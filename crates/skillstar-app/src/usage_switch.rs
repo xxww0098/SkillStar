@@ -1,46 +1,57 @@
-//! Account switching: write a subscription's credentials into the real CLI
-//! config files so the active account takes effect in `codex` / `opencode` /
-//! `grok`.
+//! Account switching: make the CLI read another account's credentials.
 //!
-//! This is the SkillStar analogue of cockpit-tools' Codex account switch:
-//! instead of injecting into an IDE's `state.vscdb`, we rewrite the CLI's own
-//! credential files (`~/.codex/auth.json` + macOS keychain, opencode's config,
-//! `~/.grok/auth.json`).
+//! ## The model
 //!
-//! Domain glue lives in `skillstar-app` (the top-level aggregator crate)
-//! because it bridges two crates: `skillstar-usage` (subscription + crypto)
-//! and `skillstar-models` (`tool_sync` path resolution + backup/merge
-//! helpers). Hosting it here keeps the Tauri command layer thin and avoids a
-//! `skillstar-usage → skillstar-models` dependency edge (the aggregator
-//! already depends on both).
+//! SkillStar does **not** hold the credential. It holds a *snapshot* of the
+//! CLI's own credential file, at
+//! `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json` (0600), and the
+//! CLI's live path becomes a symlink to whichever snapshot is current.
 //!
-//! ## Supported catalog → CLI mapping
+//! Switching used to mean copying a credential into the live file. That makes
+//! a second copy of something the CLI *also* rotates, so the two diverge by
+//! construction — and the lease / revision / read-back / rollback machinery
+//! that used to fill this module existed only to manage divergence SkillStar
+//! had created. With a link there is one copy: the CLI's rotation writes
+//! straight through into the snapshot, which is therefore never stale.
 //!
-//! | catalog_id | CLI        | auth_mode | what gets written                       |
-//! |------------|------------|-----------|-----------------------------------------|
-//! | `codex`    | Codex CLI  | OAuth     | `~/.codex/auth.json` `tokens` + keychain|
-//! | `opencode` | OpenCode   | ApiKey    | `~/.config/opencode/opencode.json`      |
-//! | `xai`      | Grok CLI   | OAuth     | `~/.grok/auth.json` OIDC scope entry    |
+//! A snapshot is the whole file, not one account's slice of it, because that
+//! is what a symlink can stand in for. See `docs/decisions.md` for the
+//! consequences of that choice.
 //!
-//! Other catalogs (cursor, antigravity, …) are IDEs, not CLIs, and use
-//! entirely different switching mechanisms — out of scope here, surfaced as
-//! [`SwitchOutcome::Unsupported`].
+//! ## What custody covers
+//!
+//! | catalog_id | CLI       | live path                                  |
+//! |------------|-----------|--------------------------------------------|
+//! | `codex`    | Codex CLI | `$CODEX_HOME/auth.json` + macOS keychain    |
+//! | `xai`      | Grok CLI  | `$GROK_HOME/auth.json`                      |
+//! | `opencode` | OpenCode  | `$XDG_DATA_HOME/opencode/auth.json`         |
+//!
+//! Support is derived from that registry ([`target_for`]), not from a
+//! hand-maintained whitelist, so the UI affordance cannot outlive the
+//! adapter. Cursor and Antigravity are IDEs whose credentials live in
+//! `state.vscdb` under an entirely different mechanism; they stay
+//! unsupported on purpose.
+//!
+//! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
+//! (subscriptions, crypto, storage) and `skillstar-models` (tool_sync path
+//! resolution and rolling backups) without either depending on the other.
 
-mod grok;
+mod custody;
+mod error;
+#[cfg(target_os = "macos")]
+mod keychain;
+mod target;
 
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use skillstar_models::tool_sync::{
-    create_rolling_backup, resolve_codex_auth_path, resolve_opencode_config_path,
-};
 use skillstar_usage::subscription::Subscription;
-use skillstar_usage::{UsageResult, crypto, storage};
+use skillstar_usage::{UsageError, UsageResult, storage};
 
-/// macOS keychain service name used by the real Codex CLI. Must match exactly
-/// or the CLI will keep reading the stale credential.
-const CODEX_KEYCHAIN_SERVICE: &str = "Codex Auth";
+use custody::{Activated, Custody, CustodyLease, LinkState};
+use target::CliCredentialTarget;
+
+pub use custody::LinkMode;
 
 /// Outcome of a single account-switch attempt. Always serialised to the DTO
 /// so the UI can show success / failure / "not a CLI provider" distinctly.
@@ -49,15 +60,24 @@ const CODEX_KEYCHAIN_SERVICE: &str = "Codex Auth";
 pub struct SwitchOutcome {
     /// CLI tool id that was targeted (`"codex"` / `"opencode"` / `"grok"`).
     pub tool_id: String,
-    /// Resolved config file that was (or would be) written.
+    /// Resolved credential file that was (or would be) bound.
     pub config_path: String,
-    /// Path to the rolling backup created before the write, if any.
+    /// Path to the rolling backup taken before the live file was replaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
-    /// `true` on macOS when the keychain entry was updated (Codex only).
+    /// `true` on macOS when the Codex keychain entry was updated too.
     #[serde(default)]
     pub keychain_updated: bool,
-    /// `true` when the write fully succeeded.
+    /// How the live path ended up bound: [`LinkMode::Symlink`] pass-through, or
+    /// a degraded [`LinkMode::Copy`]. `None` when nothing was bound (a failed
+    /// or unsupported switch).
+    ///
+    /// The degradation used to exist only in a `warn!` log, which meant a
+    /// Windows user was told "switched" and never told that the CLI's own token
+    /// rotation would no longer flow back into SkillStar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_mode: Option<LinkMode>,
+    /// `true` when the switch fully succeeded.
     pub success: bool,
     /// Human-readable error when `success` is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,514 +85,426 @@ pub struct SwitchOutcome {
 }
 
 impl SwitchOutcome {
-    fn ok(tool_id: &str, config_path: PathBuf, backup: Option<PathBuf>, keychain: bool) -> Self {
+    fn ok(tool_id: &str, config_path: &std::path::Path, activated: &Activated) -> Self {
         Self {
             tool_id: tool_id.to_string(),
             config_path: config_path.to_string_lossy().to_string(),
-            backup_path: backup.map(|p| p.to_string_lossy().to_string()),
-            keychain_updated: keychain,
+            backup_path: activated
+                .backup
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            keychain_updated: activated.external_updated,
+            link_mode: Some(activated.mode),
             success: true,
             error: None,
         }
     }
 
-    fn fail(tool_id: &str, config_path: PathBuf, error: impl Into<String>) -> Self {
+    fn fail(tool_id: &str, config_path: &std::path::Path, error: impl Into<String>) -> Self {
         Self {
             tool_id: tool_id.to_string(),
             config_path: config_path.to_string_lossy().to_string(),
             backup_path: None,
             keychain_updated: false,
+            link_mode: None,
             success: false,
             error: Some(error.into()),
         }
     }
 
+    /// Not a CLI-backed catalog: no error, nothing was attempted.
     fn unsupported(catalog_id: &str) -> Self {
         Self {
             tool_id: catalog_id.to_string(),
             config_path: String::new(),
             backup_path: None,
             keychain_updated: false,
+            link_mode: None,
             success: false,
             error: None,
         }
     }
 }
 
-/// Whether a catalog id maps to a CLI whose credentials SkillStar can switch.
-/// Surfaced to the UI so it can hide the "sync to CLI" affordance for IDEs.
-pub fn supports_cli_switch(catalog_id: &str) -> bool {
-    matches!(catalog_id, "codex" | "opencode" | "xai")
+/// Which account a CLI is *actually* serving, as read back from disk.
+///
+/// The pin in `active_per_catalog.json` is a cache of this; when the two
+/// disagree the file wins, because the file is what the CLI opens. Surfaced to
+/// the UI as three distinct states on purpose — folding them into one boolean
+/// is precisely how a card came to claim "current" while the CLI was serving
+/// somebody else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CliAccountState {
+    /// The CLI is serving this subscription — through a symlink, or through a
+    /// real file whose access token is byte-identical to its snapshot.
+    #[serde(rename_all = "camelCase")]
+    LinkedTo { subscription_id: String },
+    /// The CLI is serving a credential that belongs to no known subscription
+    /// (a `codex login` done in a terminal, say). Not "inactive": someone
+    /// *is* logged in, just nobody SkillStar can name.
+    Diverged,
+    /// The CLI has no usable credential at all.
+    Missing,
 }
 
-/// Result returned by the activation facade. Tauri receives the freshly
-/// loaded/patched subscription plus the provider-specific CLI outcome, while
-/// every ordering invariant remains inside this module.
+impl From<LinkState> for CliAccountState {
+    fn from(state: LinkState) -> Self {
+        match state {
+            LinkState::LinkedTo(subscription_id) => Self::LinkedTo { subscription_id },
+            LinkState::Diverged => Self::Diverged,
+            LinkState::Missing => Self::Missing,
+        }
+    }
+}
+
+// ── registry ─────────────────────────────────────────────────────────────
+
+/// Every catalog whose credentials live in a local CLI file.
+///
+/// This replaces the old hardcoded `matches!(id, …)` whitelist. The predicate,
+/// the capability and the reconcile sweep are now the same fact, so the UI can
+/// never offer a switch that has no implementation behind it — nor report a
+/// live state for a catalog it cannot read.
+const TARGETS: &[&'static dyn CliCredentialTarget] = &[
+    &target::codex::CodexTarget,
+    &target::grok::GrokTarget,
+    &target::opencode::OpenCodeTarget,
+];
+
+/// The custody adapter for a catalog, if it has a local credential file.
+fn target_for(catalog_id: &str) -> Option<&'static dyn CliCredentialTarget> {
+    TARGETS
+        .iter()
+        .copied()
+        .find(|target| target.catalog_id() == catalog_id)
+}
+
+/// Whether this catalog's account can be switched in a real CLI. Surfaced to
+/// the UI so it hides the affordance for IDE-backed providers.
+pub fn supports_cli_switch(catalog_id: &str) -> bool {
+    target_for(catalog_id).is_some()
+}
+
+/// Result returned by the activation facade.
 #[derive(Debug, Clone)]
 pub struct ActivationResult {
     pub subscription: Subscription,
     pub switch_result: SwitchOutcome,
 }
 
-/// Opaque provider lease held while a Usage refresh may rotate credentials.
-/// For Grok this is the official `auth.json.lock` also used by the CLI.
+/// Held while a Usage refresh may rotate credentials. For Grok this is the
+/// official `auth.json.lock` the CLI takes too; elsewhere it is a private lock
+/// that at least serialises SkillStar against its own other processes.
+///
+/// Symlinks remove stale copies, not the fact that a refresh token is
+/// single-use and whoever spends it first revokes the other side — so the
+/// lock stays.
 pub struct CliRefreshLease {
-    grok: Option<grok::GrokRefreshLease>,
+    target: Option<&'static dyn CliCredentialTarget>,
+    _lease: Option<CustodyLease>,
 }
 
-pub async fn acquire_cli_refresh_lease(catalog_id: &str) -> UsageResult<CliRefreshLease> {
-    let grok = if catalog_id == "xai" {
-        Some(grok::acquire_refresh_lease().await?)
-    } else {
-        None
-    };
-    Ok(CliRefreshLease { grok })
+fn other(error: String) -> UsageError {
+    UsageError::Other(error)
 }
 
-/// Project an already-persisted credential rotation into an active CLI while
-/// the caller still holds [`CliRefreshLease`] and the catalog transaction.
-pub fn sync_refreshed_active_subscription(
-    subscription: &mut Subscription,
-    lease: &CliRefreshLease,
-) -> UsageResult<Option<SwitchOutcome>> {
-    if subscription.catalog_id == "xai"
-        && storage::get_active_subscription("xai")?.as_deref() == Some(subscription.id.as_str())
-    {
-        let grok = lease.grok.as_ref().ok_or_else(|| {
-            skillstar_usage::UsageError::Other("active Grok refresh is missing auth lease".into())
-        })?;
-        return grok::sync_refreshed_active(subscription, grok).map(Some);
+/// Run a blocking custody operation off the async runtime.
+async fn blocking<T, F>(work: F) -> UsageResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> UsageResult<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| other(format!("CLI 凭证任务失败：{error}")))?
+}
+
+// ── the three operations ─────────────────────────────────────────────────
+
+/// Pin a subscription and point its CLI at it, under the same per-catalog
+/// serialization domain Usage refreshes use.
+///
+/// The pin is written **only after** the credential is verifiably in place, so
+/// a failed switch leaves both the previous pin and the previous live file
+/// intact — the "switch not applied" contract, now true for every catalog and
+/// not just Grok.
+pub async fn activate_subscription(subscription_id: &str) -> UsageResult<ActivationResult> {
+    let catalog_id = storage::get_subscription(subscription_id)?.catalog_id;
+    let subscription_id = subscription_id.to_string();
+    skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id.clone(), || async move {
+        let Some(target) = target_for(&catalog_id) else {
+            // Non-CLI catalogs still get a pin; it is a UI preference, not a
+            // claim about any file on disk.
+            let subscription = storage::get_subscription(&subscription_id)?;
+            storage::set_active_subscription(&subscription.catalog_id, &subscription.id)?;
+            return Ok(ActivationResult {
+                switch_result: SwitchOutcome::unsupported(&catalog_id),
+                subscription,
+            });
+        };
+        blocking(move || activate_blocking(target, &subscription_id)).await
+    })
+    .await?
+}
+
+fn activate_blocking(
+    target: &'static dyn CliCredentialTarget,
+    subscription_id: &str,
+) -> UsageResult<ActivationResult> {
+    let custody = Custody::open(target)?;
+    let _lease = custody.lock()?;
+    let mut subscription = storage::get_subscription(subscription_id)?;
+
+    match custody.activate(&mut subscription) {
+        Ok(activated) => {
+            // Also carried to the UI on `SwitchOutcome::link_mode`; logged
+            // here so a support transcript records how it was bound.
+            tracing::info!(
+                tool = custody.tool_id(),
+                mode = activated.mode.as_str(),
+                keychain = activated.external_updated,
+                "CLI account activated"
+            );
+            let switch_result =
+                SwitchOutcome::ok(custody.tool_id(), custody.live_path(), &activated);
+            storage::set_active_subscription(&subscription.catalog_id, &subscription.id)?;
+            // The installed credential is the truth; fold it back into the row
+            // so the card and the CLI cannot disagree.
+            if let Ok(saved) = storage::patch_oauth_credentials(&subscription) {
+                subscription = saved;
+            }
+            Ok(ActivationResult {
+                subscription,
+                switch_result,
+            })
+        }
+        Err(error) => {
+            // `rolled_back` is the staged half of the error made visible: a
+            // support transcript has to say whether the CLI was left holding
+            // the previous credential or a restored one.
+            tracing::warn!(
+                tool = custody.tool_id(),
+                rolled_back = error.stage.needs_rollback(),
+                %error,
+                "CLI account activation failed"
+            );
+            Ok(ActivationResult {
+                switch_result: SwitchOutcome::fail(
+                    custody.tool_id(),
+                    custody.live_path(),
+                    error.to_string(),
+                ),
+                // Re-read: capture may legitimately have absorbed a CLI rotation
+                // even though the switch itself failed.
+                subscription: storage::get_subscription(subscription_id)?,
+            })
+        }
     }
-    Ok(None)
 }
 
-/// After taking the provider lease but before issuing a refresh request, adopt
-/// a newer active CLI-side token generation if Grok already rotated it.
+/// Re-bind the currently active account without changing the pin. Backs the
+/// "重新同步到 CLI" button.
+pub async fn resync_active_subscription(catalog_id: &str) -> UsageResult<SwitchOutcome> {
+    let catalog_id = catalog_id.to_string();
+    skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id.clone(), || async move {
+        let Some(target) = target_for(&catalog_id) else {
+            return Ok(SwitchOutcome::unsupported(&catalog_id));
+        };
+        let active = storage::get_active_subscription(&catalog_id)?
+            .ok_or_else(|| other(format!("catalog {catalog_id} 还没有设置活跃账号")))?;
+        blocking(move || activate_blocking(target, &active).map(|result| result.switch_result))
+            .await
+    })
+    .await?
+}
+
+/// Which account each CLI is actually serving right now, keyed by catalog id.
+///
+/// This — not the pin — is what the "current" badge must be drawn from. The pin
+/// records what the user last asked for; a `codex login` in a terminal, a CLI
+/// that rotated its own token, or a switch that failed after the pin was read
+/// all move the file without moving the pin.
+///
+/// A catalog is absent from the map when it has no CLI adapter (its pin *is*
+/// the truth — nothing on disk to disagree with) or when reading it failed; in
+/// both cases the caller falls back to the pin, which is exactly today's
+/// behaviour and never a worse claim than the one being replaced.
+pub async fn reconcile_cli_accounts() -> UsageResult<HashMap<String, CliAccountState>> {
+    let mut states = HashMap::with_capacity(TARGETS.len());
+    for target in TARGETS {
+        let catalog_id = target.catalog_id();
+        match reconcile_cli_account(catalog_id).await {
+            Ok(Some(state)) => {
+                states.insert(catalog_id.to_string(), state);
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(
+                catalog = catalog_id,
+                %error,
+                "could not read which account the CLI is serving; falling back to the pin"
+            ),
+        }
+    }
+    Ok(states)
+}
+
+/// [`reconcile_cli_accounts`] for one catalog. `None` when the catalog has no
+/// CLI behind it.
+///
+/// Runs in the catalog's serialization domain so it cannot observe an
+/// activation half-applied, and repairs as it reads: a token the CLI rotated
+/// gets absorbed, a symlink the CLI clobbered gets rebuilt.
+pub async fn reconcile_cli_account(catalog_id: &str) -> UsageResult<Option<CliAccountState>> {
+    let catalog_id = catalog_id.to_string();
+    skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id.clone(), || async move {
+        let Some(target) = target_for(&catalog_id) else {
+            return Ok(None);
+        };
+        blocking(move || {
+            let custody = Custody::open(target)?;
+            // A CLI that was never installed has nothing to reconcile, and
+            // taking the lock would *create* its home directory and lock file
+            // just to discover that.
+            if !custody.has_live_credential() {
+                return Ok(Some(CliAccountState::Missing));
+            }
+            let _lease = custody.lock()?;
+            Ok(Some(CliAccountState::from(custody.reconcile()?)))
+        })
+        .await
+    })
+    .await?
+}
+
+/// Drop a deleted account's snapshot.
+///
+/// If the CLI is currently being served by it, a real file is left behind
+/// first: a dangling symlink is not "logged out", it is "cannot log in".
+pub fn forget_subscription_session(catalog_id: &str, subscription_id: &str) -> UsageResult<()> {
+    let Some(target) = target_for(catalog_id) else {
+        return Ok(());
+    };
+    let custody = Custody::open(target)?;
+    let _lease = custody.lock()?;
+    custody.forget(subscription_id).map_err(UsageError::from)
+}
+
+// ── the refresh window ───────────────────────────────────────────────────
+
+/// Take the CLI's lock for the duration of a Usage refresh.
+///
+/// Previously Grok-only, which is why SkillStar's background refresh could
+/// silently revoke the Codex CLI's own refresh-token generation.
+pub async fn acquire_cli_refresh_lease(catalog_id: &str) -> UsageResult<CliRefreshLease> {
+    let Some(target) = target_for(catalog_id) else {
+        return Ok(CliRefreshLease {
+            target: None,
+            _lease: None,
+        });
+    };
+    blocking(move || {
+        let custody = Custody::open(target)?;
+        let lease = custody.lock()?;
+        Ok(CliRefreshLease {
+            target: Some(target),
+            _lease: Some(lease),
+        })
+    })
+    .await
+}
+
+/// Before spending a refresh token, adopt any newer generation the CLI already
+/// rotated into the snapshot.
+///
+/// A symlink means SkillStar and the CLI write the same file, so there is no
+/// stale copy — but refresh tokens are still single-use, and spending one the
+/// CLI already replaced would 401 and look like a dead login.
 pub fn adopt_active_cli_session_before_refresh(
     subscription: &mut Subscription,
     lease: &CliRefreshLease,
 ) -> UsageResult<()> {
-    if subscription.catalog_id == "xai" {
-        let grok = lease.grok.as_ref().ok_or_else(|| {
-            skillstar_usage::UsageError::Other("active Grok refresh is missing auth lease".into())
-        })?;
-        grok::adopt_active_before_refresh(subscription, grok)?;
+    let Some(target) = lease.target else {
+        return Ok(());
+    };
+    if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
+        != Some(subscription.id.as_str())
+    {
+        return Ok(());
     }
+    let custody = Custody::open(target)?;
+    custody.reconcile()?;
+    *subscription = storage::get_subscription(&subscription.id)?;
     Ok(())
 }
 
-/// Pin a subscription and activate its real CLI credentials under the same
-/// per-catalog serialization domain used by Usage refreshes.
-pub async fn activate_subscription(subscription_id: &str) -> UsageResult<ActivationResult> {
-    let probe = storage::get_subscription(subscription_id)?;
-    let lock_catalog_id = probe.catalog_id.clone();
-    let catalog_id = lock_catalog_id.clone();
-    let subscription_id = subscription_id.to_string();
-    skillstar_usage::refresh_guard::with_catalog_lock(&lock_catalog_id, || async move {
-        if catalog_id == "xai" {
-            let (subscription, switch_result) = grok::activate(&subscription_id).await?;
-            return Ok(ActivationResult {
-                subscription,
-                switch_result,
-            });
+/// After SkillStar's own refresh produced a newer generation, write it into
+/// the snapshot — which *is* the CLI's live file.
+pub fn sync_refreshed_active_subscription(
+    subscription: &mut Subscription,
+    lease: &CliRefreshLease,
+) -> UsageResult<Option<SwitchOutcome>> {
+    let Some(target) = lease.target else {
+        return Ok(None);
+    };
+    if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
+        != Some(subscription.id.as_str())
+    {
+        return Ok(None);
+    }
+    let custody = Custody::open(target)?;
+    Ok(Some(match custody.project_refreshed(subscription) {
+        Ok(activated) => SwitchOutcome::ok(custody.tool_id(), custody.live_path(), &activated),
+        Err(error) => {
+            SwitchOutcome::fail(custody.tool_id(), custody.live_path(), error.to_string())
         }
-
-        let subscription = storage::get_subscription(&subscription_id)?;
-        storage::set_active_subscription(&subscription.catalog_id, &subscription.id)?;
-        let switch_result = switch_non_grok(&subscription);
-        Ok(ActivationResult {
-            subscription,
-            switch_result,
-        })
-    })
-    .await?
+    }))
 }
 
-/// Re-push the currently active subscription through the same provider seam
-/// without changing the active pin.
-pub async fn resync_active_subscription(catalog_id: &str) -> UsageResult<SwitchOutcome> {
-    let lock_catalog_id = catalog_id.to_string();
-    let catalog_id = lock_catalog_id.clone();
-    skillstar_usage::refresh_guard::with_catalog_lock(&lock_catalog_id, || async move {
-        let active = storage::get_active_subscription(&catalog_id)?.ok_or_else(|| {
-            skillstar_usage::UsageError::Other(format!("catalog {catalog_id} 还没有设置活跃账号"))
-        })?;
-        if catalog_id == "xai" {
-            return grok::resync(&active).await;
-        }
-        let subscription = storage::get_subscription(&active)?;
-        Ok(switch_non_grok(&subscription))
-    })
-    .await?
-}
-
-/// Remove provider-private CLI session material before a subscription row is
-/// deleted. Generic Usage storage never needs to know the Grok auth schema.
-pub fn forget_subscription_session(catalog_id: &str, subscription_id: &str) -> UsageResult<()> {
-    if catalog_id == "xai" {
-        grok::forget(subscription_id)?;
-    }
-    Ok(())
-}
-
-fn switch_non_grok(sub: &Subscription) -> SwitchOutcome {
-    match sub.catalog_id.as_str() {
-        "codex" => switch_codex(sub),
-        "opencode" => switch_opencode(sub),
-        other => SwitchOutcome::unsupported(other),
-    }
-}
-
-// ── Codex ────────────────────────────────────────────────────────────────
-
-fn switch_codex(sub: &Subscription) -> SwitchOutcome {
-    let auth_path = match resolve_codex_auth_path() {
-        Ok(p) => p,
-        Err(e) => {
-            return SwitchOutcome::fail(
-                "codex",
-                PathBuf::from("~/.codex/auth.json"),
-                e.to_string(),
-            );
-        }
-    };
-
-    // api_key mode: only OPENAI_API_KEY is needed.
-    if let Some(api_key_cipher) = sub.api_key_encrypted.as_deref() {
-        let api_key = crypto::decrypt(api_key_cipher);
-        if !api_key.is_empty() {
-            return write_codex_auth_file(&auth_path, codex_api_key_auth_value(&api_key), true);
-        }
-    }
-
-    // OAuth mode: need the full tokens block.
-    let access_token = sub
-        .access_token_encrypted
-        .as_deref()
-        .map(crypto::decrypt)
-        .filter(|t| !t.is_empty());
-    let Some(access_token) = access_token else {
-        return SwitchOutcome::fail(
-            "codex",
-            auth_path,
-            "Codex OAuth 切号缺少 access_token，请重新登录该账号补充凭证",
-        );
-    };
-
-    let id_token = sub
-        .id_token_encrypted
-        .as_deref()
-        .map(crypto::decrypt)
-        .filter(|t| !t.is_empty());
-    let Some(id_token) = id_token else {
-        return SwitchOutcome::fail(
-            "codex",
-            auth_path,
-            "Codex OAuth 切号缺少 id_token，请重新登录该账号补充凭证",
-        );
-    };
-
-    let refresh_token = sub.refresh_token_encrypted.as_deref().map(crypto::decrypt);
-    let account_id = sub.oauth_account_id.clone();
-
-    let auth_value = codex_oauth_auth_value(&id_token, &access_token, refresh_token, account_id);
-    let mut outcome = write_codex_auth_file(&auth_path, auth_value, true);
-
-    // On macOS the Codex CLI reads credentials from the keychain, not
-    // auth.json (auth.json is only a fallback). Failing to update the
-    // keychain means the switch silently no-ops, so we must do it and report.
-    #[cfg(target_os = "macos")]
-    if outcome.success {
-        match write_codex_keychain(&auth_path, &sub.catalog_id) {
-            Ok(()) => outcome.keychain_updated = true,
-            Err(e) => {
-                outcome.success = false;
-                outcome.error = Some(format!("auth.json 已更新，但 macOS keychain 写入失败：{e}"));
-            }
-        }
-    }
-    let _ = &sub.catalog_id; // keep borrow used on all platforms
-    outcome
-}
-
-/// Build the `~/.codex/auth.json` JSON value for an OAuth account, mirroring
-/// the schema the real Codex CLI writes (and cockpit-tools reproduces):
-/// `{ "OPENAI_API_KEY": null, "tokens": { id_token, access_token,
-/// refresh_token, account_id }, "last_refresh": <iso8601> }`.
-///
-/// Separated from I/O so it is trivially unit-testable.
-fn codex_oauth_auth_value(
-    id_token: &str,
-    access_token: &str,
-    refresh_token: Option<String>,
-    account_id: Option<String>,
-) -> serde_json::Value {
-    let tokens = serde_json::json!({
-        "id_token": id_token,
-        "access_token": access_token,
-        "refresh_token": refresh_token.unwrap_or_default(),
-        "account_id": account_id,
-    });
-    serde_json::json!({
-        "OPENAI_API_KEY": serde_json::Value::Null,
-        "tokens": tokens,
-        "last_refresh": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string(),
-    })
-}
-
-/// api_key-mode auth.json: `{"OPENAI_API_KEY": "<key>"}`.
-fn codex_api_key_auth_value(api_key: &str) -> serde_json::Value {
-    serde_json::json!({ "OPENAI_API_KEY": api_key })
-}
-
-/// Atomically write the auth.json value, after a rolling backup. `with_backup`
-/// is false in unit tests where there is no prior file to back up.
-fn write_codex_auth_file(
-    auth_path: &Path,
-    value: serde_json::Value,
-    with_backup: bool,
-) -> SwitchOutcome {
-    let backup = if with_backup && auth_path.exists() {
-        create_rolling_backup(auth_path).ok()
-    } else {
-        None
-    };
-
-    // We replace the whole tokens/OPENAI_API_KEY block rather than merge, so
-    // write pretty JSON directly (merge_json_write would preserve stale keys).
-    let content = match serde_json::to_string_pretty(&value) {
-        Ok(c) => c,
-        Err(e) => return SwitchOutcome::fail("codex", auth_path.to_path_buf(), e.to_string()),
-    };
-    if let Err(e) = atomic_write(auth_path, &content) {
-        return SwitchOutcome::fail("codex", auth_path.to_path_buf(), e);
-    }
-    SwitchOutcome::ok("codex", auth_path.to_path_buf(), backup, false)
-}
-
-/// Compute the keychain account label the Codex CLI looks up on macOS:
-/// `cli|<first 16 hex chars of sha256(canonicalized ~/.codex)>`. Matches
-/// cockpit-tools (`build_codex_keychain_account`) and the CLI itself.
-#[cfg(target_os = "macos")]
-fn codex_keychain_account_label(codex_home: &Path) -> String {
-    let resolved = std::fs::canonicalize(codex_home).unwrap_or_else(|_| codex_home.to_path_buf());
-    let mut hasher = Sha256::new();
-    hasher.update(resolved.to_string_lossy().as_bytes());
-    let digest = hasher.finalize();
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    format!("cli|{}", &hex[..16])
-}
-
-/// Store the same auth.json payload into the macOS keychain under the Codex
-/// CLI's service/account, via the `security` CLI.
-#[cfg(target_os = "macos")]
-fn write_codex_keychain(auth_path: &Path, _catalog_id: &str) -> Result<(), String> {
-    let codex_home = auth_path
-        .parent()
-        .ok_or_else(|| "无法定位 ~/.codex 目录".to_string())?;
-    let payload =
-        std::fs::read_to_string(auth_path).map_err(|e| format!("读取 auth.json 失败：{e}"))?;
-    let account = codex_keychain_account_label(codex_home);
-
-    let output = std::process::Command::new("security")
-        .arg("add-generic-password")
-        .arg("-U")
-        .arg("-s")
-        .arg(CODEX_KEYCHAIN_SERVICE)
-        .arg("-a")
-        .arg(&account)
-        .arg("-w")
-        .arg(&payload)
-        .output()
-        .map_err(|e| format!("执行 security 命令失败：{e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "security 写入失败：{}",
-            if stderr.trim().is_empty() {
-                "未知错误"
-            } else {
-                stderr.trim()
-            }
-        ));
-    }
-    Ok(())
-}
-
-// ── OpenCode ─────────────────────────────────────────────────────────────
-
-fn switch_opencode(sub: &Subscription) -> SwitchOutcome {
-    let config_path = match resolve_opencode_config_path() {
-        Ok(p) => p,
-        Err(e) => {
-            return SwitchOutcome::fail(
-                "opencode",
-                PathBuf::from("~/.config/opencode/opencode.json"),
-                e.to_string(),
-            );
-        }
-    };
-    let Some(api_key_cipher) = sub.api_key_encrypted.as_deref() else {
-        return SwitchOutcome::fail("opencode", config_path, "OpenCode 账号缺少 API Key");
-    };
-    let api_key = crypto::decrypt(api_key_cipher);
-    if api_key.is_empty() {
-        return SwitchOutcome::fail("opencode", config_path, "OpenCode API Key 为空");
-    }
-    match write_opencode_provider(&config_path, &api_key) {
-        Ok(backup) => SwitchOutcome::ok("opencode", config_path, backup, false),
-        Err(e) => SwitchOutcome::fail("opencode", config_path, e),
-    }
-}
-
-/// Provider block key SkillStar owns inside `provider.<key>` of
-/// `~/.config/opencode/opencode.json`. Matches the legacy `skillstar` key that
-/// `tool_sync::is_skillstar_managed_key` treats as managed.
-const MANAGED_PROVIDER_KEY: &str = "skillstar";
-
-/// Write/replace the `provider.skillstar` block (OpenCode schema) in the
-/// given config file, preserving all other top-level + sibling provider
-/// entries. Returns the backup path when a prior file existed.
-///
-/// This mirrors the OpenCode block shape written by
-/// `tool_sync::sync_opencode_binding` but works off a raw decrypted api_key
-/// instead of a full `ProviderEntryFlat` — account switching only ever needs
-/// to swap the key, not the routing metadata.
-fn write_opencode_provider(config_path: &Path, api_key: &str) -> Result<Option<PathBuf>, String> {
-    let backup = if config_path.exists() {
-        create_rolling_backup(config_path).ok()
-    } else {
-        None
-    };
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
-    }
-
-    // Read existing root (or seed the OpenCode schema), then merge the managed
-    // provider block under `provider.<key>` without touching siblings.
-    let mut root: serde_json::Value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .map_err(|e| format!("读取 {} 失败：{e}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            serde_json::json!({
-                "$schema": "https://opencode.ai/config.json",
-                "provider": {}
-            })
-        })
-    } else {
-        serde_json::json!({
-            "$schema": "https://opencode.ai/config.json",
-            "provider": {}
-        })
-    };
-
-    let provider_block = serde_json::json!({
-        "npm": "@ai-sdk/openai-compatible",
-        "name": "SkillStar",
-        "options": {
-            "baseURL": "https://api.opencode.ai/v1",
-            "apiKey": api_key,
-        }
-    });
-
-    let root_obj = root
-        .as_object_mut()
-        .ok_or_else(|| "配置根不是 JSON 对象".to_string())?;
-    let providers = root_obj
-        .entry("provider".to_string())
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    if let Some(map) = providers.as_object_mut() {
-        map.insert(MANAGED_PROVIDER_KEY.to_string(), provider_block);
-    }
-
-    let output = serde_json::to_string_pretty(&root).map_err(|e| format!("序列化失败：{e}"))?;
-    atomic_write(config_path, &output)?;
-    Ok(backup)
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────
-
-/// Atomic file write via the shared core helper; maps into this module's
-/// String-error convention.
-fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
-    skillstar_core::infra::fs_ops::atomic_write(path, content.as_bytes())
-        .map_err(|e| format!("写入失败：{e}"))
-}
+#[cfg(test)]
+#[path = "usage_switch/custody_tests.rs"]
+mod custody_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The predicate is the registry, so an entry can never be advertised
+    /// without an adapter behind it (the OpenCode chip used to be exactly
+    /// that: permanently visible, permanently failing).
     #[test]
-    fn supports_cli_switch_only_for_cli_catalogs() {
-        assert!(supports_cli_switch("codex"));
-        assert!(supports_cli_switch("opencode"));
-        assert!(supports_cli_switch("xai"));
-        assert!(!supports_cli_switch("cursor"));
-        assert!(!supports_cli_switch("antigravity"));
-        assert!(!supports_cli_switch("deepseek"));
+    fn supports_cli_switch_follows_the_target_registry() {
+        for catalog in ["codex", "opencode", "xai"] {
+            assert!(supports_cli_switch(catalog), "{catalog}");
+            assert_eq!(target_for(catalog).unwrap().catalog_id(), catalog);
+        }
+        // IDEs keep their credentials in state.vscdb — a different mechanism,
+        // deliberately out of scope. `anthropic` is out of scope for a second
+        // reason: the fetcher only ever *reads* Claude Code's own login, so
+        // there is no snapshot for custody to take.
+        for catalog in [
+            "cursor",
+            "antigravity",
+            "deepseek",
+            "glm",
+            "stepfun",
+            "anthropic",
+        ] {
+            assert!(!supports_cli_switch(catalog), "{catalog}");
+        }
     }
 
     #[test]
-    fn unsupported_catalog_returns_unsupported_outcome() {
-        let sub = Subscription {
-            id: "x".into(),
-            catalog_id: "cursor".into(),
-            display_name: "Cursor".into(),
-            auth_mode: skillstar_usage::AuthMode::OAuth,
-            plan_tier: None,
-            monthly_price: None,
-            currency: "USD".into(),
-            billing_cycle: skillstar_usage::BillingCycle::Monthly,
-            start_date: 0,
-            renew_date: 0,
-            auto_renew: false,
-            api_key_encrypted: None,
-            platform_token_encrypted: None,
-            access_token_encrypted: None,
-            refresh_token_encrypted: None,
-            access_token_expires_at: None,
-            id_token_encrypted: None,
-            oauth_account_id: None,
-            oauth_region: None,
-            requires_reauth: false,
-            cookie_jar_encrypted: None,
-            cookie_session_expires_at: None,
-            manual_quota: None,
-            note: None,
-            sort_index: 0,
-            created_at: 0,
-            updated_at: 0,
-        };
-        let outcome = switch_non_grok(&sub);
+    fn unsupported_outcome_carries_no_error() {
+        let outcome = SwitchOutcome::unsupported("cursor");
         assert!(!outcome.success);
-        assert!(outcome.error.is_none(), "unsupported must have no error");
+        assert!(outcome.error.is_none(), "unsupported is not a failure");
         assert_eq!(outcome.tool_id, "cursor");
     }
 
     #[test]
-    fn codex_oauth_auth_value_has_tokens_block_and_null_api_key() {
-        let v = codex_oauth_auth_value("idt", "acct", Some("rft".into()), Some("acc-1".into()));
-        assert!(v.get("OPENAI_API_KEY").unwrap().is_null());
-        let tokens = v.get("tokens").unwrap();
-        assert_eq!(tokens["id_token"], "idt");
-        assert_eq!(tokens["access_token"], "acct");
-        assert_eq!(tokens["refresh_token"], "rft");
-        assert_eq!(tokens["account_id"], "acc-1");
-        assert!(v.get("last_refresh").unwrap().is_string());
-    }
-
-    #[test]
-    fn codex_oauth_auth_value_uses_empty_refresh_when_missing() {
-        let v = codex_oauth_auth_value("idt", "acct", None, None);
-        assert_eq!(v["tokens"]["refresh_token"], "");
-        assert!(v["tokens"].get("account_id").unwrap().is_null());
-    }
-
-    #[test]
-    fn codex_api_key_auth_value_just_openai_key() {
-        let v = codex_api_key_auth_value("sk-test");
-        assert_eq!(v["OPENAI_API_KEY"], "sk-test");
-        assert!(v.get("tokens").is_none());
+    fn link_mode_is_named_so_a_windows_copy_is_never_silent() {
+        assert_eq!(custody::LinkMode::Symlink.as_str(), "symlink");
+        assert_eq!(custody::LinkMode::Copy.as_str(), "copy");
     }
 }

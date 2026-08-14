@@ -337,9 +337,14 @@ pub fn dismiss_alert(alert_id: &str) -> UsageResult<()> {
 ///
 /// SkillStar lets the user maintain multiple subscriptions sharing the
 /// same `catalog_id` (e.g. two DeepSeek accounts). This map records which
-/// one is currently "the active one" for that catalog — used by future
-/// CLI-injection workflows and by the UI to render an active-account
-/// badge on the right card.
+/// one is currently "the active one" for that catalog — used by the UI to
+/// render an active-account badge on the right card.
+///
+/// For CLI-backed catalogs this map is a **cache**, not a second source of
+/// truth: which account the CLI actually serves is a property of the CLI's
+/// own credential file, and `skillstar_app::usage_switch` can rebuild this
+/// map from disk at any time (see D-033). It is only written after a switch
+/// has been verified, so a rejected switch leaves the previous pin standing.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ActivePerCatalogFile {
     #[serde(default)]

@@ -135,6 +135,17 @@ fn sync_home_dir_opt() -> Option<PathBuf> {
     sandbox_home().or_else(dirs::home_dir)
 }
 
+/// Read an upstream CLI's own home override (`CODEX_HOME`, `GROK_HOME`, …).
+///
+/// Callers must consult [`sandbox_home`] **first**: the sandbox is a safety
+/// net against tests writing a developer's live credentials, and an exported
+/// `CODEX_HOME` in the developer's shell must not punch through it.
+fn upstream_home_override(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 /// Resolve the OS config directory (`~/Library/Application Support`, `%APPDATA%`,
 /// or `~/.config`) while keeping legacy MCP compatibility writes sandboxable.
 pub(crate) fn sync_config_dir() -> Result<PathBuf> {

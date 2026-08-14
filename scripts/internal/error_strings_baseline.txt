@@ -23,4 +23,15 @@
 # crates/skillstar-app/src/usage_switch/grok/io.rs (Grok account switching
 # I/O helpers). These predate the v0.0.4 release work; migrate them to a
 # real error enum and lower this number in a dedicated pass.
-34
+#
+# 2026-08-14: that dedicated pass, done against the symlink-custody rewrite
+# that replaced grok/io.rs. `usage_switch` now has its own layered error enums
+# in crates/skillstar-app/src/usage_switch/error.rs (CustodyError /
+# MaterializeError / ExternalStoreError, plus the ActivationError + Stage pair
+# that carries the before/after-replace rollback contract), so all 31
+# stringly-typed signatures in custody.rs, target*.rs and keychain.rs are
+# gone — 58 -> 27. The remaining 27 are unrelated debt (skillstar-skills,
+# skillstar-marketplace, skillstar-models, cli/install.rs, four command-layer
+# files) plus the 3 surviving `HashMap<String, String>` nested-generic false
+# positives (usage_commands.rs, usage/service.rs, skillstar-usage/storage.rs).
+27

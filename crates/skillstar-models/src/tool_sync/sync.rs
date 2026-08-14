@@ -8,14 +8,29 @@ use super::*;
 
 /// Resolve the path to Codex's auth.json file.
 pub fn resolve_codex_auth_path() -> Result<PathBuf> {
-    let home = sync_home_dir()?;
-    Ok(home.join(".codex").join("auth.json"))
+    Ok(codex_home()?.join("auth.json"))
 }
 
 /// Resolve the path to Codex's config.toml file.
 pub fn resolve_codex_config_path() -> Result<PathBuf> {
-    let home = sync_home_dir()?;
-    Ok(home.join(".codex").join("config.toml"))
+    Ok(codex_home()?.join("config.toml"))
+}
+
+/// Codex's own home, honouring the upstream `CODEX_HOME` override.
+///
+/// The CLI namespaces both `auth.json` **and** its keychain entry by this
+/// directory (`cli|<sha256(canonical CODEX_HOME)[..16]>`), so resolving the
+/// hardcoded `~/.codex` for a user who moved it would write credentials the
+/// CLI never reads. The sandbox still wins: tests must never escape into a
+/// developer's real Codex home even when `CODEX_HOME` is exported.
+fn codex_home() -> Result<PathBuf> {
+    if let Some(home) = sandbox_home() {
+        return Ok(home.join(".codex"));
+    }
+    if let Some(dir) = upstream_home_override("CODEX_HOME") {
+        return Ok(dir);
+    }
+    Ok(sync_home_dir()?.join(".codex"))
 }
 
 /// Sync a provider's credentials to Claude Code's config file.

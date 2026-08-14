@@ -26,6 +26,27 @@ pub fn resolve_opencode_config_path() -> Result<PathBuf> {
     Ok(home.join(".config").join("opencode").join("opencode.json"))
 }
 
+/// OpenCode's credential store: `$XDG_DATA_HOME/opencode/auth.json`, i.e.
+/// `~/.local/share/opencode/auth.json` by default.
+///
+/// This is the file `opencode auth login` writes and the only one OpenCode's
+/// provider gate reads (`Global.Path.data + "/auth.json"` upstream). It is a
+/// **different** file from [`resolve_opencode_config_path`] — the config file
+/// holds provider routing, not credentials — so account switching must target
+/// this one.
+pub fn resolve_opencode_auth_path() -> Result<PathBuf> {
+    let base = match sandbox_home() {
+        // Under the test sandbox, stay inside it rather than honouring the
+        // developer's real XDG_DATA_HOME.
+        Some(home) => home.join(".local").join("share"),
+        None => match std::env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
+            Some(xdg) => PathBuf::from(xdg),
+            None => sync_home_dir()?.join(".local").join("share"),
+        },
+    };
+    Ok(base.join("opencode").join("auth.json"))
+}
+
 /// `~/.claude-desktop/skillstar-binding.json` — SkillStar binding marker for
 /// Claude Desktop (native Desktop app projection is a follow-up).
 pub fn resolve_claude_desktop_binding_path() -> Result<PathBuf> {
@@ -83,13 +104,20 @@ pub fn resolve_omp_config_path() -> Result<PathBuf> {
 /// (`https://auth.x.ai::<client-id>`); each entry carries `key` (the bearer
 /// access token), `refresh_token`, `expires_at`, and identity metadata. This
 /// is the file account-switching rewrites to flip which Grok account the CLI
-/// authenticates as. We deliberately mirror [`resolve_codex_auth_path`] and
-/// ignore the `GROK_HOME` override so resolution always funnels through the
-/// sandboxable [`sync_home_dir`] (keeps tests off the developer's real
-/// `~/.grok`).
+/// authenticates as.
+///
+/// Honours the CLI's own `GROK_HOME` override — a user who moved it would
+/// otherwise get credentials written to a file `grok` never reads — but the
+/// sandbox still wins, so tests can never escape into the developer's real
+/// `~/.grok`.
 pub fn resolve_grok_auth_path() -> Result<PathBuf> {
-    let home = sync_home_dir()?;
-    Ok(home.join(".grok").join("auth.json"))
+    if let Some(home) = sandbox_home() {
+        return Ok(home.join(".grok").join("auth.json"));
+    }
+    if let Some(dir) = upstream_home_override("GROK_HOME") {
+        return Ok(dir.join("auth.json"));
+    }
+    Ok(sync_home_dir()?.join(".grok").join("auth.json"))
 }
 
 /// Resolve a config file path for `(tool_id, file_id)` from the registry.
