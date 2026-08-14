@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use super::gh_manager::{GhStatus, PublishIdentity, map_publish_status};
+use super::gh_manager::{GhStatus, PublishIdentity, map_publish_status, publish_copies_content};
 use super::gh_rest::{
     GhRestClient, GhRestError, GhRestErrorCode, GhRestResponse, GhRestTransport, REPO_AFFILIATION,
     block_on_blocking_context,
@@ -441,4 +441,38 @@ printf 'remote: echoed %s\n' "$SKILLSTAR_GIT_ASKPASS_TOKEN"
         "token echoed by Git must come back redacted: {stdout}"
     );
     assert!(stdout.contains("[REDACTED]"), "stdout: {stdout}");
+}
+
+#[test]
+fn publishing_an_installed_skill_is_a_copy_and_never_moves_its_provenance() {
+    let local_dir = std::path::Path::new("/hub/skills-local");
+
+    // Installed Skills: the hub entry is a link into a repository checkout, so
+    // publishing shares a copy and the local one keeps following its source.
+    assert!(publish_copies_content(
+        true,
+        std::path::Path::new("/hub/repos/acme--skills/skills/writer"),
+        local_dir,
+    ));
+    // A checkout that merely sits next to skills-local/ must not be mistaken
+    // for it by a prefix that stops mid-component.
+    assert!(publish_copies_content(
+        true,
+        std::path::Path::new("/hub/skills-local-cache/writer"),
+        local_dir,
+    ));
+
+    // Locally authored Skills: publication is their graduation into Git, so the
+    // lockfile write is the point of it.
+    assert!(!publish_copies_content(
+        true,
+        std::path::Path::new("/hub/skills-local/writer"),
+        local_dir,
+    ));
+    // A real directory in the hub was never a link and keeps its old behaviour.
+    assert!(!publish_copies_content(
+        false,
+        std::path::Path::new("/hub/skills/writer"),
+        local_dir,
+    ));
 }

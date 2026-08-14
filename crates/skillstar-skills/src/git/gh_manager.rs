@@ -388,6 +388,25 @@ impl PublishLockfileMode<'_> {
     }
 }
 
+/// Whether publishing this Skill produces an independent copy rather than
+/// moving the local Skill's provenance to the destination repository.
+///
+/// True for anything backed by a repository checkout: the user is sharing a
+/// Skill they installed, and their own copy must keep following the source it
+/// came from. False for locally authored Skills, whose publication *is* their
+/// graduation into Git.
+///
+/// Split out from [`publish_skill`] because it decides whether the lockfile is
+/// rewritten, and getting it wrong is silent — the Skill keeps working and
+/// simply stops receiving upstream updates.
+pub(super) fn publish_copies_content(
+    was_link: bool,
+    resolved: &Path,
+    local_skills_dir: &Path,
+) -> bool {
+    was_link && !resolved.starts_with(local_skills_dir)
+}
+
 /// Publish a skill into an existing or new GitHub repository.
 ///
 /// - `existing_repo_url`: If Some, publish into this existing repo.
@@ -433,23 +452,24 @@ pub fn publish_skill(
         anyhow::bail!("Skill directory '{}' not found", skill_name);
     }
 
-    // Resolve local skill symlinks (skills/ → skills-local/) to their actual directory.
-    // Repo-cached symlinks (.repos/) are still rejected — those should be forked first.
-    let skill_source_resolved = if skillstar_core::infra::fs_ops::is_link(&skill_source) {
-        let resolved = skillstar_core::infra::fs_ops::read_link_resolved(&skill_source)
-            .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
-
-        let local_dir = skillstar_core::infra::paths::local_skills_dir();
-        if !resolved.starts_with(&local_dir) {
-            anyhow::bail!(
-                "Skill '{}' is a repo-cached symlink. Cannot publish.",
-                skill_name
-            );
-        }
-        resolved
-    } else {
-        skill_source.clone()
-    };
+    // Hub entries are symlinks: locally authored Skills point into skills-local/,
+    // installed ones into a repository checkout. Both can be published — most of
+    // the library is installed, so refusing those made "share the Skill I use"
+    // impossible — but they mean different things afterwards, which
+    // `publish_copies_content` decides.
+    let (skill_source_resolved, was_link) =
+        if skillstar_core::infra::fs_ops::is_link(&skill_source) {
+            let resolved = skillstar_core::infra::fs_ops::read_link_resolved(&skill_source)
+                .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
+            (resolved, true)
+        } else {
+            (skill_source.clone(), false)
+        };
+    let publishes_a_copy = publish_copies_content(
+        was_link,
+        &skill_source_resolved,
+        &skillstar_core::infra::paths::local_skills_dir(),
+    );
     let content_hash = crate::content::snapshot(skill_name)
         .with_context(|| format!("Failed to capture content baseline for '{skill_name}'"))?
         .content_hash;
@@ -576,7 +596,13 @@ pub fn publish_skill(
     // A local Skill is not Git-managed until its staged graduation succeeds.
     // GUI callers therefore defer this write and let the installer commit the
     // new provenance atomically with the checkout replacement.
-    if lockfile_mode.should_commit() {
+    //
+    // Publishing an *installed* Skill is a copy, not a move: the local one keeps
+    // following the source it was installed from. Rewriting its provenance here
+    // would silently repoint it at the publisher's repository, so a Skill the
+    // user only meant to share with a teammate would stop receiving upstream
+    // updates — with nothing in the UI saying so.
+    if lockfile_mode.should_commit() && !publishes_a_copy {
         use crate::lockfile::{LockEntry, Lockfile};
         let tree_hash = skillstar_git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
         let _lock = crate::lockfile::get_mutex()
