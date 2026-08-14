@@ -120,12 +120,12 @@ CLI 凭证文件的快照；CLI 的 live 路径是指向当前快照的软链。
 - `refresh_all_subscriptions` 接受可选 `catalogId`：只刷该 catalog 的行，其余行按存储快照原样返回（返回值始终是完整列表）。单 provider 页面必须传，避免一次点击横扫所有厂商端点。
 - load error、switch error、cliFailed 和 usage.error 分层展示，不把所有失败折成“暂无数据”。
 
-## Dock 右键菜单（macOS）
+## Dock 与 Tray 菜单额度显示
 
-- macOS 右键点 Dock 图标，菜单顶部列出各订阅额度：每行 `<账号> · 剩余 N%`，按最紧张（剩余最少）在前排序。N% 是该订阅「消耗最高的那条额度窗口」的剩余份额。行是信息项（无 action，自动置灰）。
-- 分层：纯函数 `skillstar_usage::dock_usage::snapshot_remaining_percent`（对快照，可测）→ 读存储+拼行的 `skillstar_app::usage::dock_menu_lines` → Tauri 胶水 `src-tauri` `core::dock_menu`。
-- macOS 只能经 app delegate 的 `applicationDockMenu:` 提供 Dock 菜单，Tauri/muda 均未封装。实现用 objc2 把该方法**加到 Tauri 现有 delegate 类**（不替换 delegate），AppKit 每次右键即读缓存行重建菜单。
-- 触发点：启动（`install()` 装 hook + `refresh()` 读上次快照）、`refresh_all_subscriptions`/`refresh_subscription_usage`/`delete_subscription` 之后 `refresh()`。后台巡检 loop 只管 skills、不刷新用量，故不在其触发范围。
+- macOS 右键点 Dock 图标，或在系统状态栏 Tray 小图标菜单中，列出各订阅额度：每行 `<账号> · <额度状态>`（如 `剩余 N%`、`余额 $M`、`剩余 K 积分`、`未同步`），按最紧张（剩余百分比最少）在前排序。N% 是该订阅「消耗最高的那条额度窗口」的剩余份额。
+- 分层：纯函数 `skillstar_usage::dock_usage::snapshot_menu_summary`（对快照，支持多语言与全品类配额）→ 读存储+拼行的 `skillstar_app::usage::dock_menu_lines_for_lang` → Tauri 胶水 `src-tauri` `core::dock_menu` 与 `core::app_shell::build_tray_menu`。
+- macOS Dock 菜单经 app delegate 的 `applicationDockMenu:` 提供，通过 objc2 动态注入 Tauri delegate 类；Tray 菜单在系统状态栏常驻。
+- 触发点：启动（`setup_tray` 与 `dock_menu::refresh`）、订阅增删改、排序、刷新、导入与 CLI 切换时统一通过 `refresh_tray_and_dock_menu(&app)` 刷新。
 
 ## 验证
 

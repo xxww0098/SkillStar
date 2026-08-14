@@ -465,7 +465,8 @@ async fn dock_menu_lines_order_most_urgent_first_with_catalog_fallback() {
     roomy.display_name = "Alpha".into();
     let mut nameless = stored("b", "kimi");
     nameless.display_name = "  ".into();
-    let no_snapshot = stored("c", "glm");
+    let mut no_snapshot = stored("c", "glm");
+    no_snapshot.display_name = "".into();
     for sub in [roomy, nameless, no_snapshot] {
         storage::upsert_subscription(sub).unwrap();
     }
@@ -476,10 +477,21 @@ async fn dock_menu_lines_order_most_urgent_first_with_catalog_fallback() {
         dock_menu_lines(),
         vec![
             "kimi · 剩余 10%".to_string(),
-            "Alpha · 剩余 70%".to_string()
+            "Alpha · 剩余 70%".to_string(),
+            "glm · 未同步".to_string()
         ],
         "least remaining first; blank names fall back to catalog id; \
-         rows without a percent quota are hidden"
+         rows without snapshots display as not synced"
+    );
+
+    assert_eq!(
+        dock_menu_lines_for_lang("en"),
+        vec![
+            "kimi · 10% left".to_string(),
+            "Alpha · 70% left".to_string(),
+            "glm · Not synced".to_string()
+        ],
+        "english menu lines follow localized text"
     );
 }
 

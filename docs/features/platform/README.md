@@ -31,6 +31,7 @@
 
 - 后台运行开启时，主窗口 close 隐藏；关闭时退出应用并清理 tray。
 - tray 与 Settings 使用同一 patrol state/event，Start/Stop label 与实际状态一致。
+- tray 菜单同时展示用量额度概览，支持中英文自适应与数据实时刷新。
 - 独立 Usage window 等子窗口由后端创建和定位，前端只管理窗口内业务生命周期。
 
 ## CI

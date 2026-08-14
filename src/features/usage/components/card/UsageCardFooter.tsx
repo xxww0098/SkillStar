@@ -1,12 +1,10 @@
-import { AppWindow, BadgeCheck, ExternalLink, Pencil, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import { BadgeCheck, ExternalLink, Pencil, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isTauri } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { openExternalUrl } from "@/lib/externalOpen";
 import { cn } from "@/lib/utils";
-import { usageApi } from "../../api";
 import { formatCurrencyAmount } from "../../lib/pricing";
 import type { Subscription } from "../../types";
 
@@ -158,11 +156,6 @@ export function UsageCardFooter({
               <RefreshCw className={cn("h-3.5 w-3.5", cliSyncing && "animate-spin")} />
             </Button>
           )}
-          {/*
-            ExternalLink = system browser → official console (what users expect from
-            「在新窗口打开」). Floating pop-out uses AppWindow so it is never confused
-            with opening the vendor console URL.
-          */}
           {subscriptionUrl ? (
             <Button
               size="icon-sm"
@@ -174,22 +167,6 @@ export function UsageCardFooter({
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
           ) : null}
-          {isTauri() && (
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              title={t("usage.popOutCard")}
-              onClick={() => {
-                void usageApi.openUsageCardWindow(sub.id).catch((err: unknown) => {
-                  const msg = err instanceof Error ? err.message : String(err);
-                  toast.error(t("usage.openInWindowFailed"), { description: msg });
-                });
-              }}
-              className="text-zinc-500 transition-transform hover:scale-105 hover:text-zinc-800"
-            >
-              <AppWindow className="h-3.5 w-3.5" />
-            </Button>
-          )}
           {sub.requires_reauth ? (
             <Button
               size="icon-sm"

@@ -1,7 +1,7 @@
-import { CircleUserRound } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { Github } from "../../../components/ui/icons/Github";
 import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { GITHUB_ACCOUNT_MENU_EVENT, cn } from "../../../lib/utils";
 import { GitHubAuthPanel } from "./GitHubAuthPanel";
@@ -17,8 +17,23 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
   const { t } = useTranslation();
   const auth = useGitHubAuth();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  const close = useCallback(() => setOpen(false), []);
+  // Returning focus to the rail keeps the keyboard path continuous, since the
+  // shared ModalShell does not manage focus itself.
+  const close = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, close]);
 
   // Other surfaces (e.g. shared-channel sign-in prompts) ask for the panel by
   // event instead of importing this component's state.
@@ -37,7 +52,7 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
   const avatar = identity?.avatar_url ? (
     <img src={identity.avatar_url} alt={label} className="w-5 h-5 rounded-full object-cover shrink-0" />
   ) : (
-    <CircleUserRound className="w-[17px] h-[17px] shrink-0" />
+    <Github className="w-[17px] h-[17px] shrink-0" strokeWidth={1.75} />
   );
 
   const statusDot =
@@ -46,10 +61,12 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         title={title}
         aria-haspopup="dialog"
+        aria-expanded={open}
         className={cn(
           "flex items-center rounded-lg text-muted-foreground transition duration-150 cursor-pointer focus-ring",
           "hover:bg-muted/40 hover:text-foreground",
@@ -75,11 +92,11 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
       {createPortal(
         <ModalShell open={open} onClose={close} ariaLabel={t("settings.githubAccount")} panelClassName="max-w-md">
           <ModalHeader
-            icon={<CircleUserRound className="w-4 h-4 text-primary" />}
+            icon={<Github className="w-4 h-4 text-primary" strokeWidth={1.75} />}
             title={t("settings.githubAccount")}
             onClose={close}
           />
-          <div className="px-6 py-5">
+          <div className="px-6 pb-6 pt-5">
             <GitHubAuthPanel auth={auth} />
           </div>
         </ModalShell>,

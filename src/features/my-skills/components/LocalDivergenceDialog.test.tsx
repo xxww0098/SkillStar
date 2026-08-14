@@ -47,6 +47,8 @@ describe("LocalDivergenceDialog", () => {
       />,
     );
 
+    // Switch to destructive action option
+    fireEvent.click(screen.getByText("丢弃本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
 
     expect(onDiscard).toHaveBeenCalledOnce();
@@ -175,12 +177,13 @@ describe("LocalDivergenceDialog", () => {
     );
 
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("来源已不再提供");
-    expect(screen.queryByRole("button", { name: "丢弃修改并更新" })).not.toBeInTheDocument();
+    expect(screen.queryByText("丢弃本地修改")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "转为本地副本并更新" }));
+    fireEvent.click(screen.getByRole("button", { name: "转为本地副本" }));
     expect(onPreserve).toHaveBeenCalledWith({ "code-review": "code-review.local" });
 
-    fireEvent.click(screen.getByRole("button", { name: "移除并更新" }));
+    fireEvent.click(screen.getByText("彻底移除该 Skill"));
+    fireEvent.click(screen.getByRole("button", { name: "移除该技能" }));
     expect(onUninstall).toHaveBeenCalledOnce();
   });
 
@@ -200,11 +203,8 @@ describe("LocalDivergenceDialog", () => {
       />,
     );
 
-    // Only the Skill that still has content gets a name to type.
-    expect(screen.getAllByLabelText("本地副本名称")).toHaveLength(1);
     expect(screen.getByText("本地内容已不存在，无法转为副本，只能移除。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "全部转为本地副本并更新" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "全部移除并更新" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "全部移除" })).toBeEnabled();
   });
 
   it("reports how far a batch has got while it applies", () => {

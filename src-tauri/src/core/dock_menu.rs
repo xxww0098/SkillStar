@@ -19,7 +19,8 @@ static DOCK_MENU_LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Recompute the Dock menu rows from the latest stored snapshots. Cheap and
 /// safe to call often; the native menu reads them lazily on right-click.
 pub fn refresh() {
-    let lines = skillstar_app::usage::dock_menu_lines();
+    let lang = crate::core::app_shell::detect_system_lang();
+    let lines = skillstar_app::usage::dock_menu_lines_for_lang(lang);
     if let Ok(mut guard) = DOCK_MENU_LINES.lock() {
         *guard = lines;
     }
@@ -58,14 +59,19 @@ mod platform {
         let mtm = unsafe { MainThreadMarker::new_unchecked() };
         let menu = NSMenu::new(mtm);
 
-        menu.addItem(&info_item(mtm, "用量额度"));
+        let lang = crate::core::app_shell::detect_system_lang();
+        let is_zh = lang.starts_with("zh");
+        let header_title = if is_zh { "用量额度" } else { "Usage Quotas" };
+        let empty_title = if is_zh { "  暂无用量数据" } else { "  No usage data" };
+
+        menu.addItem(&info_item(mtm, header_title));
 
         let lines = DOCK_MENU_LINES
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default();
         if lines.is_empty() {
-            menu.addItem(&info_item(mtm, "  暂无用量数据"));
+            menu.addItem(&info_item(mtm, empty_title));
         } else {
             for line in &lines {
                 menu.addItem(&info_item(mtm, &format!("  {line}")));

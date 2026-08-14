@@ -278,6 +278,7 @@ describe("useSkills", () => {
       updatePromise = result.current.updateSkill("opencli-repair");
     });
     await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByText("丢弃本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
     await act(async () => {
       await updatePromise;
@@ -348,6 +349,7 @@ describe("useSkills", () => {
     expect(screen.getByText("opencli-usage")).toBeInTheDocument();
     expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
 
+    fireEvent.click(screen.getByText("丢弃以下 2 个 Skill 的本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "全部丢弃修改并更新" }));
     await act(async () => {
       await updatePromise;
@@ -486,6 +488,7 @@ describe("useSkills", () => {
     });
 
     await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByText("丢弃本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
 
     await screen.findByText(/opencli-search/);
@@ -578,6 +581,7 @@ describe("useSkills", () => {
       updatePromise = result.current.updateSkill("opencli-repair");
     });
     await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByText("丢弃本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
 
     let updated!: Skill;
@@ -652,11 +656,13 @@ describe("useSkills", () => {
     // offer "discard", which cannot work for a Skill with no source left.
     await screen.findByRole("alertdialog");
     expect(screen.queryByText("opencli-usage")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("丢弃本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
 
-    await screen.findByRole("button", { name: "移除并更新" });
+    await screen.findByText("彻底移除该 Skill");
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("来源已不再提供");
-    fireEvent.click(screen.getByRole("button", { name: "移除并更新" }));
+    fireEvent.click(screen.getByText("彻底移除该 Skill"));
+    fireEvent.click(screen.getByRole("button", { name: "移除该技能" }));
 
     let report!: { uninstalled: string[] };
     await act(async () => {

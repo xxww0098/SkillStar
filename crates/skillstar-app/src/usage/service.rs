@@ -400,11 +400,9 @@ pub async fn refresh_subscription_usage(id: String) -> Result<SubscriptionDto, A
     refresh_subscription_usage_inner(id).await
 }
 
-/// Rows for the macOS Dock right-click menu: one `"<account> · 剩余 N%"` line
-/// per subscription that exposes a percent-based quota, ordered most-urgent
-/// (least remaining) first. Empty when nothing is badge-worthy or storage is
-/// unreadable.
-pub fn dock_menu_lines() -> Vec<String> {
+/// Rows for the macOS Dock right-click menu and tray menu: one `"<account> · <status>"` line
+/// per subscription, ordered most-urgent (least remaining) first.
+pub fn dock_menu_lines_for_lang(lang: &str) -> Vec<String> {
     let subs = match storage::list_subscriptions() {
         Ok(subs) => subs,
         Err(_) => return Vec::new(),
@@ -413,22 +411,34 @@ pub fn dock_menu_lines() -> Vec<String> {
         Ok(snapshots) => snapshots,
         Err(_) => return Vec::new(),
     };
+    let is_zh = lang.starts_with("zh");
     let mut rows: Vec<(i32, String)> = subs
         .iter()
-        .filter_map(|sub| {
-            let usage = snapshots.get(&sub.id)?;
-            let remaining = skillstar_usage::dock_usage::snapshot_remaining_percent(usage)?;
+        .map(|sub| {
             let label = sub.display_name.trim();
             let label = if label.is_empty() {
                 &sub.catalog_id
             } else {
                 label
             };
-            Some((remaining, format!("{label} · 剩余 {remaining}%")))
+            if let Some(usage) = snapshots.get(&sub.id) {
+                if let Some((priority, summary)) =
+                    skillstar_usage::dock_usage::snapshot_menu_summary(usage, lang)
+                {
+                    return (priority, format!("{label} · {summary}"));
+                }
+            }
+            let not_synced = if is_zh { "未同步" } else { "Not synced" };
+            (3000, format!("{label} · {not_synced}"))
         })
         .collect();
-    rows.sort_by_key(|(remaining, _)| *remaining);
+    rows.sort_by_key(|(priority, _)| *priority);
     rows.into_iter().map(|(_, line)| line).collect()
+}
+
+/// Convenience helper for default Chinese lines.
+pub fn dock_menu_lines() -> Vec<String> {
+    dock_menu_lines_for_lang("zh-CN")
 }
 
 /// Refresh every subscription, or only one catalog's when `catalog_id` is set.

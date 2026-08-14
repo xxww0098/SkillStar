@@ -22,35 +22,48 @@ pub fn list_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
 }
 
 #[tauri::command]
-pub fn create_subscription(input: CreateSubscriptionInput) -> Result<SubscriptionDto, AppError> {
-    usage::create_subscription(input)
+pub fn create_subscription(
+    app: AppHandle,
+    input: CreateSubscriptionInput,
+) -> Result<SubscriptionDto, AppError> {
+    let dto = usage::create_subscription(input)?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
 }
 
 #[tauri::command]
 pub async fn update_subscription(
+    app: AppHandle,
     id: String,
     input: UpdateSubscriptionInput,
 ) -> Result<SubscriptionDto, AppError> {
-    usage::update_subscription(id, input).await
+    let dto = usage::update_subscription(id, input).await?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
 }
 
 #[tauri::command]
 pub async fn delete_subscription(app: AppHandle, id: String) -> Result<(), AppError> {
     usage::delete_subscription(id.clone()).await?;
     super::usage_windows::close_card_for_subscription(&app, &id);
-    crate::core::dock_menu::refresh();
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
     Ok(())
 }
 
 #[tauri::command]
-pub fn reorder_subscriptions(ids: Vec<String>) -> Result<(), AppError> {
-    usage::reorder_subscriptions(ids)
+pub fn reorder_subscriptions(app: AppHandle, ids: Vec<String>) -> Result<(), AppError> {
+    usage::reorder_subscriptions(ids)?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn refresh_subscription_usage(id: String) -> Result<SubscriptionDto, AppError> {
+pub async fn refresh_subscription_usage(
+    app: AppHandle,
+    id: String,
+) -> Result<SubscriptionDto, AppError> {
     let dto = usage::refresh_subscription_usage(id).await?;
-    crate::core::dock_menu::refresh();
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
     Ok(dto)
 }
 
@@ -58,10 +71,11 @@ pub async fn refresh_subscription_usage(id: String) -> Result<SubscriptionDto, A
 /// `xai`); omitted / null refreshes everything.
 #[tauri::command]
 pub async fn refresh_all_subscriptions(
+    app: AppHandle,
     catalog_id: Option<String>,
 ) -> Result<Vec<SubscriptionDto>, AppError> {
     let dtos = usage::refresh_all_subscriptions(catalog_id).await?;
-    crate::core::dock_menu::refresh();
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
     Ok(dtos)
 }
 
@@ -91,14 +105,22 @@ pub async fn start_oauth_login(
 
 #[tauri::command]
 pub async fn import_subscription_from_local(
+    app: AppHandle,
     catalog_id: String,
 ) -> Result<SubscriptionDto, AppError> {
-    usage::import_subscription_from_local(catalog_id).await
+    let dto = usage::import_subscription_from_local(catalog_id).await?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
 }
 
 #[tauri::command]
-pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDto, AppError> {
-    usage::await_oauth_completion(pending_id).await
+pub async fn await_oauth_completion(
+    app: AppHandle,
+    pending_id: String,
+) -> Result<SubscriptionDto, AppError> {
+    let dto = usage::await_oauth_completion(pending_id).await?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -128,14 +150,18 @@ pub async fn set_active_subscription(
     if dto.is_active {
         super::usage_windows::emit_active_changed(&app, &dto.catalog_id, &dto.id);
     }
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
     Ok(dto)
 }
 
 #[tauri::command]
 pub async fn switch_active_subscription_to_cli(
+    app: AppHandle,
     catalog_id: String,
 ) -> Result<SwitchOutcomeDto, AppError> {
-    usage::switch_active_subscription_to_cli(catalog_id).await
+    let dto = usage::switch_active_subscription_to_cli(catalog_id).await?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
 }
 
 /// Which account each CLI is actually serving right now.

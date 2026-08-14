@@ -98,6 +98,7 @@ export function LocalSkillsContent({
   const [sourceFilter, setSourceFilter] = useState<"all" | "hub" | "local">("all");
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [shareCardSkills, setShareCardSkills] = useState<string[] | null>(null);
+  const [onlyUpdatesFilter, setOnlyUpdatesFilter] = useState(false);
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
   const [reinstallingRepoSource, setReinstallingRepoSource] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
@@ -227,6 +228,10 @@ export function LocalSkillsContent({
       visibleSkills = visibleSkills.filter((skill) => skill.source === repoFilter);
     }
 
+    if (onlyUpdatesFilter) {
+      visibleSkills = visibleSkills.filter((skill) => Boolean(skill.update_available) && skill.skill_type !== "local");
+    }
+
     visibleSkills.sort((a, b) => {
       switch (sortBy) {
         case "stars-desc":
@@ -241,7 +246,7 @@ export function LocalSkillsContent({
     });
 
     return visibleSkills;
-  }, [skills, searchQuery, sortBy, agentFilter, profiles, sourceFilter, repoFilter]);
+  }, [skills, searchQuery, sortBy, agentFilter, profiles, sourceFilter, repoFilter, onlyUpdatesFilter]);
 
   // Stable Settings-backed target list for filters, cards, selection actions,
   // and project deployment. Persisted `enabled` alone is insufficient because
@@ -616,6 +621,7 @@ export function LocalSkillsContent({
   }, [hasSelection, t]);
 
   const getEmptyMessage = () => {
+    if (onlyUpdatesFilter) return t("toolbar.noPendingUpdates", { defaultValue: "没有待更新的技能" });
     if (skills.length === 0) return t("emptyState.mySkillsDesc");
     return t("mySkills.noMatching");
   };
@@ -684,6 +690,8 @@ export function LocalSkillsContent({
           reinstallingRepoSource={reinstallingRepoSource}
           onRemoveRepoSource={handleRemoveRepoSource}
           pendingUpdateCount={pendingUpdateCount}
+          onlyUpdatesFilter={onlyUpdatesFilter}
+          onOnlyUpdatesFilterChange={setOnlyUpdatesFilter}
         />
 
         {/* Selection bar */}
@@ -776,7 +784,9 @@ export function LocalSkillsContent({
               pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}
               ghostSkills={
-                !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter ? ghostSkills : undefined
+                !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter && !onlyUpdatesFilter
+                  ? ghostSkills
+                  : undefined
               }
               onInstallGhost={installGhostSkill}
               onDismissGhost={dismissGhostSkill}

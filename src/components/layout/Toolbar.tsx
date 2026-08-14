@@ -93,6 +93,10 @@ interface ToolbarProps {
   onReinstallRepoSource?: (source: string) => void;
   /** Source currently being reinstalled, if any. */
   reinstallingRepoSource?: string | null;
+  /** Whether "only updates" filter is active */
+  onlyUpdatesFilter?: boolean;
+  /** Callback when "only updates" filter changes */
+  onOnlyUpdatesFilterChange?: (enabled: boolean) => void;
 }
 
 export function Toolbar({
@@ -133,6 +137,8 @@ export function Toolbar({
   onRemoveRepoSource,
   onReinstallRepoSource,
   reinstallingRepoSource,
+  onlyUpdatesFilter,
+  onOnlyUpdatesFilterChange,
 }: ToolbarProps) {
   const { t } = useTranslation();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
@@ -585,25 +591,71 @@ export function Toolbar({
         </div>
       )}
 
-      {/* Update all pending hub skills (click-time snapshot), with pending-count badge */}
-      {onUpdateAll && hasPendingUpdates && (
-        <button
-          type="button"
-          onClick={onUpdateAll}
-          disabled={isUpdatingAll}
-          className={cn(
-            "flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-semibold text-accent-foreground shadow-sm cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring hover:brightness-110",
-            isUpdatingAll && "opacity-60 cursor-not-allowed",
+      {/* Updates filter & action group */}
+      {(hasPendingUpdates || onlyUpdatesFilter) && (
+        <div className="flex items-center h-8 rounded-lg border border-amber-500/35 bg-background/50 backdrop-blur-md shadow-xs overflow-hidden shrink-0">
+          {/* Filter toggle */}
+          {onOnlyUpdatesFilterChange ? (
+            <button
+              type="button"
+              onClick={() => onOnlyUpdatesFilterChange(!onlyUpdatesFilter)}
+              aria-pressed={onlyUpdatesFilter}
+              title={
+                onlyUpdatesFilter
+                  ? t("toolbar.showAllSkills", { defaultValue: "Show all skills" })
+                  : t("toolbar.filterUpdatesHint", { defaultValue: "Filter skills with updates" })
+              }
+              className={cn(
+                "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium cursor-pointer transition-colors focus-ring whitespace-nowrap",
+                onlyUpdatesFilter
+                  ? "bg-amber-500 text-white font-semibold shadow-xs"
+                  : "bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20",
+              )}
+            >
+              <ArrowUpCircle
+                className={cn(
+                  "w-3.5 h-3.5 shrink-0",
+                  onlyUpdatesFilter ? "text-white" : "text-amber-600 dark:text-amber-400",
+                )}
+              />
+              <span>
+                {t("toolbar.updateFilterLabel", {
+                  count: pendingUpdateCount ?? 0,
+                  defaultValue: `可更新 (${pendingUpdateCount ?? 0})`,
+                })}
+              </span>
+              {onlyUpdatesFilter && <X className="w-3 h-3 ml-0.5 opacity-85 hover:opacity-100" />}
+            </button>
+          ) : null}
+
+          {/* Update all action */}
+          {onUpdateAll && hasPendingUpdates && (
+            <>
+              {onOnlyUpdatesFilterChange && <div className="w-px h-4 bg-amber-500/30 shrink-0" />}
+              <button
+                type="button"
+                onClick={onUpdateAll}
+                disabled={isUpdatingAll}
+                title={t("toolbar.updateAllAction", { defaultValue: "Update all" })}
+                className={cn(
+                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium bg-amber-500/15 text-amber-800 dark:text-amber-200 hover:bg-amber-500/25 transition-colors cursor-pointer focus-ring whitespace-nowrap",
+                  isUpdatingAll && "opacity-60 cursor-not-allowed",
+                )}
+              >
+                {isUpdatingAll ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                )}
+                <span>
+                  {isUpdatingAll
+                    ? t("common.updating", { defaultValue: "Updating..." })
+                    : t("toolbar.updateAllAction", { defaultValue: "全部更新" })}
+                </span>
+              </button>
+            </>
           )}
-        >
-          {isUpdatingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
-          {isUpdatingAll
-            ? t("common.updating", { defaultValue: "Updating..." })
-            : t("toolbar.updateAllCount", {
-                count: pendingUpdateCount,
-                defaultValue: `Update ${pendingUpdateCount}`,
-              })}
-        </button>
+        </div>
       )}
 
       {/* View toggle */}

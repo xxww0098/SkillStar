@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, Download, ExternalLink, GitBranch, Loader2 } from "lucide-react";
+import { ArrowUpCircle, Check, Download, ExternalLink, GitBranch, Loader2 } from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
@@ -8,7 +8,6 @@ import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
 import { CardTemplate } from "../../../components/ui/card-template";
-import { SuccessCheckmark } from "../../../components/ui/SuccessCheckmark";
 import { agentIconCls, cn, formatInstalls } from "../../../lib/utils";
 import type { AgentProfile, Skill } from "../../../types";
 
@@ -114,33 +113,28 @@ function SkillCardInner({
       </div>
     ) : null;
 
+  const installedBadge = (
+    <motion.div
+      initial={{ scale: 0.85, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+      className="h-7 px-2.5 rounded-lg text-xs font-medium inline-flex items-center border bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25 shadow-xs select-none backdrop-blur-xs"
+    >
+      <Check className="w-3.5 h-3.5 mr-1 stroke-[2.2] text-emerald-600 dark:text-emerald-400 shrink-0" />
+      {t("skillCard.installed")}
+    </motion.div>
+  );
+
   let statusAction: React.ReactNode;
   if (remoteContext) {
-    statusAction = (
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      >
-        <Button
-          size="sm"
-          variant="secondary"
-          className="h-7 px-2.5 text-xs font-medium pointer-events-none bg-success/10 text-success hover:bg-success/10 border-success/20 disabled:opacity-100"
-          disabled
-        >
-          <SuccessCheckmark size={14} className="text-success mr-1" />
-          {t("skillCard.installed")}
-        </Button>
-      </motion.div>
-    );
+    statusAction = installedBadge;
   } else if (skill.installed) {
     if (skill.update_available && !isLocalSkill) {
-      // Secondary to Toolbar「更新 N 项」— quiet ghost text, no warning chrome.
       statusAction = (
         <Button
           size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs font-medium text-muted-foreground underline-offset-2 hover:bg-muted/60 hover:text-foreground hover:underline"
+          variant="outline"
+          className="h-7 px-2.5 text-xs font-medium bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/35 hover:bg-amber-500/22 hover:border-amber-500/50 hover:text-amber-800 dark:hover:text-amber-200 shadow-xs cursor-pointer transition-all active:scale-[0.98]"
           disabled={updating}
           onClick={(e) => {
             e.stopPropagation();
@@ -150,28 +144,16 @@ function SkillCardInner({
             e.stopPropagation();
           }}
         >
-          {updating ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}
+          {updating ? (
+            <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin shrink-0" />
+          ) : (
+            <ArrowUpCircle className="w-3.5 h-3.5 mr-1 shrink-0 text-amber-600 dark:text-amber-400" />
+          )}
           {updating ? t("common.updating", { defaultValue: "Updating..." }) : t("common.update")}
         </Button>
       );
     } else {
-      statusAction = (
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <Button
-            size="sm"
-            variant="secondary"
-            className="h-7 px-2.5 text-xs font-medium pointer-events-none bg-success/10 text-success hover:bg-success/10 border-success/20 disabled:opacity-100"
-            disabled
-          >
-            <SuccessCheckmark size={14} className="text-success mr-1" />
-            {t("skillCard.installed")}
-          </Button>
-        </motion.div>
-      );
+      statusAction = installedBadge;
     }
   } else if (installing) {
     statusAction = (

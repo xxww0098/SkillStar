@@ -122,9 +122,27 @@ fn build_tray_menu(
     let toggle_i = MenuItem::with_id(app, "toggle_patrol", toggle_label, true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
 
-    let menu = MenuBuilder::new(app)
-        .item(&show_i)
-        .separator()
+    let mut builder = MenuBuilder::new(app).item(&show_i).separator();
+
+    let usage_lines = skillstar_app::usage::dock_menu_lines_for_lang(lang);
+    if !usage_lines.is_empty() {
+        let quota_title = if lang.starts_with("zh") {
+            "用量额度"
+        } else {
+            "Usage Quotas"
+        };
+        let header_i = MenuItem::with_id(app, "usage_header", quota_title, false, None::<&str>)?;
+        builder = builder.item(&header_i);
+        for (idx, line) in usage_lines.iter().enumerate() {
+            let row_id = format!("usage_row_{idx}");
+            let row_item =
+                MenuItem::with_id(app, &row_id, format!("  {line}"), false, None::<&str>)?;
+            builder = builder.item(&row_item);
+        }
+        builder = builder.separator();
+    }
+
+    let menu = builder
         .item(&toggle_i)
         .separator()
         .item(&quit_i)
@@ -231,4 +249,10 @@ pub fn refresh_tray_menu(app: &tauri::AppHandle) -> Result<(), AppError> {
     tray.set_menu(Some(menu))
         .map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
+}
+
+/// Refresh both the system tray menu and macOS dock menu with latest quotas.
+pub fn refresh_tray_and_dock_menu(app: &tauri::AppHandle) -> Result<(), AppError> {
+    crate::core::dock_menu::refresh();
+    refresh_tray_menu(app)
 }
