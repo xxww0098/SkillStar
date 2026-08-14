@@ -42,7 +42,7 @@ describe("GrokUsagePanel", () => {
           weekly: {
             label: "Weekly credits",
             used: 0,
-            total: null,
+            total: undefined,
             percent: 30,
             reset_at: resetAt,
             breakdown: [],
@@ -70,9 +70,9 @@ describe("GrokUsagePanel", () => {
           weekly: {
             label: "Weekly credits",
             used: 0,
-            total: null,
+            total: undefined,
             percent: 10,
-            reset_at: null,
+            reset_at: undefined,
             breakdown: [],
           },
           monthly: null,

@@ -41,8 +41,8 @@ describe("CursorUsagePanel", () => {
             percent: 49,
             reset_at: Math.floor(Date.now() / 1000) + 86_400,
             breakdown: [
-              { label: "Auto + Composer", used: 51, total: 100, percent: 51, reset_at: null, breakdown: [] },
-              { label: "API", used: 43, total: 100, percent: 43, reset_at: null, breakdown: [] },
+              { label: "Auto + Composer", used: 51, total: 100, percent: 51, reset_at: undefined, breakdown: [] },
+              { label: "API", used: 43, total: 100, percent: 43, reset_at: undefined, breakdown: [] },
             ],
           },
           credits: [

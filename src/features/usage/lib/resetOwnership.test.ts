@@ -6,7 +6,7 @@ function win(over: Partial<UsageWindow> = {}): UsageWindow {
   return {
     label: "Weekly credits",
     used: 0,
-    total: null,
+    total: undefined,
     percent: 40,
     reset_at: 1_700_000_000,
     ...over,
@@ -15,7 +15,7 @@ function win(over: Partial<UsageWindow> = {}): UsageWindow {
 
 describe("windowRendersOwnReset", () => {
   it("false without reset_at", () => {
-    expect(windowRendersOwnReset(win({ reset_at: null }))).toBe(false);
+    expect(windowRendersOwnReset(win({ reset_at: undefined }))).toBe(false);
   });
 
   it("false for Codex 5h/7d labels (defer to meta)", () => {
@@ -28,7 +28,7 @@ describe("windowRendersOwnReset", () => {
   });
 
   it("true for simple weekly-style bar with reset", () => {
-    expect(windowRendersOwnReset(win({ label: "Weekly credits", total: null, percent: 50 }))).toBe(true);
+    expect(windowRendersOwnReset(win({ label: "Weekly credits", total: undefined, percent: 50 }))).toBe(true);
   });
 });
 

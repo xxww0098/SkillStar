@@ -41,7 +41,7 @@ describe("computeHasAutoUsage", () => {
             subscription_id: "s1",
             fetched_at: 1,
             plan_name: null,
-            hourly: { label: "5h", used: 1, total: 10, percent: 10, reset_at: null },
+            hourly: { label: "5h", used: 1, total: 10, percent: 10, reset_at: undefined },
             weekly: null,
             monthly: null,
             balance: null,

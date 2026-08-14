@@ -11,7 +11,7 @@ import { formatQuotaNumber } from "../../lib/usageLabels";
 import type { CreditInfo, Subscription } from "../../types";
 import { UsageWindowBar } from "../UsageWindowBar";
 import { resolveUsageBodyRegistration } from "./bodyRegistry";
-import { ProgressTrack } from "./primitives";
+import { MeterFigure, UsageMeter } from "./primitives";
 import { type AttachmentSurface, surfaceAllows } from "./surfaceAttachments";
 
 export interface UsageCardBodyProps {
@@ -146,16 +146,20 @@ function CreditsLine({ credits, brandColor = "10B981" }: { credits: CreditInfo[]
         {t("usage.creditsLabel")}
       </div>
       {credits.map((credit, i) => (
-        <CreditProgressItem key={`${credit.credit_type}-${i}`} credit={credit} brandColor={brandColor} />
+        <CreditProgressItem key={`${credit.credit_type}-${i}`} credit={credit} />
       ))}
     </div>
   );
 }
 
-function CreditProgressItem({ credit, brandColor }: { credit: CreditInfo; brandColor: string }) {
+/**
+ * One credit line. When the backend hands us a `used / total`, it is a quota —
+ * so it renders through the shared `UsageMeter` grammar rather than a private
+ * copy of it (docs/features/usage §"所有额度条共享 UsageMeter primitive").
+ */
+function CreditProgressItem({ credit }: { credit: CreditInfo }) {
   const { t } = useTranslation();
   const parsed = parseCreditProgress(credit.credit_amount);
-  const c = brandColor.startsWith("#") ? brandColor : `#${brandColor}`;
   const label = formatCreditType(credit.credit_type, t);
 
   if (!parsed) {
@@ -178,36 +182,21 @@ function CreditProgressItem({ credit, brandColor }: { credit: CreditInfo; brandC
   const percent = clampPercent(parsed.percent ?? (parsed.used / parsed.total) * 100);
 
   return (
-    <div className="space-y-2 rounded-xl bg-white/45 px-2.5 py-2 ring-1 ring-zinc-200/45">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[10px] font-semibold text-zinc-700" title={label}>
-          {label}
-        </span>
-        <span
-          className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums"
-          style={{ backgroundColor: `${c}12`, color: c }}
-        >
-          {percent}%
-        </span>
-      </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="font-mono text-sm font-bold leading-none tabular-nums text-zinc-900">
-          {formatQuotaNumber(parsed.used)}
-        </span>
-        <span className="text-[10px] text-zinc-300">/</span>
-        <span className="font-mono text-[11px] font-semibold tabular-nums text-zinc-500">
-          {formatQuotaNumber(parsed.total)}
-        </span>
-        <span className="ml-auto text-[10px] font-medium text-zinc-400">{t("usage.used")}</span>
-      </div>
-      <ProgressTrack usedPercent={percent} size="compact" tone="accent-static" accent={c} />
-      <div className="flex items-center justify-between gap-2 text-[9px] text-zinc-400">
-        <span>{t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}</span>
-        {credit.minimum_credit_amount_for_usage ? (
-          <span>{t("usage.creditMinimum", { min: credit.minimum_credit_amount_for_usage })}</span>
-        ) : null}
-      </div>
-    </div>
+    <UsageMeter
+      label={label}
+      usedPercent={percent}
+      compact
+      figure={<MeterFigure value={formatQuotaNumber(parsed.used)} unit={`/ ${formatQuotaNumber(parsed.total)}`} />}
+      caption={t("usage.used")}
+      showReset={false}
+      footNote={t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}
+    >
+      {credit.minimum_credit_amount_for_usage ? (
+        <p className="text-right text-[9px] text-zinc-400">
+          {t("usage.creditMinimum", { min: credit.minimum_credit_amount_for_usage })}
+        </p>
+      ) : null}
+    </UsageMeter>
   );
 }
 
@@ -255,7 +244,9 @@ function ManualUsage({ sub, density }: { sub: Subscription; density: "comfortabl
         used,
         total: q.total_tokens,
         percent,
-        reset_at: null,
+        // Manual quotas have no reset clock; `UsageWindow.reset_at` is an
+        // omitted key on the wire, so `undefined` — not `null` — is the miss.
+        reset_at: undefined,
       }}
     />
   );

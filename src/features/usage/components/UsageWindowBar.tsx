@@ -220,7 +220,9 @@ function clamp(p: number | null): number {
   return Math.max(0, Math.min(100, Math.round(p)));
 }
 
-function computePercent(used: number, total: number | null): number | null {
+// `total` is `number | null | undefined`: the backend skips the key entirely
+// when the quota ceiling is unknown, so it arrives as `undefined`, not `null`.
+function computePercent(used: number, total: number | null | undefined): number | null {
   if (!total || total <= 0) return null;
   return Math.round((used / total) * 100);
 }

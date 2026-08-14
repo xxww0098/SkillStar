@@ -110,11 +110,20 @@ export function authModeLabel(mode: AuthMode, t: TFunction): string {
       return t("usage.authBadgeOAuth");
     case "api-key":
       return t("usage.authBadgeApiKey");
+    case "cookie":
+      return t("usage.authBadgeCookie");
+    case "manual":
+      return t("usage.authBadgeManual");
   }
 }
 
 /** True when window looks like monetary included usage (USD cents). */
-export function isMonetaryQuota(window: { label?: string; total: number | null; breakdown?: unknown[] }): boolean {
+// The `total` / `reset_at` / `percent` params below are `number | null | undefined`
+// because the backend marks those fields `skip_serializing_if = "Option::is_none"`:
+// an unknown value arrives as an *absent key*, i.e. `undefined`, never `null`.
+// (The old hand-written `number | null` was the drift `src/types/generated` now
+// prevents — see `crates/skillstar-usage/src/subscription.rs`.)
+export function isMonetaryQuota(window: { label?: string; total?: number | null; breakdown?: unknown[] }): boolean {
   // Grok legacy monthly bar is USD cents when total is set. Weekly is percent-only (never monetary).
   if (window.label === "Monthly credits") {
     return window.total != null && window.total > 0;
@@ -129,7 +138,7 @@ export function isMonetaryQuota(window: { label?: string; total: number | null; 
 /** Parent window with per-model/category percent breakdown (Antigravity, Copilot, etc.). */
 export function isBreakdownQuotaWindow(window: {
   label?: string;
-  total: number | null;
+  total?: number | null;
   breakdown?: unknown[];
 }): boolean {
   return (window.breakdown?.length ?? 0) > 0 && !isMonetaryQuota(window);
@@ -139,7 +148,7 @@ export function isBreakdownQuotaWindow(window: {
 export function isAbsoluteQuotaWindow(window: {
   label: string;
   used: number;
-  total: number | null;
+  total?: number | null;
   breakdown?: unknown[];
 }): boolean {
   if (isMonetaryQuota(window)) return false;
@@ -210,7 +219,7 @@ export function subscriptionCardTitle(displayName: string, catalogDisplayName?: 
   return name;
 }
 
-function windowUsedPercent(window: { used: number; total: number | null; percent: number | null }): number {
+function windowUsedPercent(window: { used: number; total?: number | null; percent?: number | null }): number {
   if (window.percent != null) return window.percent;
   if (window.total && window.total > 0) return Math.round((window.used / window.total) * 100);
   return 0;
@@ -229,14 +238,14 @@ export interface PrimaryResetInfo {
 export function getPrimaryResetInfo(
   usage: {
     monthly: {
-      reset_at: number | null;
+      reset_at?: number | null;
       used: number;
-      total: number | null;
-      percent: number | null;
+      total?: number | null;
+      percent?: number | null;
       breakdown?: unknown[];
     } | null;
-    hourly: { reset_at: number | null; used: number; total: number | null; percent: number | null } | null;
-    weekly: { reset_at: number | null; used: number; total: number | null; percent: number | null } | null;
+    hourly: { reset_at?: number | null; used: number; total?: number | null; percent?: number | null } | null;
+    weekly: { reset_at?: number | null; used: number; total?: number | null; percent?: number | null } | null;
   } | null,
 ): PrimaryResetInfo | null {
   if (!usage) return null;
