@@ -1,0 +1,11 @@
+# Grandfathered `.rs` files that are knowingly unreachable from every cargo
+# target (see check_no_orphan_modules.sh). Entries here only WARN; anything
+# else unreachable FAILS, so the ratchet can only tighten. Once a file is
+# wired back into the module tree the guard tells you to delete its entry.
+#
+# This list should stay empty. An orphan is not debt you pay down later — it
+# is code that has never been compiled, so the fix is always either one `mod`
+# declaration or `rm`. Add an entry only for a deliberate, reviewed exception,
+# and say why on the line above it.
+#
+# (empty) — all .rs files in the workspace are reachable from a cargo target.

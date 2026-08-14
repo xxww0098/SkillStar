@@ -1,0 +1,15 @@
+# Grandfathered mismatches between the mermaid dependency graph in
+# docs/boundaries.md and the workspace's real internal dependencies
+# (see check_dep_graph_doc.sh). Entries here only WARN; every other mismatch
+# FAILS, so the ratchet can only tighten.
+#
+# One entry per line, in the exact form the guard prints:
+#   doc-only     <from> -> <to>
+#   cargo-only   <from> -> <to>
+#   missing-node <crate>
+#
+# This list should stay empty. Fixing a mismatch means editing one line of a
+# mermaid block; writing the baseline entry costs more than the fix and buys
+# a diagram nobody can trust.
+#
+# (empty) — the diagram and the manifests agree edge for edge.

@@ -193,6 +193,33 @@ cargo test --workspace --locked
 
 Windows CI 使用 npm，因此依赖变化还要更新 `package-lock.json`。
 
+### Git hooks
+
+建议每个 clone 装一次。上面这些校验在 CI 里全都跑，但 CI 只在 push 到 `main` 或开 PR 时触发。装上 hooks 可以让同一批检查在提交和推送时就先跑一遍：
+
+```bash
+bash scripts/internal/install_hooks.sh
+```
+
+hooks 直接写进 `.git/hooks/`，不引入任何依赖，也不改动 `package.json` 或两个 lockfile。分两层，耗时为本机实测（M 系列 Mac，cargo `target/` 已预热）：
+
+| Hook | 内容 | 实测耗时 |
+| --- | --- | --- |
+| `pre-commit` | 7 个纯 shell 结构棘轮 + `bun run lint` | **约 5 秒** |
+| `pre-push` | 上面全部 + i18n 棘轮 + `bun run build` + `bun run test` + `cargo test --workspace --locked` + 生成类型与 clippy 棘轮 | **约 64 秒** |
+
+`pre-push` 不单独跑 `cargo check`：`cargo test --workspace --locked` 已经编译了严格更多的目标，两者叠加只是白等（依据见 `ci.yml` 里的实测注释）。冷缓存（刚 `cargo sweep` 过或改了依赖）时 cargo 步骤会显著变慢，第一次推送需要几分钟。
+
+需要临时绕过时用 `--no-verify`，不要删 hook 文件：
+
+```bash
+git commit --no-verify        # 跳过 pre-commit
+git push --no-verify          # 跳过 pre-push
+bash scripts/internal/install_hooks.sh --uninstall   # 真的要卸载
+```
+
+hooks 会在脚本不存在（例如切到旧分支）或工具未安装时跳过该项而不是拦住你；已存在的第三方 hook 不会被覆盖，除非加 `--force`。
+
 ### 清理构建缓存
 
 长期开发后 `target/` 会涨到几十 GB（本机实测 77 GB / 389,311 个文件，其中 `incremental/` 39 GB、`deps/` 38 GB），拖慢文件系统操作。清理用 `cargo-sweep` 按时间淘汰旧产物：

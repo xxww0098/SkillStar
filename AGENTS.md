@@ -56,6 +56,8 @@ bash scripts/internal/check_file_size.sh
 bash scripts/internal/check_command_boundaries.sh
 ```
 
+首次 clone 先装 git hooks，让上述门禁在提交和推送时自动执行：见 [README](./README.md#git-hooks)。
+
 CI 由 `.github/workflows/ci.yml`、`windows-ci.yml` 和 `release.yml` 负责。修改 workflow 前先阅读文件顶部的 `Failure lessons`。本地使用 Bun，但 Windows CI 使用 npm；依赖变化必须同步 `bun.lock` 与 `package-lock.json`。
 
 ## 文档索引

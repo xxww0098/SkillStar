@@ -11,4 +11,10 @@
 # remaining diagnostic is `needless_lifetimes` in
 # crates/skillstar-usage/src/fetchers/oauth/cursor.rs, which is off-limits to
 # edit per project convention — do not fix it without explicit instruction.
+#
+# Re-verified 2026-08-14 against clippy 0.1.97 after rust-toolchain.toml
+# pinned the workspace to 1.97.1: same single diagnostic, count unchanged.
+# Until that pin landed this number had no fixed denominator — CI resolved
+# `stable` fresh on every run, so the lint set could move underneath it. Bump
+# `channel` and re-run this guard in the same commit, never separately.
 1

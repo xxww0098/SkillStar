@@ -1,0 +1,21 @@
+# Pinned build toolchain. This is NOT the MSRV: `[workspace.package]
+# rust-version = "1.94.1"` in Cargo.toml is the lower-bound promise we make to
+# consumers, and it stays where it is. This file pins the toolchain everyone
+# — contributors, CI, release builds — actually compiles with, so that
+# toolchain-sensitive gates have a fixed denominator. In particular
+# scripts/internal/clippy_baseline.txt counts diagnostics from one specific
+# clippy version; without this pin that count drifts every time GitHub's
+# `stable` moves and the ratchet silently stops meaning anything.
+#
+# `profile = "minimal"` deliberately does NOT ship clippy or rustfmt, so both
+# are listed explicitly below. Dropping them would make
+# scripts/internal/check_clippy_ratchet.sh fail to find `cargo clippy` on a
+# fresh clone — a gate that does not run is worse than no gate at all.
+#
+# Bumping `channel` is a reviewed change: re-run
+# scripts/internal/check_clippy_ratchet.sh in the same commit and update the
+# baseline if the new toolchain's lint set moves the count.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

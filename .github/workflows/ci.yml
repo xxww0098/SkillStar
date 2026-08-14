@@ -38,11 +38,20 @@ name: CI
 #    note). Duplicating clippy on macOS roughly doubles wall-clock time for
 #    no new platform signal.
 #
-# 5. cargo-deny is continue-on-error until pre-existing findings are triaged
-#    (see the step comment below). A gate that is red on day one just teaches
-#    everyone to ignore red. As of 2026-08-14 advisories/bans/sources all pass
-#    and only the html2md GPL-3.0+ licence call is left — do not flip the step
-#    to blocking before that one is resolved, or main goes red immediately.
+# 5. cargo-deny was continue-on-error while pre-existing findings were being
+#    triaged, because a gate that is red on day one just teaches everyone to
+#    ignore red. That is finished: as of 2026-08-14 all four categories exit 0
+#    (the last blocker, html2md's GPL-3.0+, was replaced by htmd/Apache-2.0)
+#    and the step is blocking. Re-check the whole run exits 0 before ever
+#    relaxing it again — see the step comment below.
+#
+# 6. This workflow only fires on push-to-main / PR, so it is NOT the first
+#    line of defence for work that has not been pushed yet. On 2026-08-14 main
+#    sat 22 commits ahead of origin with the last CI run 10 days old, meaning
+#    every gate below had run zero times against that work. The same ratchets
+#    now also run locally as git hooks; install them once per clone with
+#    `bash scripts/internal/install_hooks.sh` (see README, "Git hooks"). When
+#    you add or remove a ratchet step here, mirror it in that installer.
 on:
   push:
     branches: [main]
@@ -134,43 +143,49 @@ jobs:
       - name: Stringly-typed error guard
         run: scripts/internal/check_error_strings.sh
 
+      # Reachability walk: a `.rs` file no `mod` declaration points at is not
+      # compiled, linted or tested, yet reads like delivered code. Zero
+      # violations today, so this is blocking from day one.
+      - name: Orphan-module guard (structural governance)
+        run: scripts/internal/check_no_orphan_modules.sh
+
+      # Proves the mermaid graph in docs/boundaries.md still matches the real
+      # cargo dependency edges, both directions. Zero violations today.
+      - name: Dependency-graph documentation guard
+        run: scripts/internal/check_dep_graph_doc.sh
+
       - name: Clippy ratchet
         run: scripts/internal/check_clippy_ratchet.sh
 
-      # Triage status as of 2026-08-14 (cargo-deny 0.20.2). Three of the four
-      # categories now pass for real:
-      #   advisories  ok      — anyhow (unsound), quick-xml (2 vulns, via a
-      #                         plist 1.8->1.10 bump) and a yanked
-      #                         crypto-bigint were fixed by upgrading; the
-      #                         remaining 20 are allowlisted in deny.toml,
-      #                         each with its own reason and re-evaluation
-      #                         trigger. 19 are `unmaintained` (Tauri's
-      #                         archived Linux GTK3 stack, async-openai's
-      #                         backoff, tauri-utils' parsing helpers); the
-      #                         single live vulnerability is RUSTSEC-2023-0071
-      #                         (rsa Marvin attack) reached via russh, which
-      #                         has no fixed version upstream at all.
-      #   bans        ok
-      #   sources     ok
-      #   licenses    FAILS on exactly one finding — html2md is GPL-3.0+ and
-      #                         SkillStar ships an Apache-2.0 statically
-      #                         linked binary. The ~15 crates missing a
-      #                         `license` field WERE fixed (license now comes
-      #                         from [workspace.package]); the wreq-util
-      #                         LGPL-3.0 note is obsolete (that dep is gone,
-      #                         see docs/decisions.md D-011); tiny-keccak
-      #                         CC0-1.0 and webpki-roots CDLA-Permissive-2.0
-      #                         are now explicitly allowed as low-risk
-      #                         permissive licences.
+      # Blocking as of 2026-08-14 (cargo-deny 0.20.2). All four categories
+      # exit 0 — verified locally on this commit:
+      #   `advisories ok, bans ok, licenses ok, sources ok`
       #
-      # So this stays continue-on-error for ONE reason only: the html2md
-      # copyleft call. That is a licensing decision for whoever owns this
-      # repo, not something CI wiring should paper over by editing
-      # deny.toml's allow list. deny.toml documents the three options
-      # (including verified permissively licensed replacements). Remove this
-      # line the moment that call is made — everything else already blocks.
+      #   advisories  anyhow (unsound), quick-xml (2 vulns, via a plist
+      #               1.8->1.10 bump) and a yanked crypto-bigint were fixed by
+      #               upgrading. The remaining 20 are allowlisted in deny.toml,
+      #               each with its own reason and re-evaluation trigger: 19
+      #               are `unmaintained` (Tauri's archived Linux GTK3 stack,
+      #               async-openai's backoff, tauri-utils' parsing helpers),
+      #               and the single live vulnerability is RUSTSEC-2023-0071
+      #               (rsa Marvin attack) reached via russh, which has no fixed
+      #               version upstream at all.
+      #   bans        ok. `cargo tree --duplicates` noise stays a warning here;
+      #               duplicate-version findings are not build-breaking.
+      #   sources     ok — crates.io only.
+      #   licenses    ok. The last blocker was html2md (GPL-3.0+) against an
+      #               Apache-2.0 statically linked binary; it was replaced by
+      #               htmd (Apache-2.0) rather than allowlisted, so no copyleft
+      #               obligation was papered over. The ~15 crates missing a
+      #               `license` field were fixed by inheriting it from
+      #               [workspace.package]; tiny-keccak CC0-1.0 and webpki-roots
+      #               CDLA-Permissive-2.0 are explicitly allowed as low-risk
+      #               permissive licences.
+      #
+      # If this step ever goes red, fix the dependency — do not re-add
+      # continue-on-error and do not widen deny.toml's allow list to make a
+      # copyleft finding disappear.
       - name: cargo-deny (advisories / licenses / sources)
-        continue-on-error: true
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: src-tauri/Cargo.toml
