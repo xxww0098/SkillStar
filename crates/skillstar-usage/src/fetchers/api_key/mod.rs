@@ -66,6 +66,12 @@ pub(super) async fn fetch_spec<T: DeserializeOwned>(
 }
 
 /// Uniform transport-error mapping for API-key fetchers.
+///
+/// Only a 401 means "this key is not accepted". 403 (Cloudflare / WAF /
+/// regional block) and 429 / 5xx are the provider's state, not the key's — an
+/// API-key account has no re-authorization flow, so mapping them to
+/// [`UsageError::AuthRequired`] used to show the user an action that does not
+/// exist while wiping the card's last known balance.
 fn map_err(spec: &BalanceSpec, e: RequestError) -> UsageError {
     // A provider-specific 401 hint takes precedence over the generic auth error
     // (MiniMax wants the user to know it expects a Token Plan Key).
@@ -76,21 +82,70 @@ fn map_err(spec: &BalanceSpec, e: RequestError) -> UsageError {
         return UsageError::AuthRequired;
     }
     match e {
-        RequestError::HttpStatus { status, body } => UsageError::Fetcher(format!(
-            "{} 返回 {status}: {}",
-            spec.display_name,
-            body.chars().take(200).collect::<String>()
-        )),
+        RequestError::HttpStatus { status, body } => {
+            UsageError::http_status(spec.display_name, status, &body)
+        }
         RequestError::JsonDecode { source, .. } => {
             UsageError::Fetcher(format!("{} 响应解析失败：{source}", spec.display_name))
         }
+        RequestError::Transport(error) => UsageError::transport(spec.display_name, error),
         other => UsageError::Fetcher(format!("{} 请求失败：{other}", spec.display_name)),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::map_err;
+    use crate::UsageError;
     use crate::catalog::{CatalogTier, catalog};
+    use crate::request::RequestError;
+    use skillstar_providers::balance::API_KEY_BALANCE_SPECS;
+
+    fn spec_without_hint() -> &'static skillstar_providers::balance::BalanceSpec {
+        API_KEY_BALANCE_SPECS
+            .iter()
+            .find(|spec| spec.auth_error_hint.is_none())
+            .expect("at least one balance spec has no provider-specific 401 hint")
+    }
+
+    fn http(status: u16) -> RequestError {
+        RequestError::HttpStatus {
+            status,
+            body: "blocked".into(),
+        }
+    }
+
+    /// An API key has no re-authorization flow, so only the provider actually
+    /// rejecting the key (401) may latch `requires_reauth`.
+    #[test]
+    fn only_401_maps_to_auth_required() {
+        let spec = spec_without_hint();
+
+        assert!(matches!(
+            map_err(spec, http(401)),
+            UsageError::AuthRequired
+        ));
+
+        for status in [403, 404, 429, 500, 503] {
+            let mapped = map_err(spec, http(status));
+            assert!(
+                !matches!(mapped, UsageError::AuthRequired),
+                "{status} must not be an auth verdict, got {mapped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn throttling_and_outages_are_retryable_but_403_is_not() {
+        let spec = spec_without_hint();
+
+        assert!(map_err(spec, http(429)).is_transient());
+        assert!(map_err(spec, http(503)).is_transient());
+        assert!(
+            !map_err(spec, http(403)).is_transient(),
+            "a 403 block will not clear by retrying"
+        );
+    }
 
     /// Every API-key-tier catalog entry must have a balance spec in
     /// `skillstar-providers`, and vice versa — this pins the two tables together

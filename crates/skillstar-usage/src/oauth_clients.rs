@@ -1,4 +1,4 @@
-//! Per-provider OAuth `client_id` resolution (codex / xai / opencode).
+//! Per-provider OAuth `client_id` resolution (codex / xai).
 //!
 //! Each provider ships a built-in default `client_id` so the app works out of
 //! the box. Deployers can override it without touching source — useful when a

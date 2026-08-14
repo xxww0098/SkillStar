@@ -81,7 +81,14 @@ struct RefreshTokenResponse {
 }
 
 /// Spawn the browser-driven login. Returns `(auth_url, pending_id)`.
-pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
+///
+/// `target_subscription_id` is set when the flow was started from an existing
+/// card's "重新授权": the completed login then replaces that row in place
+/// instead of creating a duplicate.
+pub async fn start_login(
+    _region: Option<&str>,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let uuid = uuid::Uuid::new_v4().to_string();
     let auth_url = format!(
@@ -90,13 +97,18 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
     );
 
     let pending_id = crate::oauth::pending_state::register("cursor", None, auth_url.clone());
+    crate::oauth::pending_state::set_target_subscription_id(
+        &pending_id,
+        target_subscription_id.map(str::to_string),
+    );
 
     // Spawn the polling task; it'll resolve the oneshot inside pending_state.
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
     let session_uuid = uuid.clone();
     tokio::spawn(async move {
-        let result = poll_for_tokens(session_uuid, verifier).await;
+        let target_subscription_id = crate::oauth::pending_state::target_subscription_id(&pid);
+        let result = poll_for_tokens(session_uuid, verifier, target_subscription_id).await;
         if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
             let _ = tx.send(result);
         }
@@ -105,7 +117,11 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
     Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
-async fn poll_for_tokens(uuid: String, verifier: String) -> UsageResult<Subscription> {
+async fn poll_for_tokens(
+    uuid: String,
+    verifier: String,
+    target_subscription_id: Option<String>,
+) -> UsageResult<Subscription> {
     let client = http_client()?;
     let poll_url = format!("{}?uuid={}&verifier={}", POLL_ENDPOINT, uuid, verifier);
 
@@ -145,13 +161,25 @@ async fn poll_for_tokens(uuid: String, verifier: String) -> UsageResult<Subscrip
     .await?;
 
     let (access_token, refresh_token, auth_id) = tokens;
-    finalize_subscription(access_token, refresh_token, auth_id).await
+    // Same catalog lock a Cursor refresh takes, so a queued refresh cannot
+    // patch pre-login credentials over the pair this login just stored.
+    crate::refresh_guard::with_catalog_lock("cursor", || async {
+        finalize_subscription(
+            access_token,
+            refresh_token,
+            auth_id,
+            target_subscription_id.as_deref(),
+        )
+        .await
+    })
+    .await?
 }
 
 async fn finalize_subscription(
     access_token: String,
     refresh_token: String,
     auth_id: Option<String>,
+    target_subscription_id: Option<&str>,
 ) -> UsageResult<Subscription> {
     let now = Utc::now().timestamp();
     // Prefer a real email; never use WorkOS `user_…` ids as the card title.
@@ -186,6 +214,13 @@ async fn finalize_subscription(
         created_at: now,
         updated_at: now,
     };
+
+    // Re-authorizing an existing card must land back on that card, keeping the
+    // user's price/note/order (docs/features/usage/README.md).
+    if let Some(existing) = super::common::reauth_target("cursor", target_subscription_id) {
+        super::common::carry_over_user_metadata(&mut sub, &existing, CURSOR_TITLE_PLACEHOLDERS);
+        display = sub.display_name.clone();
+    }
 
     // First-time refresh — usage + plan + email from /api/auth/me (JWT has no email claim).
     // Failures are non-fatal: the subscription gets created either way.
@@ -497,6 +532,9 @@ fn email_from_auth_me(me: &AuthMe) -> Option<String> {
         .filter(|s| looks_like_email(s))
         .map(str::to_string)
 }
+
+/// Titles a fresh login is allowed to overwrite during re-authorization.
+const CURSOR_TITLE_PLACEHOLDERS: &[&str] = &["Cursor"];
 
 /// Card title: real account email only. Never surface WorkOS `user_…` ids
 /// (JWT `sub` looks like `auth0|user_01…` and is not human-readable).

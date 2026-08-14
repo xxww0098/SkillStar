@@ -53,7 +53,7 @@ export interface UsageMeterProps {
   footNote?: ReactNode;
   /** Text tone class for `footNote`. */
   footNoteClass?: string;
-  /** Leading square dot color. */
+  /** Leading square dot. `brand` picks up the card's `--brand-color`. */
   dot?: "brand" | "emerald" | null;
   compact?: boolean;
   /** Breakdown / secondary rows rendered below the meter, inside the same box. */
@@ -100,7 +100,8 @@ export function UsageMeter({
         <div className="flex min-w-0 items-center gap-2">
           {dot ? (
             <span
-              className={cn("h-1.5 w-1.5 shrink-0 rounded-[2px]", dot === "emerald" ? "bg-emerald-500" : "bg-zinc-800")}
+              className={cn("h-1.5 w-1.5 shrink-0 rounded-[2px]", dot === "emerald" && "bg-emerald-500")}
+              style={dot === "brand" ? { backgroundColor: "var(--brand-color)" } : undefined}
               aria-hidden
             />
           ) : null}

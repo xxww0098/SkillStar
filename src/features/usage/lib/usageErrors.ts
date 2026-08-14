@@ -23,6 +23,16 @@ export function formatUsageErrorForDisplay(error: string | null | undefined, t: 
   return truncateUsageError(message);
 }
 
+/**
+ * Normalize a thrown value into the string a toast can show. Single entry
+ * point so every mutation failure (delete / reorder / dismiss / refresh)
+ * reads the same way instead of leaking a raw `invoke` rejection.
+ */
+export function describeUsageFailure(err: unknown, t: TFunction): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return formatUsageErrorForDisplay(message, t) ?? t("usage.unknownError");
+}
+
 export function truncateUsageError(message: string): string {
   return message.length > 180 ? `${message.slice(0, 177)}...` : message;
 }

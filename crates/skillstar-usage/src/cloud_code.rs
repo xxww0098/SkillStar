@@ -1,6 +1,5 @@
 //! Google Cloud Code Assist APIs (Antigravity quota).
 
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::subscription::{CreditInfo, UsageWindow};
@@ -85,15 +84,10 @@ fn extract_plist_version(plist_xml: &str) -> Option<String> {
     None
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct GoogleTokenResponse {
-    #[serde(default)]
-    pub access_token: Option<String>,
-    #[serde(default)]
-    pub refresh_token: Option<String>,
-    #[serde(default)]
-    pub expires_in: Option<i64>,
-}
+/// Google's token endpoint speaks plain RFC 6749, so it shares the crate-wide
+/// [`crate::oauth::token_endpoint::TokenResponse`] rather than a private copy
+/// with its own (previously missing) error semantics.
+pub type GoogleTokenResponse = crate::oauth::token_endpoint::TokenResponse;
 
 #[derive(Debug, Clone)]
 pub struct LoadCodeAssistResult {
@@ -123,33 +117,29 @@ pub async fn refresh_antigravity_access_token(
     refresh_google_access_token(refresh_token, &oauth.client_id, &oauth.client_secret).await
 }
 
+/// Swap a Google refresh token for a fresh access token.
+///
+/// Routed through [`crate::oauth::token_endpoint`] so a revoked grant — which
+/// Google reports as **400 + `invalid_grant`**, not 401 — becomes
+/// [`UsageError::AuthRequired`] and gives the card its re-authorize button,
+/// instead of dumping Google's raw JSON body onto the UI with
+/// `requires_reauth` still false.
 async fn refresh_google_access_token(
     refresh_token: &str,
     client_id: &str,
     client_secret: &str,
 ) -> UsageResult<GoogleTokenResponse> {
-    let client = crate::http_client::usage_http_client()?;
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
+    crate::oauth::token_endpoint::post_token(
+        TOKEN_URL,
+        &[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
             ("client_id", client_id),
             ("client_secret", client_secret),
-        ])
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Google refresh：{}", e)))?;
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::Fetcher(format!(
-            "Google refresh 返回：{}",
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-    resp.json()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Google refresh 解析：{}", e)))
+        ],
+        "Google refresh",
+    )
+    .await
 }
 
 pub async fn load_code_assist(
@@ -200,19 +190,15 @@ async fn load_code_assist_with_body(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("loadCodeAssist：{}", e)))?;
+        .map_err(|e| UsageError::transport("loadCodeAssist", e))?;
 
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
         return Err(UsageError::AuthRequired);
     }
     if !resp.status().is_success() {
-        let status = resp.status();
+        let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::Fetcher(format!(
-            "loadCodeAssist 状态 {}：{}",
-            status,
-            body.chars().take(300).collect::<String>()
-        )));
+        return Err(UsageError::http_status("loadCodeAssist", status, &body));
     }
 
     let raw: Value = resp
@@ -266,7 +252,7 @@ pub async fn fetch_model_quotas(
         CLOUD_CODE_BASE,
     ];
     let mut saw_success = false;
-    let mut last_error = None;
+    let mut last_status: Option<u16> = None;
 
     for base in bases {
         let resp = client
@@ -277,13 +263,13 @@ pub async fn fetch_model_quotas(
             .json(&payload)
             .send()
             .await
-            .map_err(|e| UsageError::Fetcher(format!("fetchAvailableModels：{}", e)))?;
+            .map_err(|e| UsageError::transport("fetchAvailableModels", e))?;
 
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             return Err(UsageError::AuthRequired);
         }
         if !resp.status().is_success() {
-            last_error = Some(resp.status().to_string());
+            last_status = Some(resp.status().as_u16());
             continue;
         }
 
@@ -301,10 +287,10 @@ pub async fn fetch_model_quotas(
     if saw_success {
         Ok(Vec::new())
     } else {
-        Err(UsageError::Fetcher(format!(
-            "fetchAvailableModels 状态 {}",
-            last_error.unwrap_or_else(|| "unknown".to_string())
-        )))
+        Err(match last_status {
+            Some(status) => UsageError::http_status("fetchAvailableModels", status, ""),
+            None => UsageError::Fetcher("fetchAvailableModels 状态 unknown".to_string()),
+        })
     }
 }
 

@@ -22,14 +22,28 @@ pub fn local_import_supported(catalog_id: &str) -> bool {
     matches!(catalog_id, "codex" | "antigravity")
 }
 
+/// Import the CLI/IDE's own credentials as a new subscription.
+///
+/// Runs inside the catalog's serialization domain: the import issues a live
+/// refresh (network + token rotation + storage write), which is exactly what
+/// [`crate::refresh_guard`] exists to keep from interleaving with a concurrent
+/// refresh of the same vendor.
 pub async fn import_subscription_from_local(catalog_id: &str) -> UsageResult<Subscription> {
-    match catalog_id {
-        "codex" => import_codex_from_auth_json().await,
-        "antigravity" => import_antigravity_from_state_db().await,
-        other => Err(UsageError::Other(format!(
-            "不支持从本地导入：{other}（支持 codex、antigravity）"
-        ))),
+    if !local_import_supported(catalog_id) {
+        return Err(UsageError::Other(format!(
+            "不支持从本地导入：{catalog_id}（支持 codex、antigravity）"
+        )));
     }
+    crate::refresh_guard::with_catalog_lock(catalog_id, || async {
+        match catalog_id {
+            "codex" => import_codex_from_auth_json().await,
+            "antigravity" => import_antigravity_from_state_db().await,
+            other => Err(UsageError::Other(format!(
+                "不支持从本地导入：{other}（支持 codex、antigravity）"
+            ))),
+        }
+    })
+    .await?
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -140,7 +154,7 @@ async fn upsert_oauth_subscription(
     currency: &str,
 ) -> UsageResult<Subscription> {
     let now = Utc::now().timestamp();
-    let sub = Subscription {
+    let mut sub = Subscription {
         id: uuid::Uuid::new_v4().to_string(),
         catalog_id: catalog_id.to_string(),
         display_name,
@@ -170,7 +184,10 @@ async fn upsert_oauth_subscription(
         updated_at: now,
     };
 
-    if let Ok(usage) = crate::fetchers::refresh(&mut sub.clone()).await {
+    // Refresh the row itself, not a clone: the Antigravity import path rotates
+    // to a fresh Google access token during this call, and a clone would drop
+    // it on the floor and persist the already-spent one.
+    if let Ok(usage) = crate::fetchers::refresh(&mut sub).await {
         storage::save_usage_snapshot(usage).ok();
     }
 

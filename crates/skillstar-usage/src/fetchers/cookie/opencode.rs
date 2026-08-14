@@ -189,7 +189,7 @@ async fn call_server_fn_get(
 ) -> UsageResult<reqwest::Response> {
     let url = format!(
         "{CONSOLE_BASE}/_server?id={server_fn_id}&args={}",
-        urlencoding(&build_sfn_args(workspace_id))
+        crate::urlencode::encode(&build_sfn_args(workspace_id))
     );
     client
         .get(&url)
@@ -465,21 +465,6 @@ fn next_month_start_epoch() -> Option<i64> {
     chrono::NaiveDate::from_ymd_opt(y, m, 1)
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| dt.and_utc().timestamp())
-}
-
-// ── Misc helpers ─────────────────────────────────────────────────────────
-
-fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

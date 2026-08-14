@@ -1,6 +1,8 @@
 //! Domain types for the subscription/usage tracker.
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::catalog::AuthMode;
 
@@ -97,8 +99,9 @@ fn default_currency() -> String {
     "CNY".to_string()
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "BillingCycle.ts")]
 pub enum BillingCycle {
     /// Calendar subscription billed every month.
     #[default]
@@ -114,11 +117,21 @@ pub enum BillingCycle {
 
 /// Manual-mode quota the user maintains by hand (e.g. for Kimi Coding Plan,
 /// Xiaomi MiMo, Tencent Hy3 etc.).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+//
+// `#[ts(type = "number")]` here and on every other 64-bit field in this file:
+// ts-rs maps i64/u64 to `bigint`, but these values only ever cross the wire as
+// JSON through serde_json + Tauri IPC + `JSON.parse`, none of which round-trip
+// a real bigint — they all produce a plain JS `number`. Epoch seconds and token
+// counters are nowhere near 2^53. (Same rationale as `McpServerEntry`'s
+// timestamp fields in skillstar-models.)
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "ManualQuota.ts")]
 pub struct ManualQuota {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub total_tokens: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub used_tokens: Option<i64>,
     /// Human-readable window label (e.g. "本月" / "5h" / "周").
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,9 +142,11 @@ pub struct ManualQuota {
 ///
 /// Each fetcher fills whichever fields apply to that provider — UI renders
 /// any present field, hides any absent one.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "SubscriptionUsage.ts")]
 pub struct SubscriptionUsage {
     pub subscription_id: String,
+    #[ts(type = "number")]
     pub fetched_at: i64,
 
     /// Plan tier ("PRO" / "PLUS" / "ULTRA" / "PAYG" / "FREE" / free text).
@@ -159,8 +174,53 @@ pub struct SubscriptionUsage {
     pub deepseek_analytics: Option<DeepSeekAnalytics>,
 }
 
+impl SubscriptionUsage {
+    /// True when this snapshot carries anything a card can actually render.
+    pub fn has_quota_data(&self) -> bool {
+        self.plan_name.is_some()
+            || self.hourly.is_some()
+            || self.weekly.is_some()
+            || self.monthly.is_some()
+            || self.balance.is_some()
+            || !self.credits.is_empty()
+            || !self.api_keys.is_empty()
+            || self.deepseek_analytics.is_some()
+    }
+
+    /// The snapshot to persist after a failed refresh.
+    ///
+    /// A `transient` failure (429 / 5xx / network) says nothing about the
+    /// account's quota, so the last good snapshot survives with the error
+    /// annotated on top and its original `fetched_at` intact — the card keeps
+    /// showing real numbers, honestly dated as stale. Any other failure
+    /// replaces the snapshot, because the previous numbers may no longer
+    /// describe the account at all.
+    pub fn from_refresh_error(
+        subscription_id: &str,
+        previous: Option<&SubscriptionUsage>,
+        message: String,
+        transient: bool,
+    ) -> Self {
+        let carried = previous.filter(|_| transient).filter(|p| p.has_quota_data());
+        match carried {
+            Some(previous) => SubscriptionUsage {
+                subscription_id: subscription_id.to_string(),
+                error: Some(message),
+                ..previous.clone()
+            },
+            None => SubscriptionUsage {
+                subscription_id: subscription_id.to_string(),
+                fetched_at: Utc::now().timestamp(),
+                error: Some(message),
+                ..Default::default()
+            },
+        }
+    }
+}
+
 /// Per-model and daily usage from DeepSeek platform internal APIs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "DeepSeekAnalytics.ts")]
 pub struct DeepSeekAnalytics {
     pub month_cost: f64,
     pub today_cost: f64,
@@ -170,36 +230,53 @@ pub struct DeepSeekAnalytics {
     pub daily: Vec<DeepSeekDailyUsage>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "DeepSeekModelUsage.ts")]
 pub struct DeepSeekModelUsage {
     pub key: String,
     pub name: String,
+    #[ts(type = "number")]
     pub total_tokens: u64,
+    #[ts(type = "number")]
     pub request_count: u64,
+    #[ts(type = "number")]
     pub cache_hit_tokens: u64,
+    #[ts(type = "number")]
     pub cache_miss_tokens: u64,
+    #[ts(type = "number")]
     pub response_tokens: u64,
     pub cost: f64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "DeepSeekDailyUsage.ts")]
 pub struct DeepSeekDailyUsage {
     pub date: String,
+    #[ts(type = "number")]
     pub flash_tokens: u64,
+    #[ts(type = "number")]
     pub flash_cache_hit: u64,
+    #[ts(type = "number")]
     pub flash_cache_miss: u64,
+    #[ts(type = "number")]
     pub flash_response: u64,
+    #[ts(type = "number")]
     pub pro_tokens: u64,
+    #[ts(type = "number")]
     pub pro_cache_hit: u64,
+    #[ts(type = "number")]
     pub pro_cache_miss: u64,
+    #[ts(type = "number")]
     pub pro_response: u64,
+    #[ts(type = "number")]
     pub total_tokens: u64,
     pub total_cost: f64,
 }
 
 /// Display-only metadata for an OpenCode API key. The full key is **never**
 /// stored here — it lives encrypted on the [`Subscription`] itself.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "OpenCodeApiKey.ts")]
 pub struct OpenCodeApiKey {
     pub id: String,
     pub name: String,
@@ -208,18 +285,22 @@ pub struct OpenCodeApiKey {
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "UsageWindow.ts")]
 pub struct UsageWindow {
     /// Display label like `"5h"`, `"7d"`, `"30d"`, `"本月"`.
     pub label: String,
+    #[ts(type = "number")]
     pub used: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub total: Option<i64>,
     /// 0-100; computed by fetcher if both `used` and `total` known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percent: Option<i32>,
     /// Epoch seconds at which this window resets (if known).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub reset_at: Option<i64>,
     /// Nested sub-quotas (e.g. Cursor's Auto+Composer / API split under Total).
     /// The UI renders these inside a visual container beneath the main bar.
@@ -228,7 +309,8 @@ pub struct UsageWindow {
 }
 
 /// Credit info extracted from paid tiers (e.g. Antigravity paidTier.availableCredits).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "CreditInfo.ts")]
 pub struct CreditInfo {
     pub credit_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -237,7 +319,8 @@ pub struct CreditInfo {
     pub minimum_credit_amount_for_usage: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "MonetaryBalance.ts")]
 pub struct MonetaryBalance {
     pub currency: String,
     pub total: f64,
@@ -251,6 +334,8 @@ pub struct MonetaryBalance {
 }
 
 /// Computed alert (banner / toast trigger) — never persisted, recomputed each refresh.
+// Not `TS`-derived: the frontend contract for an alert is
+// `usage::SubscriptionAlertDto`, which owns the generated `SubscriptionAlert.ts`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionAlert {
     /// Stable id (subscription_id + kind) so dismiss is idempotent.
@@ -261,16 +346,18 @@ pub struct SubscriptionAlert {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "AlertSeverity.ts")]
 pub enum AlertSeverity {
     Info,
     Warning,
     Danger,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "AlertKind.ts")]
 pub enum AlertKind {
     QuotaLow,
     QuotaCritical,
@@ -290,5 +377,76 @@ mod tests {
 
         assert_eq!(value["models"], json!([]));
         assert_eq!(value["daily"], json!([]));
+    }
+
+    fn good_snapshot() -> SubscriptionUsage {
+        SubscriptionUsage {
+            subscription_id: "sub-1".into(),
+            fetched_at: 1_700_000_000,
+            plan_name: Some("PRO".into()),
+            weekly: Some(UsageWindow {
+                label: "7d".into(),
+                used: 61,
+                total: Some(100),
+                percent: Some(61),
+                reset_at: None,
+                breakdown: Vec::new(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn transient_failure_keeps_the_last_good_quota_and_its_timestamp() {
+        let previous = good_snapshot();
+
+        let kept = SubscriptionUsage::from_refresh_error(
+            "sub-1",
+            Some(&previous),
+            "Codex refresh 状态码 503: upstream".into(),
+            true,
+        );
+
+        assert_eq!(kept.plan_name.as_deref(), Some("PRO"));
+        assert_eq!(kept.weekly.as_ref().and_then(|w| w.percent), Some(61));
+        assert_eq!(
+            kept.fetched_at, previous.fetched_at,
+            "stale data must keep its real age, not claim to be fresh"
+        );
+        assert!(kept.error.as_deref().unwrap().contains("503"));
+    }
+
+    #[test]
+    fn non_transient_failure_replaces_the_snapshot() {
+        let previous = good_snapshot();
+
+        let replaced = SubscriptionUsage::from_refresh_error(
+            "sub-1",
+            Some(&previous),
+            "登录已失效，请重新授权。".into(),
+            false,
+        );
+
+        assert_eq!(replaced.plan_name, None);
+        assert!(replaced.weekly.is_none());
+        assert!(!replaced.has_quota_data());
+        assert_eq!(replaced.subscription_id, "sub-1");
+    }
+
+    #[test]
+    fn transient_failure_without_prior_data_still_reports_the_error() {
+        let empty = SubscriptionUsage {
+            subscription_id: "sub-1".into(),
+            fetched_at: 1,
+            error: Some("旧错误".into()),
+            ..Default::default()
+        };
+
+        let fresh =
+            SubscriptionUsage::from_refresh_error("sub-1", Some(&empty), "429 太频繁".into(), true);
+
+        assert!(!fresh.has_quota_data());
+        assert_eq!(fresh.error.as_deref(), Some("429 太频繁"));
+        assert!(fresh.fetched_at > 1, "an error-only card is re-stamped");
     }
 }

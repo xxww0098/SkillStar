@@ -168,6 +168,52 @@ impl SubscriptionBuilder {
     }
 }
 
+/// Load the row a targeted re-authorization is meant to replace.
+///
+/// `docs/features/usage/README.md` requires an OAuth flow started from an
+/// existing card to land back on that same card. Returns `None` when no target
+/// was requested, the row vanished, or it is not this catalog's OAuth row —
+/// in which case the caller falls back to creating a fresh subscription
+/// rather than hijacking someone else's.
+pub fn reauth_target(catalog_id: &str, target_subscription_id: Option<&str>) -> Option<Subscription> {
+    let id = target_subscription_id.map(str::trim).filter(|id| !id.is_empty())?;
+    crate::storage::get_subscription(id).ok().filter(|existing| {
+        existing.catalog_id == catalog_id && existing.auth_mode == AuthMode::OAuth
+    })
+}
+
+/// Rebind a freshly built subscription onto `existing`'s identity so the
+/// re-authorized account keeps its card instead of spawning a duplicate.
+///
+/// Credentials and fetcher-owned runtime state stay as built (they are the
+/// whole point of re-authorizing); everything the *user* owns — billing
+/// metadata, note, list position, creation time — is carried over.
+pub fn carry_over_user_metadata(
+    fresh: &mut Subscription,
+    existing: &Subscription,
+    catalog_placeholders: &[&str],
+) {
+    fresh.id = existing.id.clone();
+    fresh.plan_tier = existing.plan_tier.clone();
+    fresh.monthly_price = existing.monthly_price;
+    fresh.currency = existing.currency.clone();
+    fresh.billing_cycle = existing.billing_cycle;
+    fresh.start_date = existing.start_date;
+    fresh.renew_date = existing.renew_date;
+    fresh.auto_renew = existing.auto_renew;
+    fresh.manual_quota = existing.manual_quota.clone();
+    fresh.note = existing.note.clone();
+    fresh.sort_index = existing.sort_index;
+    fresh.created_at = existing.created_at;
+    // A user-chosen title outranks the login's default. The fresh name only
+    // wins when the stored one is a placeholder — the same rule
+    // `apply_email_title` uses on every refresh.
+    let fresh_title = fresh.display_name.clone();
+    fresh.display_name =
+        prefer_email_title(&existing.display_name, Some(&fresh_title), catalog_placeholders)
+            .unwrap_or_else(|| existing.display_name.clone());
+}
+
 /// Generates the `pub async fn fetch(subscription: &mut Subscription)`
 /// wrapper every OAuth fetcher repeats verbatim: delegate to the module's
 /// private `fetch_inner`.
@@ -214,5 +260,53 @@ mod tests {
             prefer_email_title("Codex", Some("user_01"), &["Codex"]),
             None
         );
+    }
+
+    fn existing_row() -> Subscription {
+        let mut sub = SubscriptionBuilder::new("codex", "我的工作号", "USD", "old-at", Some(10))
+            .refresh_token(Some("old-rt".into()))
+            .build();
+        sub.id = "row-keep-me".into();
+        sub.note = Some("公司报销".into());
+        sub.monthly_price = Some(20.0);
+        sub.sort_index = 7;
+        sub.created_at = 111;
+        sub.plan_tier = Some("Plus".into());
+        sub
+    }
+
+    #[test]
+    fn reauthorization_lands_on_the_existing_row_and_keeps_user_metadata() {
+        let existing = existing_row();
+        let mut fresh = SubscriptionBuilder::new("codex", "a@b.com", "USD", "new-at", Some(999))
+            .refresh_token(Some("new-rt".into()))
+            .build();
+        let fresh_credentials = fresh.access_token_encrypted.clone();
+
+        carry_over_user_metadata(&mut fresh, &existing, &["Codex"]);
+
+        // Same card — this is what stops re-authorization from spawning a duplicate.
+        assert_eq!(fresh.id, "row-keep-me");
+        assert_eq!(fresh.sort_index, 7);
+        assert_eq!(fresh.created_at, 111);
+        assert_eq!(fresh.note.as_deref(), Some("公司报销"));
+        assert_eq!(fresh.monthly_price, Some(20.0));
+        assert_eq!(fresh.plan_tier.as_deref(), Some("Plus"));
+        // A deliberate rename survives; the new email does not clobber it.
+        assert_eq!(fresh.display_name, "我的工作号");
+        // …while the freshly minted credentials are exactly what we keep.
+        assert_eq!(fresh.access_token_encrypted, fresh_credentials);
+        assert_eq!(fresh.access_token_expires_at, Some(999));
+    }
+
+    #[test]
+    fn placeholder_titles_are_upgraded_by_the_new_login() {
+        let mut existing = existing_row();
+        existing.display_name = "Codex".into();
+        let mut fresh = SubscriptionBuilder::new("codex", "a@b.com", "USD", "new-at", None).build();
+
+        carry_over_user_metadata(&mut fresh, &existing, &["Codex"]);
+
+        assert_eq!(fresh.display_name, "a@b.com");
     }
 }

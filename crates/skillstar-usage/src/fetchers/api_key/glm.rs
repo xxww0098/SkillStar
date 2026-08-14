@@ -133,32 +133,13 @@ fn usage_time_query() -> String {
 
     format!(
         "startTime={}&endTime={}",
-        urlencoding(&format_timestamp(start_floor)),
-        urlencoding(&format_timestamp(end)),
+        crate::urlencode::encode(&format_timestamp(start_floor)),
+        crate::urlencode::encode(&format_timestamp(end)),
     )
 }
 
 fn format_timestamp(dt: chrono::DateTime<Utc>) -> String {
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-fn urlencoding(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| match c {
-            ' ' => "%20".to_string(),
-            ':' => "%3A".to_string(),
-            other
-                if other.is_ascii_alphanumeric()
-                    || other == '-'
-                    || other == '_'
-                    || other == '.' =>
-            {
-                other.to_string()
-            }
-            other => format!("%{:02X}", other as u32),
-        })
-        .collect()
 }
 
 fn parse_quota_windows(

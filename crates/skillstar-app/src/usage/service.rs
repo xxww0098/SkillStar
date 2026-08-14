@@ -245,7 +245,7 @@ fn update_subscription_locked(
         sub.api_key_encrypted = Some(crypto::encrypt(&key));
         mark_credentials_rotated(&mut sub);
     }
-    if input.clear_platform_token {
+    if input.clear_platform_token.unwrap_or(false) {
         sub.platform_token_encrypted = None;
         mark_credentials_rotated(&mut sub);
     } else if let Some(token) = input
@@ -301,6 +301,45 @@ pub fn reorder_subscriptions(ids: Vec<String>) -> Result<(), AppError> {
 
 // ── Usage refresh ─────────────────────────────────────────────────────
 
+/// What a failed refresh persists: whether to latch the re-auth affordance,
+/// and the snapshot that replaces (or merely annotates) the stored one.
+///
+/// `AuthRequired` is the **only** verdict allowed to latch `requires_reauth`
+/// and blank the card — it is the only one that means "these credentials are
+/// dead". A 429 / 5xx / transport blip keeps the last good numbers so a single
+/// provider hiccup cannot erase a working account's quota display, and any
+/// other failure replaces the snapshot because the old numbers may no longer
+/// describe the account. `latch_reauth == false` deliberately does not *clear*
+/// an existing latch: a row already awaiting re-authorization must keep its
+/// button when the retry happens to hit a 500.
+fn refresh_failure(
+    subscription_id: &str,
+    previous: Option<&skillstar_usage::subscription::SubscriptionUsage>,
+    error: &UsageError,
+) -> (bool, skillstar_usage::subscription::SubscriptionUsage) {
+    use skillstar_usage::subscription::SubscriptionUsage;
+    match error {
+        UsageError::AuthRequired => (
+            true,
+            SubscriptionUsage {
+                subscription_id: subscription_id.to_string(),
+                fetched_at: Utc::now().timestamp(),
+                error: Some("登录已失效，请重新授权。".into()),
+                ..Default::default()
+            },
+        ),
+        other => (
+            false,
+            SubscriptionUsage::from_refresh_error(
+                subscription_id,
+                previous,
+                append_network_hint(other.to_string()),
+                other.is_transient(),
+            ),
+        ),
+    }
+}
+
 async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto, AppError> {
     // Probe only the catalog before locking; reload the row after acquiring
     // the shared catalog lock so a queued refresh cannot write credentials
@@ -313,7 +352,9 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
             .map_err(map_err)?;
         crate::usage_switch::adopt_active_cli_session_before_refresh(&mut sub, &cli_lease)
             .map_err(map_err)?;
-        let mut should_sync_cli = false;
+        // Set by both arms below; a dead auth verdict is the only case that
+        // skips the CLI push.
+        let should_sync_cli;
         let usage = match fetchers::refresh(&mut sub).await {
             Ok(usage) => {
                 should_sync_cli = true;
@@ -323,30 +364,19 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
                 storage::save_usage_snapshot(usage.clone()).map_err(map_err)?;
                 Some(usage)
             }
-            Err(UsageError::AuthRequired) => {
-                sub.requires_reauth = true;
-                sub = storage::patch_fetcher_state(&sub).map_err(map_err)?;
-                let snapshot = skillstar_usage::subscription::SubscriptionUsage {
-                    subscription_id: sub.id.clone(),
-                    fetched_at: chrono::Utc::now().timestamp(),
-                    error: Some("登录已失效，请重新授权。".into()),
-                    ..Default::default()
-                };
-                storage::save_usage_snapshot(snapshot.clone()).map_err(map_err)?;
-                Some(snapshot)
-            }
-            Err(other) => {
-                should_sync_cli = true;
+            Err(error) => {
+                // Only a real auth verdict skips the CLI sync; a provider
+                // hiccup may still have rotated credentials worth pushing.
+                should_sync_cli = !matches!(error, UsageError::AuthRequired);
+                let previous = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
+                let (latch_reauth, snapshot) = refresh_failure(&sub.id, previous.as_ref(), &error);
+                if latch_reauth {
+                    sub.requires_reauth = true;
+                }
                 // A fetcher may have rotated OAuth credentials before a later
                 // billing request failed. Persist that narrow state without
                 // replacing user-editable metadata from this network-old row.
                 sub = storage::patch_fetcher_state(&sub).map_err(map_err)?;
-                let snapshot = skillstar_usage::subscription::SubscriptionUsage {
-                    subscription_id: sub.id.clone(),
-                    fetched_at: chrono::Utc::now().timestamp(),
-                    error: Some(other.to_string()),
-                    ..Default::default()
-                };
                 storage::save_usage_snapshot(snapshot.clone()).map_err(map_err)?;
                 Some(snapshot)
             }
@@ -359,7 +389,7 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
         };
         let active = storage::list_active_per_catalog().map_err(map_err)?;
         let mut dto = fill_active(SubscriptionDto::from_parts(sub, usage), &active);
-        dto.switch_result = switch_result;
+        dto.switch_result = switch_result.map(SwitchOutcomeDto::from);
         Ok(dto)
     })
     .await
@@ -401,16 +431,42 @@ pub fn dock_menu_lines() -> Vec<String> {
     rows.into_iter().map(|(_, line)| line).collect()
 }
 
-pub async fn refresh_all_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
+/// Refresh every subscription, or only one catalog's when `catalog_id` is set.
+///
+/// The Grok page asks for `Some("xai")` and must not drag every other vendor's
+/// endpoint along with it — ignoring the argument turned a one-provider button
+/// into a full sweep, N seconds long thanks to the per-catalog spacing.
+/// Non-refreshed rows are still returned (from their stored snapshot) so the
+/// caller can keep rendering the full list.
+pub async fn refresh_all_subscriptions(
+    catalog_id: Option<String>,
+) -> Result<Vec<SubscriptionDto>, AppError> {
+    let catalog_filter = catalog_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+    if let Some(id) = catalog_filter.as_deref() {
+        ensure_catalog(id)?;
+    }
     skillstar_usage::refresh_guard::with_refresh_all_lock(|| async {
         let subs = storage::list_subscriptions().map_err(map_err)?;
         let active_map = storage::list_active_per_catalog().map_err(map_err)?;
 
         let tasks = subs.into_iter().map(|sub| {
+            let catalog_filter = catalog_filter.clone();
             let active_map = active_map.clone();
             async move {
                 let sort_index = sub.sort_index;
-                let dto = if sub.auth_mode == AuthMode::Manual {
+                let out_of_scope = catalog_filter
+                    .as_deref()
+                    .is_some_and(|wanted| wanted != sub.catalog_id);
+                let dto = if out_of_scope {
+                    // Not this refresh's catalog: report what storage already
+                    // knows instead of touching the provider.
+                    let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
+                    fill_active(SubscriptionDto::from_parts(sub, usage), &active_map)
+                } else if sub.auth_mode == AuthMode::Manual {
                     let usage = storage::get_usage_snapshot(&sub.id)
                         .map_err(map_err)?
                         .or_else(|| {
@@ -572,7 +628,7 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
     let active = storage::list_active_per_catalog().map_err(map_err)?;
     let mut dto = fill_active(SubscriptionDto::from_parts(sub, usage), &active);
-    dto.switch_result = switch_result;
+    dto.switch_result = switch_result.map(SwitchOutcomeDto::from);
     Ok(dto)
 }
 
@@ -619,7 +675,7 @@ pub async fn set_active_subscription(subscription_id: String) -> Result<Subscrip
     let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
     let active = storage::list_active_per_catalog().map_err(map_err)?;
     let mut dto = fill_active(SubscriptionDto::from_parts(sub, usage), &active);
-    dto.switch_result = Some(outcome);
+    dto.switch_result = Some(outcome.into());
     Ok(dto)
 }
 
@@ -627,12 +683,34 @@ pub async fn set_active_subscription(subscription_id: String) -> Result<Subscrip
 /// changing which account is active. Used by the "重新同步到 CLI" button when
 /// a previous switch failed (e.g. missing id_token that has since been
 /// refreshed).
+///
+/// Returns the DTO rather than the domain outcome: `set_active_subscription`
+/// already contracts against `SwitchOutcomeDto`, and two commands describing
+/// the same event through two different types is how a new field lands on one
+/// of them and not the other.
 pub async fn switch_active_subscription_to_cli(
     catalog_id: String,
-) -> Result<crate::usage_switch::SwitchOutcome, AppError> {
+) -> Result<SwitchOutcomeDto, AppError> {
     crate::usage_switch::resync_active_subscription(&catalog_id)
         .await
+        .map(SwitchOutcomeDto::from)
         .map_err(map_err)
+}
+
+/// Which account each CLI is *actually* serving, keyed by catalog id.
+///
+/// The pin returned by [`get_active_subscriptions`] is a cache of this. When
+/// the two disagree the file wins — it is what the CLI opens — so the
+/// "current" badge is drawn from here, and only falls back to the pin for
+/// catalogs absent from this map (no CLI adapter behind them, or unreadable).
+pub async fn reconcile_cli_accounts()
+-> Result<std::collections::HashMap<String, CliAccountStateDto>, AppError> {
+    Ok(crate::usage_switch::reconcile_cli_accounts()
+        .await
+        .map_err(map_err)?
+        .into_iter()
+        .map(|(catalog_id, state)| (catalog_id, CliAccountStateDto::from(state)))
+        .collect())
 }
 
 /// Drop the pin for `catalog_id`. UI will fall back to no active account

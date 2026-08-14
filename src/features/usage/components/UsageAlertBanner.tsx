@@ -31,7 +31,7 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
           </span>
           <button
             type="button"
-            className="text-current/60 hover:text-current"
+            className="text-current/75 hover:text-current"
             onClick={() => onDismiss(alert.id)}
             aria-label={t("usage.dismissAlert")}
           >
@@ -61,14 +61,19 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
   );
 }
 
+/**
+ * Dark-theme tints stay as-is; `paper:` picks the darker ramp so the text keeps
+ * WCAG AA against the light tinted background. `dark:` would be wrong here — it
+ * tracks the OS preference, not the in-app `data-bg-style` switch.
+ */
 function toneClasses(severity: SubscriptionAlert["severity"]) {
   switch (severity) {
     case "danger":
-      return "border-red-500/40 bg-red-500/10 text-red-300";
+      return "border-red-500/40 bg-red-500/10 text-red-300 paper:border-red-600/50 paper:text-red-700";
     case "warning":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+      return "border-amber-500/40 bg-amber-500/10 text-amber-300 paper:border-amber-600/50 paper:text-amber-800";
     default:
-      return "border-blue-500/40 bg-blue-500/10 text-blue-300";
+      return "border-blue-500/40 bg-blue-500/10 text-blue-300 paper:border-blue-600/50 paper:text-blue-700";
   }
 }
 

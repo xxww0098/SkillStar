@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatUsdCents } from "../../lib/usageLabels";
 import type { CreditInfo, SubscriptionUsage } from "../../types";
-import { MetaRow, ProgressTrack, SecondaryPanel } from "../card/primitives";
+import { MetaRow, MeterFigure, SecondaryPanel, UsageMeter } from "../card/primitives";
 import { UsageWindowBar } from "../UsageWindowBar";
 
 /** Backend credit types from `skillstar-usage` cursor fetcher. */
@@ -102,19 +102,19 @@ function OnDemandRow({
   const percent = parsed.total > 0 ? Math.max(0, Math.min(100, Math.round((parsed.used / parsed.total) * 100))) : 0;
   const remainingPct = Math.max(0, 100 - percent);
 
+  // `used / total` cents is a quota, so it reads through the shared meter
+  // grammar (docs/features/usage §"所有额度条共享 UsageMeter primitive").
   return (
-    <div className={cn("space-y-1.5", showDivider && "pt-2 border-t border-zinc-200/50")}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{label}</span>
-        <span className="font-mono text-[11px] font-bold tabular-nums text-zinc-800">
-          {formatUsdCents(parsed.used)}
-          <span className="ml-1 text-[10px] font-medium text-zinc-400">/ {formatUsdCents(parsed.total)}</span>
-        </span>
-      </div>
-      <ProgressTrack usedPercent={percent} size="compact" tone="accent-static" accent={accent} />
-      <p className="text-[9px] text-zinc-400">
-        {t("usage.remaining")} {remainingPct}%
-      </p>
+    <div className={cn(showDivider && "border-t border-zinc-200/50 pt-2")}>
+      <UsageMeter
+        label={label}
+        usedPercent={percent}
+        compact
+        figure={<MeterFigure value={formatUsdCents(parsed.used)} unit={`/ ${formatUsdCents(parsed.total)}`} />}
+        caption={t("usage.used")}
+        showReset={false}
+        footNote={`${t("usage.remaining")} ${remainingPct}%`}
+      />
     </div>
   );
 }

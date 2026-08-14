@@ -23,7 +23,6 @@
 //! also tolerated for proxy mirrors and older fixtures.
 
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
 use serde_json::Value;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -33,6 +32,7 @@ use super::common::SubscriptionBuilder;
 use crate::crypto;
 use crate::oauth::local_server;
 use crate::oauth::pkce::PkcePair;
+use crate::oauth::token_endpoint::{self, TokenResponse};
 use crate::oauth::token_refresh;
 use crate::oauth_clients;
 use crate::storage;
@@ -86,18 +86,6 @@ struct CurrentPeriod {
     weekly: Option<bool>,
     end: Option<i64>,
     usage_percent: Option<f64>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct TokenResponse {
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    id_token: Option<String>,
-    #[serde(default)]
-    expires_in: Option<i64>,
 }
 
 pub async fn start_login(
@@ -193,47 +181,18 @@ async fn exchange_code(
     verifier: &str,
     redirect_uri: &str,
 ) -> UsageResult<TokenResponse> {
-    let client = crate::fetchers::http_client()?;
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
+    token_endpoint::post_token(
+        TOKEN_URL,
+        &[
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("client_id", CLIENT_ID.as_str()),
             ("code_verifier", verifier),
-        ])
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Grok token 交换失败: {}", e)))?;
-
-    parse_token_response(resp, "Grok token").await
-}
-
-async fn parse_token_response(resp: reqwest::Response, label: &str) -> UsageResult<TokenResponse> {
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        let invalid_grant = serde_json::from_str::<Value>(&body)
-            .ok()
-            .and_then(|payload| payload.get("error")?.as_str().map(str::to_string))
-            .is_some_and(|error| error == "invalid_grant");
-        if status == reqwest::StatusCode::UNAUTHORIZED || invalid_grant {
-            return Err(UsageError::AuthRequired);
-        }
-        return Err(UsageError::Fetcher(format!(
-            "{} 状态码 {}: {}",
-            label,
-            status,
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-    let tokens: TokenResponse = serde_json::from_str(&body)
-        .map_err(|e| UsageError::Fetcher(format!("{} 响应解析失败: {}", label, e)))?;
-    if trim_opt(tokens.access_token.as_deref()).is_none() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(tokens)
+        ],
+        "Grok token",
+    )
+    .await
 }
 
 async fn finalize(
@@ -287,9 +246,9 @@ fn build_subscription(
     tokens: TokenResponse,
     existing: Option<&Subscription>,
 ) -> UsageResult<Subscription> {
-    let access_token = trim_opt(tokens.access_token.as_deref()).ok_or(UsageError::AuthRequired)?;
-    let refresh_token = trim_opt(tokens.refresh_token.as_deref());
-    let id_token = trim_opt(tokens.id_token.as_deref());
+    let access_token = tokens.access_token().ok_or(UsageError::AuthRequired)?;
+    let refresh_token = tokens.refresh_token();
+    let id_token = tokens.id_token();
     // Some xAI token exchanges omit `id_token` (especially targeted
     // reauthorization). In that case the new access token is still the
     // authoritative account identity; carrying the old row's account id would
@@ -304,11 +263,7 @@ fn build_subscription(
     let display_name = email
         .clone()
         .unwrap_or_else(|| DEFAULT_PLAN_NAME.to_string());
-    let expires_at = tokens
-        .expires_in
-        .map(|s| Utc::now().timestamp() + s)
-        .or_else(|| token_refresh::jwt_exp(access_token))
-        .or_else(|| id_token.and_then(token_refresh::jwt_exp));
+    let expires_at = tokens.expires_at();
 
     let mut sub = SubscriptionBuilder::new("xai", display_name, "USD", access_token, expires_at)
         .refresh_token(refresh_token.map(str::to_string))
@@ -446,31 +401,25 @@ async fn refresh_xai_tokens(subscription: &mut Subscription) -> UsageResult<()> 
         return Err(UsageError::AuthRequired);
     }
 
-    let client = crate::fetchers::http_client()?;
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
+    let tokens = token_endpoint::post_token(
+        TOKEN_URL,
+        &[
             ("grant_type", "refresh_token"),
             ("client_id", CLIENT_ID.as_str()),
             ("refresh_token", refresh_token.trim()),
-        ])
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Grok refresh 失败: {}", e)))?;
-    let tokens = parse_token_response(resp, "Grok refresh").await?;
-    let access_token = trim_opt(tokens.access_token.as_deref()).ok_or(UsageError::AuthRequired)?;
+        ],
+        "Grok refresh",
+    )
+    .await?;
+    let access_token = tokens.access_token().ok_or(UsageError::AuthRequired)?;
 
     subscription.access_token_encrypted = Some(crypto::encrypt(access_token));
-    if let Some(rt) = trim_opt(tokens.refresh_token.as_deref()) {
+    if let Some(rt) = tokens.refresh_token() {
         subscription.refresh_token_encrypted = Some(crypto::encrypt(rt));
     }
-    subscription.access_token_expires_at = tokens
-        .expires_in
-        .map(|s| Utc::now().timestamp() + s)
-        .or_else(|| token_refresh::jwt_exp(access_token))
-        .or_else(|| trim_opt(tokens.id_token.as_deref()).and_then(token_refresh::jwt_exp));
+    subscription.access_token_expires_at = tokens.expires_at();
 
-    if let Some(id_token) = trim_opt(tokens.id_token.as_deref()) {
+    if let Some(id_token) = tokens.id_token() {
         if let Some(email) = super::common::email_from_jwt(id_token) {
             super::common::apply_email_title(subscription, Some(&email), &["Grok"]);
         }
@@ -815,10 +764,6 @@ fn format_usd_cents(cents: f64) -> String {
     } else {
         format!("${:.2}", cents as f64 / 100.0)
     }
-}
-
-fn trim_opt(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]

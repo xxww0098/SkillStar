@@ -2,8 +2,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatQuotaNumber } from "../../lib/usageLabels";
 import type { CreditInfo, SubscriptionUsage, UsageWindow } from "../../types";
-import { ProgressTrack } from "../card/primitives";
-import { ResetCountdown } from "../ResetCountdown";
+import { MeterFigure, UsageMeter } from "../card/primitives";
 
 interface GlmUsagePanelProps {
   usage: SubscriptionUsage;
@@ -45,17 +44,12 @@ export function GlmUsagePanel({
 
   return (
     <div className={cn("space-y-1.5", compact && "space-y-1")}>
-      {usage.hourly && (
-        <GlmQuotaRow window={usage.hourly} title={t("usage.window5h")} accent={accent} compact={compact} />
-      )}
-      {usage.weekly && (
-        <GlmQuotaRow window={usage.weekly} title={t("usage.window7d")} accent={accent} compact={compact} />
-      )}
+      {usage.hourly && <GlmQuotaRow window={usage.hourly} title={t("usage.window5h")} compact={compact} />}
+      {usage.weekly && <GlmQuotaRow window={usage.weekly} title={t("usage.window7d")} compact={compact} />}
       {usage.monthly && (
         <GlmQuotaRow
           window={usage.monthly}
           title={t("usage.glmMcpMonthly")}
-          accent={accent}
           compact={compact}
           breakdown={compact ? undefined : usage.monthly.breakdown}
         />
@@ -100,17 +94,19 @@ export function GlmUsagePanel({
   );
 }
 
-/** One short row: title · numbers · reset · % · thin bar. */
+/**
+ * One GLM quota window, composed from the shared `UsageMeter` grammar instead
+ * of a local copy of its box + used-badge ramp (docs/features/usage §"所有额度条
+ * 共享 UsageMeter primitive"). Breakdown rows ride in `children`.
+ */
 function GlmQuotaRow({
   window,
   title,
-  accent,
   compact,
   breakdown,
 }: {
   window: UsageWindow;
   title: string;
-  accent: string;
   compact?: boolean;
   breakdown?: UsageWindow["breakdown"];
 }) {
@@ -118,55 +114,25 @@ function GlmQuotaRow({
   const percent = clampPercent(window.percent ?? computePercent(window.used, window.total));
   const remaining = window.total != null ? Math.max(0, window.total - window.used) : null;
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
-  const high = percent >= 75;
 
   return (
-    <div
-      className={cn(
-        "rounded-2xl border border-zinc-200/50 bg-zinc-50/40 transition-colors hover:bg-zinc-50/80",
-        compact ? "space-y-1 px-2.5 py-2" : "space-y-1 px-3 py-2",
-      )}
+    <UsageMeter
+      label={title}
+      dot="brand"
+      usedPercent={percent}
+      compact={compact}
+      figure={
+        window.total != null ? (
+          <MeterFigure value={formatQuotaNumber(window.used)} unit={`/ ${formatQuotaNumber(window.total)}`} />
+        ) : null
+      }
+      caption={window.total != null ? t("usage.used") : null}
+      resetAt={window.reset_at}
+      // GLM has always shown its own countdown per window; keep that.
+      showReset={Boolean(window.reset_at)}
+      resetMode="rateLimit"
+      footNote={remaining != null ? t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) }) : null}
     >
-      <div className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ backgroundColor: accent }} aria-hidden />
-        <p className="min-w-0 shrink-0 text-[11px] font-bold leading-none text-zinc-700">{title}</p>
-        {window.total != null ? (
-          <p className="min-w-0 flex-1 truncate font-mono text-[10px] tabular-nums text-zinc-500">
-            <span className="font-semibold text-zinc-800">{formatQuotaNumber(window.used)}</span>
-            <span className="mx-0.5 text-zinc-300">/</span>
-            {formatQuotaNumber(window.total)}
-            {remaining != null && !compact && (
-              <span className="ml-1 text-zinc-400">
-                · {t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}
-              </span>
-            )}
-          </p>
-        ) : (
-          <span className="flex-1" />
-        )}
-        <div className="flex shrink-0 items-center gap-1">
-          {window.reset_at ? <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode="rateLimit" /> : null}
-          <span
-            className={cn(
-              "rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
-              percent >= 90
-                ? "bg-rose-500/10 text-rose-600"
-                : percent >= 75
-                  ? "bg-amber-500/10 text-amber-600"
-                  : "bg-zinc-100 text-zinc-600",
-            )}
-          >
-            {percent}%
-          </span>
-        </div>
-      </div>
-
-      {high ? (
-        <ProgressTrack usedPercent={percent} size="compact" tone="brand-urgency" />
-      ) : (
-        <ProgressTrack usedPercent={percent} size="compact" tone="accent-static" accent={accent} />
-      )}
-
       {hasBreakdown && (
         <div className="space-y-0.5 border-t border-zinc-200/40 pt-1">
           {breakdown!.map((item, index) => (
@@ -177,7 +143,7 @@ function GlmQuotaRow({
           ))}
         </div>
       )}
-    </div>
+    </UsageMeter>
   );
 }
 
@@ -224,7 +190,9 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function computePercent(used: number, total: number | null): number {
+// `total` is `number | null | undefined`: the backend skips the key entirely
+// when the quota ceiling is unknown, so it arrives as `undefined`, not `null`.
+function computePercent(used: number, total: number | null | undefined): number {
   if (!total || total <= 0) return 0;
   return Math.round((used / total) * 100);
 }

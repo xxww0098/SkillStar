@@ -3,19 +3,22 @@
 //! Google OAuth + Cloud Code Assist (`loadCodeAssist` + `fetchAvailableModels`).
 
 use chrono::Utc;
-use serde::Deserialize;
 use std::time::Duration;
 
 use super::common::SubscriptionBuilder;
 use crate::cloud_code::{self, LoadCodeAssistResult};
 use crate::crypto;
 use crate::oauth::local_server;
+use crate::oauth::token_endpoint::{self, TokenResponse};
 use crate::oauth::token_refresh;
 use crate::storage;
 use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
+use crate::urlencode;
 use crate::{UsageError, UsageResult};
 
 use crate::antigravity_oauth_config::antigravity_oauth_config;
+
+const ANTIGRAVITY_TITLE_PLACEHOLDERS: &[&str] = &["Antigravity"];
 
 const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -23,28 +26,24 @@ const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo?alt=js
 const SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs";
 const CALLBACK_PORT: u16 = 51121;
 
-#[derive(Debug, Deserialize, Default)]
-struct TokenResponse {
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    id_token: Option<String>,
-    #[serde(default)]
-    expires_in: Option<i64>,
-}
-
-pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
+pub async fn start_login(
+    _region: Option<&str>,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<super::OAuthStartInfo> {
     let state = crate::oauth::pkce::random_state();
     let redirect = format!("http://localhost:{}/oauth-callback", CALLBACK_PORT);
     let auth_url = build_auth_url(&redirect, &state, &antigravity_oauth_config()?.client_id);
 
     let pending_id = crate::oauth::pending_state::register("antigravity", None, auth_url.clone());
+    crate::oauth::pending_state::set_target_subscription_id(
+        &pending_id,
+        target_subscription_id.map(str::to_string),
+    );
     let pid = pending_id.clone();
     let state_for_task = state.clone();
     tokio::spawn(async move {
-        let result = drive_login(state_for_task, redirect).await;
+        let target_subscription_id = crate::oauth::pending_state::target_subscription_id(&pid);
+        let result = drive_login(state_for_task, redirect, target_subscription_id).await;
         if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
             let _ = tx.send(result);
         }
@@ -58,32 +57,46 @@ fn build_auth_url(redirect: &str, state: &str, client_id: &str) -> String {
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&access_type=offline&prompt=consent&state={}",
         AUTHORIZE_URL,
         client_id,
-        urlencoding(redirect),
-        urlencoding(SCOPES),
+        urlencode::encode(redirect),
+        urlencode::encode(SCOPES),
         state,
     )
 }
 
-async fn drive_login(state: String, redirect_uri: String) -> UsageResult<Subscription> {
+async fn drive_login(
+    state: String,
+    redirect_uri: String,
+    target_subscription_id: Option<String>,
+) -> UsageResult<Subscription> {
     let code =
         local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
             .await?;
     let tokens = exchange_code(&code, &redirect_uri).await?;
     let access_token = tokens
-        .access_token
-        .ok_or_else(|| UsageError::Other("Antigravity 缺少 access_token".into()))?;
-    let expires_at = tokens
-        .expires_in
-        .map(|s| Utc::now().timestamp() + s)
-        .or_else(|| token_refresh::jwt_exp(&access_token));
+        .access_token()
+        .ok_or_else(|| UsageError::Other("Antigravity 缺少 access_token".into()))?
+        .to_string();
+    let expires_at = tokens.expires_at();
     let email = fetch_email(&access_token).await.or_else(|| {
         tokens
-            .id_token
-            .as_deref()
+            .id_token()
             .and_then(|jwt| token_refresh::jwt_string(jwt, &["email"]))
     });
+    let refresh_token = tokens.refresh_token().map(str::to_string);
 
-    finalize(access_token, tokens.refresh_token, expires_at, email).await
+    // Same catalog lock the refresh path takes, so a concurrent Antigravity
+    // refresh cannot overwrite the credentials this login just stored.
+    crate::refresh_guard::with_catalog_lock("antigravity", || async {
+        finalize(
+            access_token,
+            refresh_token,
+            expires_at,
+            email,
+            target_subscription_id.as_deref(),
+        )
+        .await
+    })
+    .await?
 }
 
 async fn fetch_email(access_token: &str) -> Option<String> {
@@ -104,29 +117,18 @@ async fn fetch_email(access_token: &str) -> Option<String> {
 
 async fn exchange_code(code: &str, redirect_uri: &str) -> UsageResult<TokenResponse> {
     let oauth = antigravity_oauth_config()?;
-    let client = crate::http_client::usage_http_client()?;
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
+    token_endpoint::post_token(
+        TOKEN_URL,
+        &[
             ("grant_type", "authorization_code"),
             ("code", code),
             ("client_id", oauth.client_id.as_str()),
             ("client_secret", oauth.client_secret.as_str()),
             ("redirect_uri", redirect_uri),
-        ])
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Google token：{}", e)))?;
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::Fetcher(format!(
-            "Google token 返回：{}",
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-    resp.json::<TokenResponse>()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Google 解析 token: {}", e)))
+        ],
+        "Google token",
+    )
+    .await
 }
 
 async fn finalize(
@@ -134,9 +136,10 @@ async fn finalize(
     refresh_token: Option<String>,
     expires_at: Option<i64>,
     email: Option<String>,
+    target_subscription_id: Option<&str>,
 ) -> UsageResult<Subscription> {
     let display_name = email.clone().unwrap_or_else(|| "Antigravity".to_string());
-    let sub = SubscriptionBuilder::new(
+    let mut sub = SubscriptionBuilder::new(
         "antigravity",
         display_name,
         "USD",
@@ -147,7 +150,22 @@ async fn finalize(
     .oauth_account_id(email)
     .build();
 
-    if let Ok(usage) = build_usage(&sub.id, &access_token, None).await {
+    // Re-authorizing an existing card must land back on that card
+    // (docs/features/usage/README.md), not add a second one beside it.
+    let cached_project = match super::common::reauth_target("antigravity", target_subscription_id) {
+        Some(existing) => {
+            let cached_project = existing.note.clone();
+            super::common::carry_over_user_metadata(
+                &mut sub,
+                &existing,
+                ANTIGRAVITY_TITLE_PLACEHOLDERS,
+            );
+            cached_project
+        }
+        None => None,
+    };
+
+    if let Ok(usage) = build_usage(&sub.id, &access_token, cached_project.as_deref()).await {
         storage::save_usage_snapshot(usage).ok();
     }
     storage::upsert_subscription(sub)
@@ -168,7 +186,11 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
             .filter(|s| super::common::looks_like_email(s))
             .map(str::to_string)
     }) {
-        super::common::apply_email_title(subscription, Some(&email), &["Antigravity"]);
+        super::common::apply_email_title(
+            subscription,
+            Some(&email),
+            ANTIGRAVITY_TITLE_PLACEHOLDERS,
+        );
         if subscription.oauth_account_id.is_none() {
             subscription.oauth_account_id = Some(email);
         }
@@ -267,16 +289,16 @@ async fn ensure_fresh_access_token(subscription: &mut Subscription) -> UsageResu
     if refresh.is_empty() {
         return Err(UsageError::AuthRequired);
     }
+    // Google answers a revoked grant with 400 + `invalid_grant`, so the shared
+    // token endpoint (not the status code) is what turns that into
+    // `AuthRequired` and gives the card its "重新授权" affordance.
     let tokens = cloud_code::refresh_antigravity_access_token(&refresh).await?;
-    if let Some(at) = tokens.access_token {
-        subscription.access_token_encrypted = Some(crypto::encrypt(&at));
-        subscription.access_token_expires_at = tokens
-            .expires_in
-            .map(|s| Utc::now().timestamp() + s)
-            .or_else(|| token_refresh::jwt_exp(&at));
+    if let Some(at) = tokens.access_token() {
+        subscription.access_token_encrypted = Some(crypto::encrypt(at));
+        subscription.access_token_expires_at = tokens.expires_at();
     }
-    if let Some(rt) = tokens.refresh_token {
-        subscription.refresh_token_encrypted = Some(crypto::encrypt(&rt));
+    if let Some(rt) = tokens.refresh_token() {
+        subscription.refresh_token_encrypted = Some(crypto::encrypt(rt));
     }
     Ok(())
 }
@@ -314,19 +336,6 @@ fn usage_from_load(
         api_keys: Vec::new(),
         deepseek_analytics: None,
     }
-}
-
-fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

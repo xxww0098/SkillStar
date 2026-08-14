@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useUsageDataContext } from "../context/UsageDataContext";
+import { isDegradedCopyBinding } from "../lib/cliCustody";
 import { FILTER_ALL, type CatalogFilter, type Subscription } from "../types";
 import { SubscriptionEditDialog } from "./SubscriptionEditDialog";
 import { UsageActionBar } from "./UsageActionBar";
@@ -59,6 +60,14 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
     clearUsageCreateRequest();
   }, [usageCreateRequest, clearUsageCreateRequest]);
 
+  // `remove` / `reorder` / `dismissAlert` toast their own failure and roll the
+  // list back, then rethrow so a caller can react. Nothing here needs to, but
+  // the rejection must still be consumed — a bare `void data.remove(id)` left
+  // an unhandled rejection and zero user-visible feedback.
+  const settled = (op: Promise<unknown>) => {
+    void op.catch(() => undefined);
+  };
+
   const refreshScopeCatalogId = filter === FILTER_ALL ? null : filter;
   const refreshScopeLabel = useMemo(() => {
     if (!refreshScopeCatalogId) return null;
@@ -84,9 +93,9 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
         allSubscriptions={data.subscriptions}
         catalog={data.catalog}
         filter={filter}
-        onReorder={data.reorder}
+        onReorder={(ids) => settled(data.reorder(ids))}
       />
-      <UsageAlertBanner alerts={data.alerts} onDismiss={data.dismissAlert} />
+      <UsageAlertBanner alerts={data.alerts} onDismiss={(id) => settled(data.dismissAlert(id))} />
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {data.loading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -101,15 +110,14 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
             subscriptions={filtered}
             allSubscriptions={data.subscriptions}
             catalog={data.catalog}
+            cliAccounts={data.cliAccounts}
             filter={filter}
-            onReorder={data.reorder}
+            onReorder={(ids) => settled(data.reorder(ids))}
             onBrowseProviders={() => toast.info(t("usage.pickProviderFromSidebar"))}
             onRefresh={data.refreshOneWithUi}
             refreshDisabled={data.refreshBusy}
             onEdit={openEdit}
-            onDelete={(id) => {
-              void data.remove(id);
-            }}
+            onDelete={(id) => settled(data.remove(id))}
             onReauth={(id) => {
               openEdit(id);
             }}
@@ -126,6 +134,14 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
                   toast.success(t("usage.switchCliSuccess"), {
                     description: `${updated.display_name} → ${outcome.toolId} · ${t("usage.switchCliRestartHint")}`,
                   });
+                  // A copy is a different deal from a link, and the user is the
+                  // one who has to live with it.
+                  if (isDegradedCopyBinding(outcome)) {
+                    toast.warning(t("usage.switchCliCopyMode"), {
+                      description: t("usage.switchCliCopyModeHint"),
+                      duration: 8000,
+                    });
+                  }
                 } else {
                   toast.success(t("usage.activeAccountSet"), {
                     description: updated.display_name,
@@ -142,6 +158,12 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
                   toast.success(t("usage.switchCliSynced"), {
                     description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint")}`,
                   });
+                  if (isDegradedCopyBinding(outcome)) {
+                    toast.warning(t("usage.switchCliCopyMode"), {
+                      description: t("usage.switchCliCopyModeHint"),
+                      duration: 8000,
+                    });
+                  }
                 } else if (outcome.error) {
                   toast.error(t("usage.switchCliSyncFailed"), {
                     description: outcome.error,
@@ -169,11 +191,12 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
           closeDialog();
           void data.reload();
         }}
-        onDeleted={async () => {
-          if (editingSub) {
-            await data.remove(editingSub.id);
-          }
+        onDeleted={() => {
+          // Close first: `remove` used to throw before `closeDialog()` ran,
+          // leaving the dialog permanently open with no error shown.
+          const target = editingSub;
           closeDialog();
+          if (target) settled(data.remove(target.id));
         }}
       />
     </div>

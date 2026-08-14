@@ -31,6 +31,7 @@ pub mod request;
 pub mod storage;
 pub mod subscription;
 pub mod tool_paths;
+pub mod urlencode;
 pub mod vscdb;
 
 pub use catalog::{AuthMode, CatalogEntry, catalog};
@@ -66,11 +67,54 @@ pub enum UsageError {
     #[error("fetcher error: {0}")]
     Fetcher(String),
 
+    /// The provider is momentarily unavailable (429 / 5xx / transport
+    /// failure). Distinct from [`UsageError::Fetcher`] because retrying later
+    /// is plausible: callers must not latch `requires_reauth` and must not
+    /// discard the last good quota snapshot over one of these.
+    #[error("provider temporarily unavailable: {0}")]
+    Transient(String),
+
     #[error("auth required (token expired or revoked)")]
     AuthRequired,
 
     #[error("{0}")]
     Other(String),
+}
+
+impl UsageError {
+    /// Classify an upstream non-2xx response.
+    ///
+    /// 429 and 5xx are the provider's problem, not the credential's, so they
+    /// become [`UsageError::Transient`]. Everything else stays a plain
+    /// [`UsageError::Fetcher`]. Deciding *auth* is deliberately not this
+    /// function's job — only `oauth::token_endpoint` (token grants) and the
+    /// explicit 401 checks in the quota fetchers may return
+    /// [`UsageError::AuthRequired`].
+    pub fn http_status(label: &str, status: u16, body: &str) -> Self {
+        let summary = format!("{label} 状态码 {status}: {}", truncate_body(body));
+        if status == 429 || (500..600).contains(&status) {
+            Self::Transient(summary)
+        } else {
+            Self::Fetcher(summary)
+        }
+    }
+
+    /// A network/TLS/DNS/timeout failure reaching `label`'s endpoint.
+    pub fn transport(label: &str, error: impl std::fmt::Display) -> Self {
+        Self::Transient(format!("{label} 请求失败: {error}"))
+    }
+
+    /// True when the failure is expected to clear on its own. Callers use this
+    /// to keep the previously fetched quota snapshot instead of replacing it
+    /// with a bare error card.
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Transient(_) | Self::Io(_))
+    }
+}
+
+/// Trim a provider body down to something safe to show in an error message.
+pub(crate) fn truncate_body(body: &str) -> String {
+    body.chars().take(200).collect()
 }
 
 pub type UsageResult<T> = std::result::Result<T, UsageError>;

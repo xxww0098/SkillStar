@@ -1,10 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useUsageAutoRefreshRunner, useUsageAutoRefreshSettings } from "../hooks/useUsageAutoRefresh";
 import { useUsageData } from "../hooks/useUsageData";
-import { formatUsageErrorForDisplay, truncateUsageError } from "../lib/usageErrors";
-import type { SubscriptionUsage } from "../types";
+import { describeUsageFailure, formatUsageErrorForDisplay, truncateUsageError } from "../lib/usageErrors";
+import { USAGE_ACTIVE_CHANGED_EVENT, type ActiveChangedPayload, type SubscriptionUsage } from "../types";
 
 type UsageDataContextValue = ReturnType<typeof useUsageData> & {
   refreshBusy: boolean;
@@ -23,21 +24,22 @@ export function UsageDataProvider({ children }: { children: ReactNode }) {
   const autoRefresh = useUsageAutoRefreshSettings();
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
-  const queueRef = useRef(Promise.resolve());
   const pendingRef = useRef(0);
 
+  /**
+   * Track "a refresh is in flight" for the toolbar/card spinners.
+   *
+   * Serialization itself lives in `useUsageData` — one queue covering refresh
+   * *and* the mutations, so `setActive`/`remove`/`reorder` can no longer be
+   * overwritten by a `refreshAll` that was already on the wire. Queueing here
+   * as well would deadlock (the outer slot would await an inner enqueue that
+   * can never start).
+   */
   const withRefreshLock = useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
     pendingRef.current += 1;
     setRefreshBusy(true);
-
-    const task = queueRef.current.then(run);
-    queueRef.current = task.then(
-      () => undefined,
-      () => undefined,
-    );
-
     try {
-      return await task;
+      return await run();
     } finally {
       pendingRef.current -= 1;
       if (pendingRef.current === 0) {
@@ -105,6 +107,13 @@ export function UsageDataProvider({ children }: { children: ReactNode }) {
     refreshBusy,
   );
 
+  // A floating card window can pin a different account; without this the main
+  // grid kept showing a stale "current" badge until the next manual refresh.
+  const syncActiveAccounts = value.syncActiveAccounts;
+  useTauriEvent<ActiveChangedPayload>(USAGE_ACTIVE_CHANGED_EVENT, () => {
+    void syncActiveAccounts();
+  });
+
   const ctx = useMemo(
     () => ({
       ...value,
@@ -166,6 +175,5 @@ function emptyRefreshMessage(
 }
 
 function formatRefreshError(err: unknown, t: ReturnType<typeof useTranslation>["t"]): string {
-  const message = err instanceof Error ? err.message : String(err);
-  return formatUsageErrorForDisplay(message, t) ?? "Unknown error";
+  return describeUsageFailure(err, t);
 }

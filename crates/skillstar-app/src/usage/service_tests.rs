@@ -71,7 +71,7 @@ fn empty_update() -> UpdateSubscriptionInput {
         auto_renew: None,
         api_key: None,
         platform_token: None,
-        clear_platform_token: false,
+        clear_platform_token: None,
         manual_quota: None,
         note: None,
         cookie_header: None,
@@ -119,6 +119,83 @@ fn non_network_and_already_hinted_errors_pass_through_unchanged() {
     assert_eq!(append_network_hint(hinted.clone()), hinted);
 }
 
+// ── refresh failures: who may latch re-auth, who may blank the card ───
+
+#[test]
+fn only_auth_required_latches_reauth_and_blanks_the_card() {
+    let previous = snapshot_with_window("s1", "7d", 61);
+
+    let (latch, snapshot) =
+        refresh_failure("s1", Some(&previous), &UsageError::AuthRequired);
+
+    assert!(latch, "a dead credential is the one case that needs re-login");
+    assert!(!snapshot.has_quota_data());
+    assert_eq!(snapshot.error.as_deref(), Some("登录已失效，请重新授权。"));
+}
+
+/// One 429 / 5xx from the provider used to mark the account "登录已失效" and
+/// throw away its quota. It must do neither.
+#[test]
+fn throttling_and_outages_keep_the_last_quota_and_never_latch_reauth() {
+    let previous = snapshot_with_window("s1", "7d", 61);
+
+    for error in [
+        UsageError::Transient("Codex refresh 状态码 429: slow down".into()),
+        UsageError::Transient("Codex refresh 状态码 503: upstream".into()),
+    ] {
+        let (latch, snapshot) = refresh_failure("s1", Some(&previous), &error);
+
+        assert!(!latch, "{error} must not demand re-authorization");
+        assert_eq!(
+            snapshot.monthly.as_ref().and_then(|w| w.percent),
+            Some(61),
+            "{error} must not erase the last known quota"
+        );
+        assert_eq!(
+            snapshot.fetched_at, previous.fetched_at,
+            "carried-over data keeps its real age"
+        );
+        assert!(snapshot.error.is_some(), "the failure is still reported");
+    }
+}
+
+#[test]
+fn a_hard_provider_error_replaces_the_snapshot_without_latching_reauth() {
+    let previous = snapshot_with_window("s1", "7d", 61);
+
+    let (latch, snapshot) = refresh_failure(
+        "s1",
+        Some(&previous),
+        &UsageError::Fetcher("GLM 状态码 400: bad request".into()),
+    );
+
+    assert!(!latch);
+    assert!(
+        !snapshot.has_quota_data(),
+        "a non-retryable failure means the old numbers may be wrong"
+    );
+    assert!(snapshot.error.as_deref().unwrap().contains("400"));
+}
+
+/// `append_network_hint` reads the proxy config, so this one needs the
+/// sandboxed storage root the other behavioural tests use.
+#[tokio::test(flavor = "current_thread")]
+async fn network_failures_carry_the_proxy_hint_into_the_snapshot() {
+    let _lock = ENV_LOCK.lock().await;
+    let data_root = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::set(&[("SKILLSTAR_DATA_DIR", data_root.path())]);
+
+    let (latch, snapshot) = refresh_failure(
+        "s1",
+        None,
+        &UsageError::Transient("Grok token 请求失败: error sending request".into()),
+    );
+
+    assert!(!latch);
+    let message = snapshot.error.unwrap();
+    assert!(message.contains("x.ai / Grok"), "{message}");
+}
+
 #[test]
 fn mark_credentials_rotated_clears_auth_expired_latch() {
     let mut sub = stored("s1", "kimi");
@@ -142,6 +219,59 @@ fn fill_active_flags_only_the_pinned_row_of_its_catalog() {
     assert!(!fill_active(dto(), &sibling_pinned).is_active);
 
     assert!(!fill_active(dto(), &HashMap::new()).is_active);
+}
+
+/// `is_active` above is the *pin* — what the user last asked for. What the CLI
+/// is actually serving arrives separately, and has to reach the frontend as
+/// three distinct answers: this account, somebody else, nobody.
+#[test]
+fn the_live_state_projects_as_three_answers_not_one_boolean() {
+    use crate::usage_switch::CliAccountState;
+
+    assert_eq!(
+        CliAccountStateDto::from(CliAccountState::LinkedTo {
+            subscription_id: "s1".into()
+        }),
+        CliAccountStateDto::LinkedTo {
+            subscription_id: "s1".into()
+        }
+    );
+    assert_eq!(
+        CliAccountStateDto::from(CliAccountState::Diverged),
+        CliAccountStateDto::Diverged
+    );
+    assert_eq!(
+        CliAccountStateDto::from(CliAccountState::Missing),
+        CliAccountStateDto::Missing
+    );
+}
+
+/// A binding that degraded to a byte copy means the CLI's own token rotation
+/// no longer writes through. That has to survive the DTO seam, because a log
+/// line is not something a user can read.
+#[test]
+fn the_switch_dto_carries_the_binding_mode() {
+    use crate::usage_switch::{LinkMode, SwitchOutcome};
+
+    let outcome = |link_mode| SwitchOutcome {
+        tool_id: "grok".into(),
+        config_path: "/tmp/auth.json".into(),
+        backup_path: None,
+        keychain_updated: false,
+        link_mode,
+        success: true,
+        error: None,
+    };
+
+    assert_eq!(
+        SwitchOutcomeDto::from(outcome(Some(LinkMode::Copy))).link_mode,
+        Some(LinkModeDto::Copy)
+    );
+    assert_eq!(
+        SwitchOutcomeDto::from(outcome(Some(LinkMode::Symlink))).link_mode,
+        Some(LinkModeDto::Symlink)
+    );
+    assert_eq!(SwitchOutcomeDto::from(outcome(None)).link_mode, None);
 }
 
 // ── behavior against isolated storage ─────────────────────────────────
@@ -363,12 +493,65 @@ async fn refresh_all_synthesizes_usage_for_manual_accounts_without_network() {
     input.plan_tier = Some("Pro".into());
     create_subscription(input).unwrap();
 
-    let dtos = refresh_all_subscriptions().await.unwrap();
+    let dtos = refresh_all_subscriptions(None).await.unwrap();
 
     assert_eq!(dtos.len(), 1);
     let usage = dtos[0].usage.as_ref().expect("manual rows get a snapshot");
     assert_eq!(usage.plan_name.as_deref(), Some("Pro"));
     assert_eq!(usage.error, None);
+}
+
+/// The Grok page asks for `Some("xai")`; ignoring that turned one provider's
+/// button into a sweep across every vendor's endpoint.
+#[tokio::test(flavor = "current_thread")]
+async fn refresh_all_scoped_to_one_catalog_leaves_other_rows_untouched() {
+    let _lock = ENV_LOCK.lock().await;
+    let data_root = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::set(&[("SKILLSTAR_DATA_DIR", data_root.path())]);
+
+    // Two Manual rows in different catalogs: Manual refresh synthesizes a
+    // snapshot without touching the network, so the difference between
+    // "refreshed" and "left alone" is observable offline.
+    let mut stepfun = create_input("stepfun", AuthMode::Manual);
+    stepfun.plan_tier = Some("Pro".into());
+    let stepfun = create_subscription(stepfun).unwrap();
+
+    let mut opencode = create_input("opencode", AuthMode::Manual);
+    opencode.plan_tier = Some("Zen".into());
+    let opencode = create_subscription(opencode).unwrap();
+
+    let dtos = refresh_all_subscriptions(Some("stepfun".into()))
+        .await
+        .unwrap();
+
+    // The full list still comes back — the filter scopes the refresh, not the response.
+    assert_eq!(dtos.len(), 2);
+    let refreshed = dtos.iter().find(|d| d.id == stepfun.id).unwrap();
+    assert_eq!(
+        refreshed.usage.as_ref().unwrap().plan_name.as_deref(),
+        Some("Pro"),
+        "the requested catalog is refreshed"
+    );
+    let skipped = dtos.iter().find(|d| d.id == opencode.id).unwrap();
+    assert!(
+        skipped.usage.is_none(),
+        "an out-of-scope row keeps its stored (here: absent) snapshot instead of being refreshed"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn refresh_all_rejects_an_unknown_catalog_filter() {
+    let _lock = ENV_LOCK.lock().await;
+    let data_root = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::set(&[("SKILLSTAR_DATA_DIR", data_root.path())]);
+
+    let err = refresh_all_subscriptions(Some("no-such-provider".into()))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown catalog id"), "{err}");
+
+    // Blank / whitespace means "no filter", not "unknown catalog".
+    assert!(refresh_all_subscriptions(Some("  ".into())).await.is_ok());
 }
 
 // ── OAuth plumbing that fails fast without any pending login ──────────

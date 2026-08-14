@@ -64,12 +64,43 @@ async fn revoked_refresh_token_requires_reauthentication() {
             .unwrap();
     });
 
+    // Same two steps `token_endpoint::post_token` performs after the send;
+    // going through plain `reqwest` here keeps the test off the proxy-aware
+    // shared client (which reads the developer's real config).
     let response = reqwest::get(address).await.unwrap();
-    let error = parse_token_response(response, "Grok refresh")
-        .await
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap();
+    let error = crate::oauth::token_endpoint::parse_token_body(status, &body, "Grok refresh")
         .expect_err("revoked refresh tokens must require a fresh login");
 
     assert!(matches!(error, UsageError::AuthRequired), "{error}");
+    responder.join().unwrap();
+}
+
+/// The companion to the test above: Grok's endpoint hiccuping must **not**
+/// look like a revoked grant, or one 5xx would demand a fresh login and blank
+/// the card.
+#[tokio::test]
+async fn grok_server_errors_stay_retryable() {
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let address = format!("http://{}", server.server_addr());
+    let responder = std::thread::spawn(move || {
+        let request = server.recv().unwrap();
+        request
+            .respond(
+                tiny_http::Response::from_string("upstream unavailable").with_status_code(503),
+            )
+            .unwrap();
+    });
+
+    let response = reqwest::get(address).await.unwrap();
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap();
+    let error = crate::oauth::token_endpoint::parse_token_body(status, &body, "Grok refresh")
+        .expect_err("503 is still a failure");
+
+    assert!(matches!(error, UsageError::Transient(_)), "{error}");
+    assert!(error.is_transient());
     responder.join().unwrap();
 }
 

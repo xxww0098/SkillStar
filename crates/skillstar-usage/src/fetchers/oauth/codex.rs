@@ -19,10 +19,12 @@ use super::common::SubscriptionBuilder;
 use crate::crypto;
 use crate::oauth::local_server::{self, CallbackSession};
 use crate::oauth::pkce::PkcePair;
+use crate::oauth::token_endpoint::{self, TokenResponse};
 use crate::oauth::token_refresh;
 use crate::oauth_clients;
 use crate::storage;
 use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
+use crate::urlencode;
 use crate::{UsageError, UsageResult};
 
 static CLIENT_ID: LazyLock<String> = LazyLock::new(|| {
@@ -40,18 +42,6 @@ const FALLBACK_CALLBACK_PORT: u16 = 1457;
 const SCOPES: &str =
     "openid profile email offline_access api.connectors.read api.connectors.invoke";
 const ORIGINATOR: &str = "codex_cli_rs";
-
-#[derive(Debug, Deserialize, Default)]
-struct TokenResponse {
-    #[serde(default)]
-    id_token: Option<String>,
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    expires_in: Option<i64>,
-}
 
 #[derive(Debug, Deserialize, Default)]
 struct UsageResponse {
@@ -77,7 +67,10 @@ struct Window {
     reset_at: Option<i64>,
 }
 
-pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
+pub async fn start_login(
+    _region: Option<&str>,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let state = crate::oauth::pkce::random_state();
     let session = local_server::start_session(DEFAULT_CALLBACK_PORT, Some(FALLBACK_CALLBACK_PORT))?;
@@ -91,13 +84,25 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
         auth_url.clone(),
         Some(port),
     );
+    crate::oauth::pending_state::set_target_subscription_id(
+        &pending_id,
+        target_subscription_id.map(str::to_string),
+    );
 
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
     let redirect = redirect_uri.clone();
     let state_for_task = state.clone();
     tokio::spawn(async move {
-        let result = drive_login(session, state_for_task, verifier, redirect).await;
+        let target_subscription_id = crate::oauth::pending_state::target_subscription_id(&pid);
+        let result = drive_login(
+            session,
+            state_for_task,
+            verifier,
+            redirect,
+            target_subscription_id,
+        )
+        .await;
         if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
             let _ = tx.send(result);
         }
@@ -121,7 +126,7 @@ fn build_authorize_url(redirect_uri: &str, pkce: &PkcePair, state: &str) -> Stri
     ];
     let qs = params
         .into_iter()
-        .map(|(k, v)| format!("{k}={}", urlencoding(v)))
+        .map(|(k, v)| format!("{k}={}", urlencode::encode(v)))
         .collect::<Vec<_>>()
         .join("&");
     format!("{AUTHORIZE_URL}?{qs}")
@@ -132,35 +137,16 @@ async fn drive_login(
     state: String,
     verifier: String,
     redirect_uri: String,
+    target_subscription_id: Option<String>,
 ) -> UsageResult<Subscription> {
     let code = local_server::wait(session, state, Some(Duration::from_secs(300))).await?;
     let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
-    let access_token = tokens
-        .access_token
-        .ok_or_else(|| UsageError::Other("Codex 缺少 access_token".into()))?;
-    let id_token = tokens
-        .id_token
-        .ok_or_else(|| UsageError::Other("Codex 缺少 id_token".into()))?;
-    let expires_at = tokens
-        .expires_in
-        .map(|s| Utc::now().timestamp() + s)
-        .or_else(|| token_refresh::jwt_exp(&access_token));
-
-    let account_id = token_refresh::jwt_string(
-        &id_token,
-        &["https://api.openai.com/auth", "chatgpt_account_id"],
-    )
-    .or_else(|| token_refresh::jwt_string(&id_token, &["chatgpt_account_id"]))
-    .or_else(|| token_refresh::jwt_string(&id_token, &["sub"]));
-
-    finalize(
-        access_token,
-        tokens.refresh_token,
-        expires_at,
-        account_id,
-        id_token,
-    )
-    .await
+    // Hold the catalog lock across the whole write so a queued Codex refresh
+    // cannot patch stale credentials over the pair we just minted.
+    crate::refresh_guard::with_catalog_lock("codex", || async {
+        finalize(tokens, target_subscription_id.as_deref()).await
+    })
+    .await?
 }
 
 async fn exchange_code(
@@ -168,49 +154,55 @@ async fn exchange_code(
     verifier: &str,
     redirect_uri: &str,
 ) -> UsageResult<TokenResponse> {
-    let client = crate::fetchers::http_client()?;
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
+    token_endpoint::post_token(
+        TOKEN_URL,
+        &[
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("client_id", CLIENT_ID.as_str()),
             ("code_verifier", verifier),
-        ])
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Codex token 交换：{}", e)))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::Fetcher(format!(
-            "Codex token 返回 {}：{}",
-            status,
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-    resp.json::<TokenResponse>()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Codex 解析 token: {}", e)))
+        ],
+        "Codex token",
+    )
+    .await
 }
 
 async fn finalize(
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_at: Option<i64>,
-    account_id: Option<String>,
-    id_token: String,
+    tokens: TokenResponse,
+    target_subscription_id: Option<&str>,
 ) -> UsageResult<Subscription> {
+    let access_token = tokens
+        .access_token()
+        .ok_or_else(|| UsageError::Other("Codex 缺少 access_token".into()))?
+        .to_string();
+    let id_token = tokens
+        .id_token()
+        .ok_or_else(|| UsageError::Other("Codex 缺少 id_token".into()))?
+        .to_string();
+    let account_id = account_id_from_id_token(&id_token);
+
     // Card title = login email (logo already says Codex). Fallback only when claim missing.
     // `oauth_account_id` stays the ChatGPT account id used by the usage API header.
     let email = super::common::email_from_jwt(&id_token);
     let display_name = email.unwrap_or_else(|| "Codex".to_string());
-    let sub = SubscriptionBuilder::new("codex", display_name, "USD", &access_token, expires_at)
-        .refresh_token(refresh_token)
-        .id_token(Some(id_token))
-        .oauth_account_id(account_id.clone())
-        .build();
+    let mut sub = SubscriptionBuilder::new(
+        "codex",
+        display_name,
+        "USD",
+        &access_token,
+        tokens.expires_at(),
+    )
+    .refresh_token(tokens.refresh_token().map(str::to_string))
+    .id_token(Some(id_token))
+    .oauth_account_id(account_id.clone())
+    .build();
+
+    // Re-authorizing an existing card must land back on that card, not add a
+    // second one next to it (docs/features/usage/README.md).
+    if let Some(existing) = super::common::reauth_target("codex", target_subscription_id) {
+        super::common::carry_over_user_metadata(&mut sub, &existing, CODEX_TITLE_PLACEHOLDERS);
+    }
 
     if let Ok(usage) = fetch_with_token(&sub.id, &access_token, account_id.as_deref()).await {
         storage::save_usage_snapshot(usage).ok();
@@ -218,6 +210,17 @@ async fn finalize(
     let saved = storage::upsert_subscription(sub)
         .map_err(|e| UsageError::Other(format!("Codex 订阅保存失败：{}", e)))?;
     Ok(saved)
+}
+
+/// ChatGPT account id from the OIDC id token, trying the namespaced claim
+/// first and falling back to the bare claim then `sub`.
+fn account_id_from_id_token(id_token: &str) -> Option<String> {
+    token_refresh::jwt_string(
+        id_token,
+        &["https://api.openai.com/auth", "chatgpt_account_id"],
+    )
+    .or_else(|| token_refresh::jwt_string(id_token, &["chatgpt_account_id"]))
+    .or_else(|| token_refresh::jwt_string(id_token, &["sub"]))
 }
 
 super::common::impl_oauth_fetch!();
@@ -277,46 +280,31 @@ async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()
     if refresh.is_empty() {
         return Err(UsageError::AuthRequired);
     }
-    let client = crate::http_client::usage_http_client()?;
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
+    // `post_token` is what keeps an OpenAI 5xx or 429 from being read as a
+    // revoked grant: only 401 / `invalid_grant` reaches `AuthRequired`.
+    let tokens = token_endpoint::post_token(
+        TOKEN_URL,
+        &[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh.as_str()),
             ("client_id", CLIENT_ID.as_str()),
-        ])
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Codex refresh：{}", e)))?;
-    if !resp.status().is_success() {
-        return Err(UsageError::AuthRequired);
+        ],
+        "Codex refresh",
+    )
+    .await?;
+    let access_token = tokens.access_token().ok_or(UsageError::AuthRequired)?;
+    subscription.access_token_encrypted = Some(crypto::encrypt(access_token));
+    if let Some(rt) = tokens.refresh_token() {
+        subscription.refresh_token_encrypted = Some(crypto::encrypt(rt));
     }
-    let tokens: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Codex refresh 解析：{}", e)))?;
-    let access_token = tokens.access_token.ok_or(UsageError::AuthRequired)?;
-    subscription.access_token_encrypted = Some(crypto::encrypt(&access_token));
-    if let Some(rt) = tokens.refresh_token {
-        subscription.refresh_token_encrypted = Some(crypto::encrypt(&rt));
-    }
-    subscription.access_token_expires_at = tokens
-        .expires_in
-        .map(|s| Utc::now().timestamp() + s)
-        .or_else(|| token_refresh::jwt_exp(&access_token));
-    if let Some(id_token) = tokens.id_token.as_deref() {
+    subscription.access_token_expires_at = tokens.expires_at();
+    if let Some(id_token) = tokens.id_token() {
         subscription.id_token_encrypted = Some(crypto::encrypt(id_token));
         if let Some(email) = super::common::email_from_jwt(id_token) {
             super::common::apply_email_title(subscription, Some(&email), CODEX_TITLE_PLACEHOLDERS);
         }
-        let account_id = token_refresh::jwt_string(
-            id_token,
-            &["https://api.openai.com/auth", "chatgpt_account_id"],
-        )
-        .or_else(|| token_refresh::jwt_string(id_token, &["chatgpt_account_id"]))
-        .or_else(|| token_refresh::jwt_string(id_token, &["sub"]));
-        if account_id.is_some() {
-            subscription.oauth_account_id = account_id;
+        if let Some(account_id) = account_id_from_id_token(id_token) {
+            subscription.oauth_account_id = Some(account_id);
         }
     }
     Ok(())
@@ -336,16 +324,18 @@ async fn fetch_with_token(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("Codex wham/usage：{}", e)))?;
+        .map_err(|e| UsageError::transport("Codex wham/usage", e))?;
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(UsageError::AuthRequired);
     }
     if !status.is_success() {
-        return Err(UsageError::Fetcher(format!(
-            "Codex wham/usage 状态码 {}",
-            status
-        )));
+        let body = resp.text().await.unwrap_or_default();
+        return Err(UsageError::http_status(
+            "Codex wham/usage",
+            status.as_u16(),
+            &body,
+        ));
     }
     let body: UsageResponse = resp
         .json()
@@ -387,19 +377,6 @@ fn window(w: Option<&Window>, label: &str) -> Option<UsageWindow> {
         reset_at: w.reset_at,
         breakdown: Vec::new(),
     })
-}
-
-fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

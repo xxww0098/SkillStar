@@ -174,8 +174,17 @@ impl Resp {
         (200..300).contains(&self.status)
     }
 
+    /// 401 only. **403 is deliberately excluded**: Cloudflare and regional
+    /// blocks answer 403 with a perfectly valid credential, and calling that
+    /// "login expired" latches `requires_reauth` on accounts that have nothing
+    /// to re-authorize (API-key providers cannot re-authorize at all).
     pub fn is_auth_error(&self) -> bool {
-        self.status == 401 || self.status == 403
+        self.status == 401
+    }
+
+    /// 429 / 5xx — the provider is busy or broken, the credential is fine.
+    pub fn is_transient(&self) -> bool {
+        self.status == 429 || (500..600).contains(&self.status)
     }
 
     pub fn parsed_json<T: DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
@@ -207,9 +216,24 @@ pub enum RequestError {
 }
 
 impl RequestError {
-    /// Quick check: did the upstream return 401/403?
+    /// Quick check: did the upstream return 401?
+    ///
+    /// **403 is deliberately not an auth error here.** Cloudflare / WAF /
+    /// regional blocks all answer 403 to a perfectly valid credential, and the
+    /// four API-key fetchers that consume this used to turn that into "登录已
+    /// 失效，请重新授权" — advice they cannot even act on, since an API key has
+    /// no re-authorization flow.
     pub fn is_auth_error(&self) -> bool {
-        matches!(self, Self::HttpStatus { status, .. } if *status == 401 || *status == 403)
+        matches!(self, Self::HttpStatus { status, .. } if *status == 401)
+    }
+
+    /// 429 / 5xx / transport failure: retrying later is plausible.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Transport(_) => true,
+            Self::HttpStatus { status, .. } => *status == 429 || (500..600).contains(status),
+            _ => false,
+        }
     }
 
     /// If this is an HTTP status error, return the status code.
@@ -219,5 +243,55 @@ impl RequestError {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(code: u16) -> RequestError {
+        RequestError::HttpStatus {
+            status: code,
+            body: "{}".into(),
+        }
+    }
+
+    #[test]
+    fn only_401_counts_as_an_auth_failure() {
+        assert!(status(401).is_auth_error());
+        for code in [403, 404, 429, 500, 503] {
+            assert!(
+                !status(code).is_auth_error(),
+                "{code} must not latch requires_reauth"
+            );
+        }
+    }
+
+    #[test]
+    fn rate_limit_and_server_errors_are_transient() {
+        for code in [429, 500, 502, 503] {
+            assert!(status(code).is_transient(), "{code}");
+        }
+        for code in [400, 401, 403, 404] {
+            assert!(!status(code).is_transient(), "{code}");
+        }
+    }
+
+    #[test]
+    fn resp_helpers_agree_with_the_error_classification() {
+        let forbidden = Resp {
+            status: 403,
+            body: String::new(),
+        };
+        assert!(!forbidden.is_auth_error());
+        assert!(!forbidden.is_transient());
+
+        let throttled = Resp {
+            status: 429,
+            body: String::new(),
+        };
+        assert!(!throttled.is_auth_error());
+        assert!(throttled.is_transient());
     }
 }

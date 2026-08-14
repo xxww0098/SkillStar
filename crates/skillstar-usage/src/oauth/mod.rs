@@ -8,4 +8,5 @@ pub mod manual_callback;
 pub mod pending_state;
 pub mod pkce;
 pub mod poll_flow;
+pub mod token_endpoint;
 pub mod token_refresh;
