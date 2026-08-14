@@ -15,6 +15,8 @@ name: Release
 #      bun run build          # must pass (tsc is strict in production)
 #      bun run test && cargo test --workspace --locked
 #      # wait for CI + Windows CI green on the commit you will tag
+#    The last line is no longer a request — the require-green-ci job below
+#    enforces it (lesson #6).
 #
 # 2. Windows-only Rust deps must be declared as target-specific.
 #    v0.0.1 Windows release failed with E0433 `cannot find crate junction`
@@ -40,17 +42,156 @@ name: Release
 #    `SKILLSTAR_GITHUB_APP_CLIENT_ID`. It is not a secret, but it must be in the
 #    Tauri build environment so Rust can embed it with `option_env!`. Fail before
 #    the platform matrix spends time compiling if the variable is absent.
+#
+# 6. Until 2026-08-14 this workflow needed no CI at all: it is tag-triggered,
+#    no job had `needs:`, and cross-workflow `needs:` does not exist in
+#    Actions — so `git tag v9 && git push --tags` shipped signed installers
+#    that had passed zero gates. Not theoretical: on 2026-08-14 main sat 22
+#    commits ahead of origin with the last CI run 10 days old (ci.yml lesson
+#    #6), so "we always run CI first" was not true even as a habit.
+#    The fix is require-green-ci below. It VERIFIES rather than REPEATS: it
+#    asks the Actions API whether ci.yml and windows-ci.yml already concluded
+#    `success` on this exact commit, and blocks the matrix until they have.
+#    Why not re-run the gates here (the obvious alternative):
+#      - Re-running them fresh — via a `gates` job or a `workflow_call`
+#        workflow shared with ci.yml — means bun install + lint + build +
+#        `cargo test --workspace` + the clippy ratchet against a cold
+#        release-scoped cargo cache. That is ~25-40 min in front of a matrix
+#        that already takes 20-35 min, to re-derive a verdict CI reached on
+#        this same SHA. Same guarantee, ~50x the wall clock.
+#      - Re-running only the cheap shell ratchets would be fast but strictly
+#        weaker: it would miss exactly what has actually burned releases here
+#        (compile and type errors), and CI already ran those ratchets on this
+#        SHA anyway.
+#    Cost of the design we took: all four platform legs wait on one ~30 s job,
+#    so a release where you followed the lesson #1 checklist gets ~30-45 s
+#    slower and the legs still run fully in parallel with each other. If CI is
+#    still running on the commit (the common `git push --follow-tags` race)
+#    the gate polls for up to 45 min rather than failing, so pushing main and
+#    the tag together still works — it just costs CI's own wall clock, which
+#    is the point.
+#    A commit that CI never ran at all cannot be released. That is intended:
+#    push it to main or open a PR first. The only bypass is a manual
+#    workflow_dispatch with skip_ci_gate=true, which is unreachable from a tag
+#    push and annotates the run when used.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      skip_ci_gate:
+        description: "Publish without a green CI run on this commit (emergency use only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
+  # Gate #1 — see failure lesson #6. Costs ~30 s when you followed the
+  # documented tag procedure, because it verifies CI rather than repeating it.
+  require-green-ci:
+    name: Require green CI on the release commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Assert required workflows are green on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          FALLBACK_SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          SKIP: ${{ inputs.skip_ci_gate }}
+          # Workflow *filenames* (stable across renames of their `name:`).
+          # Keep this list in step with the workflows that actually gate main.
+          REQUIRED: "ci.yml windows-ci.yml"
+          # How long to wait for a run that EXISTS to finish. Sized for a cold
+          # `cargo test --workspace` + clippy ratchet on the Linux leg.
+          TIMEOUT_MINUTES: "45"
+          # How long to wait for a run to appear AT ALL. Actions queues a run
+          # within seconds of a push, so "still nothing" almost always means
+          # this commit was never pushed to main / never opened as a PR. Fail
+          # that case fast instead of hanging for the full timeout.
+          GRACE_MINUTES: "10"
+          POLL_SECONDS: "30"
+        run: |
+          set -euo pipefail
+
+          # The escape hatch is deliberately unreachable from a tag push: on a
+          # `push` event the `inputs` context is empty, so SKIP is "". Only a
+          # human clicking "Run workflow" and ticking the box can bypass, and
+          # that leaves an annotation on the run.
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$SKIP" = "true" ]; then
+            echo "::warning title=Release gate skipped::skip_ci_gate=true was requested manually. These bundles were NOT verified against CI."
+            exit 0
+          fi
+
+          # Resolve the ref to a commit. Annotated tags are dereferenced by
+          # this endpoint, which `github.sha` alone would not guarantee.
+          SHA="$(gh api "repos/${REPO}/commits/${REF_NAME}" --jq '.sha' 2>/dev/null || true)"
+          [ -n "$SHA" ] || SHA="$FALLBACK_SHA"
+          echo "Release commit: $SHA (from $REF_NAME)"
+
+          # success | failed | running | missing
+          #   running = a run exists for this commit but has not concluded
+          #   missing = Actions has no run for this commit at all
+          state_of() {
+            local wf="$1" runs
+            runs="$(gh api "repos/${REPO}/actions/workflows/${wf}/runs?head_sha=${SHA}&per_page=100" \
+                      --jq '.workflow_runs[] | "\(.status):\(.conclusion)"' 2>/dev/null || true)"
+            if printf '%s\n' "$runs" | grep -qx 'completed:success'; then
+              echo success
+            elif [ -z "${runs//[[:space:]]/}" ]; then
+              echo missing
+            elif printf '%s\n' "$runs" | grep -qv '^completed:'; then
+              echo running
+            else
+              echo failed
+            fi
+          }
+
+          now() { date +%s; }
+          deadline=$(( $(now) + TIMEOUT_MINUTES * 60 ))
+          grace_deadline=$(( $(now) + GRACE_MINUTES * 60 ))
+
+          while :; do
+            running=""; failed=""; missing=""
+            for wf in $REQUIRED; do
+              case "$(state_of "$wf")" in
+                success) echo "  green      $wf" ;;
+                running) echo "  running    $wf"; running="$running $wf" ;;
+                missing) echo "  no run yet $wf"; missing="$missing $wf" ;;
+                failed)  echo "  RED        $wf"; failed="$failed $wf" ;;
+              esac
+            done
+
+            if [ -n "$failed" ]; then
+              echo "::error title=Release blocked::Required workflow(s)$failed did not conclude successfully on $SHA. Fix them, push, and re-run this release."
+              exit 1
+            fi
+            if [ -z "$running$missing" ]; then
+              echo "All required workflows are green on $SHA."
+              exit 0
+            fi
+            if [ -n "$missing" ] && [ "$(now)" -ge "$grace_deadline" ]; then
+              echo "::error title=Release blocked::No run of$missing exists for $SHA after ${GRACE_MINUTES}m. That commit was almost certainly never pushed to main and never opened as a PR, so it has passed no gates. Push it, let CI go green, then re-run this release."
+              exit 1
+            fi
+            if [ "$(now)" -ge "$deadline" ]; then
+              echo "::error title=Release blocked::Timed out after ${TIMEOUT_MINUTES}m waiting for$running$missing on $SHA."
+              exit 1
+            fi
+            echo "  ...retrying in ${POLL_SECONDS}s"
+            sleep "$POLL_SECONDS"
+          done
+
   release:
+    needs: require-green-ci
     env:
       SKILLSTAR_GITHUB_APP_CLIENT_ID: ${{ vars.SKILLSTAR_GITHUB_APP_CLIENT_ID }}
     strategy:
@@ -88,9 +229,32 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Reads the pin out of rust-toolchain.toml instead of hard-coding it —
+      # identical to ci.yml's steps, where the long rationale lives (ci.yml
+      # failure lesson #7). `shell: bash` matters: one matrix leg is
+      # windows-latest, which defaults to pwsh.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Verify GitHub App client ID

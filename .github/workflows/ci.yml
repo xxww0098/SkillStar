@@ -52,6 +52,27 @@ name: CI
 #    now also run locally as git hooks; install them once per clone with
 #    `bash scripts/internal/install_hooks.sh` (see README, "Git hooks"). When
 #    you add or remove a ratchet step here, mirror it in that installer.
+#
+# 7. Do NOT go back to `dtolnay/rust-toolchain@stable`. That ref installs
+#    whatever `stable` is today, and then the first `cargo` call in the repo
+#    makes rustup read rust-toolchain.toml and download 1.97.1 as well — two
+#    toolchains per runner where one is used. Worse, the `components: clippy`
+#    that used to sit on that step attached clippy to the `stable` toolchain
+#    that nothing here ever invokes; the clippy the ratchet actually runs came
+#    from rustup's own rust-toolchain.toml handling. The `@master` +
+#    `toolchain:` form below installs the pinned version once, with clippy and
+#    rustfmt attached to it directly.
+#    Two things to know before touching those steps:
+#    - The version and the component list are read out of rust-toolchain.toml
+#      at run time, so that file stays the single source of truth and no
+#      workflow carries a copy of "1.97.1" to drift out of sync.
+#    - `@master` is required when passing `toolchain:` as an input; the
+#      `@stable` / `@1.97.1` refs are branches whose only job is to supply a
+#      default. See the action's own README.
+#    Expect ONE cold Swatinem/rust-cache run per job after this change, then
+#    normal hit rates. That is not a regression: rust-cache hashes `rustc -vV`
+#    for the default toolchain plus every installed toolchain, and the set went
+#    from {stable, 1.97.1} to {1.97.1}, so the key legitimately moved once.
 on:
   push:
     branches: [main]
@@ -102,10 +123,40 @@ jobs:
       - name: Frontend tests
         run: bun run test
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Rust version + component list have exactly one home: rust-toolchain.toml
+      # (see failure lesson #7). Read it here and hand it to the action, so no
+      # workflow ever carries a second copy of the version number.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+
+          # Fail loudly rather than install something nobody chose:
+          #  - empty `components` would silently drop clippy/rustfmt and turn
+          #    check_clippy_ratchet.sh into a gate that never runs;
+          #  - a two-part `channel` ("1.98" rather than "1.98.0") is worse than
+          #    it looks: dtolnay's parser matches /^1\.[0-9]+$/ and rewrites it
+          #    into a date-derived version. Only an exact x.y.z passes through
+          #    its parser untouched.
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components — clippy/rustfmt must stay installed or the clippy ratchet stops running"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
         with:
-          components: clippy
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -215,8 +266,29 @@ jobs:
       - name: Frontend tests
         run: bun run test
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Identical to test-linux's pair of steps — see the long comment there.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

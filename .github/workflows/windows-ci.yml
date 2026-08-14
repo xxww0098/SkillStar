@@ -59,8 +59,32 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Reads the pin out of rust-toolchain.toml instead of hard-coding it —
+      # identical to ci.yml's steps, where the long rationale lives (ci.yml
+      # failure lesson #7). `shell: bash` matters here: this runner defaults to
+      # pwsh, and the script is POSIX sh.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
