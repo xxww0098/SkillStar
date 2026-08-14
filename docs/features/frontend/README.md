@@ -31,6 +31,7 @@
 精确 token 在 `src/index.css` 和 Tailwind theme 中维护，本文只维护不变量：
 
 - 默认视觉是深色精密玻璃界面；卡片可以半透明，正文密集的 modal 必须使用 `.modal-surface` / `.modal-surface-subtle` 的近实色表面，避免退回低对比度 `bg-card/95`。
+- 浅色由应用内的 `data-bg-style="paper"` 驱动，与系统色彩偏好无关。需要随主题换色的状态色写 `text-amber-400 paper:text-amber-700` 这类 `paper:` variant（`@custom-variant paper`），不要用 `dark:`——它匹配的是系统偏好，在应用内主题切换时不生效。
 - 小字号次级文本优先使用有足够对比度的 `text-foreground/60–75`。disabled 状态不能只靠 `opacity-50`。
 - 大容器使用统一大圆角尺度；紧凑控件使用较小尺度。
 - 动效只表达进入、退出、层级和直接反馈；尊重 `prefers-reduced-motion`。

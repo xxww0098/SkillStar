@@ -26,6 +26,10 @@
 @plugin "@tailwindcss/typography";
 @import "tailwindcss";
 
+/* The light theme is an app-level attribute (`data-bg-style="paper"`), not the
+   system color scheme, so status colors need their own variant to swap on it. */
+@custom-variant paper (&:where([data-bg-style="paper"] *));
+
 /* ========== SkillStar Dark Glassmorphism Design System ========== */
 
 @theme {
