@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+<title>技术手册教程原型</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d12;--panel:#121722;--line:#293246;--ink:#edf2ff;--muted:#9ca8bd;--accent:#8bb4ff;--ok:#70d7b1;--warn:#f7c76d}*{box-sizing:border-box}body{margin:0;background:#0b0d12;color:var(--ink);font:14px/1.55 ui-sans-serif,system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:42px 28px 70px}h1{font-size:42px;line-height:1.05;letter-spacing:-.035em;margin:6px 0 10px}h2{font-size:21px;margin:30px 0 10px}p{margin:5px 0;color:var(--muted)}code{background:#080a0e;border:1px solid var(--line);border-radius:5px;padding:2px 5px;color:#d8e7ff}.eyebrow{color:var(--accent);font-size:11px;letter-spacing:.16em;text-transform:uppercase}.grid{display:grid;grid-template-columns:1.12fr .88fr;gap:14px;margin-top:24px}.panel{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px}.panel h2{margin-top:0}.diagram{width:100%;height:auto;background:#090c12;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse}th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px;vertical-align:top}th{color:#cbd8ed;background:#0f141d;font-size:12px;text-transform:uppercase;letter-spacing:.06em}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--accent)}.required{color:var(--ok)}.unsupported{color:var(--warn)}@media(max-width:760px){.grid{grid-template-columns:1fr}h1{font-size:34px}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">B · Reference · 教程质量基准原型</div>
+<h1>Skill 检查契约</h1>
+<p>高密度速查。适合已熟悉 Agent/Skill 概念、希望在几十秒内定位入口、配置、文件或错误的用户。</p>
+<div class="grid">
+<section class="panel"><h2>能力边界</h2><table><tbody><tr><th>入口</th><td><code>SKILL.md</code> <span class="badge required">required</span></td></tr><tr><th>配置来源</th><td><code>references/config.md</code> <span class="badge required">explicit</span></td></tr><tr><th>验证入口</th><td><code>scripts/check.sh</code></td></tr><tr><th>未支持</th><td><span class="unsupported">源文件未声明的参数或结果</span></td></tr></tbody></table></section>
+<section class="panel"><h2>失败出口</h2><svg class="diagram" role="img" aria-label="检查失败后的诊断决策树" viewBox="0 0 430 270"><title>检查失败诊断树</title><rect x="130" y="18" width="170" height="46" rx="8" fill="#182238"/><text x="215" y="47" text-anchor="middle" fill="#edf2ff">check.sh 非零退出</text><path d="M215 64V110M215 110H85V155M215 110H345V155" stroke="#8bb4ff" stroke-width="2" fill="none"/><rect x="20" y="155" width="130" height="46" rx="8" fill="#342b1c"/><text x="85" y="184" text-anchor="middle" fill="#f7c76d">配置缺失/无效</text><rect x="280" y="155" width="130" height="46" rx="8" fill="#19322d"/><text x="345" y="184" text-anchor="middle" fill="#70d7b1">配置已核对</text><text x="85" y="231" text-anchor="middle" fill="#9ca8bd" font-size="13">回到 config.md</text><text x="345" y="231" text-anchor="middle" fill="#9ca8bd" font-size="13">保留输出并报告</text></svg></section>
+</div>
+<h2>操作矩阵</h2>
+<table><thead><tr><th>问题</th><th>判定</th><th>动作</th><th>证据</th></tr></thead><tbody><tr><td>从哪里开始？</td><td>Required</td><td>读取核心指令与前置条件</td><td><code>SKILL.md</code></td></tr><tr><td>配置值是否允许？</td><td>Explicit only</td><td>比对参考文件；不猜默认值</td><td><code>references/config.md</code></td></tr><tr><td>怎么证明成功？</td><td>Observable</td><td>运行脚本并读取退出码</td><td><code>scripts/check.sh</code></td></tr><tr><td>检查失败怎么办？</td><td>Recoverable</td><td>先核对配置，再保留输出报告</td><td>配置与脚本输出</td></tr></tbody></table>
+<h2>不变量</h2>
+<table><thead><tr><th>级别</th><th>契约</th><th>违反时</th></tr></thead><tbody><tr><td class="required">Required</td><td>所有操作必须有源文件证据</td><td>停止，不生成推测步骤</td></tr><tr><td>Optional</td><td>仅执行文件明确支持的扩展</td><td>跳过扩展</td></tr><tr><td class="unsupported">Unsupported</td><td>教程不得保证尚未运行的结果</td><td>改写为可观察检查</td></tr></tbody></table>
+<h2>源文件职责</h2>
+<table><thead><tr><th>源文件</th><th>作用</th><th>教程位置</th><th>证据</th></tr></thead><tbody><tr data-skillstar-file="SKILL.md"><td>SKILL.md</td><td>required 入口</td><td>能力边界 / 操作矩阵</td><td>任务边界</td></tr><tr data-skillstar-file="references/config.md"><td>references/config.md</td><td>配置契约</td><td>失败出口 / 不变量</td><td>显式配置</td></tr><tr data-skillstar-file="scripts/check.sh"><td>scripts/check.sh</td><td>输出契约</td><td>操作矩阵 / 失败出口</td><td>退出状态</td></tr></tbody></table>
+</main>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+<title>循序导览教程原型</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0f16;--panel:#141b28;--line:#2a354a;--ink:#f3f6ff;--muted:#a3aec2;--accent:#7eb0ff;--ok:#69d8b0;--warn:#ffd078}*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#0b0f16,#121a29);color:var(--ink);font:15px/1.65 ui-sans-serif,system-ui,sans-serif}main{max-width:980px;margin:auto;padding:56px 28px 72px}h1{font-size:clamp(36px,6vw,64px);line-height:1.03;letter-spacing:-.04em;margin:8px 0 20px}h2{margin-top:40px}h3{margin:0 0 7px}p{color:var(--muted)}code{background:#080b11;border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:#dce9ff}.eyebrow{color:var(--accent);font-size:12px;letter-spacing:.18em;text-transform:uppercase}.lede{font-size:19px;max-width:720px}.facts,.steps{display:grid;gap:14px}.facts{grid-template-columns:repeat(3,1fr);margin:28px 0}.fact,.step,.callout{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}.fact strong{display:block}.flow{width:100%;height:auto;background:#090d14;border:1px solid var(--line);border-radius:18px}.step{display:grid;grid-template-columns:44px 1fr;gap:14px}.number{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:#203d66;color:#d9e8ff;font-weight:800}.signal{border-left:3px solid var(--ok);padding-left:12px}.warning{border-left-color:var(--warn)}table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:11px;vertical-align:top}th{color:#cfdbef;background:#101722}@media(max-width:700px){.facts{grid-template-columns:1fr}.step{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">A · Guided · 教程质量基准原型</div>
+<h1>30 秒跑通一次 Skill 检查</h1>
+<p class="lede">适合第一次接触该 Skill 的用户。先完成最短成功路径，再解释文件关系和失败恢复。示例能力只来自源文件清单。</p>
+<section class="facts" aria-label="学习目标">
+<div class="fact"><strong>你会完成</strong><span>读取规则并执行检查</span></div>
+<div class="fact"><strong>学习路径</strong><span>3 个可验证步骤</span></div>
+<div class="fact"><strong>成功依据</strong><span>真实退出码与输出</span></div>
+</section>
+<svg class="flow" role="img" aria-label="从核心指令到配置再到验证脚本的主流程" viewBox="0 0 900 220"><title>Skill 检查主流程</title><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#7eb0ff"/></marker></defs><rect x="35" y="70" width="220" height="82" rx="14" fill="#172238" stroke="#7eb0ff"/><text x="145" y="103" text-anchor="middle" fill="#f3f6ff" font-size="18">SKILL.md</text><text x="145" y="130" text-anchor="middle" fill="#a3aec2" font-size="13">目标与入口</text><rect x="340" y="70" width="220" height="82" rx="14" fill="#172238" stroke="#7eb0ff"/><text x="450" y="103" text-anchor="middle" fill="#f3f6ff" font-size="17">references/config.md</text><text x="450" y="130" text-anchor="middle" fill="#a3aec2" font-size="13">配置约束</text><rect x="645" y="70" width="220" height="82" rx="14" fill="#17322d" stroke="#69d8b0"/><text x="755" y="103" text-anchor="middle" fill="#f3f6ff" font-size="17">scripts/check.sh</text><text x="755" y="130" text-anchor="middle" fill="#a3aec2" font-size="13">可观察结果</text><path d="M255 111H330M560 111H635" stroke="#7eb0ff" stroke-width="3" marker-end="url(#arrow)"/></svg>
+<h2>最短成功路径</h2>
+<section class="steps">
+<article class="step"><div class="number">1</div><div><h3>找到正确入口</h3><p>先读 <code>SKILL.md</code>，确认任务、前置条件和下一份要读的文件。不要从脚本名反推能力。</p><p class="signal"><strong>成功信号：</strong>你能用一句话复述目标，并指出配置证据的位置。</p></div></article>
+<article class="step"><div class="number">2</div><div><h3>核对配置约束</h3><p>按核心指令读取 <code>references/config.md</code>。只使用文件明确列出的配置项和默认值。</p><p class="signal warning"><strong>出错怎么办：</strong>若引用不存在，停止执行并报告缺失路径，不猜测配置。</p></div></article>
+<article class="step"><div class="number">3</div><div><h3>运行并验证</h3><p>按说明调用 <code>scripts/check.sh</code>，以真实退出码和终端输出判断结果。</p><p class="signal"><strong>成功信号：</strong>退出码为 0；否则回到配置步骤逐项比对。</p></div></article>
+</section>
+<aside class="callout"><h3>深入理解</h3><p>三个文件形成“意图 → 约束 → 证据”链路。教程不宣称脚本一定成功，只告诉你如何验证。</p></aside>
+<h2>源文件覆盖</h2>
+<table><thead><tr><th>源文件</th><th>作用</th><th>教程位置</th><th>证据</th></tr></thead><tbody><tr data-skillstar-file="SKILL.md"><td>SKILL.md</td><td>核心指令</td><td>步骤 1</td><td>入口与前置条件</td></tr><tr data-skillstar-file="references/config.md"><td>references/config.md</td><td>配置参考</td><td>步骤 2</td><td>允许的配置项</td></tr><tr data-skillstar-file="scripts/check.sh"><td>scripts/check.sh</td><td>验证脚本</td><td>步骤 3</td><td>可观察成功信号</td></tr></tbody></table>
+</main>
+</body>
+</html>
