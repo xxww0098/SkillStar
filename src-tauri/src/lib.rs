@@ -473,6 +473,7 @@ pub fn run() {
             commands::usage_commands::import_subscription_from_local,
             commands::usage_commands::get_subscription_api_key,
             commands::usage_commands::switch_active_subscription_to_cli,
+            commands::usage_commands::reconcile_cli_accounts,
             // Usage floating card windows (multi-window)
             commands::usage_windows::open_usage_card_window,
             commands::usage_windows::close_usage_card_window,

@@ -7,8 +7,8 @@ use skillstar_core::infra::error::AppError;
 use tauri::AppHandle;
 
 pub use skillstar_app::usage::{
-    CatalogEntryDto, CreateSubscriptionInput, OAuthStartDto, SubscriptionAlertDto, SubscriptionDto,
-    UpdateSubscriptionInput, UsageSummary,
+    CatalogEntryDto, CliAccountStateDto, CreateSubscriptionInput, OAuthStartDto,
+    SubscriptionAlertDto, SubscriptionDto, SwitchOutcomeDto, UpdateSubscriptionInput, UsageSummary,
 };
 
 #[tauri::command]
@@ -54,9 +54,13 @@ pub async fn refresh_subscription_usage(id: String) -> Result<SubscriptionDto, A
     Ok(dto)
 }
 
+/// `catalogId` scopes the sweep to one provider (the Grok page refreshes only
+/// `xai`); omitted / null refreshes everything.
 #[tauri::command]
-pub async fn refresh_all_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
-    let dtos = usage::refresh_all_subscriptions().await?;
+pub async fn refresh_all_subscriptions(
+    catalog_id: Option<String>,
+) -> Result<Vec<SubscriptionDto>, AppError> {
+    let dtos = usage::refresh_all_subscriptions(catalog_id).await?;
     crate::core::dock_menu::refresh();
     Ok(dtos)
 }
@@ -130,8 +134,19 @@ pub async fn set_active_subscription(
 #[tauri::command]
 pub async fn switch_active_subscription_to_cli(
     catalog_id: String,
-) -> Result<skillstar_app::usage_switch::SwitchOutcome, AppError> {
+) -> Result<SwitchOutcomeDto, AppError> {
     usage::switch_active_subscription_to_cli(catalog_id).await
+}
+
+/// Which account each CLI is actually serving right now.
+///
+/// The companion to `get_active_subscriptions`: that one returns the pin (what
+/// the user asked for), this one returns what is on disk (what the CLI will
+/// read). The badge follows this; the pin only fills in for catalogs that have
+/// no CLI behind them.
+#[tauri::command]
+pub async fn reconcile_cli_accounts() -> Result<HashMap<String, CliAccountStateDto>, AppError> {
+    usage::reconcile_cli_accounts().await
 }
 
 #[tauri::command]

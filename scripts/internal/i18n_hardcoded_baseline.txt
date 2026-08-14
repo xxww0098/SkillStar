@@ -18,6 +18,11 @@
 # `isAlternateIaPrototype()` gates on `!import.meta.env.PROD`, and
 # `ModelsHubPrototype`/`PrototypeOverlays` are that switcher's own chrome.
 # `devMock/models.ts` is Chinese fixture copy, same as its sibling devMocks.
+# Updated 2026-08-14: devMock/usageData.ts 8 -> 14. The Usage catalog gained
+# `anthropic` and the dialog gained Cookie mode, so the browser-dev fixture now
+# mirrors six more `catalog.rs` fields (display_name / description / warning).
+# Those strings live in Rust and reach the UI through the Tauri DTO, never
+# through i18n; the fixture is only what the browser sees with no backend.
 src/components/layout/CommandPalette.tsx:9
 src/components/shared/ProviderBrandIcon.tsx:3
 src/features/models/components/hub/prototype/ModelsHubPrototype.tsx:2
@@ -33,4 +38,4 @@ src/lib/ipc/devMock/mcpData.ts:2
 src/lib/ipc/devMock/models.ts:1
 src/lib/ipc/devMock/modelsData.ts:1
 src/lib/ipc/devMock/skillsData.ts:4
-src/lib/ipc/devMock/usageData.ts:8
+src/lib/ipc/devMock/usageData.ts:14

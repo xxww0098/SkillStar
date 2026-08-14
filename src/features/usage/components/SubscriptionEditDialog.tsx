@@ -8,19 +8,21 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { openExternalUrl } from "@/lib/externalOpen";
 import { cn } from "@/lib/utils";
 import { usageApi } from "../api";
+import { selectableAuthModes } from "../lib/authModes";
+import { authModeLabel } from "../lib/usageLabels";
 import {
   LOCAL_IMPORT_CATALOG_IDS,
   type AuthMode,
   type BillingCycle,
   type CatalogEntry,
   type OAuthStart,
-  selectableAuthModes,
   type Subscription,
 } from "../types";
 import { ProviderCatalogHero } from "./ProviderCatalogHero";
 import { AdvancedBillingSection } from "./subscriptionEdit/AdvancedBillingSection";
 import { ApiKeyFields } from "./subscriptionEdit/api/ApiKeyFields";
 import { AutoImportBanner } from "./subscriptionEdit/AutoImportBanner";
+import { CookieFields } from "./subscriptionEdit/cookie/CookieFields";
 import { Field, parseDateInput, toDateInput } from "./subscriptionEdit/fields";
 import { OAuthLoginPanel } from "./subscriptionEdit/oauth/OAuthLoginPanel";
 
@@ -62,6 +64,7 @@ export function SubscriptionEditDialog({
   const [autoRenew, setAutoRenew] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [platformToken, setPlatformToken] = useState("");
+  const [cookieHeader, setCookieHeader] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [showPlatformToken, setShowPlatformToken] = useState(false);
   const [region, setRegion] = useState("cn");
@@ -101,6 +104,7 @@ export function SubscriptionEditDialog({
       setAutoRenew(editing.auto_renew);
       setApiKey("");
       setPlatformToken("");
+      setCookieHeader("");
       setRegion(editing.oauth_region ?? "cn");
       setNote(editing.note ?? "");
     } else {
@@ -120,6 +124,7 @@ export function SubscriptionEditDialog({
       setAutoRenew(false);
       setApiKey("");
       setPlatformToken("");
+      setCookieHeader("");
       setRegion(preselectedEntry?.regions[0] ?? "cn");
       setNote("");
     }
@@ -180,14 +185,7 @@ export function SubscriptionEditDialog({
 
   const endDateLabel = autoRenew ? t("usage.fieldNextRenew") : t("usage.fieldEndDate");
 
-  const labelAuthMode = (mode: AuthMode) => {
-    switch (mode) {
-      case "api-key":
-        return "API Key";
-      case "o-auth":
-        return "OAuth";
-    }
-  };
+  const labelAuthMode = (mode: AuthMode) => authModeLabel(mode, t);
 
   const billingCycleOptions: BillingCycle[] = ["monthly", "annual", "one-time", "api-key"];
 
@@ -280,7 +278,8 @@ export function SubscriptionEditDialog({
       const apiKeyPayload = authMode === "api-key" && apiKey.trim() ? apiKey.trim() : undefined;
       const platformTokenPayload =
         catalogId === "deepseek" && authMode === "api-key" && platformToken.trim() ? platformToken.trim() : undefined;
-      const shouldRefreshAfterSave = Boolean(apiKeyPayload || platformTokenPayload);
+      const cookieHeaderPayload = authMode === "cookie" && cookieHeader.trim() ? cookieHeader.trim() : undefined;
+      const shouldRefreshAfterSave = Boolean(apiKeyPayload || platformTokenPayload || cookieHeaderPayload);
 
       const refreshAfterCredentialSave = async (sub: Subscription) => {
         if (!shouldRefreshAfterSave) return sub;
@@ -299,6 +298,7 @@ export function SubscriptionEditDialog({
           auth_mode: authMode,
           api_key: apiKeyPayload,
           platform_token: platformTokenPayload,
+          cookie_header: cookieHeaderPayload,
           oauth_region: authMode === "o-auth" ? region : undefined,
           ...payload,
         });
@@ -309,6 +309,7 @@ export function SubscriptionEditDialog({
           ...payload,
           api_key: apiKeyPayload,
           platform_token: platformTokenPayload,
+          cookie_header: cookieHeaderPayload,
         });
         onUpdated(await refreshAfterCredentialSave(updated));
         toast.success(t("usage.toastUpdated"));
@@ -639,6 +640,16 @@ export function SubscriptionEditDialog({
                 setPlatformToken={setPlatformToken}
                 showPlatformToken={showPlatformToken}
                 setShowPlatformToken={setShowPlatformToken}
+              />
+            )}
+
+            {/* 1b. Cookie 认证：粘贴浏览器 Cookie 头（stepfun / opencode） */}
+            {authMode === "cookie" && (
+              <CookieFields
+                editing={editing}
+                selectedEntry={selectedEntry}
+                cookieHeader={cookieHeader}
+                setCookieHeader={setCookieHeader}
               />
             )}
 

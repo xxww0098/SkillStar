@@ -1,7 +1,8 @@
-import { BadgeCheck, GripVertical } from "lucide-react";
+import { BadgeCheck, GripVertical, TriangleAlert, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { BrandTheme } from "../../lib/brandThemes";
+import type { CliAccountBadge } from "../../lib/cliCustody";
 import type { BillingCycle } from "../../types";
 import { PlanBadge } from "../PlanBadge";
 import { hasBrandIcon, ProviderLogo } from "../ProviderLogo";
@@ -14,12 +15,35 @@ export interface UsageCardHeaderProps {
   planName: string | null;
   /** Billing type chip: 月付 / 年付 / API Key / 一次性 */
   billingCycle?: BillingCycle;
-  /** Active account for this catalog — shown here so MetaStrip height stays stable. */
-  isActive?: boolean;
+  /**
+   * What the CLI is actually doing with this account — shown here so MetaStrip
+   * height stays stable.
+   *
+   * Three states, not a boolean: "the CLI is on this account", "the CLI is on
+   * something else", and "the CLI has nobody" are different things to tell a
+   * user, and the last two used to render identically to "not current".
+   */
+  cliBadge?: CliAccountBadge;
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
 }
 
-/** Signature brand band — logo chip + title + billing type + active + plan badge + drag handle. */
+/**
+ * Colour is the honest part of the signal: a card the CLI has moved off must
+ * not keep wearing the same green chip a serving card wears.
+ */
+const BADGE_STYLES: Record<Exclude<CliAccountBadge, "none">, string> = {
+  current: "bg-emerald-400/25 text-emerald-50 ring-emerald-200/50",
+  diverged: "bg-amber-400/30 text-amber-50 ring-amber-200/60",
+  missing: "bg-zinc-900/30 text-zinc-100 ring-white/30",
+};
+
+const BADGE_COPY: Record<Exclude<CliAccountBadge, "none">, { label: string; title: string }> = {
+  current: { label: "usage.cardActive", title: "usage.cardActiveTitle" },
+  diverged: { label: "usage.cardCliDiverged", title: "usage.cardCliDivergedTitle" },
+  missing: { label: "usage.cardCliMissing", title: "usage.cardCliMissingTitle" },
+};
+
+/** Signature brand band — logo chip + title + billing type + CLI state + plan badge + drag handle. */
 export function UsageCardHeader({
   catalogId,
   displayName,
@@ -27,7 +51,7 @@ export function UsageCardHeader({
   theme,
   planName,
   billingCycle,
-  isActive,
+  cliBadge = "none",
   onDragHandlePointerDown,
 }: UsageCardHeaderProps) {
   const { t } = useTranslation();
@@ -72,13 +96,23 @@ export function UsageCardHeader({
                 {billingLabel}
               </span>
             )}
-            {isActive && (
+            {cliBadge !== "none" && (
               <span
-                className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-emerald-400/25 px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide text-emerald-50 ring-1 ring-emerald-200/50 backdrop-blur-[2px]"
-                title={t("usage.cardActiveTitle")}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide ring-1 backdrop-blur-[2px]",
+                  BADGE_STYLES[cliBadge],
+                )}
+                title={t(BADGE_COPY[cliBadge].title)}
+                data-cli-badge={cliBadge}
               >
-                <BadgeCheck className="h-2.5 w-2.5" />
-                {t("usage.cardActive")}
+                {cliBadge === "current" ? (
+                  <BadgeCheck className="h-2.5 w-2.5" />
+                ) : cliBadge === "diverged" ? (
+                  <TriangleAlert className="h-2.5 w-2.5" />
+                ) : (
+                  <Unplug className="h-2.5 w-2.5" />
+                )}
+                {t(BADGE_COPY[cliBadge].label)}
               </span>
             )}
           </div>

@@ -1,5 +1,6 @@
 import {
   AntigravityColor,
+  ClaudeColor,
   CodexColor,
   CursorMono,
   DeepSeekColor,
@@ -27,6 +28,7 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   codex: CodexColor,
   antigravity: AntigravityColor,
   xai: GrokMono,
+  anthropic: ClaudeColor,
   // api-key
   deepseek: DeepSeekColor,
   glm: ZhipuColor,

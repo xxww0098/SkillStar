@@ -1,9 +1,10 @@
 import { motion } from "framer-motion";
 import { getBrandTheme } from "../lib/brandThemes";
+import { cliAccountBadgeFor } from "../lib/cliCustody";
 import { monthlyEquivalentPrice } from "../lib/pricing";
 import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
-import type { CatalogEntry, Subscription } from "../types";
+import type { CatalogEntry, CliAccountState, Subscription } from "../types";
 import { priorityCardClass } from "./ResetCountdown";
 import {
   UsageCardBody,
@@ -18,6 +19,10 @@ import {
 interface SubscriptionCardProps {
   subscription: Subscription;
   catalog: CatalogEntry | undefined;
+  /** `catalog_id -> which account that CLI is actually serving`. The "current"
+   *  badge is drawn from this, not from the `is_active` pin, which is only a
+   *  cache of it. Absent entries fall back to the pin. */
+  cliAccounts?: Record<string, CliAccountState>;
   onRefresh: (id: string) => Promise<void>;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -41,6 +46,7 @@ interface SubscriptionCardProps {
 export function SubscriptionCard({
   subscription: sub,
   catalog,
+  cliAccounts,
   onRefresh,
   onEdit,
   onDelete,
@@ -61,6 +67,7 @@ export function SubscriptionCard({
   const brandColorHex = catalog?.brand_color ?? "6B7280";
   const theme = getBrandTheme(sub.catalog_id, brandColorHex);
   const cardTitle = subscriptionCardTitle(sub.display_name, catalog?.display_name);
+  const cliBadge = cliAccountBadgeFor(sub, cliAccounts ?? {});
 
   return (
     <motion.article
@@ -71,7 +78,9 @@ export function SubscriptionCard({
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       style={brandThemeToCssVars(theme)}
       className={usageCardShellClassName({
-        isActive: sub.is_active,
+        // The ring means "the CLI is on this account", so it follows the
+        // reconciled state and not the pin that only records the request.
+        isActive: cliBadge === "current",
         requiresReauth: sub.requires_reauth,
         priorityClass: resetInfo && priorityCardClass(resetInfo.resetAt, resetInfo.usedPercent, resetInfo.mode),
       })}
@@ -85,7 +94,7 @@ export function SubscriptionCard({
           theme={theme}
           planName={planName}
           billingCycle={sub.billing_cycle}
-          isActive={sub.is_active}
+          cliBadge={cliBadge}
           onDragHandlePointerDown={onDragHandlePointerDown}
         />
         <UsageCardMetaStrip

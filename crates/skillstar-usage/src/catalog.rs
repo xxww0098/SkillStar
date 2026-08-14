@@ -5,9 +5,11 @@
 //! by extending this catalog rather than letting users free-text input.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "AuthMode.ts")]
 pub enum AuthMode {
     ApiKey,
     OAuth,
@@ -15,8 +17,9 @@ pub enum AuthMode {
     Manual,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "CatalogTier.ts")]
 pub enum CatalogTier {
     /// OAuth — v1 implements 6 of these.
     OAuth,
@@ -85,7 +88,7 @@ const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 /// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
     vec![
-        // ── Tier 1: OAuth (4) ──────────────────────────────────────────
+        // ── Tier 1: OAuth ──────────────────────────────────────────────
         CatalogEntry {
             id: "cursor",
             display_name: "Cursor",
@@ -132,7 +135,26 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "USD",
             "https://x.ai",
         ),
-        // ── Tier 2: API Key (4) ────────────────────────────────────────
+        CatalogEntry {
+            id: "anthropic",
+            display_name: "Claude",
+            description: "Anthropic Claude Code",
+            tier: CatalogTier::OAuth,
+            auth_modes: OAUTH_ONLY,
+            brand_color: "D97757",
+            default_currency: "USD",
+            subscription_url: "https://claude.ai/settings/usage",
+            // There is no browser leg to drive: Claude Code owns the credential
+            // and rotates it, so "登录" adopts whatever that store already holds.
+            warning: Some(
+                "Claude 额度读取 Claude Code 自己的登录态（macOS 钥匙串 \
+                 `Claude Code-credentials`，其它平台 `~/.claude/.credentials.json`）。\
+                 请先在终端跑一次 `claude` 完成登录，再点下方按钮绑定；\
+                 SkillStar 不会刷新或覆盖这份凭证。",
+            ),
+            regions: NO_REGIONS,
+        },
+        // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
             "DeepSeek",
@@ -173,7 +195,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "CNY",
             "https://platform.minimaxi.com/user-center/basic-information/interface-key",
         ),
-        // ── Tier 3: Cookie (2) + Manual ────────────────────────────────
+        // ── Tier 3: Cookie + Manual ────────────────────────────────────
         CatalogEntry {
             id: "stepfun",
             display_name: "阶跃 Step",
@@ -217,8 +239,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_10_entries() {
-        assert_eq!(catalog().len(), 10);
+    fn catalog_has_11_entries() {
+        assert_eq!(catalog().len(), 11);
     }
 
     #[test]
@@ -237,7 +259,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 4);
+        assert_eq!(oauth, 5);
         assert_eq!(api_key, 4);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);

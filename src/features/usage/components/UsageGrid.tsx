@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { mergeSubscriptionOrder } from "../lib/pricing";
-import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type Subscription } from "../types";
+import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type CliAccountState, type Subscription } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { UsageHomeEmpty } from "./UsageHomeEmpty";
@@ -15,6 +15,9 @@ interface UsageGridProps {
   subscriptions: Subscription[];
   allSubscriptions: Subscription[];
   catalog: CatalogEntry[];
+  /** `catalog_id -> which account that CLI is actually serving`; each card
+   *  draws its "current" badge from this rather than from the pin. */
+  cliAccounts?: Record<string, CliAccountState>;
   filter: CatalogFilter;
   onRefresh: (id: string) => Promise<void>;
   refreshDisabled?: boolean;
@@ -31,7 +34,7 @@ interface UsageGridProps {
 
 type CardCallbacks = Pick<
   UsageGridProps,
-  "onRefresh" | "onEdit" | "onDelete" | "onReauth" | "onSetActive" | "onSwitchToCli" | "refreshDisabled"
+  "onRefresh" | "onEdit" | "onDelete" | "onReauth" | "onSetActive" | "onSwitchToCli" | "refreshDisabled" | "cliAccounts"
 >;
 
 interface ProviderGroup {
@@ -45,6 +48,7 @@ export function UsageGrid({
   subscriptions,
   allSubscriptions,
   catalog,
+  cliAccounts,
   filter,
   onRefresh,
   refreshDisabled = false,
@@ -117,6 +121,7 @@ export function UsageGrid({
     onReauth,
     onSetActive,
     onSwitchToCli,
+    cliAccounts,
   };
 
   const gridClass = "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";

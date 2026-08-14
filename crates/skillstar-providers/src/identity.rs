@@ -92,9 +92,11 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
     },
     // Native Official seeds (Models routing; empty endpoints, no API key).
     ProviderIdentity {
+        // Usage catalog `anthropic` (Claude subscription quota) + Models native
+        // Official seed are the same vendor account, so they share one identity.
         canonical_id: "claude-official",
         display_name: "Claude Official",
-        catalog_id: None,
+        catalog_id: Some("anthropic"),
         preset_ids: &["claude-official"],
     },
     // ── Subscription-only providers (OAuth / Cookie / Manual; no routing preset) ──

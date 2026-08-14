@@ -57,6 +57,19 @@ export const USAGE_CATALOG = [
     regions: [],
   },
   {
+    id: "anthropic",
+    display_name: "Claude",
+    description: "Anthropic Claude Code",
+    tier: "o-auth",
+    auth_modes: ["o-auth"],
+    brand_color: "D97757",
+    default_currency: "USD",
+    subscription_url: "https://claude.ai/settings/usage",
+    warning:
+      "Claude 额度读取 Claude Code 自己的登录态（macOS 钥匙串 `Claude Code-credentials`，其它平台 `~/.claude/.credentials.json`）。请先在终端跑一次 `claude` 完成登录，再点下方按钮绑定；SkillStar 不会刷新或覆盖这份凭证。",
+    regions: [],
+  },
+  {
     id: "deepseek",
     display_name: "DeepSeek",
     description: "API Key 余额",
@@ -102,6 +115,32 @@ export const USAGE_CATALOG = [
     default_currency: "CNY",
     subscription_url: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     warning: null,
+    regions: [],
+  },
+  {
+    id: "stepfun",
+    display_name: "阶跃 Step",
+    description: "账户余额 / 消费",
+    tier: "cookie",
+    auth_modes: ["cookie", "manual"],
+    brand_color: "00B5A9",
+    default_currency: "CNY",
+    subscription_url: "https://platform.stepfun.com/account-overview",
+    warning:
+      "阶跃官方未提供余额查询 API：请使用 Cookie 模式，登录 platform.stepfun.com 后，从浏览器开发者工具复制包含 Oasis-Token 的 Cookie。",
+    regions: [],
+  },
+  {
+    id: "opencode",
+    display_name: "OpenCode",
+    description: "$10/月 Go 订阅 · Zen 按量付费",
+    tier: "cookie",
+    auth_modes: ["cookie", "manual"],
+    brand_color: "6366F1",
+    default_currency: "USD",
+    subscription_url: "https://opencode.ai/workspace",
+    warning:
+      "OpenCode 官方 OAuth token 无法读取控制台用量；请使用 Cookie 模式，从 opencode.ai 控制台请求中复制 Cookie。",
     regions: [],
   },
 ];
@@ -216,6 +255,44 @@ export const USAGE_SUBSCRIPTIONS = [
         percent: 31,
         reset_at: nowSec() + days(5),
         breakdown: [],
+      },
+      monthly: null,
+      balance: null,
+      credits: [],
+      error: null,
+      api_keys: [],
+    },
+  }),
+  sub({
+    id: "sub-anthropic",
+    catalog_id: "anthropic",
+    display_name: "claude@example.com",
+    auth_mode: "o-auth",
+    plan_tier: "MAX",
+    monthly_price: 100,
+    currency: "USD",
+    sort_index: 2,
+    is_active: false,
+    usage: {
+      subscription_id: "sub-anthropic",
+      fetched_at: nowSec() - 600,
+      plan_name: "MAX",
+      // Percent-only rate-limit windows: `used == percent`, `total == 100`.
+      // Same shape Codex emits, so both cards read through `UsageMeter`.
+      hourly: { label: "5h", used: 47, total: 100, percent: 47, reset_at: nowSec() + 7200, breakdown: [] },
+      weekly: {
+        label: "7d",
+        used: 68,
+        total: 100,
+        percent: 68,
+        reset_at: nowSec() + days(4),
+        // `limits[].kind == "weekly_scoped"` — per-model weekly allowances.
+        // Scoped limits share the parent's reset, so the fetcher strips their
+        // redundant countdown rather than stacking three identical chips.
+        breakdown: [
+          { label: "Opus 5", used: 91, total: 100, percent: 91, breakdown: [] },
+          { label: "Sonnet 5", used: 22, total: 100, percent: 22, breakdown: [] },
+        ],
       },
       monthly: null,
       balance: null,

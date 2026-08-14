@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { BadgeCheck, Pin, PinOff, RefreshCw, X } from "lucide-react";
+import { BadgeCheck, Pin, PinOff, RefreshCw, TriangleAlert, Unplug, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -10,17 +10,19 @@ import { ProviderLogo, hasBrandIcon } from "./ProviderLogo";
 import { ResetCountdown } from "./ResetCountdown";
 import { LightBodySurface, UsageCardBody, resolveUsageBodyRegistration } from "./card";
 import { getBrandTheme } from "../lib/brandThemes";
+import { cliAccountBadgeFor, isDegradedCopyBinding } from "../lib/cliCustody";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
 import { authModeLabel, getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
 import { usageApi } from "../api";
-import type { CatalogEntry, Subscription, SwitchOutcome } from "../types";
+import {
+  USAGE_ACTIVE_CHANGED_EVENT,
+  type ActiveChangedPayload,
+  type CatalogEntry,
+  type CliAccountState,
+  type Subscription,
+  type SwitchOutcome,
+} from "../types";
 import { cn } from "@/lib/utils";
-
-/** Payload of the `usage://active-changed` event broadcast by the backend. */
-interface ActiveChangedPayload {
-  catalogId: string;
-  subscriptionId: string;
-}
 
 const AUTO_REFRESH_MS = 60_000;
 
@@ -49,6 +51,10 @@ export function UsageCardWindow() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry | null>(null);
   const [allCatalog, setAllCatalog] = useState<CatalogEntry[]>([]);
+  /** What the CLIs are actually serving. This window shows the same badge as
+   *  the grid, so it has to read the same truth — the pin alone would let it
+   *  claim "current" for an account the CLI had already been moved off. */
+  const [cliAccounts, setCliAccounts] = useState<Record<string, CliAccountState>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -61,6 +67,12 @@ export function UsageCardWindow() {
         const subs = await usageApi.listSubscriptions();
         const target = subs.find((s) => s.id === subId) ?? null;
         setSubscription(target);
+        try {
+          setCliAccounts(await usageApi.reconcileCliAccounts());
+        } catch {
+          // Best-effort: the badge falls back to the pin rather than to a
+          // louder claim, and the rest of the card still loads.
+        }
         if (allCatalog.length === 0) {
           const cat = await usageApi.listCatalog();
           setAllCatalog(cat);
@@ -139,6 +151,12 @@ export function UsageCardWindow() {
         toast.success(t("usage.switchCliSuccess"), {
           description: `${displayName} → ${outcome.toolId} · ${t("usage.switchCliRestartHint")}`,
         });
+        if (isDegradedCopyBinding(outcome)) {
+          toast.warning(t("usage.switchCliCopyMode"), {
+            description: t("usage.switchCliCopyModeHint"),
+            duration: 8000,
+          });
+        }
         return;
       }
       if (outcome.error) {
@@ -178,6 +196,12 @@ export function UsageCardWindow() {
         toast.success(t("usage.switchCliSynced"), {
           description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint")}`,
         });
+        if (isDegradedCopyBinding(outcome)) {
+          toast.warning(t("usage.switchCliCopyMode"), {
+            description: t("usage.switchCliCopyModeHint"),
+            duration: 8000,
+          });
+        }
       } else if (outcome.error) {
         toast.error(t("usage.switchCliSyncFailed"), {
           description: outcome.error,
@@ -248,6 +272,8 @@ export function UsageCardWindow() {
   const hasIcon = hasBrandIcon(subscription.catalog_id);
   const cliFailed =
     subscription.supports_cli_switch && subscription.switch_result && !subscription.switch_result.success;
+  const cliBadge = cliAccountBadgeFor(subscription, cliAccounts);
+  const copyBound = isDegradedCopyBinding(subscription.switch_result);
 
   return (
     <div
@@ -282,9 +308,28 @@ export function UsageCardWindow() {
             catalog?.display_name,
           )}
         </span>
-        {subscription.is_active && (
-          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+        {cliBadge === "current" && (
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+            <BadgeCheck size={10} />
             {t("usage.cardActive")}
+          </span>
+        )}
+        {cliBadge === "diverged" && (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
+            title={t("usage.cardCliDivergedTitle")}
+          >
+            <TriangleAlert size={10} />
+            {t("usage.cardCliDiverged")}
+          </span>
+        )}
+        {cliBadge === "missing" && (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            title={t("usage.cardCliMissingTitle")}
+          >
+            <Unplug size={10} />
+            {t("usage.cardCliMissing")}
           </span>
         )}
         <button
@@ -340,6 +385,16 @@ export function UsageCardWindow() {
           <UsageCardBody subscription={subscription} brandColorHex={brandColor} density="compact" surface="window" />
         </LightBodySurface>
 
+        {cliBadge === "diverged" && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-600">
+            {t("usage.cardCliDivergedHint")}
+          </div>
+        )}
+        {copyBound && (
+          <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] text-amber-600">
+            {t("usage.switchCliCopyModeHint")}
+          </div>
+        )}
         {cliFailed && subscription.switch_result?.error && (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-600">
             {subscription.switch_result.error}
@@ -402,7 +457,7 @@ function useActiveChangedListener(catalogId: string | null, onActiveChanged: () 
     if (!isTauri() || !catalogId) return;
     let disposed = false;
     let unlisten: UnlistenFn | null = null;
-    listen<ActiveChangedPayload>("usage://active-changed", (e) => {
+    listen<ActiveChangedPayload>(USAGE_ACTIVE_CHANGED_EVENT, (e) => {
       if (e.payload?.catalogId === catalogId) handlerRef.current();
     })
       .then((fn) => {

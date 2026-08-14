@@ -16,6 +16,12 @@ export const USAGE_HANDLERS: DevMockHandlers = {
     deepseek: "sub-deepseek",
     glm: "sub-glm",
   }),
+  // What the CLIs are actually serving. Only catalogs with a CLI behind them
+  // appear here; everything else falls back to the pin above, which for those
+  // catalogs is the whole truth.
+  reconcile_cli_accounts: () => ({
+    codex: { kind: "linkedTo", subscriptionId: "sub-codex" },
+  }),
   get_subscription_alerts: () => USAGE_ALERTS,
   get_usage_summary: () => USAGE_SUMMARY,
   // Returns full Subscription list (backend shape). Optional catalogId is

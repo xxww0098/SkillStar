@@ -1,6 +1,7 @@
 import { tauriInvokeDynamic as invoke } from "../../lib/ipc/core";
 import type {
   CatalogEntry,
+  CliAccountState,
   CreateSubscriptionInput,
   OAuthStart,
   Subscription,
@@ -40,6 +41,10 @@ export const usageApi = {
 
   // ── Multi-account: active-per-catalog (Phase 7) ──────────────────
   getActiveSubscriptions: () => invoke<Record<string, string>>("get_active_subscriptions"),
+  /** Which account each CLI is *actually* serving, keyed by catalog id — the
+   *  badge's source of truth. `getActiveSubscriptions` above returns the pin,
+   *  which is only a cache of this and can be stale by the time it is read. */
+  reconcileCliAccounts: () => invoke<Record<string, CliAccountState>>("reconcile_cli_accounts"),
   setActiveSubscription: (subscriptionId: string) =>
     invoke<Subscription>("set_active_subscription", { subscriptionId }),
   clearActiveSubscription: (catalogId: string) => invoke<void>("clear_active_subscription", { catalogId }),
