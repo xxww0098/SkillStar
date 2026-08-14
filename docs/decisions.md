@@ -298,6 +298,24 @@
 - 后果：获得——dev 迭代保持当前速度，且这条"不做"有了实测依据，不必每次重新辩论；`target/` 可以继续留在外置卷，省掉一次没有收益的搬迁。承担——放弃了该模板在其它仓库确实兑现过的收益，若本仓库的 derive 密度将来大幅上升，这条结论需要重测而不是继续引用。根因决定了何时该重测：**收益与 derive 点数量成正比，成本几乎固定**——`syn`×2 / `serde_derive` / `ts-rs-macros` / `tauri-codegen` / `tauri-build` / `tauri-utils` 按 -O3 编一遍的代价与仓库大小无关，而本仓库只有 756 个 serde + ts-rs derive 点，是样本仓库（4090 个）的 18%，摊不薄这笔固定成本。`--timings` 逐单元差分给出的直接证据是成本 +980 unit-seconds、收益仅 137 unit-seconds。另有一个只在 `cargo check` 主导的迭代循环里出现的陷阱：`package.<name>.opt-level` 会经 `OPT_LEVEL` 环境变量传给该包的 `build.rs`，`cc` 会照着它编捆绑的 C——`libsqlite3-sys`（bundled SQLite）3.67 s → 71.72 s、`aws-lc-sys` 67.62 s → 109.47 s，而这两个包在 `cargo check` 下根本不产出被检查的代码，是纯成本。
 - 证据：根 `Cargo.toml`（保持只有 `[profile.release]`，无 `[profile.dev]`）；2026-08-14 构建速度审计的 A/B/C/D/BO1/BO2 对照组与 `--timings` 逐单元差分；derive 普查以 `#\[derive\((.*?)\)\]` 全仓扫描交叉验证（Serialize 332 / Deserialize 376 / TS 48）。
 
+## D-033：账号切换用「软链直通快照」，SkillStar 不把凭证拷进 CLI 的 live 文件
+
+- 日期：2026-08-14
+- 状态：accepted
+- 背景：原实现把订阅行的凭证**拷贝**进 CLI 的 live 凭证文件。CLI 自己也会轮换 token 并写回同一个文件，于是两份拷贝必然发散；Grok 那条链路里的 lease / sha256 乐观并发 / 临时 pin / 回读逐字段比对 / 提交回滚，全部是在管理这个发散 —— 而发散是这个抽象自己造出来的。同一时期 codex 与 opencode 只是裸写：codex 无任何锁与回滚（后台刷新会踢掉 Codex CLI 的登录），opencode 硬要 `api_key_encrypted` 而它的 catalog auth mode 是 Cookie|Manual，那条切号链路 100% 走 fail 分支，UI 却常驻一个永远点不通的入口。
+- 决策：live 路径不再持有凭证，**它是指向快照的软链**；快照 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json` 是唯一真相。一份快照是**整个** CLI 凭证文件（软链只能整文件替身），不是其中一个账号的片段。三家 catalog 共用一套 custody 引擎（capture → prepare → 换软链 → 回读 → 副作用 → 落 pin），各自只实现 `CliCredentialTarget`：路径、锁、access_token 提取、身份、materialize、absorb。对账比**内容**不比文件类型，三态 `LinkedTo / Diverged / Missing`，只比 access_token 字符串。`supports_cli_switch` 由 target 注册表推导而不是手抄白名单。Cursor / Antigravity 保持不支持：凭证在 `state.vscdb`，是另一套机制。
+- 后果：获得——CLI 轮换 token 时写穿到快照，快照永远新鲜，「检测轮换再回抄」这类代码整体消失；`auth_mode` 与「能否切号」解耦（opencode 只要 CLI 里登录过就能切，不再需要 SkillStar 持有 API Key），那条死链路自然消失；pin 降级为可由 `reconcile` 重建的缓存，不再是第二个真相源；codex 第一次获得与 grok 同级的锁、备份、回读与回滚，「切换被拒时保留旧 badge」从只对 xai 成立变成全域成立。承担——(1) **整文件快照意味着同一个文件里其它 provider 的登录会跟着账号一起切**：opencode 的 `auth.json` 是 `providerID → 凭证` 的扁平表，在账号 A 期间登录的 anthropic 会留在 A 的快照里，切到 B 后不可见（切回 A 即恢复，不会丢失）。做成「只换本 provider 那一段」就必须回到拷贝语义，也就把发散请回来了，因此不做。(2) 软链盖不住三个洞，必须显式处理：macOS Codex 以 keychain 为准（activate 写、reconcile 吸收、写入改成 read-modify-write）；CLI 用 `rename()` 会把软链冲成实体文件（内容一致即判 `LinkedTo` 并静默重建）；Windows 无软链权限时降级为拷贝并在日志显式标注 `LinkMode::Copy`。(3) refresh token 单次使用的双花竞态**不会**因软链消失 —— 软链消灭的是陈旧拷贝，不是「谁先刷谁让对方失效」—— 所以 CLI 自己的文件锁（Grok 官方 `auth.json.lock` 及其 `PID:秒` holder 行）、刷新前 adopt、刷新后回投这三件事全部保留，只是从 xai 专属变成全域通用。
+- 证据：`crates/skillstar-app/src/usage_switch/{custody.rs,target.rs,keychain.rs,target/*}` 与 `custody_tests.rs`（实体文件内容一致判 LinkedTo、CLI 轮换后快照自动新鲜、activate 失败时旧 pin 与旧 live 完好、forget 掉当前 active 后 live 仍是可用实体文件、opencode 无 API Key 也能切）；行为契约见 [features/usage/README.md](./features/usage/README.md)。
+
+## D-034：DTO 投影拥有前端契约，有重构节奏的域类型不直接暴露给 ts-rs
+
+- 日期：2026-08-14
+- 状态：accepted
+- 背景：`/usage` 的前端形状长期是 `src/features/usage/types.ts` 里手抄的 `usage/dto.rs` 镜像，已在六个方向漂移，其中两类靠 review 抓不住：带 `skip_serializing_if` 的字段 `None` 时**整个键从 JSON 消失**，手抄凭 `Option<T>` 直觉写成 `| null`，于是 `x === null` 分支从来没被触发过；永远序列化的 bool 是必填，手抄写成可选。同期把 usage DTO 接进 ts-rs 时发现，`usage_switch::SwitchOutcome` 若自己 derive `TS`，切换域的重构会直接震动前端契约。
+- 决策：`skillstar-usage` 的 `subscription.rs` / `catalog.rs` 里**纯数据、无行为**的类型（枚举、usage 快照树）直接 derive `TS`——它们本来就是 wire 形状，再套一层投影只会制造两份要同步的定义。有自己重构节奏的域类型不上生成面：`skillstar_app::usage::dto` 定义 `SwitchOutcomeDto` 等投影，接缝落在 AGENTS.md 已经指定的跨域聚合 crate。`types.ts` 退化为纯 re-export barrel，只保留没有 Rust 对应物的前端自有物（表单能力声明、事件契约、筛选哨兵）。
+- 后果：获得——手抄漂移这一整类缺陷被门禁消灭（`check_generated_types.sh`），且 ts-rs 读 serde 属性，上面两种错误它都不会犯。承担——(1) `impl From<SwitchOutcome> for SwitchOutcomeDto` 用**完全解构**而不是 `..` 展开，上游加字段会在这里产生编译错误，这正是希望的：新字段要么显式进入前端契约，要么显式被丢弃，不会静默消失。(2) ts-rs 默认把 `i64`/`u64` 映射成 `bigint`，而 Tauri IPC 经 `JSON.parse` 只产出 `number`，64 位字段必须按仓库既有惯例标 `#[ts(type = "number")]`。
+- 证据：`crates/skillstar-app/src/usage/dto.rs`、`src/types/generated/`、`src/features/usage/types.ts`；契约描述见 [features/usage/README.md](./features/usage/README.md) 的「前端类型契约」。
+
 ## 新增记录格式
 
 ```text

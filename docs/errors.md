@@ -2,6 +2,27 @@
 
 状态：active
 
+## 2026-08-14 - 跨 provider 的时间戳单位不是常识：Claude Code 的 expiresAt 是毫秒
+
+- Symptom: 尚未发生（新增 `anthropic` fetcher 时提前拦下）。若直接把 `claudeAiOauth.expiresAt` 写进 `Subscription::access_token_expires_at`，过期时刻会落在约五万年后，`token_refresh::needs_refresh` 之类的过期判定对该行**永远返回 false**——不会报错，只会静默地永不失效，等到上游真的 401 才暴露，且届时错误分类正确、症状却是“卡片突然要求重新登录且没有任何前兆”。
+- Root cause: `skillstar-usage` 内所有既有 provider 的 token 过期都是 epoch **秒**（`TokenResponse::expires_at()`、`jwt_exp`、`Subscription::access_token_expires_at` 全是秒），于是“过期字段是秒”变成了一条没有人写下来、也没有类型系统兜底的隐含约定。Claude Code 是 Node 生态出身，`Date.now()` 给的是毫秒。跨生态借用凭证文件时，**字段名相同不代表单位相同**，而 `i64` 对两者一视同仁。
+- Fix: 反序列化字段命名为 `expires_at_ms` 并只经 `ClaudeOAuth::expires_at_seconds()` 出口（`/1_000`），doc comment 直接写“禁止直接使用该字段”；配一个断言毫秒→秒换算的单元测试。
+- Files: `crates/skillstar-usage/src/fetchers/oauth/anthropic.rs`、`anthropic_tests.rs`。
+- Self-check:
+  - 通用判据：**从别的工具的凭证文件/配置文件里读时间戳，先确认单位**。判据很便宜：把值当秒解释，看看落在哪一年。落在 2100 年之后就是毫秒。
+  - 通用判据：**单位应该编码进字段名而不是注释**（`expires_at_ms` vs `expires_at`），并且只留一个换算出口；靠调用点自觉乘除迟早漏一处。
+  - 回归判据：任何新增的、从第三方 CLI 读凭证的 fetcher，必须有一个“过期字段单位”的单元测试，而不是等 401。
+
+## 2026-08-14 - 手抄的 DTO 会把“键缺席”抄成 `null`
+
+- Symptom: 前端类型写 `total: number | null`，运行时拿到的却是 `undefined`；`x === null` 分支永不触发，而 `x ?? fallback` 侥幸把它掩盖成“看起来能跑”。对称的第二种：永远序列化的 bool 被手抄成可选 `?`，于是前端为一个不可能缺席的字段写了永远走不到的兜底分支。`/usage` 一次性暴露了这两类共六处。
+- Root cause: Rust 字段带 `#[serde(default, skip_serializing_if = "Option::is_none")]` 时，`None` 让**整个键从 JSON 里消失**，而不是序列化成 `null`。手抄类型的人凭 `Option<T>` 直觉写成 `| null`，就此漂移；两种写法都能通过 `tsc`，也都能通过 code review，只有运行时行为不同，且不同的那一半是“分支静默失效”而不是报错。
+- Fix: 不要手抄。让 ts-rs 生成——它读 serde 属性，两种都不会错。`src/features/usage/types.ts` 已退化为 re-export barrel，决策见 [decisions.md](./decisions.md) D-034。
+- Files: `crates/skillstar-app/src/usage/dto.rs`、`src/types/generated/`、`src/features/usage/types.ts`。
+- Self-check:
+  - 通用判据：**任何手写的、镜像后端形状的前端类型都是待爆的漂移**，review 抓不住它，因为两侧各自都自洽。判据是“这个形状有没有 Rust 来源”，有就必须生成。
+  - 回归判据：`bash scripts/internal/check_generated_types.sh` 是门禁；新增 DTO 时先确认它进了 `types:gen`，而不是先在前端写一份。
+
 ## 2026-08-12 - 共享 skills 目录：没有归属记录时，清理一律退化成"看起来像技能就删"
 
 - Symptom: 多个 Agent 解析到同一个物理 skills 目录时，一方的移除会静默删掉另一方仍在使用的技能，两侧各有独立表现。Global 侧：cline 与 zed 共用 `~/.agents/skills`，在 SkillCard 或 Settings 里对 cline 取消部署某技能，zed/warp/loaf/dexto/kimi-code-cli 五个仍启用的 Agent 一并失去它（`deployment/mod.rs:305-336`，全程无共享检查，且用的是 `require_global_profile` 而非 enabled 版本，对已禁用 Agent 也照删）。Project 侧：卸载 hub 技能时 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 对**全部** profile（含从未启用的、含 openclaw 的项目根 `skills`）拼路径，只要 `is_link || is_dir` 就删，用户手写的 `.agents/skills/foo` 被静默删除；一次 `full_sync` 的 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 更是按目录清空而非按 manifest 清空，共享目录里所有未登记技能一次 Apply 后消失。UI 侧的伴生症状是计数串台：6 个共用 `~/.agents/skills` 的 Agent 各自显示同一个总数（`registry.rs:131-153`），任一 Agent 装了技能则 6 个图标一起亮（`installed_skill.rs:532-548`）。
@@ -166,7 +187,7 @@
   5. Usage refresh could rotate the active xAI refresh-token generation only in the card store while leaving `auth.json` stale, and SkillStar did not cooperate with Grok's official refresh lock/adopt-sibling protocol.
 - Fix: isolate Grok activation in `skillstar_app::usage_switch::grok` behind the `activate_subscription` / `resync_active_subscription` facade; give it a private encrypted, cross-process-locked session store and sole ownership of stable-identity outgoing capture, target restore/merge, schema/scope/effective-expiry validation, atomic `0600` write, post-write verification, and active-pin commit/reconciliation/rollback. Add the missing OAuth scopes; normalize every entry source to Grok's required schema; cooperate with the official `auth.json.lock` across sibling adoption, refresh and active CLI projection; preserve refresh/id tokens only when the same xAI subject is proven; immediately reactivate an active row after OAuth; serialize refresh/edit/delete/switch under one cross-process catalog lock; persist fetch results through narrow field patches; prefer a matching live disk session without downgrading newer cards; distinguish pre/post-replace errors; and reject known narrow-scope or unrestorable tokens before touching the working CLI file. Existing cards created with the old scope set must re-authorize once.
 - Files: `crates/skillstar-usage/src/{fetchers/oauth/{xai.rs,xai_tests.rs},storage.rs,refresh_guard.rs}`, `crates/skillstar-app/src/usage_switch{.rs,/grok.rs,/grok/{io.rs},/grok_tests.rs}`, `src-tauri/src/commands/usage_commands.rs`, `src/features/usage/{hooks/useUsageData.ts,components/{UsagePanel,UsageCardWindow}.tsx}`, i18n, `docs/features/usage/README.md`.
-- Self-check: `cargo test -p skillstar-usage oauth_scopes_include_conversations_for_grok_cli`; `cargo test -p skillstar-app usage_switch::grok`; `bunx vitest run src/features/usage/hooks/useUsageData.test.ts`; switch from a running/valid Grok account to an old narrow-scope card and confirm SkillStar reports reauthorization without changing the current `auth.json`, then re-authorize and switch successfully without browser OAuth. The written OIDC entry must contain `create_time`, and a following Usage refresh must leave the card and `auth.json` on the same access/refresh generation.
+- Self-check: `cargo test -p skillstar-usage oauth_scopes_include_conversations_for_grok_cli`; `cargo test -p skillstar-app usage_switch` (the Grok-only module was replaced by the shared symlink custody engine — see D-033);  `bunx vitest run src/features/usage/hooks/useUsageData.test.ts`; switch from a running/valid Grok account to an old narrow-scope card and confirm SkillStar reports reauthorization without changing the current `auth.json`, then re-authorize and switch successfully without browser OAuth. The written OIDC entry must contain `create_time`, and a following Usage refresh must leave the card and `auth.json` on the same access/refresh generation.
 
 ## 2026-07-12 - GitHub Actions chronic failures (Windows CI / Release / CI)
 
