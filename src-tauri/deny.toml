@@ -6,15 +6,14 @@
 #   advisories  PASSES  — 4 findings fixed by upgrade, 20 allowlisted below
 #                         with a per-entry reason and re-evaluation trigger.
 #   bans        PASSES
-#   licenses    FAILS   — on exactly ONE finding: html2md is GPL-3.0+. See the
-#                         block above [[licenses.clarify]]. That is a copyleft
-#                         decision for the repo owner, not a config problem.
+#   licenses    PASSES  — was the one failing class (html2md, GPL-3.0+). Fixed
+#                         by removing that dependency, not by allowlisting it;
+#                         see the history note above [[licenses.clarify]].
 #   sources     PASSES
 #
-# Because `licenses` still fails for real reasons, the CI step that runs this
-# config keeps `continue-on-error: true`. Do not remove that line until
-# `cargo deny check` exits 0 locally — a gate that is red on day one just
-# teaches everyone to ignore red.
+# `cargo deny check --config src-tauri/deny.toml` now exits 0. The CI step
+# that runs it can therefore drop its `continue-on-error: true`; that removal
+# is a workflow change and is tracked separately from this file.
 #
 # Fixed by upgrade in this same change (no allowlist entry needed, and none
 # should be added if they come back — they mean a real regression):
@@ -140,34 +139,33 @@ allow = [
 confidence-threshold = 0.8
 
 # ---------------------------------------------------------------------------
-# ★ ONE `licenses` FAILURE REMAINS: html2md 0.2.15 is GPL-3.0+ (rejected —
-#   not on the allow list above). It is deliberately NOT allowlisted here.
+# RESOLVED on 2026-08-14 (was the last `licenses` failure): html2md 0.2.15 is
+#   GPL-3.0+ and was rejected by the allow list above. It was **removed**, not
+#   allowlisted — `skillstar-marketplace` now depends on htmd 0.5.5
+#   (Apache-2.0, the same licence this repo ships under).
 #
-#   Path: skillstar-marketplace -> html2md. Used in exactly two places, both
-#   in remote/skill_details.rs (lines 96 and 101), both the same shape:
-#       .map(|inner| html2md::parse_html(&inner))
-#   i.e. one `&str -> String` call turning a scraped prose block into
-#   Markdown. SkillStar ships as an Apache-2.0 desktop binary and Rust links
-#   statically, so a GPL-3.0-or-later dependency is a genuine copyleft
-#   question about the distributed artifact, not a lint to silence. Adding it
-#   to `allow` would be CI wiring silently making a licensing call.
+#   Why removal and not an allowlist entry: SkillStar ships as an Apache-2.0
+#   desktop binary and Rust links statically, so a GPL-3.0-or-later dependency
+#   was a genuine copyleft question about the distributed artifact, not a lint
+#   to silence. Adding it to `allow` would have been CI wiring silently making
+#   a licensing call. The alternatives that were weighed and rejected: accept
+#   the copyleft obligation and relicense; or allowlist it with a written
+#   owner decision. Do not re-add html2md — reach for htmd instead.
 #
-#   Three options, for whoever owns this decision:
-#
-#   (a) Replace it. Verified against the registry on 2026-08-14:
-#         htmd 0.5.5       license = "Apache-2.0"   <- same licence as this repo
-#         html2text 0.17.1 license = "MIT"
-#       htmd is the real like-for-like swap: it is an HTML-to-Markdown
-#       converter with `htmd::convert(html) -> Result<String, io::Error>`,
-#       so each call site becomes `htmd::convert(&inner).ok()` — the
-#       surrounding `.map(...).filter(...)` chain already discards failures.
-#       html2text is NOT equivalent despite the similar name: its own
-#       description is "Render HTML as plain text", so it would silently drop
-#       the Markdown formatting these two fields exist to preserve.
-#       Output will not be byte-identical to html2md's, so the marketplace
-#       skill-details snapshot tests are the thing to check when swapping.
-#   (b) Accept the copyleft obligation and comply/relicense.
-#   (c) Allowlist it here with a written owner decision recorded alongside.
+#   Replacement notes, kept because they are the reason htmd was picked:
+#     htmd 0.5.5       license = "Apache-2.0"   <- same licence as this repo
+#     html2text 0.17.1 license = "MIT"          <- NOT equivalent, do not use:
+#       its own description is "Render HTML as plain text", so it silently
+#       drops the Markdown formatting the two converted fields exist to keep.
+#   The two call sites (remote/skill_details.rs) went from the infallible
+#   `html2md::parse_html(&str) -> String` to `htmd::convert(&str) ->
+#   Result<String, io::Error>` behind a `prose_html_to_markdown` helper that
+#   logs and returns `None` on failure. Output is not byte-identical: htmd
+#   emits ATX headings, turndown-style list indentation and `* * *` rules, and
+#   — unlike html2md — preserves the code-fence language. No construct was
+#   lost (headings, nested lists, links, fenced code, tables all survive);
+#   `remote::skill_details::tests` now pins that, and was added with this
+#   change because the path had no coverage at all before it.
 #
 #   RESOLVED on 2026-08-14 (was blocker #2 here): all 13 workspace crates
 #   used to report `unlicensed`. Fixed properly in the manifests rather than

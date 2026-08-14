@@ -18,7 +18,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-html2md = { workspace = true }
+htmd = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 r2d2 = { workspace = true }

@@ -93,12 +93,12 @@ pub async fn fetch_marketplace_skill_details_with_meta(
 fn parse_skill_detail_html(html: &str) -> MarketplaceSkillDetails {
     // ── Summary ────────────────────────────────────────────────────
     let summary = extract_prose_block(html, ">Summary</div>")
-        .map(|inner| html2md::parse_html(&inner))
+        .and_then(|inner| prose_html_to_markdown(&inner))
         .filter(|s| !s.trim().is_empty());
 
     // ── SKILL.md ───────────────────────────────────────────────────
     let readme = extract_prose_block(html, "SKILL.md</span>")
-        .map(|inner| html2md::parse_html(&inner))
+        .and_then(|inner| prose_html_to_markdown(&inner))
         .filter(|s| !s.trim().is_empty());
 
     // ── Weekly Installs ────────────────────────────────────────────
@@ -121,6 +121,33 @@ fn parse_skill_detail_html(html: &str) -> MarketplaceSkillDetails {
         github_stars,
         first_seen,
         security_audits,
+    }
+}
+
+/// Convert one scraped prose block from HTML to Markdown.
+///
+/// Backed by `htmd` (Apache-2.0, same licence as this repo). It replaced
+/// `html2md`, which is GPL-3.0-or-later and therefore could not be statically
+/// linked into an Apache-2.0 desktop binary — see the history note in
+/// `src-tauri/deny.toml`.
+///
+/// `htmd::convert` is fallible (`io::Error` out of the Markdown writer) where
+/// `html2md::parse_html` was not, so a failure is folded back into `None`:
+/// both call sites already treat a missing field as "fall back to the
+/// truncated description", and swallowing the error with `unwrap_or_default`
+/// would turn a broken conversion into an indistinguishable empty field.
+fn prose_html_to_markdown(inner_html: &str) -> Option<String> {
+    match htmd::convert(inner_html) {
+        Ok(markdown) => Some(markdown),
+        Err(e) => {
+            warn!(
+                target: "skills_sh",
+                error = %e,
+                len = inner_html.len(),
+                "html-to-markdown conversion failed; dropping prose block"
+            );
+            None
+        }
     }
 }
 
@@ -344,4 +371,116 @@ pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearc
         total_count,
         keyword_skill_map,
     })
+}
+
+// ── Tests ───────────────────────────────────────────────────────────
+//
+// These cover the HTML→Markdown seam, which had no coverage at all when the
+// converter was swapped from `html2md` (GPL-3.0+) to `htmd` (Apache-2.0).
+// They assert on *structure surviving the conversion* — headings, lists,
+// fenced code with its language, links, tables — rather than on byte-exact
+// output, because the exact whitespace and escaping style is the converter's
+// business and pinning it would make every upgrade a false failure.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A page fragment shaped like a real skills.sh detail page: a `Summary`
+    /// prose block and a `SKILL.md` prose block, each inside the
+    /// `<div class="prose ...">` container the extractor looks for.
+    const DETAIL_PAGE: &str = concat!(
+        r#"<div class="text-sm">Summary</div>"#,
+        r#"<div class="prose prose-sm"><p>Create <strong>well-formed</strong> commits.</p></div>"#,
+        r#"<span class="font-mono">SKILL.md</span>"#,
+        r#"<div class="prose prose-sm">"#,
+        r#"<h2>Overview</h2>"#,
+        r#"<p>Scaffold exercises, see <a href="https://skills.sh/docs">the docs</a>.</p>"#,
+        r#"<ul><li>Creates <code>section/</code> dirs</li><li>Writes README<ul><li>nested</li></ul></li></ul>"#,
+        r#"<pre><code class="language-bash">git add -A</code></pre>"#,
+        r#"<table><thead><tr><th>Flag</th><th>Meaning</th></tr></thead>"#,
+        r#"<tbody><tr><td>--all</td><td>Everything</td></tr></tbody></table>"#,
+        r#"</div>"#,
+    );
+
+    #[test]
+    fn converts_summary_prose_block_to_markdown() {
+        let details = parse_skill_detail_html(DETAIL_PAGE);
+        let summary = details.summary.expect("summary should be extracted");
+        assert!(
+            summary.contains("**well-formed**"),
+            "inline emphasis lost: {summary:?}"
+        );
+    }
+
+    #[test]
+    fn skill_md_prose_block_keeps_every_block_construct() {
+        let details = parse_skill_detail_html(DETAIL_PAGE);
+        let readme = details.readme.expect("readme should be extracted");
+
+        // Heading — ATX, and it must not be swallowed.
+        assert!(readme.contains("## Overview"), "heading lost: {readme:?}");
+        // Link with its href intact.
+        assert!(
+            readme.contains("[the docs](https://skills.sh/docs)"),
+            "link lost: {readme:?}"
+        );
+        // List, including the nested level (indented, not flattened).
+        assert!(
+            readme.contains("Creates `section/` dirs"),
+            "list item / inline code lost: {readme:?}"
+        );
+        assert!(
+            readme
+                .lines()
+                .any(|l| l.starts_with("    ") && l.contains("nested")),
+            "nested list flattened: {readme:?}"
+        );
+        // Fenced code block *with* its language — `html2md` used to drop the
+        // language, `htmd` keeps it; this is the one behaviour change we
+        // actually want to hold on to.
+        assert!(
+            readme.contains("```bash"),
+            "code fence language lost: {readme:?}"
+        );
+        assert!(readme.contains("git add -A"), "code body lost: {readme:?}");
+        // Table survives as a Markdown table, header row and all.
+        assert!(
+            readme.contains("| Flag") && readme.contains("| Meaning"),
+            "table header lost: {readme:?}"
+        );
+        assert!(
+            readme
+                .lines()
+                .any(|l| l.contains("---") && l.starts_with('|')),
+            "table delimiter row lost: {readme:?}"
+        );
+        assert!(readme.contains("Everything"), "table body lost: {readme:?}");
+    }
+
+    #[test]
+    fn missing_prose_blocks_yield_none_not_empty_strings() {
+        let details = parse_skill_detail_html("<div>no prose here</div>");
+        assert!(details.summary.is_none());
+        assert!(details.readme.is_none());
+    }
+
+    #[test]
+    fn whitespace_only_prose_block_is_filtered_out() {
+        let html = concat!(
+            r#"<div class="text-sm">Summary</div>"#,
+            r#"<div class="prose"><p>   </p></div>"#,
+        );
+        assert!(parse_skill_detail_html(html).summary.is_none());
+    }
+
+    #[test]
+    fn converter_tolerates_unclosed_and_non_html_input() {
+        // The extractor hands over whatever it scraped; the converter must not
+        // panic on malformed fragments.
+        assert_eq!(
+            prose_html_to_markdown("<p>unclosed").as_deref(),
+            Some("unclosed")
+        );
+        assert_eq!(prose_html_to_markdown("").as_deref(), Some(""));
+    }
 }
