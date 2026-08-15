@@ -1,0 +1,10 @@
+# Baselined TypeScript orphans: files knowingly unreachable from src/main.tsx
+# and src/pages/. Entries here WARN instead of FAIL.
+#
+# This file is intentionally EMPTY and should stay that way. The gate went in
+# alongside the deletion of the ~4000 unreachable lines it was written to find,
+# so there is no grandfathered debt to park here. If you are about to add a
+# line, the honest options are usually (a) wire the module into the render
+# tree, or (b) delete it.
+#
+# Format: one repo-relative path per line.

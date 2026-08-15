@@ -10,13 +10,11 @@
 # now tracks remaining intentional bilingual keywords + sharded devMock
 # sample content (Chinese fixture copy for browser-dev).
 #
-# Updated 2026-08-14: the Models hub promoted `hub/prototype/` onto the
-# production path (Models.tsx -> ModelsHub -> ia/VariantD1). Everything that
-# path reaches was migrated into the locale files. The four entries below are
-# the remainder, which production cannot reach: `ia/VariantD2` and
-# `ia/VariantD3` only render behind `?variant=D2|D3`, which
-# `isAlternateIaPrototype()` gates on `!import.meta.env.PROD`, and
-# `ModelsHubPrototype`/`PrototypeOverlays` are that switcher's own chrome.
+# Updated 2026-08-15 (Models redesign WP-0): `hub/prototype/` no longer
+# exists. The DEV-only `?variant=D2|D3` island (ModelsHubPrototype,
+# PrototypeOverlays, ia/VariantD2, ia/VariantD3) was deleted, so its four
+# baseline entries are gone with it; the production files that lived under
+# that directory moved to `hub/matrix/` with their strings already migrated.
 # `devMock/models.ts` is Chinese fixture copy, same as its sibling devMocks.
 # Updated 2026-08-14: devMock/usageData.ts 8 -> 14. The Usage catalog gained
 # `anthropic` and the dialog gained Cookie mode, so the browser-dev fixture now
@@ -25,10 +23,6 @@
 # through i18n; the fixture is only what the browser sees with no backend.
 src/components/layout/CommandPalette.tsx:9
 src/components/shared/ProviderBrandIcon.tsx:3
-src/features/models/components/hub/prototype/ModelsHubPrototype.tsx:2
-src/features/models/components/hub/prototype/PrototypeOverlays.tsx:1
-src/features/models/components/hub/prototype/ia/VariantD2.tsx:12
-src/features/models/components/hub/prototype/ia/VariantD3.tsx:14
 src/features/settings/sections/BackgroundRunSection.tsx:2
 src/features/usage/components/SubscriptionEditDialog.tsx:3
 src/features/usage/components/UsageGrid.tsx:2

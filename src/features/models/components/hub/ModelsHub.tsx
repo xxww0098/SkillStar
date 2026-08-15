@@ -7,18 +7,18 @@ import { getProviderToolBadges, useProvidersFlat } from "../../hooks/useProvider
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
 import { DeleteProviderDialog } from "./DeleteProviderDialog";
 import { isNativeOfficialProvider } from "../../lib/officialProviders";
-import { VariantD1 } from "./prototype/ia/VariantD1";
-import type { ModelsNavBridge } from "./prototype/modelsNavBridge";
-import { usePrototypeHub } from "./prototype/usePrototypeHub";
+import { VariantB2b } from "./matrix/rich/VariantB2b";
+import type { ModelsNavBridge } from "../../lib/navBridge";
+import { useModelsData } from "../../hooks/useModelsData";
 
 /**
- * Production Models workbench: Provider × Agent matrix (shipped D1 IA).
+ * Production Models workbench: Provider × Agent matrix.
  * Create / Claude mapping stay as main-pane pages; provider edit uses the
  * production tabbed drawer; Official toggles live in Claude/Codex column headers.
  */
 export function ModelsHub(nav: ModelsNavBridge) {
   const { t } = useTranslation();
-  const data = usePrototypeHub(nav);
+  const data = useModelsData(nav);
   const { createProvider, deleteProvider } = useProvidersFlat();
 
   const editProvider = useMemo(() => {
@@ -77,7 +77,7 @@ export function ModelsHub(nav: ModelsNavBridge) {
 
   return (
     <>
-      <VariantD1 data={data} />
+      <VariantB2b data={data} />
 
       {editProvider ? (
         <ProviderEditorDrawer

@@ -621,7 +621,7 @@ export function LocalSkillsContent({
   }, [hasSelection, t]);
 
   const getEmptyMessage = () => {
-    if (onlyUpdatesFilter) return t("toolbar.noPendingUpdates", { defaultValue: "没有待更新的技能" });
+    if (onlyUpdatesFilter) return t("toolbar.noPendingUpdates");
     if (skills.length === 0) return t("emptyState.mySkillsDesc");
     return t("mySkills.noMatching");
   };

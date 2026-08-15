@@ -618,12 +618,7 @@ export function Toolbar({
                   onlyUpdatesFilter ? "text-white" : "text-amber-600 dark:text-amber-400",
                 )}
               />
-              <span>
-                {t("toolbar.updateFilterLabel", {
-                  count: pendingUpdateCount ?? 0,
-                  defaultValue: `可更新 (${pendingUpdateCount ?? 0})`,
-                })}
-              </span>
+              <span>{t("toolbar.updateFilterLabel", { count: pendingUpdateCount ?? 0 })}</span>
               {onlyUpdatesFilter && <X className="w-3 h-3 ml-0.5 opacity-85 hover:opacity-100" />}
             </button>
           ) : null}
@@ -647,11 +642,7 @@ export function Toolbar({
                 ) : (
                   <RefreshCw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 )}
-                <span>
-                  {isUpdatingAll
-                    ? t("common.updating", { defaultValue: "Updating..." })
-                    : t("toolbar.updateAllAction", { defaultValue: "全部更新" })}
-                </span>
+                <span>{isUpdatingAll ? t("common.updating") : t("toolbar.updateAllAction")}</span>
               </button>
             </>
           )}

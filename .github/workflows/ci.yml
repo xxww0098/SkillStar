@@ -200,6 +200,14 @@ jobs:
       - name: Orphan-module guard (structural governance)
         run: scripts/internal/check_no_orphan_modules.sh
 
+      # The TypeScript twin of the walk above. A .ts/.tsx file that no entry
+      # point reaches is still linted, still type-checked and still runs its
+      # own co-located tests — which is exactly how ~4000 unreachable lines
+      # survived inside src/features/models with every gate green. Zero
+      # violations today, so this is blocking from day one.
+      - name: TS orphan-module guard (structural governance)
+        run: scripts/internal/check_ts_orphan_modules.sh
+
       # Proves the mermaid graph in docs/boundaries.md still matches the real
       # cargo dependency edges, both directions. Zero violations today.
       - name: Dependency-graph documentation guard

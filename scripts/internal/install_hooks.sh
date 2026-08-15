@@ -218,12 +218,14 @@ HOOK_EOF
 echo "[pre-commit] fast ratchets (~5s)"
 
 # Measured warm, 2026-08-14: 0.08 / 1.99 / 1.49 / 0.05 / 0.72 / 0.68 / 0.07 s.
+# check_ts_orphan_modules.sh added 2026-08-15: 0.32 s.
 gate check_workspace_deps.sh
 gate check_file_size.sh
 gate check_feature_imports.sh
 gate check_command_boundaries.sh
 gate check_error_strings.sh
 gate check_no_orphan_modules.sh
+gate check_ts_orphan_modules.sh
 gate check_dep_graph_doc.sh
 
 # biome over 516 files: 0.30 s.
@@ -295,6 +297,7 @@ gate check_feature_imports.sh
 gate check_command_boundaries.sh
 gate check_error_strings.sh
 gate check_no_orphan_modules.sh
+gate check_ts_orphan_modules.sh
 gate check_dep_graph_doc.sh
 
 # Too slow for pre-commit (2.9 s of a 6 s budget); lands here instead.
