@@ -21,8 +21,8 @@
 //! would replace a specific `401` with a generic complaint.
 
 use super::provider::Provider;
-use super::store::{flat_store_path, read_flat_store};
-use super::types::ProviderEntryFlat;
+use super::store::flat_store_path;
+use super::store_v4::load_or_migrate_store_v4;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
@@ -41,8 +41,9 @@ pub struct ResolvedConnection {
 }
 
 impl ResolvedConnection {
-    fn from_v3(entry: &ProviderEntryFlat) -> Self {
-        let endpoint_candidates = entry
+    /// Project a v4 row into the flat facts a probe needs.
+    pub fn from_v4(provider: &Provider) -> Self {
+        let endpoint_candidates = provider
             .preset_id
             .as_deref()
             .and_then(|pid| {
@@ -52,20 +53,6 @@ impl ResolvedConnection {
             })
             .map(|p| p.endpoint_candidates)
             .unwrap_or_default();
-        Self {
-            provider_id: entry.id.clone(),
-            api_key: entry.api_key.clone(),
-            base_url_openai: entry.base_url_openai.clone(),
-            base_url_anthropic: entry.base_url_anthropic.clone(),
-            models_url: entry.models_url.clone(),
-            preset_id: entry.preset_id.clone(),
-            endpoint_candidates,
-        }
-    }
-
-    /// Project a v4 row. Used once the store is v4; kept beside the v3 reader
-    /// so the two derivations of the same facts stay visibly parallel.
-    pub fn from_v4(provider: &Provider) -> Self {
         Self {
             provider_id: provider.id.clone(),
             // Only literal keys resolve here. `EnvVar` / `File` / `Command`
@@ -89,7 +76,7 @@ impl ResolvedConnection {
                 .unwrap_or_default(),
             models_url: provider.endpoints.models_list.clone().unwrap_or_default(),
             preset_id: provider.preset_id.clone(),
-            endpoint_candidates: Vec::new(),
+            endpoint_candidates,
         }
     }
 
@@ -115,59 +102,45 @@ pub fn resolve_connection(provider_id: &str) -> Result<ResolvedConnection> {
 
 /// Same, against an explicit store path (what the tests use).
 pub fn resolve_connection_at(path: &Path, provider_id: &str) -> Result<ResolvedConnection> {
-    let store = read_flat_store(path)
+    let loaded = load_or_migrate_store_v4(path)
         .with_context(|| format!("failed to read provider store at {}", path.display()))?;
-    let Some(entry) = store.providers.iter().find(|p| p.id == provider_id) else {
+    let Some(provider) = loaded.store.provider(provider_id) else {
         // Naming the id matters: the usual cause is a stale frontend cache
         // pointing at a row that was deleted, and "provider not found" without
         // the id sends the reader looking in the wrong place.
         bail!("provider '{provider_id}' is not in the store");
     };
-    Ok(ResolvedConnection::from_v3(entry))
+    Ok(ResolvedConnection::from_v4(provider))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::binding::ProvidersStoreV4;
     use crate::providers::credential::Credential;
-    use crate::providers::types::FlatProvidersStore;
 
-    fn store_file(dir: &Path, entries: Vec<ProviderEntryFlat>) -> std::path::PathBuf {
+    fn store_file(dir: &Path, providers: Vec<Provider>) -> std::path::PathBuf {
         let path = dir.join("model_providers.json");
-        let store = FlatProvidersStore {
-            version: 3,
-            providers: entries,
-            tool_activations: Default::default(),
+        let store = ProvidersStoreV4 {
+            version: 4,
+            providers,
+            bindings: Default::default(),
         };
         std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).unwrap();
         path
     }
 
-    fn entry(id: &str) -> ProviderEntryFlat {
-        ProviderEntryFlat {
-            id: id.to_string(),
-            name: "Relay".to_string(),
-            base_url_openai: "https://relay.example.com/v1".to_string(),
-            base_url_anthropic: String::new(),
-            models_url: String::new(),
-            api_key: "sk-from-disk".to_string(),
-            models: vec![],
-            default_model: String::new(),
-            sort_index: 0,
-            preset_id: None,
-            icon_color: None,
-            notes: None,
-            created_at: None,
-            meta: None,
-            codex_wire_api: "chat".to_string(),
-            codex_auth_mode: "third_party".to_string(),
-        }
+    fn relay(id: &str) -> Provider {
+        let mut provider = Provider::new(id, "Relay");
+        provider.endpoints.openai_chat = Some("https://relay.example.com/v1".to_string());
+        provider.credential = Credential::single_key("k1", "sk-from-disk");
+        provider
     }
 
     #[test]
     fn the_key_comes_from_disk_not_from_the_caller() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = store_file(tmp.path(), vec![entry("p1")]);
+        let path = store_file(tmp.path(), vec![relay("p1")]);
 
         let resolved = resolve_connection_at(&path, "p1").unwrap();
 
@@ -181,7 +154,7 @@ mod tests {
     #[test]
     fn an_unknown_provider_id_names_itself_in_the_error() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = store_file(tmp.path(), vec![entry("p1")]);
+        let path = store_file(tmp.path(), vec![relay("p1")]);
 
         let err = resolve_connection_at(&path, "ghost").unwrap_err().to_string();
 
@@ -191,7 +164,7 @@ mod tests {
     #[test]
     fn a_missing_models_url_falls_back_to_the_openai_base() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = store_file(tmp.path(), vec![entry("p1")]);
+        let path = store_file(tmp.path(), vec![relay("p1")]);
 
         let resolved = resolve_connection_at(&path, "p1").unwrap();
 
@@ -205,9 +178,10 @@ mod tests {
     #[test]
     fn an_explicit_models_url_wins_over_the_fallback() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let mut e = entry("p1");
-        e.models_url = "https://relay.example.com/custom/models".to_string();
-        let path = store_file(tmp.path(), vec![e]);
+        let mut provider = relay("p1");
+        provider.endpoints.models_list =
+            Some("https://relay.example.com/custom/models".to_string());
+        let path = store_file(tmp.path(), vec![provider]);
 
         let resolved = resolve_connection_at(&path, "p1").unwrap();
 
@@ -218,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn a_v4_row_resolves_only_literal_keys() {
+    fn only_literal_keys_resolve() {
         let mut provider = Provider::new("p1", "Relay");
         provider.credential = Credential::single_key("k1", "sk-literal");
         assert_eq!(ResolvedConnection::from_v4(&provider).api_key, "sk-literal");
@@ -232,11 +206,24 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_candidates_come_from_the_preset() {
+        let mut provider = relay("p1");
+        provider.preset_id = Some("deepseek".to_string());
+
+        let resolved = ResolvedConnection::from_v4(&provider);
+
+        assert!(
+            !resolved.endpoint_candidates.is_empty(),
+            "the speed test needs the preset's alternate hosts"
+        );
+    }
+
+    #[test]
     fn an_empty_key_resolves_rather_than_failing() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let mut e = entry("local");
-        e.api_key = String::new();
-        let path = store_file(tmp.path(), vec![e]);
+        let mut provider = relay("local");
+        provider.credential = Credential::unknown_local();
+        let path = store_file(tmp.path(), vec![provider]);
 
         let resolved = resolve_connection_at(&path, "local").unwrap();
 

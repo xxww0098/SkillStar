@@ -1,0 +1,8 @@
+model = "gpt-5.4"
+model_provider = "skillstar_cccc3333"
+
+[model_providers.skillstar_cccc3333]
+base_url = "https://api.openai.com/v1"
+name = "SkillStar"
+requires_openai_auth = true
+wire_api = "responses"

@@ -76,25 +76,31 @@ fn make_valid_entry(id: &str, name: &str) -> ProviderEntry {
     }
 }
 
-fn make_flat_entry(name: &str) -> ProviderEntryFlat {
-    ProviderEntryFlat {
-        id: String::new(), // Will be overwritten by create
-        name: name.to_string(),
-        base_url_openai: "https://api.example.com/v1".to_string(),
-        base_url_anthropic: "https://api.example.com/anthropic".to_string(),
-        models_url: "https://api.example.com/v1/models".to_string(),
-        api_key: "sk-test-key".to_string(),
-        models: vec!["model-a".to_string()],
-        default_model: "model-a".to_string(),
-        sort_index: 0,
-        preset_id: None,
-        icon_color: None,
-        notes: None,
-        created_at: None,
-        meta: None,
-        codex_wire_api: "responses".to_string(),
-        codex_auth_mode: "api_key".to_string(),
-    }
+/// A v4 provider row: chat + Anthropic endpoints, one literal key.
+///
+/// Each call mints a fresh id, because v4 lets the caller own the id and
+/// `create_provider` therefore rejects a duplicate instead of silently
+/// reassigning one — which is the behaviour that makes a stable slug possible.
+fn make_provider(name: &str) -> Provider {
+    let mut provider = Provider::new(uuid::Uuid::new_v4().to_string(), name);
+    provider.endpoints = Endpoints {
+        openai_chat: Some("https://api.example.com/v1".to_string()),
+        openai_responses: None,
+        anthropic_messages: Some("https://api.example.com/anthropic".to_string()),
+        models_list: Some("https://api.example.com/v1/models".to_string()),
+    };
+    provider.credential = Credential::single_key("k1", "sk-test-key");
+    provider.models = vec!["model-a".to_string()];
+    provider.default_model = Some("model-a".to_string());
+    provider
+}
+
+/// The same, but able to serve Codex.
+fn make_responses_provider(name: &str) -> Provider {
+    let mut provider = make_provider(name);
+    provider.endpoints.openai_responses = Some("https://api.example.com/v1".to_string());
+    provider.caps.responses_api = Tri::Yes;
+    provider
 }
 
 mod part1;

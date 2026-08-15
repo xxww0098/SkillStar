@@ -133,6 +133,25 @@ pub fn migrate_store_if_needed(path: &Path) -> Result<FlatProvidersStore> {
 
     let version = value.get("version").and_then(|v| v.as_u64());
 
+    // A store from the *future* must never fall through to the v1 arm below.
+    //
+    // The v1 arm is reached by exclusion, not by recognition: anything that is
+    // not v3 and not v2 is assumed to be v1. A v4 file has none of v1's fields
+    // and every one of them is `#[serde(default)]`, so `ProvidersStore` parses
+    // it into four empty buckets — a *successful* parse that yields an empty
+    // store, which `backup_and_write` then persists over the user's real
+    // configuration. Recognising "newer than I understand" as an error is the
+    // only thing standing between a downgraded binary and data loss.
+    if version.is_some_and(|v| v > FLAT_STORE_VERSION as u64) {
+        bail!(
+            "provider store at {} is at version {} but this build understands at most {}. \
+             Refusing to parse it as a v1 store — that would silently discard every provider.",
+            path.display(),
+            version.unwrap_or_default(),
+            FLAT_STORE_VERSION
+        );
+    }
+
     // Already current — parse directly (ToolBinding deserializes natively).
     if version == Some(FLAT_STORE_VERSION as u64) {
         let store: FlatProvidersStore =

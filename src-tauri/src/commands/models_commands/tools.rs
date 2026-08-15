@@ -1,31 +1,27 @@
-//! Tool activation, config-file, installation and conflict-detection commands.
-//!
-//! Carved out of `models_commands` mechanically — no logic changes.
+//! Agent binding, config-file, installation and conflict-detection commands.
 
 use super::*;
+use super::compat;
 
 // ---------------------------------------------------------------------------
 // Tool config commands
 // ---------------------------------------------------------------------------
 
-/// Returns the list of supported external tool config targets with their paths and existence status.
+/// Returns the supported external tool config targets with paths and existence.
 #[tauri::command]
 pub async fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>, AppError> {
     Ok(tool_sync::get_tool_config_targets()?)
 }
 
-/// Activate a provider for a specific Agent tool.
+/// Bind a provider to an agent and make it the active one.
 ///
-/// Updates the `tool_activations` map and syncs the provider's credentials
-/// to the tool's config file. Only one provider can be active per tool —
-/// activating a new provider replaces any previous activation.
-///
-/// If `model` is None, the provider's `default_model` is used.
-///
-/// `settings` is an optional per-tool config object (e.g. `{ "wire_api": "chat", "auth_mode": "oauth" }` for Codex).
-/// When omitted, the previous activation's settings are preserved if re-activating the same tool.
+/// Replaces v3's `activate_tool`, which also did the jobs now held by
+/// [`set_active_binding`] and [`update_binding_entry`]. Fails when the provider
+/// has no endpoint for the protocol the agent speaks — for Codex that means
+/// `/v1/responses`, and that refusal is the point: binding a chat-only host to
+/// Codex is what produced `config.toml` files Codex could not parse.
 #[tauri::command]
-pub async fn activate_tool(
+pub async fn bind_provider(
     lock: State<'_, ProvidersWriteLock>,
     provider_id: String,
     tool_id: String,
@@ -34,71 +30,23 @@ pub async fn activate_tool(
 ) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
-    // 1. Update the tool_activations map (binding upsert + active pointer)
-    providers::activate_tool(
+    providers::bind_provider(
         &mut store,
-        &provider_id,
         &tool_id,
+        &provider_id,
         model.as_deref(),
         settings,
     )?;
+    providers::write_store_v4(&store, &path)?;
 
-    // 2. Persist the updated store
-    providers::write_flat_store(&store, &path)?;
-
-    // 3. Sync to disk. Multi-provider agents (codex, opencode) project their
-    //    whole binding; single-provider agents write the active entry. Routing
-    //    lives in `sync_tool_binding` so the command layer stays kind-agnostic.
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
-
-    // On a successful disk write, stamp last_sync_at (baseline for
-    // external-modification detection) and persist.
-    if sync_result.success {
-        if let Some(act) = store
-            .tool_activations
-            .get_mut(&tool_id)
-            .and_then(|b| b.active_mut())
-        {
-            act.last_sync_at = Some(now_unix_secs());
-        }
-        providers::write_flat_store(&store, &path)?;
-    }
-
+    stamp_sync(&mut store, &tool_id, &sync_result, &path)?;
     Ok(sync_result)
 }
 
-/// Deactivate a tool by removing its activation entry and restoring its config.
-///
-/// Clears the tool's entry in `tool_activations` and calls the appropriate
-/// unsync function to remove managed fields from the tool's config file.
-#[tauri::command]
-pub async fn deactivate_tool(
-    lock: State<'_, ProvidersWriteLock>,
-    tool_id: String,
-) -> Result<(), AppError> {
-    let _guard = lock.0.lock().await;
-    let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
-
-    // 1. Remove the activation from the map
-    providers::deactivate_tool(&mut store, &tool_id)?;
-
-    // 2. Persist the updated store
-    providers::write_flat_store(&store, &path)?;
-
-    // 3. Unsync the tool's config file (remove ALL managed fields/entries).
-    //    Dispatch is registry-driven inside tool_sync.
-    tool_sync::unsync_tool(&tool_id)?;
-
-    Ok(())
-}
-
-/// Switch which bound provider is active for a multi-provider tool.
-///
-/// Moves the binding's active pointer to `provider_id` (which must already be
-/// bound) and rewrites the tool's config so the active selector follows.
+/// Move an agent's active pointer to an already-bound provider.
 #[tauri::command]
 pub async fn set_active_binding(
     lock: State<'_, ProvidersWriteLock>,
@@ -107,110 +55,147 @@ pub async fn set_active_binding(
 ) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
     providers::set_active_binding(&mut store, &tool_id, &provider_id)?;
-    providers::write_flat_store(&store, &path)?;
+    providers::write_store_v4(&store, &path)?;
 
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
-    if sync_result.success {
-        if let Some(act) = store
-            .tool_activations
-            .get_mut(&tool_id)
-            .and_then(|b| b.active_mut())
-        {
-            act.last_sync_at = Some(now_unix_secs());
-        }
-        providers::write_flat_store(&store, &path)?;
-    }
+    stamp_sync(&mut store, &tool_id, &sync_result, &path)?;
     Ok(sync_result)
 }
 
-/// Remove a single provider entry from a multi-provider tool's binding.
-///
-/// Drops the entry and rewrites the tool's config (the provider's managed
-/// table is removed; the active pointer re-clamps to a remaining entry). If the
-/// last entry is removed, the tool is fully unsynced.
+/// Change a bound entry's model and/or settings without moving the pointer.
 #[tauri::command]
-pub async fn remove_binding_entry(
+pub async fn update_binding_entry(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+    provider_id: String,
+    model: Option<String>,
+    settings: Option<serde_json::Value>,
+) -> Result<ToolSyncResultFlat, AppError> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = load_store()?;
+
+    providers::update_binding_entry(
+        &mut store,
+        &tool_id,
+        &provider_id,
+        model.as_deref(),
+        settings,
+    )?;
+    providers::write_store_v4(&store, &path)?;
+
+    let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
+    stamp_sync(&mut store, &tool_id, &sync_result, &path)?;
+    Ok(sync_result)
+}
+
+/// Unbind **one** provider from an agent.
+///
+/// v3 wired every per-row unbind button to `deactivate_tool`, which cleared the
+/// agent's whole list — so unbinding one of three providers unbound all three.
+/// This removes exactly the row asked for; [`unbind_agent`] is the one that
+/// clears everything, and it now has to be named.
+#[tauri::command]
+pub async fn unbind_provider(
     lock: State<'_, ProvidersWriteLock>,
     tool_id: String,
     provider_id: String,
 ) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
-    providers::remove_binding_entry(&mut store, &tool_id, &provider_id)?;
-    providers::write_flat_store(&store, &path)?;
+    providers::unbind_provider(&mut store, &tool_id, &provider_id)?;
+    providers::write_store_v4(&store, &path)?;
 
     // sync_tool_binding unsyncs automatically when the binding is now empty.
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
-    if sync_result.success {
-        if let Some(act) = store
-            .tool_activations
-            .get_mut(&tool_id)
-            .and_then(|b| b.active_mut())
-        {
-            act.last_sync_at = Some(now_unix_secs());
-        }
-        providers::write_flat_store(&store, &path)?;
+    stamp_sync(&mut store, &tool_id, &sync_result, &path)?;
+    Ok(sync_result)
+}
+
+/// Clear an agent's binding entirely and restore its config file.
+#[tauri::command]
+pub async fn unbind_agent(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+) -> Result<(), AppError> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = load_store()?;
+
+    providers::unbind_agent(&mut store, &tool_id)?;
+    providers::write_store_v4(&store, &path)?;
+    tool_sync::unsync_tool(&tool_id)?;
+
+    Ok(())
+}
+
+/// Replace the active entry's per-provider settings bag.
+#[tauri::command]
+pub async fn update_binding_entry_settings(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+    settings: serde_json::Value,
+) -> Result<ToolSyncResultFlat, AppError> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = load_store()?;
+
+    providers::update_binding_entry_settings(&mut store, &tool_id, settings)?;
+    providers::write_store_v4(&store, &path)?;
+
+    Ok(tool_sync::sync_tool_binding(&store, &tool_id))
+}
+
+/// Replace an agent's own settings — including its role → model routing.
+///
+/// The renderer still sends roles inside the settings bag under the key v3
+/// used; they are split back out into the typed `roles` field here. The bag and
+/// the roles are two fields in v4 and one on the wire until WP-4.
+#[tauri::command]
+pub async fn update_agent_settings(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+    settings: serde_json::Value,
+) -> Result<ToolSyncResultFlat, AppError> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = load_store()?;
+
+    let roles = compat::roles_from_flat(&settings);
+    let rest = compat::settings_without_roles(&settings);
+    providers::update_agent_settings(
+        &mut store,
+        &tool_id,
+        rest.unwrap_or(serde_json::Value::Null),
+    )?;
+    providers::set_agent_roles(&mut store, &tool_id, roles)?;
+    providers::write_store_v4(&store, &path)?;
+
+    Ok(tool_sync::sync_tool_binding(&store, &tool_id))
+}
+
+/// Stamp the active entry's last-sync time after a successful disk write, and
+/// persist. The stamp is the baseline external-modification detection compares
+/// against, so it is only meaningful when the write actually happened.
+fn stamp_sync(
+    store: &mut providers::ProvidersStoreV4,
+    tool_id: &str,
+    result: &ToolSyncResultFlat,
+    path: &std::path::Path,
+) -> Result<(), AppError> {
+    if !result.success {
+        return Ok(());
     }
-    Ok(sync_result)
-}
-
-/// Update only the settings of an active tool without changing provider or model.
-///
-/// Useful for toggling per-tool options (e.g. Codex's `wire_api` or `auth_mode`)
-/// without a full re-activation. Automatically re-syncs the tool's config file.
-#[tauri::command]
-pub async fn update_tool_settings(
-    lock: State<'_, ProvidersWriteLock>,
-    tool_id: String,
-    settings: serde_json::Value,
-) -> Result<ToolSyncResultFlat, AppError> {
-    let _guard = lock.0.lock().await;
-    let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
-
-    // 1. Update settings on the active entry of the binding
-    providers::update_tool_settings(&mut store, &tool_id, settings)?;
-
-    // 2. Persist the updated store
-    providers::write_flat_store(&store, &path)?;
-
-    // 3. Re-sync the tool's config file (whole binding for multi-provider tools)
-    let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
-
-    Ok(sync_result)
-}
-
-/// Update a tool's binding-level settings without changing provider or model.
-///
-/// The tool-wide sibling of [`update_tool_settings`]: used for config that spans
-/// several bound providers at once, currently OMP's model roles (`default` /
-/// `smol` / `slow` / `plan` …), each of which may point at a different provider.
-/// Automatically re-syncs the tool's config file.
-#[tauri::command]
-pub async fn update_tool_binding_settings(
-    lock: State<'_, ProvidersWriteLock>,
-    tool_id: String,
-    settings: serde_json::Value,
-) -> Result<ToolSyncResultFlat, AppError> {
-    let _guard = lock.0.lock().await;
-    let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
-
-    // 1. Update the binding-level settings bag
-    providers::update_tool_binding_settings(&mut store, &tool_id, settings)?;
-
-    // 2. Persist the updated store
-    providers::write_flat_store(&store, &path)?;
-
-    // 3. Re-sync the tool's config file (roles land in the agent's config)
-    let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
-
-    Ok(sync_result)
+    if let Some(entry) = store.bindings.get_mut(tool_id).and_then(|b| b.active_mut()) {
+        entry.last_sync_at_ms = Some(now_unix_ms());
+    }
+    providers::write_store_v4(store, path)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +314,7 @@ pub async fn format_tool_config_file(tool_id: String, file_id: String) -> Result
     Ok(tool_sync::format_tool_config_file(&tool_id, &file_id)?)
 }
 
-/// Push the active flat-store provider credentials to a tool's config files.
+/// Push a bound provider's credentials to a tool's config files.
 #[tauri::command]
 pub async fn push_provider_to_tool_config(
     lock: State<'_, ProvidersWriteLock>,
@@ -337,12 +322,11 @@ pub async fn push_provider_to_tool_config(
     tool_id: String,
 ) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
-    let path = providers::flat_store_path();
-    let store = providers::migrate_store_if_needed(&path)?;
+    let store = load_store()?;
 
     // The provider must be bound to this tool (in any entry).
     let bound = store
-        .tool_activations
+        .bindings
         .get(&tool_id)
         .is_some_and(|b| b.binds_provider(&provider_id));
     if !bound {
@@ -360,11 +344,15 @@ pub async fn push_provider_to_tool_config(
 // Environment Conflict Detection
 // ---------------------------------------------------------------------------
 
-/// Current Unix time in seconds (best-effort; 0 if the clock is before epoch).
-fn now_unix_secs() -> u64 {
+/// Current Unix time in **milliseconds** (best-effort; 0 before the epoch).
+///
+/// v3 stored this one in seconds while storing `created_at` in milliseconds, in
+/// the same file. v4 puts the unit in the field name and this is where the
+/// value that fills it comes from.
+fn now_unix_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
 
@@ -375,17 +363,19 @@ fn now_unix_secs() -> u64 {
 pub async fn detect_provider_conflicts(
     provider_id: String,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let path = providers::flat_store_path();
-    let store = providers::read_flat_store(&path)?;
+    let store = load_store()?;
 
     let mut conflicts: Vec<tool_sync::ConfigConflict> = Vec::new();
-    for (tool_id, binding) in &store.tool_activations {
-        if let Some(act) = binding
+    for (tool_id, binding) in &store.bindings {
+        if let Some(entry) = binding
             .entries
             .iter()
             .find(|e| e.provider_id == provider_id)
         {
-            for c in tool_sync::detect_conflicts(tool_id, act.last_sync_at) {
+            // detect_conflicts compares against a file mtime, which it reads in
+            // seconds; the store now holds milliseconds.
+            let last_sync_at = entry.last_sync_at_ms.map(|ms| ms / 1000);
+            for c in tool_sync::detect_conflicts(tool_id, last_sync_at) {
                 // Env overrides are global — added once below to avoid dupes.
                 if !matches!(c.conflict_type, tool_sync::ConflictType::EnvVarOverride) {
                     conflicts.push(c);
@@ -411,29 +401,15 @@ pub async fn resync_tool(
 ) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
-    let is_active = store
-        .tool_activations
-        .get(&tool_id)
-        .is_some_and(|b| !b.is_empty());
-    if !is_active {
-        return Err(AppError::Other(format!("Tool '{}' is not active", tool_id)));
+    let is_bound = store.bindings.get(&tool_id).is_some_and(|b| !b.is_empty());
+    if !is_bound {
+        return Err(AppError::Other(format!("Tool '{tool_id}' is not bound")));
     }
 
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
-
-    if sync_result.success {
-        if let Some(act) = store
-            .tool_activations
-            .get_mut(&tool_id)
-            .and_then(|b| b.active_mut())
-        {
-            act.last_sync_at = Some(now_unix_secs());
-        }
-        providers::write_flat_store(&store, &path)?;
-    }
-
+    stamp_sync(&mut store, &tool_id, &sync_result, &path)?;
     Ok(sync_result)
 }
 

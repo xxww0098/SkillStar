@@ -57,7 +57,7 @@ export const AiProviderSection = memo(function AiProviderSection({
     if (!localAiConfig.enabled) return null;
     if (aiSource === "models") {
       const proto =
-        localAiConfig.provider_ref?.app_id === "codex" || localAiConfig.api_format === "openai" ? "OpenAI" : "Claude";
+        localAiConfig.provider_ref?.agent_id === "codex" || localAiConfig.api_format === "openai" ? "OpenAI" : "Claude";
       if (!localAiConfig.provider_ref) {
         return `${t("settings.modelsProvider")} · ${t("common.none")}`;
       }
@@ -81,7 +81,7 @@ export const AiProviderSection = memo(function AiProviderSection({
         ...localAiConfig,
         provider_ref: localAiConfig.provider_ref,
         api_format:
-          localAiConfig.provider_ref?.app_id === "codex"
+          localAiConfig.provider_ref?.agent_id === "codex"
             ? "openai"
             : localAiConfig.api_format === "openai"
               ? "openai"

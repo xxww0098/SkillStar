@@ -38,15 +38,29 @@ fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
             })),
         };
 
+        // The tier models live on the claude-code binding in v4, so the store
+        // needs one for them to migrate onto. Without a binding there is no
+        // agent whose roles they could be — which is the point of moving them
+        // off the provider row.
+        let mut tool_activations = std::collections::HashMap::new();
+        tool_activations.insert(
+            "claude-code".to_string(),
+            crate::providers::ToolBinding::single(crate::providers::ToolActivation {
+                provider_id: "test-uuid-claude".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+                settings: None,
+                last_sync_at: None,
+            }),
+        );
         let store = FlatProvidersStore {
-            version: 2,
+            version: 3,
             providers: vec![entry],
-            tool_activations: std::collections::HashMap::new(),
+            tool_activations,
         };
         write_flat_store(&store, &flat_store_path()).expect("write flat store");
 
         let mut cfg = AiConfig::default();
-        let label = super::resolve_from_flat_store(&mut cfg, "claude", "test-uuid-claude")
+        let label = super::resolve_from_flat_store(&mut cfg, "claude-code", "test-uuid-claude")
             .expect("resolve should succeed");
 
         assert_eq!(label, "Test Claude");
@@ -93,14 +107,14 @@ fn resolve_from_flat_store_claude_falls_back_to_openai_url_when_anthropic_empty(
         };
 
         let store = FlatProvidersStore {
-            version: 2,
+            version: 3,
             providers: vec![entry],
             tool_activations: std::collections::HashMap::new(),
         };
         write_flat_store(&store, &flat_store_path()).expect("write flat store");
 
         let mut cfg = AiConfig::default();
-        super::resolve_from_flat_store(&mut cfg, "claude", "test-uuid-relay")
+        super::resolve_from_flat_store(&mut cfg, "claude-code", "test-uuid-relay")
             .expect("resolve should succeed");
 
         assert_eq!(cfg.base_url, "https://relay.example.com/anthropic");
@@ -135,7 +149,7 @@ fn resolve_from_flat_store_codex_uses_openai_endpoint() {
         };
 
         let store = FlatProvidersStore {
-            version: 2,
+            version: 3,
             providers: vec![entry],
             tool_activations: std::collections::HashMap::new(),
         };
@@ -180,7 +194,7 @@ fn resolve_from_flat_store_fails_when_api_key_missing() {
         };
 
         let store = FlatProvidersStore {
-            version: 2,
+            version: 3,
             providers: vec![entry],
             tool_activations: std::collections::HashMap::new(),
         };
@@ -247,7 +261,7 @@ fn resolve_from_legacy_store_reads_claude_model_variants() {
         write_store(&store).expect("write legacy store");
 
         let mut cfg = AiConfig::default();
-        let label = super::resolve_from_legacy_store(&mut cfg, "claude", "legacy-claude")
+        let label = super::resolve_from_legacy_store(&mut cfg, "claude-code", "legacy-claude")
             .expect("resolve should succeed");
 
         assert_eq!(label, "Legacy Claude");

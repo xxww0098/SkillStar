@@ -1,53 +1,55 @@
-//! Provider / preset / ref CRUD commands (flat store v2).
-//!
-//! Carved out of `models_commands` mechanically — no logic changes.
+//! Provider / preset / ref CRUD commands, on the v4 store.
 
 use super::*;
+use super::compat;
 
 // ---------------------------------------------------------------------------
 // Read commands (no lock needed)
 // ---------------------------------------------------------------------------
 
-/// Returns built-in flat provider presets (v2) — single source of truth for the UI.
+/// Returns built-in flat provider presets — single source of truth for the UI.
 #[tauri::command]
 pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, AppError> {
     Ok(providers::get_all_presets_flat())
 }
 
-/// Point application AI (`ai.json`) at a flat-store provider.
+/// Point application AI (`ai.json`) at a provider.
 ///
-/// `app_id` must be `claude` (Anthropic) or `codex` (OpenAI). Validates that the
-/// provider exists and can be resolved before persisting.
+/// `agent_id` is an id from the agent registry. v3 called this `app_id` and
+/// took `"claude"` / `"codex"` — a private two-value id space that shadowed the
+/// registry's without matching it. The legacy spelling is still accepted and
+/// mapped forward so a UI build in flight does not break.
 #[tauri::command]
-pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Result<(), AppError> {
-    let app_id = app_id.trim();
+pub async fn set_app_ai_provider_ref(
+    app_id: String,
+    provider_id: String,
+) -> Result<(), AppError> {
+    let agent_id = skillstar_models::normalize_agent_id(&app_id).to_string();
     let provider_id = provider_id.trim();
-    if !matches!(app_id, "claude" | "codex") {
+    if !matches!(agent_id.as_str(), "claude-code" | "codex") {
         return Err(AppError::Other(format!(
-            "Unsupported app_id for app AI: '{app_id}'"
+            "Unsupported agent for app AI: '{agent_id}'"
         )));
     }
     if provider_id.is_empty() {
         return Err(AppError::Other("provider_id cannot be empty".to_string()));
     }
 
-    let path = providers::flat_store_path();
-    let store = providers::migrate_store_if_needed(&path)?;
-    if !store.providers.iter().any(|p| p.id == provider_id) {
+    let store = load_store()?;
+    if store.provider(provider_id).is_none() {
         return Err(AppError::Other(format!(
-            "Provider '{}' not found",
-            provider_id
+            "Provider '{provider_id}' not found"
         )));
     }
 
     let mut ai_config = ai_provider::load_config();
     ai_config.enabled = true;
     ai_config.provider_ref = Some(AiProviderRef {
-        app_id: app_id.to_string(),
+        agent_id: agent_id.clone(),
         provider_id: provider_id.to_string(),
     });
-    ai_config.api_format = match app_id {
-        "claude" => ai_provider::ApiFormat::Anthropic,
+    ai_config.api_format = match agent_id.as_str() {
+        "claude-code" => ai_provider::ApiFormat::Anthropic,
         _ => ai_provider::ApiFormat::Openai,
     };
 
@@ -57,7 +59,7 @@ pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Res
     Ok(())
 }
 
-/// Clear application AI provider reference (switch back to manual/local config).
+/// Clear the application AI provider reference (back to manual/local config).
 #[tauri::command]
 pub async fn clear_app_ai_provider_ref() -> Result<(), AppError> {
     let mut ai_config = ai_provider::load_config();
@@ -67,38 +69,35 @@ pub async fn clear_app_ai_provider_ref() -> Result<(), AppError> {
 }
 
 // ---------------------------------------------------------------------------
-// Flat store: Read commands (no lock needed)
+// Store: read
 // ---------------------------------------------------------------------------
 
-/// Returns the full flat provider store (version + providers + tool_activations).
+/// Returns the full provider store.
 ///
-/// Performs v1→v2 migration on first access if needed, then ensures Claude /
-/// Codex Official seed rows exist (stable ids; insert-only).
+/// Migrates v1 → v4 on first access and, on that same run, repairs the agent
+/// config files the old format had already written — see
+/// [`providers::load_store_and_repair`]. Then ensures the native-login seed
+/// rows exist.
 #[tauri::command]
 pub async fn get_providers_flat(
     lock: State<'_, ProvidersWriteLock>,
 ) -> Result<FlatProvidersResponse, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let loaded = providers::load_store_and_repair(&path)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let mut store = loaded.store;
     if providers::ensure_official_providers(&mut store) {
-        providers::write_flat_store(&store, &path)?;
+        providers::write_store_v4(&store, &path)?;
     }
-    Ok(FlatProvidersResponse {
-        version: store.version,
-        providers: store.providers,
-        tool_activations: store.tool_activations,
-    })
+    Ok(compat::store_to_flat(&store))
 }
 
 // ---------------------------------------------------------------------------
-// Flat store: Write commands (lock required)
+// Store: write (lock required)
 // ---------------------------------------------------------------------------
 
-/// Create a new provider in the flat store.
-///
-/// Validates the entry (name non-empty, URL format), generates a UUID,
-/// sets `created_at` and `sort_index`, then persists atomically.
+/// Create a new provider.
 #[tauri::command]
 pub async fn create_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
@@ -106,19 +105,18 @@ pub async fn create_provider_flat(
 ) -> Result<ProviderEntryFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
-    let created = providers::create_provider_flat(&mut store, entry)?;
-    providers::write_flat_store(&store, &path)?;
+    // v3 minted the id here and overwrote whatever the caller sent. v4 lets the
+    // caller keep a stable slug, so the id is only generated when absent.
+    let created = providers::create_provider(&mut store, compat::provider_from_flat_new(&entry))?;
+    providers::write_store_v4(&store, &path)?;
 
-    Ok(created)
+    Ok(compat::provider_to_flat(&created))
 }
 
-/// Update an existing provider with a partial patch.
-///
-/// Only non-None fields in the patch are applied. If the provider is currently
-/// active for any tools, those tools are automatically re-synced with the
-/// updated credentials (preserving each tool's individually selected model).
+/// Update an existing provider with a partial patch, then re-sync any agent
+/// that is bound to it.
 #[tauri::command]
 pub async fn update_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
@@ -127,24 +125,25 @@ pub async fn update_provider_flat(
 ) -> Result<ProviderUpdateFlatResult, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
-    let updated = providers::update_provider_flat(&mut store, &id, patch)?;
-    providers::write_flat_store(&store, &path)?;
+    let mut provider = store
+        .provider(&id)
+        .cloned()
+        .ok_or_else(|| AppError::Other(format!("Provider '{id}' not found")))?;
+    compat::apply_flat_patch(&mut provider, &patch);
+    let updated = providers::replace_provider(&mut store, provider)?;
+    providers::write_store_v4(&store, &path)?;
 
     let tool_sync_results = tool_sync::resync_active_tools(&store, &id);
 
     Ok(ProviderUpdateFlatResult {
-        provider: updated,
+        provider: compat::provider_to_flat(&updated),
         tool_sync_results,
     })
 }
 
-/// Delete a provider from the flat store.
-///
-/// Also clears any `tool_activations` entries that reference this provider.
-/// The caller should handle tool config file restoration (deactivation) before
-/// calling this command if needed.
+/// Delete a provider, along with every binding entry and role that named it.
 #[tauri::command]
 pub async fn delete_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
@@ -152,18 +151,15 @@ pub async fn delete_provider_flat(
 ) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
-    providers::delete_provider_flat(&mut store, &id)?;
-    providers::write_flat_store(&store, &path)?;
+    providers::delete_provider(&mut store, &id)?;
+    providers::write_store_v4(&store, &path)?;
 
     Ok(())
 }
 
-/// Reorder providers by assigning new `sort_index` values based on the given ID list.
-///
-/// Each ID in `ordered_ids` gets `sort_index = position` (0-based).
-/// Providers not in the list keep their existing `sort_index`.
+/// Reorder providers by assigning `sort_index = position`.
 #[tauri::command]
 pub async fn reorder_providers(
     lock: State<'_, ProvidersWriteLock>,
@@ -171,10 +167,10 @@ pub async fn reorder_providers(
 ) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path)?;
+    let mut store = load_store()?;
 
     providers::reorder_providers(&mut store, &ordered_ids)?;
-    providers::write_flat_store(&store, &path)?;
+    providers::write_store_v4(&store, &path)?;
 
     Ok(())
 }

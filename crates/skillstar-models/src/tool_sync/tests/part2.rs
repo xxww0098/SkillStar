@@ -264,33 +264,23 @@ fn test_codex_auth_json_merge_write() {
 
 #[test]
 fn test_resync_active_tools_syncs_correct_tools() {
-    use crate::providers::{FlatProvidersStore, ToolActivation, ToolBinding};
+    use crate::providers::ProvidersStoreV4;
 
     // Sandbox: resync writes real config files; keep them off the dev's home.
     let _sandbox = use_sandbox_home();
     let provider = make_test_provider_flat();
-    let store = FlatProvidersStore {
-        version: 2,
+    let store = ProvidersStoreV4 {
+        version: crate::providers::STORE_VERSION_V4,
         providers: vec![provider.clone()],
-        tool_activations: {
+        bindings: {
             let mut map = HashMap::new();
             map.insert(
                 "claude-code".to_string(),
-                ToolBinding::single(ToolActivation {
-                    provider_id: "test-uuid-1234".to_string(),
-                    model: "model-a".to_string(),
-                    settings: None,
-                    last_sync_at: None,
-                }),
+                AgentBinding::single(BindingEntry::new("test-uuid-1234", "model-a")),
             );
             map.insert(
                 "codex".to_string(),
-                ToolBinding::single(ToolActivation {
-                    provider_id: "test-uuid-1234".to_string(),
-                    model: "model-b".to_string(),
-                    settings: None,
-                    last_sync_at: None,
-                }),
+                AgentBinding::single(BindingEntry::new("test-uuid-1234".to_string(), "model-b".to_string())),
             );
             map
         },
@@ -310,9 +300,8 @@ fn test_resync_active_tools_syncs_correct_tools() {
 
 #[test]
 fn test_resync_active_tools_provider_not_found() {
-    use crate::providers::FlatProvidersStore;
 
-    let store = FlatProvidersStore::default();
+    let store = ProvidersStoreV4::default();
     let results = resync_active_tools(&store, "nonexistent-id");
 
     assert_eq!(results.len(), 1);
@@ -322,35 +311,25 @@ fn test_resync_active_tools_provider_not_found() {
 
 #[test]
 fn test_resync_active_tools_skips_other_providers() {
-    use crate::providers::{FlatProvidersStore, ToolActivation, ToolBinding};
+    use crate::providers::ProvidersStoreV4;
 
     // Sandbox: resync writes real config files; keep them off the dev's home.
     let _sandbox = use_sandbox_home();
     let provider = make_test_provider_flat();
-    let store = FlatProvidersStore {
-        version: 2,
+    let store = ProvidersStoreV4 {
+        version: crate::providers::STORE_VERSION_V4,
         providers: vec![provider.clone()],
-        tool_activations: {
+        bindings: {
             let mut map = HashMap::new();
             // Claude Code uses a different provider
             map.insert(
                 "claude-code".to_string(),
-                ToolBinding::single(ToolActivation {
-                    provider_id: "other-provider-id".to_string(),
-                    model: "other-model".to_string(),
-                    settings: None,
-                    last_sync_at: None,
-                }),
+                AgentBinding::single(BindingEntry::new("other-provider-id".to_string(), "other-model".to_string())),
             );
             // Codex uses our provider
             map.insert(
                 "codex".to_string(),
-                ToolBinding::single(ToolActivation {
-                    provider_id: "test-uuid-1234".to_string(),
-                    model: "model-a".to_string(),
-                    settings: None,
-                    last_sync_at: None,
-                }),
+                AgentBinding::single(BindingEntry::new("test-uuid-1234", "model-a")),
             );
             map
         },

@@ -261,13 +261,20 @@ fn test_get_all_presets_flat_unique_ids() {
 #[test]
 fn test_get_all_presets_flat_categories() {
     let presets = get_all_presets_flat();
-    let domestic: Vec<_> = presets
-        .iter()
-        .filter(|p| p.category == "domestic")
-        .collect();
-    let relay: Vec<_> = presets.iter().filter(|p| p.category == "relay").collect();
-    assert_eq!(domestic.len(), 8);
-    assert_eq!(relay.len(), 2);
+    let count = |category: PresetCategory| {
+        presets.iter().filter(|p| p.category == category).count()
+    };
+    assert_eq!(count(PresetCategory::Domestic), 8);
+    assert_eq!(count(PresetCategory::Relay), 2);
+    // The split that retired the id whitelist: Grok is a vendor you reach with
+    // a key, the Claude/Codex seeds are logins that own their own credentials.
+    assert_eq!(count(PresetCategory::VendorOfficial), 1);
+    assert_eq!(count(PresetCategory::NativeLogin), 2);
+    assert_eq!(
+        count(PresetCategory::OpenaiCompatible),
+        0,
+        "the generic template is synthesised by the frontend, not registered here"
+    );
 }
 #[test]
 fn test_get_all_presets_flat_deepseek() {
@@ -295,7 +302,7 @@ fn test_get_all_presets_flat_openrouter() {
     let presets = get_all_presets_flat();
     let or = presets.iter().find(|p| p.id == "openrouter").unwrap();
     assert_eq!(or.name, "OpenRouter");
-    assert_eq!(or.category, "relay");
+    assert_eq!(or.category, PresetCategory::Relay);
     assert_eq!(or.base_url_openai, "https://openrouter.ai/api/v1");
     assert!(or.base_url_anthropic.is_empty());
     assert!(or.models.is_empty());
@@ -306,28 +313,37 @@ fn test_get_all_presets_flat_siliconflow() {
     let presets = get_all_presets_flat();
     let sf = presets.iter().find(|p| p.id == "siliconflow").unwrap();
     assert_eq!(sf.name, "SiliconFlow");
-    assert_eq!(sf.category, "relay");
+    assert_eq!(sf.category, PresetCategory::Relay);
     assert_eq!(sf.base_url_openai, "https://api.siliconflow.cn/v1");
     assert!(sf.base_url_anthropic.is_empty());
     assert!(sf.models.is_empty());
 }
 #[test]
-fn test_create_from_preset_flat_deepseek() {
-    let result = create_from_preset_flat("deepseek", "sk-test-key-123").unwrap();
+fn test_create_from_preset_deepseek() {
+    let result = create_provider_from_preset("deepseek", "sk-test-key-123").unwrap();
     assert_eq!(result.name, "DeepSeek");
-    assert_eq!(result.base_url_openai, "https://api.deepseek.com/v1");
     assert_eq!(
-        result.base_url_anthropic,
-        "https://api.deepseek.com/anthropic"
+        result.endpoints.openai_chat.as_deref(),
+        Some("https://api.deepseek.com/v1")
     );
-    assert_eq!(result.api_key, "sk-test-key-123");
+    assert_eq!(
+        result.endpoints.anthropic_messages.as_deref(),
+        Some("https://api.deepseek.com/anthropic")
+    );
+    assert_eq!(
+        result.credential.literal_secret(),
+        Some("sk-test-key-123")
+    );
     assert!(result.models.is_empty());
-    assert_eq!(result.default_model, "");
+    assert_eq!(result.default_model, None);
     assert_eq!(result.preset_id, Some("deepseek".to_string()));
     assert_eq!(result.icon_color, Some("#4D6BFE".to_string()));
-    assert!(result.created_at.is_some());
-    // ID should be a valid UUID
+    assert!(result.created_at_ms.is_some());
     assert!(uuid::Uuid::parse_str(&result.id).is_ok());
+    assert_eq!(
+        result.endpoints.openai_responses, None,
+        "DeepSeek speaks chat only; assuming otherwise is what broke Codex"
+    );
 }
 
 #[test]
@@ -335,7 +351,7 @@ fn test_native_official_presets_empty_endpoints_no_key_url() {
     let presets = get_all_presets_flat();
     for id in [CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID] {
         let p = presets.iter().find(|p| p.id == id).unwrap();
-        assert_eq!(p.category, "official");
+        assert_eq!(p.category, PresetCategory::NativeLogin);
         assert!(p.base_url_openai.is_empty());
         assert!(p.base_url_anthropic.is_empty());
         assert!(p.models_url.is_empty());
@@ -345,23 +361,28 @@ fn test_native_official_presets_empty_endpoints_no_key_url() {
 }
 
 #[test]
-fn test_create_from_preset_flat_official_stable_ids() {
-    let claude = create_from_preset_flat(CLAUDE_OFFICIAL_ID, "").unwrap();
+fn test_create_from_preset_official_stable_ids() {
+    let claude = create_provider_from_preset(CLAUDE_OFFICIAL_ID, "").unwrap();
     assert_eq!(claude.id, CLAUDE_OFFICIAL_ID);
     assert_eq!(claude.preset_id.as_deref(), Some(CLAUDE_OFFICIAL_ID));
-    assert!(claude.api_key.is_empty());
-    assert!(claude.base_url_anthropic.is_empty());
+    assert!(claude.endpoints.is_empty());
+    assert!(
+        matches!(&claude.credential, Credential::ExternalCli { surface } if surface == "claude"),
+        "the key lives in the Claude CLI's store; that is a state, not an absence"
+    );
 
-    let codex = create_from_preset_flat(CODEX_OFFICIAL_ID, "").unwrap();
+    let codex = create_provider_from_preset(CODEX_OFFICIAL_ID, "").unwrap();
     assert_eq!(codex.id, CODEX_OFFICIAL_ID);
     assert_eq!(codex.preset_id.as_deref(), Some(CODEX_OFFICIAL_ID));
-    assert_eq!(codex.codex_auth_mode, "oauth");
-    assert!(codex.base_url_openai.is_empty());
+    assert!(codex.endpoints.is_empty());
+    assert!(
+        matches!(&codex.credential, Credential::ExternalCli { surface } if surface == "codex")
+    );
 }
 
 #[test]
 fn test_ensure_official_providers_idempotent() {
-    let mut store = FlatProvidersStore::default();
+    let mut store = ProvidersStoreV4::default();
     assert!(ensure_official_providers(&mut store));
     assert_eq!(store.providers.len(), 2);
     assert!(store.providers.iter().any(|p| p.id == CLAUDE_OFFICIAL_ID));
@@ -391,23 +412,11 @@ fn test_ensure_official_providers_idempotent() {
 }
 
 #[test]
-fn test_activate_claude_official_skips_url_gate() {
-    let mut store = FlatProvidersStore::default();
+fn test_bind_claude_official_skips_the_endpoint_gate() {
+    let mut store = ProvidersStoreV4::default();
     assert!(ensure_official_providers(&mut store));
-    let activation =
-        activate_tool(&mut store, CLAUDE_OFFICIAL_ID, "claude-code", None, None).unwrap();
-    assert_eq!(activation.provider_id, CLAUDE_OFFICIAL_ID);
+    let entry =
+        bind_provider(&mut store, "claude-code", CLAUDE_OFFICIAL_ID, None, None).unwrap();
+    assert_eq!(entry.provider_id, CLAUDE_OFFICIAL_ID);
 }
 
-#[test]
-fn test_activate_codex_official_forces_oauth_settings() {
-    let mut store = FlatProvidersStore::default();
-    assert!(ensure_official_providers(&mut store));
-    let activation = activate_tool(&mut store, CODEX_OFFICIAL_ID, "codex", None, None).unwrap();
-    assert_eq!(activation.provider_id, CODEX_OFFICIAL_ID);
-    let settings = activation.settings.expect("oauth settings");
-    assert_eq!(
-        settings.get("auth_mode").and_then(|v| v.as_str()),
-        Some("oauth")
-    );
-}

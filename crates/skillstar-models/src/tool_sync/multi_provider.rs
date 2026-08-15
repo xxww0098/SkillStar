@@ -8,13 +8,12 @@
 //! the active one (Codex `model_provider`, OpenCode top-level `model`, Pi
 //! `defaultProvider`/`defaultModel` in `settings.json`).
 //!
-//! These writers project an entire [`ToolBinding`] onto disk: one managed entry
+//! These writers project an entire [`AgentBinding`] onto disk: one managed entry
 //! per bound provider, keyed `skillstar_<id8>`, plus the active pointer. Every
 //! managed key shares the `skillstar` prefix so unsync and conflict detection
 //! can find them all regardless of how many providers are bound.
 
 use super::*;
-use crate::providers::{FlatProvidersStore, ProviderEntryFlat, ToolBinding};
 
 /// Prefix shared by every SkillStar-managed provider entry across Codex and
 /// OpenCode. Unsync and conflict detection match on this prefix so they catch
@@ -61,12 +60,9 @@ pub fn is_skillstar_managed_key(key: &str) -> bool {
 ///
 /// Returns `None` when no usable entry remains (the tool should be unsynced).
 pub(crate) fn resolve_entries<'a>(
-    binding: &'a ToolBinding,
-    providers: &'a [ProviderEntryFlat],
-) -> Option<(
-    Vec<(&'a ProviderEntryFlat, &'a crate::providers::ToolActivation)>,
-    String,
-)> {
+    binding: &'a AgentBinding,
+    providers: &'a [Provider],
+) -> Option<(Vec<(&'a Provider, &'a BindingEntry)>, String)> {
     let resolved: Vec<_> = binding
         .entries
         .iter()
@@ -112,12 +108,12 @@ pub(crate) fn resolve_entries<'a>(
 pub(crate) type ActivePointer = (String, String);
 
 pub(crate) fn sync_json_blocks_inner(
-    entries: &[(&ProviderEntryFlat, &crate::providers::ToolActivation)],
+    entries: &[(&Provider, &BindingEntry)],
     active_id: &str,
     config_path: &Path,
     blocks_key: &str,
     init_root: impl Fn() -> Value,
-    build_block: impl Fn(&ProviderEntryFlat, &str) -> Value,
+    build_block: impl Fn(&Provider, &str) -> Value,
     finish_root: impl FnOnce(&mut serde_json::Map<String, Value>, Option<&ActivePointer>),
 ) -> Result<(Option<PathBuf>, Option<ActivePointer>)> {
     let backup_path = if config_path.exists() {
@@ -157,14 +153,14 @@ pub(crate) fn sync_json_blocks_inner(
     provider_map.retain(|k, _| !is_skillstar_managed_key(k));
     let mut active_pointer: Option<(String, String)> = None;
     for (provider, entry) in entries {
-        if provider.base_url_openai.trim().is_empty() {
+        if openai_base(provider).trim().is_empty() {
             continue;
         }
         let key = skillstar_managed_key(&provider.id);
         let block = build_block(provider, &entry.model);
         if provider.id == active_id {
             let model_id = if entry.model.trim().is_empty() {
-                provider.default_model.clone()
+                default_model(provider).to_string()
             } else {
                 entry.model.clone()
             };
@@ -189,6 +185,58 @@ pub(crate) fn sync_json_blocks_inner(
 // Codex
 // ---------------------------------------------------------------------------
 
+/// Whether a provider can be written into Codex's config at all.
+///
+/// Two conditions, and they are not the same question:
+///
+/// - the host must expose a `/v1/responses` endpoint, because Codex ≥0.95
+///   removed every other `WireApi` variant from its enum; and
+/// - a probe must not have established that it does *not* speak it.
+///
+/// `Tri::Unknown` deliberately passes. Migration writes `Unknown` for every
+/// row, so treating "never probed" as "unsupported" would unbind everyone on
+/// upgrade — the endpoint's presence is what carries the decision, and the
+/// capability bit only ever *removes* a host a probe has disproved.
+pub fn codex_can_serve(provider: &Provider) -> bool {
+    !provider.caps.responses_api.is_denied() && serves(provider, RequiredWire::OpenaiResponses)
+}
+
+/// The Codex settings for one entry, defaulting from the credential.
+///
+/// v3 fell back to two columns on the provider row (`codex_wire_api` /
+/// `codex_auth_mode`) that applied to agents with no such concept. v4 keeps
+/// `auth_mode` per entry, where it belongs, and derives the default from what
+/// kind of credential the provider actually has: a key that lives in another
+/// CLI's store must never be written to `auth.json`, and a literal third-party
+/// key travels via `env_key` so a concurrent ChatGPT login survives.
+pub(crate) fn codex_settings_for(provider: &Provider, entry: &BindingEntry) -> CodexSettings {
+    let mut settings = entry
+        .settings
+        .as_ref()
+        .map(CodexSettings::from_value)
+        .unwrap_or_else(|| CodexSettings {
+            auth_mode: default_codex_auth_mode(provider).to_string(),
+        });
+    if settings.auth_mode.trim().is_empty() {
+        settings.auth_mode = default_codex_auth_mode(provider).to_string();
+    }
+    settings
+}
+
+/// The auth mode a provider implies when its entry does not name one.
+fn default_codex_auth_mode(provider: &Provider) -> &'static str {
+    if provider.is_external_cli() {
+        // Credentials belong to the Codex CLI's own login; never touch them.
+        CODEX_AUTH_MODE_OAUTH
+    } else if serves(provider, RequiredWire::OpenaiResponses)
+        && responses_base(provider).contains("api.openai.com")
+    {
+        CODEX_AUTH_MODE_API_KEY
+    } else {
+        CODEX_AUTH_MODE_THIRD_PARTY
+    }
+}
+
 /// Write a whole Codex binding to `~/.codex/config.toml` (+ `auth.json`).
 ///
 /// Each bound provider gets a `[model_providers.skillstar_<id>]` table; the
@@ -197,8 +245,8 @@ pub(crate) fn sync_json_blocks_inner(
 /// slot); third-party entries carry their key via per-table `env_key`, so they
 /// never depend on `auth.json`.
 pub fn sync_codex_binding(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_codex_config_path()?;
     Ok(ToolSyncResultFlat::from_write_outcome(
@@ -213,8 +261,8 @@ pub fn sync_codex_binding(
 /// sandbox HOME. (`auth.json` still resolves through the sandboxable home; use
 /// an OAuth/third-party auth mode to keep a test fully path-hermetic.)
 pub fn sync_codex_binding_inner(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
     let (entries, active_id) = resolve_entries(binding, providers)
@@ -227,21 +275,14 @@ pub fn sync_codex_binding_inner(
         .find(|(p, _)| p.id == active_id)
         .copied()
         .context("active Codex entry not found after resolution")?;
-    let active_settings = active_entry
-        .settings
-        .as_ref()
-        .map(CodexSettings::from_value)
-        .unwrap_or_else(|| CodexSettings {
-            wire_api: active_provider.codex_wire_api.clone(),
-            auth_mode: active_provider.codex_auth_mode.clone(),
-        });
+    let active_settings = codex_settings_for(active_provider, active_entry);
 
-    let official_active = crate::providers::is_native_official_provider(active_provider);
+    let official_active = active_provider.is_external_cli();
 
     // Official (ChatGPT OAuth): never require a Base URL and never touch auth.json.
-    if !official_active && active_provider.base_url_openai.trim().is_empty() {
+    if !official_active && !codex_can_serve(active_provider) {
         bail!(
-            "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty)",
+            "Provider '{}' has no /v1/responses endpoint; Codex >=0.95 speaks nothing else",
             active_provider.name
         );
     }
@@ -261,7 +302,7 @@ pub fn sync_codex_binding_inner(
         }
         let auth_fields: Vec<(&str, Value)> = vec![(
             "OPENAI_API_KEY",
-            Value::String(active_provider.api_key.clone()),
+            Value::String(api_key(active_provider).to_string()),
         )];
         merge_json_write(&auth_path, &auth_fields)?;
     }
@@ -320,20 +361,16 @@ pub fn sync_codex_binding_inner(
     mp_table.retain(|k, _| !is_skillstar_managed_key(k));
 
     for (provider, entry) in &entries {
-        if provider.base_url_openai.trim().is_empty()
-            || crate::providers::is_native_official_provider(provider)
-        {
+        // The Codex fix, in one condition. A host with no `/v1/responses`
+        // endpoint is *skipped*, not written with `wire_api = "chat"`: that
+        // value no longer exists in Codex's enum, and a config.toml containing
+        // it fails to deserialize — taking the whole file, and every other
+        // provider in it, down with it.
+        if provider.is_external_cli() || !codex_can_serve(provider) {
             continue;
         }
-        let settings = entry
-            .settings
-            .as_ref()
-            .map(CodexSettings::from_value)
-            .unwrap_or_else(|| CodexSettings {
-                wire_api: provider.codex_wire_api.clone(),
-                auth_mode: provider.codex_auth_mode.clone(),
-            });
-        let section = CodexModelProvider::from_activation(provider, &settings).to_toml_table();
+        let settings = codex_settings_for(provider, entry);
+        let section = CodexModelProvider::from_binding(provider, &settings).to_toml_table();
         mp_table.insert(
             skillstar_managed_key(&provider.id),
             toml::Value::Table(section),
@@ -360,8 +397,8 @@ pub fn sync_codex_binding_inner(
 /// Each bound provider becomes a `provider.skillstar_<id>` block; the active
 /// entry sets the top-level `model = "skillstar_<id>/<model>"` selector.
 pub fn sync_opencode_binding(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_opencode_config_path()?;
     Ok(ToolSyncResultFlat::from_write_outcome(
@@ -372,8 +409,8 @@ pub fn sync_opencode_binding(
 }
 
 pub(crate) fn sync_opencode_binding_inner(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
     let (entries, active_id) = resolve_entries(binding, providers)
@@ -414,8 +451,8 @@ pub(crate) fn sync_opencode_binding_inner(
 /// entries so Pi's own defaults apply); the active entry drives
 /// `defaultProvider` / `defaultModel` in `settings.json`.
 pub fn sync_pi_binding(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_pi_models_path()?;
     let settings_path = resolve_pi_settings_path()?;
@@ -429,13 +466,13 @@ pub fn sync_pi_binding(
 /// Build one Pi provider block. Model entries carry only `id` — Pi supplies
 /// its own `contextWindow` / `maxTokens` defaults, and we have no reliable
 /// per-model metadata to override them with.
-pub(crate) fn build_pi_provider_block(provider: &ProviderEntryFlat, model: &str) -> Value {
-    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
+pub(crate) fn build_pi_provider_block(provider: &Provider, model: &str) -> Value {
+    let base_url = openai_base(provider).trim().trim_end_matches('/');
 
     let mut seen = std::collections::HashSet::new();
     let mut model_ids: Vec<String> = Vec::new();
     for candidate in std::iter::once(model)
-        .chain(std::iter::once(provider.default_model.as_str()))
+        .chain(std::iter::once(default_model(provider)))
         .chain(provider.models.iter().map(String::as_str))
     {
         let id = candidate.trim();
@@ -452,14 +489,14 @@ pub(crate) fn build_pi_provider_block(provider: &ProviderEntryFlat, model: &str)
     serde_json::json!({
         "baseUrl": base_url,
         "api": "openai-completions",
-        "apiKey": provider.api_key,
+        "apiKey": api_key(provider),
         "models": models
     })
 }
 
 pub(crate) fn sync_pi_binding_inner(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
     config_path: &Path,
     settings_path: &Path,
 ) -> Result<Option<PathBuf>> {
@@ -505,7 +542,7 @@ pub(crate) fn sync_pi_binding_inner(
 /// agents write their active entry's env block, multi-provider agents project
 /// the whole binding). An empty binding unsyncs the tool via
 /// [`AgentSpec::unsync`]. Unknown tools return a failed result.
-pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncResultFlat {
+pub fn sync_tool_binding(store: &ProvidersStoreV4, tool_id: &str) -> ToolSyncResultFlat {
     let Some(spec) = agent_spec(tool_id) else {
         return ToolSyncResultFlat {
             tool_id: tool_id.to_string(),
@@ -516,8 +553,8 @@ pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncR
         };
     };
 
-    let binding = store.tool_activations.get(tool_id);
-    let empty = ToolBinding::default();
+    let binding = store.bindings.get(tool_id);
+    let empty = AgentBinding::default();
     let binding = binding.unwrap_or(&empty);
 
     // Empty binding → ensure the tool is clean.
@@ -586,6 +623,59 @@ pub(crate) fn unsync_codex_all_at(auth_path: &Path, config_path: &Path) -> Resul
         }
         std::fs::write(config_path, toml::to_string_pretty(&table)?)?;
     }
+    Ok(())
+}
+
+/// Remove **one** provider's managed table from Codex's `config.toml`.
+///
+/// The migration needs this and full unsync will not do. A user with three
+/// providers bound to Codex, one of which is chat-only, must lose exactly that
+/// one: leaving its `wire_api = "chat"` table behind keeps Codex unbootable,
+/// and clearing all three throws away two working bindings to fix a third.
+pub fn unsync_codex_entry(provider_id: &str) -> Result<()> {
+    unsync_codex_entry_at(provider_id, &resolve_codex_config_path()?)
+}
+
+/// Path-taking core of [`unsync_codex_entry`].
+pub(crate) fn unsync_codex_entry_at(provider_id: &str, config_path: &Path) -> Result<()> {
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let key = skillstar_managed_key(provider_id);
+    let content = std::fs::read_to_string(config_path)?;
+    let mut table: toml::Table = toml::from_str(&content)
+        .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+
+    let removed = table
+        .get_mut("model_providers")
+        .and_then(|v| v.as_table_mut())
+        .map(|mp| mp.remove(&key).is_some())
+        .unwrap_or(false);
+    if !removed {
+        return Ok(());
+    }
+    create_rolling_backup(config_path)?;
+
+    // The top-level pointer must not outlive the table it names — Codex fails
+    // to start on a `model_provider` that resolves to nothing, which is the
+    // same class of breakage this whole repair exists to undo.
+    if table
+        .get("model_provider")
+        .and_then(|v| v.as_str())
+        .is_some_and(|current| current == key)
+    {
+        table.remove("model_provider");
+        table.remove("model");
+    }
+    if table
+        .get("model_providers")
+        .and_then(|v| v.as_table())
+        .is_some_and(|mp| mp.is_empty())
+    {
+        table.remove("model_providers");
+    }
+
+    std::fs::write(config_path, toml::to_string_pretty(&table)?)?;
     Ok(())
 }
 

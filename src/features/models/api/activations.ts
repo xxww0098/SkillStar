@@ -45,7 +45,7 @@ export function useActivationMutations() {
       toolId: string;
       model?: string;
       settings?: Record<string, unknown> | null;
-    }) => tauriInvoke("activate_tool", { providerId, toolId, model: model ?? null, settings: settings ?? null }),
+    }) => tauriInvoke("bind_provider", { providerId, toolId, model: model ?? null, settings: settings ?? null }),
     onMutate: async ({ providerId, toolId, model }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);
@@ -86,7 +86,7 @@ export function useActivationMutations() {
   });
 
   const deactivateMutation = useMutation({
-    mutationFn: (toolId: string) => tauriInvoke("deactivate_tool", { toolId }),
+    mutationFn: (toolId: string) => tauriInvoke("unbind_agent", { toolId }),
     onMutate: async (toolId) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);
@@ -116,7 +116,7 @@ export function useActivationMutations() {
 
   const updateSettingsMutation = useMutation({
     mutationFn: ({ toolId, settings }: { toolId: string; settings: Record<string, unknown> }) =>
-      tauriInvoke("update_tool_settings", { toolId, settings }),
+      tauriInvoke("update_binding_entry_settings", { toolId, settings }),
     onSuccess: (result, { toolId }) => {
       if (result?.success) {
         toast.success(i18n.t("models.toasts.settingsUpdated", { name: toolDisplayName(toolId) }));
@@ -139,7 +139,7 @@ export function useActivationMutations() {
   // the only place binding state lives (see the note at the top of this file).
   const updateBindingSettingsMutation = useMutation({
     mutationFn: ({ toolId, settings }: { toolId: string; settings: ToolBindingSettings }) =>
-      tauriInvoke("update_tool_binding_settings", { toolId, settings }),
+      tauriInvoke("update_agent_settings", { toolId, settings }),
     onMutate: async ({ toolId, settings }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);
@@ -202,7 +202,7 @@ export function useActivationMutations() {
 
   const removeBindingEntryMutation = useMutation({
     mutationFn: ({ toolId, providerId }: { toolId: string; providerId: string }) =>
-      tauriInvoke("remove_binding_entry", { toolId, providerId }),
+      tauriInvoke("unbind_provider", { toolId, providerId }),
     onMutate: async ({ toolId, providerId }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);

@@ -31,7 +31,7 @@ export function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
   return (
     a.enabled === b.enabled &&
     a.api_format === b.api_format &&
-    (a.provider_ref?.app_id ?? "") === (b.provider_ref?.app_id ?? "") &&
+    (a.provider_ref?.agent_id ?? "") === (b.provider_ref?.agent_id ?? "") &&
     (a.provider_ref?.provider_id ?? "") === (b.provider_ref?.provider_id ?? "") &&
     a.base_url === b.base_url &&
     a.api_key === b.api_key &&

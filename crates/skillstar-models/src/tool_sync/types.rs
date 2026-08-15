@@ -1,14 +1,26 @@
 //! Data types and managed-field constants for tool-config sync.
 
+use crate::providers::ModelRef;
 use serde::{Deserialize, Serialize};
 
-use crate::providers::ProviderEntryFlat;
+use crate::providers::{Provider, RequiredWire};
 
 // ---------------------------------------------------------------------------
 // Per-tool typed settings helpers
 // ---------------------------------------------------------------------------
 
-/// Typed accessor for Codex-specific settings stored in `ToolActivation.settings`.
+/// Typed accessor for Codex-specific settings stored in `BindingEntry.settings`.
+///
+/// ## Why `wire_api` is gone
+///
+/// v3 carried a `wire_api` here (and a matching column on the provider row)
+/// because Codex once accepted two protocols and SkillStar had to say which.
+/// Codex ≥0.95 removed `WireApi::Chat` from its enum, so the field encodes a
+/// choice that no longer exists — and worse, the value SkillStar computed for
+/// every third-party host was exactly the one Codex can no longer parse. The
+/// real question was never "which protocol shall I ask for" but "does this host
+/// implement the one protocol Codex has left", which is a fact about the host
+/// and now lives on `Provider.endpoints.openai_responses`.
 ///
 /// `auth_mode` is a three-state value (see `CODEX_AUTH_MODE_*` constants):
 /// - `"api_key"` — official OpenAI API key; written to `auth.json` as
@@ -21,8 +33,6 @@ use crate::providers::ProviderEntryFlat;
 ///   login stays valid. `requires_openai_auth = false`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CodexSettings {
-    #[serde(default = "default_wire_api")]
-    pub wire_api: String,
     #[serde(default = "default_auth_mode")]
     pub auth_mode: String,
 }
@@ -34,12 +44,15 @@ pub const CODEX_AUTH_MODE_OAUTH: &str = "oauth";
 /// Auth-mode sentinel: third-party API via `env_key` (`auth.json` preserved).
 pub const CODEX_AUTH_MODE_THIRD_PARTY: &str = "third_party";
 
-fn default_wire_api() -> String {
-    "responses".to_string()
-}
 fn default_auth_mode() -> String {
     CODEX_AUTH_MODE_API_KEY.to_string()
 }
+
+/// The only `wire_api` value Codex still accepts.
+///
+/// Written as a constant rather than a settable field so there is no code path
+/// left that can put anything else in `config.toml`.
+pub const CODEX_WIRE_API: &str = "responses";
 
 impl CodexSettings {
     /// Parse from a generic `Value`, filling in defaults for missing fields.
@@ -70,7 +83,6 @@ impl CodexSettings {
 impl Default for CodexSettings {
     fn default() -> Self {
         Self {
-            wire_api: default_wire_api(),
             auth_mode: default_auth_mode(),
         }
     }
@@ -104,73 +116,30 @@ pub const OMP_THINKING_LEVELS: &[&str] = &[
     "inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max", "auto",
 ];
 
-/// One role → provider+model assignment.
+/// Render a role target as OMP's on-disk `modelRoles` value:
+/// `<managed_key>/<model>[:thinking]`.
 ///
-/// `provider_id` is a SkillStar provider id, *not* the on-disk `skillstar_*`
-/// key — the key is derived at write time so it always tracks
-/// `skillstar_managed_key`. A role may point at any bound provider, which is why
-/// this lives on [`ToolBinding::settings`] rather than a single entry's.
+/// Returns `None` for an incomplete target — a role with no model must not
+/// overwrite whatever the user already has on disk.
 ///
-/// [`ToolBinding::settings`]: crate::providers::ToolBinding::settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct OmpRoleTarget {
-    pub provider_id: String,
-    pub model: String,
-    /// Optional thinking level appended as `:level`. Must be one of
-    /// [`OMP_THINKING_LEVELS`]; anything else is dropped at write time.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<String>,
-}
-
-impl OmpRoleTarget {
-    /// Render the on-disk `modelRoles` value: `<managed_key>/<model>[:thinking]`.
-    ///
-    /// Returns `None` when the target is incomplete (no model) — an incomplete
-    /// role must not overwrite whatever the user already has on disk.
-    pub fn to_role_value(&self, managed_key: &str) -> Option<String> {
-        let model = self.model.trim();
-        if model.is_empty() {
-            return None;
-        }
-        let mut value = format!("{managed_key}/{model}");
-        if let Some(level) = self.thinking.as_deref().map(str::trim)
-            && OMP_THINKING_LEVELS.contains(&level)
-        {
+/// This replaces v3's `OmpRoleTarget::to_role_value`. The type it took was
+/// OMP-private even though every other agent needed the same triple; the
+/// rendering stayed here because the `provider/model:level` grammar is OMP's,
+/// but the data it renders is now the shared [`ModelRef`].
+pub fn omp_role_value(target: &ModelRef, managed_key: &str) -> Option<String> {
+    let model = target.model.trim();
+    if model.is_empty() {
+        return None;
+    }
+    let mut value = format!("{managed_key}/{model}");
+    if let Some(effort) = target.effort {
+        let level = effort.as_omp_thinking();
+        if OMP_THINKING_LEVELS.contains(&level) {
             value.push(':');
             value.push_str(level);
         }
-        Some(value)
     }
-}
-
-/// Typed accessor for OMP-specific tool-level settings stored in
-/// `ToolBinding.settings`.
-///
-/// Only `roles` lives here today. Roles the user has not assigned are simply
-/// absent from the map, and absent roles are never written to `config.yml` —
-/// OMP falls back to `default` on its own, and untouched roles stay under the
-/// user's control.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct OmpSettings {
-    #[serde(default)]
-    pub roles: std::collections::BTreeMap<String, OmpRoleTarget>,
-}
-
-impl OmpSettings {
-    /// Parse from a generic `Value`, falling back to empty on any mismatch
-    /// (mirrors [`CodexSettings::from_value`]).
-    pub fn from_value(value: &serde_json::Value) -> Self {
-        serde_json::from_value(value.clone()).unwrap_or_default()
-    }
-
-    /// Read the roles out of a binding's tool-level settings bag.
-    pub fn from_binding(binding: &crate::providers::ToolBinding) -> Self {
-        binding
-            .settings
-            .as_ref()
-            .map(Self::from_value)
-            .unwrap_or_default()
-    }
+    Some(value)
 }
 
 /// Whether a role name is safe to write into `modelRoles`.
@@ -204,7 +173,8 @@ pub fn is_valid_omp_role_name(role: &str) -> bool {
 pub struct CodexModelProvider {
     pub name: String,
     pub base_url: String,
-    /// `"responses"` (Codex native) or `"chat"` (OpenAI-compatible `/v1/chat/completions`).
+    /// Always [`CODEX_WIRE_API`]. Kept as a field because it is a field in
+    /// Codex's own schema, not because there is a choice to make.
     pub wire_api: String,
     /// Mirrors Codex's `requires_openai_auth` flag.
     pub requires_openai_auth: bool,
@@ -215,17 +185,24 @@ pub struct CodexModelProvider {
 }
 
 impl CodexModelProvider {
-    /// Build the provider table from an activation + resolved settings.
-    pub fn from_activation(provider: &ProviderEntryFlat, settings: &CodexSettings) -> Self {
+    /// Build the provider table from a bound provider + resolved settings.
+    ///
+    /// `base_url` is the **Responses** endpoint, not the chat one. Codex only
+    /// calls `/v1/responses`, so pointing it at a chat base URL produces a
+    /// table that parses and then fails every request.
+    pub fn from_binding(provider: &Provider, settings: &CodexSettings) -> Self {
         let env_key = if settings.auth_mode == CODEX_AUTH_MODE_THIRD_PARTY {
-            Some(codex_env_key_for(provider))
+            Some(codex_env_key_for(&provider.id))
         } else {
             None
         };
         Self {
             name: "SkillStar".to_string(),
-            base_url: provider.base_url_openai.clone(),
-            wire_api: settings.wire_api.clone(),
+            base_url: provider
+                .endpoint_for(RequiredWire::OpenaiResponses)
+                .unwrap_or_default()
+                .to_string(),
+            wire_api: CODEX_WIRE_API.to_string(),
             requires_openai_auth: settings.requires_openai_auth(),
             env_key,
         }
@@ -261,8 +238,8 @@ impl CodexModelProvider {
 /// of the provider id, uppercased and reduced to `[A-Z0-9_]`. Two providers
 /// therefore never share an env var (UUIDv4 prefix collision is negligible),
 /// and the name is filesystem/shell-safe.
-pub fn codex_env_key_for(provider: &ProviderEntryFlat) -> String {
-    let raw_prefix = provider.id.chars().take(8).collect::<String>();
+pub fn codex_env_key_for(provider_id: &str) -> String {
+    let raw_prefix = provider_id.chars().take(8).collect::<String>();
     let safe: String = raw_prefix
         .chars()
         .map(|c| {

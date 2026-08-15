@@ -1,7 +1,7 @@
 //! Tool configuration sync module.
 //!
-//! Writes provider credentials from the flat store (`ProviderEntryFlat`) to
-//! external tool config files. Only supports hardcoded known config paths for
+//! Writes provider credentials from the v4 store (`Provider` / `AgentBinding`)
+//! to external tool config files. Only supports hardcoded known config paths for
 //! security. For example:
 //! - Claude Code: `~/.claude/settings.json` env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL)
 //! - Codex: `~/.codex/auth.json` (OPENAI_API_KEY) + `~/.codex/config.toml` (model_provider, model, [model_providers.skillstar])
@@ -14,8 +14,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::providers::{
-    FlatProvidersStore, ModelCatalogEntry, ProviderEntryFlat, catalog_from_meta,
+    AgentBinding, BindingEntry, ModelCatalogEntry, ModelRef, Provider, ProvidersStoreV4,
+    RequiredWire, catalog_cache,
 };
+
+mod view;
+use view::*;
 
 mod agents;
 pub use agents::*;
@@ -40,6 +44,9 @@ pub use multi_provider::*;
 
 mod omp_provider;
 pub use omp_provider::*;
+
+mod migrate_configs;
+pub use migrate_configs::*;
 
 // ---------------------------------------------------------------------------
 // Sandboxed home resolution (single source of truth for tool-config paths)

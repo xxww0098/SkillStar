@@ -8,8 +8,7 @@
 //! skeleton with `serde_yaml` (order-preserving mappings).
 
 use super::*;
-use crate::providers::{ProviderEntryFlat, ToolBinding};
-use crate::tool_sync::types::{OmpSettings, is_valid_omp_role_name};
+use crate::tool_sync::types::{is_valid_omp_role_name, omp_role_value};
 
 // ---------------------------------------------------------------------------
 // Oh My Pi (YAML multi-provider: ~/.omp/agent/models.yml + config.yml)
@@ -20,12 +19,12 @@ use crate::tool_sync::types::{OmpSettings, is_valid_omp_role_name};
 /// block per bound provider → caller finalizes (active pointer) → persist.
 /// `serde_yaml::Mapping` is order-preserving, so user key order survives.
 pub(crate) fn sync_yaml_blocks_inner(
-    entries: &[(&ProviderEntryFlat, &crate::providers::ToolActivation)],
+    entries: &[(&Provider, &BindingEntry)],
     active_id: &str,
     config_path: &Path,
     blocks_key: &str,
     init_root: impl Fn() -> serde_yaml::Value,
-    build_block: impl Fn(&ProviderEntryFlat, &str) -> serde_yaml::Value,
+    build_block: impl Fn(&Provider, &str) -> serde_yaml::Value,
     finish_root: impl FnOnce(&mut serde_yaml::Mapping, Option<&ActivePointer>),
 ) -> Result<(Option<PathBuf>, Option<ActivePointer>)> {
     let backup_path = if config_path.exists() {
@@ -65,14 +64,14 @@ pub(crate) fn sync_yaml_blocks_inner(
     provider_map.retain(|k, _| !k.as_str().is_some_and(is_skillstar_managed_key));
     let mut active_pointer: Option<ActivePointer> = None;
     for (provider, entry) in entries {
-        if provider.base_url_openai.trim().is_empty() {
+        if openai_base(provider).trim().is_empty() {
             continue;
         }
         let key = skillstar_managed_key(&provider.id);
         let block = build_block(provider, &entry.model);
         if provider.id == active_id {
             let model_id = if entry.model.trim().is_empty() {
-                provider.default_model.clone()
+                default_model(provider).to_string()
             } else {
                 entry.model.clone()
             };
@@ -100,15 +99,15 @@ pub(crate) fn sync_yaml_blocks_inner(
 /// (`api: "openai-completions"`, plaintext `apiKey`, minimal `{ id }` model
 /// entries so OMP's own defaults apply).
 ///
-/// Roles come from [`OmpSettings`] on the binding: each assigned role is written
+/// Roles come from [`AgentBinding::roles`]: each assigned role is written
 /// as `modelRoles.<role> = "skillstar_<id>/<model>[:thinking]"`. When no
 /// `default` role is assigned, the active entry supplies it, which is the
 /// pre-roles behaviour. Roles pointing at a provider that is not bound (or has
 /// no OpenAI base URL, so it never reached `models.yml`) are skipped rather than
 /// written as dangling pointers.
 pub fn sync_omp_binding(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
 ) -> Result<ToolSyncResultFlat> {
     let models_path = resolve_omp_models_path()?;
     let config_path = resolve_omp_config_path()?;
@@ -128,16 +127,16 @@ pub fn sync_omp_binding(
 /// (a relay provider may have an empty catalogue and a hand-typed model),
 /// otherwise the role would point at a model OMP cannot resolve.
 pub(crate) fn build_omp_provider_block(
-    provider: &ProviderEntryFlat,
+    provider: &Provider,
     model: &str,
     role_models: &[String],
 ) -> serde_yaml::Value {
-    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
+    let base_url = openai_base(provider).trim().trim_end_matches('/');
 
     let mut seen = std::collections::HashSet::new();
     let mut model_ids: Vec<String> = Vec::new();
     for candidate in std::iter::once(model)
-        .chain(std::iter::once(provider.default_model.as_str()))
+        .chain(std::iter::once(default_model(provider)))
         .chain(provider.models.iter().map(String::as_str))
         .chain(role_models.iter().map(String::as_str))
     {
@@ -155,7 +154,7 @@ pub(crate) fn build_omp_provider_block(
     serde_yaml::to_value(serde_json::json!({
         "baseUrl": base_url,
         "api": "openai-completions",
-        "apiKey": provider.api_key,
+        "apiKey": api_key(provider),
         "models": models
     }))
     .expect("static OMP provider block always serializes")
@@ -165,8 +164,8 @@ pub(crate) fn build_omp_provider_block(
 /// tests can drive it against isolated temp paths instead of the shared
 /// sandbox HOME (avoids cross-test races on `~/.omp/agent/models.yml`).
 pub(crate) fn sync_omp_binding_inner(
-    binding: &ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
     models_path: &Path,
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
@@ -207,11 +206,10 @@ pub(crate) fn sync_omp_binding_inner(
 /// SkillStar provider id. Feeds the `models.yml` block so no role can name a
 /// model the provider block does not declare.
 fn role_models_by_provider(
-    binding: &ToolBinding,
+    binding: &AgentBinding,
 ) -> std::collections::HashMap<String, Vec<String>> {
-    let settings = OmpSettings::from_binding(binding);
     let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    for (role, target) in &settings.roles {
+    for (role, target) in &binding.roles {
         if !is_valid_omp_role_name(role) {
             continue;
         }
@@ -235,28 +233,31 @@ fn role_models_by_provider(
 /// `default` falls back to the active entry so a binding with no role config at
 /// all keeps behaving exactly as it did before roles existed.
 fn resolve_omp_roles(
-    binding: &ToolBinding,
-    entries: &[(&ProviderEntryFlat, &crate::providers::ToolActivation)],
+    binding: &AgentBinding,
+    entries: &[(&Provider, &BindingEntry)],
     active_pointer: Option<&ActivePointer>,
 ) -> Vec<(String, String)> {
-    let settings = OmpSettings::from_binding(binding);
     let mut resolved: Vec<(String, String)> = Vec::new();
 
-    for (role, target) in &settings.roles {
-        if !is_valid_omp_role_name(role) {
+    for (role, target) in &binding.roles {
+        // Back into OMP's vocabulary. The store holds canonical ids; OMP knows
+        // `smol` and `task`, not `fast` and `subagent`, so writing the store's
+        // spelling would drop the user's routing and add roles OMP ignores.
+        let role = crate::providers::migrate::omp_role_key(role);
+        if !is_valid_omp_role_name(&role) {
             continue;
         }
         // The provider must have produced a `skillstar_*` block in models.yml,
         // otherwise the role would point at a provider OMP cannot resolve.
         let written = entries.iter().any(|(provider, _)| {
-            provider.id == target.provider_id && !provider.base_url_openai.trim().is_empty()
+            provider.id == target.provider_id && !openai_base(provider).trim().is_empty()
         });
         if !written {
             continue;
         }
         let key = skillstar_managed_key(&target.provider_id);
-        if let Some(value) = target.to_role_value(&key) {
-            resolved.push((role.clone(), value));
+        if let Some(value) = omp_role_value(target, &key) {
+            resolved.push((role, value));
         }
     }
 
@@ -266,6 +267,13 @@ fn resolve_omp_roles(
         resolved.push(("default".to_string(), format!("{provider_key}/{model_id}")));
     }
 
+    // Sorted by OMP's own role name. `modelRoles` is an order-preserving
+    // mapping, so the iteration order of the store's map would otherwise leak
+    // into the file: renaming `smol` to the canonical `fast` in the store moved
+    // it two places in the YAML even though nothing about the routing changed.
+    // A config file that reorders itself for internal reasons is a diff nobody
+    // can read.
+    resolved.sort_by(|(a, _), (b, _)| a.cmp(b));
     resolved
 }
 

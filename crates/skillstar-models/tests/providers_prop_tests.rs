@@ -159,3 +159,21 @@ fn arb_flat_providers_store() -> impl Strategy<Value = FlatProvidersStore> {
             tool_activations,
         })
 }
+
+/// The same generated stores, migrated to v4.
+///
+/// Reusing the v3 generator rather than writing a v4 one is deliberate: the
+/// properties being checked are about the *operations*, and running every case
+/// through the real migration means each one also asserts that the migration
+/// produces a store those operations can work on.
+#[allow(dead_code)]
+fn arb_providers_store_v4()
+-> impl Strategy<Value = skillstar_models::providers::ProvidersStoreV4> {
+    arb_flat_providers_store().prop_map(|v3| {
+        skillstar_models::providers::migrate::migrate_v3_to_v4(
+            v3,
+            &skillstar_models::providers::get_all_presets_flat(),
+        )
+        .store
+    })
+}

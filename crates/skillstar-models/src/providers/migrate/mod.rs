@@ -16,5 +16,5 @@ pub use report::{
 };
 pub use v3_to_v4::{
     ExtractedCatalog, MigrationOutcome, PLANNED_AGENT_CLAUDE_DESKTOP, ROLE_DEFAULT, ROLE_FAST,
-    ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION, canonical_role_key, migrate_v3_to_v4,
+    ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION, canonical_role_key, migrate_v3_to_v4, omp_role_key,
 };

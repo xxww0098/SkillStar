@@ -85,7 +85,8 @@
       "!!**/src-tauri/gen",
       "!!**/.vscode",
       "!!.claude",
-      "!!**/src/types/generated"
+      "!!**/src/types/generated",
+      "!!**/tool_sync/tests/golden_v3"
     ]
   }
 }

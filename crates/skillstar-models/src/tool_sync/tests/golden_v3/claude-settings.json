@@ -1,0 +1,11 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-aaaa1111-x-secret",
+    "ANTHROPIC_BASE_URL": "https://alpha.example.com/anthropic",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku-fast",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "opus-deep",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "sonnet-mid",
+    "ANTHROPIC_MODEL": "model-a",
+    "USER_KEY": "keep"
+  }
+}

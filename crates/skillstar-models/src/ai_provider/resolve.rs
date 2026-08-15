@@ -33,88 +33,86 @@ use super::*;
 /// - `default_model`      → `~/.codex/config.toml: model`
 pub(crate) fn resolve_from_flat_store(
     config: &mut AiConfig,
-    app_id: &str,
+    agent_id: &str,
     provider_id: &str,
 ) -> Result<String> {
     let path = providers::flat_store_path();
-    let store = providers::read_flat_store(&path).context("Failed to read flat provider store")?;
+    let loaded = providers::load_or_migrate_store_v4(&path)
+        .context("Failed to read provider store")?;
+    let store = loaded.store;
 
-    let entry = store
-        .providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .ok_or_else(|| anyhow::anyhow!("Provider not found in flat store: {provider_id}"))?;
+    let provider = store
+        .provider(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("Provider not found in store: {provider_id}"))?;
 
-    let label = entry.name.clone();
+    let label = provider.name.clone();
+    let api_key = provider.credential.literal_secret().unwrap_or("").trim();
+    if api_key.is_empty() {
+        anyhow::bail!("{label} is missing an API key");
+    }
+    let default_model = provider.default_model.as_deref().unwrap_or("").trim();
+    // Claude's tiered models moved from `provider.meta` onto the binding in v4.
+    // The app's own inference reads the same three roles the Claude Code writer
+    // does, so the two cannot drift apart.
+    let roles = store.bindings.get("claude-code").map(|b| &b.roles);
+    let role_model = |role: &str| {
+        roles
+            .and_then(|roles| roles.get(role))
+            .map(|target| target.model.trim())
+            .filter(|model| !model.is_empty())
+            .map(str::to_string)
+    };
 
-    match app_id {
-        "claude" => {
-            if entry.api_key.trim().is_empty() {
-                anyhow::bail!("{label} is missing an API key");
-            }
+    match agent_id {
+        "claude-code" => {
+            // Prefer the dedicated Anthropic endpoint; fall back to the
+            // OpenAI-compatible one, then to Anthropic's own host.
+            let base_url = provider
+                .endpoints
+                .anthropic_messages
+                .as_deref()
+                .or(provider.endpoints.openai_chat.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("https://api.anthropic.com")
+                .to_string();
 
-            // Prefer dedicated Anthropic endpoint; fall back to OpenAI-compatible.
-            let base_url = [
-                entry.base_url_anthropic.trim(),
-                entry.base_url_openai.trim(),
-            ]
-            .iter()
-            .copied()
-            .find(|s| !s.is_empty())
-            .unwrap_or("https://api.anthropic.com")
-            .to_string();
-
-            // Main model: claude_main_model meta > default_model > hard default
-            let model = get_meta_str(&entry.meta, "claude_main_model")
-                .or_else(|| {
-                    let dm = entry.default_model.trim();
-                    if dm.is_empty() {
-                        None
-                    } else {
-                        Some(dm.to_string())
-                    }
-                })
+            let model = role_model("default")
+                .or_else(|| (!default_model.is_empty()).then(|| default_model.to_string()))
                 .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
 
             config.api_format = ApiFormat::Anthropic;
-            config.api_key = entry.api_key.trim().to_string();
+            config.api_key = api_key.to_string();
             config.base_url = base_url;
             config.model = model;
-            config.claude_haiku_model = get_meta_str(&entry.meta, "claude_haiku_model");
-            config.claude_sonnet_model = get_meta_str(&entry.meta, "claude_sonnet_model");
-            config.claude_opus_model = get_meta_str(&entry.meta, "claude_opus_model");
-            apply_provider_request_meta(config, &entry.meta);
+            config.claude_haiku_model = role_model("fast");
+            config.claude_sonnet_model = role_model("sonnet");
+            config.claude_opus_model = role_model("opus");
+            apply_provider_request_meta(config, &provider.ext);
         }
         "codex" => {
-            if entry.api_key.trim().is_empty() {
-                anyhow::bail!("{label} is missing an API key");
-            }
+            let base_url = provider
+                .endpoints
+                .openai_chat
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("https://api.openai.com/v1")
+                .to_string();
 
-            let base_url = {
-                let url = entry.base_url_openai.trim();
-                if url.is_empty() {
-                    "https://api.openai.com/v1".to_string()
-                } else {
-                    url.to_string()
-                }
-            };
-
-            let model = {
-                let dm = entry.default_model.trim();
-                if dm.is_empty() {
-                    "gpt-5.4".to_string()
-                } else {
-                    dm.to_string()
-                }
+            let model = if default_model.is_empty() {
+                "gpt-5.4".to_string()
+            } else {
+                default_model.to_string()
             };
 
             config.api_format = ApiFormat::Openai;
-            config.api_key = entry.api_key.trim().to_string();
+            config.api_key = api_key.to_string();
             config.base_url = base_url;
             config.model = model;
-            apply_provider_request_meta(config, &entry.meta);
+            apply_provider_request_meta(config, &provider.ext);
         }
-        _ => anyhow::bail!("Unsupported AI provider app: {app_id}"),
+        _ => anyhow::bail!("Unsupported AI provider agent: {agent_id}"),
     }
 
     Ok(label)
@@ -122,12 +120,17 @@ pub(crate) fn resolve_from_flat_store(
 
 // ── Provider resolution: legacy store (v1) ──────────────────────────
 
+/// Pick the v1 store's per-app bucket for an agent id.
+///
+/// The v1 file predates agent ids and names its buckets `claude` / `codex`, so
+/// this is where the two id spaces meet. The mapping is one-way and frozen: v1
+/// is a read-only migration source and will never gain a bucket.
 fn select_provider_app<'a>(
     store: &'a providers::ProvidersStore,
-    app_id: &str,
+    agent_id: &str,
 ) -> Option<&'a providers::AppProviders> {
-    match app_id {
-        "claude" => Some(&store.claude),
+    match agent_id {
+        "claude-code" => Some(&store.claude),
         "codex" => Some(&store.codex),
         _ => None,
     }
@@ -142,21 +145,21 @@ fn select_provider_app<'a>(
 ///         `settings_config["config"]` (TOML string)
 pub(crate) fn resolve_from_legacy_store(
     config: &mut AiConfig,
-    app_id: &str,
+    agent_id: &str,
     provider_id: &str,
 ) -> Result<String> {
     let store = providers::read_store().context("Failed to read model providers")?;
-    let app = select_provider_app(&store, app_id)
-        .ok_or_else(|| anyhow::anyhow!("Unsupported AI provider app: {app_id}"))?;
+    let app = select_provider_app(&store, agent_id)
+        .ok_or_else(|| anyhow::anyhow!("Unsupported AI provider agent: {agent_id}"))?;
     let entry = app
         .providers
         .get(provider_id)
-        .ok_or_else(|| anyhow::anyhow!("Unknown AI provider: {app_id}:{provider_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("Unknown AI provider: {agent_id}:{provider_id}"))?;
 
     let label = entry.name.clone();
 
-    match app_id {
-        "claude" => {
+    match agent_id {
+        "claude-code" => {
             let env = entry
                 .settings_config
                 .get("env")
@@ -266,7 +269,7 @@ pub(crate) fn resolve_from_legacy_store(
             config.base_url = base_url;
             config.model = model;
         }
-        _ => anyhow::bail!("Unsupported AI provider app: {app_id}"),
+        _ => anyhow::bail!("Unsupported AI provider agent: {agent_id}"),
     }
 
     Ok(label)
@@ -279,14 +282,16 @@ pub fn resolve_provider_ref_parts(
     app_id: &str,
     provider_id: &str,
 ) -> Result<String> {
-    let app_id = app_id.trim();
+    // A pointer written by an older build still says `claude`; map it forward
+    // rather than rejecting a file the user never edited.
+    let app_id = crate::provider_ref::normalize_agent_id(app_id);
     let provider_id = provider_id.trim();
 
-    if provider_id.is_empty() || !matches!(app_id, "claude" | "codex") {
+    if provider_id.is_empty() || !matches!(app_id, "claude-code" | "codex") {
         anyhow::bail!("Unsupported AI provider reference: {app_id}:{provider_id}");
     }
 
-    // Try the flat store (v2) first — this is where the Models UI stores providers.
+    // Try the current store first — this is where the Models UI stores providers.
     match resolve_from_flat_store(config, app_id, provider_id) {
         Ok(label) => return Ok(label),
         Err(e) => {
@@ -309,7 +314,7 @@ pub fn resolve_provider_ref(config: &mut AiConfig) -> Result<()> {
         return Ok(());
     };
 
-    resolve_provider_ref_parts(config, &provider_ref.app_id, &provider_ref.provider_id).map(|_| ())
+    resolve_provider_ref_parts(config, &provider_ref.agent_id, &provider_ref.provider_id).map(|_| ())
 }
 
 pub fn resolve_runtime_config(config: &AiConfig) -> Result<AiConfig> {

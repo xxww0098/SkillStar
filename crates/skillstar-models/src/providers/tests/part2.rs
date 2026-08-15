@@ -1,491 +1,338 @@
+//! v4 provider-row CRUD, and the v1/v2/v3 → current migration chain.
+
 use super::*;
 
+// ---------------------------------------------------------------------------
+// Building a row from a preset
+// ---------------------------------------------------------------------------
+
 #[test]
-fn test_create_from_preset_flat_relay_empty_models() {
-    let result = create_from_preset_flat("openrouter", "or-key").unwrap();
-    assert_eq!(result.name, "OpenRouter");
-    assert!(result.models.is_empty());
-    assert_eq!(result.default_model, "");
-    assert_eq!(result.base_url_openai, "https://openrouter.ai/api/v1");
-    assert!(result.base_url_anthropic.is_empty());
+fn a_relay_preset_creates_a_row_with_no_models_and_no_anthropic_endpoint() {
+    let provider = create_provider_from_preset("openrouter", "or-key").unwrap();
+    assert_eq!(provider.name, "OpenRouter");
+    assert!(provider.models.is_empty());
+    assert_eq!(provider.default_model, None);
+    assert_eq!(
+        provider.endpoints.openai_chat.as_deref(),
+        Some("https://openrouter.ai/api/v1")
+    );
+    assert_eq!(
+        provider.endpoints.anthropic_messages, None,
+        "an absent endpoint is None, not an empty string"
+    );
 }
+
 #[test]
-fn test_create_from_preset_flat_invalid_preset_id() {
-    let result = create_from_preset_flat("nonexistent-preset", "key");
-    assert!(result.is_err());
+fn an_unknown_preset_id_is_an_error() {
+    let result = create_provider_from_preset("nonexistent-preset", "key");
     assert!(result.unwrap_err().to_string().contains("not found"));
 }
+
 #[test]
-fn test_create_from_preset_flat_all_presets_succeed() {
-    let presets = get_all_presets_flat();
-    for preset in &presets {
-        let result = create_from_preset_flat(&preset.id, "test-api-key");
-        assert!(
-            result.is_ok(),
-            "Failed to create provider from preset '{}': {:?}",
-            preset.id,
-            result.err()
+fn every_registered_preset_builds_a_valid_row() {
+    for preset in get_all_presets_flat() {
+        let provider = create_provider_from_preset(&preset.id, "test-api-key")
+            .unwrap_or_else(|e| panic!("preset '{}' failed: {e}", preset.id));
+
+        assert_eq!(provider.name, preset.name);
+        assert_eq!(
+            provider.endpoints.openai_chat.unwrap_or_default(),
+            preset.base_url_openai
         );
-        let entry = result.unwrap();
-        assert_eq!(entry.name, preset.name);
-        assert_eq!(entry.base_url_openai, preset.base_url_openai);
-        assert_eq!(entry.base_url_anthropic, preset.base_url_anthropic);
-        assert!(entry.models.is_empty());
-        assert!(entry.default_model.is_empty());
-        assert_eq!(entry.icon_color, Some(preset.icon_color.clone()));
-        assert_eq!(entry.preset_id, Some(preset.id.clone()));
-        assert!(entry.created_at.is_some());
-        if is_native_official_preset_id(&preset.id) {
-            assert_eq!(entry.id, preset.id);
+        assert_eq!(
+            provider.endpoints.anthropic_messages.unwrap_or_default(),
+            preset.base_url_anthropic
+        );
+        assert!(provider.models.is_empty());
+        assert_eq!(provider.default_model, None);
+        assert_eq!(provider.icon_color, Some(preset.icon_color.clone()));
+        assert_eq!(provider.preset_id, Some(preset.id.clone()));
+        assert!(provider.created_at_ms.is_some());
+
+        if preset.category.is_native_login() {
+            assert_eq!(provider.id, preset.id, "native-login rows keep a stable id");
+            assert!(
+                matches!(provider.credential, Credential::ExternalCli { .. }),
+                "the credential lives in the agent's own store, which is a state, not an absence"
+            );
         } else {
-            assert!(uuid::Uuid::parse_str(&entry.id).is_ok());
+            assert!(uuid::Uuid::parse_str(&provider.id).is_ok());
         }
     }
 }
-#[test]
-fn test_create_provider_flat_basic() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("My Provider");
-    let result = create_provider_flat(&mut store, entry).unwrap();
-
-    assert_eq!(result.name, "My Provider");
-    assert!(uuid::Uuid::parse_str(&result.id).is_ok());
-    assert!(result.created_at.is_some());
-    assert_eq!(result.sort_index, 0);
-    assert_eq!(store.providers.len(), 1);
-    assert_eq!(store.providers[0].id, result.id);
-}
-#[test]
-fn test_create_provider_flat_empty_name() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("");
-    let result = create_provider_flat(&mut store, entry);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("name must not be empty")
-    );
-}
-#[test]
-fn test_create_provider_flat_whitespace_name() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("   ");
-    let result = create_provider_flat(&mut store, entry);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("name must not be empty")
-    );
-}
-#[test]
-fn test_create_provider_flat_invalid_url() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.base_url_openai = "not-a-url".to_string();
-    let result = create_provider_flat(&mut store, entry);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Invalid URL"));
-}
-#[test]
-fn test_create_provider_flat_invalid_scheme() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.base_url_openai = "ftp://api.example.com/v1".to_string();
-    let result = create_provider_flat(&mut store, entry);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("http or https"));
-}
-#[test]
-fn test_create_provider_flat_empty_url_allowed() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.base_url_anthropic = String::new();
-    let result = create_provider_flat(&mut store, entry);
-    assert!(result.is_ok());
-}
-
-// ---------------------------------------------------------------------------
-// Codex default inference (recommended_codex_defaults + create injection)
-// ---------------------------------------------------------------------------
 
 #[test]
-fn test_recommended_codex_defaults_official_openai() {
-    // api.openai.com → Responses API + official key path.
-    let (wire, auth) = recommended_codex_defaults("https://api.openai.com/v1");
-    assert_eq!(wire, "responses");
-    assert_eq!(auth, "api_key");
-}
-
-#[test]
-fn test_recommended_codex_defaults_third_party_providers() {
-    // Every known third-party provider only speaks /chat/completions and must
-    // use third_party auth (env_key) so auth.json is never touched.
-    for url in [
-        "https://api.deepseek.com/v1",
-        "https://api.moonshot.cn/v1",
-        "https://api.kimi.com/coding/v1",
-        "https://api.minimax.chat/v1",
-        "https://open.bigmodel.cn/api/paas/v4",
-        "https://openrouter.ai/api/v1",
-        "https://api.siliconflow.cn/v1",
-        "https://api.x.ai/v1", // Grok is "official" category but only supports chat completions
-    ] {
-        let (wire, auth) = recommended_codex_defaults(url);
-        assert_eq!(wire, "chat", "expected chat for {url}");
-        assert_eq!(auth, "third_party", "expected third_party for {url}");
+fn only_openai_gets_a_responses_endpoint_without_being_probed() {
+    // The rule the Codex fix rests on: nobody else is assumed to speak it.
+    for preset in get_all_presets_flat() {
+        let provider = create_provider_from_preset(&preset.id, "k").unwrap();
+        let expected = preset.base_url_openai.contains("api.openai.com");
+        assert_eq!(
+            provider.endpoints.openai_responses.is_some(),
+            expected,
+            "preset '{}' got the wrong Responses assumption",
+            preset.id
+        );
+        assert_eq!(
+            provider.caps.responses_api,
+            if expected { Tri::Yes } else { Tri::Unknown },
+            "preset '{}' — an unprobed host is Unknown, never No",
+            preset.id
+        );
     }
 }
 
 #[test]
-fn test_recommended_codex_defaults_empty_and_custom_fallback() {
-    // Empty / custom OpenAI-compatible endpoint → safe third-party default.
-    for url in [
-        "",
-        "https://my-proxy.example.com/v1",
-        "https://localhost:11434/v1",
-    ] {
-        let (wire, auth) = recommended_codex_defaults(url);
-        assert_eq!(wire, "chat");
-        assert_eq!(auth, "third_party");
+fn the_native_login_category_replaces_the_id_whitelist() {
+    let native: Vec<String> = get_all_presets_flat()
+        .into_iter()
+        .filter(|p| p.category.is_native_login())
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(native, vec![CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID]);
+    assert!(is_native_official_preset_id(CLAUDE_OFFICIAL_ID));
+    assert!(
+        !is_native_official_preset_id("grok"),
+        "Grok is a vendor you reach with a key; it was only ever `official` by accident"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// create_provider
+// ---------------------------------------------------------------------------
+
+#[test]
+fn creating_a_provider_stamps_it_and_appends_it() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_provider("My Provider")).unwrap();
+
+    assert_eq!(created.name, "My Provider");
+    assert!(created.created_at_ms.is_some_and(|ms| ms > 0));
+    assert_eq!(created.sort_index, 0);
+    assert_eq!(store.providers.len(), 1);
+    assert_eq!(store.providers[0].id, created.id);
+}
+
+#[test]
+fn a_blank_name_is_rejected() {
+    for name in ["", "   "] {
+        let mut store = ProvidersStoreV4::default();
+        let err = create_provider(&mut store, make_provider(name)).unwrap_err();
+        assert!(err.to_string().contains("name must not be empty"), "{err}");
     }
 }
 
 #[test]
-fn test_create_provider_flat_infers_third_party_codex_defaults() {
-    // DeepSeek (third-party) created without explicit codex fields → must land
-    // as chat + third_party (the bug fix: previously defaulted to responses).
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("DeepSeek");
-    entry.base_url_openai = "https://api.deepseek.com/v1".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
-    assert_eq!(created.codex_wire_api, "chat");
-    assert_eq!(created.codex_auth_mode, "third_party");
+fn a_malformed_endpoint_is_rejected() {
+    let mut store = ProvidersStoreV4::default();
+    let mut provider = make_provider("Test");
+    provider.endpoints.openai_chat = Some("not-a-url".to_string());
+    let err = create_provider(&mut store, provider).unwrap_err();
+    assert!(err.to_string().contains("Invalid URL"), "{err}");
 }
 
 #[test]
-fn test_create_provider_flat_keeps_openai_responses_default() {
-    // OpenAI official → responses + api_key (unchanged).
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("OpenAI");
-    entry.base_url_openai = "https://api.openai.com/v1".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
-    assert_eq!(created.codex_wire_api, "responses");
-    assert_eq!(created.codex_auth_mode, "api_key");
+fn a_non_http_scheme_is_rejected() {
+    let mut store = ProvidersStoreV4::default();
+    let mut provider = make_provider("Test");
+    provider.endpoints.openai_chat = Some("ftp://api.example.com/v1".to_string());
+    let err = create_provider(&mut store, provider).unwrap_err();
+    assert!(err.to_string().contains("http or https"), "{err}");
 }
 
 #[test]
-fn test_create_provider_flat_preserves_explicit_codex_choice() {
-    // The inference guard can only distinguish a *non-default* explicit value
-    // from the serde default. A caller that deliberately set a non-default
-    // value (e.g. `oauth`) must NOT be overridden. (Setting `"api_key"` is
-    // indistinguishable from the serde default, so it is still corrected —
-    // that's the intended trade-off: the common path is "caller omitted the
-    // field" and we fix it.)
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("DeepSeek OAuth");
-    entry.base_url_openai = "https://api.deepseek.com/v1".to_string();
-    // Explicit non-default values: preserved by the guard.
-    entry.codex_wire_api = "chat".to_string();
-    entry.codex_auth_mode = "oauth".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
-    assert_eq!(created.codex_wire_api, "chat");
-    assert_eq!(created.codex_auth_mode, "oauth");
+fn an_absent_endpoint_is_allowed() {
+    let mut store = ProvidersStoreV4::default();
+    let mut provider = make_provider("Test");
+    provider.endpoints.anthropic_messages = None;
+    assert!(create_provider(&mut store, provider).is_ok());
 }
 
 #[test]
-fn test_create_provider_flat_generates_uuid() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.id = "user-provided-id".to_string();
-    let result = create_provider_flat(&mut store, entry).unwrap();
-    // ID should be overwritten with a valid UUID
-    assert_ne!(result.id, "user-provided-id");
-    assert!(uuid::Uuid::parse_str(&result.id).is_ok());
+fn the_caller_keeps_the_id_it_chose() {
+    // v3 overwrote it, which is why seeding a fixed-slug row needed a whitelist.
+    let mut store = ProvidersStoreV4::default();
+    let mut provider = make_provider("Official");
+    provider.id = "claude-official".to_string();
+    let created = create_provider(&mut store, provider).unwrap();
+    assert_eq!(created.id, "claude-official");
 }
-#[test]
-fn test_create_provider_flat_sets_created_at() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Test");
-    let result = create_provider_flat(&mut store, entry).unwrap();
-    assert!(result.created_at.is_some());
-    assert!(result.created_at.unwrap() > 0);
-}
-#[test]
-fn test_create_provider_flat_preserves_existing_created_at() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.created_at = Some(1719000000000);
-    let result = create_provider_flat(&mut store, entry).unwrap();
-    assert_eq!(result.created_at, Some(1719000000000));
-}
-#[test]
-fn test_create_provider_flat_sort_index_increments() {
-    let mut store = FlatProvidersStore::default();
 
-    let entry1 = make_flat_entry("First");
-    let result1 = create_provider_flat(&mut store, entry1).unwrap();
-    assert_eq!(result1.sort_index, 0);
-
-    let entry2 = make_flat_entry("Second");
-    let result2 = create_provider_flat(&mut store, entry2).unwrap();
-    assert_eq!(result2.sort_index, 1);
-
-    let entry3 = make_flat_entry("Third");
-    let result3 = create_provider_flat(&mut store, entry3).unwrap();
-    assert_eq!(result3.sort_index, 2);
-}
 #[test]
-fn test_update_provider_flat_basic() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Original");
-    let created = create_provider_flat(&mut store, entry).unwrap();
+fn a_duplicate_id_is_refused_rather_than_reassigned() {
+    let mut store = ProvidersStoreV4::default();
+    let mut first = make_provider("A");
+    first.id = "fixed".to_string();
+    let mut second = make_provider("B");
+    second.id = "fixed".to_string();
 
-    let patch = ProviderPatchFlat {
-        name: Some("Updated".to_string()),
-        ..Default::default()
-    };
-    let updated = update_provider_flat(&mut store, &created.id, patch).unwrap();
-    assert_eq!(updated.name, "Updated");
-    assert_eq!(updated.id, created.id);
-    // Other fields unchanged
-    assert_eq!(updated.base_url_openai, "https://api.example.com/v1");
+    create_provider(&mut store, first).unwrap();
+    let err = create_provider(&mut store, second).unwrap_err();
+    assert!(err.to_string().contains("already exists"), "{err}");
 }
-#[test]
-fn test_update_provider_flat_multiple_fields() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Original");
-    let created = create_provider_flat(&mut store, entry).unwrap();
 
-    let patch = ProviderPatchFlat {
-        name: Some("New Name".to_string()),
-        base_url_openai: Some("https://new-api.com/v1".to_string()),
-        api_key: Some("new-key".to_string()),
-        models: Some(vec!["new-model".to_string()]),
-        default_model: Some("new-model".to_string()),
-        icon_color: Some("#FF0000".to_string()),
-        notes: Some("Some notes".to_string()),
-        ..Default::default()
-    };
-    let updated = update_provider_flat(&mut store, &created.id, patch).unwrap();
-    assert_eq!(updated.name, "New Name");
-    assert_eq!(updated.base_url_openai, "https://new-api.com/v1");
-    assert_eq!(updated.api_key, "new-key");
-    assert_eq!(updated.models, vec!["new-model"]);
-    assert_eq!(updated.default_model, "new-model");
-    assert_eq!(updated.icon_color, Some("#FF0000".to_string()));
-    assert_eq!(updated.notes, Some("Some notes".to_string()));
-}
 #[test]
-fn test_update_provider_flat_not_found() {
-    let mut store = FlatProvidersStore::default();
-    let patch = ProviderPatchFlat {
-        name: Some("New".to_string()),
-        ..Default::default()
-    };
-    let result = update_provider_flat(&mut store, "nonexistent", patch);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
+fn an_existing_creation_timestamp_is_preserved() {
+    let mut store = ProvidersStoreV4::default();
+    let mut provider = make_provider("Test");
+    provider.created_at_ms = Some(1719000000000);
+    let created = create_provider(&mut store, provider).unwrap();
+    assert_eq!(created.created_at_ms, Some(1719000000000));
 }
-#[test]
-fn test_delete_provider_flat_basic() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("To Delete");
-    let created = create_provider_flat(&mut store, entry).unwrap();
-    assert_eq!(store.providers.len(), 1);
 
-    delete_provider_flat(&mut store, &created.id).unwrap();
-    assert_eq!(store.providers.len(), 0);
-}
 #[test]
-fn test_delete_provider_flat_not_found() {
-    let mut store = FlatProvidersStore::default();
-    let result = delete_provider_flat(&mut store, "nonexistent");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
+fn sort_index_increments_per_row() {
+    let mut store = ProvidersStoreV4::default();
+    for (n, name) in ["First", "Second", "Third"].iter().enumerate() {
+        let created = create_provider(&mut store, make_provider(name)).unwrap();
+        assert_eq!(created.sort_index, n as u32);
+    }
 }
-#[test]
-fn test_delete_provider_flat_cleans_tool_activations() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Active Provider");
-    let created = create_provider_flat(&mut store, entry).unwrap();
 
-    // Set up tool_activations referencing this provider
-    store.tool_activations.insert(
-        "claude-code".to_string(),
-        ToolBinding::single(ToolActivation {
-            provider_id: created.id.clone(),
-            model: "model-a".to_string(),
-            settings: None,
-            last_sync_at: None,
-        }),
+// ---------------------------------------------------------------------------
+// replace_provider / delete_provider / reorder_providers
+// ---------------------------------------------------------------------------
+
+#[test]
+fn replacing_a_row_keeps_its_position() {
+    let mut store = ProvidersStoreV4::default();
+    create_provider(&mut store, make_provider("First")).unwrap();
+    let second = create_provider(&mut store, make_provider("Second")).unwrap();
+    create_provider(&mut store, make_provider("Third")).unwrap();
+
+    let mut edited = second.clone();
+    edited.name = "Second (renamed)".to_string();
+    replace_provider(&mut store, edited).unwrap();
+
+    assert_eq!(store.providers[1].id, second.id);
+    assert_eq!(store.providers[1].name, "Second (renamed)");
+}
+
+#[test]
+fn replacing_an_absent_row_is_an_error() {
+    let mut store = ProvidersStoreV4::default();
+    let err = replace_provider(&mut store, make_provider("Ghost")).unwrap_err();
+    assert!(err.to_string().contains("not found"), "{err}");
+}
+
+#[test]
+fn deleting_a_provider_removes_it() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_provider("Doomed")).unwrap();
+    delete_provider(&mut store, &created.id).unwrap();
+    assert!(store.providers.is_empty());
+}
+
+#[test]
+fn deleting_an_absent_provider_is_an_error() {
+    let mut store = ProvidersStoreV4::default();
+    let err = delete_provider(&mut store, "ghost").unwrap_err();
+    assert!(err.to_string().contains("not found"), "{err}");
+}
+
+#[test]
+fn deleting_a_provider_takes_its_bindings_and_its_roles_with_it() {
+    let mut store = ProvidersStoreV4::default();
+    let keep = create_provider(&mut store, make_provider("Keep")).unwrap();
+    let doomed = create_provider(&mut store, make_provider("Doomed")).unwrap();
+
+    bind_provider(&mut store, "omp", &keep.id, Some("model-a"), None).unwrap();
+    bind_provider(&mut store, "omp", &doomed.id, Some("model-a"), None).unwrap();
+    set_agent_roles(
+        &mut store,
+        "omp",
+        [
+            ("default".to_string(), ModelRef::new(&keep.id, "model-a")),
+            ("fast".to_string(), ModelRef::new(&doomed.id, "model-a")),
+        ]
+        .into_iter()
+        .collect(),
+    )
+    .unwrap();
+
+    delete_provider(&mut store, &doomed.id).unwrap();
+
+    let binding = &store.bindings["omp"];
+    assert_eq!(binding.entries.len(), 1);
+    assert_eq!(binding.entries[0].provider_id, keep.id);
+    assert_eq!(
+        binding.roles.keys().collect::<Vec<_>>(),
+        vec!["default"],
+        "a role pointing at a deleted provider writes a dangling key into the agent config"
     );
-    store.tool_activations.insert(
-        "codex".to_string(),
-        ToolBinding::single(ToolActivation {
-            provider_id: created.id.clone(),
-            model: "model-a".to_string(),
-            settings: None,
-            last_sync_at: None,
-        }),
-    );
-
-    delete_provider_flat(&mut store, &created.id).unwrap();
-
-    // Both activations should be cleared (entries dropped → empty binding)
-    assert!(
-        store
-            .tool_activations
-            .get("claude-code")
-            .unwrap()
-            .is_empty()
-    );
-    assert!(store.tool_activations.get("codex").unwrap().is_empty());
+    assert_eq!(binding.active_index, 0);
 }
+
 #[test]
-fn test_delete_provider_flat_preserves_other_activations() {
-    let mut store = FlatProvidersStore::default();
-    let entry1 = make_flat_entry("Provider 1");
-    let entry2 = make_flat_entry("Provider 2");
-    let created1 = create_provider_flat(&mut store, entry1).unwrap();
-    let created2 = create_provider_flat(&mut store, entry2).unwrap();
+fn deleting_a_provider_leaves_other_agents_alone() {
+    let mut store = ProvidersStoreV4::default();
+    let keep = create_provider(&mut store, make_provider("Keep")).unwrap();
+    let doomed = create_provider(&mut store, make_provider("Doomed")).unwrap();
 
-    // Set up tool_activations: claude-code → provider1, codex → provider2
-    store.tool_activations.insert(
-        "claude-code".to_string(),
-        ToolBinding::single(ToolActivation {
-            provider_id: created1.id.clone(),
-            model: "model-a".to_string(),
-            settings: None,
-            last_sync_at: None,
-        }),
+    bind_provider(&mut store, "claude-code", &keep.id, Some("model-a"), None).unwrap();
+    bind_provider(&mut store, "omp", &doomed.id, Some("model-a"), None).unwrap();
+
+    delete_provider(&mut store, &doomed.id).unwrap();
+
+    assert_eq!(store.bindings["claude-code"].entries.len(), 1);
+    assert!(store.bindings["omp"].is_empty());
+}
+
+#[test]
+fn reordering_assigns_sort_index_by_position() {
+    let mut store = ProvidersStoreV4::default();
+    let a = create_provider(&mut store, make_provider("A")).unwrap();
+    let b = create_provider(&mut store, make_provider("B")).unwrap();
+    let c = create_provider(&mut store, make_provider("C")).unwrap();
+
+    reorder_providers(&mut store, &[c.id.clone(), a.id.clone(), b.id.clone()]).unwrap();
+
+    let index_of = |id: &str| store.provider(id).unwrap().sort_index;
+    assert_eq!(index_of(&c.id), 0);
+    assert_eq!(index_of(&a.id), 1);
+    assert_eq!(index_of(&b.id), 2);
+}
+
+#[test]
+fn reordering_leaves_unnamed_rows_where_they_were() {
+    let mut store = ProvidersStoreV4::default();
+    let a = create_provider(&mut store, make_provider("A")).unwrap();
+    let b = create_provider(&mut store, make_provider("B")).unwrap();
+    let before = store.provider(&b.id).unwrap().sort_index;
+
+    reorder_providers(&mut store, &[a.id.clone()]).unwrap();
+
+    assert_eq!(store.provider(&a.id).unwrap().sort_index, 0);
+    assert_eq!(store.provider(&b.id).unwrap().sort_index, before);
+}
+
+#[test]
+fn reordering_rejects_an_unknown_id_without_touching_anything() {
+    let mut store = ProvidersStoreV4::default();
+    let a = create_provider(&mut store, make_provider("A")).unwrap();
+    let before = store.provider(&a.id).unwrap().sort_index;
+
+    let err = reorder_providers(&mut store, &[a.id.clone(), "ghost".to_string()]).unwrap_err();
+
+    assert!(err.to_string().contains("not found"), "{err}");
+    assert_eq!(
+        store.provider(&a.id).unwrap().sort_index,
+        before,
+        "validation runs before any write, so a bad list is a no-op"
     );
-    store.tool_activations.insert(
-        "codex".to_string(),
-        ToolBinding::single(ToolActivation {
-            provider_id: created2.id.clone(),
-            model: "model-a".to_string(),
-            settings: None,
-            last_sync_at: None,
-        }),
-    );
-
-    // Delete provider1 — only claude-code should be cleared
-    delete_provider_flat(&mut store, &created1.id).unwrap();
-
-    assert!(
-        store
-            .tool_activations
-            .get("claude-code")
-            .unwrap()
-            .is_empty()
-    );
-    let codex_act = store
-        .tool_activations
-        .get("codex")
-        .unwrap()
-        .active()
-        .unwrap();
-    assert_eq!(codex_act.provider_id, created2.id);
 }
+
 #[test]
-fn test_reorder_providers_basic() {
-    let mut store = FlatProvidersStore::default();
-    let entry1 = make_flat_entry("First");
-    let entry2 = make_flat_entry("Second");
-    let entry3 = make_flat_entry("Third");
-    let created1 = create_provider_flat(&mut store, entry1).unwrap();
-    let created2 = create_provider_flat(&mut store, entry2).unwrap();
-    let created3 = create_provider_flat(&mut store, entry3).unwrap();
-
-    // Reorder: Third, First, Second
-    let ordered_ids = vec![
-        created3.id.clone(),
-        created1.id.clone(),
-        created2.id.clone(),
-    ];
-    reorder_providers(&mut store, &ordered_ids).unwrap();
-
-    // Verify sort_index assignments
-    let p1 = store
-        .providers
-        .iter()
-        .find(|p| p.id == created1.id)
-        .unwrap();
-    let p2 = store
-        .providers
-        .iter()
-        .find(|p| p.id == created2.id)
-        .unwrap();
-    let p3 = store
-        .providers
-        .iter()
-        .find(|p| p.id == created3.id)
-        .unwrap();
-    assert_eq!(p3.sort_index, 0);
-    assert_eq!(p1.sort_index, 1);
-    assert_eq!(p2.sort_index, 2);
+fn reordering_an_empty_list_is_a_no_op() {
+    let mut store = ProvidersStoreV4::default();
+    create_provider(&mut store, make_provider("A")).unwrap();
+    assert!(reorder_providers(&mut store, &[]).is_ok());
 }
-#[test]
-fn test_reorder_providers_partial() {
-    let mut store = FlatProvidersStore::default();
-    let entry1 = make_flat_entry("First");
-    let entry2 = make_flat_entry("Second");
-    let entry3 = make_flat_entry("Third");
-    let created1 = create_provider_flat(&mut store, entry1).unwrap();
-    let created2 = create_provider_flat(&mut store, entry2).unwrap();
-    let created3 = create_provider_flat(&mut store, entry3).unwrap();
 
-    // Only reorder two of three — Third keeps its existing sort_index
-    let ordered_ids = vec![created2.id.clone(), created1.id.clone()];
-    reorder_providers(&mut store, &ordered_ids).unwrap();
+// ---------------------------------------------------------------------------
+// Migration chain (v1 / v2 / v3 → the current flat format)
+// ---------------------------------------------------------------------------
 
-    let p1 = store
-        .providers
-        .iter()
-        .find(|p| p.id == created1.id)
-        .unwrap();
-    let p2 = store
-        .providers
-        .iter()
-        .find(|p| p.id == created2.id)
-        .unwrap();
-    let p3 = store
-        .providers
-        .iter()
-        .find(|p| p.id == created3.id)
-        .unwrap();
-    assert_eq!(p2.sort_index, 0);
-    assert_eq!(p1.sort_index, 1);
-    // Third keeps its original sort_index (2)
-    assert_eq!(p3.sort_index, 2);
-}
-#[test]
-fn test_reorder_providers_invalid_id() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Test");
-    create_provider_flat(&mut store, entry).unwrap();
-
-    let ordered_ids = vec!["nonexistent-id".to_string()];
-    let result = reorder_providers(&mut store, &ordered_ids);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
-}
-#[test]
-fn test_reorder_providers_empty_list() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Test");
-    let created = create_provider_flat(&mut store, entry).unwrap();
-
-    // Empty reorder list — no changes
-    reorder_providers(&mut store, &[]).unwrap();
-
-    let p = store.providers.iter().find(|p| p.id == created.id).unwrap();
-    assert_eq!(p.sort_index, 0); // Unchanged
-}
 #[test]
 fn test_migrate_store_if_needed_file_not_found() {
     let (_tmp, path) = setup_temp_store();
@@ -653,3 +500,4 @@ fn test_migrate_store_if_needed_v1_deduplication() {
         .unwrap();
     assert_eq!(claude_act.provider_id, codex_act.provider_id);
 }
+

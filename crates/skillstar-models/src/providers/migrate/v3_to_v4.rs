@@ -267,10 +267,9 @@ fn should_backfill(current: &str, preset_value: &str, current_openai: &str, pres
 /// Only `api.openai.com` is known to speak the Responses API without probing.
 /// Everything else is `Unknown` — see the note on [`ProviderCaps`].
 fn derive_responses(base_url_openai: &str) -> (Option<String>, Tri) {
-    if base_url_openai.contains("api.openai.com") {
-        (Some(base_url_openai.to_string()), Tri::Yes)
-    } else {
-        (None, Tri::Unknown)
+    match crate::providers::presets::derive_responses_endpoint(base_url_openai) {
+        Some(url) => (Some(url), Tri::Yes),
+        None => (None, Tri::Unknown),
     }
 }
 
@@ -504,20 +503,41 @@ fn take_roles_from_settings(settings: &mut serde_json::Value) -> BTreeMap<String
     roles
 }
 
-/// Map a v3 OMP role name to its canonical id.
+/// Map an OMP role name to its canonical id.
 ///
 /// Names with no canonical counterpart — `slow`, `designer`, `commit`, and any
 /// user-invented key — are kept verbatim. `slow` in particular is not a role at
 /// all in the v4 model (it is a reasoning tier), but discarding it during
 /// migration would delete configuration the user typed, so it survives as an
 /// extra role and the UI simply stops promoting it.
-pub fn canonical_role_key(v3_key: &str) -> String {
-    match v3_key {
+pub fn canonical_role_key(omp_key: &str) -> String {
+    match omp_key {
         "default" => ROLE_DEFAULT.to_string(),
         "smol" => ROLE_FAST.to_string(),
         "plan" => ROLE_PLAN.to_string(),
         "vision" => ROLE_VISION.to_string(),
         "task" => ROLE_SUBAGENT.to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// The inverse: a canonical role id in OMP's own spelling.
+///
+/// Not decoration. Migration renames `smol` → `fast` in the store, and OMP has
+/// never heard of `fast`: writing the canonical name into `config.yml` would
+/// delete the user's `smol` routing and add a role OMP ignores. Whichever
+/// direction a role travels, it has to arrive in the vocabulary of the file it
+/// lands in.
+///
+/// Round-trip property: `omp_role_key(canonical_role_key(k)) == k` for every
+/// key in [`crate::tool_sync::OMP_MODEL_ROLES`]. A test pins it.
+pub fn omp_role_key(canonical: &str) -> String {
+    match canonical {
+        ROLE_DEFAULT => "default".to_string(),
+        ROLE_FAST => "smol".to_string(),
+        ROLE_PLAN => "plan".to_string(),
+        ROLE_VISION => "vision".to_string(),
+        ROLE_SUBAGENT => "task".to_string(),
         other => other.to_string(),
     }
 }

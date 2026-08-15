@@ -5,9 +5,12 @@
 //!
 //! ## Architecture
 //!
-//! Commands operate on the flat `FlatProvidersStore` format (v2) with a unified
-//! provider list and `tool_activations` map. The legacy per-app (v1) store only
-//! survives as a read-once migration source inside `skillstar_models::providers`.
+//! Commands operate on the v4 store (`ProvidersStoreV4`: a provider list plus a
+//! `bindings` map). The v1/v2/v3 formats survive only as migration sources
+//! inside `skillstar_models::providers`.
+//!
+//! The **wire** shape is still v3 — see [`compat`] for what that means and when
+//! it goes away. Nothing below this module's boundary speaks v3.
 
 use serde::{Deserialize, Serialize};
 use skillstar_core::infra::error::AppError;
@@ -20,7 +23,8 @@ use skillstar_models::diagnostics::ConnectionTestResult;
 use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
 use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::providers::{
-    self, ModelCatalogFetchResult, ProviderEntryFlat, ProviderPatchFlat, ToolBinding,
+    self, ModelCatalogFetchResult, ProviderEntryFlat, ProviderPatchFlat, ProvidersStoreV4,
+    ToolBinding,
 };
 use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 
@@ -29,6 +33,7 @@ use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 // resolves exactly as before).
 // ---------------------------------------------------------------------------
 
+mod compat;
 mod diagnostics;
 mod provider_cmds;
 mod tools;
@@ -36,6 +41,18 @@ mod tools;
 pub use diagnostics::*;
 pub use provider_cmds::*;
 pub use tools::*;
+
+/// Load the v4 store, turning a store error into an `AppError` the renderer
+/// can show.
+///
+/// Deliberately *not* the repair path: that runs once, from
+/// `get_providers_flat`, because it rewrites agent config files. Every other
+/// command wants the store as it is.
+fn load_store() -> Result<ProvidersStoreV4, AppError> {
+    providers::load_store()
+        .map(|loaded| loaded.store)
+        .map_err(|e| AppError::Other(e.to_string()))
+}
 
 // ---------------------------------------------------------------------------
 // State: write-serialization mutex

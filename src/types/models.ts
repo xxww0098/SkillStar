@@ -187,10 +187,21 @@ export interface ProviderPatchFlat {
   codex_auth_mode?: string;
 }
 
+/**
+ * What kind of thing a preset describes. Generated as `PresetCategory` on the
+ * Rust side; mirrored here because `ProviderPresetFlat` is still hand-written.
+ *
+ * `native_login` and `vendor_official` were one value (`official`) in v3, which
+ * is why telling a browser login apart from an API-key vendor needed a
+ * hardcoded id list. `openai_compatible` is the frontend's own synthetic
+ * template and never arrives from the backend registry.
+ */
+export type PresetCategory = "domestic" | "relay" | "vendor_official" | "native_login" | "openai_compatible";
+
 export interface ProviderPresetFlat {
   id: string;
   name: string;
-  category: string;
+  category: PresetCategory;
   base_url_openai: string;
   base_url_anthropic: string;
   /**

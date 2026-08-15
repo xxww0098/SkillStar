@@ -38,7 +38,12 @@ export interface AiStreamPayload {
 }
 
 export interface AiProviderRef {
-  app_id: string;
+  /**
+   * An id from the agent registry (`claude-code`, `codex`). v3 called this
+   * `app_id` and used its own two-value id space (`claude` / `codex`); the
+   * backend still accepts the old spelling and maps it forward.
+   */
+  agent_id: string;
   provider_id: string;
 }
 

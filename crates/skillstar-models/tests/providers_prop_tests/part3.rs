@@ -4,12 +4,12 @@
 //!
 //! **Validates: Requirements 2.1, 3.8, 4.6, 5.2, 5.4, 5.5, 6.4**
 
-use super::arb_flat_providers_store;
+use super::arb_providers_store_v4;
 use proptest::prelude::*;
 use skillstar_models::providers::{
-    FlatProvidersStore, ProviderEntryFlat, ProviderPatchFlat, activate_tool,
-    create_from_preset_flat, create_provider_flat, delete_provider_flat, get_all_presets_flat,
-    reorder_providers, update_provider_flat,
+    Credential, Endpoints, Provider, ProvidersStoreV4, bind_provider, create_provider,
+    create_provider_from_preset, delete_provider, get_all_presets_flat, reorder_providers,
+    replace_provider,
 };
 use std::collections::HashMap;
 
@@ -25,9 +25,9 @@ use std::collections::HashMap;
 // **Validates: Requirements 2.1, 5.4**
 // ===========================================================================
 
-/// Strategy: generate a FlatProvidersStore with N providers that have unique IDs.
+/// Strategy: generate a store with N providers that have unique IDs.
 /// Each provider gets a random sort_index (simulating an arbitrary initial state).
-fn arb_flat_store_with_unique_ids() -> impl Strategy<Value = FlatProvidersStore> {
+fn arb_flat_store_with_unique_ids() -> impl Strategy<Value = ProvidersStoreV4> {
     // Generate 1..=10 providers with unique IDs
     (1usize..=10usize).prop_flat_map(|n| {
         // Generate n unique IDs
@@ -38,33 +38,28 @@ fn arb_flat_store_with_unique_ids() -> impl Strategy<Value = FlatProvidersStore>
         .prop_flat_map(move |ids| {
             // Generate random sort_index values for each provider
             proptest::collection::vec(0u32..1000u32, n).prop_map(move |sort_indices| {
-                let providers: Vec<ProviderEntryFlat> = ids
+                let providers: Vec<Provider> = ids
                     .iter()
                     .zip(sort_indices.iter())
-                    .map(|(id, &sort_idx)| ProviderEntryFlat {
-                        id: id.clone(),
-                        name: format!("Provider-{}", &id[..8]),
-                        base_url_openai: format!("https://{}.example.com/v1", &id[..8]),
-                        base_url_anthropic: String::new(),
-                        models_url: String::new(),
-                        api_key: "sk-test".to_string(),
-                        models: vec!["model-a".to_string()],
-                        default_model: "model-a".to_string(),
-                        sort_index: sort_idx,
-                        preset_id: None,
-                        icon_color: None,
-                        notes: None,
-                        created_at: None,
-                        meta: None,
-                        codex_wire_api: "responses".to_string(),
-                        codex_auth_mode: "api_key".to_string(),
+                    .map(|(id, &sort_idx)| {
+                        let mut provider =
+                            Provider::new(id.clone(), format!("Provider-{}", &id[..8]));
+                        provider.endpoints = Endpoints {
+                            openai_chat: Some(format!("https://{}.example.com/v1", &id[..8])),
+                            ..Endpoints::default()
+                        };
+                        provider.credential = Credential::single_key("k1", "sk-test");
+                        provider.models = vec!["model-a".to_string()];
+                        provider.default_model = Some("model-a".to_string());
+                        provider.sort_index = sort_idx;
+                        provider
                     })
                     .collect();
 
-                FlatProvidersStore {
-                    version: 2,
+                ProvidersStoreV4 {
+                    version: skillstar_models::providers::STORE_VERSION_V4,
                     providers,
-                    tool_activations: HashMap::new(),
+                    bindings: HashMap::new(),
                 }
             })
         })
@@ -141,7 +136,7 @@ proptest! {
         }
 
         // ── Verification 3: Sorting by sort_index ascending produces the permuted order ──
-        let mut sorted_providers: Vec<&ProviderEntryFlat> = reordered_store.providers.iter().collect();
+        let mut sorted_providers: Vec<&Provider> = reordered_store.providers.iter().collect();
         sorted_providers.sort_by_key(|p| p.sort_index);
 
         let sorted_ids: Vec<&String> = sorted_providers.iter().map(|p| &p.id).collect();
@@ -208,14 +203,15 @@ proptest! {
         preset_id in arb_flat_preset_id(),
         api_key in arb_flat_api_key(),
     ) {
-        // Call create_from_preset_flat
-        let result = create_from_preset_flat(&preset_id, &api_key);
+        let result = create_provider_from_preset(&preset_id, &api_key);
         prop_assert!(
             result.is_ok(),
-            "create_from_preset_flat should succeed for preset '{}', got: {:?}",
+            "create_provider_from_preset should succeed for preset '{}', got: {:?}",
             preset_id, result.err()
         );
         let entry = result.unwrap();
+        let base_url_openai = entry.endpoints.openai_chat.clone().unwrap_or_default();
+        let base_url_anthropic = entry.endpoints.anthropic_messages.clone().unwrap_or_default();
 
         // 1. Native Official seeds use a stable id; others get a UUID.
         prop_assert!(!entry.id.is_empty(), "id should be non-empty");
@@ -237,27 +233,36 @@ proptest! {
             );
         }
 
-        // 2. api_key matches the input
-        prop_assert_eq!(
-            &entry.api_key, &api_key,
-            "api_key should match the input"
-        );
+        // 2. The key is reachable through the credential union.
+        //
+        // Native-login rows are the exception, and deliberately so: their
+        // credential lives in the agent's own store, so a key handed to them
+        // has nowhere to go and must not be silently retained.
+        if matches!(preset_id.as_str(), "claude-official" | "codex-official") {
+            prop_assert!(
+                matches!(entry.credential, Credential::ExternalCli { .. }),
+                "a native-login preset must not absorb a key"
+            );
+        } else {
+            prop_assert_eq!(
+                entry.credential.literal_secret().unwrap_or_default(),
+                api_key.as_str(),
+                "the literal key should match the input"
+            );
+        }
 
         // 3. Look up the preset to verify base_url fields match
         let presets = get_all_presets_flat();
         let preset = presets.iter().find(|p| p.id == preset_id)
             .expect("Preset should exist in registry");
 
-        // base_url_openai matches the preset's base_url_openai
         prop_assert_eq!(
-            &entry.base_url_openai, &preset.base_url_openai,
-            "base_url_openai should match preset definition"
+            &base_url_openai, &preset.base_url_openai,
+            "the chat endpoint should match the preset definition"
         );
-
-        // base_url_anthropic matches the preset's base_url_anthropic
         prop_assert_eq!(
-            &entry.base_url_anthropic, &preset.base_url_anthropic,
-            "base_url_anthropic should match preset definition"
+            &base_url_anthropic, &preset.base_url_anthropic,
+            "the Anthropic endpoint should match the preset definition"
         );
 
         // 4. models are intentionally empty; users fetch current models after
@@ -268,15 +273,15 @@ proptest! {
             preset_id
         );
 
-        // 5. created_at is Some and non-zero
+        // 5. created_at_ms is Some and non-zero
         prop_assert!(
-            entry.created_at.is_some(),
-            "created_at should be Some for preset '{}'",
+            entry.created_at_ms.is_some(),
+            "created_at_ms should be Some for preset '{}'",
             preset_id
         );
         prop_assert!(
-            entry.created_at.unwrap() > 0,
-            "created_at should be non-zero for preset '{}'",
+            entry.created_at_ms.unwrap() > 0,
+            "created_at_ms should be non-zero for preset '{}'",
             preset_id
         );
 
@@ -303,10 +308,10 @@ proptest! {
         ),
         api_key in arb_flat_api_key(),
     ) {
-        let result = create_from_preset_flat(&invalid_id, &api_key);
+        let result = create_provider_from_preset(&invalid_id, &api_key);
         prop_assert!(
             result.is_err(),
-            "create_from_preset_flat should fail for invalid preset_id '{}', got Ok",
+            "create_provider_from_preset should fail for invalid preset_id '{}', got Ok",
             invalid_id
         );
         let err_msg = result.unwrap_err().to_string();
@@ -379,34 +384,22 @@ proptest! {
     /// and the store should remain unchanged.
     #[test]
     fn prop_failed_create_empty_name_leaves_state_unchanged(
-        store in arb_flat_providers_store(),
+        store in arb_providers_store_v4(),
         invalid_name in arb_invalid_name(),
     ) {
         let mut store_mut = store.clone();
         let original = store.clone();
 
-        // Build an entry with an invalid (empty/whitespace) name
-        let entry = ProviderEntryFlat {
-            id: String::new(),
-            name: invalid_name,
-            base_url_openai: "https://api.example.com/v1".to_string(),
-            base_url_anthropic: String::new(),
-            models_url: String::new(),
-            api_key: "sk-test".to_string(),
-            models: vec!["model-a".to_string()],
-            default_model: "model-a".to_string(),
-            sort_index: 0,
-            preset_id: None,
-            icon_color: None,
-            notes: None,
-            created_at: None,
-            meta: None,
-            codex_wire_api: "responses".to_string(),
-            codex_auth_mode: "api_key".to_string(),
+        // Build a row with an invalid (empty/whitespace) name
+        let mut provider = Provider::new("fresh-id", invalid_name);
+        provider.endpoints = Endpoints {
+            openai_chat: Some("https://api.example.com/v1".to_string()),
+            ..Endpoints::default()
         };
+        provider.credential = Credential::single_key("k1", "sk-test");
 
-        let result = create_provider_flat(&mut store_mut, entry);
-        prop_assert!(result.is_err(), "create_provider_flat with empty name should fail");
+        let result = create_provider(&mut store_mut, provider);
+        prop_assert!(result.is_err(), "create_provider with empty name should fail");
 
         // Store should be unchanged
         prop_assert_eq!(
@@ -418,9 +411,9 @@ proptest! {
             prop_assert_eq!(orig, current, "provider entry should be unchanged after failed create");
         }
         prop_assert_eq!(
-            store_mut.tool_activations.len(),
-            original.tool_activations.len(),
-            "tool_activations should be unchanged after failed create"
+            store_mut.bindings.len(),
+            original.bindings.len(),
+            "bindings should be unchanged after failed create"
         );
     }
 
@@ -430,34 +423,22 @@ proptest! {
     /// and the store should remain unchanged.
     #[test]
     fn prop_failed_create_invalid_url_leaves_state_unchanged(
-        store in arb_flat_providers_store(),
+        store in arb_providers_store_v4(),
         invalid_url in arb_invalid_url_for_flat(),
     ) {
         let mut store_mut = store.clone();
         let original = store.clone();
 
-        // Build an entry with an invalid URL
-        let entry = ProviderEntryFlat {
-            id: String::new(),
-            name: "Valid Name".to_string(),
-            base_url_openai: invalid_url,
-            base_url_anthropic: String::new(),
-            models_url: String::new(),
-            api_key: "sk-test".to_string(),
-            models: vec!["model-a".to_string()],
-            default_model: "model-a".to_string(),
-            sort_index: 0,
-            preset_id: None,
-            icon_color: None,
-            notes: None,
-            created_at: None,
-            meta: None,
-            codex_wire_api: "responses".to_string(),
-            codex_auth_mode: "api_key".to_string(),
+        // Build a row with an invalid endpoint URL
+        let mut provider = Provider::new("fresh-id", "Valid Name");
+        provider.endpoints = Endpoints {
+            openai_chat: Some(invalid_url),
+            ..Endpoints::default()
         };
+        provider.credential = Credential::single_key("k1", "sk-test");
 
-        let result = create_provider_flat(&mut store_mut, entry);
-        prop_assert!(result.is_err(), "create_provider_flat with invalid URL should fail");
+        let result = create_provider(&mut store_mut, provider);
+        prop_assert!(result.is_err(), "create_provider with invalid URL should fail");
 
         // Store should be unchanged
         prop_assert_eq!(
@@ -469,8 +450,8 @@ proptest! {
             prop_assert_eq!(orig, current, "provider entry should be unchanged after failed create (invalid URL)");
         }
         prop_assert_eq!(
-            store_mut.tool_activations.len(),
-            original.tool_activations.len(),
+            store_mut.bindings.len(),
+            original.bindings.len(),
             "tool_activations should be unchanged after failed create (invalid URL)"
         );
     }
@@ -481,19 +462,16 @@ proptest! {
     /// and the store should remain unchanged.
     #[test]
     fn prop_failed_update_nonexistent_id_leaves_state_unchanged(
-        store in arb_flat_providers_store(),
+        store in arb_providers_store_v4(),
         nonexistent_id in arb_nonexistent_id(),
     ) {
         let mut store_mut = store.clone();
         let original = store.clone();
 
-        let patch = ProviderPatchFlat {
-            name: Some("New Name".to_string()),
-            ..Default::default()
-        };
+        let ghost = Provider::new(&nonexistent_id, "New Name");
 
-        let result = update_provider_flat(&mut store_mut, &nonexistent_id, patch);
-        prop_assert!(result.is_err(), "update_provider_flat with non-existent ID should fail");
+        let result = replace_provider(&mut store_mut, ghost);
+        prop_assert!(result.is_err(), "replace_provider with non-existent ID should fail");
 
         // Store should be unchanged
         prop_assert_eq!(
@@ -505,9 +483,9 @@ proptest! {
             prop_assert_eq!(orig, current, "provider entry should be unchanged after failed update");
         }
         prop_assert_eq!(
-            store_mut.tool_activations.len(),
-            original.tool_activations.len(),
-            "tool_activations should be unchanged after failed update"
+            store_mut.bindings.len(),
+            original.bindings.len(),
+            "bindings should be unchanged after failed update"
         );
     }
 
@@ -517,14 +495,14 @@ proptest! {
     /// and the store should remain unchanged.
     #[test]
     fn prop_failed_delete_nonexistent_id_leaves_state_unchanged(
-        store in arb_flat_providers_store(),
+        store in arb_providers_store_v4(),
         nonexistent_id in arb_nonexistent_id(),
     ) {
         let mut store_mut = store.clone();
         let original = store.clone();
 
-        let result = delete_provider_flat(&mut store_mut, &nonexistent_id);
-        prop_assert!(result.is_err(), "delete_provider_flat with non-existent ID should fail");
+        let result = delete_provider(&mut store_mut, &nonexistent_id);
+        prop_assert!(result.is_err(), "delete_provider with non-existent ID should fail");
 
         // Store should be unchanged
         prop_assert_eq!(
@@ -536,9 +514,9 @@ proptest! {
             prop_assert_eq!(orig, current, "provider entry should be unchanged after failed delete");
         }
         prop_assert_eq!(
-            store_mut.tool_activations.len(),
-            original.tool_activations.len(),
-            "tool_activations should be unchanged after failed delete"
+            store_mut.bindings.len(),
+            original.bindings.len(),
+            "bindings should be unchanged after failed delete"
         );
     }
 
@@ -548,7 +526,7 @@ proptest! {
     /// and the store should remain unchanged.
     #[test]
     fn prop_failed_reorder_nonexistent_ids_leaves_state_unchanged(
-        store in arb_flat_providers_store(),
+        store in arb_providers_store_v4(),
         nonexistent_id in arb_nonexistent_id(),
     ) {
         let mut store_mut = store.clone();
@@ -570,9 +548,9 @@ proptest! {
             prop_assert_eq!(orig, current, "provider entry (including sort_index) should be unchanged after failed reorder");
         }
         prop_assert_eq!(
-            store_mut.tool_activations.len(),
-            original.tool_activations.len(),
-            "tool_activations should be unchanged after failed reorder"
+            store_mut.bindings.len(),
+            original.bindings.len(),
+            "bindings should be unchanged after failed reorder"
         );
     }
 }
@@ -592,10 +570,12 @@ proptest! {
 // Strategies for Property 5
 // ---------------------------------------------------------------------------
 
-/// Strategy: generate a FlatProvidersStore with 2..=5 providers that have valid URLs.
-/// All providers have non-empty base_url_openai and base_url_anthropic so that
-/// activate_tool can succeed for any tool_id.
-fn arb_store_with_valid_providers() -> impl Strategy<Value = FlatProvidersStore> {
+/// Strategy: generate a store with 2..=5 providers that can serve every agent.
+///
+/// Each row carries all three endpoints, including `/v1/responses` — without
+/// that one, binding to Codex is correctly refused, and the property under test
+/// is about the active pointer, not about capability gating.
+fn arb_store_with_valid_providers() -> impl Strategy<Value = ProvidersStoreV4> {
     proptest::collection::vec(
         (
             "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", // id
@@ -605,38 +585,34 @@ fn arb_store_with_valid_providers() -> impl Strategy<Value = FlatProvidersStore>
         2..=5,
     )
     .prop_map(|entries| {
-        let providers: Vec<ProviderEntryFlat> = entries
+        let providers: Vec<Provider> = entries
             .into_iter()
             .enumerate()
-            .map(|(i, (id, name, models))| ProviderEntryFlat {
-                id,
-                name,
-                base_url_openai: format!("https://api{}.example.com/v1", i),
-                base_url_anthropic: format!("https://api{}.example.com/anthropic", i),
-                models_url: format!("https://api{}.example.com/v1/models", i),
-                api_key: format!("sk-test-{}", i),
-                models: models.clone(),
-                default_model: models.first().cloned().unwrap_or_default(),
-                sort_index: i as u32,
-                preset_id: None,
-                icon_color: None,
-                notes: None,
-                created_at: None,
-                meta: None,
-                codex_wire_api: "responses".to_string(),
-                codex_auth_mode: "api_key".to_string(),
+            .map(|(i, (id, name, models))| {
+                let mut provider = Provider::new(id, name);
+                provider.endpoints = Endpoints {
+                    openai_chat: Some(format!("https://api{i}.example.com/v1")),
+                    openai_responses: Some(format!("https://api{i}.example.com/v1/responses")),
+                    anthropic_messages: Some(format!("https://api{i}.example.com/anthropic")),
+                    models_list: Some(format!("https://api{i}.example.com/v1/models")),
+                };
+                provider.credential = Credential::single_key("k1", format!("sk-test-{i}"));
+                provider.default_model = models.first().cloned();
+                provider.models = models;
+                provider.sort_index = i as u32;
+                provider
             })
             .collect();
 
-        FlatProvidersStore {
-            version: 2,
+        ProvidersStoreV4 {
+            version: skillstar_models::providers::STORE_VERSION_V4,
             providers,
-            tool_activations: HashMap::new(),
+            bindings: HashMap::new(),
         }
     })
 }
 
-/// A single activate_tool operation: (provider_index, tool_id_index, model_option).
+/// A single bind operation: (provider_index, tool_id_index, model_option).
 /// We use indices into the providers vec and a fixed set of tool_ids.
 #[derive(Debug, Clone)]
 struct ActivateOp {
@@ -695,11 +671,10 @@ proptest! {
             let tool_id = TOOL_IDS[op.tool_id_idx];
             let model_ref = op.model.as_deref();
 
-            // Perform activation
-            let result = activate_tool(&mut store_mut, &provider_id, tool_id, model_ref, None);
+            let result = bind_provider(&mut store_mut, tool_id, &provider_id, model_ref, None);
             prop_assert!(
                 result.is_ok(),
-                "activate_tool should succeed at step {} (provider_idx={}, tool='{}'), got: {:?}",
+                "bind_provider should succeed at step {} (provider_idx={}, tool='{}'), got: {:?}",
                 step, provider_idx, tool_id, result.err()
             );
 
@@ -707,7 +682,7 @@ proptest! {
             // The tool we just activated must have the new provider as its
             // ACTIVE entry. (Multi-provider tools may retain other entries, but
             // the active pointer always follows the most recent activation.)
-            for (tid, binding) in &store_mut.tool_activations {
+            for (tid, binding) in &store_mut.bindings {
                 if let Some(act) = binding.active()
                     && tid == tool_id
                 {
@@ -722,7 +697,7 @@ proptest! {
             // Each tool_id maps to exactly one binding (HashMap key), and that
             // binding has exactly one active entry.
             let active_count_for_tool: usize = store_mut
-                .tool_activations
+                .bindings
                 .iter()
                 .filter(|(tid, binding)| *tid == tool_id && binding.active().is_some())
                 .count();
@@ -737,7 +712,7 @@ proptest! {
         // After all operations, each tool_id should still have at most one active binding
         for tool_id in TOOL_IDS {
             let active_count: usize = store_mut
-                .tool_activations
+                .bindings
                 .iter()
                 .filter(|(tid, binding)| tid.as_str() == *tool_id && binding.active().is_some())
                 .count();
@@ -761,7 +736,7 @@ proptest! {
 
         for (tool_id, expected_provider_id) in &expected_active {
             if let Some(activation) = store_mut
-                .tool_activations
+                .bindings
                 .get(*tool_id)
                 .and_then(|b| b.active())
             {

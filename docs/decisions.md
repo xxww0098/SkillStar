@@ -343,6 +343,24 @@
 - 后果：获得——明文 key 不再离开拥有它的进程；`models_url` 兜底规则只剩一份实现；前端传了一把与磁盘漂移的 key 这类 bug 被消除。承担——(1) 探测的是**已保存**的连接，因此草稿态必须先落盘再探测（`AppAiModelsPicker` 已按此顺序调整），这与 §4.5「凭据显式提交」的保存策略一致；(2) 未保存的行无法被探测，这是有意的。
 - 证据：`crates/skillstar-models/src/providers/secret_resolve.rs`、`src-tauri/src/commands/models_commands/diagnostics.rs`、`crates/skillstar-app/src/models/dto.rs`（`provider_dto_never_contains_plaintext_secret`）。
 
+## D-038：Codex 绑定按能力位门禁，迁移主动修复已写坏的磁盘配置
+
+- 日期：2026-08-15
+- 状态：accepted
+- 背景：Codex ≥0.95 从 `WireApi` 枚举里删掉了 `Chat`，只剩 `Responses`。SkillStar 的 `recommended_codex_defaults` 对任何不含 `api.openai.com` 的 base URL 返回 `("chat", "third_party")`，并且有八个真实 provider 的测试在锁死这个行为。后果不是「某个 provider 用不了」——`wire_api = "chat"` 反序列化失败会让整个 `config.toml` 解析不了，Codex 完全起不来，而用户在 SkillStar 里唯一能操作的杠杆正是那条产生它的绑定。
+- 决策：三件事一起做。(1) 删除 `codex_wire_api` 字段与 `CodexSettings.wire_api`——它编码的是一个已经不存在的选择；writer 只会写 `responses`。(2) 「这家能不能接 Codex」变成关于 host 的事实，存在 `Provider.endpoints.openai_responses` 与 `ProviderCaps.responses_api` 上，由注册表的 `required_wire` 在绑定时门禁；没有 responses 端点的 host 在写盘时**整条跳过**而不是降级写入。(3) 迁移那一次运行主动清理磁盘：删掉不可写的 Codex 表（`unsync_codex_entry`，单条而非整体），把被删条目连同 provider 名与模型记进 `MigrationReport::codex_dropped`。
+- 后果：获得——存量用户升级后 Codex 能重新启动；「不支持」从此可表达，UI 能在绑定前挡住不可能的组合而不是让用户事后发现。承担——(1) 之前「绑上了」的第三方 Codex 列变成禁用，这是修 bug 不是破坏，但必须由迁移报告解释清楚；(2) 判定依据是端点存在性，而 `Tri::Unknown` **从不**拒绝（迁移给每一行写的都是 `Unknown`，把「没探测过」当「不支持」会在升级时静默解绑所有人）；探测把 `Unknown` 变成 `Yes` 后即可恢复绑定，这是 WP-2B 的事。
+- 证据：`crates/skillstar-models/src/tool_sync/migrate_configs.rs`、`crates/skillstar-models/src/tool_sync/tests/part6.rs`、`crates/skillstar-models/src/providers/crud_v4.rs`（`check_bindable`）。
+
+## D-039：写盘行为的对照基线是旧代码实际跑出的字节，不是手写期望值
+
+- 日期：2026-08-15
+- 状态：accepted
+- 背景：v3→v4 把 provider 行、绑定、角色和模型目录四处数据全部换了形状和存放位置，而这些数据的唯一用途是投影成六个 Agent 的配置文件。「换存放位置不改写盘结果」这句话，用手写断言是证不出来的：手写断言记录的是作者**以为**旧代码做了什么。
+- 决策：从 v3 的最后一个提交拉一个 worktree，用同一份 fixture 跑真实 writer，把产物原样存进 `tool_sync/tests/golden_v3/`；新测试拿同一份 fixture 走真实迁移再走新 writer，逐字节比对。Codex 是唯一豁免（它的输出必须变，见 D-038），豁免范围收窄到「本来就写 `responses` 的 `api.openai.com` 行仍然逐字节相同」，其余变化在 `part6` 里按行为单独断言。fixture 目录从 formatter 的管辖范围里排除——格式化它就等于销毁它的用途。
+- 后果：获得——三个真实回归当场暴露：OMP 角色名 `smol` 被规范化成 `fast` 后会写进 OMP 不认识的键、角色写入顺序随内部改名而重排、模型目录移出 store 后 OpenCode 块丢失 `limit`/`cost`。这三个都不会被任何手写断言发现。承担——fixture 与其构造函数必须逐字保持一致，否则比对失去意义；构造函数因此在测试里完整写出而不是复用 helper。
+- 证据：`crates/skillstar-models/src/tool_sync/tests/golden.rs`、`crates/skillstar-models/src/tool_sync/tests/golden_v3/`。
+
 ## 新增记录格式
 
 ```text

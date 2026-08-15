@@ -112,7 +112,7 @@ export const MODELS_HANDLERS: DevMockHandlers = {
       .sort((a, b) => a.sort_index - b.sort_index) as never;
     return undefined;
   },
-  activate_tool: (args) => {
+  bind_provider: (args) => {
     const toolId = String(args?.toolId ?? "");
     const providerId = String(args?.providerId ?? "");
     const provider = FLAT_PROVIDERS.providers.find((p) => p.id === providerId);
@@ -150,12 +150,12 @@ export const MODELS_HANDLERS: DevMockHandlers = {
       config_path: `~/.${toolId}/settings.json`,
     };
   },
-  deactivate_tool: (args) => {
+  unbind_agent: (args) => {
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding>;
     acts[String(args?.toolId ?? "")] = { entries: [], active_index: 0 };
     return undefined;
   },
-  update_tool_settings: (args) => {
+  update_binding_entry_settings: (args) => {
     const toolId = String(args?.toolId ?? "");
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
     const binding = acts[toolId];
@@ -163,13 +163,27 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     if (active) active.settings = args?.settings ?? null;
     return { tool_id: toolId, success: true };
   },
-  update_tool_binding_settings: (args) => {
+  update_agent_settings: (args) => {
     const toolId = String(args?.toolId ?? "");
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
     const binding = acts[toolId];
     // Binding-level, not per-entry: an OMP role may target a provider other
     // than the active one, so it hangs off the binding itself.
     if (binding) binding.settings = args?.settings ?? null;
+    return { tool_id: toolId, success: true };
+  },
+  update_binding_entry: (args) => {
+    const toolId = String(args?.toolId ?? "");
+    const providerId = String(args?.providerId ?? "");
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const entry = acts[toolId]?.entries.find((e) => e.provider_id === providerId);
+    if (entry) {
+      // `undefined` means "leave it alone" — the point of splitting this out
+      // of bind_provider is that changing the model does not require the
+      // caller to hand the settings back unchanged.
+      if (args?.model != null) entry.model = String(args.model);
+      if (args?.settings !== undefined) entry.settings = args.settings ?? null;
+    }
     return { tool_id: toolId, success: true };
   },
   set_active_binding: (args) => {
@@ -183,7 +197,7 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     }
     return { tool_id: toolId, success: true };
   },
-  remove_binding_entry: (args) => {
+  unbind_provider: (args) => {
     const toolId = String(args?.toolId ?? "");
     const providerId = String(args?.providerId ?? "");
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;

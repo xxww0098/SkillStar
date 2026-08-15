@@ -726,3 +726,30 @@ mod prop {
         }
     }
 }
+
+#[test]
+fn every_omp_role_name_survives_a_round_trip_through_the_canonical_id() {
+    // Migration renames `smol` to the canonical `fast` in the store, and the
+    // OMP writer has to rename it back — OMP has never heard of `fast`, so
+    // writing the canonical name would delete the user's routing and add a
+    // role OMP ignores. The two mappings only work as a pair, so they are
+    // pinned as a pair.
+    for role in crate::tool_sync::OMP_MODEL_ROLES {
+        let canonical = canonical_role_key(role);
+        assert_eq!(
+            omp_role_key(&canonical),
+            *role,
+            "role '{role}' does not survive canonical_role_key -> omp_role_key"
+        );
+    }
+}
+
+#[test]
+fn a_role_nobody_anticipated_passes_through_both_directions_unchanged() {
+    // `modelRoles` is an open map, so a user may invent a role. Renaming one we
+    // do not recognise would be worse than leaving it alone.
+    for role in ["my-own-role", "slow", "designer"] {
+        assert_eq!(canonical_role_key(role), role);
+        assert_eq!(omp_role_key(role), role);
+    }
+}

@@ -1,0 +1,4 @@
+modelRoles:
+  default: skillstar_aaaa1111/model-a:high
+  plan: skillstar_aaaa1111/model-b
+  smol: skillstar_bbbb2222/model-c:low

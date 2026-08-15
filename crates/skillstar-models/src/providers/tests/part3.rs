@@ -227,350 +227,200 @@ fn test_migrate_store_if_needed_no_current() {
     let claude_act = result.tool_activations.get("claude-code");
     assert!(claude_act.is_none() || claude_act.unwrap().is_empty());
 }
+// ---------------------------------------------------------------------------
+// Binding an agent to a provider
+// ---------------------------------------------------------------------------
+
 #[test]
-fn test_activate_tool_success_claude_code() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("DeepSeek");
-    let created = create_provider_flat(&mut store, entry).unwrap();
+fn binding_claude_code_records_the_provider_and_model() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_provider("DeepSeek")).unwrap();
 
-    let activation = activate_tool(
-        &mut store,
-        &created.id,
-        "claude-code",
-        Some("deepseek-chat"),
-        None,
-    )
-    .unwrap();
-    assert_eq!(activation.provider_id, created.id);
-    assert_eq!(activation.model, "deepseek-chat");
+    let entry =
+        bind_provider(&mut store, "claude-code", &created.id, Some("deepseek-chat"), None).unwrap();
 
-    // Verify it's in the store
-    let stored = store
-        .tool_activations
-        .get("claude-code")
-        .unwrap()
-        .active()
-        .unwrap();
+    assert_eq!(entry.provider_id, created.id);
+    assert_eq!(entry.model, "deepseek-chat");
+    let stored = store.bindings["claude-code"].active().unwrap();
     assert_eq!(stored.provider_id, created.id);
     assert_eq!(stored.model, "deepseek-chat");
 }
+
 #[test]
-fn test_activate_tool_success_codex() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("DeepSeek");
-    let created = create_provider_flat(&mut store, entry).unwrap();
+fn binding_codex_requires_a_responses_endpoint() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_responses_provider("OpenAI")).unwrap();
 
-    let activation = activate_tool(
-        &mut store,
-        &created.id,
-        "codex",
-        Some("deepseek-reasoner"),
-        None,
-    )
-    .unwrap();
-    assert_eq!(activation.provider_id, created.id);
-    assert_eq!(activation.model, "deepseek-reasoner");
+    let entry =
+        bind_provider(&mut store, "codex", &created.id, Some("gpt-5.4"), None).unwrap();
 
-    let stored = store
-        .tool_activations
-        .get("codex")
-        .unwrap()
-        .active()
-        .unwrap();
-    assert_eq!(stored.provider_id, created.id);
-    assert_eq!(stored.model, "deepseek-reasoner");
+    assert_eq!(entry.provider_id, created.id);
+    assert_eq!(entry.model, "gpt-5.4");
+    assert_eq!(store.bindings["codex"].active().unwrap().model, "gpt-5.4");
 }
-#[test]
-fn test_activate_tool_falls_back_to_default_model() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("DeepSeek");
-    entry.default_model = "deepseek-chat".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
 
-    // No model provided — should use default_model
-    let activation = activate_tool(&mut store, &created.id, "codex", None, None).unwrap();
-    assert_eq!(activation.model, "deepseek-chat");
-}
 #[test]
-fn test_activate_tool_empty_model_falls_back_to_default() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("DeepSeek");
-    entry.default_model = "deepseek-chat".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
+fn an_absent_or_blank_model_falls_back_to_the_providers_default() {
+    for model in [None, Some(""), Some("   ")] {
+        let mut store = ProvidersStoreV4::default();
+        let mut provider = make_responses_provider("DeepSeek");
+        provider.default_model = Some("deepseek-chat".to_string());
+        let created = create_provider(&mut store, provider).unwrap();
 
-    // Empty string model — should use default_model
-    let activation = activate_tool(&mut store, &created.id, "codex", Some(""), None).unwrap();
-    assert_eq!(activation.model, "deepseek-chat");
-}
-#[test]
-fn test_activate_tool_whitespace_model_falls_back_to_default() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("DeepSeek");
-    entry.default_model = "deepseek-chat".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
+        let entry = bind_provider(&mut store, "codex", &created.id, model, None).unwrap();
 
-    let activation = activate_tool(&mut store, &created.id, "codex", Some("   "), None).unwrap();
-    assert_eq!(activation.model, "deepseek-chat");
+        assert_eq!(entry.model, "deepseek-chat", "for model = {model:?}");
+    }
 }
-#[test]
-fn test_activate_tool_provider_not_found() {
-    let mut store = FlatProvidersStore::default();
-    let result = activate_tool(&mut store, "nonexistent-id", "claude-code", None, None);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
-}
-#[test]
-fn test_activate_tool_claude_code_empty_anthropic_url() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("OpenRouter");
-    entry.base_url_anthropic = String::new(); // No Anthropic endpoint
-    let created = create_provider_flat(&mut store, entry).unwrap();
 
-    let result = activate_tool(&mut store, &created.id, "claude-code", None, None);
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("Anthropic-compatible endpoint"));
-    assert!(err_msg.contains("base_url_anthropic is empty"));
-}
 #[test]
-fn test_activate_tool_claude_code_whitespace_anthropic_url() {
-    let mut store = FlatProvidersStore::default();
-    // Directly insert a provider with whitespace-only anthropic URL
-    // (bypassing create_provider_flat validation to test activate_tool's own validation)
-    store.providers.push(ProviderEntryFlat {
-        id: "test-id".to_string(),
-        name: "Test".to_string(),
-        base_url_openai: "https://api.example.com/v1".to_string(),
-        base_url_anthropic: "   ".to_string(),
-        models_url: String::new(),
-        api_key: "sk-key".to_string(),
-        models: vec!["model-a".to_string()],
-        default_model: "model-a".to_string(),
-        sort_index: 0,
-        preset_id: None,
-        icon_color: None,
-        notes: None,
-        created_at: None,
-        meta: None,
-        codex_wire_api: "responses".to_string(),
-        codex_auth_mode: "api_key".to_string(),
-    });
+fn binding_an_unknown_provider_is_an_error() {
+    let mut store = ProvidersStoreV4::default();
+    let err = bind_provider(&mut store, "claude-code", "ghost", None, None).unwrap_err();
+    assert!(err.to_string().contains("not found"), "{err}");
+}
 
-    let result = activate_tool(&mut store, "test-id", "claude-code", None, None);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("Anthropic-compatible endpoint")
+#[test]
+fn claude_code_refuses_a_provider_with_no_anthropic_endpoint() {
+    for endpoint in [None, Some("   ".to_string())] {
+        let mut store = ProvidersStoreV4::default();
+        let mut provider = make_provider("Relay");
+        provider.endpoints.anthropic_messages = endpoint.clone();
+        let created = create_provider(&mut store, provider).unwrap();
+
+        let err =
+            bind_provider(&mut store, "claude-code", &created.id, Some("m"), None).unwrap_err();
+
+        assert!(
+            err.to_string().contains("Anthropic"),
+            "for endpoint {endpoint:?}: {err}"
+        );
+        assert!(!store.bindings.contains_key("claude-code"));
+    }
+}
+
+#[test]
+fn a_chat_speaking_agent_refuses_a_provider_with_no_chat_endpoint() {
+    let mut store = ProvidersStoreV4::default();
+    let mut provider = make_provider("Anthropic only");
+    provider.endpoints.openai_chat = None;
+    let created = create_provider(&mut store, provider).unwrap();
+
+    let err = bind_provider(&mut store, "opencode", &created.id, Some("m"), None).unwrap_err();
+
+    assert!(err.to_string().contains("chat/completions"), "{err}");
+}
+
+#[test]
+fn an_unknown_agent_id_is_gated_on_chat() {
+    // The safest assumption for an id the registry does not know: every
+    // OpenAI-compatible host implements chat, so requiring it binds nothing
+    // that could not work and refuses a row with no endpoint at all.
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_provider("Relay")).unwrap();
+
+    assert!(bind_provider(&mut store, "some-future-agent", &created.id, Some("m"), None).is_ok());
+}
+
+#[test]
+fn rebinding_a_single_provider_agent_replaces_its_entry() {
+    let mut store = ProvidersStoreV4::default();
+    let first = create_provider(&mut store, make_provider("First")).unwrap();
+    let second = create_provider(&mut store, make_provider("Second")).unwrap();
+
+    bind_provider(&mut store, "claude-code", &first.id, Some("model-a"), None).unwrap();
+    bind_provider(&mut store, "claude-code", &second.id, Some("model-b"), None).unwrap();
+
+    let binding = &store.bindings["claude-code"];
+    assert_eq!(binding.entries.len(), 1);
+    assert_eq!(binding.active().unwrap().provider_id, second.id);
+}
+
+#[test]
+fn rebinding_a_multi_provider_agent_appends_and_points_at_the_new_row() {
+    let mut store = ProvidersStoreV4::default();
+    let first = create_provider(&mut store, make_provider("First")).unwrap();
+    let second = create_provider(&mut store, make_provider("Second")).unwrap();
+
+    bind_provider(&mut store, "omp", &first.id, Some("model-a"), None).unwrap();
+    bind_provider(&mut store, "omp", &second.id, Some("model-b"), None).unwrap();
+
+    let binding = &store.bindings["omp"];
+    assert_eq!(binding.entries.len(), 2);
+    assert_eq!(binding.active().unwrap().provider_id, second.id);
+}
+
+// ---------------------------------------------------------------------------
+// Unbinding
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unbinding_an_agent_returns_what_was_active() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_provider("DeepSeek")).unwrap();
+    bind_provider(&mut store, "claude-code", &created.id, Some("model-a"), None).unwrap();
+
+    let previous = unbind_agent(&mut store, "claude-code").unwrap().unwrap();
+
+    assert_eq!(previous.provider_id, created.id);
+    assert!(store.bindings["claude-code"].is_empty());
+}
+
+#[test]
+fn unbinding_an_agent_that_was_never_bound_returns_nothing() {
+    let mut store = ProvidersStoreV4::default();
+    assert!(unbind_agent(&mut store, "claude-code").unwrap().is_none());
+    assert!(unbind_agent(&mut store, "claude-code").unwrap().is_none());
+}
+
+#[test]
+fn bind_then_unbind_then_bind_again_round_trips() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_provider("DeepSeek")).unwrap();
+
+    bind_provider(&mut store, "claude-code", &created.id, Some("model-a"), None).unwrap();
+    unbind_agent(&mut store, "claude-code").unwrap();
+    assert!(store.bindings["claude-code"].is_empty());
+
+    bind_provider(&mut store, "claude-code", &created.id, Some("model-b"), None).unwrap();
+    assert_eq!(store.bindings["claude-code"].active().unwrap().model, "model-b");
+}
+
+#[test]
+fn one_provider_can_serve_several_agents_with_different_models() {
+    let mut store = ProvidersStoreV4::default();
+    let created = create_provider(&mut store, make_responses_provider("DeepSeek")).unwrap();
+
+    bind_provider(&mut store, "claude-code", &created.id, Some("model-a"), None).unwrap();
+    bind_provider(&mut store, "codex", &created.id, Some("model-b"), None).unwrap();
+
+    assert_eq!(store.bindings["claude-code"].active().unwrap().model, "model-a");
+    assert_eq!(store.bindings["codex"].active().unwrap().model, "model-b");
+}
+
+#[test]
+fn binding_codex_official_forces_the_oauth_auth_mode() {
+    let mut store = ProvidersStoreV4::default();
+    assert!(ensure_official_providers(&mut store));
+
+    let entry = bind_provider(&mut store, "codex", CODEX_OFFICIAL_ID, None, None).unwrap();
+
+    assert_eq!(entry.provider_id, CODEX_OFFICIAL_ID);
+    assert_eq!(
+        entry
+            .settings
+            .expect("oauth settings")
+            .get("auth_mode")
+            .and_then(|v| v.as_str()),
+        Some("oauth"),
+        "writing OPENAI_API_KEY would clobber the user's ChatGPT session"
     );
 }
-#[test]
-fn test_activate_tool_codex_empty_openai_url() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.base_url_openai = String::new(); // No OpenAI endpoint
-    entry.base_url_anthropic = "https://api.example.com/anthropic".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
 
-    let result = activate_tool(&mut store, &created.id, "codex", None, None);
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("OpenAI-compatible endpoint"));
-    assert!(err_msg.contains("base_url_openai is empty"));
-}
-#[test]
-fn test_activate_tool_other_tool_empty_openai_url() {
-    let mut store = FlatProvidersStore::default();
-    let mut entry = make_flat_entry("Test");
-    entry.base_url_openai = String::new();
-    entry.base_url_anthropic = "https://api.example.com/anthropic".to_string();
-    let created = create_provider_flat(&mut store, entry).unwrap();
-
-    // Unknown tool defaults to requiring base_url_openai
-    let result = activate_tool(&mut store, &created.id, "some-other-tool", None, None);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("OpenAI-compatible endpoint")
-    );
-}
-#[test]
-fn test_activate_tool_replaces_previous_activation() {
-    let mut store = FlatProvidersStore::default();
-    let entry1 = make_flat_entry("Provider A");
-    let entry2 = make_flat_entry("Provider B");
-    let created1 = create_provider_flat(&mut store, entry1).unwrap();
-    let created2 = create_provider_flat(&mut store, entry2).unwrap();
-
-    // Activate provider A for claude-code
-    activate_tool(
-        &mut store,
-        &created1.id,
-        "claude-code",
-        Some("model-a"),
-        None,
-    )
-    .unwrap();
-    let stored = store
-        .tool_activations
-        .get("claude-code")
-        .unwrap()
-        .active()
-        .unwrap();
-    assert_eq!(stored.provider_id, created1.id);
-
-    // Activate provider B for claude-code — should replace A
-    activate_tool(
-        &mut store,
-        &created2.id,
-        "claude-code",
-        Some("model-b"),
-        None,
-    )
-    .unwrap();
-    let stored = store
-        .tool_activations
-        .get("claude-code")
-        .unwrap()
-        .active()
-        .unwrap();
-    assert_eq!(stored.provider_id, created2.id);
-    assert_eq!(stored.model, "model-b");
-
-    // Only one activation for claude-code
-    let activations_for_claude: Vec<_> = store
-        .tool_activations
-        .iter()
-        .filter(|(k, v)| *k == "claude-code" && !v.is_empty())
-        .collect();
-    assert_eq!(activations_for_claude.len(), 1);
-}
-#[test]
-fn test_deactivate_tool_returns_previous() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("DeepSeek");
-    let created = create_provider_flat(&mut store, entry).unwrap();
-
-    // Activate first
-    activate_tool(
-        &mut store,
-        &created.id,
-        "claude-code",
-        Some("deepseek-chat"),
-        None,
-    )
-    .unwrap();
-
-    // Deactivate — should return the previous activation
-    let previous = deactivate_tool(&mut store, "claude-code").unwrap();
-    assert!(previous.is_some());
-    let prev = previous.unwrap();
-    assert_eq!(prev.provider_id, created.id);
-    assert_eq!(prev.model, "deepseek-chat");
-
-    // Verify it's now cleared in the store
-    let stored = store.tool_activations.get("claude-code").unwrap();
-    assert!(stored.is_empty());
-}
-#[test]
-fn test_deactivate_tool_no_previous_activation() {
-    let mut store = FlatProvidersStore::default();
-
-    // Deactivate a tool that was never activated
-    let previous = deactivate_tool(&mut store, "claude-code").unwrap();
-    assert!(previous.is_none());
-
-    // The entry should now exist as an empty binding
-    let stored = store.tool_activations.get("claude-code").unwrap();
-    assert!(stored.is_empty());
-}
-#[test]
-fn test_deactivate_tool_already_none() {
-    let mut store = FlatProvidersStore::default();
-    store
-        .tool_activations
-        .insert("codex".to_string(), ToolBinding::default());
-
-    // Deactivate a tool that's already empty
-    let previous = deactivate_tool(&mut store, "codex").unwrap();
-    assert!(previous.is_none());
-}
-#[test]
-fn test_activate_deactivate_round_trip() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("Provider");
-    let created = create_provider_flat(&mut store, entry).unwrap();
-
-    // Activate
-    let activation =
-        activate_tool(&mut store, &created.id, "codex", Some("model-x"), None).unwrap();
-    assert_eq!(activation.provider_id, created.id);
-    assert_eq!(activation.model, "model-x");
-
-    // Deactivate
-    let previous = deactivate_tool(&mut store, "codex").unwrap();
-    assert_eq!(previous.unwrap().provider_id, created.id);
-
-    // Verify tool is deactivated
-    let stored = store.tool_activations.get("codex").unwrap();
-    assert!(stored.is_empty());
-}
-#[test]
-fn test_activate_multiple_tools_same_provider() {
-    let mut store = FlatProvidersStore::default();
-    let entry = make_flat_entry("DeepSeek");
-    let created = create_provider_flat(&mut store, entry).unwrap();
-
-    // Activate same provider for both tools
-    activate_tool(
-        &mut store,
-        &created.id,
-        "claude-code",
-        Some("deepseek-chat"),
-        None,
-    )
-    .unwrap();
-    activate_tool(
-        &mut store,
-        &created.id,
-        "codex",
-        Some("deepseek-reasoner"),
-        None,
-    )
-    .unwrap();
-
-    // Both should be active
-    let claude = store
-        .tool_activations
-        .get("claude-code")
-        .unwrap()
-        .active()
-        .unwrap();
-    assert_eq!(claude.provider_id, created.id);
-    assert_eq!(claude.model, "deepseek-chat");
-
-    let codex = store
-        .tool_activations
-        .get("codex")
-        .unwrap()
-        .active()
-        .unwrap();
-    assert_eq!(codex.provider_id, created.id);
-    assert_eq!(codex.model, "deepseek-reasoner");
-}
-
-// NOTE: This test's verbatim source was lost when the original (uncommitted)
-// `providers.rs` was deleted during the module split; it is the only one of the
-// 103 provider tests not recoverable from editor history. Reconstructed to match
-// its name/intent: every built-in flat preset id must resolve to a usable
-// provider identity via `create_from_preset_flat`.
 #[test]
 fn every_preset_id_resolves_to_a_provider_identity() {
     for preset in get_all_presets_flat() {
-        let entry = create_from_preset_flat(&preset.id, "sk-test-key-12345")
+        let entry = create_provider_from_preset(&preset.id, "sk-test-key-12345")
             .unwrap_or_else(|e| panic!("preset `{}` failed to resolve: {e}", preset.id));
         assert!(
             !entry.name.trim().is_empty(),

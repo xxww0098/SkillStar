@@ -11,11 +11,10 @@
 //! decision and the frontend-pinned literals.
 
 use super::*;
-use crate::providers::ToolBinding;
 
 /// Whether the agent's config format natively holds several providers.
 ///
-/// Mirrors `providers::crud::agent_supports_multiple_providers` (the store
+/// Mirrors `providers::crud_v4::agent_supports_multiple_providers` (the store
 /// layer's kind decision point) and the frontend descriptor `kind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentKind {
@@ -25,22 +24,13 @@ pub enum AgentKind {
     Multi,
 }
 
-/// Which provider URL field the agent requires at activation time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequiredUrl {
-    /// `base_url_anthropic` must be non-empty (Claude Code).
-    Anthropic,
-    /// `base_url_openai` must be non-empty (everything else).
-    Openai,
-}
-
 /// One on-disk config file belonging to an agent.
 pub struct AgentConfigFileSpec {
     /// Stable id used by the config-file editor commands (`file_id`).
     pub file_id: &'static str,
     /// Human label shown by the editor UI (usually the file name).
     pub label: &'static str,
-    /// `"json"`, `"toml"` or `"env"`.
+    /// `"json"`, `"toml"` or `"yaml"`.
     pub format: &'static str,
     /// Sandbox-aware path resolver (funnels through `sync_home_dir`).
     pub resolve: fn() -> Result<PathBuf>,
@@ -60,13 +50,18 @@ pub struct AgentSpec {
     /// (joined with `/`; an agent may have several historical locations).
     pub config_dir_probes: &'static [&'static str],
     pub kind: AgentKind,
-    pub required_url: RequiredUrl,
+    /// The wire protocol this agent speaks. Replaces v3's `required_url`,
+    /// which could only say "the OpenAI field" or "the Anthropic field" — it
+    /// had no way to express that Codex needs `/v1/responses` specifically and
+    /// that `/v1/chat/completions` will not do, which is precisely the fact
+    /// whose absence produced unbootable `config.toml` files.
+    pub required_wire: RequiredWire,
     /// Config-file inventory. The first entry is the agent's primary config
     /// file (the one `resolve_tool_config_path` returns).
     pub files: &'static [AgentConfigFileSpec],
-    /// Project a whole [`ToolBinding`] onto disk. Single-provider agents
+    /// Project a whole [`AgentBinding`] onto disk. Single-provider agents
     /// resolve the active entry; multi-provider agents write every entry.
-    pub sync_binding: fn(&ToolBinding, &[ProviderEntryFlat]) -> Result<ToolSyncResultFlat>,
+    pub sync_binding: fn(&AgentBinding, &[Provider]) -> Result<ToolSyncResultFlat>,
     /// Remove every SkillStar-managed field/entry from the agent's configs.
     pub unsync: fn() -> Result<()>,
     /// Read an *existing* primary config file and report a human-readable
@@ -91,7 +86,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         binary_name: "claude",
         config_dir_probes: &[".claude"],
         kind: AgentKind::Single,
-        required_url: RequiredUrl::Anthropic,
+        required_wire: RequiredWire::AnthropicMessages,
         files: &[AgentConfigFileSpec {
             file_id: "settings",
             label: "settings.json",
@@ -111,7 +106,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         binary_name: "claude-desktop",
         config_dir_probes: &[".claude-desktop"],
         kind: AgentKind::Single,
-        required_url: RequiredUrl::Anthropic,
+        required_wire: RequiredWire::AnthropicMessages,
         files: &[AgentConfigFileSpec {
             file_id: "binding",
             label: "skillstar-binding.json",
@@ -129,7 +124,10 @@ static AGENT_SPECS: &[AgentSpec] = &[
         binary_name: "codex",
         config_dir_probes: &[".codex"],
         kind: AgentKind::Multi,
-        required_url: RequiredUrl::Openai,
+        // Codex ≥0.95 removed `wire_api = "chat"` from its enum entirely, so
+        // an OpenAI-*compatible* host is not enough: it must implement
+        // `/v1/responses`.
+        required_wire: RequiredWire::OpenaiResponses,
         files: &[
             AgentConfigFileSpec {
                 file_id: "config",
@@ -156,7 +154,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         binary_name: "opencode",
         config_dir_probes: &[".config/opencode", ".opencode"],
         kind: AgentKind::Multi,
-        required_url: RequiredUrl::Openai,
+        required_wire: RequiredWire::OpenaiChat,
         files: &[AgentConfigFileSpec {
             file_id: "opencode",
             label: "opencode.json",
@@ -174,7 +172,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         binary_name: "pi",
         config_dir_probes: &[".pi"],
         kind: AgentKind::Multi,
-        required_url: RequiredUrl::Openai,
+        required_wire: RequiredWire::OpenaiChat,
         files: &[
             AgentConfigFileSpec {
                 file_id: "models",
@@ -201,7 +199,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         binary_name: "omp",
         config_dir_probes: &[".omp"],
         kind: AgentKind::Multi,
-        required_url: RequiredUrl::Openai,
+        required_wire: RequiredWire::OpenaiChat,
         files: &[
             AgentConfigFileSpec {
                 file_id: "models",
@@ -369,14 +367,26 @@ mod tests {
     }
 
     #[test]
-    fn required_url_pins_activation_validation_rules() {
-        // Mirrors the match in providers::crud::activate_tool.
+    fn required_wire_pins_bind_validation_rules() {
+        // Mirrors what providers::crud_v4::bind_provider gates on.
         for id in ["claude-code", "claude-desktop"] {
-            assert_eq!(agent_spec(id).unwrap().required_url, RequiredUrl::Anthropic);
+            assert_eq!(
+                agent_spec(id).unwrap().required_wire,
+                RequiredWire::AnthropicMessages
+            );
         }
-        for id in ["codex", "opencode", "pi"] {
-            assert_eq!(agent_spec(id).unwrap().required_url, RequiredUrl::Openai);
+        for id in ["opencode", "pi", "omp"] {
+            assert_eq!(
+                agent_spec(id).unwrap().required_wire,
+                RequiredWire::OpenaiChat
+            );
         }
+        // The whole point of the Codex fix: chat-only hosts are not bindable.
+        assert_eq!(
+            agent_spec("codex").unwrap().required_wire,
+            RequiredWire::OpenaiResponses,
+            "Codex >=0.95 speaks only the Responses API"
+        );
     }
 
     #[test]

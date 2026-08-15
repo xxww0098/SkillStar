@@ -288,16 +288,6 @@ pub(crate) fn parse_codex_active_provider_base_url(config_text: &str) -> Option<
 
 // ── Meta helpers ────────────────────────────────────────────────────
 
-/// Extract a non-empty string value from a JSON meta object.
-pub(crate) fn get_meta_str(meta: &Option<serde_json::Value>, key: &str) -> Option<String> {
-    meta.as_ref()
-        .and_then(|m| m.get(key))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
 fn meta_u64(meta: &Option<serde_json::Value>, key: &str) -> Option<u64> {
     meta.as_ref().and_then(|m| m.get(key)).and_then(|v| {
         v.as_u64()

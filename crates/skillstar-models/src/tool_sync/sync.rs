@@ -43,34 +43,42 @@ fn codex_home() -> Result<PathBuf> {
 /// - `ANTHROPIC_AUTH_TOKEN`: the provider's API key
 /// - `ANTHROPIC_MODEL`: the selected model
 /// - `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `_SONNET_MODEL` / `_OPUS_MODEL`: optional
-///   tier overrides read from `provider.meta` (the key is removed when blank)
+///   tier overrides read from the binding's `roles` map (the key is removed
+///   when blank)
+///
+/// The tier overrides used to live in `provider.meta`, where only Claude could
+/// reach them; v4 stores them as roles on the binding. This writer reads the
+/// new location so the three env keys keep the exact values they had — moving
+/// where a value is *stored* must not change what lands on disk.
 pub fn sync_to_claude_code(
-    provider: &ProviderEntryFlat,
+    provider: &Provider,
     model: &str,
+    roles: &std::collections::BTreeMap<String, ModelRef>,
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_tool_config_path("claude-code")?;
     Ok(ToolSyncResultFlat::from_write_outcome(
         "claude-code",
         &config_path,
-        sync_to_claude_code_inner(provider, model, &config_path),
+        sync_to_claude_code_inner(provider, model, roles, &config_path),
     ))
 }
 
 /// Inner implementation for Claude Code sync.
 pub(crate) fn sync_to_claude_code_inner(
-    provider: &ProviderEntryFlat,
+    provider: &Provider,
     model: &str,
+    roles: &std::collections::BTreeMap<String, ModelRef>,
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
-    // Native Official: clear SkillStar-managed env so Claude uses browser/client login.
-    if crate::providers::is_native_official_provider(provider) {
+    // Native login: clear SkillStar-managed env so Claude uses its own login.
+    if provider.is_external_cli() {
         return clear_claude_managed_env_at(config_path);
     }
 
-    // Validate that base_url_anthropic is non-empty
-    if provider.base_url_anthropic.is_empty() {
+    let anthropic_base = anthropic_base(provider);
+    if anthropic_base.is_empty() {
         bail!(
-            "Provider '{}' does not have an Anthropic-compatible endpoint (base_url_anthropic is empty)",
+            "Provider '{}' does not have an Anthropic-compatible endpoint",
             provider.name
         );
     }
@@ -89,33 +97,30 @@ pub(crate) fn sync_to_claude_code_inner(
     }
 
     // Build managed fields for the env block. The tier-model overrides
-    // (Haiku/Sonnet/Opus) come from `provider.meta`; each is written when set,
+    // (Haiku/Sonnet/Opus) come from the binding's roles; each is written when set,
     // or passed as Null (→ key removed) when the user left it blank.
     // `ANTHROPIC_MODEL` follows the same rule: an empty/whitespace model
     // (e.g. a provider with no `default_model` activated without an explicit
     // model) is treated as Null so Claude Code doesn't receive an invalid
     // `"ANTHROPIC_MODEL": ""` that breaks model resolution.
     let managed_fields: Vec<(&str, Value)> = vec![
-        (
-            "ANTHROPIC_BASE_URL",
-            Value::String(provider.base_url_anthropic.clone()),
-        ),
+        ("ANTHROPIC_BASE_URL", Value::String(anthropic_base.to_string())),
         (
             "ANTHROPIC_AUTH_TOKEN",
-            Value::String(provider.api_key.clone()),
+            Value::String(api_key(provider).to_string()),
         ),
         ("ANTHROPIC_MODEL", trim_or_null(model)),
         (
             "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            meta_model_field(provider, "claude_haiku_model"),
+            role_model_field(roles, CLAUDE_ROLE_HAIKU),
         ),
         (
             "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            meta_model_field(provider, "claude_sonnet_model"),
+            role_model_field(roles, CLAUDE_ROLE_SONNET),
         ),
         (
             "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            meta_model_field(provider, "claude_opus_model"),
+            role_model_field(roles, CLAUDE_ROLE_OPUS),
         ),
     ];
 
@@ -157,18 +162,28 @@ fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
     Ok(backup_path)
 }
 
-/// Read a Claude tier-model override from `provider.meta`. Returns a
-/// `Value::String` when the field is a non-empty string, otherwise
-/// `Value::Null` (which `merge_json_env_write` treats as "remove the key").
-fn meta_model_field(provider: &ProviderEntryFlat, key: &str) -> Value {
-    provider
-        .meta
-        .as_ref()
-        .and_then(|m| m.get(key))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| Value::String(s.to_string()))
+/// Role ids Claude's three tier-model env keys read from.
+///
+/// `fast` is the canonical cross-agent name the migration mapped Haiku onto;
+/// `sonnet` and `opus` stay under their own names because they are Claude
+/// tiers with no counterpart elsewhere, and inventing one would make the role
+/// vocabulary claim a generality it does not have.
+pub(crate) const CLAUDE_ROLE_HAIKU: &str = "fast";
+pub(crate) const CLAUDE_ROLE_SONNET: &str = "sonnet";
+pub(crate) const CLAUDE_ROLE_OPUS: &str = "opus";
+
+/// Read a Claude tier-model override out of the binding's roles. Returns a
+/// `Value::String` for a non-empty model, otherwise `Value::Null` (which
+/// `merge_json_env_write` treats as "remove the key").
+fn role_model_field(
+    roles: &std::collections::BTreeMap<String, ModelRef>,
+    role: &str,
+) -> Value {
+    roles
+        .get(role)
+        .map(|target| target.model.trim())
+        .filter(|model| !model.is_empty())
+        .map(|model| Value::String(model.to_string()))
         .unwrap_or(Value::Null)
 }
 
@@ -185,19 +200,23 @@ fn trim_or_null(s: &str) -> Value {
     }
 }
 
-pub(crate) fn build_opencode_provider_block(provider: &ProviderEntryFlat, model: &str) -> Value {
+pub(crate) fn build_opencode_provider_block(provider: &Provider, model: &str) -> Value {
+    let default_model = default_model(provider);
     let selected_model_id = if model.trim().is_empty() {
-        if provider.default_model.trim().is_empty() {
+        if default_model.trim().is_empty() {
             "default".to_string()
         } else {
-            provider.default_model.clone()
+            default_model.to_string()
         }
     } else {
         model.to_string()
     };
 
-    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
-    let catalog = catalog_from_meta(provider.meta.as_ref());
+    let base_url = openai_base(provider).trim().trim_end_matches('/');
+    // The catalog left the provider row in v4; it now lives in the cache
+    // directory. Reading it here is what keeps each model's `name` / `limit` /
+    // `cost` block identical to what v3 wrote.
+    let catalog = catalog_cache::read_catalog(&provider.id);
     let model_ids = build_opencode_model_ids(provider, &selected_model_id, &catalog);
     let models = model_ids
         .iter()
@@ -215,14 +234,14 @@ pub(crate) fn build_opencode_provider_block(provider: &ProviderEntryFlat, model:
         "name": provider.name,
         "options": {
             "baseURL": base_url,
-            "apiKey": provider.api_key,
+            "apiKey": api_key(provider),
         },
         "models": models
     })
 }
 
 fn build_opencode_model_ids(
-    provider: &ProviderEntryFlat,
+    provider: &Provider,
     selected_model_id: &str,
     catalog: &[ModelCatalogEntry],
 ) -> Vec<String> {
@@ -230,7 +249,7 @@ fn build_opencode_model_ids(
     let mut ids = Vec::new();
 
     for candidate in std::iter::once(selected_model_id)
-        .chain(std::iter::once(provider.default_model.as_str()))
+        .chain(std::iter::once(default_model(provider)))
         .chain(provider.models.iter().map(String::as_str))
         .chain(catalog.iter().map(|entry| entry.id.as_str()))
     {
@@ -278,11 +297,11 @@ fn build_opencode_model_entry(model_id: &str, catalog_entry: Option<&ModelCatalo
 /// Registry adapter: write a Claude Code binding by resolving its active
 /// entry (single-provider agents only ever project the active entry).
 pub(crate) fn sync_claude_code_binding(
-    binding: &crate::providers::ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
 ) -> Result<ToolSyncResultFlat> {
     let (provider, model) = resolve_single_active(binding, providers)?;
-    sync_to_claude_code(provider, model)
+    sync_to_claude_code(provider, model, &binding.roles)
 }
 
 /// Persist the Claude Desktop store binding to a local marker file.
@@ -291,8 +310,8 @@ pub(crate) fn sync_claude_code_binding(
 /// (`resolve_claude_desktop_binding_path`) keeps CLI / Desktop store bindings
 /// independently inspectable under `SKILLSTAR_TOOL_SYNC_HOME`.
 pub(crate) fn sync_claude_desktop_binding(
-    binding: &crate::providers::ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
 ) -> Result<ToolSyncResultFlat> {
     let path = resolve_claude_desktop_binding_path()?;
     Ok(ToolSyncResultFlat::from_write_outcome(
@@ -303,8 +322,8 @@ pub(crate) fn sync_claude_desktop_binding(
 }
 
 fn sync_claude_desktop_binding_inner(
-    binding: &crate::providers::ToolBinding,
-    providers: &[ProviderEntryFlat],
+    binding: &AgentBinding,
+    providers: &[Provider],
     path: &Path,
 ) -> Result<Option<PathBuf>> {
     let (provider, model) = resolve_single_active(binding, providers)?;
@@ -354,9 +373,9 @@ pub(crate) fn detect_claude_desktop_provider(path: &Path) -> Result<Option<Strin
 
 /// Resolve the active entry of a single-provider binding to `(provider, model)`.
 fn resolve_single_active<'a>(
-    binding: &'a crate::providers::ToolBinding,
-    providers: &'a [ProviderEntryFlat],
-) -> Result<(&'a ProviderEntryFlat, &'a str)> {
+    binding: &'a AgentBinding,
+    providers: &'a [Provider],
+) -> Result<(&'a Provider, &'a str)> {
     let active = binding.active().context("no active entry")?;
     let provider = providers
         .iter()

@@ -16,4 +16,4 @@ mod provider_ref;
 pub mod providers;
 pub mod tool_sync;
 
-pub use provider_ref::AiProviderRef;
+pub use provider_ref::{AiProviderRef, normalize_agent_id};

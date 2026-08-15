@@ -276,3 +276,89 @@ fn write_then_read_preserves_every_v4_only_field() {
 
     assert_eq!(read, store, "roles, caps and credential variants all survive");
 }
+
+// ---------------------------------------------------------------------------
+// A v4 file must never reach the v1 parser
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_v3_reader_refuses_a_v4_file_instead_of_emptying_it() {
+    // The failure this guards against is silent and total. `migrate_store_if_needed`
+    // reaches its v1 arm by exclusion — anything that is not v3 and not v2 is
+    // assumed to be v1 — and every field of the v1 struct is `#[serde(default)]`.
+    // So a v4 file *parses successfully* as a v1 store with four empty buckets,
+    // and the migration then writes that empty store back over the user's real
+    // configuration. One downgraded launch would be enough.
+    let scratch = Scratch::new("v4-not-v1");
+    let path = scratch.store_path();
+
+    let store = ProvidersStoreV4 {
+        version: STORE_VERSION_V4,
+        providers: vec![Provider::new("p1", "Relay")],
+        bindings: [(
+            "omp".to_string(),
+            AgentBinding::single(BindingEntry::new("p1", "m1")),
+        )]
+        .into_iter()
+        .collect(),
+    };
+    write_store_v4(&store, &path).expect("write");
+    let before = std::fs::read_to_string(&path).expect("read back");
+
+    let err = crate::providers::store::migrate_store_if_needed(&path)
+        .expect_err("a store from the future must be an error, not an empty parse");
+
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("version 4"),
+        "the error must name the version it could not handle: {message}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read after"),
+        before,
+        "the file must be left exactly as it was — nothing is worth overwriting it with"
+    );
+}
+
+#[test]
+fn a_migrated_store_survives_a_restart_with_every_field_intact() {
+    // The round-trip that matters in production: migrate once, then start again
+    // and confirm the second launch sees the same store rather than re-running
+    // a migration (or, worse, a v1 parse) over its own output.
+    let scratch = Scratch::new("restart");
+    let path = scratch.store_path();
+    write_raw(&path, V3_FIXTURE);
+
+    let first = load_or_migrate_store_v4(&path).expect("first launch");
+    assert!(first.report.is_some(), "the first launch migrates");
+    let after_migration = std::fs::read_to_string(&path).expect("read");
+
+    let second = load_or_migrate_store_v4(&path).expect("second launch");
+
+    assert!(second.report.is_none(), "the second launch must not migrate");
+    assert_eq!(second.store, first.store);
+    assert!(
+        second.catalogs.is_empty(),
+        "catalogs are extracted once; a second pass would re-report them as new"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        after_migration,
+        "a launch that changes nothing must not rewrite the file"
+    );
+}
+
+#[test]
+fn a_store_from_an_unknown_future_version_is_refused_rather_than_migrated() {
+    let scratch = Scratch::new("v99");
+    let path = scratch.store_path();
+    write_raw(&path, r#"{ "version": 99, "providers": [], "bindings": {} }"#);
+
+    // Not v4, so `read_store_v4` declines it; it must then be refused rather
+    // than fed to the v1 parser, and the file must be left alone.
+    let err = load_or_migrate_store_v4(&path).expect_err("refuse");
+    assert!(
+        matches!(err, StoreError::Corrupted { .. }),
+        "an unreadable-but-present store is a state the user must resolve: {err}"
+    );
+}

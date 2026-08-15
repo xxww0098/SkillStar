@@ -60,31 +60,47 @@ export interface ModelsCommands {
   delete_provider_flat: { args: { id: string }; result: void };
   reorder_providers: { args: { orderedIds: string[] }; result: void };
 
-  // Tool activations (v2)
-  activate_tool: {
+  // Agent bindings.
+  //
+  // v3's `activate_tool` did three jobs (add, point, edit) and its
+  // `deactivate_tool` cleared an agent's whole list even when the caller meant
+  // to drop one row. Each of those is now its own command.
+
+  /** Add a provider to an agent and make it active. */
+  bind_provider: {
     args: { providerId: string; toolId: string; model?: string | null; settings?: Record<string, unknown> | null };
     result: ToolSyncResult;
   };
-  deactivate_tool: { args: { toolId: string }; result: void };
-  update_tool_settings: {
-    args: { toolId: string; settings: Record<string, unknown> };
+  /** Drop **one** provider from an agent. */
+  unbind_provider: {
+    args: { toolId: string; providerId: string };
     result: ToolSyncResult;
   };
-  /**
-   * Binding-level settings (OMP model roles), as opposed to per-entry settings.
-   * Typed as the bag itself rather than a loose record — a caller holding a
-   * well-formed `OmpSettings` should reach the command without a cast.
-   */
-  update_tool_binding_settings: {
-    args: { toolId: string; settings: ToolBindingSettings };
-    result: ToolSyncResult;
-  };
+  /** Clear an agent's binding entirely. The destructive one. */
+  unbind_agent: { args: { toolId: string }; result: void };
+  /** Move the active pointer to an already-bound provider. */
   set_active_binding: {
     args: { toolId: string; providerId: string };
     result: ToolSyncResult;
   };
-  remove_binding_entry: {
-    args: { toolId: string; providerId: string };
+  /** Edit one bound entry without moving the pointer. */
+  update_binding_entry: {
+    args: { toolId: string; providerId: string; model?: string | null; settings?: Record<string, unknown> | null };
+    result: ToolSyncResult;
+  };
+  /** Per-entry settings: how this provider behaves under this agent. */
+  update_binding_entry_settings: {
+    args: { toolId: string; settings: Record<string, unknown> };
+    result: ToolSyncResult;
+  };
+  /**
+   * Agent-level settings, including role → model routing.
+   *
+   * Typed as the bag itself rather than a loose record — a caller holding a
+   * well-formed settings object should reach the command without a cast.
+   */
+  update_agent_settings: {
+    args: { toolId: string; settings: ToolBindingSettings };
     result: ToolSyncResult;
   };
 

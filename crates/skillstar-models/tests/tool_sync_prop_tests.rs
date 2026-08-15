@@ -7,7 +7,8 @@
 use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
-    FlatProvidersStore, ProviderEntryFlat, ToolActivation, ToolBinding,
+    AgentBinding, BindingEntry, FlatProvidersStore, Provider, ProviderEntryFlat, ProvidersStoreV4,
+    ToolActivation, ToolBinding, Tri,
 };
 use skillstar_models::tool_sync::{
     CodexSettings, TOOL_SYNC_HOME_ENV, merge_json_env_write, resync_active_tools,
@@ -144,6 +145,38 @@ fn provider_entry_flat_strategy() -> impl Strategy<Value = ProviderEntryFlat> {
                 codex_auth_mode: "api_key".to_string(),
             },
         )
+}
+
+/// Migrate a generated v3 store into the shape the writers now take.
+///
+/// The generators stay v3 on purpose: running each case through the real
+/// migration means every property also exercises the migration that produced
+/// the store under test.
+fn to_v4(store: FlatProvidersStore) -> ProvidersStoreV4 {
+    skillstar_models::providers::migrate::migrate_v3_to_v4(
+        store,
+        &skillstar_models::providers::get_all_presets_flat(),
+    )
+    .store
+}
+
+/// The v4 view of one generated v3 row.
+fn to_v4_provider(entry: &ProviderEntryFlat) -> Provider {
+    to_v4(FlatProvidersStore {
+        version: skillstar_models::providers::FLAT_STORE_VERSION,
+        providers: vec![entry.clone()],
+        tool_activations: HashMap::new(),
+    })
+    .providers
+    .remove(0)
+}
+
+/// The same row, given the `/v1/responses` endpoint Codex requires.
+fn codex_capable(entry: &ProviderEntryFlat) -> Provider {
+    let mut provider = to_v4_provider(entry);
+    provider.endpoints.openai_responses = provider.endpoints.openai_chat.clone();
+    provider.caps.responses_api = Tri::Yes;
+    provider
 }
 
 /// Strategy that generates a safe TOML section name (not managed by Codex sync).
@@ -348,17 +381,22 @@ proptest! {
         // Write the binding. OAuth auth-mode keeps the case path-hermetic:
         // it never touches the home-resolved auth.json (see the writer docs).
         let settings = CodexSettings {
-            wire_api: "responses".to_string(),
             auth_mode: "oauth".to_string(),
         };
-        let binding = ToolBinding {
-            entries: vec![ToolActivation {
+        // Codex only accepts hosts that implement /v1/responses, so the
+        // generated row is given one. Without it the writer would correctly
+        // refuse, and this property is about TOML merging, not capability
+        // gating (which part6 covers).
+        let provider = codex_capable(&provider);
+        let binding = AgentBinding {
+            entries: vec![BindingEntry {
                 provider_id: provider.id.clone(),
                 model: model.clone(),
                 settings: Some(serde_json::to_value(&settings).unwrap()),
-                last_sync_at: None,
+                last_sync_at_ms: None,
             }],
             active_index: 0,
+            roles: Default::default(),
             settings: None,
         };
         sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path)
@@ -394,7 +432,7 @@ proptest! {
             .expect("managed provider entry should be a table");
         prop_assert_eq!(
             skillstar.get("base_url").and_then(|v| v.as_str()),
-            Some(provider.base_url_openai.as_str()),
+            provider.endpoints.openai_responses.as_deref(),
             "skillstar.base_url mismatch"
         );
         prop_assert_eq!(
@@ -664,7 +702,7 @@ proptest! {
         (store, target_id, expected_active_tools) in store_with_active_tools_strategy()
     ) {
         use_sandbox_home();
-        let results = resync_active_tools(&store, &target_id);
+        let results = resync_active_tools(&to_v4(store), &target_id);
 
         // Verify: result count matches the number of active tools for this provider
         prop_assert_eq!(
@@ -709,7 +747,7 @@ proptest! {
         (store, target_id, expected_active_tools) in store_with_mixed_activations_strategy()
     ) {
         use_sandbox_home();
-        let results = resync_active_tools(&store, &target_id);
+        let results = resync_active_tools(&to_v4(store), &target_id);
 
         // Verify: result count matches expected active tools for target provider
         prop_assert_eq!(

@@ -28,8 +28,7 @@
 use super::binding::{ProvidersStoreV4, STORE_VERSION_V4};
 use super::migrate::{ExtractedCatalog, MigrationOutcome, MigrationReport, migrate_v3_to_v4};
 use super::presets::get_all_presets_flat;
-use super::store::{migrate_store_if_needed, read_flat_store};
-use super::types::FLAT_STORE_VERSION;
+use super::store::migrate_store_if_needed;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tracing::warn;
@@ -252,12 +251,44 @@ fn restore_from_v3_backup(path: &Path) {
     }
 }
 
-/// Read a v3 store for the legacy code paths that have not moved to v4 yet.
+/// Load the store from the default path, migrating if needed.
+pub fn load_store() -> Result<LoadedStore, StoreError> {
+    load_or_migrate_store_v4(&super::store::flat_store_path())
+}
+
+/// The full startup path: load, migrate, and repair what is already on disk.
 ///
-/// WP-3 removes this: once `tool_sync` and `crud` speak v4 natively there is no
-/// caller left. It is here so that this package can land the v4 format without
-/// also rewriting the writers, which is a separate change with its own risks.
-pub fn read_legacy_flat_store(path: &Path) -> Result<super::types::FlatProvidersStore> {
-    debug_assert_eq!(FLAT_STORE_VERSION, 3, "legacy reader tracks the v3 shape");
-    read_flat_store(path)
+/// Migrating the store is only half the job. The other half is that
+/// `~/.codex/config.toml` may already contain `wire_api = "chat"` tables this
+/// version can no longer produce — and which Codex can no longer parse, taking
+/// the whole file down with them. So on the run that migrates, and only then,
+/// every binding is re-projected: unwritable Codex entries are dropped from
+/// both the store and the file, and everything that survives is rewritten.
+///
+/// Ordering matters. The catalogs are persisted *before* the re-sync, because
+/// the OpenCode writer reads them to build its model blocks; doing it the other
+/// way round would write a correct file with the model metadata stripped out.
+///
+/// After a repair the store is written again — the dropped entries are a store
+/// change, and leaving them only in memory would resurrect them on restart.
+pub fn load_store_and_repair(path: &Path) -> Result<LoadedStore, StoreError> {
+    let mut loaded = load_or_migrate_store_v4(path)?;
+    let Some(report) = loaded.report.as_mut() else {
+        // Not the migrating run. Nothing on disk is stale.
+        return Ok(loaded);
+    };
+
+    super::catalog_cache::persist_extracted(&loaded.catalogs, &mut report.warnings);
+    crate::tool_sync::repair_agent_configs(&mut loaded.store, report);
+
+    write_store_v4(&loaded.store, path).map_err(|e| StoreError::VerifyFailed {
+        path: path.to_path_buf(),
+        detail: format!("persisting the post-repair store: {e}"),
+    })?;
+    Ok(loaded)
+}
+
+/// Persist a v4 store to the default path.
+pub fn save_store(store: &ProvidersStoreV4) -> Result<()> {
+    write_store_v4(store, &super::store::flat_store_path())
 }

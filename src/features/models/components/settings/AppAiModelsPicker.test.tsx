@@ -67,7 +67,7 @@ const provider: ProviderEntryFlat = {
 const config: AiConfig = {
   enabled: true,
   api_format: "anthropic",
-  provider_ref: { app_id: "claude", provider_id: "deepseek" },
+  provider_ref: { agent_id: "claude-code", provider_id: "deepseek" },
   base_url: "",
   api_key: "",
   model: "deepseek-chat",
@@ -194,7 +194,7 @@ describe("AppAiModelsPicker", () => {
       expect.objectContaining({
         api_format: "openai",
         model: "gpt-test",
-        provider_ref: { app_id: "codex", provider_id: "custom" },
+        provider_ref: { agent_id: "codex", provider_id: "custom" },
       }),
     );
   });

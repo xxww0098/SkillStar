@@ -1,7 +1,6 @@
 //! tool_sync tests — part1 (split out of the original inline test module).
 
 use super::*;
-use crate::providers::{ToolActivation, ToolBinding};
 
 #[test]
 fn test_resolve_tool_config_path_claude_code() {
@@ -61,10 +60,14 @@ fn test_get_tool_config_targets_returns_all_tools() {
 
 #[test]
 fn test_build_opencode_provider_block_uses_model_catalog_metadata() {
+    // The catalog left the provider row in v4 and lives in the cache directory;
+    // the writer reads it from there.
+    let _data = DataDirSandbox::new();
     let mut provider = make_test_provider_flat();
     provider.models = vec!["model-a".to_string(), "model-b".to_string()];
-    provider.meta = Some(serde_json::json!({
-        "model_catalog": [
+    crate::providers::catalog_cache::write_catalog(
+        &provider.id,
+        &serde_json::from_value::<Vec<ModelCatalogEntry>>(serde_json::json!([
             {
                 "id": "model-a",
                 "display_name": "Model A Display",
@@ -77,8 +80,10 @@ fn test_build_opencode_provider_block_uses_model_catalog_metadata() {
                 "display_name": "Model B Display",
                 "context_length": 128000
             }
-        ]
-    }));
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
 
     let block = build_opencode_provider_block(&provider, "model-a");
     let model_a = block
@@ -119,7 +124,7 @@ fn test_sync_to_claude_code_inner_new_file() {
     let config_path = tmp.path().join(".claude").join("settings.json");
     let provider = make_test_provider_flat();
 
-    let result = sync_to_claude_code_inner(&provider, "model-a", &config_path).unwrap();
+    let result = sync_to_claude_code_inner(&provider, "model-a", &no_roles(), &config_path).unwrap();
 
     // No backup since file didn't exist
     assert!(result.is_none());
@@ -164,7 +169,7 @@ fn test_sync_to_claude_code_inner_merges_existing() {
     .unwrap();
 
     let provider = make_test_provider_flat();
-    let backup = sync_to_claude_code_inner(&provider, "model-b", &config_path).unwrap();
+    let backup = sync_to_claude_code_inner(&provider, "model-b", &no_roles(), &config_path).unwrap();
 
     // Backup should exist
     assert!(backup.is_some());
@@ -203,9 +208,9 @@ fn test_sync_to_claude_code_inner_fails_without_anthropic_url() {
     let config_path = tmp.path().join("settings.json");
 
     let mut provider = make_test_provider_flat();
-    provider.base_url_anthropic = String::new();
+    provider.endpoints.anthropic_messages = None;
 
-    let result = sync_to_claude_code_inner(&provider, "model-a", &config_path);
+    let result = sync_to_claude_code_inner(&provider, "model-a", &no_roles(), &config_path);
     assert!(result.is_err());
     assert!(
         result
@@ -226,7 +231,7 @@ fn test_sync_to_claude_code_inner_empty_model_skips_key() {
     let config_path = tmp.path().join(".claude").join("settings.json");
     let provider = make_test_provider_flat();
 
-    let result = sync_to_claude_code_inner(&provider, "", &config_path).unwrap();
+    let result = sync_to_claude_code_inner(&provider, "", &no_roles(), &config_path).unwrap();
     assert!(result.is_none(), "no backup expected for a new file");
 
     let content = std::fs::read_to_string(&config_path).unwrap();
@@ -253,13 +258,13 @@ fn test_sync_to_claude_code_inner_empty_model_skips_key() {
 // Three-state auth_mode (api_key / oauth / third_party)
 // ---------------------------------------------------------------------------
 
-/// Helper: build a `ToolActivation` with explicit Codex settings.
-fn make_codex_activation(provider: &ProviderEntryFlat, settings: CodexSettings) -> ToolActivation {
-    ToolActivation {
+/// Helper: build a binding entry with explicit Codex settings.
+fn make_codex_activation(provider: &Provider, settings: CodexSettings) -> BindingEntry {
+    BindingEntry {
         provider_id: provider.id.clone(),
         model: "model-a".to_string(),
         settings: Some(serde_json::to_value(&settings).unwrap()),
-        last_sync_at: None,
+        last_sync_at_ms: None,
     }
 }
 
@@ -270,11 +275,11 @@ fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
 
     let provider = make_test_provider_flat();
     let settings = CodexSettings {
-        wire_api: "chat".to_string(),
         auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
     };
-    let binding = ToolBinding {
+    let binding = AgentBinding {
         entries: vec![make_codex_activation(&provider, settings)],
+        roles: Default::default(),
         active_index: 0,
         settings: None,
     };
@@ -317,11 +322,11 @@ fn test_codex_oauth_enables_openai_auth_and_no_env_key() {
 
     let provider = make_test_provider_flat();
     let settings = CodexSettings {
-        wire_api: "responses".to_string(),
         auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
     };
-    let binding = ToolBinding {
+    let binding = AgentBinding {
         entries: vec![make_codex_activation(&provider, settings)],
+        roles: Default::default(),
         active_index: 0,
         settings: None,
     };
@@ -381,12 +386,12 @@ fn test_codex_oauth_and_third_party_preserve_existing_auth_json() {
         std::fs::write(&auth_path, oauth_blob.to_string()).unwrap();
 
         let settings = CodexSettings {
-            wire_api: "responses".to_string(),
             auth_mode: mode.to_string(),
         };
-        let binding = ToolBinding {
+        let binding = AgentBinding {
             entries: vec![make_codex_activation(&provider, settings)],
-            active_index: 0,
+            roles: Default::default(),
+        active_index: 0,
             settings: None,
         };
 
@@ -410,11 +415,11 @@ fn test_codex_env_key_rule_is_stable_and_shell_safe() {
     // Non-alphanumeric chars in the id (dashes from a UUID) collapse to '_'.
     let mut p = make_test_provider_flat();
     p.id = "a1b2c3d4-rest-of-uuid".to_string();
-    assert_eq!(codex_env_key_for(&p), "SKILLSTAR_A1B2C3D4_KEY");
+    assert_eq!(codex_env_key_for(&p.id), "SKILLSTAR_A1B2C3D4_KEY");
 
     // Empty / pathological id still yields a usable var name.
     p.id = "".to_string();
-    let fallback = codex_env_key_for(&p);
+    let fallback = codex_env_key_for(&p.id);
     assert!(fallback.starts_with("SKILLSTAR_") && fallback.ends_with("_KEY"));
 }
 
@@ -437,9 +442,9 @@ fn test_claude_official_sync_clears_managed_env_without_writing_key() {
     .unwrap();
 
     let official =
-        crate::providers::create_from_preset_flat(crate::providers::CLAUDE_OFFICIAL_ID, "")
+        crate::providers::create_provider_from_preset(crate::providers::CLAUDE_OFFICIAL_ID, "")
             .unwrap();
-    sync_to_claude_code_inner(&official, "", &config_path).unwrap();
+    sync_to_claude_code_inner(&official, "", &no_roles(), &config_path).unwrap();
 
     let parsed: Value =
         serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
@@ -493,13 +498,13 @@ requires_openai_auth = false
     .unwrap();
 
     let official =
-        crate::providers::create_from_preset_flat(crate::providers::CODEX_OFFICIAL_ID, "").unwrap();
+        crate::providers::create_provider_from_preset(crate::providers::CODEX_OFFICIAL_ID, "").unwrap();
     let settings = CodexSettings {
-        wire_api: "responses".to_string(),
         auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
     };
-    let binding = ToolBinding {
+    let binding = AgentBinding {
         entries: vec![make_codex_activation(&official, settings)],
+        roles: Default::default(),
         active_index: 0,
         settings: None,
     };

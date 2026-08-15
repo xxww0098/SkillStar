@@ -32,7 +32,7 @@ export interface AppAiModelsPickerProps {
 type ConnectionSaveState = "idle" | "saving" | "saved" | "error";
 
 function initialAppFromConfig(config: AiConfig): AppAiAppId {
-  return config.provider_ref?.app_id === "codex" || (!config.provider_ref && config.api_format === "openai")
+  return config.provider_ref?.agent_id === "codex" || (!config.provider_ref && config.api_format === "openai")
     ? "codex"
     : "claude";
 }
@@ -206,7 +206,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
         enabled: true,
         api_format: selectedApp === "claude" ? "anthropic" : "openai",
         model,
-        provider_ref: { app_id: selectedApp, provider_id: provider.id },
+        provider_ref: { agent_id: selectedApp, provider_id: provider.id },
       });
     },
     [config, onConfigChange, selectedApp, setAppAiProvider],
@@ -236,7 +236,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
           enabled: true,
           api_format: appId === "claude" ? "anthropic" : "openai",
           model,
-          provider_ref: { app_id: appId, provider_id: selectedId },
+          provider_ref: { agent_id: appId, provider_id: selectedId },
         });
       });
     },
@@ -369,7 +369,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
   const isBoundToCurrentProvider =
     Boolean(selectedProvider) &&
     config.provider_ref?.provider_id === selectedProvider?.id &&
-    config.provider_ref?.app_id === selectedApp;
+    config.provider_ref?.agent_id === selectedApp;
   const canUsePrimaryAction = hasConnectionChanges || (!isBoundToCurrentProvider && hasDraftCredentials);
 
   const saveLabel = useMemo(

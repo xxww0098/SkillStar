@@ -11,31 +11,61 @@ pub const CLAUDE_OFFICIAL_ID: &str = "claude-official";
 /// Stable store/preset id for Codex ChatGPT OAuth (Official) login.
 pub const CODEX_OFFICIAL_ID: &str = "codex-official";
 
-/// Whether `preset_id` is a native Official seed (no API key / empty endpoints).
+/// What kind of thing a preset describes.
 ///
-/// Distinct from Grok-style `category: "official"` presets that still use keys.
+/// v3 spelled this as a free string with four values, one of which —
+/// `"official"` — covered two structurally different things: Grok, a vendor you
+/// reach with an API key, and the Claude/Codex seeds, which have no key and no
+/// endpoints because the point of them is to hand control back to the agent's
+/// own login. Telling those apart required an id whitelist
+/// (`is_native_official_preset_id`) consulted from six places, and the
+/// whitelist's own comment admitted it was standing in for a missing field.
+///
+/// Splitting the category is that missing field. The whitelist is gone; the
+/// question "is this a native-login row" is now answered by the data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "PresetCategory.ts")]
+pub enum PresetCategory {
+    /// Chinese domestic model vendors.
+    Domestic,
+    /// Relays and aggregators that front several upstream vendors.
+    Relay,
+    /// A vendor's own API, reached with an API key (Grok).
+    VendorOfficial,
+    /// The agent's own browser/client login. No key, no endpoints — syncing one
+    /// means *clearing* SkillStar's managed fields.
+    NativeLogin,
+    /// The generic "any OpenAI-compatible endpoint" template. Not in the
+    /// backend registry; the frontend synthesises it, and it is listed here so
+    /// the category type is total across everything the UI can show.
+    OpenaiCompatible,
+}
+
+impl PresetCategory {
+    /// Whether presets in this category are native-login seeds.
+    pub fn is_native_login(self) -> bool {
+        matches!(self, PresetCategory::NativeLogin)
+    }
+}
+
+/// Whether `preset_id` names a native-login seed.
+///
+/// Now a lookup in the registry rather than a hardcoded id list, so adding a
+/// native-login preset is one row and no whitelist edit.
 pub fn is_native_official_preset_id(preset_id: &str) -> bool {
-    matches!(preset_id, CLAUDE_OFFICIAL_ID | CODEX_OFFICIAL_ID)
+    get_all_presets_flat()
+        .iter()
+        .any(|p| p.id == preset_id && p.category.is_native_login())
 }
 
-/// Whether a flat provider row is a native Official seed.
-///
-/// Matches stable `id` or `preset_id` so renamed display names still qualify.
-pub fn is_native_official_provider(provider: &ProviderEntryFlat) -> bool {
-    is_native_official_preset_id(&provider.id)
-        || provider
-            .preset_id
-            .as_deref()
-            .is_some_and(is_native_official_preset_id)
-}
-
-/// Ensure Claude / Codex Official seed rows exist in the store.
+/// Ensure the native-login seed rows exist in the v4 store.
 ///
 /// Inserts missing seeds with stable ids (`claude-official` / `codex-official`).
-/// Skips when a row with the same `id` or `preset_id` already exists (does not
-/// overwrite a user-renamed Official row). Returns `true` when the store was
-/// mutated.
-pub fn ensure_official_providers(store: &mut FlatProvidersStore) -> bool {
+/// Skips when a row with the same `id` or `preset_id` already exists, so a user
+/// who renamed their Official row keeps the rename. Returns `true` when the
+/// store was mutated.
+pub fn ensure_official_providers(store: &mut super::binding::ProvidersStoreV4) -> bool {
     let mut changed = false;
     for preset_id in [CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID] {
         let exists = store
@@ -45,25 +75,123 @@ pub fn ensure_official_providers(store: &mut FlatProvidersStore) -> bool {
         if exists {
             continue;
         }
-        let Ok(mut entry) = create_from_preset_flat(preset_id, "") else {
+        let Ok(mut provider) = create_provider_from_preset(preset_id, "") else {
             continue;
         };
-        // Assign sort_index at the front-ish of the list without reshuffling.
+        // Append without reshuffling anything the user has ordered.
         let max_sort = store
             .providers
             .iter()
             .map(|p| p.sort_index)
             .max()
             .unwrap_or(0);
-        entry.sort_index = if store.providers.is_empty() {
+        provider.sort_index = if store.providers.is_empty() {
             0
         } else {
             max_sort + 1
         };
-        store.providers.push(entry);
+        store.providers.push(provider);
         changed = true;
     }
     changed
+}
+
+/// The `/v1/responses` endpoint implied by an OpenAI-compatible base URL.
+///
+/// Only `api.openai.com` is known to speak the Responses API without being
+/// probed. Everything else yields `None`, which is what keeps a third-party
+/// relay out of Codex's config until a probe says otherwise — writing one in
+/// is what produced the `wire_api = "chat"` tables that stop Codex booting.
+///
+/// Shared by preset creation and the v3 → v4 migration so the two cannot
+/// disagree about which hosts get an endpoint for free.
+pub fn derive_responses_endpoint(base_url_openai: &str) -> Option<String> {
+    let trimmed = base_url_openai.trim();
+    if trimmed.contains("api.openai.com") {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+/// Build a v4 [`Provider`] row from a built-in preset.
+///
+/// Native-login seeds keep the preset id as their stable row id and carry an
+/// [`Credential::ExternalCli`] rather than an empty key string — "the
+/// credential lives in another CLI's store" is a state, not an absence.
+pub fn create_provider_from_preset(
+    preset_id: &str,
+    api_key: &str,
+) -> Result<super::provider::Provider> {
+    use super::credential::{Credential, NoCredentialReason};
+    use super::provider::{Endpoints, Provider, ProviderCaps, Tri};
+
+    let presets = get_all_presets_flat();
+    let preset = presets
+        .into_iter()
+        .find(|p| p.id == preset_id)
+        .with_context(|| format!("Preset '{preset_id}' not found in flat preset registry"))?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let native_login = preset.category.is_native_login();
+    let id = if native_login {
+        preset.id.clone()
+    } else {
+        Uuid::new_v4().to_string()
+    };
+
+    let credential = if native_login {
+        Credential::ExternalCli {
+            surface: if preset.id == CODEX_OFFICIAL_ID {
+                "codex".to_string()
+            } else {
+                "claude".to_string()
+            },
+        }
+    } else if api_key.trim().is_empty() {
+        Credential::None {
+            reason: NoCredentialReason::LocalService,
+        }
+    } else {
+        Credential::single_key(Uuid::new_v4().to_string(), api_key)
+    };
+
+    let openai_responses = derive_responses_endpoint(&preset.base_url_openai);
+    let responses_api = if openai_responses.is_some() {
+        Tri::Yes
+    } else {
+        Tri::Unknown
+    };
+
+    let mut provider = Provider::new(id, preset.name);
+    provider.preset_id = Some(preset.id);
+    provider.endpoints = Endpoints {
+        openai_chat: non_empty(&preset.base_url_openai),
+        openai_responses,
+        anthropic_messages: non_empty(&preset.base_url_anthropic),
+        models_list: non_empty(&preset.models_url),
+    };
+    provider.credential = credential;
+    provider.caps = ProviderCaps {
+        responses_api,
+        ..ProviderCaps::unknown()
+    };
+    provider.icon_color = Some(preset.icon_color);
+    provider.created_at_ms = Some(now);
+    Ok(provider)
+}
+
+fn non_empty(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -79,8 +207,7 @@ pub fn ensure_official_providers(store: &mut FlatProvidersStore) -> bool {
 pub struct ProviderPresetFlat {
     pub id: String,
     pub name: String,
-    /// Category: "domestic", "relay", "official", or "openai_compatible"
-    pub category: String,
+    pub category: PresetCategory,
     pub base_url_openai: String,
     pub base_url_anthropic: String,
     /// Unique "fetch available models" URL for this provider.
@@ -113,7 +240,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "deepseek".to_string(),
             name: "DeepSeek".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.deepseek.com/v1".to_string(),
             base_url_anthropic: "https://api.deepseek.com/anthropic".to_string(),
             models_url: "https://api.deepseek.com/v1/models".to_string(),
@@ -130,7 +257,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "kimi".to_string(),
             name: "Kimi".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.moonshot.cn/v1".to_string(),
             base_url_anthropic: "https://api.moonshot.cn/anthropic".to_string(),
             models_url: "https://api.moonshot.cn/v1/models".to_string(),
@@ -144,7 +271,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "kimi-coding".to_string(),
             name: "Kimi For Coding".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.kimi.com/coding/v1".to_string(),
             base_url_anthropic: "https://api.kimi.com/coding/".to_string(),
             models_url: "https://api.moonshot.cn/v1/models".to_string(),
@@ -158,7 +285,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "minimax".to_string(),
             name: "MiniMax".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.minimax.chat/v1".to_string(),
             base_url_anthropic: "https://api.minimax.chat/anthropic".to_string(),
             models_url: "https://api.minimax.chat/v1/models".to_string(),
@@ -175,7 +302,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "glm".to_string(),
             name: "智谱 GLM".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://open.bigmodel.cn/api/paas/v4".to_string(),
             base_url_anthropic: "https://open.bigmodel.cn/api/anthropic".to_string(),
             models_url: "https://open.bigmodel.cn/api/paas/v4/models".to_string(),
@@ -189,7 +316,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "glm-coding".to_string(),
             name: "智谱 GLM Coding Plan".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.z.ai/api/coding/paas/v4".to_string(),
             base_url_anthropic: "https://api.z.ai/api/anthropic".to_string(),
             models_url: "https://api.z.ai/api/coding/paas/v4/models".to_string(),
@@ -203,7 +330,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "longcat".to_string(),
             name: "LongCat".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.longcat.chat/openai/v1".to_string(),
             base_url_anthropic: "https://api.longcat.chat/anthropic".to_string(),
             models_url: "https://api.longcat.chat/openai/v1/models".to_string(),
@@ -220,7 +347,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "xiaomi-mimo".to_string(),
             name: "小米 MiMo".to_string(),
-            category: "domestic".to_string(),
+            category: PresetCategory::Domestic,
             base_url_openai: "https://api.xiaomimimo.com/v1".to_string(),
             base_url_anthropic: "https://api.xiaomimimo.com/anthropic".to_string(),
             models_url: "https://api.xiaomimimo.com/v1/models".to_string(),
@@ -238,7 +365,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "openrouter".to_string(),
             name: "OpenRouter".to_string(),
-            category: "relay".to_string(),
+            category: PresetCategory::Relay,
             base_url_openai: "https://openrouter.ai/api/v1".to_string(),
             base_url_anthropic: String::new(),
             models_url: "https://openrouter.ai/api/v1/models".to_string(),
@@ -252,7 +379,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "siliconflow".to_string(),
             name: "SiliconFlow".to_string(),
-            category: "relay".to_string(),
+            category: PresetCategory::Relay,
             base_url_openai: "https://api.siliconflow.cn/v1".to_string(),
             base_url_anthropic: String::new(),
             models_url: "https://api.siliconflow.cn/v1/models".to_string(),
@@ -269,7 +396,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: CLAUDE_OFFICIAL_ID.to_string(),
             name: "Claude Official".to_string(),
-            category: "official".to_string(),
+            category: PresetCategory::NativeLogin,
             base_url_openai: String::new(),
             base_url_anthropic: String::new(),
             models_url: String::new(),
@@ -283,7 +410,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: CODEX_OFFICIAL_ID.to_string(),
             name: "Codex Official".to_string(),
-            category: "official".to_string(),
+            category: PresetCategory::NativeLogin,
             base_url_openai: String::new(),
             base_url_anthropic: String::new(),
             models_url: String::new(),
@@ -298,7 +425,7 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
         ProviderPresetFlat {
             id: "grok".to_string(),
             name: "Grok (xAI)".to_string(),
-            category: "official".to_string(),
+            category: PresetCategory::VendorOfficial,
             base_url_openai: "https://api.x.ai/v1".to_string(),
             base_url_anthropic: String::new(),
             models_url: "https://api.x.ai/v1/models".to_string(),
@@ -310,65 +437,4 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
             endpoint_candidates: vec!["https://api.x.ai/v1".to_string()],
         },
     ]
-}
-
-/// Create a new flat provider entry from a built-in preset.
-///
-/// Looks up the preset by ID, sets the current timestamp, and copies all
-/// relevant fields from the preset template. Most presets get a fresh UUID;
-/// native Official seeds (`claude-official` / `codex-official`) use a stable
-/// id matching the preset id and allow an empty API key.
-///
-/// # Arguments
-/// * `preset_id` - The ID of the preset to use (e.g., "deepseek", "kimi")
-/// * `api_key` - The user's API key for this provider (may be empty for Official)
-///
-/// # Returns
-/// A fully populated `ProviderEntryFlat` ready to be inserted into the store.
-///
-/// # Errors
-/// Returns an error if the `preset_id` is not found in the preset registry.
-pub fn create_from_preset_flat(preset_id: &str, api_key: &str) -> Result<ProviderEntryFlat> {
-    let presets = get_all_presets_flat();
-    let preset = presets
-        .into_iter()
-        .find(|p| p.id == preset_id)
-        .with_context(|| format!("Preset '{}' not found in flat preset registry", preset_id))?;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let native_official = is_native_official_preset_id(preset_id);
-    let id = if native_official {
-        preset_id.to_string()
-    } else {
-        Uuid::new_v4().to_string()
-    };
-    // Codex Official binds ChatGPT OAuth — never write OPENAI_API_KEY.
-    let codex_auth_mode = if preset_id == CODEX_OFFICIAL_ID {
-        "oauth".to_string()
-    } else {
-        default_codex_auth_mode()
-    };
-
-    Ok(ProviderEntryFlat {
-        id,
-        name: preset.name,
-        base_url_openai: preset.base_url_openai,
-        base_url_anthropic: preset.base_url_anthropic,
-        models_url: preset.models_url,
-        api_key: api_key.to_string(),
-        models: vec![],
-        default_model: String::new(),
-        sort_index: 0,
-        preset_id: Some(preset.id),
-        icon_color: Some(preset.icon_color),
-        notes: None,
-        created_at: Some(now),
-        meta: None,
-        codex_wire_api: default_codex_wire_api(),
-        codex_auth_mode,
-    })
 }

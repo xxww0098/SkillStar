@@ -13,14 +13,16 @@
 - 添加 Provider 从 `crates/skillstar-providers/src/identity.rs` 开始，再补 Models preset、余额解析 fixture 和映射测试；不得在 command/frontend 手写鉴权头。
 - v1 per-app store 只是历史迁移来源：命令面与同步/CRUD 已删除，v1 类型和读取收缩为 crate 内部，仅供 v1→v2 migration 和 `ai_provider` 的 legacy provider-ref fallback 使用。新功能只能进入 flat v2 registry 和 API。
 
-### v4 数据模型（已落地，尚未接入运行路径）
+### v4 数据模型（已接入运行路径）
 
 - v4 类型在 `providers/{provider,credential,binding,catalog}.rs`：`Provider` + `Endpoints`（每协议一个可选 URL）+ `ProviderCaps`（三态 `Tri`）+ `Credential`（判别联合）+ `AgentBinding`（含一等字段 `roles`）。裁决与理由见 [decisions.md](../../decisions.md) D-035。
 - **能力位语义**：`Tri::Unknown` 是「需要检测」，**不是**「不支持」。只有探测明确返回 `No` 才允许禁用绑定入口。迁移期一律写 `Unknown`。
 - **Official = `Credential::ExternalCli`**：不再靠 id 白名单分支。`claude-official` / `codex-official` 两个固定 id 保留（改 id 会让用户的原生登录绑定失效）。
 - **角色路由归 `AgentBinding.roles`**：`provider.meta.claude_*_model` 与 `binding.settings.roles` 都迁到这里。键是开放 map，规范键为 `default` / `fast` / `plan` / `vision` / `subagent`，其余（含 OMP 的 `slow`、`designer`）原样保留为 extra 角色。
 - **Claude Desktop 降级为 planned**：`claude-desktop` 的 binding 在迁移时被丢弃并列进迁移报告，不自动搬到 `claude-code`（那是替用户做决定）。它此前写的只是 SkillStar 自造的标记文件，对 Claude Desktop 不产生实际效果——迁移报告必须诚实说明这一点。**退出条件：若 6 个月内（即 2027-02-15 前）仍无可用的原生写盘路径，从 `PLANNED_AGENTS` 中彻底删除。**
-- **当前边界**：v4 类型、v3→v4 迁移、store 安全外壳与前端 DTO 都已实现并测试，但 `crud` / `tool_sync` / 命令读写路径仍在 v3 上，因此 `load_or_migrate_store_v4` 尚未接入启动流程。接入是独立工作包的事——先切换格式再改写盘方，会让两个高风险改动叠在同一次提交里。
+- **磁盘格式已切换**：`model_providers.json` 现在以 v4 写盘（`version: 4`，`providers` + `bindings`）。启动入口是 `load_store_and_repair`：读→（必要时）迁移→落盘 catalog 缓存→修复已写坏的 Agent 配置→再次写回 store。`get_providers_flat` 是唯一调用它的命令，其余命令走不做修复的 `load_store`。
+- **v3 reader 拒绝未来版本**：`migrate_store_if_needed` 的 v1 分支是「排除法」到达的，而 v1 结构每个字段都有 serde 默认值——所以一个 v4 文件会被**成功**解析成四个空桶，然后覆盖用户的真实配置。现在遇到高于 `FLAT_STORE_VERSION` 的版本直接报错并保留原文件。
+- **IPC 线上形状仍是 v3**：store 与所有 writer 都是 v4，但渲染进程读到的仍是 v3 形状，翻译集中在 `src-tauri/src/commands/models_commands/compat.rs` 一处。写入是**打补丁**而非重建：v3 表达不了的 `caps` / `headers` / key 故障转移链 / `ext` 因此不会在每次保存时被清空。前端 IA 重写时删除该模块，明文 key 也随之停止过界。
 
 ### 迁移契约（v3 → v4）
 
@@ -36,7 +38,9 @@
 
 ## Tool binding 与写盘
 
-- Agent binding 使用 `ToolBinding { entries, active_index }`；所有读写通过 helper/facade，不直接索引 `entries[active_index]`。
+- Agent binding 使用 `AgentBinding { entries, active_index, roles, settings }`；所有读写通过 helper/facade，不直接索引 `entries[active_index]`。
+- **命令按职责拆分**（v3 的 `activate_tool` 一个名字干三件事、`deactivate_tool` 不是它的逆）：`bind_provider`（加一条并指向它）/ `set_active_binding`（只移动指针）/ `update_binding_entry`（只改条目，不动指针）/ `unbind_provider`（只摘一条）/ `unbind_agent`（清空，破坏性的那个现在必须点名）/ `update_binding_entry_settings`（entry 级设置袋）/ `update_agent_settings`（agent 级设置袋 + 角色）。
+- **绑定按 wire protocol 校验**：注册表列从 `required_url` 换成 `required_wire`（`RequiredWire`）。`codex` 要求 `OpenaiResponses`，`claude-code` / `claude-desktop` 要求 `AnthropicMessages`，其余要求 `OpenaiChat`。`Credential::ExternalCli` 行豁免（空端点是它的语义）。`Tri::Unknown` 从不拒绝，只有探测得到的 `No` 才拒绝。
 - Agent descriptor 的 `kind` 是 UI 和后端能力的共同开关：single 只激活一个 provider；multi 原生保留多个条目并维护 active 指针。
 - Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、必需 URL、sync/unsync/探测 dispatch）的 SSOT 是 `tool_sync::agents` 注册表；写盘、卸载、resync 与配置目标枚举都经它路由，新增 Agent 只加一行 spec 及其 writer。它与前端 `agentRegistry.ts` 各自持有同一份 toolId 清单，由两侧的表驱动一致性测试互相锁定。
 - tool-sync 只改自己管理的字段，保留用户已有配置；写入前备份并使用原子替换。
@@ -44,6 +48,8 @@
 - 所有测试设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录，绝不写真实 Agent 配置。
 - Claude CLI（`claude-code`）与 Claude Desktop（`claude-desktop`）是**独立绑定**：各自有 `tool_activations` 条目、Official 开关和角色映射状态；共用同一条 Claude Official 种子 Provider（不拆 `claude-desktop-official`）。CLI 写 `~/.claude/settings.json`；Desktop 目前写 SkillStar 绑定标记 `~/.claude-desktop/skillstar-binding.json`（原生 Desktop 配置投影后续接入）。Codex CLI、桌面体验和官方编辑器扩展仍共用一份 Codex binding。
 - Codex third-party key 只有用户明确点击时才写 `~/.zshrc`；autosave 不得产生该副作用。
+- **Codex 只写 `wire_api = "responses"`**：`CodexSettings` 不再有 `wire_api` 字段，provider 行也不再有 `codex_wire_api`。没有 `/v1/responses` 端点的 host **整条跳过**，不写入 `config.toml`；`base_url` 取 responses 端点而非 chat 端点。根因：Codex ≥0.95 的 `WireApi` 枚举只剩 `Responses`，而 SkillStar 对任何非 `api.openai.com` 的 base URL 都写 `"chat"`；该值反序列化失败会让**整个 `config.toml` 解析不了**，Codex 起不来——不是单个 provider 失效。自检：`grep 'wire_api' ~/.codex/config.toml`，出现 `"chat"` 即为受影响。（errors.md 的正式条目归后续工作包。）
+- **迁移会修复已写坏的磁盘配置**：`tool_sync::repair_agent_configs` 在迁移那一次运行时删掉不可写的 Codex 条目（store 与 `config.toml` 两侧）、清掉 Claude Desktop 标记文件，再重投影其余绑定。被删的条目带 provider 名与模型进 `MigrationReport::codex_dropped`，UI 必须解释而不是静默。单条清理用 `unsync_codex_entry`，不是整体 unsync——修一条坏绑定不该丢掉两条能用的。
 - Pi 是 multi Agent：绑定写 `~/.pi/agent/models.json` 的 `providers.skillstar_*` 块（`openai-completions`，模型条目只写 `id`，其余交给 Pi 默认值），激活条目同时把 `~/.pi/agent/settings.json` 的 `defaultProvider`/`defaultModel` 指过去；停用只清理托管块，且仅当 default 指针指向托管块时才连带清除。
 - OMP（Oh My Pi）是独立产品（配置根 `~/.omp`），不读 Pi 的 `~/.pi/agent/*`。绑定写 `~/.omp/agent/models.yml` 的 `providers.skillstar_*` 块（YAML，schema 与 Pi 同构：`baseUrl` / `api: "openai-completions"` / `apiKey` / 最小 `{ id }` 模型条目）。tool-sync 对 `omp` 使用 YAML 文件规格（`format: "yaml"`，编辑器校验/格式化走 serde_yaml，保留 key 顺序）。
 
@@ -51,25 +57,26 @@
 
 OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/config.yml` 的 `modelRoles`。SkillStar 把这层路由暴露到 Models 工作台，规则如下（角色与 thinking 等级清单的 SSOT 是 `tool_sync::types` 的 `OMP_MODEL_ROLES` / `OMP_THINKING_LEVELS`，前端 `lib/ompRoles.ts` 只决定展示顺序与分组，两侧由一致性测试锁定）：
 
-- 角色分配存在 **binding 级** `ToolBinding.settings`（`OmpSettings { roles }`），不是 entry 级 `ToolActivation.settings`——一个角色可以指向任意已绑定 provider，不必是 active 的那个。这是 binding 级设置袋的首个消费者，写入命令是 `update_tool_binding_settings`。
+- 角色分配存在 **binding 级一等字段** `AgentBinding.roles`（`BTreeMap<String, ModelRef>`），不是 entry 级 `BindingEntry.settings`——一个角色可以指向任意已绑定 provider，不必是 active 的那个。写入命令是 `update_agent_settings`。
+- **角色名要在落盘时翻译回 OMP 的词汇**：store 存规范键（`smol` 迁移后叫 `fast`，`task` 叫 `subagent`），OMP 不认识这两个名字。writer 走 `migrate::omp_role_key` 把它们译回去，双向映射由一条 round-trip 测试锁定。写入顺序按 OMP 的角色名排序，避免内部改名让 YAML 无故重排。
 - 每个已分配角色写成 `modelRoles.<role> = "skillstar_<id8>/<model>[:thinking]"`。未分配的角色**不写**：OMP 自己会让 `smol`/`slow`/`designer` 回落到 `default`，留空是安全的。
 - `default` 未显式分配时由 binding 的 active 条目兜底，等同于角色功能引入前的行为。
 - 角色指向未绑定、或没有 OpenAI base URL（因此没进 models.yml）、或没选模型的 provider 时跳过，不写悬空指针。角色名含 `/`、空白或以 `@` 开头（与 OMP 的 `@role` 别名语法冲突）同样跳过。
 - 每次同步先删除所有指向 `skillstar_*` 的角色再写入当前集合，与 models.yml 托管块的 retain 策略一致：用户在 UI 取消分配后磁盘上不留残留。指向用户自有 provider 的角色永不触碰。
-- 解绑 provider（`remove_binding_entry`）或删除 provider（`delete_provider_flat`）会连带清除指向它的角色分配；停用整个工具清空整个设置袋。
+- 解绑 provider（`unbind_provider`）或删除 provider（`delete_provider_flat`）会连带清除指向它的角色分配；`unbind_agent` 清空整条绑定连同角色。
 - Ctrl+P 只在 OMP 的 `cycleOrder`（默认 `["smol","default","slow"]`）之间循环，配置了 `plan` 等角色也不会进循环——这是 OMP 侧行为，SkillStar 不代写 `cycleOrder`。
 
 ## Native Official（原生登录）
 
 - `claude-official` / `codex-official` 是固定种子 Provider（稳定 store `id` + `preset_id`），不是 UUID 新建行。判定靠这些 id，不靠空 URL 启发式。
-- 与 Grok 等 `category: "official"`（带 API Key 的官方大厂）不同：Native Official **无 API Key、无余额探测、空双端点**；文案上对应「原生登录 / Official」。
+- **`PresetCategory` 拆开了 v3 的 `official`**：`native_login`（Claude / Codex 种子，凭据在别人的 CLI 里）与 `vendor_official`（Grok，拿 API Key 访问）是结构上不同的两件事，v3 用一个字符串表示、靠 id 白名单区分。白名单已删除，`is_native_official_preset_id` 现在查注册表。前端 `openai_compatible` 是它自己合成的模板，也在同一个枚举里，所以类型是完备的。
 - `ensure_official_providers` 在缺失时插入种子行；已存在同 `id`/`preset_id` 则跳过（不覆盖用户改名）。`get_providers_flat` 会调用它并在变更时写盘。
-- `create_from_preset_flat` / `create_provider_flat` 对这两个种子保留稳定 id（不发 UUID）；允许空 Key。
+- `create_provider_from_preset` 对这两个种子保留稳定 id 并写 `Credential::ExternalCli`；`create_provider` 不再改写调用方给的 id（v3 会覆盖成 UUID，这正是固定 slug 需要白名单的原因），重复 id 直接报错。
 - 激活时跳过「必须有 anthropic/openai URL」校验。
 - Claude Official 种子可分别绑定到 `claude-code` 或 `claude-desktop`：激活 CLI 时清除 SkillStar 托管 env（`ANTHROPIC_*`），让 Claude 走浏览器/客户端原生登录；不写第三方 Base URL/Key。两条绑定共用同一 Official 种子 id（不拆 `claude-desktop-official`），但开关互不影响。
-- Codex Official 绑定 `codex`：`activate_tool` 强制 `auth_mode = oauth`，不写 `OPENAI_API_KEY`、不触碰用户 ChatGPT token；清除指向 SkillStar 托管表的 `model_provider`/`model` 指针。
+- Codex Official 绑定 `codex`：`bind_provider` 强制 `auth_mode = oauth`，不写 `OPENAI_API_KEY`、不触碰用户 ChatGPT token；清除指向 SkillStar 托管表的 `model_provider`/`model` 指针。
 - 停用 Official 与普通 unbind 一致（清 binding；Claude 不额外清用户自有配置）。
-- Official **不是**矩阵交叉引用行：前端 `matrixProviders` 过滤种子行；Claude CLI、Claude Desktop、Codex 列表头各自提供「切回官方」开关（分别走 `claude-code` / `claude-desktop` / `codex` binding）。仅当 store 缺失时客户端注入同 id 种子作 activate fallback。开关走生产用的 `activate_tool` / `deactivate_tool`。创建流程的 preset 列表不展示这两个原生 Official 预设。
+- Official **不是**矩阵交叉引用行：前端 `matrixProviders` 过滤种子行；Claude CLI、Claude Desktop、Codex 列表头各自提供「切回官方」开关（分别走 `claude-code` / `claude-desktop` / `codex` binding）。仅当 store 缺失时客户端注入同 id 种子作 activate fallback。开关走生产用的 `bind_provider` / `unbind_agent`。创建流程的 preset 列表不展示这两个原生 Official 预设。
 - 本轮不做 proxy takeover /「官方账号路由」例外。
 
 ## Models 工作台
@@ -79,8 +86,9 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - Claude / Codex 列表头提供 Official（原生登录）开关；矩阵单元格负责第三方 Bind / 模型选择 / Claude mapping。
 - 侧栏「添加 Provider」与 Recent 只服务第三方 Provider；Official 种子不进 Recent。
 - Provider 编辑使用既有 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。创建是主栏表单，创建后打开 editor drawer。
-- Claude mapping UI 仍是前端本地状态（Agent 加法）；解绑/绑定走真实 `activate_tool` / `deactivate_tool`。「一键设置」把当前/默认模型广播到全部角色；「获取模型列表」走 `fetch_provider_model_catalog` 并写回该 Provider 的 `models` / `meta.model_catalog`。
-- OMP 列的单元格打开 `OmpRolePanel`（Radix Popover），单元格显示已配置的主要角色数。面板**真实持久化**：每次改动整体提交 `{ roles }` 给 `update_tool_binding_settings`，乐观更新与 toast 由 api 层负责。provider 下拉只列已绑定到 OMP 且有 OpenAI base URL 的 Provider（其余会被写盘逻辑跳过），每行展示 `previewRoleValue()` 的实际写入值，底部给出等价 `omp --model/--smol/--slow/--plan` 命令行。文案全部走 i18n `models.ompRoles.*`。
+- Claude mapping UI 仍是前端本地状态（Agent 加法）；解绑/绑定走真实 `bind_provider` / `unbind_agent`。「一键设置」把当前/默认模型广播到全部角色；「获取模型列表」走 `fetch_provider_model_catalog`。
+- **Claude 的三档模型来自 binding 角色**：`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` 现在读 `roles["fast"]` / `roles["sonnet"]` / `roles["opus"]`，不再读 `provider.meta`。值的存放位置变了，写到磁盘上的三个 env key 一字未变——由 golden 对照测试锁定。
+- OMP 列的单元格打开 `OmpRolePanel`（Radix Popover），单元格显示已配置的主要角色数。面板**真实持久化**：每次改动整体提交 `{ roles }` 给 `update_agent_settings`，乐观更新与 toast 由 api 层负责。provider 下拉只列已绑定到 OMP 且有 OpenAI base URL 的 Provider（其余会被写盘逻辑跳过），每行展示 `previewRoleValue()` 的实际写入值，底部给出等价 `omp --model/--smol/--slow/--plan` 命令行。文案全部走 i18n `models.ompRoles.*`。
 - 不再有 `?variant=` 原型开关：DEV-only 的 D2 / D3 交替 IA 岛已随 Models 重设计 WP-0 删除，`#models` 只有一条渲染路径。
 - 生产组件在 `components/hub/`（入口 `ModelsHub.tsx`，矩阵在 `hub/matrix/`）；数据聚合在 `hooks/useModelsData.ts`，nav 桥接类型在 `lib/navBridge.ts`。
 - `ProviderConfigPrimitives.tsx` 是 Models 表单视觉 SSOT：标准控件 40px、dense 控件 36px，并统一 border、focus、disabled 和 invalid 状态。
@@ -98,6 +106,8 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 
 ## 应用内 AI
 
+- `AiProviderRef` 的 `app_id` 改名为 `agent_id`，取值来自 Agent 注册表（`claude` → `claude-code`，`codex` 不变）。这是 Models 域的第五套 id 空间，现在并入第四套。旧文件靠 serde `alias = "app_id"` 继续解析，`normalize_agent_id` 负责把旧拼法映射过来。
+- Claude 的三档模型同样读 `claude-code` binding 的角色，与写盘 writer 同源，两者不会漂移。
 - chat、summary、skill pick 的 provider resolve 与 HTTP 实现在 `skillstar-models::ai_provider`。Skill 图文教程不走 Models provider，而由 Skills 详情页调用用户配置的 ACP Agent。
 - 前端展示后端报告的 route/provider/fallback，不复制 provider 选择逻辑。
 - provider timeout 在 resolve 时应用，不写进旧 `ai.json` 兼容格式。
@@ -107,6 +117,13 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 
 Models/MCP 的跨 IPC 大结构使用 ts-rs。修改 Rust 类型后运行 `bun run types:gen`，禁止手改 `src/types/generated/`。是否把小型手写 mirror 转为生成类型，以实际维护收益和既有门槛为准，不在本文复制字段清单。
 
+## 模型 catalog 缓存
+
+- Provider 自己 `/v1/models` 返回的目录不再存在 store 里（v3 的 `meta.model_catalog` 会把几百个模型的原始 JSON 反复重写进放着凭据的文件）。现在一 provider 一个文件，放 `<data_root>/cache/model_catalog/<provider_id>.json`，模块是 `providers::catalog_cache`。
+- 读失败一律返回空表而不是报错：没有模型元数据的配置文件是降级，写不出配置文件是坏掉。
+- OpenCode 的 provider 块靠它填 `name` / `limit` / `cost`，所以迁移必须先落盘 catalog 再重投影配置，否则会写出一份正确但没有模型元数据的 `opencode.json`。
+- 三级来源策略（内置快照 / models.dev / provider 自身）属于后续工作包，本模块只拥有 provider 自身这一级。
+
 ## 验证
 
 ```bash
@@ -114,3 +131,5 @@ cargo test -p skillstar-providers -p skillstar-models
 bun run test -- src/features/models
 bun run types:gen
 ```
+
+写盘行为改动必须跑 `tool_sync::tests::golden` —— 它的 fixture 是在 v3 代码上**实际跑出来**的输出，不是手写的期望值。Codex 之外的任何字节差异都是回归。

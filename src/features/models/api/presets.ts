@@ -43,7 +43,9 @@ export function useProviderPresets() {
   const presets = data ?? [];
 
   const grouped = {
-    official: presets.filter((p) => p.category === "official"),
+    // v3's single `official` bucket held both, and the UI had no way to tell
+    // "log in with your browser" from "paste an API key" apart from an id list.
+    official: presets.filter((p) => p.category === "native_login" || p.category === "vendor_official"),
     domestic: presets.filter((p) => p.category === "domestic"),
     relay: presets.filter((p) => p.category === "relay"),
     openai_compatible: [buildOpenaiCompatiblePreset(t("models.preset.categoryCompatible"))],
