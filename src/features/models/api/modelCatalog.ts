@@ -16,20 +16,22 @@ export function useModelFetch() {
   const [error, setError] = useState<Error | null>(null);
 
   /**
-   * Fetch available models from the provider's unique models endpoint.
+   * Fetch available models from the provider's discovery endpoint.
    *
-   * @param url - Full `models_url` for the provider (e.g., `https://api.deepseek.com/v1/models`)
-   * @param apiKey - The API key for authentication
+   * Takes the provider id rather than a URL and key: the backend resolves both
+   * from the stored row, so the key never crosses IPC and the `models_url`
+   * fallback rule has one implementation instead of two.
+   *
+   * @param providerId - The stored provider's id
    * @returns Array of discovered model IDs
    */
-  const fetchModels = useCallback(async (url: string, apiKey: string): Promise<string[]> => {
+  const fetchModels = useCallback(async (providerId: string): Promise<string[]> => {
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await tauriInvoke("fetch_provider_models", {
-        url,
-        apiKey,
+        providerId,
         timeoutMs: 15000,
       });
       setModels(result);
@@ -43,14 +45,13 @@ export function useModelFetch() {
     }
   }, []);
 
-  const fetchModelCatalog = useCallback(async (url: string, apiKey: string): Promise<ModelCatalogFetchResult> => {
+  const fetchModelCatalog = useCallback(async (providerId: string): Promise<ModelCatalogFetchResult> => {
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await tauriInvoke("fetch_provider_model_catalog", {
-        url,
-        apiKey,
+        providerId,
         timeoutMs: 15000,
       });
       setModels(result.models);

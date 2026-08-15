@@ -103,8 +103,17 @@ describe("AppAiModelsPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "models.modelsTab.fetchModels" }));
 
     await waitFor(() => {
-      expect(mocks.fetchModels).toHaveBeenCalledWith("https://api.deepseek.com/v1/models", "sk-test");
+      // Probed by provider id — the draft connection is persisted first so the
+      // backend resolves the key the user just typed, not a stale one.
+      expect(mocks.fetchModels).toHaveBeenCalledWith("deepseek");
     });
+    expect(mocks.updateProvider).toHaveBeenCalledWith(
+      "deepseek",
+      expect.objectContaining({
+        models_url: "https://api.deepseek.com/v1/models",
+        api_key: "sk-test",
+      }),
+    );
     expect(mocks.updateProvider).toHaveBeenCalledWith(
       "deepseek",
       expect.objectContaining({

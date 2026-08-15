@@ -11,10 +11,17 @@ use tracing::warn;
 use url::Url;
 use uuid::Uuid;
 
+mod binding;
+mod catalog;
+mod credential;
 mod crud;
+pub mod migrate;
 mod model_catalog;
 mod presets;
+mod provider;
+mod secret_resolve;
 mod store;
+mod store_v4;
 mod types;
 
 // Re-export the full public API at the `providers::*` path so external callers
@@ -23,10 +30,16 @@ mod types;
 // re-exports each module's `pub(crate)` helpers at crate visibility, so sibling
 // submodules and the test modules can reach `store_path`, `get_app`, and the
 // `default_codex_*` defaults through `super::*` / `crate::providers::*`.
+pub use binding::*;
+pub use catalog::*;
+pub use credential::*;
 pub use crud::*;
 pub use model_catalog::*;
 pub use presets::*;
+pub use provider::*;
+pub use secret_resolve::*;
 pub use store::*;
+pub use store_v4::*;
 pub use types::*;
 
 #[cfg(test)]

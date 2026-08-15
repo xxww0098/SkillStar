@@ -167,13 +167,15 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
    - `src/features/models/lib/agentRegistry.ts`：在 `PROVIDER_AGENTS` 加一条
      `AgentDescriptor`（toolId / displayName / requiredUrlField / **kind** /
      installDocsUrl / tagline / disabledTooltip / configPathDisplay），并视情况
-     扩展 `CONFIG_FILE_TOOLS`。**`kind` 决定卡片形态与绑定语义**：
-     `"single"`（全局 env，仅一个激活供应商，如 Claude Code）渲染
-     `AgentHeroCard`；`"multi"`（配置文件原生并存多个供应商 + 指针，如 Codex /
-     OpenCode / Pi）渲染 `MultiProviderCard`（供应商列表 + 激活单选 + 增删）。
+     扩展 `CONFIG_FILE_TOOLS`。**`kind` 记录绑定语义**：`"single"`（全局 env，
+     仅一个激活供应商，如 Claude Code）与 `"multi"`（配置文件原生并存多个供应商
+     + 指针，如 Codex / OpenCode / Pi）。当前渲染方是 `hub/matrix/` 的矩阵列，
+     单/多绑定的差异体现在单元格形态上；早期的 `AgentHeroCard` /
+     `MultiProviderCard` / `AgentSettingsDialog` 卡片岛已随 Models 重设计 WP-0
+     删除（零引用死代码），新的 Agent 详情形态由 WP-4 提供。
      前后端注册表各自钉住同一份 toolId 字面量清单
      （`agentRegistry.test.ts` ↔ `agents.rs` 一致性测试），加行时两侧同步；
-     Agent 卡片、接入设置对话框、状态汇总和工具配置检查全部由该注册表驱动，无需新组件；
+     矩阵列、状态汇总和工具配置检查全部由该注册表驱动，无需新组件；
    - `src/features/models/components/shared/AgentToolIcon.tsx`：
      `AgentToolIconId` 对齐 `ProviderToolId`，并为每个 tool 挂 `@lobehub/icons` 字形
      （经 `lobe.ts`）；gallery 徽章经 `getAgent(toolId).iconId` 渲染，勿再维护身份映射表；

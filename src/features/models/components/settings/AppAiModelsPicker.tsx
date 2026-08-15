@@ -255,7 +255,13 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
     }
 
     try {
-      const fetched = await fetchModels(draftModelsUrl.trim(), draftApiKey.trim());
+      // Persist the draft connection before probing: the backend reads the
+      // key from the stored row, so an unsaved edit would probe the old one.
+      await updateProvider(selectedProvider.id, {
+        models_url: draftModelsUrl.trim(),
+        api_key: draftApiKey.trim(),
+      });
+      const fetched = await fetchModels(selectedProvider.id);
       const nextModel = draftModel.trim() || selectedModel || fetched[0] || "";
       const updated = await updateProvider(
         selectedProvider.id,

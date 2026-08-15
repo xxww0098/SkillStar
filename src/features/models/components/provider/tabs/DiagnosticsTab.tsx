@@ -18,7 +18,7 @@ export function DiagnosticsTab({ form, provider }: { form: ProviderForm; provide
 
       <EndpointSpeedPanel
         urls={form.speedTestUrls}
-        apiKey={values.apiKey}
+        providerId={provider.id}
         onApplyFastest={form.handleApplyFastestEndpoint}
       />
     </div>

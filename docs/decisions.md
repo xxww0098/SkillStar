@@ -316,6 +316,33 @@
 - 后果：获得——手抄漂移这一整类缺陷被门禁消灭（`check_generated_types.sh`），且 ts-rs 读 serde 属性，上面两种错误它都不会犯。承担——(1) `impl From<SwitchOutcome> for SwitchOutcomeDto` 用**完全解构**而不是 `..` 展开，上游加字段会在这里产生编译错误，这正是希望的：新字段要么显式进入前端契约，要么显式被丢弃，不会静默消失。(2) ts-rs 默认把 `i64`/`u64` 映射成 `bigint`，而 Tauri IPC 经 `JSON.parse` 只产出 `number`，64 位字段必须按仓库既有惯例标 `#[ts(type = "number")]`。
 - 证据：`crates/skillstar-app/src/usage/dto.rs`、`src/types/generated/`、`src/features/usage/types.ts`；契约描述见 [features/usage/README.md](./features/usage/README.md) 的「前端类型契约」。
 
+## D-035：Provider store 四层分离（Catalog / Provider / Credential / AgentBinding）
+
+- 日期：2026-08-15
+- 状态：accepted
+- 背景：v3 的 `ProviderEntryFlat` 把四件不同的事塞进一张扁平行。三个后果各自独立地伤人：①协议是端点的属性而不是 Provider 的属性——同一个中转常同时开 `/v1/chat/completions` 与 `/anthropic`（`deepseek` preset 即如此），两个硬编码 URL 字段撑不住第三种协议；②「没探测过」与「不支持」不可区分——Codex 默认靠「字段是否等于 serde 默认值」推断，于是用户显式选择与从未触碰长得一样；③凭据只能是一个 `String`，但 Codex 的 `env_key` 存的是变量名、OpenCode 支持 `{env:}`/`{file:}`、Claude 的 `apiKeyHelper` 是一条命令，四种语义不同的通道被压成一种。另外 `created_at` 是毫秒而 `last_sync_at` 是秒，同一个文件两种单位。
+- 决策：v4 拆成四个 < 400 行的模块。`Provider` 持 `Endpoints`（每协议一个 `Option<String>`）+ `ProviderCaps`（三态 `Tri`）；`Credential` 是判别联合，`ExternalCli` 变体取代 v3 靠 id 白名单在六处分支的 Native Official 特例；`AgentBinding.roles` 把角色路由从设置袋提升为一等字段（v3 里 Claude 层级模型在 `provider.meta`、OMP 角色在 `binding.settings`，同一概念两套存储）；catalog 独立成型且移出 store 文件。所有时间字段带 `_ms` 后缀。
+- 后果：获得——能力位可表达「未知」，因此迁移永远写 `Unknown` 而非 `No`，升级不会让用户已有绑定突然失效；Official 从「六处 id 比较」变成「一次 `matches!`」；角色路由可跨 Agent 推广。承担——(1) 需要 v3→v4 迁移与永久备份（见 D-036）；(2) `providers/types.rs` 降级为只供迁移读的历史类型，`crud`/`tool_sync` 的 v4 化是独立工作包，在那之前 v4 是已落地但未接入运行路径的一层。
+- 证据：`crates/skillstar-models/src/providers/{provider,credential,binding,catalog}.rs`；`docs/others/model-redesign/05-redesign-proposal.md` §2.3。
+
+## D-036：迁移必须双备份、写后读回，备份失败即中止
+
+- 日期：2026-08-15
+- 状态：accepted
+- 背景：v3 的 `backup_and_write` 在备份失败时只打一条 warn 就继续迁移，`read_flat_store` 对任何解析失败一律返回空 store「保证应用总能启动」。两条合起来构成一个静默毁数据的路径：一次读失败会让损坏的 store 看起来和首次运行一模一样，紧接着的写盘就用空 store 覆盖掉用户的全部 provider 与绑定。而备份失败的场景（磁盘满、无权限）恰恰是写盘最可能出问题的场景。
+- 决策：`load_or_migrate_store_v4` 先取两份备份——rolling `.bak.<ms>` 和**永不参与清理**的 `model_providers.v3.json`——任一失败即返回 `StoreError::BackupFailed` 并保持 v3 运行；已存在的 v3 快照绝不被二次迁移覆盖。写盘后立即读回比对，不一致就从永久备份还原。`read_store_v4` 对损坏文件返回 `StoreError::Corrupted` 并原样保留文件，由命令层交给用户决定「打开文件 / 从备份恢复 / 重置」。
+- 后果：获得——迁移不可能在无备份的情况下发生，损坏文件不再被静默替换，迁移报告的「撤销」按钮有真实依据。承担——首次 v4 启动多出两次文件拷贝；调用方必须处理 `StoreError` 的四个变体而不能再假设读取总成功。
+- 证据：`crates/skillstar-models/src/providers/store_v4.rs` 与 `providers/tests/store_v4.rs`（`corrupted_store_returns_error_and_keeps_file`、`migration_aborts_when_the_backup_cannot_be_written`）。
+
+## D-037：诊断类命令按 `provider_id` 取凭据，明文 key 不过 IPC
+
+- 日期：2026-08-15
+- 状态：accepted
+- 背景：`test_provider_connection` / `fetch_provider_models` / `fetch_provider_model_catalog` / `query_provider_balance` / `test_endpoints_latency` / `test_provider_latency` 都把明文 API key 当参数收。这意味着渲染进程必须持有 key、把它放进 query cache、并在每次探测时经 IPC 送回后端——每一处都是 key 可被观测的地方，而后端本来就拥有 key 所在的 store。同时前端还自行拼 `models_url` 的兜底规则，与后端各写一份。
+- 决策：这六条命令改收 `provider_id`，由 `providers::resolve_connection` 在后端解析端点与凭据。`test_endpoints_latency` 保留 `urls` 参数——它的语义就是比较「行当前并未指向的候选 URL」。`EnvVar`/`File`/`Command` 三种间接凭据在此**不展开**：展开等于把本机环境烤进一次可能在别处执行的探测，那是 writer 在同步时该做的事。
+- 后果：获得——明文 key 不再离开拥有它的进程；`models_url` 兜底规则只剩一份实现；前端传了一把与磁盘漂移的 key 这类 bug 被消除。承担——(1) 探测的是**已保存**的连接，因此草稿态必须先落盘再探测（`AppAiModelsPicker` 已按此顺序调整），这与 §4.5「凭据显式提交」的保存策略一致；(2) 未保存的行无法被探测，这是有意的。
+- 证据：`crates/skillstar-models/src/providers/secret_resolve.rs`、`src-tauri/src/commands/models_commands/diagnostics.rs`、`crates/skillstar-app/src/models/dto.rs`（`provider_dto_never_contains_plaintext_secret`）。
+
 ## 新增记录格式
 
 ```text

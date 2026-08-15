@@ -9,8 +9,13 @@
 # the list is a navigation aid, not an SSOT — the authority is the derives
 # themselves, and this script fails on any drift regardless of what is listed
 # here:
-#   - `crates/skillstar-models/src/mcp/types.rs` (unified MCP store types)
-#     and `crates/skillstar-models/src/providers/types.rs` (ProviderPreset)
+#   - `crates/skillstar-models/src/mcp/types.rs` (unified MCP store types).
+#     Note `providers/types.rs` carries NO derives — it holds the historical
+#     v1/v2/v3 shapes that only the migration reads, and `grep -n 'derive(.*TS'`
+#     on it returns nothing. The provider types that DO reach the frontend are
+#     `providers/{provider,binding,catalog,credential}.rs` (v4 wire shapes:
+#     Endpoints, Tri, ProviderCaps, ModelRef, Effort, the catalog records) and
+#     `providers/migrate/report.rs` (the migration report the UI shows once)
 #   - `crates/skillstar-marketplace/src/mcp_models/` (MCP registry/
 #     marketplace types) and `src/mcp_remote/`, `src/mcp_snapshot/filters.rs`
 #     (catalog sources and the parameterized card query)
@@ -25,6 +30,9 @@
 #     runtime-shape candidates and the pre-install confirmation plan)
 #   - `crates/skillstar-app/src/usage/dto.rs` (the /usage page's frontend
 #     contract; `src/features/usage/types.ts` only re-exports it)
+#   - `crates/skillstar-app/src/models/dto.rs` (the Models page's frontend
+#     contract; `ProviderDto` exists so the plaintext API key on `Provider`
+#     has nowhere to travel to)
 #   - `src-tauri/src/commands/mcp_commands.rs` (McpServerWithSync — the
 #     Tauri-command-layer DTO wrapping a synced server; package name is
 #     `skillstar`, not `src-tauri`, since that's what its Cargo.toml declares)

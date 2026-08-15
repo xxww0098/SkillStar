@@ -9,18 +9,19 @@ import { providerCardClass } from "../providerForm/ProviderConfigPrimitives";
 
 export interface EndpointSpeedPanelProps {
   urls: string[];
-  apiKey: string;
+  /** Whose credential to probe with. The key itself stays in the backend. */
+  providerId: string;
   onApplyFastest?: (url: string, field: "openai" | "anthropic" | "models") => void;
   className?: string;
 }
 
-function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: EndpointSpeedPanelProps) {
+function EndpointSpeedPanelInner({ urls, providerId, onApplyFastest, className }: EndpointSpeedPanelProps) {
   const { t } = useTranslation();
   const { testEndpoints, results, isLoading, clearResults } = useEndpointSpeedTest();
 
   const handleTest = useCallback(() => {
-    void testEndpoints(urls, apiKey);
-  }, [testEndpoints, urls, apiKey]);
+    void testEndpoints(urls, providerId);
+  }, [testEndpoints, urls, providerId]);
 
   const fastest = useMemo(() => {
     const ok = results.filter(isEndpointReachable);
@@ -30,7 +31,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
     );
   }, [results]);
 
-  const canTest = urls.some((u) => u.trim()) && apiKey.trim();
+  const canTest = urls.some((u) => u.trim()) && providerId.trim();
 
   return (
     <section className={cn(providerCardClass, "space-y-3 p-4", className)}>

@@ -80,12 +80,17 @@ export function useProviderForm(provider: ProviderEntryFlat) {
     }
   }, [values, provider.id, provider.meta, updateProvider]);
 
-  /** Fetch the provider's /models catalog and merge it into the form. */
+  /**
+   * Fetch the provider's /models catalog and merge it into the form.
+   *
+   * The backend resolves the endpoint and key from the stored row, so this
+   * probes what is actually saved. Connection fields autosave on a 600ms
+   * debounce, which is what makes "saved" and "on screen" the same thing here.
+   */
   const handleFetchModels = useCallback(async () => {
-    const url = values.modelsUrl.trim();
-    if (!url || !values.apiKey.trim()) return;
+    if (!values.modelsUrl.trim() || !values.apiKey.trim()) return;
     try {
-      const result = await fetchModelCatalog(url, values.apiKey.trim());
+      const result = await fetchModelCatalog(provider.id);
       const fetched = buildModelCatalog(result.models);
       dispatch({
         type: "merge",
@@ -105,7 +110,7 @@ export function useProviderForm(provider: ProviderEntryFlat) {
       );
       setModelFetchCount(null);
     }
-  }, [fetchModelCatalog, values.modelsUrl, values.apiKey, values.models]);
+  }, [fetchModelCatalog, provider.id, values.modelsUrl, values.apiKey, values.models]);
 
   const claudeModelOptions = useMemo(
     () =>

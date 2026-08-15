@@ -80,6 +80,7 @@ function getConnectionStatus(result: ReturnType<typeof useLatencyTest>["result"]
 }
 
 function ConnectionStatusPanelInner({
+  providerId,
   presetId,
   apiKey,
   baseUrl,
@@ -99,13 +100,13 @@ function ConnectionStatusPanelInner({
     isLoading: isBalanceLoading,
     error: balanceError,
     refresh: refreshBalance,
-  } = useBalanceQuery(balancePresetId, apiKey, primaryUrl);
+  } = useBalanceQuery(providerId, balancePresetId);
 
   const handleTestConnection = useCallback(() => {
     if (!primaryUrl || !apiKey) return;
     const format = openaiUrl ? "openai" : "anthropic";
-    testConnection(primaryUrl, apiKey, "", format);
-  }, [primaryUrl, apiKey, openaiUrl, testConnection]);
+    testConnection(providerId, "", format);
+  }, [primaryUrl, apiKey, openaiUrl, providerId, testConnection]);
 
   const handleRefreshBalance = useCallback(() => {
     void refreshBalance();

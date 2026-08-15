@@ -99,14 +99,16 @@ export function parseBalanceResponse(presetId: string, raw: unknown): BalanceInf
 /**
  * Hook for querying provider balance/quota asynchronously.
  *
- * Auto-fetches when presetId and apiKey are both non-empty.
+ * Auto-fetches when the provider has a preset that supports balance queries.
  * Uses a 10-second timeout and does not block panel rendering.
  *
- * @param presetId - The provider's preset ID (determines which balance API to use)
- * @param apiKey - The provider's API key
- * @param baseUrl - The provider's base URL
+ * The key is not a parameter: the backend reads it from the stored row, so a
+ * balance probe cannot be the reason a key sits in renderer state.
+ *
+ * @param providerId - The stored provider's id
+ * @param presetId - Preset ID, which selects the response parser
  */
-export function useBalanceQuery(presetId: string | null, apiKey: string, baseUrl: string) {
+export function useBalanceQuery(providerId: string, presetId: string | null) {
   const [balance, setBalance] = useState<BalanceInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -115,7 +117,7 @@ export function useBalanceQuery(presetId: string | null, apiKey: string, baseUrl
   const requestIdRef = useRef(0);
 
   const fetchBalance = useCallback(async () => {
-    if (!presetId || !apiKey) {
+    if (!presetId || !providerId) {
       setBalance(null);
       setError(null);
       return;
@@ -127,11 +129,7 @@ export function useBalanceQuery(presetId: string | null, apiKey: string, baseUrl
 
     try {
       const result = await Promise.race([
-        tauriInvoke("query_provider_balance", {
-          presetId,
-          apiKey,
-          baseUrl,
-        }),
+        tauriInvoke("query_provider_balance", { providerId }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(i18n.t("models.toasts.queryTimeout"))), BALANCE_TIMEOUT_MS),
         ),
@@ -158,18 +156,18 @@ export function useBalanceQuery(presetId: string | null, apiKey: string, baseUrl
         setIsLoading(false);
       }
     }
-  }, [presetId, apiKey, baseUrl]);
+  }, [presetId, providerId]);
 
-  // Auto-fetch when presetId + apiKey are non-empty
+  // Auto-fetch once the row is known and its preset supports balance queries
   useEffect(() => {
-    if (presetId && apiKey) {
+    if (presetId && providerId) {
       fetchBalance();
     } else {
       setBalance(null);
       setError(null);
       setIsLoading(false);
     }
-  }, [presetId, apiKey, fetchBalance]);
+  }, [presetId, providerId, fetchBalance]);
 
   return {
     balance,

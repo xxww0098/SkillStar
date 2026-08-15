@@ -17,24 +17,18 @@ export function useLatencyTest() {
   /**
    * Test connection to a provider endpoint.
    *
-   * @param baseUrl - The provider's base URL
-   * @param apiKey - The API key for authentication
+   * @param providerId - The stored provider's id; the backend resolves its
+   *   endpoint and credential
    * @param model - The model to test with
    * @param format - The API format ("openai" or "anthropic")
    * @returns Connection test result with status and latency
    */
   const testConnection = useCallback(
-    async (
-      baseUrl: string,
-      apiKey: string,
-      model: string,
-      format: "openai" | "anthropic",
-    ): Promise<ConnectionTestResult> => {
+    async (providerId: string, model: string, format: "openai" | "anthropic"): Promise<ConnectionTestResult> => {
       setIsLoading(true);
       try {
         const testResult = await tauriInvoke("test_provider_connection", {
-          baseUrl,
-          apiKey,
+          providerId,
           model,
           format,
         });
@@ -69,7 +63,7 @@ export function useEndpointSpeedTest() {
   const [results, setResults] = useState<EndpointLatencyResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const testEndpoints = useCallback(async (urls: string[], apiKey?: string) => {
+  const testEndpoints = useCallback(async (urls: string[], providerId?: string) => {
     const trimmed = urls.map((u) => u.trim()).filter(Boolean);
     if (trimmed.length === 0) return [];
 
@@ -77,7 +71,7 @@ export function useEndpointSpeedTest() {
     try {
       const probeResults = await tauriInvoke("test_endpoints_latency", {
         urls: trimmed,
-        apiKey: apiKey?.trim() || null,
+        providerId: providerId?.trim() || null,
         timeoutMs: 10_000,
       });
       setResults(probeResults);

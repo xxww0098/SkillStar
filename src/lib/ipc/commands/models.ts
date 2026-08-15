@@ -93,36 +93,35 @@ export interface ModelsCommands {
 
   // Presets and discovery
   get_provider_presets_flat: { args: Record<string, never>; result: ProviderPresetFlat[] };
+  // Diagnostics take `providerId`, never a key: the backend resolves the
+  // credential from the store it already owns, so the plaintext key never has
+  // to live in the renderer or cross IPC. `urls` survives on the speed test
+  // because that probe is explicitly about comparing candidate URLs the row
+  // does not point at yet.
   test_endpoints_latency: {
-    args: { urls: string[]; apiKey?: string | null; timeoutMs?: number };
+    args: { urls: string[]; providerId?: string | null; timeoutMs?: number };
     result: EndpointLatencyResult[];
   };
   fetch_provider_models: {
-    args: { url: string; apiKey: string; timeoutMs?: number };
+    args: { providerId: string; timeoutMs?: number };
     result: string[];
   };
   fetch_provider_model_catalog: {
-    args: { url: string; apiKey: string; timeoutMs?: number };
+    args: { providerId: string; timeoutMs?: number };
     result: ModelCatalogFetchResult;
   };
 
   // Tests
   test_provider_connection: {
-    args: { baseUrl: string; apiKey: string; model: string; format: "openai" | "anthropic" };
+    args: { providerId: string; model: string; format: "openai" | "anthropic" };
     result: ConnectionTestResult;
   };
   test_provider_latency: {
-    args: {
-      app_id: AppId | string;
-      provider_id: string;
-      base_url: string;
-      api_key: string;
-      timeout_ms?: number;
-    };
+    args: { app_id: AppId | string; provider_id: string; timeout_ms?: number };
     result: LatencyResult;
   };
   query_provider_balance: {
-    args: { presetId: string; apiKey: string; baseUrl: string };
+    args: { providerId: string };
     result: BalanceRawResponse;
   };
 

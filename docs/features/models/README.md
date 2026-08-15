@@ -13,6 +13,27 @@
 - 添加 Provider 从 `crates/skillstar-providers/src/identity.rs` 开始，再补 Models preset、余额解析 fixture 和映射测试；不得在 command/frontend 手写鉴权头。
 - v1 per-app store 只是历史迁移来源：命令面与同步/CRUD 已删除，v1 类型和读取收缩为 crate 内部，仅供 v1→v2 migration 和 `ai_provider` 的 legacy provider-ref fallback 使用。新功能只能进入 flat v2 registry 和 API。
 
+### v4 数据模型（已落地，尚未接入运行路径）
+
+- v4 类型在 `providers/{provider,credential,binding,catalog}.rs`：`Provider` + `Endpoints`（每协议一个可选 URL）+ `ProviderCaps`（三态 `Tri`）+ `Credential`（判别联合）+ `AgentBinding`（含一等字段 `roles`）。裁决与理由见 [decisions.md](../../decisions.md) D-035。
+- **能力位语义**：`Tri::Unknown` 是「需要检测」，**不是**「不支持」。只有探测明确返回 `No` 才允许禁用绑定入口。迁移期一律写 `Unknown`。
+- **Official = `Credential::ExternalCli`**：不再靠 id 白名单分支。`claude-official` / `codex-official` 两个固定 id 保留（改 id 会让用户的原生登录绑定失效）。
+- **角色路由归 `AgentBinding.roles`**：`provider.meta.claude_*_model` 与 `binding.settings.roles` 都迁到这里。键是开放 map，规范键为 `default` / `fast` / `plan` / `vision` / `subagent`，其余（含 OMP 的 `slow`、`designer`）原样保留为 extra 角色。
+- **Claude Desktop 降级为 planned**：`claude-desktop` 的 binding 在迁移时被丢弃并列进迁移报告，不自动搬到 `claude-code`（那是替用户做决定）。它此前写的只是 SkillStar 自造的标记文件，对 Claude Desktop 不产生实际效果——迁移报告必须诚实说明这一点。**退出条件：若 6 个月内（即 2027-02-15 前）仍无可用的原生写盘路径，从 `PLANNED_AGENTS` 中彻底删除。**
+- **当前边界**：v4 类型、v3→v4 迁移、store 安全外壳与前端 DTO 都已实现并测试，但 `crud` / `tool_sync` / 命令读写路径仍在 v3 上，因此 `load_or_migrate_store_v4` 尚未接入启动流程。接入是独立工作包的事——先切换格式再改写盘方，会让两个高风险改动叠在同一次提交里。
+
+### 迁移契约（v3 → v4）
+
+- 纯函数 `migrate_v3_to_v4(v3, presets) -> MigrationOutcome`，无 IO、无时钟、无网络；catalog 只被**抽出**，由调用方落盘，写失败不中止（catalog 可重建，绑定不可）。
+- **三条件回填**：仅当「当前 anthropic 端点为空」且「preset 有值」且「openai URL 与 preset 逐字相同」三条同时成立才回填。第三条区分「前端 bug 造成的空」与「用户主动清空」——后者回填等于覆盖用户的决定。`models_url` 同规则。回填结果必须经 modal（非 toast）告知并提供撤销。
+- **备份与回滚**：见 [decisions.md](../../decisions.md) D-036。`model_providers.v3.json` 永久保留，是撤销按钮的依据。
+- **单位**：v4 所有时间字段带 `_ms` 后缀。v3 的 `last_sync_at`（秒）迁移时 ×1000。
+
+### 前端类型契约
+
+- `ProviderDto` 定义在 `crates/skillstar-app/src/models/dto.rs`，**不带明文 key**：只有 `credential_kind` / `credential_summary`（掩码或变量名/路径/命令）/ `has_secret`。理由与后果见 D-037。
+- 诊断命令收 `provider_id` 而非 key。草稿态需先落盘再探测。
+
 ## Tool binding 与写盘
 
 - Agent binding 使用 `ToolBinding { entries, active_index }`；所有读写通过 helper/facade，不直接索引 `entries[active_index]`。
@@ -48,7 +69,7 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - Claude Official 种子可分别绑定到 `claude-code` 或 `claude-desktop`：激活 CLI 时清除 SkillStar 托管 env（`ANTHROPIC_*`），让 Claude 走浏览器/客户端原生登录；不写第三方 Base URL/Key。两条绑定共用同一 Official 种子 id（不拆 `claude-desktop-official`），但开关互不影响。
 - Codex Official 绑定 `codex`：`activate_tool` 强制 `auth_mode = oauth`，不写 `OPENAI_API_KEY`、不触碰用户 ChatGPT token；清除指向 SkillStar 托管表的 `model_provider`/`model` 指针。
 - 停用 Official 与普通 unbind 一致（清 binding；Claude 不额外清用户自有配置）。
-- Official **不是**矩阵交叉引用行：前端 `matrixProviders` 过滤种子行；Claude CLI、Claude Desktop、Codex 列表头各自提供「切回官方」开关（分别走 `claude-code` / `claude-desktop` / `codex` binding）。仅当 store 缺失时客户端注入同 id 种子作 activate fallback。开关走生产用的 `activate_tool` / `deactivate_tool`。PresetPicker 不展示这两个原生 Official 预设。
+- Official **不是**矩阵交叉引用行：前端 `matrixProviders` 过滤种子行；Claude CLI、Claude Desktop、Codex 列表头各自提供「切回官方」开关（分别走 `claude-code` / `claude-desktop` / `codex` binding）。仅当 store 缺失时客户端注入同 id 种子作 activate fallback。开关走生产用的 `activate_tool` / `deactivate_tool`。创建流程的 preset 列表不展示这两个原生 Official 预设。
 - 本轮不做 proxy takeover /「官方账号路由」例外。
 
 ## Models 工作台
@@ -60,7 +81,8 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - Provider 编辑使用既有 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。创建是主栏表单，创建后打开 editor drawer。
 - Claude mapping UI 仍是前端本地状态（Agent 加法）；解绑/绑定走真实 `activate_tool` / `deactivate_tool`。「一键设置」把当前/默认模型广播到全部角色；「获取模型列表」走 `fetch_provider_model_catalog` 并写回该 Provider 的 `models` / `meta.model_catalog`。
 - OMP 列的单元格打开 `OmpRolePanel`（Radix Popover），单元格显示已配置的主要角色数。面板**真实持久化**：每次改动整体提交 `{ roles }` 给 `update_tool_binding_settings`，乐观更新与 toast 由 api 层负责。provider 下拉只列已绑定到 OMP 且有 OpenAI base URL 的 Provider（其余会被写盘逻辑跳过），每行展示 `previewRoleValue()` 的实际写入值，底部给出等价 `omp --model/--smol/--slow/--plan` 命令行。文案全部走 i18n `models.ompRoles.*`。
-- DEV 仅保留 `?variant=D2|D3` 交替 IA 原型；默认 `#models` 即生产矩阵。
+- 不再有 `?variant=` 原型开关：DEV-only 的 D2 / D3 交替 IA 岛已随 Models 重设计 WP-0 删除，`#models` 只有一条渲染路径。
+- 生产组件在 `components/hub/`（入口 `ModelsHub.tsx`，矩阵在 `hub/matrix/`）；数据聚合在 `hooks/useModelsData.ts`，nav 桥接类型在 `lib/navBridge.ts`。
 - `ProviderConfigPrimitives.tsx` 是 Models 表单视觉 SSOT：标准控件 40px、dense 控件 36px，并统一 border、focus、disabled 和 invalid 状态。
 - 删除必须确认并展示会断开的 Agent。
 

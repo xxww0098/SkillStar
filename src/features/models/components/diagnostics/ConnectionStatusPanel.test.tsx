@@ -79,7 +79,8 @@ describe("ConnectionStatusPanel", () => {
   it("does not render balance UI for presets without a balance endpoint", () => {
     renderPanel("anthropic");
 
-    expect(vi.mocked(useBalanceQuery)).toHaveBeenCalledWith(null, "sk-test", "https://api.example.com/v1");
+    // The key is no longer a parameter: the backend reads it from the row.
+    expect(vi.mocked(useBalanceQuery)).toHaveBeenCalledWith("provider-1", null);
     expect(screen.queryByRole("heading", { name: "余额" })).not.toBeInTheDocument();
   });
 

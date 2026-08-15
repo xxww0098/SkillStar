@@ -90,6 +90,9 @@ bun run build
 bun run test
 bash scripts/internal/check_feature_imports.sh
 bash scripts/internal/check_i18n_hardcoded.sh
+bash scripts/internal/check_ts_orphan_modules.sh
 ```
 
 新增或修改文案时同步 `src/i18n/locales/en.json` 与 `zh-CN.json`。
+
+`check_ts_orphan_modules.sh` 从 `src/main.tsx` 与 `src/pages/` 出发做可达性分析，`src/features/` 下的孤儿文件直接失败。注意 `check_i18n_hardcoded.sh` 只判定 CJK 字面量，裸英文文案不在它的覆盖范围内，需要人工走查。
