@@ -1,16 +1,11 @@
-import { Check, ChevronDown, CornerDownRight, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CornerDownRight, X } from "lucide-react";
 import { Select } from "radix-ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../../../../../lib/utils";
-import type { OmpRoleTarget, OmpThinkingLevel, ProviderEntryFlat } from "../../../../../../types";
-import {
-  isDefaultThinking,
-  OMP_ROLES_INHERITING_DEFAULT,
-  OMP_THINKING_LEVELS,
-  type OmpRoleDef,
-  previewRoleValue,
-} from "../../../../lib/ompRoles";
+import type { DroppedRole, OmpRoleTarget, OmpThinkingLevel, ProviderEntryFlat } from "../../../../../../types";
+import type { Reasoning } from "../../../../../../types/generated/Reasoning";
+import { isDefaultThinking, ompThinkingLevelsFor, type OmpRoleDef, previewRoleValue } from "../../../../lib/ompRoles";
 import {
   modelCompactInputClass,
   modelOptionClass,
@@ -29,6 +24,21 @@ export type OmpRoleRowProps = {
   onModelChange: (model: string) => void;
   onThinkingChange: (level: OmpThinkingLevel) => void;
   onClear: () => void;
+  /**
+   * The role this one falls back to when left empty, or `null` when the agent
+   * resolves it by rules SkillStar does not model. Comes from the backend
+   * registry, so the row can say what an empty row will actually do instead of
+   * leaving the user to guess (02 §9.3 gap 3).
+   */
+  inheritsRole?: string | null;
+  /**
+   * The selected model's reasoning capability, when the catalogue knows it.
+   * Narrows the thinking picker to levels the model can honour; `null`/absent
+   * keeps the full grammar, because "unknown" must not read as "unsupported".
+   */
+  reasoning?: Reasoning | null;
+  /** Set when the last write skipped this role, with the backend's reason. */
+  drop?: DroppedRole | null;
 };
 
 /**
@@ -44,6 +54,9 @@ export function OmpRoleRow({
   onModelChange,
   onThinkingChange,
   onClear,
+  inheritsRole = null,
+  reasoning = null,
+  drop = null,
 }: OmpRoleRowProps) {
   const { t } = useTranslation();
   // Free-typed model ids are committed on blur/Enter so a keystroke never turns
@@ -54,7 +67,7 @@ export function OmpRoleRow({
   const provider = target ? (providers.find((p) => p.id === target.provider_id) ?? null) : null;
   const modelValue = draft ?? target?.model ?? "";
   const preview = target ? previewRoleValue(target.provider_id, target.model, target.thinking) : null;
-  const inheritsDefault = OMP_ROLES_INHERITING_DEFAULT.includes(role.id);
+  const thinkingLevels = ompThinkingLevelsFor(reasoning);
 
   const commitModel = () => {
     if (draft === null) return;
@@ -108,6 +121,7 @@ export function OmpRoleRow({
 
         <ThinkingSelect
           value={target?.thinking ?? null}
+          levels={thinkingLevels}
           disabled={!target}
           roleName={t(`models.ompRoles.${role.key}.name`)}
           onChange={onThinkingChange}
@@ -128,15 +142,28 @@ export function OmpRoleRow({
       <p className="mt-1 flex items-center gap-1 truncate font-mono text-[10px] leading-4 text-muted-foreground/80">
         <CornerDownRight className="h-3 w-3 shrink-0 opacity-60" />
         {preview ? (
-          <span className="truncate text-emerald-500/85">{preview}</span>
+          <span className={cn("truncate", drop ? "text-amber-500/90 line-through" : "text-emerald-500/85")}>
+            {preview}
+          </span>
         ) : (
           <span className="truncate font-sans">
-            {inheritsDefault
-              ? t("models.ompRoles.panel.unassignedInherits")
+            {inheritsRole
+              ? t("models.roles.inheritsFrom", { role: inheritsRole })
               : t("models.ompRoles.panel.unassignedKept")}
           </span>
         )}
       </p>
+
+      {drop ? (
+        <p className="mt-1 flex items-start gap-1 text-[10px] leading-4 text-amber-500">
+          <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+          <span>
+            <span className="font-semibold">{t("models.roleDrops.rowBadge")}</span>
+            {" — "}
+            {t(`models.roleDrops.reason.${drop.reason}`)}
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -144,17 +171,23 @@ export function OmpRoleRow({
 /** Thinking-level `:suffix` picker. `inherit` and "unset" are the same to OMP. */
 function ThinkingSelect({
   value,
+  levels,
   disabled,
   roleName,
   onChange,
 }: {
   value: OmpThinkingLevel | null;
+  levels: OmpThinkingLevel[];
   disabled: boolean;
   roleName: string;
   onChange: (level: OmpThinkingLevel) => void;
 }) {
   const { t } = useTranslation();
   const current = isDefaultThinking(value) ? "inherit" : (value as OmpThinkingLevel);
+  // A level the user already chose stays listed even when the catalogue says
+  // the model has no such tier: dropping it would silently rewrite their
+  // config the next time the row re-rendered.
+  const options = levels.includes(current) ? levels : [...levels, current];
 
   return (
     <Select.Root value={current} onValueChange={(next) => onChange(next as OmpThinkingLevel)} disabled={disabled}>
@@ -178,7 +211,7 @@ function ThinkingSelect({
           className={cn(modelPopoverContentClass, "z-[140] max-h-64 min-w-[8rem]")}
         >
           <Select.Viewport>
-            {OMP_THINKING_LEVELS.map((level) => (
+            {options.map((level) => (
               <Select.Item key={level} value={level} className={cn(modelOptionClass, "relative pr-6")}>
                 <Select.ItemText>
                   {level === "inherit" ? t("models.ompRoles.panel.thinkingInherit") : level}

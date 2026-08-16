@@ -299,7 +299,7 @@ export function Marketplace({
           document.getElementById(`tab-${nextId}`)?.focus();
         }}
         className={cn(
-          "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors duration-150 cursor-pointer focus-ring",
+          "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors duration-150 cursor-pointer focus-ring",
           isActive
             ? "bg-primary/15 text-primary shadow-[0_1px_2px_rgba(15,23,42,0.08),0_1px_1px_rgba(15,23,42,0.04)] ring-1 ring-inset ring-primary/25 dark:bg-primary/18 dark:shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
             : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover/60",
@@ -334,62 +334,58 @@ export function Marketplace({
           onAiSearch={isMcpTab ? undefined : handleAiSearch}
           aiSearching={isMcpTab ? false : aiSearching}
           hideSortControls={isMcpTab}
-        />
-
-        {/* Category tabs */}
-        <div className="border-b border-border bg-sidebar px-6 py-2">
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <div
-              className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              role="tablist"
-              aria-label={t("sidebar.market")}
-            >
+          filtersLead={
+            <div className="flex min-w-0 items-center gap-2 shrink-0" role="tablist" aria-label={t("sidebar.market")}>
               <div
-                className="flex min-w-max items-center gap-2 rounded-full border border-border/60 bg-background/20 p-1"
+                className="flex min-w-max items-center gap-1 rounded-full border border-border/60 bg-background/20 p-0.5 h-8"
                 role="presentation"
               >
                 <span className="shrink-0 px-2 text-[11px] font-medium text-foreground/65">
                   {t("marketplace.skillGroup")}
                 </span>
-                <div className="flex items-center gap-1">{skillTabIds.map((id) => renderTabButton(id))}</div>
+                <div className="flex items-center gap-0.5">{skillTabIds.map((id) => renderTabButton(id))}</div>
               </div>
 
               <div
-                className="flex min-w-max items-center gap-2 rounded-full border border-border/60 bg-background/35 p-1"
+                className="flex min-w-max items-center gap-1 rounded-full border border-border/60 bg-background/35 p-0.5 h-8"
                 role="presentation"
               >
-                <span className="px-2 text-[11px] font-medium text-foreground/65">
+                <span className="shrink-0 px-2 text-[11px] font-medium text-foreground/65">
                   {t("marketplace.mcpSourceGithub")}
                 </span>
-                <div className="flex items-center gap-1">{mcpTabIds.map((id) => renderTabButton(id))}</div>
+                <div className="flex items-center gap-0.5">{mcpTabIds.map((id) => renderTabButton(id))}</div>
               </div>
             </div>
-
-            <div className="ml-auto flex shrink-0 items-center gap-3 px-2 text-right" aria-live="polite">
-              {/* Install toast */}
-              {installStatus && (
-                <motion.span
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="text-xs text-success font-medium"
-                >
-                  {installStatus}
-                </motion.span>
-              )}
-              {snapshotLabel && (
-                <span className="hidden text-[11px] text-muted-foreground sm:inline" title={snapshotTitle}>
-                  {snapshotLabel}
-                </span>
-              )}
-              {isMcpTab ? (
-                <span className="text-caption">{t("marketplace.mcpPublishersCount", { count: totalCount })}</span>
-              ) : activeTab !== "official" ? (
-                <span className="text-caption">{t("marketplace.skillsCount", { count: totalCount })}</span>
-              ) : null}
-            </div>
-          </div>
-        </div>
+          }
+          countText={
+            isMcpTab ? (
+              <span>{t("marketplace.mcpPublishersCount", { count: totalCount })}</span>
+            ) : activeTab !== "official" ? (
+              <span>{t("marketplace.skillsCount", { count: totalCount })}</span>
+            ) : null
+          }
+          actionsLead={
+            (installStatus || snapshotLabel) && (
+              <div className="flex items-center gap-2.5 shrink-0 px-1" aria-live="polite">
+                {installStatus && (
+                  <motion.span
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="text-xs text-success font-medium"
+                  >
+                    {installStatus}
+                  </motion.span>
+                )}
+                {snapshotLabel && (
+                  <span className="hidden text-[11px] text-muted-foreground sm:inline" title={snapshotTitle}>
+                    {snapshotLabel}
+                  </span>
+                )}
+              </div>
+            )
+          }
+        />
 
         {!isMcpTab && snapshot.error && (
           <SnapshotErrorBanner error={snapshot.error} refreshing={refreshing} onRetry={handleSnapshotRetry} />

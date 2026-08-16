@@ -14,9 +14,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::providers::{
-    AgentBinding, BindingEntry, ModelCatalogEntry, ModelRef, Provider, ProvidersStoreV4,
-    RequiredWire, catalog_cache,
+    AgentBinding, BindingEntry, DroppedRole, ModelCatalogEntry, ModelRef, Provider,
+    ProvidersStoreV4, RequiredWire, RoleCapability, RoleDef, RoleDropReason, catalog_cache,
 };
+use crate::providers::{ROLE_DEFAULT, ROLE_FAST, ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION};
 
 mod view;
 use view::*;

@@ -3,7 +3,7 @@
 use crate::providers::ModelRef;
 use serde::{Deserialize, Serialize};
 
-use crate::providers::{Provider, RequiredWire};
+use crate::providers::{DroppedRole, Provider, Reasoning, RequiredWire};
 
 // ---------------------------------------------------------------------------
 // Per-tool typed settings helpers
@@ -115,6 +115,67 @@ pub const OMP_MODEL_ROLES: &[&str] = &[
 pub const OMP_THINKING_LEVELS: &[&str] = &[
     "inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max", "auto",
 ];
+
+/// The thinking levels worth offering for one model.
+///
+/// [`OMP_THINKING_LEVELS`] is the *grammar* — every suffix `config.yml` accepts.
+/// It was also, in v3, the picker: all nine levels were offered for every model,
+/// including models with no reasoning mode at all, so the user could pick `xhigh`
+/// for a model that has never had tiers and watch it do nothing. The levels a
+/// given model can honour are a property of the model, so this narrows the
+/// grammar by the capability the catalogue reports.
+///
+/// `None` — no catalogue entry, or an entry from a provider `/v1/models` list
+/// that carries no capability data — returns the full grammar. "We do not know"
+/// must not render as "we know it supports nothing": narrowing on absent data
+/// would take away levels that work.
+pub fn omp_thinking_levels_for(reasoning: Option<&Reasoning>) -> Vec<&'static str> {
+    let Some(reasoning) = reasoning else {
+        return OMP_THINKING_LEVELS.to_vec();
+    };
+    // `inherit` is always available: it is the instruction to defer to the
+    // global default, which is a statement about SkillStar's write, not about
+    // the model's abilities.
+    let mut levels = vec!["inherit"];
+    match reasoning {
+        Reasoning::None => {}
+        Reasoning::Toggle { can_disable } => {
+            if *can_disable {
+                levels.push("off");
+            }
+            levels.push("auto");
+        }
+        Reasoning::Effort {
+            values,
+            can_disable,
+            ..
+        } => {
+            if *can_disable {
+                levels.push("off");
+            }
+            // Ordered by the grammar, not by the catalogue's arbitrary order, so
+            // the picker reads low → high no matter how the source listed them.
+            for level in OMP_THINKING_LEVELS {
+                if values
+                    .iter()
+                    .any(|effort| effort.as_omp_thinking() == *level)
+                    && !levels.contains(level)
+                {
+                    levels.push(level);
+                }
+            }
+            levels.push("auto");
+        }
+        Reasoning::BudgetTokens { .. } => {
+            // OMP's suffix grammar has no place for a token count, so a budget
+            // model gets the tiers OMP maps onto budgets, plus `off` — the
+            // budget models in play (the Anthropic family) can all disable
+            // thinking entirely.
+            levels.extend(["off", "low", "medium", "high", "max", "auto"]);
+        }
+    }
+    levels
+}
 
 /// Render a role target as OMP's on-disk `modelRoles` value:
 /// `<managed_key>/<model>[:thinking]`.
@@ -314,6 +375,17 @@ pub struct ToolSyncResultFlat {
     pub config_path: Option<String>,
     pub error: Option<String>,
     pub backup_path: Option<String>,
+    /// Roles the user configured that this write did **not** put on disk, with
+    /// the reason for each.
+    ///
+    /// A successful sync that quietly discarded half the role map is the worst
+    /// of the three outcomes: the UI shows a green tick, the panel shows the
+    /// assignment, and the file has nothing. v3 dropped roles on three separate
+    /// conditions and reported none of them. This field is not an error channel
+    /// — the write did succeed — it is the difference between what was asked for
+    /// and what was written, which only the writer can compute.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_roles: Vec<DroppedRole>,
 }
 
 impl ToolSyncResultFlat {
@@ -325,14 +397,24 @@ impl ToolSyncResultFlat {
         config_path: &std::path::Path,
         outcome: anyhow::Result<Option<std::path::PathBuf>>,
     ) -> Self {
+        Self::from_write_outcome_with_drops(tool_id, config_path, outcome.map(|b| (b, Vec::new())))
+    }
+
+    /// Same, for writers that also report which roles they discarded.
+    pub(crate) fn from_write_outcome_with_drops(
+        tool_id: &str,
+        config_path: &std::path::Path,
+        outcome: anyhow::Result<(Option<std::path::PathBuf>, Vec<DroppedRole>)>,
+    ) -> Self {
         let config_path = Some(config_path.to_string_lossy().to_string());
         match outcome {
-            Ok(backup_path) => Self {
+            Ok((backup_path, dropped_roles)) => Self {
                 tool_id: tool_id.to_string(),
                 success: true,
                 config_path,
                 error: None,
                 backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
+                dropped_roles,
             },
             Err(e) => Self {
                 tool_id: tool_id.to_string(),
@@ -340,6 +422,7 @@ impl ToolSyncResultFlat {
                 config_path,
                 error: Some(e.to_string()),
                 backup_path: None,
+                dropped_roles: Vec::new(),
             },
         }
     }
@@ -352,6 +435,7 @@ impl ToolSyncResultFlat {
             config_path: None,
             error: Some(error.to_string()),
             backup_path: None,
+            dropped_roles: Vec::new(),
         }
     }
 }
@@ -382,12 +466,23 @@ pub struct WriteToolConfigFileResult {
 // Constants: managed field names
 // ---------------------------------------------------------------------------
 
-/// Fields managed by SkillStar in Claude Code's `~/.claude/settings.json` env block.
-pub(crate) const CLAUDE_MANAGED_ENV_KEYS: &[&str] = &[
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_MODEL",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-];
+/// Connection fields SkillStar manages in Claude Code's
+/// `~/.claude/settings.json` env block, independent of role routing.
+pub(crate) const CLAUDE_MANAGED_CONNECTION_KEYS: &[&str] =
+    &["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"];
+
+/// Every env key SkillStar owns in Claude Code's settings: the connection pair
+/// plus one key per declared role.
+///
+/// Derived rather than listed. The v3 list was a hand-maintained copy of the
+/// writer's field table, and the two only agreed because nobody had added a key
+/// recently — a new role would have been written on sync and left behind on
+/// unsync, which is the worst kind of leftover: a stale model override on a
+/// provider the user thought they had disconnected.
+pub fn claude_managed_env_keys() -> Vec<&'static str> {
+    let mut keys = CLAUDE_MANAGED_CONNECTION_KEYS.to_vec();
+    if let Some(spec) = crate::tool_sync::agent_spec("claude-code") {
+        keys.extend(spec.roles.iter().map(|role| role.agent_key));
+    }
+    keys
+}

@@ -10,7 +10,13 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import i18n from "../../../i18n";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { FlatProvidersResponse, ToolActivationsMap, ToolBindingSettings, ToolSyncResult } from "../../../types";
+import type {
+  DroppedRole,
+  FlatProvidersResponse,
+  ToolActivationsMap,
+  ToolBindingSettings,
+  ToolSyncResult,
+} from "../../../types";
 import { getAgent } from "../lib/agentRegistry";
 import { removeBindingEntry as removeEntryLocal, setActiveProvider, upsertBindingEntry } from "../lib/toolBinding";
 import { modelsKeys } from "./keys";
@@ -33,6 +39,37 @@ export function useActivationMutations() {
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey });
   }, [queryClient, queryKey]);
+
+  /**
+   * Park what the write skipped, and say so once.
+   *
+   * Every mutation here can silently discard part of the role map — a role
+   * pointing at a provider this agent is not bound to, a row with no model.
+   * Before this, the panel kept showing the assignment and the file did not
+   * have it, and only the file knew. The backend reports the difference; this
+   * is the one place that remembers it and tells the user, so no call site can
+   * forget to.
+   */
+  const recordDrops = useCallback(
+    (toolId: string, result: ToolSyncResult | null | undefined) => {
+      const dropped: DroppedRole[] = result?.dropped_roles ?? [];
+      queryClient.setQueryData<DroppedRole[]>(modelsKeys.roleDrops(toolId), dropped);
+      if (dropped.length > 0) {
+        toast.warning(
+          i18n.t("models.roleDrops.toastTitle", {
+            count: dropped.length,
+            name: toolDisplayName(toolId),
+          }),
+          {
+            description: dropped
+              .map((drop) => `${drop.role}: ${i18n.t(`models.roleDrops.reason.${drop.reason}`)}`)
+              .join("\n"),
+          },
+        );
+      }
+    },
+    [queryClient],
+  );
 
   const activateMutation = useMutation({
     mutationFn: ({
@@ -68,6 +105,7 @@ export function useActivationMutations() {
       return { previous };
     },
     onSuccess: (result, { toolId }) => {
+      recordDrops(toolId, result);
       if (result?.success) {
         toast.success(i18n.t("models.toasts.syncedToConfig", { name: toolDisplayName(toolId) }));
       } else if (result) {
@@ -118,6 +156,7 @@ export function useActivationMutations() {
     mutationFn: ({ toolId, settings }: { toolId: string; settings: Record<string, unknown> }) =>
       tauriInvoke("update_binding_entry_settings", { toolId, settings }),
     onSuccess: (result, { toolId }) => {
+      recordDrops(toolId, result);
       if (result?.success) {
         toast.success(i18n.t("models.toasts.settingsUpdated", { name: toolDisplayName(toolId) }));
       } else if (result) {
@@ -156,6 +195,7 @@ export function useActivationMutations() {
       return { previous };
     },
     onSuccess: (result, { toolId }) => {
+      recordDrops(toolId, result);
       if (result && !result.success) {
         toast.error(result.error ?? i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }));
       }
@@ -187,6 +227,7 @@ export function useActivationMutations() {
       return { previous };
     },
     onSuccess: (result, { toolId }) => {
+      recordDrops(toolId, result);
       if (result && !result.success) {
         toast.error(result.error ?? i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }));
       }

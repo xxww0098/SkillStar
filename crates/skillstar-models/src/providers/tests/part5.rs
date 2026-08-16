@@ -355,3 +355,67 @@ fn a_native_login_row_binds_without_any_endpoint() {
         "Codex Official binds a ChatGPT session; writing OPENAI_API_KEY would break it"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Reasoning capability: the data behind a narrowed thinking picker
+// ---------------------------------------------------------------------------
+
+/// A provider's own `/v1/models` list says nothing about reasoning, and the
+/// absence has to stay distinguishable from a "no reasoning" answer — the
+/// picker widens on the first and narrows on the second.
+#[test]
+fn a_plain_models_list_reports_unknown_reasoning_rather_than_none() {
+    let body = serde_json::json!({ "data": [{ "id": "relay-model" }] });
+    let catalog = catalog_from_provider_models(&body);
+    assert_eq!(catalog.len(), 1);
+    assert_eq!(catalog[0].reasoning, None);
+}
+
+#[test]
+fn a_registry_entry_carries_its_reasoning_tiers() {
+    let body = serde_json::json!({
+        "openai": { "models": {
+            "gpt-5.4": {
+                "id": "gpt-5.4",
+                "reasoning": true,
+                "reasoning_options": { "effort": ["low", "medium", "high"], "can_disable": false }
+            },
+            "chat-only": { "id": "chat-only", "reasoning": false }
+        }}
+    });
+    let catalog = catalog_from_registry(&body);
+    let by_id = |id: &str| {
+        catalog
+            .iter()
+            .find(|entry| entry.id == id)
+            .unwrap_or_else(|| panic!("{id} missing"))
+            .reasoning
+            .clone()
+    };
+
+    assert_eq!(
+        by_id("gpt-5.4"),
+        Some(Reasoning::Effort {
+            values: vec![Effort::Low, Effort::Medium, Effort::High],
+            default: None,
+            can_disable: false,
+        })
+    );
+    assert_eq!(
+        by_id("chat-only"),
+        Some(Reasoning::None),
+        "an explicit `reasoning: false` is knowledge, not absence of it"
+    );
+}
+
+/// A model that reasons but publishes no tier list is a toggle, not a nine-way
+/// picker — the distinction v3 could not make.
+#[test]
+fn a_reasoning_model_without_tiers_is_a_toggle() {
+    let body = serde_json::json!({ "data": [{ "id": "thinky", "reasoning": true }] });
+    let catalog = catalog_from_provider_models(&body);
+    assert_eq!(
+        catalog[0].reasoning,
+        Some(Reasoning::Toggle { can_disable: true })
+    );
+}

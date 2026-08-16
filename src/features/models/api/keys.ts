@@ -7,6 +7,13 @@ export const modelsKeys = {
   providersFlat: () => [...modelsKeys.all, "providers-flat"] as const,
   presets: () => [...modelsKeys.all, "presets-flat"] as const,
   install: (toolId: string) => [...modelsKeys.all, "install", toolId] as const,
+  agentDescriptors: () => [...modelsKeys.all, "agent-descriptors"] as const,
+  /**
+   * Roles the last write to `toolId` skipped. Not a fetch — the backend can
+   * only compute this while writing, so the sync result is the only source and
+   * the cache is where it is parked for the panels to read.
+   */
+  roleDrops: (toolId: string) => [...modelsKeys.all, "role-drops", toolId] as const,
 };
 
 /**

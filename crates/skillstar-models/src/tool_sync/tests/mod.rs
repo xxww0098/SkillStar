@@ -10,6 +10,7 @@ mod part3;
 mod part4;
 mod part5;
 mod part6;
+mod roles;
 
 use super::*;
 use crate::providers::{BindingEntry, Credential, Endpoints, Provider};

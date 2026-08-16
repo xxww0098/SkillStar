@@ -550,26 +550,40 @@ pub fn sync_tool_binding(store: &ProvidersStoreV4, tool_id: &str) -> ToolSyncRes
             config_path: None,
             error: Some(format!("Unknown tool_id '{tool_id}'")),
             backup_path: None,
+            dropped_roles: Vec::new(),
         };
     };
 
-    let binding = store.bindings.get(tool_id);
+    sync_binding_with_spec(spec, store)
+}
+
+/// The dispatch body, taking the spec instead of looking it up.
+///
+/// Split out so the claim "a new agent needs a registry row and a writer, and
+/// nothing else" can be *tested*: a synthetic [`AgentSpec`] built in a test —
+/// an id this function has never heard of — flows through unchanged. If this
+/// body ever grows a `match tool_id`, that test stops passing.
+pub(crate) fn sync_binding_with_spec(
+    spec: &AgentSpec,
+    store: &ProvidersStoreV4,
+) -> ToolSyncResultFlat {
     let empty = AgentBinding::default();
-    let binding = binding.unwrap_or(&empty);
+    let binding = store.bindings.get(spec.id).unwrap_or(&empty);
 
     // Empty binding → ensure the tool is clean.
     if binding.is_empty() {
         let unsync_result = (spec.unsync)();
         return ToolSyncResultFlat {
-            tool_id: tool_id.to_string(),
+            tool_id: spec.id.to_string(),
             success: unsync_result.is_ok(),
             config_path: None,
             error: unsync_result.err().map(|e| e.to_string()),
             backup_path: None,
+            dropped_roles: Vec::new(),
         };
     }
 
-    (spec.sync_binding)(binding, &store.providers).unwrap_or_else(err_result(tool_id))
+    (spec.sync_binding)(binding, &store.providers).unwrap_or_else(err_result(spec.id))
 }
 
 /// Build a closure that turns a sync error into a failed `ToolSyncResultFlat`

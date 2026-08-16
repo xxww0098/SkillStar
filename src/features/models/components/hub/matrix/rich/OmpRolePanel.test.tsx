@@ -9,6 +9,29 @@ vi.mock("../../../../hooks/useProvidersFlat", () => ({
   useProvidersFlat: () => ({ updateToolBindingSettings }),
 }));
 
+/** Registry rows and the last write's skipped roles, both normally served over
+ *  IPC. Stubbed rather than wired to a QueryClient: what is under test is what
+ *  the panel does with them, not how they arrive. */
+const descriptor = {
+  id: "omp",
+  display_name: "Oh My Pi",
+  kind: "multi" as const,
+  required_wire: "openai_chat" as const,
+  roles: [
+    { id: "default", agent_key: "default", primary: true, inherits: null, requires: "any" as const },
+    { id: "fast", agent_key: "smol", primary: true, inherits: "default", requires: "any" as const },
+    { id: "slow", agent_key: "slow", primary: true, inherits: "default", requires: "any" as const },
+    { id: "plan", agent_key: "plan", primary: true, inherits: null, requires: "any" as const },
+  ],
+  config_files: [],
+};
+const roleDrops = vi.fn(() => [] as { role: string; reason: string }[]);
+
+vi.mock("../../../../api/agents", () => ({
+  useAgentDescriptor: () => descriptor,
+  useRoleDrops: () => roleDrops(),
+}));
+
 function provider(id: string, overrides: Partial<ProviderEntryFlat> = {}): ProviderEntryFlat {
   return {
     id,
@@ -40,6 +63,7 @@ function lastRoles() {
 
 beforeEach(() => {
   updateToolBindingSettings.mockClear();
+  roleDrops.mockReturnValue([]);
 });
 
 describe("ompAssignableProviders", () => {
@@ -64,10 +88,10 @@ describe("ompAssignedCount", () => {
   it("counts only roles that carry both a provider and a non-blank model", () => {
     const roles = {
       default: { provider_id: "alpha123", model: "m-one" },
-      smol: { provider_id: "alpha123", model: "   " },
+      fast: { provider_id: "alpha123", model: "   " },
       slow: { provider_id: "", model: "m-two" },
     };
-    expect(ompAssignedCount(roles, ["default", "smol", "slow", "plan"])).toBe(1);
+    expect(ompAssignedCount(roles, ["default", "fast", "slow", "plan"])).toBe(1);
   });
 });
 
@@ -112,7 +136,7 @@ describe("OmpRolePanel", () => {
       settings: {
         roles: {
           default: { provider_id: "alpha123", model: "m-one" },
-          smol: { provider_id: "alpha123", model: "m-two" },
+          fast: { provider_id: "alpha123", model: "m-two" },
         },
       },
     });
@@ -128,7 +152,7 @@ describe("OmpRolePanel", () => {
     fireEvent.click(screen.getByText("填充主要角色"));
     expect(lastRoles()).toEqual({
       default: { provider_id: "alpha123", model: "m-one" },
-      smol: { provider_id: "alpha123", model: "m-one" },
+      fast: { provider_id: "alpha123", model: "m-one" },
       slow: { provider_id: "alpha123", model: "m-one" },
       plan: { provider_id: "alpha123", model: "m-one" },
     });
@@ -156,5 +180,37 @@ describe("OmpRolePanel", () => {
 
     expect(screen.getByText(/还没有绑定到 OMP 的 Provider/)).toBeInTheDocument();
     expect(screen.queryByText("--smol")).not.toBeInTheDocument();
+  });
+
+  /**
+   * 02 §9.3 gap 3: the fallback table existed and was used only to decide
+   * whether to nag. The row now says what leaving it empty will actually do,
+   * and says it from the backend registry rather than a local copy.
+   */
+  it("tells an empty row what it falls back to", () => {
+    render(<OmpRolePanel binding={binding()} providers={[provider("alpha123")]} />);
+
+    // `fast` (OMP's `smol`) inherits `default`; `plan` does not, so it must
+    // not claim to.
+    // `fast` and `slow` both declare it; `plan` does not.
+    expect(screen.getAllByText(/回落到 default/)).toHaveLength(2);
+    expect(screen.getAllByText(/config\.yml 里的原值保持不变/).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * 02 §9.3 gap 1: a role the writer skipped used to leave the panel showing an
+   * assignment the file did not have.
+   */
+  it("marks a role the last write skipped, with the reason", () => {
+    roleDrops.mockReturnValue([{ role: "fast", reason: "provider_not_bound" }]);
+    render(
+      <OmpRolePanel
+        binding={binding({ settings: { roles: { fast: { provider_id: "beta456", model: "m-two" } } } })}
+        providers={[provider("alpha123")]}
+      />,
+    );
+
+    expect(screen.getByText(/未写入/)).toBeInTheDocument();
+    expect(screen.getByText(/没有绑定到此 Agent/)).toBeInTheDocument();
   });
 });

@@ -42,7 +42,7 @@
 - **命令按职责拆分**（v3 的 `activate_tool` 一个名字干三件事、`deactivate_tool` 不是它的逆）：`bind_provider`（加一条并指向它）/ `set_active_binding`（只移动指针）/ `update_binding_entry`（只改条目，不动指针）/ `unbind_provider`（只摘一条）/ `unbind_agent`（清空，破坏性的那个现在必须点名）/ `update_binding_entry_settings`（entry 级设置袋）/ `update_agent_settings`（agent 级设置袋 + 角色）。
 - **绑定按 wire protocol 校验**：注册表列从 `required_url` 换成 `required_wire`（`RequiredWire`）。`codex` 要求 `OpenaiResponses`，`claude-code` / `claude-desktop` 要求 `AnthropicMessages`，其余要求 `OpenaiChat`。`Credential::ExternalCli` 行豁免（空端点是它的语义）。`Tri::Unknown` 从不拒绝，只有探测得到的 `No` 才拒绝。
 - Agent descriptor 的 `kind` 是 UI 和后端能力的共同开关：single 只激活一个 provider；multi 原生保留多个条目并维护 active 指针。
-- Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、必需 URL、sync/unsync/探测 dispatch）的 SSOT 是 `tool_sync::agents` 注册表；写盘、卸载、resync 与配置目标枚举都经它路由，新增 Agent 只加一行 spec 及其 writer。它与前端 `agentRegistry.ts` 各自持有同一份 toolId 清单，由两侧的表驱动一致性测试互相锁定。
+- Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、`required_wire`、**角色清单**、sync/unsync/探测 dispatch）的 SSOT 是 `tool_sync::agents` 注册表；写盘、卸载、resync 与配置目标枚举都经它路由，新增 Agent 只加一行 spec 及其 writer。这条目标是**可证伪的**，不是口号：`a_synthetic_agent_syncs_through_the_registry_alone` 用一个 dispatch 从没见过的合成 Agent 走完整条同步路径；`agent_ids_are_spelled_out_only_in_the_registry_and_the_writers` 给注册表和 writer 之外的每个文件钉死 Agent id 字面量预算。声明面通过 `list_agent_descriptors` 命令投影为 `AgentDescriptorDto` 供前端消费（`crates/skillstar-app/src/models/agents.rs`）；前端 `agentRegistry.ts` 只保留没有后端对应物的展示项（图标、tagline、安装文档链接）。
 - tool-sync 只改自己管理的字段，保留用户已有配置；写入前备份并使用原子替换。
 - JSON 型 multi Agent（OpenCode / Pi）的写盘共享 `multi_provider` 内部骨架（备份 → retain 托管键 → 写块 → active 指针），各自只提供 build_block 与指针落点；Codex（TOML + auth.json 副通道）独立维护，理由见 decisions.md D-012。
 - 所有测试设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录，绝不写真实 Agent 配置。
@@ -53,15 +53,40 @@
 - Pi 是 multi Agent：绑定写 `~/.pi/agent/models.json` 的 `providers.skillstar_*` 块（`openai-completions`，模型条目只写 `id`，其余交给 Pi 默认值），激活条目同时把 `~/.pi/agent/settings.json` 的 `defaultProvider`/`defaultModel` 指过去；停用只清理托管块，且仅当 default 指针指向托管块时才连带清除。
 - OMP（Oh My Pi）是独立产品（配置根 `~/.omp`），不读 Pi 的 `~/.pi/agent/*`。绑定写 `~/.omp/agent/models.yml` 的 `providers.skillstar_*` 块（YAML，schema 与 Pi 同构：`baseUrl` / `api: "openai-completions"` / `apiKey` / 最小 `{ id }` 模型条目）。tool-sync 对 `omp` 使用 YAML 文件规格（`format: "yaml"`，编辑器校验/格式化走 serde_yaml，保留 key 顺序）。
 
-### OMP 模型角色
+### 角色路由（跨 Agent）
 
-OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/config.yml` 的 `modelRoles`。SkillStar 把这层路由暴露到 Models 工作台，规则如下（角色与 thinking 等级清单的 SSOT 是 `tool_sync::types` 的 `OMP_MODEL_ROLES` / `OMP_THINKING_LEVELS`，前端 `lib/ompRoles.ts` 只决定展示顺序与分组，两侧由一致性测试锁定）：
+角色路由是**域内一等概念**，不是 OMP 的功能。词表与类型在 `providers::roles`（`RoleDef` / `RoleCapability` / `DroppedRole` / `RoleDropReason` + 五个规范角色常量 `default` / `fast` / `plan` / `vision` / `subagent`），值的形状是共享的 `ModelRef{provider_id, model, effort}`，存储位置是 `AgentBinding.roles`。
+
+**每个 Agent 在注册表里声明自己支持哪些角色**，分三档：
+
+| 档 | Agent | `AgentSpec.roles` |
+| --- | --- | --- |
+| 无角色 | `pi` / `codex` / `opencode` / `claude-desktop` | 空 slice，UI 只渲染单一 provider+model 选择 |
+| 单角色 + 兜底 | `claude-code` | `default` / `fast` / `sonnet` / `opus` / `subagent`（5 条） |
+| 多角色 | `omp` | 10 条完整角色面板（主要平铺 + 次要折叠） |
+
+Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`、`small_model`），这里**故意留空**：它们的 writer 目前只投影 active 指针。
+
+**红线：注册表声明的角色，writer 必须写。** 声明但不写等于 UI 提供一个无效设置，正是本轮要修的缺陷。`every_declared_role_reaches_disk` 逐 Agent 赋满全部声明角色、跑真实 writer、断言每个 `agent_key` 出现在写出的字节里；加角色忘了改 writer 会直接红。
+
+- `RoleDef.agent_key` 是该 Agent 配置文件里的键名（OMP 的 `smol`、Claude 的 `ANTHROPIC_DEFAULT_HAIKU_MODEL`、OpenCode 的 `small_model`），writer 与角色面板都读它，不再各自硬编码翻译表。
+- `RoleDef.inherits` 是**该 Agent 文档承认的**回落目标，UI 把它渲染成空行的 placeholder（「未配置 — 回落到 default」/「未配置 — 由该 Agent 自行选择」）。回落只在**读时**解析（`providers::roles::resolve_role`），绝不写盘：写时复制会让「显式设成同一个模型」和「继承」在磁盘上无法区分，清空字段也拿不回原值。
+- **写盘时被跳过的角色必须回报**：`ToolSyncResultFlat.dropped_roles` 带 `{role, reason, provider_id}`，reason 是 `provider_not_bound` / `provider_has_no_endpoint` / `provider_missing` / `no_model` / `role_not_supported` / `invalid_role_name`。同步成功不代表配置完整，差集只有 writer 算得出来，所以它是返回值的一部分。前端 `useRoleDrops` 只记住后端裁决，不重算规则。
+- **thinking / effort 等级按模型能力裁剪**：`ModelCatalogEntry.reasoning`（`Reasoning::{None, Toggle, Effort, BudgetTokens}`）来自模型目录，`tool_sync::omp_thinking_levels_for` 据此收窄 9 元 grammar；前端 `ompThinkingLevelsFor` 是同一张表的镜像。目录**没有**该模型的数据时返回完整清单——「不知道」不能渲染成「不支持」。
+
+#### Claude Code
+
+`AgentBinding.roles` 直接投影到 `~/.claude/settings.json` 的 env 块，键名取自注册表：`default → ANTHROPIC_MODEL`（未分配时由 active 条目的模型兜底）、`fast → ANTHROPIC_DEFAULT_HAIKU_MODEL`、`sonnet` / `opus → ANTHROPIC_DEFAULT_{SONNET,OPUS}_MODEL`、`subagent → CLAUDE_CODE_SUBAGENT_MODEL`。托管 env key 清单由注册表派生（`claude_managed_env_keys()`），所以 unsync 不会漏清新增角色。Claude 的 env 块只有一个 base URL，因此指向**其它 provider** 的角色不写并回报 `provider_not_bound`。前端映射面板经 `update_agent_settings` 落盘——v3 它只有 `useState`，用户填的东西从未抵达后端。
+
+#### OMP 模型角色
+
+OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/config.yml` 的 `modelRoles`。规则如下（角色与 thinking 等级清单的 SSOT 是 `tool_sync::agents` 的 `OMP_ROLES` 与 `tool_sync::types` 的 `OMP_THINKING_LEVELS`，前端 `lib/ompRoles.ts` 只决定展示顺序、分组与 i18n，两侧由一致性测试锁定）：
 
 - 角色分配存在 **binding 级一等字段** `AgentBinding.roles`（`BTreeMap<String, ModelRef>`），不是 entry 级 `BindingEntry.settings`——一个角色可以指向任意已绑定 provider，不必是 active 的那个。写入命令是 `update_agent_settings`。
-- **角色名要在落盘时翻译回 OMP 的词汇**：store 存规范键（`smol` 迁移后叫 `fast`，`task` 叫 `subagent`），OMP 不认识这两个名字。writer 走 `migrate::omp_role_key` 把它们译回去，双向映射由一条 round-trip 测试锁定。写入顺序按 OMP 的角色名排序，避免内部改名让 YAML 无故重排。
+- **角色名要在落盘时翻译回 OMP 的词汇**：store 存规范键（`smol` 迁移后叫 `fast`，`task` 叫 `subagent`），OMP 不认识这两个名字。writer 查注册表的 `RoleDef.agent_key` 译回去；注册表未声明的自定义角色原样透传（`modelRoles` 是开放 map）。注册表与迁移的 `migrate::omp_role_key` 由 `registry_agent_keys_match_the_migration_table` 锁定，前端一侧由 `ompRoles.test.ts` 锁定——**前端也必须按规范键读写**，否则迁移过的用户会看到角色「消失」同时旁边多出一条重复角色。写入顺序按 OMP 的角色名排序，避免内部改名让 YAML 无故重排。
 - 每个已分配角色写成 `modelRoles.<role> = "skillstar_<id8>/<model>[:thinking]"`。未分配的角色**不写**：OMP 自己会让 `smol`/`slow`/`designer` 回落到 `default`，留空是安全的。
 - `default` 未显式分配时由 binding 的 active 条目兜底，等同于角色功能引入前的行为。
-- 角色指向未绑定、或没有 OpenAI base URL（因此没进 models.yml）、或没选模型的 provider 时跳过，不写悬空指针。角色名含 `/`、空白或以 `@` 开头（与 OMP 的 `@role` 别名语法冲突）同样跳过。
+- 角色指向未绑定、或没有 OpenAI base URL（因此没进 models.yml）、或没选模型的 provider 时跳过，不写悬空指针。角色名含 `/`、空白或以 `@` 开头（与 OMP 的 `@role` 别名语法冲突）同样跳过。**每一种跳过都进 `dropped_roles`**，角色行标黄给出原因——v3 这里是三个裸 `continue`，前端无从知道。
 - 每次同步先删除所有指向 `skillstar_*` 的角色再写入当前集合，与 models.yml 托管块的 retain 策略一致：用户在 UI 取消分配后磁盘上不留残留。指向用户自有 provider 的角色永不触碰。
 - 解绑 provider（`unbind_provider`）或删除 provider（`delete_provider_flat`）会连带清除指向它的角色分配；`unbind_agent` 清空整条绑定连同角色。
 - Ctrl+P 只在 OMP 的 `cycleOrder`（默认 `["smol","default","slow"]`）之间循环，配置了 `plan` 等角色也不会进循环——这是 OMP 侧行为，SkillStar 不代写 `cycleOrder`。
@@ -86,9 +111,9 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - Claude / Codex 列表头提供 Official（原生登录）开关；矩阵单元格负责第三方 Bind / 模型选择 / Claude mapping。
 - 侧栏「添加 Provider」与 Recent 只服务第三方 Provider；Official 种子不进 Recent。
 - Provider 编辑使用既有 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。创建是主栏表单，创建后打开 editor drawer。
-- Claude mapping UI 仍是前端本地状态（Agent 加法）；解绑/绑定走真实 `bind_provider` / `unbind_agent`。「一键设置」把当前/默认模型广播到全部角色；「获取模型列表」走 `fetch_provider_model_catalog`。
-- **Claude 的三档模型来自 binding 角色**：`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` 现在读 `roles["fast"]` / `roles["sonnet"]` / `roles["opus"]`，不再读 `provider.meta`。值的存放位置变了，写到磁盘上的三个 env key 一字未变——由 golden 对照测试锁定。
-- OMP 列的单元格打开 `OmpRolePanel`（Radix Popover），单元格显示已配置的主要角色数。面板**真实持久化**：每次改动整体提交 `{ roles }` 给 `update_agent_settings`，乐观更新与 toast 由 api 层负责。provider 下拉只列已绑定到 OMP 且有 OpenAI base URL 的 Provider（其余会被写盘逻辑跳过），每行展示 `previewRoleValue()` 的实际写入值，底部给出等价 `omp --model/--smol/--slow/--plan` 命令行。文案全部走 i18n `models.ompRoles.*`。
+- Claude mapping UI **真实持久化**：每次改动整体提交 `{ roles }` 给 `update_agent_settings`，与 OMP 面板同一条链路；解绑/绑定走真实 `bind_provider` / `unbind_agent`。角色行由 `list_agent_descriptors` 驱动，因此原型期那个 `fable` 行消失了——Claude Code 没有 `ANTHROPIC_DEFAULT_FABLE_MODEL`，那一行永远不可能写入。「一键设置」把当前/默认模型广播到全部**已声明**角色；「获取模型列表」走 `fetch_provider_model_catalog`。
+- **Claude 的三档模型来自 binding 角色**：`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` 现在读 `roles["fast"]` / `roles["sonnet"]` / `roles["opus"]`，不再读 `provider.meta`。值的存放位置变了，写到磁盘上的三个 env key 一字未变——由 golden 对照测试锁定。`CLAUDE_CODE_SUBAGENT_MODEL` 是新增的第四个键，仅在用户分配了 `subagent` 角色时出现，因此不影响既有 golden。
+- OMP 列的单元格打开 `OmpRolePanel`（Radix Popover），单元格显示已配置的主要角色数。面板**真实持久化**：每次改动整体提交 `{ roles }` 给 `update_agent_settings`，乐观更新与 toast 由 api 层负责。provider 下拉只列已绑定到 OMP 且有 OpenAI base URL 的 Provider（其余会被写盘逻辑跳过），每行展示 `previewRoleValue()` 的实际写入值、回落目标与上次写盘的跳过原因，thinking 下拉按模型的 `reasoning` 能力收窄，底部给出等价 `omp --model/--smol/--slow/--plan` 命令行。文案全部走 i18n `models.ompRoles.*` / `models.roles.*` / `models.roleDrops.*`。
 - 不再有 `?variant=` 原型开关：DEV-only 的 D2 / D3 交替 IA 岛已随 Models 重设计 WP-0 删除，`#models` 只有一条渲染路径。
 - 生产组件在 `components/hub/`（入口 `ModelsHub.tsx`，矩阵在 `hub/matrix/`）；数据聚合在 `hooks/useModelsData.ts`，nav 桥接类型在 `lib/navBridge.ts`。
 - `ProviderConfigPrimitives.tsx` 是 Models 表单视觉 SSOT：标准控件 40px、dense 控件 36px，并统一 border、focus、disabled 和 invalid 状态。

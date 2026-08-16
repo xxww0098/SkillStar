@@ -31,14 +31,13 @@ use std::collections::BTreeMap;
 /// The agent that lost its writer in v4. Its binding is reported, then dropped.
 pub const PLANNED_AGENT_CLAUDE_DESKTOP: &str = "claude-desktop";
 
-/// Canonical role ids that have cross-agent meaning. Everything else is kept
-/// verbatim as an extra role — the on-disk schema is an open map precisely so
-/// that a role nobody anticipated survives a migration.
-pub const ROLE_DEFAULT: &str = "default";
-pub const ROLE_FAST: &str = "fast";
-pub const ROLE_PLAN: &str = "plan";
-pub const ROLE_VISION: &str = "vision";
-pub const ROLE_SUBAGENT: &str = "subagent";
+/// The canonical role vocabulary lives in `providers::roles` — it is a domain
+/// concept, not a migration detail, and the agent registry declares against the
+/// same constants. Re-exported here so the migration's existing callers keep
+/// their import path.
+pub use crate::providers::roles::{
+    ROLE_DEFAULT, ROLE_FAST, ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION,
+};
 
 /// Claude's tiered-model meta keys, in v3's spelling.
 const META_CLAUDE_MAIN: &str = "claude_main_model";

@@ -1814,21 +1814,18 @@
     },
     "claudeMapping": {
       "title": "模型映射",
-      "subtitle": "显示名称只影响 /model 菜单；1M 只是给 Claude 的上下文能力声明。",
       "filledSuffix": "已填实际模型",
       "quickSet": "一键设置",
       "quickSetSuccess": "已将模型名称应用到所有角色",
       "quickSetEmpty": "没有可应用的模型 — 先填写某一角色或获取模型列表",
       "fetchModels": "获取模型列表",
       "colRole": "角色",
-      "colDisplay": "显示名称",
       "colRequest": "实际请求模型",
-      "displayPlaceholder": "例如 DeepSeek V4 Pro",
-      "displayHidden": "不显示在 /model 菜单",
-      "oneMTitle": "声明支持 1M 上下文",
       "unbind": "断开",
       "done": "完成",
-      "diskHint": "写入 ~/.claude/settings.json"
+      "diskHint": "写入 ~/.claude/settings.json",
+      "fallbackHint": "留空某一档，Claude Code 就用它自带的模型。",
+      "colWrites": "写入"
     },
     "ompRoles": {
       "default": {
@@ -2130,6 +2127,24 @@
         "openrouter": "聚合路由 · OpenAI 兼容",
         "custom": "自填 Base URL 与 Key"
       }
+    },
+    "roleDrops": {
+      "toastTitle": "有 {{count}} 个角色没有写入 {{name}}",
+      "toastTitle_other": "有 {{count}} 个角色没有写入 {{name}}",
+      "rowBadge": "未写入",
+      "reason": {
+        "provider_not_bound": "该 Provider 没有绑定到此 Agent，角色已跳过。",
+        "provider_has_no_endpoint": "该 Provider 没有此 Agent 可用的端点，角色已跳过。",
+        "provider_missing": "该 Provider 已不存在，角色已跳过。",
+        "no_model": "没有选择模型，此角色什么都没写。",
+        "role_not_supported": "此 Agent 没有对应该角色的配置键，已跳过。",
+        "invalid_role_name": "该角色名无法写入此 Agent 的配置文件。"
+      }
+    },
+    "roles": {
+      "inheritsFrom": "未配置 — 回落到 {{role}}",
+      "agentDecides": "未配置 — 由该 Agent 自行选择",
+      "writesTo": "写入 {{key}}"
     }
   },
   "ssh": {

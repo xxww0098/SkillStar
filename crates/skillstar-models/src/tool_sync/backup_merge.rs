@@ -194,6 +194,7 @@ pub fn resync_active_tools(
             config_path: None,
             error: Some(format!("Provider '{}' not found in store", provider_id)),
             backup_path: None,
+            dropped_roles: Vec::new(),
         }];
     }
 

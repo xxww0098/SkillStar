@@ -41,26 +41,61 @@ fn codex_home() -> Result<PathBuf> {
 /// The env block will contain:
 /// - `ANTHROPIC_BASE_URL`: the provider's Anthropic-compatible base URL
 /// - `ANTHROPIC_AUTH_TOKEN`: the provider's API key
-/// - `ANTHROPIC_MODEL`: the selected model
-/// - `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `_SONNET_MODEL` / `_OPUS_MODEL`: optional
-///   tier overrides read from the binding's `roles` map (the key is removed
-///   when blank)
+/// - one env key per declared role in the agent registry, taken from the
+///   binding's `roles` map (the key is removed when blank)
 ///
 /// The tier overrides used to live in `provider.meta`, where only Claude could
-/// reach them; v4 stores them as roles on the binding. This writer reads the
-/// new location so the three env keys keep the exact values they had — moving
-/// where a value is *stored* must not change what lands on disk.
+/// reach them; v4 stores them as roles on the binding. Which role lands in which
+/// env key is no longer spelled out here either — the registry row owns that
+/// mapping, so adding a Claude role is a registry edit rather than an edit here
+/// plus an edit to the managed-key list plus an edit to the unsync path.
 pub fn sync_to_claude_code(
     provider: &Provider,
     model: &str,
     roles: &std::collections::BTreeMap<String, ModelRef>,
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_tool_config_path("claude-code")?;
-    Ok(ToolSyncResultFlat::from_write_outcome(
+    Ok(ToolSyncResultFlat::from_write_outcome_with_drops(
         "claude-code",
         &config_path,
-        sync_to_claude_code_inner(provider, model, roles, &config_path),
+        sync_to_claude_code_inner(provider, model, roles, &config_path)
+            .map(|backup| (backup, claude_dropped_roles(provider, roles))),
     ))
+}
+
+/// Roles the Claude writer will not put on disk, and why.
+///
+/// Claude Code is a single-provider agent: its env block names exactly one
+/// `ANTHROPIC_BASE_URL`, so a role pointing at a *different* provider cannot be
+/// honoured — the model id would be sent to the bound provider's endpoint and
+/// fail. v3 wrote the model id anyway (it only ever read the string), producing
+/// a config that looks configured and 404s. The role is skipped, and the user is
+/// told which one and why instead of being left to discover it at runtime.
+fn claude_dropped_roles(
+    provider: &Provider,
+    roles: &std::collections::BTreeMap<String, ModelRef>,
+) -> Vec<DroppedRole> {
+    let defs = agent_spec("claude-code").map(|s| s.roles).unwrap_or(&[]);
+    let mut dropped = Vec::new();
+    for (role, target) in roles {
+        if !defs.iter().any(|def| def.id == role.as_str()) {
+            dropped.push(DroppedRole::new(role, RoleDropReason::RoleNotSupported));
+        } else if target.model.trim().is_empty() {
+            // Nothing to write is not a failure — it is how a role is cleared —
+            // so an empty *and* unset role is silent. A role with a provider but
+            // no model is a half-filled row worth flagging.
+            if !target.provider_id.trim().is_empty() {
+                dropped.push(DroppedRole::new(role, RoleDropReason::NoModel));
+            }
+        } else if !target.provider_id.trim().is_empty() && target.provider_id != provider.id {
+            dropped.push(DroppedRole::for_provider(
+                role,
+                RoleDropReason::ProviderNotBound,
+                &target.provider_id,
+            ));
+        }
+    }
+    dropped
 }
 
 /// Inner implementation for Claude Code sync.
@@ -96,38 +131,47 @@ pub(crate) fn sync_to_claude_code_inner(
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    // Build managed fields for the env block. The tier-model overrides
-    // (Haiku/Sonnet/Opus) come from the binding's roles; each is written when set,
-    // or passed as Null (→ key removed) when the user left it blank.
-    // `ANTHROPIC_MODEL` follows the same rule: an empty/whitespace model
-    // (e.g. a provider with no `default_model` activated without an explicit
-    // model) is treated as Null so Claude Code doesn't receive an invalid
-    // `"ANTHROPIC_MODEL": ""` that breaks model resolution.
-    let managed_fields: Vec<(&str, Value)> = vec![
-        ("ANTHROPIC_BASE_URL", Value::String(anthropic_base.to_string())),
+    // Build managed fields for the env block. Every role the registry declares
+    // contributes its env key, written when set, or Null (→ key removed) when the
+    // user left it blank. `ANTHROPIC_MODEL` is the `default` role's key and takes
+    // the active entry's model when no `default` role is assigned — the entry is
+    // the direct statement of intent that predates roles, and a binding with no
+    // role config at all has to keep behaving exactly as it did.
+    //
+    // An empty/whitespace model (a provider with no `default_model` bound without
+    // an explicit model) is Null rather than `""`: Claude Code cannot resolve an
+    // empty model id, and the missing key is the state that lets it fall back.
+    let mut managed_fields: Vec<(&str, Value)> = vec![
+        (
+            "ANTHROPIC_BASE_URL",
+            Value::String(anthropic_base.to_string()),
+        ),
         (
             "ANTHROPIC_AUTH_TOKEN",
             Value::String(api_key(provider).to_string()),
         ),
-        ("ANTHROPIC_MODEL", trim_or_null(model)),
-        (
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            role_model_field(roles, CLAUDE_ROLE_HAIKU),
-        ),
-        (
-            "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            role_model_field(roles, CLAUDE_ROLE_SONNET),
-        ),
-        (
-            "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            role_model_field(roles, CLAUDE_ROLE_OPUS),
-        ),
     ];
+    for def in claude_role_defs() {
+        let from_role = role_model_field(provider, roles, def.id);
+        let value = if def.id == crate::providers::ROLE_DEFAULT && from_role.is_null() {
+            trim_or_null(model)
+        } else {
+            from_role
+        };
+        managed_fields.push((def.agent_key, value));
+    }
 
     // Merge write into the env block
     merge_json_env_write(config_path, &managed_fields)?;
 
     Ok(backup_path)
+}
+
+/// Claude Code's declared roles, or an empty slice if the registry ever loses
+/// the row (in which case the writer degrades to base URL + token rather than
+/// panicking on a lookup that should never fail).
+fn claude_role_defs() -> &'static [crate::providers::RoleDef] {
+    agent_spec("claude-code").map(|spec| spec.roles).unwrap_or(&[])
 }
 
 /// Remove SkillStar-managed Claude env keys (Official / unsync shared path).
@@ -144,8 +188,8 @@ fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
         .with_context(|| format!("Failed to parse JSON in {}", config_path.display()))?;
 
     if let Some(env_obj) = json.get_mut("env").and_then(|v| v.as_object_mut()) {
-        for key in CLAUDE_MANAGED_ENV_KEYS {
-            env_obj.remove(*key);
+        for key in claude_managed_env_keys() {
+            env_obj.remove(key);
         }
         if env_obj.is_empty()
             && let Some(root_obj) = json.as_object_mut()
@@ -162,25 +206,29 @@ fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
     Ok(backup_path)
 }
 
-/// Role ids Claude's three tier-model env keys read from.
+/// Read one role's model out of the binding. Returns a `Value::String` for a
+/// usable assignment, otherwise `Value::Null` (which `merge_json_env_write`
+/// treats as "remove the key").
 ///
-/// `fast` is the canonical cross-agent name the migration mapped Haiku onto;
-/// `sonnet` and `opus` stay under their own names because they are Claude
-/// tiers with no counterpart elsewhere, and inventing one would make the role
-/// vocabulary claim a generality it does not have.
-pub(crate) const CLAUDE_ROLE_HAIKU: &str = "fast";
-pub(crate) const CLAUDE_ROLE_SONNET: &str = "sonnet";
-pub(crate) const CLAUDE_ROLE_OPUS: &str = "opus";
-
-/// Read a Claude tier-model override out of the binding's roles. Returns a
-/// `Value::String` for a non-empty model, otherwise `Value::Null` (which
-/// `merge_json_env_write` treats as "remove the key").
+/// A role pointing at a provider other than the bound one yields Null: Claude's
+/// env block carries a single base URL, so that model id would be sent to the
+/// wrong host. [`claude_dropped_roles`] reports the same condition to the caller
+/// so the skip is visible rather than silent.
+///
+/// Fallbacks are deliberately **not** resolved here. Writing the inherited value
+/// into the tier key would make "explicitly set to the same model" and "left to
+/// Claude's own default" identical on disk, and clearing the field would no
+/// longer restore Claude's behaviour.
 fn role_model_field(
+    provider: &Provider,
     roles: &std::collections::BTreeMap<String, ModelRef>,
     role: &str,
 ) -> Value {
     roles
         .get(role)
+        .filter(|target| {
+            target.provider_id.trim().is_empty() || target.provider_id == provider.id
+        })
         .map(|target| target.model.trim())
         .filter(|model| !model.is_empty())
         .map(|model| Value::String(model.to_string()))

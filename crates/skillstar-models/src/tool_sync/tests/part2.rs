@@ -143,8 +143,8 @@ fn test_unsync_claude_code_removes_managed_fields() {
     let mut json: Value = serde_json::from_str(&content).unwrap();
 
     if let Some(env_obj) = json.get_mut("env").and_then(|v| v.as_object_mut()) {
-        for key in CLAUDE_MANAGED_ENV_KEYS {
-            env_obj.remove(*key);
+        for key in claude_managed_env_keys() {
+            env_obj.remove(key);
         }
     }
 

@@ -9,6 +9,8 @@ import {
   OMP_SECONDARY_ROLES,
   OMP_THINKING_LEVELS,
   OMP_TOOL_ID,
+  modelReasoning,
+  ompThinkingLevelsFor,
   previewRoleValue,
 } from "../ompRoles";
 
@@ -49,7 +51,21 @@ const RUST_OMP_THINKING_LEVELS = [
 
 describe("OMP_ROLE_DEFS", () => {
   it("covers exactly the Rust role list, in the same order", () => {
-    expect(OMP_ROLE_DEFS.map((r) => r.id)).toEqual([...RUST_OMP_MODEL_ROLES]);
+    // Compared on `agentKey`, not `id`: the store speaks canonical ids
+    // (`fast`, `subagent`) and `config.yml` speaks OMP's (`smol`, `task`).
+    // `RoleDef.agent_key` in the Rust registry is the same translation, and
+    // `registry_agent_keys_match_the_migration_table` pins that side.
+    expect(OMP_ROLE_DEFS.map((r) => r.agentKey)).toEqual([...RUST_OMP_MODEL_ROLES]);
+  });
+
+  it("stores under canonical ids so a migrated role map is still readable", () => {
+    // v4 renamed `smol` to `fast` and `task` to `subagent` in the store. A
+    // panel keyed by the on-disk names would show every migrated user an empty
+    // row and then write a duplicate role beside their real one.
+    const byKey = Object.fromEntries(OMP_ROLE_DEFS.map((r) => [r.agentKey, r.id]));
+    expect(byKey.smol).toBe("fast");
+    expect(byKey.task).toBe("subagent");
+    expect(byKey.default).toBe("default");
   });
 
   it("mirrors the Rust thinking levels", () => {
@@ -57,8 +73,15 @@ describe("OMP_ROLE_DEFS", () => {
   });
 
   it("splits into the four flag-backed roles and six secondary ones", () => {
-    expect(OMP_PRIMARY_ROLES.map((r) => r.id)).toEqual(["default", "smol", "slow", "plan"]);
-    expect(OMP_SECONDARY_ROLES.map((r) => r.id)).toEqual(["vision", "designer", "commit", "tiny", "task", "advisor"]);
+    expect(OMP_PRIMARY_ROLES.map((r) => r.id)).toEqual(["default", "fast", "slow", "plan"]);
+    expect(OMP_SECONDARY_ROLES.map((r) => r.id)).toEqual([
+      "vision",
+      "designer",
+      "commit",
+      "tiny",
+      "subagent",
+      "advisor",
+    ]);
     expect(OMP_PRIMARY_ROLES.length + OMP_SECONDARY_ROLES.length).toBe(OMP_ROLE_DEFS.length);
   });
 
@@ -71,14 +94,17 @@ describe("OMP_ROLE_DEFS", () => {
 
   it("keys are unique and usable as i18n suffixes", () => {
     expect(new Set(OMP_ROLE_DEFS.map((r) => r.key)).size).toBe(OMP_ROLE_DEFS.length);
-    expect(OMP_ROLE_DEFS.every((r) => r.key === r.id)).toBe(true);
+    // The i18n suffix follows OMP's own name, which is what the copy describes.
+    expect(OMP_ROLE_DEFS.every((r) => r.key === r.agentKey)).toBe(true);
   });
 
   it("cycle order and default-inheriting roles reference real roles", () => {
     const ids = new Set(OMP_ROLE_DEFS.map((r) => r.id));
-    for (const id of [...OMP_DEFAULT_CYCLE_ORDER, ...OMP_ROLES_INHERITING_DEFAULT]) {
-      expect(ids.has(id)).toBe(true);
-    }
+    const agentKeys = new Set(OMP_ROLE_DEFS.map((r) => r.agentKey));
+    // The cycle order is OMP's own setting, so it is spelled OMP's way; the
+    // inheritance list is a store-side fact, so it is spelled canonically.
+    for (const key of OMP_DEFAULT_CYCLE_ORDER) expect(agentKeys.has(key)).toBe(true);
+    for (const id of OMP_ROLES_INHERITING_DEFAULT) expect(ids.has(id)).toBe(true);
     // Ctrl+P never reaches `plan`, which is why the panel says so.
     expect(OMP_DEFAULT_CYCLE_ORDER).not.toContain("plan");
   });
@@ -161,8 +187,71 @@ describe("buildOmpLaunchCommand", () => {
   });
 
   it("covers all four flags", () => {
-    expect(buildOmpLaunchCommand({ default: "a", smol: "b", slow: "c", plan: "d" })).toBe(
+    // Keyed by canonical id, matching the role map the panel holds.
+    expect(buildOmpLaunchCommand({ default: "a", fast: "b", slow: "c", plan: "d" })).toBe(
       'omp --model "a" --smol "b" --slow "c" --plan "d"',
     );
+  });
+});
+
+/**
+ * Narrowing the thinking picker by what the model can do (02 §9.3 gap 2).
+ *
+ * The expectations below are the same table as
+ * `tool_sync::tests::roles::*_thinking_*` in Rust. Both sides have to agree:
+ * this one decides what the user can pick, that one decides what gets written,
+ * and a picker offering a level the writer discards is the defect being fixed.
+ */
+describe("ompThinkingLevelsFor", () => {
+  it("keeps the whole grammar when the catalogue says nothing", () => {
+    expect(ompThinkingLevelsFor(null)).toEqual([...OMP_THINKING_LEVELS]);
+    expect(ompThinkingLevelsFor(undefined)).toEqual([...OMP_THINKING_LEVELS]);
+  });
+
+  it("offers no tiers for a model with no reasoning mode", () => {
+    expect(ompThinkingLevelsFor({ kind: "none" })).toEqual(["inherit"]);
+  });
+
+  it("offers exactly an effort model's tiers, in grammar order", () => {
+    expect(
+      ompThinkingLevelsFor({
+        kind: "effort",
+        // Out of order on purpose: the picker must still read low → high.
+        values: ["high", "low", "medium"],
+        default: "medium",
+        can_disable: true,
+      }),
+    ).toEqual(["inherit", "off", "low", "medium", "high", "auto"]);
+  });
+
+  it("omits `off` when the model cannot disable reasoning", () => {
+    expect(ompThinkingLevelsFor({ kind: "effort", values: ["low"], default: null, can_disable: false })).toEqual([
+      "inherit",
+      "low",
+      "auto",
+    ]);
+  });
+
+  it("maps a budget model onto the tiers OMP's suffix grammar can express", () => {
+    const levels = ompThinkingLevelsFor({ kind: "budget_tokens", min: 1024, max: 32000, default: 4096 });
+    expect(levels).toContain("high");
+    // A token count has no spelling in `provider/model:level`.
+    expect(levels).not.toContain("minimal");
+  });
+});
+
+describe("modelReasoning", () => {
+  const catalog = [{ id: "thinky", reasoning: { kind: "toggle" as const, can_disable: true } }, { id: "plain" }];
+
+  it("finds the capability recorded for a model", () => {
+    expect(modelReasoning(catalog, "thinky")).toEqual({ kind: "toggle", can_disable: true });
+  });
+
+  it("returns null for a model the catalogue does not cover", () => {
+    // Not `{kind:"none"}`: "we have no entry" and "it has no reasoning" lead to
+    // opposite pickers.
+    expect(modelReasoning(catalog, "plain")).toBeNull();
+    expect(modelReasoning(catalog, "unknown-model")).toBeNull();
+    expect(modelReasoning(catalog, "  ")).toBeNull();
   });
 });

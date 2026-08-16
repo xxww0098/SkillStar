@@ -111,10 +111,10 @@ pub fn sync_omp_binding(
 ) -> Result<ToolSyncResultFlat> {
     let models_path = resolve_omp_models_path()?;
     let config_path = resolve_omp_config_path()?;
-    Ok(ToolSyncResultFlat::from_write_outcome(
+    Ok(ToolSyncResultFlat::from_write_outcome_with_drops(
         "omp",
         &models_path,
-        sync_omp_binding_inner(binding, providers, &models_path, &config_path),
+        sync_omp_binding_with_drops(binding, providers, &models_path, &config_path),
     ))
 }
 
@@ -163,12 +163,25 @@ pub(crate) fn build_omp_provider_block(
 /// Path-taking core of [`sync_omp_binding`] — exposed `pub(crate)` so unit
 /// tests can drive it against isolated temp paths instead of the shared
 /// sandbox HOME (avoids cross-test races on `~/.omp/agent/models.yml`).
+#[cfg(test)]
 pub(crate) fn sync_omp_binding_inner(
     binding: &AgentBinding,
     providers: &[Provider],
     models_path: &Path,
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
+    sync_omp_binding_with_drops(binding, providers, models_path, config_path)
+        .map(|(backup, _dropped)| backup)
+}
+
+/// As [`sync_omp_binding_inner`], but also reporting the roles that did not make
+/// it onto disk.
+pub(crate) fn sync_omp_binding_with_drops(
+    binding: &AgentBinding,
+    providers: &[Provider],
+    models_path: &Path,
+    config_path: &Path,
+) -> Result<(Option<PathBuf>, Vec<DroppedRole>)> {
     let (entries, active_id) = resolve_entries(binding, providers)
         .context("OMP binding has no resolvable provider entries")?;
 
@@ -196,10 +209,10 @@ pub(crate) fn sync_omp_binding_inner(
 
     // config.yml: rewrite the managed modelRoles, preserving every other role
     // and setting the user keeps there.
-    let roles = resolve_omp_roles(binding, &entries, active_pointer.as_ref());
+    let (roles, dropped) = resolve_omp_roles(binding, providers, &entries, active_pointer.as_ref());
     set_omp_model_roles(config_path, &roles)?;
 
-    Ok(backup_path)
+    Ok((backup_path, dropped))
 }
 
 /// Models each provider is referenced by through a role assignment, keyed by
@@ -226,25 +239,41 @@ fn role_models_by_provider(
 }
 
 /// Turn the binding's role assignments into the concrete `(role, value)` pairs
-/// to write, dropping anything that would land as a dangling pointer.
+/// to write, plus the list of roles that were dropped and why.
 ///
 /// A role survives only if its name is writable, its provider is actually bound
 /// *and* reached `models.yml` (non-empty OpenAI base URL), and it names a model.
 /// `default` falls back to the active entry so a binding with no role config at
 /// all keeps behaving exactly as it did before roles existed.
+///
+/// Every `continue` below used to be silent. Each one is a case where the panel
+/// shows an assignment and the file does not have it, which the user can only
+/// discover by reading `config.yml` — so each now hands back a reason instead.
 fn resolve_omp_roles(
     binding: &AgentBinding,
+    providers: &[Provider],
     entries: &[(&Provider, &BindingEntry)],
     active_pointer: Option<&ActivePointer>,
-) -> Vec<(String, String)> {
+) -> (Vec<(String, String)>, Vec<DroppedRole>) {
     let mut resolved: Vec<(String, String)> = Vec::new();
+    let mut dropped: Vec<DroppedRole> = Vec::new();
 
-    for (role, target) in &binding.roles {
+    for (canonical, target) in &binding.roles {
         // Back into OMP's vocabulary. The store holds canonical ids; OMP knows
         // `smol` and `task`, not `fast` and `subagent`, so writing the store's
-        // spelling would drop the user's routing and add roles OMP ignores.
-        let role = crate::providers::migrate::omp_role_key(role);
+        // spelling would drop the user's routing and add roles OMP ignores. The
+        // registry row owns the translation; an unregistered role is passed
+        // through verbatim because OMP's `modelRoles` is an open map and a role
+        // the user invented is a role OMP will honour.
+        let role = omp_agent_key(canonical);
         if !is_valid_omp_role_name(&role) {
+            dropped.push(DroppedRole::new(canonical, RoleDropReason::InvalidRoleName));
+            continue;
+        }
+        if target.model.trim().is_empty() {
+            if !target.provider_id.trim().is_empty() {
+                dropped.push(DroppedRole::new(canonical, RoleDropReason::NoModel));
+            }
             continue;
         }
         // The provider must have produced a `skillstar_*` block in models.yml,
@@ -253,11 +282,25 @@ fn resolve_omp_roles(
             provider.id == target.provider_id && !openai_base(provider).trim().is_empty()
         });
         if !written {
+            let exists = providers.iter().any(|p| p.id == target.provider_id);
+            let bound = entries
+                .iter()
+                .any(|(provider, _)| provider.id == target.provider_id);
+            dropped.push(DroppedRole::for_provider(
+                canonical,
+                match (exists, bound) {
+                    (false, _) => RoleDropReason::ProviderMissing,
+                    (true, false) => RoleDropReason::ProviderNotBound,
+                    (true, true) => RoleDropReason::ProviderHasNoEndpoint,
+                },
+                &target.provider_id,
+            ));
             continue;
         }
         let key = skillstar_managed_key(&target.provider_id);
-        if let Some(value) = omp_role_value(target, &key) {
-            resolved.push((role, value));
+        match omp_role_value(target, &key) {
+            Some(value) => resolved.push((role, value)),
+            None => dropped.push(DroppedRole::new(canonical, RoleDropReason::NoModel)),
         }
     }
 
@@ -274,7 +317,20 @@ fn resolve_omp_roles(
     // A config file that reorders itself for internal reasons is a diff nobody
     // can read.
     resolved.sort_by(|(a, _), (b, _)| a.cmp(b));
-    resolved
+    dropped.sort_by(|a, b| a.role.cmp(&b.role));
+    (resolved, dropped)
+}
+
+/// What OMP's `config.yml` calls a canonical role id.
+///
+/// Reads the registry row, so the writer and the role panel cannot disagree
+/// about the spelling. Unregistered roles pass through unchanged: `modelRoles`
+/// is an open map, and a key the user added by hand is one OMP will act on.
+fn omp_agent_key(canonical: &str) -> String {
+    agent_spec("omp")
+        .and_then(|spec| spec.roles.iter().find(|def| def.id == canonical))
+        .map(|def| def.agent_key.to_string())
+        .unwrap_or_else(|| canonical.to_string())
 }
 
 /// Rewrite the SkillStar-managed entries of `modelRoles` in

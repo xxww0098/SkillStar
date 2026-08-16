@@ -1814,21 +1814,18 @@
     },
     "claudeMapping": {
       "title": "Model mapping",
-      "subtitle": "Display names only affect the /model menu; 1M is a context-capacity declaration for Claude.",
       "filledSuffix": "roles filled",
       "quickSet": "One-click set",
       "quickSetSuccess": "Applied the model to every role",
       "quickSetEmpty": "No model to apply — fill a role or fetch the model list first",
       "fetchModels": "Fetch models",
       "colRole": "Role",
-      "colDisplay": "Display name",
       "colRequest": "Request model",
-      "displayPlaceholder": "e.g. DeepSeek V4 Pro",
-      "displayHidden": "Hidden from /model menu",
-      "oneMTitle": "Declare 1M context support",
       "unbind": "Unbind",
       "done": "Done",
-      "diskHint": "Writes to ~/.claude/settings.json"
+      "diskHint": "Writes to ~/.claude/settings.json",
+      "fallbackHint": "Leave a tier empty and Claude Code uses its own built-in model for it.",
+      "colWrites": "Writes to"
     },
     "ompRoles": {
       "default": {
@@ -2130,6 +2127,24 @@
         "openrouter": "Aggregating router · OpenAI-compatible",
         "custom": "Bring your own base URL and key"
       }
+    },
+    "roleDrops": {
+      "toastTitle": "{{count}} role was not written to {{name}}",
+      "toastTitle_other": "{{count}} roles were not written to {{name}}",
+      "rowBadge": "not written",
+      "reason": {
+        "provider_not_bound": "That provider is not bound to this agent, so the role was skipped.",
+        "provider_has_no_endpoint": "That provider has no usable endpoint for this agent, so the role was skipped.",
+        "provider_missing": "That provider no longer exists, so the role was skipped.",
+        "no_model": "No model is selected, so nothing was written for this role.",
+        "role_not_supported": "This agent has no config key for that role, so it was skipped.",
+        "invalid_role_name": "The role name cannot be written to this agent's config file."
+      }
+    },
+    "roles": {
+      "inheritsFrom": "Unassigned — falls back to {{role}}",
+      "agentDecides": "Unassigned — the agent picks for itself",
+      "writesTo": "Writes {{key}}"
     }
   },
   "ssh": {

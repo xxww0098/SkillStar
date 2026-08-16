@@ -254,6 +254,63 @@ export const MODELS_HANDLERS: DevMockHandlers = {
   get_provider_presets_flat: () => PRESETS_FLAT,
   detect_provider_conflicts: () => [],
   get_tool_config_targets: () => [],
+  // Mirrors `tool_sync::agent_specs()` closely enough for the browser dev shell
+  // to render the three role tiers: none, tier aliases, full map.
+  list_agent_descriptors: () => [
+    {
+      id: "claude-code",
+      display_name: "Claude Code",
+      kind: "single",
+      required_wire: "anthropic_messages",
+      roles: [
+        { id: "default", agent_key: "ANTHROPIC_MODEL", primary: true, inherits: null, requires: "any" },
+        { id: "fast", agent_key: "ANTHROPIC_DEFAULT_HAIKU_MODEL", primary: true, inherits: null, requires: "any" },
+        { id: "sonnet", agent_key: "ANTHROPIC_DEFAULT_SONNET_MODEL", primary: false, inherits: null, requires: "any" },
+        { id: "opus", agent_key: "ANTHROPIC_DEFAULT_OPUS_MODEL", primary: false, inherits: null, requires: "any" },
+        {
+          id: "subagent",
+          agent_key: "CLAUDE_CODE_SUBAGENT_MODEL",
+          primary: false,
+          inherits: "default",
+          requires: "any",
+        },
+      ],
+      config_files: [{ file_id: "settings", label: "settings.json", format: "json" }],
+    },
+    {
+      id: "omp",
+      display_name: "Oh My Pi",
+      kind: "multi",
+      required_wire: "openai_chat",
+      roles: [
+        { id: "default", agent_key: "default", primary: true, inherits: null, requires: "any" },
+        { id: "fast", agent_key: "smol", primary: true, inherits: "default", requires: "any" },
+        { id: "slow", agent_key: "slow", primary: true, inherits: "default", requires: "any" },
+        { id: "plan", agent_key: "plan", primary: true, inherits: null, requires: "any" },
+        { id: "vision", agent_key: "vision", primary: false, inherits: null, requires: "vision" },
+        { id: "designer", agent_key: "designer", primary: false, inherits: "default", requires: "any" },
+        { id: "commit", agent_key: "commit", primary: false, inherits: null, requires: "any" },
+        { id: "tiny", agent_key: "tiny", primary: false, inherits: null, requires: "any" },
+        { id: "subagent", agent_key: "task", primary: false, inherits: null, requires: "any" },
+        { id: "advisor", agent_key: "advisor", primary: false, inherits: null, requires: "any" },
+      ],
+      config_files: [
+        { file_id: "models", label: "models.yml", format: "yaml" },
+        { file_id: "config", label: "config.yml", format: "yaml" },
+      ],
+    },
+    {
+      id: "pi",
+      display_name: "Pi",
+      kind: "multi",
+      required_wire: "openai_chat",
+      roles: [],
+      config_files: [
+        { file_id: "models", label: "models.json", format: "json" },
+        { file_id: "settings", label: "settings.json", format: "json" },
+      ],
+    },
+  ],
   detect_tool_installation: () => ({
     installed: true,
     binary_found: true,

@@ -4,4 +4,5 @@
 //! frontend contract, and per D-034 domain types with their own refactoring
 //! rhythm must not be the thing the frontend is pinned to.
 
+pub mod agents;
 pub mod dto;

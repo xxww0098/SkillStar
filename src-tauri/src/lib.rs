@@ -416,6 +416,7 @@ pub fn run() {
             commands::models_commands::push_provider_to_tool_config,
             commands::models_commands::test_provider_latency,
             commands::models_commands::get_tool_config_targets,
+            commands::models_commands::list_agent_descriptors,
             // Flat store commands (v2)
             commands::models_commands::get_providers_flat,
             commands::models_commands::create_provider_flat,

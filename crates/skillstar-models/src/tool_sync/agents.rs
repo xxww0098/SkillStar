@@ -56,6 +56,19 @@ pub struct AgentSpec {
     /// that `/v1/chat/completions` will not do, which is precisely the fact
     /// whose absence produced unbootable `config.toml` files.
     pub required_wire: RequiredWire,
+    /// Which roles this agent can route, and what its config file calls them.
+    ///
+    /// An empty slice means the agent has no role concept at all: the UI renders
+    /// a single provider+model choice and no role panel. That is the correct
+    /// answer for Pi, and inventing roles for it would only produce config the
+    /// tool ignores — Cline paid 88 duplicated fields for two roles and is the
+    /// standing example of why not.
+    ///
+    /// **A role appears here only when [`Self::sync_binding`] writes it.** The
+    /// list is a promise that configuring the role changes a file; anything
+    /// declared but unwritten is the silent-drop defect wearing a registry row.
+    /// `every_declared_role_reaches_disk` holds the two sides together.
+    pub roles: &'static [RoleDef],
     /// Config-file inventory. The first entry is the agent's primary config
     /// file (the one `resolve_tool_config_path` returns).
     pub files: &'static [AgentConfigFileSpec],
@@ -77,6 +90,72 @@ fn resolve_claude_settings_path() -> Result<PathBuf> {
     Ok(home.join(".claude").join("settings.json"))
 }
 
+// ---------------------------------------------------------------------------
+// Role tables
+//
+// Three tiers, per the cross-project survey (02 §9.4): agents with no role
+// concept, agents with a main model plus a couple of tier overrides, and agents
+// with a full role map. The tier is not a label stored anywhere — it is just
+// what the length of this slice already says.
+// ---------------------------------------------------------------------------
+
+/// Tier 2 — Claude Code: one main model plus tier aliases.
+///
+/// `ANTHROPIC_DEFAULT_{SONNET,OPUS}_MODEL` are alias mappings ("when something
+/// asks for Opus, use this id"), not jobs a model is hired for, which is why
+/// they keep Claude's own names instead of being forced into the canonical five.
+/// Only Haiku maps onto [`ROLE_FAST`], and only because Anthropic's own schema
+/// describes it as the model "for background and low-complexity tasks" — the
+/// same sentence every other tool uses for its small model.
+///
+/// None of the tier keys declares an `inherits` target: leaving one unset does
+/// not make Claude fall back to `ANTHROPIC_MODEL`, it makes Claude use its own
+/// built-in model for that tier. Claiming a fallback SkillStar cannot honour
+/// would be worse than saying nothing.
+static CLAUDE_CODE_ROLES: &[RoleDef] = &[
+    RoleDef::primary(ROLE_DEFAULT, "ANTHROPIC_MODEL"),
+    RoleDef::primary(ROLE_FAST, "ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+    RoleDef::secondary("sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"),
+    RoleDef::secondary("opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"),
+    // Unset, sub-agents run on the main model — a fallback Anthropic documents,
+    // so this one is declared.
+    RoleDef::secondary(ROLE_SUBAGENT, "CLAUDE_CODE_SUBAGENT_MODEL").inheriting(ROLE_DEFAULT),
+];
+
+/// Tier 3 — OMP: the full role map, and the only target that can hold all of it.
+///
+/// `agent_key` is OMP's own spelling. The store holds canonical ids, OMP has
+/// never heard of `fast` or `subagent`, and writing the canonical name into
+/// `config.yml` would delete the user's routing while adding roles OMP ignores.
+/// `registry_agent_keys_match_the_migration_table` pins these against
+/// `omp_role_key`, so the two directions cannot drift apart.
+///
+/// `smol` / `slow` / `designer` are the three roles OMP's own
+/// `shouldInheritDefaultBeforePriority` resolves through `default`; the rest go
+/// through its priority chain, which SkillStar does not model and therefore does
+/// not claim to.
+static OMP_ROLES: &[RoleDef] = &[
+    RoleDef::primary(ROLE_DEFAULT, "default"),
+    RoleDef::primary(ROLE_FAST, "smol").inheriting(ROLE_DEFAULT),
+    RoleDef::primary("slow", "slow").inheriting(ROLE_DEFAULT),
+    RoleDef::primary(ROLE_PLAN, "plan"),
+    RoleDef::secondary(ROLE_VISION, "vision").requiring(RoleCapability::Vision),
+    RoleDef::secondary("designer", "designer").inheriting(ROLE_DEFAULT),
+    RoleDef::secondary("commit", "commit"),
+    RoleDef::secondary("tiny", "tiny"),
+    RoleDef::secondary(ROLE_SUBAGENT, "task"),
+    RoleDef::secondary("advisor", "advisor"),
+];
+
+/// Tier 1 — no role concept.
+///
+/// Codex and OpenCode both *have* one upstream (`default_subagent_model`,
+/// `small_model`), and both are absent here on purpose: their writers project
+/// only the active pointer today, and a role this registry declares but no
+/// writer writes is precisely the defect being fixed. Adding either means adding
+/// the writer in the same change, at which point the row grows a line.
+static NO_ROLES: &[RoleDef] = &[];
+
 /// The registry. Order is the canonical presentation order used by
 /// `get_tool_config_targets`.
 static AGENT_SPECS: &[AgentSpec] = &[
@@ -87,6 +166,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         config_dir_probes: &[".claude"],
         kind: AgentKind::Single,
         required_wire: RequiredWire::AnthropicMessages,
+        roles: CLAUDE_CODE_ROLES,
         files: &[AgentConfigFileSpec {
             file_id: "settings",
             label: "settings.json",
@@ -107,6 +187,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         config_dir_probes: &[".claude-desktop"],
         kind: AgentKind::Single,
         required_wire: RequiredWire::AnthropicMessages,
+        roles: NO_ROLES,
         files: &[AgentConfigFileSpec {
             file_id: "binding",
             label: "skillstar-binding.json",
@@ -128,6 +209,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         // an OpenAI-*compatible* host is not enough: it must implement
         // `/v1/responses`.
         required_wire: RequiredWire::OpenaiResponses,
+        roles: NO_ROLES,
         files: &[
             AgentConfigFileSpec {
                 file_id: "config",
@@ -155,6 +237,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         config_dir_probes: &[".config/opencode", ".opencode"],
         kind: AgentKind::Multi,
         required_wire: RequiredWire::OpenaiChat,
+        roles: NO_ROLES,
         files: &[AgentConfigFileSpec {
             file_id: "opencode",
             label: "opencode.json",
@@ -173,6 +256,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         config_dir_probes: &[".pi"],
         kind: AgentKind::Multi,
         required_wire: RequiredWire::OpenaiChat,
+        roles: NO_ROLES,
         files: &[
             AgentConfigFileSpec {
                 file_id: "models",
@@ -200,6 +284,7 @@ static AGENT_SPECS: &[AgentSpec] = &[
         config_dir_probes: &[".omp"],
         kind: AgentKind::Multi,
         required_wire: RequiredWire::OpenaiChat,
+        roles: OMP_ROLES,
         files: &[
             AgentConfigFileSpec {
                 file_id: "models",

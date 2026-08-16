@@ -108,8 +108,58 @@ fn model_entry_from_value(value: &Value) -> Option<ModelCatalogEntry> {
         max_completion_tokens: first_u64(value, &["max_completion_tokens", "outputTokenLimit"])
             .or_else(|| nested_u64(value, "limit", "output")),
         cost: first_value(value, &["cost", "pricing", "price"]),
+        reasoning: reasoning_from_value(value),
         raw: Some(value.clone()),
     })
+}
+
+/// Read a model's reasoning capability out of a registry entry.
+///
+/// Returns `None` when the source says nothing, which is the common case for a
+/// provider's own `/v1/models` list. Only models.dev-shaped entries carry this,
+/// and only they get narrowed pickers; everyone else keeps the full grammar.
+fn reasoning_from_value(value: &Value) -> Option<Reasoning> {
+    let supports = value.get("reasoning").and_then(Value::as_bool)?;
+    if !supports {
+        return Some(Reasoning::None);
+    }
+
+    // models.dev names the tier list `reasoning_options.effort`; older exports
+    // used a bare `reasoning_effort` array. Either way an explicit tier list is
+    // what turns the picker from a toggle into a set of levels.
+    let efforts = value
+        .get("reasoning_options")
+        .and_then(|options| options.get("effort"))
+        .or_else(|| value.get("reasoning_effort"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(Effort::from_omp_thinking)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    // "Can this model turn reasoning off" is a separate question from "which
+    // tiers does it have"; absent an explicit answer, assume it can, because
+    // offering `off` for a model that ignores it costs a no-op while withholding
+    // it from one that honours it costs the user the setting.
+    let can_disable = value
+        .get("reasoning_options")
+        .and_then(|options| options.get("can_disable"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    if efforts.is_empty() {
+        Some(Reasoning::Toggle { can_disable })
+    } else {
+        Some(Reasoning::Effort {
+            default: None,
+            values: efforts,
+            can_disable,
+        })
+    }
 }
 
 fn merge_entry(target: &mut ModelCatalogEntry, source: &ModelCatalogEntry) {
@@ -130,6 +180,9 @@ fn merge_entry(target: &mut ModelCatalogEntry, source: &ModelCatalogEntry) {
     }
     if target.cost.is_none() {
         target.cost = source.cost.clone();
+    }
+    if target.reasoning.is_none() {
+        target.reasoning = source.reasoning.clone();
     }
     if target.raw.is_none() {
         target.raw = source.raw.clone();

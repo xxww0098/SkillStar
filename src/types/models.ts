@@ -1,6 +1,7 @@
 //! models domain types. Split out of the old monolithic index for
 //! navigability; all re-exported by `index.ts`.
 
+import type { Reasoning } from "./generated/Reasoning";
 import type { NavPage } from "./marketplace";
 
 export type AppMode = "skills" | "usage" | "models";
@@ -33,12 +34,40 @@ export interface ToolConfigTarget {
   current_provider?: string;
 }
 
+/**
+ * Why a configured role never reached disk. Mirrors `RoleDropReason` in
+ * `crates/skillstar-models/src/providers/roles.rs`.
+ */
+export type RoleDropReason =
+  | "provider_not_bound"
+  | "provider_has_no_endpoint"
+  | "provider_missing"
+  | "no_model"
+  | "role_not_supported"
+  | "invalid_role_name";
+
+/** One role the last write skipped, with the reason. Mirrors `DroppedRole`. */
+export interface DroppedRole {
+  role: string;
+  reason: RoleDropReason;
+  provider_id?: string | null;
+}
+
 export interface ToolSyncResult {
   tool_id: string;
   success: boolean;
   config_path?: string;
   error?: string;
   backup_path?: string;
+  /**
+   * Roles the write did **not** put on disk. Absent means nothing was skipped.
+   *
+   * A successful sync can still have dropped half the role map — the panel then
+   * shows an assignment the file does not have, which the user could previously
+   * only discover by opening the file. Surfacing this is the whole reason the
+   * field exists, so a caller that ignores it reintroduces the defect.
+   */
+  dropped_roles?: DroppedRole[];
 }
 
 // === Flat Provider Store Types (v2 architecture) ===
@@ -79,6 +108,12 @@ export interface ModelCatalogEntry {
   context_length?: number | null;
   max_completion_tokens?: number | null;
   cost?: Record<string, unknown> | null;
+  /**
+   * What kind of reasoning control this model has, when the source said so.
+   * Absent means "unknown", which the thinking picker treats as "offer
+   * everything" — see `ompThinkingLevelsFor`.
+   */
+  reasoning?: Reasoning | null;
   raw?: Record<string, unknown> | null;
 }
 
@@ -127,25 +162,41 @@ export const OMP_THINKING_LEVELS = [
 export type OmpThinkingLevel = (typeof OMP_THINKING_LEVELS)[number];
 
 /**
- * One OMP model role → provider+model assignment. `provider_id` is a SkillStar
- * provider id; the on-disk `skillstar_*` key is derived at write time.
+ * One role → provider+model assignment. `provider_id` is a SkillStar provider
+ * id; the on-disk key (OMP's `skillstar_*`, Claude's env var) is derived at
+ * write time.
+ *
+ * Domain-general, not OMP's: the backend's `ModelRef` is the one shape every
+ * agent's writer consumes, and Claude's tier mapping now travels through the
+ * same field. `thinking` is `ModelRef.effort` in OMP's spelling, which is the
+ * spelling the v3 wire shape uses until WP-4 replaces it.
  */
-export interface OmpRoleTarget {
+export interface RoleTarget {
   provider_id: string;
   model: string;
   thinking?: OmpThinkingLevel | null;
 }
 
+/** Historical name for {@link RoleTarget}, kept while the OMP panel still uses it. */
+export type OmpRoleTarget = RoleTarget;
+
 /**
- * OMP-specific binding-level settings. Mirrors the backend `OmpSettings`.
- * Keys of `roles` are OMP role names (`default`, `smol`, `slow`, `plan`, …).
+ * Binding-level settings: the role map, keyed by canonical role id.
+ *
+ * The keys are the ids the backend registry declares (`default`, `fast`,
+ * `plan`, …), **not** the target file's spelling — the writer translates. That
+ * is what lets Claude Code and OMP share one storage field despite spelling
+ * `fast` as `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `smol` respectively.
  */
-export interface OmpSettings {
-  roles: Record<string, OmpRoleTarget>;
+export interface AgentRoleSettings {
+  roles: Record<string, RoleTarget>;
 }
 
-/** Binding-level settings bag. Only OMP populates it today. */
-export type ToolBindingSettings = OmpSettings;
+/** Historical name for {@link AgentRoleSettings}. */
+export type OmpSettings = AgentRoleSettings;
+
+/** Binding-level settings bag. */
+export type ToolBindingSettings = AgentRoleSettings;
 
 /**
  * All provider+model bindings for one Agent tool, plus which one is active.

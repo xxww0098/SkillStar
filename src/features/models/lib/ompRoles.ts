@@ -10,13 +10,25 @@
  * `primary` marks the four roles OMP exposes as CLI flags — the ones worth
  * configuring first. The rest are shown behind a "more roles" disclosure.
  */
-import { OMP_THINKING_LEVELS, type OmpThinkingLevel } from "../../../types";
+import { OMP_THINKING_LEVELS, type ModelCatalogEntry, type OmpThinkingLevel } from "../../../types";
+import type { Effort } from "../../../types/generated/Effort";
+import type { Reasoning } from "../../../types/generated/Reasoning";
 
 export const OMP_TOOL_ID = "omp";
 
 export interface OmpRoleDef {
-  /** Role key written to `modelRoles.<id>`. */
+  /**
+   * Canonical role id — the key the assignment is **stored** under, shared with
+   * every other agent.
+   *
+   * Not what `config.yml` calls it. The store speaks canonical ids since v4
+   * (`smol` migrated to `fast`), and a panel keyed by the on-disk spelling
+   * would read an empty slot for every migrated user while quietly writing a
+   * second, duplicate role beside theirs.
+   */
   id: string;
+  /** What `modelRoles.<key>` calls it on disk. Mirrors `RoleDef.agent_key`. */
+  agentKey: string;
   /** The CLI flag that overrides this role for one run, when one exists. */
   flag?: string;
   /** i18n key suffix under `models.ompRoles.<key>`. */
@@ -30,16 +42,16 @@ export interface OmpRoleDef {
  * the panel reads top-down as "normal → cheap → deep → planning".
  */
 export const OMP_ROLE_DEFS: OmpRoleDef[] = [
-  { id: "default", flag: "--model", key: "default", primary: true },
-  { id: "smol", flag: "--smol", key: "smol", primary: true },
-  { id: "slow", flag: "--slow", key: "slow", primary: true },
-  { id: "plan", flag: "--plan", key: "plan", primary: true },
-  { id: "vision", key: "vision", primary: false },
-  { id: "designer", key: "designer", primary: false },
-  { id: "commit", key: "commit", primary: false },
-  { id: "tiny", key: "tiny", primary: false },
-  { id: "task", key: "task", primary: false },
-  { id: "advisor", key: "advisor", primary: false },
+  { id: "default", agentKey: "default", flag: "--model", key: "default", primary: true },
+  { id: "fast", agentKey: "smol", flag: "--smol", key: "smol", primary: true },
+  { id: "slow", agentKey: "slow", flag: "--slow", key: "slow", primary: true },
+  { id: "plan", agentKey: "plan", flag: "--plan", key: "plan", primary: true },
+  { id: "vision", agentKey: "vision", key: "vision", primary: false },
+  { id: "designer", agentKey: "designer", key: "designer", primary: false },
+  { id: "commit", agentKey: "commit", key: "commit", primary: false },
+  { id: "tiny", agentKey: "tiny", key: "tiny", primary: false },
+  { id: "subagent", agentKey: "task", key: "task", primary: false },
+  { id: "advisor", agentKey: "advisor", key: "advisor", primary: false },
 ];
 
 export const OMP_PRIMARY_ROLES = OMP_ROLE_DEFS.filter((r) => r.primary);
@@ -54,13 +66,65 @@ export const OMP_DEFAULT_CYCLE_ORDER = ["smol", "default", "slow"];
 
 /**
  * Roles that fall back to `default` when unassigned, per OMP's
- * `shouldInheritDefaultBeforePriority`. Leaving these blank is safe — the UI
- * says so rather than nagging the user to fill them in.
+ * `shouldInheritDefaultBeforePriority`.
+ *
+ * Superseded by `RoleDefDto.inherits`, which the backend registry serves for
+ * every agent rather than just this one. Kept as the value used while the
+ * descriptor query is still in flight, so the panel never briefly claims a role
+ * has no fallback when it does.
  */
-export const OMP_ROLES_INHERITING_DEFAULT = ["smol", "slow", "designer"];
+export const OMP_ROLES_INHERITING_DEFAULT = ["fast", "slow", "designer"];
 
 export { OMP_THINKING_LEVELS };
 export type { OmpThinkingLevel };
+
+/**
+ * The thinking levels worth offering for one model.
+ *
+ * Mirrors `omp_thinking_levels_for` in
+ * `crates/skillstar-models/src/tool_sync/types.rs`, which is the SSOT — the same
+ * narrowing has to happen on the write side, and the picker exists to stop the
+ * user choosing something the writer will then quietly not honour.
+ *
+ * `null` means the catalogue said nothing about this model, which is not the
+ * same as "it has no reasoning mode": narrowing on absent data would hide levels
+ * that work. Only an explicit capability narrows.
+ */
+export function ompThinkingLevelsFor(reasoning: Reasoning | null | undefined): OmpThinkingLevel[] {
+  if (!reasoning) return [...OMP_THINKING_LEVELS];
+
+  const levels: OmpThinkingLevel[] = ["inherit"];
+  switch (reasoning.kind) {
+    case "none":
+      break;
+    case "toggle":
+      if (reasoning.can_disable) levels.push("off");
+      levels.push("auto");
+      break;
+    case "effort": {
+      if (reasoning.can_disable) levels.push("off");
+      // Ordered by the grammar rather than by the catalogue's order, so the
+      // picker reads low → high however the source listed them.
+      for (const level of OMP_THINKING_LEVELS) {
+        if (reasoning.values.includes(level as Effort) && !levels.includes(level)) levels.push(level);
+      }
+      levels.push("auto");
+      break;
+    }
+    case "budget_tokens":
+      // OMP's `:suffix` grammar has no place for a token count, so a budget
+      // model gets the tiers OMP does map onto budgets.
+      levels.push("off", "low", "medium", "high", "max", "auto");
+      break;
+  }
+  return levels;
+}
+
+/** The reasoning capability recorded for one model id, if the catalogue has it. */
+export function modelReasoning(catalog: ModelCatalogEntry[], modelId: string): Reasoning | null {
+  if (!modelId.trim()) return null;
+  return catalog.find((entry) => entry.id === modelId.trim())?.reasoning ?? null;
+}
 
 /** `inherit` and an unset suffix mean the same thing to OMP. */
 export function isDefaultThinking(level: OmpThinkingLevel | null | undefined): boolean {

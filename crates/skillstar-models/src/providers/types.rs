@@ -191,6 +191,16 @@ pub struct ModelCatalogEntry {
     pub max_completion_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<Value>,
+    /// What kind of reasoning control this model actually has, when the source
+    /// said so.
+    ///
+    /// `None` means "the source did not say", not "none" — a provider's plain
+    /// `/v1/models` list carries no capability data at all. The distinction is
+    /// load-bearing: [`crate::tool_sync::omp_thinking_levels_for`] narrows the
+    /// thinking picker on `Some` and leaves the full grammar on `None`, so
+    /// conflating them would hide levels that work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<super::catalog::Reasoning>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<Value>,
 }

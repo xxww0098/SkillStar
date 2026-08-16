@@ -122,7 +122,7 @@ flowchart LR
   tauri --> sync
 ```
 
-- `skillstar-models::providers` 的模块归属：`provider.rs` / `credential.rs` / `binding.rs` / `catalog.rs` 是 v4 域类型；`crud_v4.rs` 拥有 v4 的 provider 行与绑定命令；`migrate/` 拥有 v3→v4 纯函数与迁移报告；`store_v4.rs` 拥有 v4 读写与备份/校验外壳；`catalog_cache.rs` 拥有 provider 自身模型目录的磁盘缓存（`<data_root>/cache/model_catalog/`，一 provider 一文件）；`types.rs` 降级为只供迁移读的 v1/v2/v3 历史形状，新代码不得引用。前端 DTO 投影（剥离明文凭据）在 `skillstar-app/src/models/dto.rs`，不在域 crate。
+- `skillstar-models::providers` 的模块归属：`provider.rs` / `credential.rs` / `binding.rs` / `catalog.rs` / `roles.rs` 是 v4 域类型（`roles.rs` 拥有跨 Agent 的角色词表、`RoleDef` 注册表行类型与写盘跳过原因，因此 `tool_sync` 的 Agent 注册表依赖 `providers`，而不是反过来）；`crud_v4.rs` 拥有 v4 的 provider 行与绑定命令；`migrate/` 拥有 v3→v4 纯函数与迁移报告；`store_v4.rs` 拥有 v4 读写与备份/校验外壳；`catalog_cache.rs` 拥有 provider 自身模型目录的磁盘缓存（`<data_root>/cache/model_catalog/`，一 provider 一文件）；`types.rs` 降级为只供迁移读的 v1/v2/v3 历史形状，新代码不得引用。前端 DTO 投影（剥离明文凭据）在 `skillstar-app/src/models/dto.rs`，Agent 注册表的声明面投影（`AgentDescriptorDto`，剥离函数指针）在 `skillstar-app/src/models/agents.rs`，都不在域 crate。
 - `skillstar-models::tool_sync` 只接受 v4 类型：writer 签名是 `(&AgentBinding, &[Provider])`，`view.rs` 是把 v4 可选端点与 `Credential` 投影成 writer 需要的平字符串的**唯一**地方。`migrate_configs.rs` 拥有「迁移那一次运行修复已写坏的 Agent 配置文件」这条接缝——它是 `providers` 与 `tool_sync` 之间唯一一处由 store 侧调用写盘侧的方向。
 - `src-tauri/src/commands/models_commands/compat.rs` 是 v4 域类型与仍为 v3 形状的 IPC 之间的唯一翻译层，随前端 IA 重写一并删除。除它以外，命令层不得出现 v3 类型。
 

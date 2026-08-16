@@ -13,6 +13,19 @@ pub async fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>, AppError
     Ok(tool_sync::get_tool_config_targets()?)
 }
 
+/// The agent registry itself: identity, binding kind, wire protocol, config
+/// files, and each agent's role list.
+///
+/// This is what lets the role panel be one component instead of one per agent.
+/// Which roles Claude Code has, what OMP calls `fast` on disk, and which rows
+/// fall back to `default` are all facts the backend already had to know in order
+/// to write the files; serving them is what stops the frontend from keeping a
+/// second, drifting copy.
+#[tauri::command]
+pub async fn list_agent_descriptors() -> Result<Vec<AgentDescriptorDto>, AppError> {
+    Ok(skillstar_app::models::agents::agent_descriptors())
+}
+
 /// Bind a provider to an agent and make it the active one.
 ///
 /// Replaces v3's `activate_tool`, which also did the jobs now held by

@@ -128,9 +128,11 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
   `~/.omp/agent/config.yml` 的 `modelRoles` 角色指针；tool-sync 以
   `format: "yaml"` 文件规格读写（见 decisions.md D-018、D-025）。OMP 不读
   `~/.pi/agent/models.json` / `settings.json`，与 Pi 的绑定互不影响。
-- OMP 是唯一带**模型角色**的 Agent：同一次绑定可以把 `default` / `smol` / `slow` /
-  `plan` 等角色分别指到不同 Provider。角色行为、写盘与清理规则见
-  [models/README.md](../models/README.md#omp-模型角色)，不在此重复。
+- **角色路由是每个 Agent 自己声明的能力**，分三档：无角色（Pi / Codex / OpenCode /
+  Claude Desktop）、单角色 + 兜底（Claude Code 的 5 条 env 键）、多角色（OMP 的 10 条
+  `modelRoles`）。声明写在 `tool_sync::agents` 注册表的 `roles` 列，UI 与 writer 都读它。
+  角色词表、回落语义、写盘跳过回报与能力裁剪见
+  [models/README.md](../models/README.md#角色路由跨-agent)，不在此重复。
 
 ---
 

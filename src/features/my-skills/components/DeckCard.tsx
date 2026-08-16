@@ -328,14 +328,15 @@ export function DeckCard({
               {/* Deploy to project */}
               <Button
                 size="sm"
-                className="h-7 px-3 text-xs group/btn bg-primary hover:bg-primary/90"
+                className="h-7 w-7 p-0 shrink-0 group/btn bg-primary hover:bg-primary/90"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeploy(groupSkillNames);
                 }}
+                title={t("skillCards.deploy")}
+                aria-label={t("skillCards.deploy")}
               >
-                <Rocket className="w-3 h-3 mr-1.5 transition-transform group-hover/btn:-translate-y-[1px] group-hover/btn:translate-x-[1px]" />
-                {t("skillCards.deploy")}
+                <Rocket className="w-3.5 h-3.5 transition-transform group-hover/btn:-translate-y-[1px] group-hover/btn:translate-x-[1px]" />
               </Button>
             </div>
           )}

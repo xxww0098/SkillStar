@@ -7,6 +7,7 @@
 ## 所有权
 
 - `skillstar-skills` 拥有技能 install/update/bundle/local/repo scan、lockfile/update detection、Agent registry、项目 manifest、deployment 和 patrol。无消费者的旧 terminal backend 不作为公共子系统保留。
+- `skillstar-skills::skill_hooks` 拥有技能自带 hook 的解析与逐 Agent 落盘。它与 deployment 共用安装管道但不共用代码路径：deployment 投放惰性 Markdown，skill_hooks 写入可执行载荷，两者的门禁与归属规则不同。
 - `skillstar-core` 只提供共享 `Skill` 契约与基础设施，不拥有技能 lockfile/update detection。
 - `src-tauri/src/commands/` 只转发 DTO、State 和事件；CLI 安装/管理复用相同 facade。
 - 搜索结果安装等跨 marketplace/skills 流程由 `skillstar-app` 编排。
@@ -130,6 +131,19 @@
 - 更新后的 `resync_existing_links` 同时刷新 link 和 copy；新部署先在 staging 路径建立，再原子替换。
 - 打开项目时，copy 部署通过内容 hash 检测 stale；仅刷新仍被 manifest 选择的技能，不复活用户主动删除的条目。
 - unlink 对 link、junction 和 copy 都使用统一删除入口；missing 视为幂等成功。
+
+## 技能自带 Hook
+
+技能的第二种载荷。技能目录下的 `hooks/hooks.json` 使用 Claude Code hook 格式；`skillstar-skills::skill_hooks` 是唯一写入面。
+
+- **一份载荷，不做翻译。** Claude 的 `~/.claude/settings.json` 的 `hooks` 与 Codex 的 `~/.codex/hooks.json` 的 `hooks` 使用同一套 PascalCase 事件名和同一种条目结构（`{matcher?, hooks: [{type, command, timeout?}]}`），只有落点不同，因此注册表只记录「哪个 Agent、哪个文件」两列。Codex `config.toml` 里的 `pre_tool_use` 一类 snake_case 是信任账本键，不是事件名，不得当作第二种方言。
+- **Agent 入表的门槛是实测。** 只有其 hook 文件被真实读取、事件结构确认与上述格式一致的 Agent 才加一行；凭厂商文档加行会写出永不触发的 hook。当前两行：`claude`、`codex`。
+- **写入只是提议，不等于启用。** Codex 按 `[hooks.state."<文件>:<事件>:<索引>:<索引>"].trusted_hash` 逐条记录信任，未被信任的条目不执行（绕过需要 `--dangerously-bypass-hook-trust`）。Hook 是可执行载荷而非惰性 Markdown，因此不得随技能安装静默下发，必须是逐技能的显式用户动作。
+- **归属零状态推导**，与 [decisions.md](../../decisions.md) D-024 同源：不写 sidecar 台账，命令必须经 `${SKILL_DIR}`（同时接受生态既有的 `${CLAUDE_PLUGIN_ROOT}`）展开为技能绝对路径，归属判据是「命令中出现该技能目录，且其后紧跟路径分隔符或字符串结尾」。判据是「后接分隔符」而非「后一个字符不像文件名」：POSIX 文件名几乎允许所有标点，排除法只是一张想得起来的字符清单，`…/skills/foo+bar/run` 会被 `foo` 误认领。技能目录的尾部分隔符在比较前归一，否则同步传 `…/foo`、卸载传 `…/foo/` 会让条目变成删不掉的孤儿。
+- **写入即可移除**是不变量，两条 fail-closed 门禁守它：展开后不满足上述判据的命令拒绝写入；不含任何 `command` 的条目（空 `hooks` 数组或全是非 command handler）同样拒绝——它能被写进去却永远判不出归属。声明为空数组的事件不创建键，否则该键无主、清理时也不会被剪掉。
+- **就地覆写而非追加**：信任账本的键含条目索引，移动邻居条目会静默作废其 `trusted_hash` 并让用户为已审过的 hook 重新授权。等量重同步不移动任何外部条目；增删条目仍会重编号，属已知上限（见模块内 `ponytail:` 注释）。
+- 目标 Agent 的配置目录不存在时拒绝写入，不代为创建——否则 SkillStar 会让探测方误认为该 Agent 已安装。
+- 同步报告返回实际写入的事件名。Agent 会静默忽略不认识的事件键，因此「写了什么」必须如实回报，不能让永不触发的 hook 看起来像安装成功。**不做 per-Agent 事件白名单过滤**：各 Agent 事件集确实不同（Claude 有 `PostToolUseFailure`/`StopFailure`/`TeammateIdle`，均不在 Codex 的 hook 迁移事件表中），但 Codex 公布的表同时漏掉了其信任账本证明会执行的 `Stop`，据此构造白名单会拒掉能用的 hook。误拒比如实回报一次空转更糟。
 
 ## 本地创作、Bundle 与 Share
 

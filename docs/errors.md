@@ -2,6 +2,30 @@
 
 状态：active
 
+## 2026-08-15 - 声明了却没人写：角色面板收下用户输入然后丢掉，UI 与磁盘长期不一致
+
+- Symptom: 三种表现，同一个根因。① Claude Code 的模型映射面板可以填 Sonnet/Opus/Haiku，保存后 `~/.claude/settings.json` 里没有任何 `ANTHROPIC_DEFAULT_*_MODEL`；重开面板值还在，因为它从来只活在渲染进程。② OMP 角色面板里一个角色显示 `某 provider/某模型`，`~/.omp/agent/config.yml` 的 `modelRoles` 里却没有该条目，且同步结果是绿色成功。③ 面板给每个模型都列出 9 个 thinking 等级，选了对没有推理档的模型无效的等级，也不会有任何提示。
+- Root cause: 「角色」这个概念在 v3 有两处互不相通的实现——Claude 的层级模型在 `provider.meta`、OMP 的角色在 binding 的无 schema settings 袋——因此没有任何一层能回答「这个 Agent 支持哪些角色」。于是三件事各自失配：前端 Claude 面板只有 `useState`（后端契约其实早就就绪，断链在前端）；OMP 写盘函数 `resolve_omp_roles` 对「provider 未绑定 / 无端点 / 无模型」三种情况各有一个裸 `continue`，调用方拿不到任何差异信息；thinking 等级是一个全局 9 元常量，与模型能力无关。共同点是**声明与写盘之间没有约束**：UI 可以提供一个写盘侧根本不会处理的设置，而且没有任何机制会发现。
+- Fix: 角色词表提升为域内类型 `providers::roles`（`RoleDef{id, agent_key, primary, inherits, requires}` + `DroppedRole`/`RoleDropReason`）；`AgentSpec` 增加 `roles` 列，每个 Agent 声明自己能投影的角色及其磁盘键名；`ToolSyncResultFlat` 增加 `dropped_roles`，OMP 与 Claude 写盘时逐条回报跳过原因，前端落到角色行并弹一次警告；`ModelCatalogEntry` 增加 `reasoning`，`omp_thinking_levels_for` 按能力裁剪等级；Claude 面板改为经 `update_agent_settings` 落到 `AgentBinding.roles`。
+- Files: `crates/skillstar-models/src/providers/roles.rs`、`crates/skillstar-models/src/tool_sync/{agents,sync,omp_provider,types}.rs`、`crates/skillstar-app/src/models/agents.rs`、`src/features/models/components/hub/matrix/rich/ClaudeMappingPanel.tsx`、`src/features/models/api/{agents,activations}.ts`。
+- Self-check:
+  - 通用判据：**只要一处「声明能力」和另一处「实现能力」分处两个文件，就必须有测试把两者对上，否则它们迟早不一致**。这里是 `every_declared_role_reaches_disk`：给每个 Agent 的全部声明角色赋值、跑真实 writer、断言每个 `agent_key` 出现在写出的字节里。新增角色但忘了改 writer 会直接红。
+  - 「成功」与「完整」是两个问题。写盘成功不代表用户配的东西都写进去了，差集只有 writer 算得出来，所以它必须是返回值的一部分而不是日志。任何新 writer 若有 `continue`/`skip` 分支，都要顺手回报原因。
+  - 前端不要重算后端的跳过规则。规则复制一份就会在 writer 改动时过期；`useRoleDrops` 只记住后端的裁决。
+  - 存储键与磁盘键不是一回事。v4 迁移把 `smol` 改名为 `fast`，前端若继续按 `smol` 读写，老用户的角色会「消失」同时旁边多出一条重复角色。`registry_agent_keys_match_the_migration_table` 与 `ompRoles.test.ts` 分别钉住两侧。
+  - 「不知道」不能渲染成「不支持」。模型目录没有 reasoning 数据时必须给出完整等级表，只有明确的能力声明才收窄。
+
+## 2026-08-14 - 稀疏 checkout 按 Skill 名去重会把仍存在的已安装来源误报为删除
+
+- Symptom: 更新 `impeccable` 时弹出「来源已不再提供」，选择「彻底移除该 Skill」却收到 `Skill 'impeccable' still comes from its source; keep or discard the local changes instead of removing it`。Git reflog 显示每次更新都先 reset 到远端提交、随即回滚；远端提交仍包含 lockfile 记录的 `.agents/skills/impeccable`。
+- Root cause: 远端新增了同名的 `.agent/skills/impeccable` provider 副本。`derive_sparse_skill_dirs` 为节省物化范围按 Skill 目录名去重，`.agent/...` 与 `.agents/...` 优先级相同且前者按字典序先出现，于是更新后的 sparse set 只保留 `.agent/...`。`git sparse-checkout set` 随即移除已安装链接指向的 `.agents/...` 工作树目录；`skills_dropped_by_source` 只看链接目标当下是否存在，便误报来源删除并触发回滚。resolver 随后用 Git tree 正确看见 `.agents/...` 仍存在，因此拒绝“来源删除”专用卸载，形成自相矛盾且没有可用出口的对话框。
+- Fix: repo-cache 更新在重算发现目录之前记录同一 checkout 的全部已安装 `source_folder`；若远端仍有其它同名 provider，新的 sparse set 也必须合并这些已安装来源目录。真正被远端删除的路径即使留在 sparse pattern 中也不会被物化，原有 source-removal 检测继续成立。
+- Files: `crates/skillstar-skills/src/repo_scanner/ops.rs`、`crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`。
+- Self-check:
+  - 通用判据：**发现结果的去重策略不能改写已经安装的 provenance**。同名 provider 路径用于“新安装选哪个”，lockfile 的 `source_folder` 用于“已安装项继续跟哪个”；两者不是同一个问题。
+  - 回归 fixture 必须从仅有 `.agents/skills/impeccable` 的 sparse checkout 开始，再让远端同时保留该路径并新增 `.agent/skills/impeccable`；更新应直接成功，不能产生 `SourceRemoved`。
+  - 同时保留真正删除来源的测试：远端确实移除原路径时，即使 sparse pattern 仍含旧目录，目标仍不存在，必须继续进入可保留副本/移除的停止状态。
+
 ## 2026-08-14 - 跨 provider 的时间戳单位不是常识：Claude Code 的 expiresAt 是毫秒
 
 - Symptom: 尚未发生（新增 `anthropic` fetcher 时提前拦下）。若直接把 `claudeAiOauth.expiresAt` 写进 `Subscription::access_token_expires_at`，过期时刻会落在约五万年后，`token_refresh::needs_refresh` 之类的过期判定对该行**永远返回 false**——不会报错，只会静默地永不失效，等到上游真的 401 才暴露，且届时错误分类正确、症状却是“卡片突然要求重新登录且没有任何前兆”。

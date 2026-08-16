@@ -26,6 +26,7 @@ use skillstar_models::providers::{
     self, ModelCatalogFetchResult, ProviderEntryFlat, ProviderPatchFlat, ProvidersStoreV4,
     ToolBinding,
 };
+use skillstar_app::models::agents::AgentDescriptorDto;
 use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 
 // ---------------------------------------------------------------------------

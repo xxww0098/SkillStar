@@ -1,22 +1,17 @@
 import { Layers3, Route, Unplug } from "lucide-react";
 import { Popover } from "radix-ui";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../../components/ui/button";
 import { cn } from "../../../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../../../types";
 import type { AgentDescriptor } from "../../../../lib/agentRegistry";
+import { useAgentDescriptor } from "../../../../api/agents";
 import { OMP_PRIMARY_ROLES, OMP_TOOL_ID } from "../../../../lib/ompRoles";
 import { activeEntry, bindingRoles, bindsProvider } from "../../../../lib/toolBinding";
 import { EditorPage } from "../EditorPage";
 import type { ModelsHubData } from "../types";
-import {
-  ClaudeMappingPanel,
-  emptyClaudeMap,
-  mappingFillCount,
-  seedClaudeMap,
-  type ClaudeMapState,
-} from "./ClaudeMappingPanel";
+import { ClaudeMappingPanel, claudeFillCount } from "./ClaudeMappingPanel";
 import { ompAssignedCount, OmpRolePanel } from "./OmpRolePanel";
 import { isCompatible, providerModels, RichMatrixShell } from "./RichMatrixShell";
 
@@ -34,31 +29,12 @@ function claudeDiskHintKey(toolId: string): string {
   return toolId === "claude-desktop" ? "models.matrix.claudeDesktopDiskHint" : "models.matrix.claudeCliDiskHint";
 }
 
-function mapKey(toolId: string, providerId: string): string {
-  return `${toolId}::${providerId}`;
-}
-
 export function VariantB2b({ data }: { data: ModelsHubData }) {
   const { t } = useTranslation();
-  // Mapping is per Claude surface × provider — CLI and Desktop never share rows.
-  const [maps, setMaps] = useState<Record<string, ClaudeMapState>>({});
-
-  const getMap = (toolId: string, provider: ProviderEntryFlat) => maps[mapKey(toolId, provider.id)] ?? emptyClaudeMap();
-  const setMap = (toolId: string, providerId: string, next: ClaudeMapState) => {
-    setMaps((prev) => ({ ...prev, [mapKey(toolId, providerId)]: next }));
-  };
 
   // Full-page Claude mapping from agent strip / deep settings.
   if (data.overlay.type === "agent-settings" && isClaudeColumn(data.overlay.toolId)) {
-    const toolId = data.overlay.toolId;
-    return (
-      <ClaudeMappingPage
-        data={data}
-        toolId={toolId}
-        maps={maps}
-        setMap={(providerId, next) => setMap(toolId, providerId, next)}
-      />
-    );
+    return <ClaudeMappingPage data={data} toolId={data.overlay.toolId} />;
   }
 
   // Create / App AI stay main-pane pages. Edit/delete are owned by ModelsHub
@@ -79,13 +55,7 @@ export function VariantB2b({ data }: { data: ModelsHubData }) {
       legend={null}
       renderCell={({ provider, column, agent }) =>
         isClaudeColumn(column.bindToolId) ? (
-          <ClaudeCodeCell
-            data={data}
-            provider={provider}
-            toolId={column.bindToolId}
-            map={getMap(column.bindToolId, provider)}
-            onMapChange={(next) => setMap(column.bindToolId, provider.id, next)}
-          />
+          <ClaudeCodeCell data={data} provider={provider} toolId={column.bindToolId} />
         ) : column.bindToolId === OMP_TOOL_ID ? (
           <OmpRoleCell data={data} provider={provider} agent={agent} />
         ) : (
@@ -96,28 +66,12 @@ export function VariantB2b({ data }: { data: ModelsHubData }) {
   );
 }
 
-function ClaudeMappingPage({
-  data,
-  toolId,
-  maps,
-  setMap,
-}: {
-  data: ModelsHubData;
-  toolId: string;
-  maps: Record<string, ClaudeMapState>;
-  setMap: (providerId: string, next: ClaudeMapState) => void;
-}) {
+function ClaudeMappingPage({ data, toolId }: { data: ModelsHubData; toolId: string }) {
   const { t } = useTranslation();
-  const entry = activeEntry(data.toolActivations[toolId]);
+  const binding = data.toolActivations[toolId] ?? null;
+  const entry = activeEntry(binding);
   const provider = entry ? (data.providers.find((p) => p.id === entry.provider_id) ?? null) : null;
   const title = toolId === "claude-desktop" ? "Claude Desktop" : "Claude CLI";
-  const key = provider ? mapKey(toolId, provider.id) : "";
-
-  useEffect(() => {
-    if (provider && !maps[key]) {
-      setMap(provider.id, seedClaudeMap(provider));
-    }
-  }, [provider, maps, key, setMap]);
 
   if (!provider) {
     return (
@@ -129,8 +83,6 @@ function ClaudeMappingPage({
       </div>
     );
   }
-
-  const value = maps[key] ?? seedClaudeMap(provider);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -151,13 +103,12 @@ function ClaudeMappingPage({
           <ClaudeMappingPanel
             chrome="page"
             provider={provider}
-            value={value}
-            onChange={(next) => setMap(provider.id, next)}
+            toolId={toolId}
+            binding={binding}
             onUnbind={() => {
               void data.deactivateTool(toolId);
               data.closeOverlay();
             }}
-            onStub={data.stub}
             diskHint={t(claudeDiskHintKey(toolId))}
           />
         </div>
@@ -170,25 +121,22 @@ function ClaudeCodeCell({
   data,
   provider,
   toolId,
-  map,
-  onMapChange,
 }: {
   data: ModelsHubData;
   provider: ProviderEntryFlat;
   toolId: string;
-  map: ClaudeMapState;
-  onMapChange: (next: ClaudeMapState) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const entry = activeEntry(data.toolActivations[toolId]);
+  const binding = data.toolActivations[toolId] ?? null;
+  const entry = activeEntry(binding);
   const isActive = entry?.provider_id === provider.id;
-  const { filled, total } = mappingFillCount(map);
+  const descriptor = useAgentDescriptor(toolId);
+  const roles = bindingRoles(binding);
+  const defs = useMemo(() => descriptor?.roles ?? [], [descriptor]);
+  const { filled, total } = claudeFillCount(roles, defs);
   const unmappedLabel = t("models.matrix.unmapped");
-  const primary = useMemo(() => {
-    const sonnet = map.sonnet.requestModel.trim();
-    return sonnet || provider.default_model || unmappedLabel;
-  }, [map, provider.default_model, unmappedLabel]);
+  const primary = roles.sonnet?.model.trim() || entry?.model || provider.default_model || unmappedLabel;
 
   const compatible = Boolean(provider.base_url_anthropic);
   if (!compatible) {
@@ -206,10 +154,7 @@ function ClaudeCodeCell({
         onClick={() => {
           void data
             .activateTool(provider.id, toolId, provider.default_model || undefined)
-            .then(() => {
-              onMapChange(seedClaudeMap(provider));
-              setOpen(true);
-            })
+            .then(() => setOpen(true))
             .catch(() => {});
         }}
         className="mx-auto flex h-14 w-full max-w-[168px] flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-border/55 text-[11px] text-muted-foreground hover:border-primary/40 hover:bg-primary/[0.04] hover:text-foreground"
@@ -220,16 +165,8 @@ function ClaudeCodeCell({
     );
   }
 
-  const panelValue = filled === 0 ? seedClaudeMap(provider) : map;
-
   return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next && filled === 0) onMapChange(seedClaudeMap(provider));
-      }}
-    >
+    <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button
           type="button"
@@ -250,14 +187,13 @@ function ClaudeCodeCell({
           <ClaudeMappingPanel
             chrome="popover"
             provider={provider}
-            value={panelValue}
-            onChange={onMapChange}
+            toolId={toolId}
+            binding={binding}
             onClose={() => setOpen(false)}
             onUnbind={() => {
               void data.deactivateTool(toolId);
               setOpen(false);
             }}
-            onStub={data.stub}
             diskHint={t(claudeDiskHintKey(toolId))}
           />
         </Popover.Content>

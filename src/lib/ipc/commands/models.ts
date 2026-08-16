@@ -15,6 +15,7 @@ import type {
   ToolSyncResult,
   WriteToolConfigFileResult,
 } from "../../../types";
+import type { AgentDescriptorDto } from "../../../types/generated/AgentDescriptorDto";
 
 interface ConfigConflict {
   conflict_type: "EnvVarOverride" | "LegacyConfig" | "ExternalModification";
@@ -106,6 +107,12 @@ export interface ModelsCommands {
 
   // Tool config targets
   get_tool_config_targets: { args: { app_id: AppId }; result: ToolConfigTarget[] };
+  /**
+   * The agent registry itself. Compiled into the binary, so the renderer can
+   * cache it forever — and, more to the point, stop keeping a second copy of
+   * which roles each agent has and what its config file calls them.
+   */
+  list_agent_descriptors: { args: Record<string, never>; result: AgentDescriptorDto[] };
 
   // Presets and discovery
   get_provider_presets_flat: { args: Record<string, never>; result: ProviderPresetFlat[] };

@@ -10,17 +10,22 @@ import type {
   ProviderEntryFlat,
   ToolBinding,
 } from "../../../../../../types";
+import type { Reasoning } from "../../../../../../types/generated/Reasoning";
+import { useAgentDescriptor, useRoleDrops } from "../../../../api/agents";
 import { useProvidersFlat } from "../../../../hooks/useProvidersFlat";
 import {
   buildOmpLaunchCommand,
   isDefaultThinking,
+  modelReasoning,
   OMP_DEFAULT_CYCLE_ORDER,
   OMP_PRIMARY_ROLES,
   OMP_ROLE_DEFS,
+  OMP_ROLES_INHERITING_DEFAULT,
   OMP_SECONDARY_ROLES,
   OMP_TOOL_ID,
   previewRoleValue,
 } from "../../../../lib/ompRoles";
+import { getModelCatalogFromMeta } from "../../../../lib/providerPatch";
 import { activeEntry, bindingRoles } from "../../../../lib/toolBinding";
 import { OmpRoleRow } from "./OmpRoleRow";
 import { providerModels } from "./RichMatrixShell";
@@ -60,9 +65,40 @@ export function OmpRolePanel({ binding, providers, onClose, chrome = "popover" }
   const { updateToolBindingSettings } = useProvidersFlat();
   const [showSecondary, setShowSecondary] = useState(false);
   const [copied, setCopied] = useState(false);
+  // The registry knows which roles fall back to which, and which the writer
+  // just skipped. Both were previously invisible: the fallback table lived here
+  // as a literal and the skips were reported nowhere at all.
+  const descriptor = useAgentDescriptor(OMP_TOOL_ID);
+  const drops = useRoleDrops(OMP_TOOL_ID);
 
   const roles = bindingRoles(binding);
   const assignable = useMemo(() => ompAssignableProviders(binding, providers), [binding, providers]);
+
+  /**
+   * What an empty row will fall back to. The backend registry answers for every
+   * agent; the local list is only the value used before the query resolves, so
+   * the row never briefly claims a role has no fallback when it does.
+   */
+  const inheritsOf = useCallback(
+    (roleId: string): string | null => {
+      const declared = descriptor?.roles.find((def) => def.agent_key === roleId || def.id === roleId);
+      if (descriptor) return declared?.inherits ?? null;
+      return OMP_ROLES_INHERITING_DEFAULT.includes(roleId) ? "default" : null;
+    },
+    [descriptor],
+  );
+
+  /** The reasoning capability of the model a role points at, when known. */
+  const reasoningOf = useCallback(
+    (target: OmpRoleTarget | undefined): Reasoning | null => {
+      if (!target) return null;
+      const provider = providers.find((p) => p.id === target.provider_id);
+      return modelReasoning(getModelCatalogFromMeta(provider?.meta), target.model);
+    },
+    [providers],
+  );
+
+  const dropOf = useCallback((roleId: string) => drops.find((drop) => drop.role === roleId) ?? null, [drops]);
   const primaryCount = ompAssignedCount(
     roles,
     OMP_PRIMARY_ROLES.map((r) => r.id),
@@ -203,6 +239,9 @@ export function OmpRolePanel({ binding, providers, onClose, chrome = "popover" }
               onModelChange={(model) => patchRole(role.id, { model })}
               onThinkingChange={(level) => setThinking(role.id, level)}
               onClear={() => patchRole(role.id, null)}
+              inheritsRole={inheritsOf(role.id)}
+              reasoning={reasoningOf(roles[role.id])}
+              drop={dropOf(role.id)}
             />
           ))}
 
@@ -226,6 +265,9 @@ export function OmpRolePanel({ binding, providers, onClose, chrome = "popover" }
                   onModelChange={(model) => patchRole(role.id, { model })}
                   onThinkingChange={(level) => setThinking(role.id, level)}
                   onClear={() => patchRole(role.id, null)}
+                  inheritsRole={inheritsOf(role.id)}
+                  reasoning={reasoningOf(roles[role.id])}
+                  drop={dropOf(role.id)}
                 />
               ))
             : null}

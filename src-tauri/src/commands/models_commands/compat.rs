@@ -432,6 +432,53 @@ mod tests {
         );
     }
 
+    /// The middle link of the chain 00 §1.3 found broken.
+    ///
+    /// This is the literal payload the Claude mapping panel sends — canonical
+    /// role ids, one entry per tier — and what it has to become is a role map
+    /// the Claude writer recognises. The renderer's end is
+    /// `ClaudeMappingPanel.persist.test.tsx`; the disk end is
+    /// `tool_sync::tests::roles::claude_role_mapping_lands_in_the_env_block`.
+    /// Between them the tier models now reach `~/.claude/settings.json`, which
+    /// they had not done in three schema versions.
+    #[test]
+    fn the_claude_panels_payload_becomes_roles_the_writer_recognises() {
+        let payload = serde_json::json!({
+            "roles": {
+                "default": { "provider_id": "p1", "model": "big-model" },
+                "fast":    { "provider_id": "p1", "model": "haiku-fast" },
+                "sonnet":  { "provider_id": "p1", "model": "sonnet-mid" },
+                "opus":    { "provider_id": "p1", "model": "opus-deep" },
+                "subagent":{ "provider_id": "p1", "model": "subagent-model" },
+            }
+        });
+
+        let roles = roles_from_flat(&payload);
+        assert_eq!(roles.len(), 5);
+
+        // Every key must be one Claude Code declares, or the writer would drop
+        // it — the panel offering a row the backend has no env key for is the
+        // silent-discard defect in a different costume.
+        let declared: Vec<&str> = skillstar_models::tool_sync::agent_spec("claude-code")
+            .unwrap()
+            .roles
+            .iter()
+            .map(|def| def.id)
+            .collect();
+        for role in roles.keys() {
+            assert!(
+                declared.contains(&role.as_str()),
+                "the panel sends `{role}`, which claude-code does not declare"
+            );
+        }
+        assert_eq!(roles["fast"].model, "haiku-fast");
+        assert_eq!(roles["subagent"].provider_id, "p1");
+
+        // And the bag holds nothing else, so no stray agent settings are
+        // invented by a panel that only edits roles.
+        assert_eq!(settings_without_roles(&payload), None);
+    }
+
     #[test]
     fn a_bag_holding_only_roles_projects_back_to_no_bag_at_all() {
         let bag = serde_json::json!({ "roles": { "fast": { "provider_id": "p1", "model": "m" } } });

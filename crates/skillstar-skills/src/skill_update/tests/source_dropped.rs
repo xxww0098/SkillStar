@@ -253,3 +253,85 @@ fn a_dropped_skill_whose_content_is_already_gone_can_only_be_removed() {
     let lockfile = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).unwrap();
     assert!(!lockfile.skills.iter().any(|entry| entry.name == "alpha"));
 }
+
+#[test]
+fn adding_a_duplicate_provider_path_does_not_look_like_source_removal() {
+    let _guard = crate::lock_test_env();
+    let _hub = TestHub::new();
+    let remote = tempfile::tempdir().unwrap();
+    run_git(remote.path(), &["init", "--initial-branch=main"]);
+    run_git(remote.path(), &["config", "user.email", "test@example.com"]);
+    run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
+
+    let original = remote.path().join(".agents/skills/impeccable");
+    std::fs::create_dir_all(&original).unwrap();
+    std::fs::write(
+        original.join("SKILL.md"),
+        "---\nname: impeccable\ndescription: impeccable v1\n---\n",
+    )
+    .unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "v1"]);
+
+    let repos = skillstar_core::infra::paths::repos_cache_dir();
+    std::fs::create_dir_all(&repos).unwrap();
+    let cache = repos.join("impeccable");
+    run_git(
+        &repos,
+        &[
+            "clone",
+            remote.path().to_str().unwrap(),
+            cache.to_str().unwrap(),
+        ],
+    );
+    run_git(&cache, &["sparse-checkout", "init", "--cone"]);
+    run_git(
+        &cache,
+        &["sparse-checkout", "set", ".agents/skills/impeccable"],
+    );
+    crate::repo_scanner::install_from_repo_at(
+        &cache,
+        &remote.path().to_string_lossy(),
+        None,
+        &[crate::repo_scanner::SkillInstallTarget {
+            id: "impeccable".to_string(),
+            folder_path: ".agents/skills/impeccable".to_string(),
+        }],
+    )
+    .unwrap();
+
+    std::fs::write(
+        original.join("SKILL.md"),
+        "---\nname: impeccable\ndescription: impeccable v2\n---\n",
+    )
+    .unwrap();
+    let duplicate = remote.path().join(".agent/skills/impeccable");
+    std::fs::create_dir_all(&duplicate).unwrap();
+    std::fs::write(
+        duplicate.join("SKILL.md"),
+        "---\nname: impeccable\ndescription: generated provider copy\n---\n",
+    )
+    .unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "add provider copy"]);
+
+    let report = update_skills(&["impeccable".to_string()]);
+    if !report.blocked.is_empty() {
+        let error = resolve_skill_update("impeccable", LocalDivergenceResolution::Uninstall)
+            .expect_err("the false source-removal dialog currently has no working exit");
+        panic!(
+            "the tracked source still contains the installed path, but update reported {:?} and removal failed: {error:#}",
+            report.blocked
+        );
+    }
+
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(report.updated.len(), 1);
+    assert!(
+        std::fs::read_to_string(
+            skillstar_core::infra::paths::hub_skills_dir().join("impeccable/SKILL.md")
+        )
+        .unwrap()
+        .contains("impeccable v2")
+    );
+}
