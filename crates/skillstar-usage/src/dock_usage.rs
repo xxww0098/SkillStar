@@ -82,15 +82,15 @@ pub fn snapshot_menu_summary(usage: &SubscriptionUsage, lang: &str) -> Option<(i
         return Some((1000, text));
     }
 
-    if let Some(credit) = usage.credits.first() {
-        if let Some(amt) = &credit.credit_amount {
-            let text = if is_zh {
-                format!("剩余 {amt} 积分")
-            } else {
-                format!("{amt} credits")
-            };
-            return Some((1001, text));
-        }
+    if let Some(credit) = usage.credits.first()
+        && let Some(amt) = &credit.credit_amount
+    {
+        let text = if is_zh {
+            format!("剩余 {amt} 积分")
+        } else {
+            format!("{amt} credits")
+        };
+        return Some((1001, text));
     }
 
     if let Some(plan) = &usage.plan_name {

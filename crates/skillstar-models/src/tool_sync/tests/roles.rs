@@ -70,8 +70,10 @@ fn every_declared_role_reaches_disk() {
         let mut binding = AgentBinding::single(entry(&provider.id, "entry-model"));
         binding.roles = assign_every_role(spec, &provider.id);
 
-        let mut store = ProvidersStoreV4::default();
-        store.providers = vec![provider];
+        let mut store = ProvidersStoreV4 {
+            providers: vec![provider],
+            ..Default::default()
+        };
         store.bindings.insert(spec.id.to_string(), binding.clone());
 
         let (result, written) = write_all_configs(spec, &store);
@@ -289,8 +291,10 @@ fn a_claude_role_on_another_provider_is_skipped_and_reported() {
         ModelRef::new(&bound.id, "pretty-model"),
     );
 
-    let mut store = ProvidersStoreV4::default();
-    store.providers = vec![bound.clone(), other.clone()];
+    let mut store = ProvidersStoreV4 {
+        providers: vec![bound.clone(), other.clone()],
+        ..Default::default()
+    };
     store.bindings.insert("claude-code".to_string(), binding);
 
     let result = sync_tool_binding(&store, "claude-code");
@@ -329,11 +333,13 @@ fn omp_reports_why_each_dropped_role_was_dropped() {
     no_endpoint.endpoints.openai_chat = None;
     let unbound = flat("omp-unbound", "elsewhere");
 
-    let mut binding = AgentBinding::default();
-    binding.entries = vec![
-        entry(&bound.id, "model-a"),
-        entry(&no_endpoint.id, "model-a"),
-    ];
+    let mut binding = AgentBinding {
+        entries: vec![
+            entry(&bound.id, "model-a"),
+            entry(&no_endpoint.id, "model-a"),
+        ],
+        ..Default::default()
+    };
     binding
         .roles
         .insert("default".to_string(), ModelRef::new(&bound.id, "model-a"));
@@ -352,8 +358,10 @@ fn omp_reports_why_each_dropped_role_was_dropped() {
         .roles
         .insert("tiny".to_string(), ModelRef::new(&bound.id, "   "));
 
-    let mut store = ProvidersStoreV4::default();
-    store.providers = vec![bound.clone(), no_endpoint.clone(), unbound.clone()];
+    let mut store = ProvidersStoreV4 {
+        providers: vec![bound.clone(), no_endpoint.clone(), unbound.clone()],
+        ..Default::default()
+    };
     store.bindings.insert("omp".to_string(), binding);
 
     let result = sync_tool_binding(&store, "omp");
@@ -399,8 +407,10 @@ fn a_fully_writable_role_map_reports_no_drops() {
         .roles
         .insert("fast".to_string(), ModelRef::new(&bound.id, "model-b"));
 
-    let mut store = ProvidersStoreV4::default();
-    store.providers = vec![bound];
+    let mut store = ProvidersStoreV4 {
+        providers: vec![bound],
+        ..Default::default()
+    };
     store.bindings.insert("omp".to_string(), binding);
 
     let result = sync_tool_binding(&store, "omp");
@@ -472,8 +482,10 @@ fn a_synthetic_agent_syncs_through_the_registry_alone() {
     };
 
     let provider = flat("fake-p1", "relay");
-    let mut store = ProvidersStoreV4::default();
-    store.providers = vec![provider.clone()];
+    let mut store = ProvidersStoreV4 {
+        providers: vec![provider.clone()],
+        ..Default::default()
+    };
 
     // Unbound → the registry's unsync column runs, no id knowledge needed.
     let empty = sync_binding_with_spec(&spec, &store);

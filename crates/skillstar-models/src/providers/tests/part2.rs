@@ -300,7 +300,7 @@ fn reordering_leaves_unnamed_rows_where_they_were() {
     let b = create_provider(&mut store, make_provider("B")).unwrap();
     let before = store.provider(&b.id).unwrap().sort_index;
 
-    reorder_providers(&mut store, &[a.id.clone()]).unwrap();
+    reorder_providers(&mut store, std::slice::from_ref(&a.id)).unwrap();
 
     assert_eq!(store.provider(&a.id).unwrap().sort_index, 0);
     assert_eq!(store.provider(&b.id).unwrap().sort_index, before);

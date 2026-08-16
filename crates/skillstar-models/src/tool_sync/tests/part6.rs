@@ -235,22 +235,24 @@ fn the_repair_drops_unwritable_codex_entries_and_explains_itself() {
     let mut openai = v3_relay("bbbb2222-y", "api.openai.com");
     openai.base_url_openai = "https://api.openai.com/v1".to_string();
 
-    let mut binding = ToolBinding::default();
-    binding.entries = vec![
-        ToolActivation {
-            provider_id: chat_only.id.clone(),
-            model: "model-a".to_string(),
-            settings: None,
-            last_sync_at: None,
-        },
-        ToolActivation {
-            provider_id: openai.id.clone(),
-            model: "gpt-5.4".to_string(),
-            settings: None,
-            last_sync_at: None,
-        },
-    ];
-    binding.active_index = 1;
+    let binding = ToolBinding {
+        entries: vec![
+            ToolActivation {
+                provider_id: chat_only.id.clone(),
+                model: "model-a".to_string(),
+                settings: None,
+                last_sync_at: None,
+            },
+            ToolActivation {
+                provider_id: openai.id.clone(),
+                model: "gpt-5.4".to_string(),
+                settings: None,
+                last_sync_at: None,
+            },
+        ],
+        active_index: 1,
+        ..Default::default()
+    };
     let mut tool_activations = std::collections::HashMap::new();
     tool_activations.insert("codex".to_string(), binding);
 
@@ -309,13 +311,15 @@ fn the_repair_clears_codex_entirely_when_no_entry_survives() {
     .unwrap();
 
     let chat_only = v3_relay("aaaa1111-x", "relay.example.com");
-    let mut binding = ToolBinding::default();
-    binding.entries = vec![ToolActivation {
-        provider_id: chat_only.id.clone(),
-        model: "model-a".to_string(),
-        settings: None,
-        last_sync_at: None,
-    }];
+    let binding = ToolBinding {
+        entries: vec![ToolActivation {
+            provider_id: chat_only.id.clone(),
+            model: "model-a".to_string(),
+            settings: None,
+            last_sync_at: None,
+        }],
+        ..Default::default()
+    };
     let mut tool_activations = std::collections::HashMap::new();
     tool_activations.insert("codex".to_string(), binding);
 
@@ -350,13 +354,15 @@ fn a_native_login_row_survives_the_repair_untouched() {
     official.api_key = String::new();
     official.codex_auth_mode = "oauth".to_string();
 
-    let mut binding = ToolBinding::default();
-    binding.entries = vec![ToolActivation {
-        provider_id: official.id.clone(),
-        model: String::new(),
-        settings: None,
-        last_sync_at: None,
-    }];
+    let binding = ToolBinding {
+        entries: vec![ToolActivation {
+            provider_id: official.id.clone(),
+            model: String::new(),
+            settings: None,
+            last_sync_at: None,
+        }],
+        ..Default::default()
+    };
     let mut tool_activations = std::collections::HashMap::new();
     tool_activations.insert("codex".to_string(), binding);
 

@@ -97,12 +97,16 @@ fn v3_fixture() -> FlatProvidersStore {
     let p1 = relay("aaaa1111-x", "alpha", true);
     let p2 = relay("bbbb2222-y", "beta", false);
 
-    let mut multi = ToolBinding::default();
-    multi.entries = vec![v3_entry(&p1.id, "model-a"), v3_entry(&p2.id, "model-b")];
-    multi.active_index = 1;
+    let multi = ToolBinding {
+        entries: vec![v3_entry(&p1.id, "model-a"), v3_entry(&p2.id, "model-b")],
+        active_index: 1,
+        ..Default::default()
+    };
 
-    let mut claude = ToolBinding::default();
-    claude.entries = vec![v3_entry(&p1.id, "model-a")];
+    let claude = ToolBinding {
+        entries: vec![v3_entry(&p1.id, "model-a")],
+        ..Default::default()
+    };
 
     let mut omp = multi.clone();
     omp.settings = Some(serde_json::json!({
@@ -238,8 +242,10 @@ fn codex_writes_the_same_bytes_as_v3_for_a_host_that_already_spoke_responses() {
     openai.codex_auth_mode = "api_key".to_string();
     let id = openai.id.clone();
 
-    let mut binding = ToolBinding::default();
-    binding.entries = vec![v3_entry(&id, "gpt-5.4")];
+    let binding = ToolBinding {
+        entries: vec![v3_entry(&id, "gpt-5.4")],
+        ..Default::default()
+    };
     let mut tool_activations = std::collections::HashMap::new();
     tool_activations.insert("codex".to_string(), binding);
 

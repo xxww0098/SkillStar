@@ -69,7 +69,7 @@ fn migrate_backfills_anthropic_url_only_when_openai_url_matches_preset() {
     row.preset_id = Some("deepseek".to_string());
     row.base_url_openai = preset.base_url_openai.clone();
 
-    let out = migrate_v3_to_v4(store_of(vec![row]), &[preset.clone()]);
+    let out = migrate_v3_to_v4(store_of(vec![row]), std::slice::from_ref(&preset));
 
     let provider = &out.store.providers[0];
     assert_eq!(
@@ -142,7 +142,7 @@ fn migrate_backfills_models_list_under_the_same_rule() {
     row.preset_id = Some("deepseek".to_string());
     row.base_url_openai = preset.base_url_openai.clone();
 
-    let out = migrate_v3_to_v4(store_of(vec![row]), &[preset.clone()]);
+    let out = migrate_v3_to_v4(store_of(vec![row]), std::slice::from_ref(&preset));
 
     assert_eq!(
         out.store.providers[0].endpoints.models_list.as_deref(),

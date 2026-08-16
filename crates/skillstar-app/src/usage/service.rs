@@ -421,12 +421,11 @@ pub fn dock_menu_lines_for_lang(lang: &str) -> Vec<String> {
             } else {
                 label
             };
-            if let Some(usage) = snapshots.get(&sub.id) {
-                if let Some((priority, summary)) =
+            if let Some(usage) = snapshots.get(&sub.id)
+                && let Some((priority, summary)) =
                     skillstar_usage::dock_usage::snapshot_menu_summary(usage, lang)
-                {
-                    return (priority, format!("{label} · {summary}"));
-                }
+            {
+                return (priority, format!("{label} · {summary}"));
             }
             let not_synced = if is_zh { "未同步" } else { "Not synced" };
             (3000, format!("{label} · {not_synced}"))
