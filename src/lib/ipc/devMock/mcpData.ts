@@ -550,6 +550,28 @@ export function mcpRuntimeSelection(id: string): MockRecord {
   };
 }
 
+const TEMPLATE_TOKEN = /\{([A-Za-z0-9_.-]+)\}/g;
+
+/**
+ * Seed the `{curly_brace}` sub-form the real backend ships with each templated
+ * input, so the browser dev path renders the same variable fields the app does.
+ */
+function templateVariables(declared: MockRecord): MockRecord[] {
+  const value = typeof declared.value === "string" ? declared.value : "";
+  const map = (declared.variables as Record<string, MockRecord> | undefined) ?? {};
+  const out: MockRecord[] = [];
+  for (const [, name] of value.matchAll(TEMPLATE_TOKEN)) {
+    if (out.some((seen) => seen.name === name)) continue;
+    const variable = map[name] ?? { isRequired: true, isSecret: false, format: "string" };
+    out.push({
+      name,
+      variable,
+      prefilled: variable.isRequired || variable.isSecret ? "" : String(variable.default ?? ""),
+    });
+  }
+  return out;
+}
+
 /** `McpInstallPlan` — the pre-install confirmation payload. */
 export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
   const selection = mcpRuntimeSelection(id);
@@ -564,22 +586,26 @@ export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
   const pkg = isPackage ? packagesOf(id)[packageIndex] : undefined;
 
   const inputs: MockRecord[] = [];
-  for (const env of (pkg?.environmentVariables as MockRecord[] | undefined) ?? []) {
+  for (const [index, env] of ((pkg?.environmentVariables as MockRecord[] | undefined) ?? []).entries()) {
     inputs.push({
       key: env.name,
       scope: "environment",
+      index,
       input: env,
       prefilled: env.isSecret || env.isRequired ? "" : String(env.default ?? ""),
       mustAsk: Boolean(env.isSecret || env.isRequired),
+      variables: templateVariables(env),
     });
   }
-  for (const header of (remote?.headers as MockRecord[] | undefined) ?? []) {
+  for (const [index, header] of ((remote?.headers as MockRecord[] | undefined) ?? []).entries()) {
     inputs.push({
       key: header.name,
       scope: "header",
+      index,
       input: header,
       prefilled: String(header.value ?? ""),
       mustAsk: Boolean((header.isSecret || header.isRequired) && header.value === undefined),
+      variables: templateVariables(header),
     });
   }
 

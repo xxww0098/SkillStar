@@ -9,7 +9,7 @@ function input(patch: Partial<McpInput> = {}): McpInput {
 }
 
 function declared(patch: Partial<McpInstallInput> = {}): McpInstallInput {
-  return { key: "API_KEY", scope: "environment", input: input(), prefilled: "", mustAsk: false, ...patch };
+  return { key: "API_KEY", scope: "environment", index: 0, input: input(), prefilled: "", mustAsk: false, ...patch };
 }
 
 function renderForm(inputs: McpInstallInput[], errors: Parameters<typeof McpInstallInputsForm>[0]["errors"] = []) {
@@ -61,7 +61,7 @@ describe("McpInstallInputsForm", () => {
     expect(field).toHaveValue("50325");
 
     fireEvent.change(field, { target: { value: "50326" } });
-    expect(onFieldChange).toHaveBeenCalledWith("PORT", "environment", "50326");
+    expect(onFieldChange).toHaveBeenCalledWith("environment", 0, "50326");
   });
 
   it("locks a publisher-pinned value and edits its variable instead", () => {
@@ -70,10 +70,8 @@ describe("McpInstallInputsForm", () => {
         key: "Authorization",
         scope: "header",
         prefilled: "Bearer {TOKEN}",
-        input: input({
-          value: "Bearer {TOKEN}",
-          variables: { TOKEN: { isRequired: true, isSecret: true, format: "string" } },
-        }),
+        input: input({ value: "Bearer {TOKEN}" }),
+        variables: [{ name: "TOKEN", variable: { isRequired: true, isSecret: true, format: "string" }, prefilled: "" }],
       }),
     ]);
 
@@ -84,7 +82,7 @@ describe("McpInstallInputsForm", () => {
     const variable = screen.getByLabelText(/\{TOKEN\}/);
     expect(variable).toHaveAttribute("type", "password");
     fireEvent.change(variable, { target: { value: "ghp_x" } });
-    expect(onVariableChange).toHaveBeenCalledWith("Authorization", "header", "TOKEN", "ghp_x");
+    expect(onVariableChange).toHaveBeenCalledWith("header", 0, "TOKEN", "ghp_x");
   });
 
   it("shows the publisher's own description for a field", () => {
@@ -95,7 +93,7 @@ describe("McpInstallInputsForm", () => {
   it("renders a per-field validation error", () => {
     renderForm(
       [declared({ key: "API_KEY", mustAsk: true, input: input({ isRequired: true }) })],
-      [{ key: "API_KEY", scope: "environment", code: "required" }],
+      [{ scope: "environment", index: 0, code: "required" }],
     );
     expect(screen.getByText("必填")).toBeInTheDocument();
   });
