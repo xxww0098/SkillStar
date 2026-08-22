@@ -18,6 +18,11 @@
 //! any target fails to drop the server, the removals that already landed are
 //! put back before the error propagates, so the store and the live configs
 //! never disagree about whether a server exists.
+//!
+//! **Create is the other exception.** `create_server_and_sync` persists
+//! `mcp_servers.json` itself (through [`write_mcp_store`], not
+//! [`guarded_write`]) *before* projecting, because that order is what keeps
+//! the store a superset of what the tools hold. See its docs.
 
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -399,6 +404,36 @@ fn remove_from_public_tools_atomically(
             (results, Err(e))
         }
     }
+}
+
+/// Create an entry, persist the store, then project it to every enabled
+/// target.
+///
+/// **The store is written before anything is projected**, and unlike its
+/// siblings this function owns that write rather than leaving it to the
+/// caller — the order is the contract, so it cannot be delegated. A crash
+/// between the two steps leaves a store holding a server no tool has yet:
+/// recoverable, one re-sync away from correct. Projecting first would leave
+/// the reverse — live tool configs holding a server the store never recorded,
+/// which nothing points at and no re-sync can find.
+///
+/// A target that refuses the projection does not fail the create: the store
+/// stays the superset, and the per-target results report what actually landed
+/// (see the module docs on non-transactional batches). A create carries no
+/// legacy tombstones — `create_server` drops enable flags for unsupported
+/// ids, and both tombstone ids are unsupported — so the public pass is the
+/// whole projection.
+pub fn create_server_and_sync(
+    store: &mut McpStore,
+    path: &Path,
+    entry: McpServerEntry,
+) -> Result<(McpServerEntry, Vec<McpSyncResult>)> {
+    let mut next = store.clone();
+    let created = create_server(&mut next, entry)?;
+    write_mcp_store(&next, path)?;
+    *store = next;
+    let results = sync_server_public_tools(&created, false);
+    Ok((created, results))
 }
 
 /// Apply an edit and reconcile all public targets plus any pending legacy
