@@ -17,7 +17,7 @@ use skillstar_marketplace::{
 };
 use tracing::{debug, error};
 
-use skillstar_app::mcp::McpInstallPlan;
+use skillstar_app::mcp::{McpInstallAnswer, McpInstallPlan, McpInstallPreview};
 
 const MCP_REGISTRY_SCOPE: &str = "mcp_registry";
 
@@ -192,5 +192,31 @@ pub async fn mcp_market_install_plan(
     Ok(skillstar_app::mcp::build_install_plan(
         &load_registry_server(&id)?,
         runtime_id.as_deref(),
+    ))
+}
+
+/// The same payload recomputed with the user's answers folded in: the entry as
+/// it would be written, and the command line as it would run.
+///
+/// Separate from [`mcp_market_install_plan`] because it is cheap — no `PATH`
+/// walk, no filesystem — so the wizard can call it as the form is filled. The
+/// answers carry the user's secrets, which is why **only the row id and the
+/// runtime shape are logged**, never a value, and why the result must not be
+/// cached (a cache key holding a secret is a secret at rest).
+#[tauri::command]
+pub async fn mcp_market_install_preview(
+    id: String,
+    runtime_id: Option<String>,
+    answers: Vec<McpInstallAnswer>,
+) -> Result<McpInstallPreview, AppError> {
+    debug!(
+        target: "mcp_marketplace",
+        id = %id, runtime = ?runtime_id, answers = answers.len(),
+        "mcp_market_install_preview called"
+    );
+    Ok(skillstar_app::mcp::preview_install(
+        &load_registry_server(&id)?,
+        runtime_id.as_deref(),
+        &answers,
     ))
 }

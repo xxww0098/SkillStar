@@ -24,9 +24,77 @@ use skillstar_marketplace::{
 };
 use skillstar_models::mcp::McpServerEntry;
 
+use super::install::{McpInstallAnswer, McpInstallInputScope, template_tokens};
 use super::runtime::{
     CandidateOrigin, McpRuntimeCandidate, McpRuntimeShape, parse_candidate_id, select_runtime,
 };
+
+/// The values the user typed, addressed the way the install plan numbered the
+/// form: `(scope, ordinal)`, plus a variable name for one `{curly_brace}` hole
+/// inside a publisher-pinned template.
+///
+/// Substitution happens *here*, at the three [`prefill`] call sites, and not on
+/// the flattened `args` afterwards. At this point the argument list is still
+/// structured and ordered, so an answer **replaces** the publisher's prefill
+/// instead of being spliced in beside it — which is what used to emit an
+/// argument carrying a `default` twice (`--port 3000 3000`).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Answers<'a>(&'a [McpInstallAnswer]);
+
+impl<'a> Answers<'a> {
+    pub(crate) fn new(answers: &'a [McpInstallAnswer]) -> Self {
+        Self(answers)
+    }
+
+    /// The raw answer for one address, if the user gave one.
+    pub(crate) fn get(
+        &self,
+        scope: McpInstallInputScope,
+        index: usize,
+        variable: Option<&str>,
+    ) -> Option<&'a str> {
+        self.0
+            .iter()
+            .find(|answer| {
+                answer.scope == scope
+                    && answer.index as usize == index
+                    && answer.variable.as_deref() == variable
+            })
+            .map(|answer| answer.value.as_str())
+    }
+
+    /// What one field contributes to the launch spec.
+    ///
+    /// A publisher-pinned `value` stays pinned — the schema says it is not the
+    /// user's to edit — but its `{curly_braces}` are filled from the
+    /// per-variable answers. A token nobody answered is left visible, the same
+    /// rule [`resolve_url`] has always followed.
+    pub(crate) fn value(
+        &self,
+        scope: McpInstallInputScope,
+        index: usize,
+        input: &McpInput,
+    ) -> String {
+        let Some(template) = input.value.as_deref().filter(|value| !value.is_empty()) else {
+            return match self.get(scope, index, None) {
+                Some(answered) => answered.to_string(),
+                None => prefill(input),
+            };
+        };
+
+        let mut out = template.to_string();
+        for token in template_tokens(template) {
+            let Some(answered) = self
+                .get(scope, index, Some(&token))
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            out = out.replace(&format!("{{{token}}}"), answered);
+        }
+        out
+    }
+}
 
 /// Sanitize a registry name into a valid MCP config key. Server keys are
 /// written verbatim into every tool's config, so keep them to `[A-Za-z0-9_-]`.
@@ -66,10 +134,15 @@ pub(crate) fn prefill(input: &McpInput) -> String {
     input.default.clone().unwrap_or_default()
 }
 
-fn key_values(items: &[McpKeyValueInput]) -> BTreeMap<String, String> {
+fn key_values(
+    items: &[McpKeyValueInput],
+    scope: McpInstallInputScope,
+    answers: Answers<'_>,
+) -> BTreeMap<String, String> {
     items
         .iter()
-        .map(|item| (item.name.clone(), prefill(&item.input)))
+        .enumerate()
+        .map(|(index, item)| (item.name.clone(), answers.value(scope, index, &item.input)))
         .collect()
 }
 
@@ -79,15 +152,19 @@ fn key_values(items: &[McpKeyValueInput]) -> BTreeMap<String, String> {
 /// the publisher set one. `placeholder` and `valueHint` are deliberately not
 /// emitted — they are display hints, and pushing them would put the string
 /// "PATH_TO_DIRECTORY" on the real command line.
-pub(crate) fn argument_tokens(args: &[McpArgument]) -> Vec<String> {
+pub(crate) fn argument_tokens(
+    args: &[McpArgument],
+    scope: McpInstallInputScope,
+    answers: Answers<'_>,
+) -> Vec<String> {
     let mut out = Vec::new();
-    for arg in args {
+    for (index, arg) in args.iter().enumerate() {
         if arg.kind == McpArgumentKind::Named
             && let Some(name) = arg.name.as_deref().filter(|n| !n.trim().is_empty())
         {
             out.push(name.to_string());
         }
-        let value = prefill(&arg.input);
+        let value = answers.value(scope, index, &arg.input);
         if !value.is_empty() {
             out.push(value);
         }
@@ -99,10 +176,14 @@ pub(crate) fn argument_tokens(args: &[McpArgument]) -> Vec<String> {
 /// default for. Unresolved placeholders are left in place: the install form
 /// collects them, and a half-substituted url is more honest than one with an
 /// empty hole in it.
-pub(crate) fn resolve_url(url: &str, variables: &[McpKeyValueInput]) -> String {
+pub(crate) fn resolve_url(
+    url: &str,
+    variables: &[McpKeyValueInput],
+    answers: Answers<'_>,
+) -> String {
     let mut out = url.to_string();
-    for variable in variables {
-        let value = prefill(&variable.input);
+    for (index, variable) in variables.iter().enumerate() {
+        let value = answers.value(McpInstallInputScope::UrlVariable, index, &variable.input);
         if value.is_empty() {
             continue;
         }
@@ -112,10 +193,17 @@ pub(crate) fn resolve_url(url: &str, variables: &[McpKeyValueInput]) -> String {
 }
 
 /// Build the `args` a package candidate launches with.
-pub(crate) fn package_args(package: &McpRegistryPackageSummary) -> Vec<String> {
+pub(crate) fn package_args(
+    package: &McpRegistryPackageSummary,
+    answers: Answers<'_>,
+) -> Vec<String> {
     let command = package.runtime.trim();
     let identifier = package.identifier.trim();
-    let runtime_args = argument_tokens(&package.runtime_arguments);
+    let runtime_args = argument_tokens(
+        &package.runtime_arguments,
+        McpInstallInputScope::RuntimeArgument,
+        answers,
+    );
     let versioned = |separator: &str| match package.version.as_deref() {
         Some(version) if !version.trim().is_empty() => {
             format!("{identifier}{separator}{}", version.trim())
@@ -152,24 +240,40 @@ pub(crate) fn package_args(package: &McpRegistryPackageSummary) -> Vec<String> {
             }
         }
     }
-    args.extend(argument_tokens(&package.package_arguments));
+    args.extend(argument_tokens(
+        &package.package_arguments,
+        McpInstallInputScope::PackageArgument,
+        answers,
+    ));
     args
 }
 
-fn fill_stdio(entry: &mut McpServerEntry, package: &McpRegistryPackageSummary) {
+fn fill_stdio(
+    entry: &mut McpServerEntry,
+    package: &McpRegistryPackageSummary,
+    answers: Answers<'_>,
+) {
     entry.transport = "stdio".to_string();
     let command = package.runtime.trim();
     if !command.is_empty() {
         entry.command = Some(command.to_string());
     }
-    entry.args = package_args(package);
-    entry.env = key_values(&package.environment_variables);
+    entry.args = package_args(package, answers);
+    entry.env = key_values(
+        &package.environment_variables,
+        McpInstallInputScope::Environment,
+        answers,
+    );
 }
 
-fn fill_remote(entry: &mut McpServerEntry, remote: &McpRegistryRemoteSummary) {
+fn fill_remote(
+    entry: &mut McpServerEntry,
+    remote: &McpRegistryRemoteSummary,
+    answers: Answers<'_>,
+) {
     entry.transport = remote.transport.clone();
-    entry.url = Some(resolve_url(&remote.url, &remote.variables));
-    entry.headers = key_values(&remote.headers);
+    entry.url = Some(resolve_url(&remote.url, &remote.variables, answers));
+    entry.headers = key_values(&remote.headers, McpInstallInputScope::Header, answers);
 }
 
 /// Map a cached registry server into a prefilled `McpServerEntry` draft, using
@@ -198,6 +302,17 @@ pub fn registry_to_entry(server: &McpRegistryServer) -> McpServerEntry {
 pub fn registry_to_entry_for(
     server: &McpRegistryServer,
     candidate: Option<&McpRuntimeCandidate>,
+) -> McpServerEntry {
+    registry_to_entry_answered(server, candidate, Answers::default())
+}
+
+/// [`registry_to_entry_for`] with the user's answers folded in as the draft is
+/// built. This is the one derivation of "answers → entry"; the install preview
+/// is a thin wrapper over it.
+pub(crate) fn registry_to_entry_answered(
+    server: &McpRegistryServer,
+    candidate: Option<&McpRuntimeCandidate>,
+    answers: Answers<'_>,
 ) -> McpServerEntry {
     let mut entry = McpServerEntry {
         id: String::new(),
@@ -247,12 +362,12 @@ pub fn registry_to_entry_for(
     match parse_candidate_id(&candidate.id) {
         Some(CandidateOrigin::Remote(index)) => {
             if let Some(remote) = server.remotes.get(index) {
-                fill_remote(&mut entry, remote);
+                fill_remote(&mut entry, remote, answers);
             }
         }
         Some(CandidateOrigin::Package(index)) => {
             if let Some(package) = server.packages.get(index) {
-                fill_stdio(&mut entry, package);
+                fill_stdio(&mut entry, package, answers);
             }
         }
         None => {}

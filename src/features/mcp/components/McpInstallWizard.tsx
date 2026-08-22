@@ -5,15 +5,15 @@ import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import type { McpInstallInputScope, McpServerEntry, McpToolId } from "../../../types";
 import { buildCommandConfirmation, buildEnvPreview } from "../lib/commandPreview";
 import {
-  applyInstallFields,
+  buildInstallAnswers,
   buildInstallFields,
-  resolvedFieldValue,
   secretFieldKeys,
   setFieldValue,
   setFieldVariable,
   validateInstallFields,
 } from "../lib/installForm";
 import { useMcpInstallPlan } from "../hooks/useMcpInstallPlan";
+import { useMcpInstallPreview } from "../hooks/useMcpInstallPreview";
 import { McpCommandConfirm } from "./McpCommandConfirm";
 import { McpInstallInputsForm } from "./McpInstallInputsForm";
 import { McpRuntimePicker } from "./McpRuntimePicker";
@@ -25,8 +25,14 @@ import { McpToolTargetPicker } from "./McpToolTargetPicker";
  *
  * The order is not cosmetic. The shape decides which inputs exist, the inputs
  * decide what the command line and environment end up containing, and the
- * confirmation is therefore the last step and re-renders from the *final*
- * values rather than from the plan's precomputed preview.
+ * confirmation is therefore the last step.
+ *
+ * Nothing here assembles a launch spec. The answers go back to the backend,
+ * which folds them into the draft *before* the arguments are flattened and
+ * returns both the entry and the command line it renders from it — so the
+ * string the user approves and the object that gets installed are one
+ * derivation. While that round trip is in flight the command on screen is
+ * stale, which is why submit is disabled until it lands.
  */
 
 interface McpInstallWizardProps {
@@ -81,29 +87,35 @@ export function McpInstallWizard({
   const errors = useMemo(() => validateInstallFields(fields), [fields]);
   const secretValues = useMemo(
     () =>
-      fields.flatMap((field) => {
-        const values = field.input.isSecret ? [resolvedFieldValue(field)] : [];
-        return [...values, ...field.variables.filter((v) => v.variable.isSecret).map((v) => v.value)];
-      }),
+      fields.flatMap((field) => [
+        ...(field.input.isSecret && !field.templated ? [field.value] : []),
+        ...field.variables.filter((v) => v.variable.isSecret).map((v) => v.value),
+      ]),
     [fields],
   );
 
-  const draft = useMemo(() => {
-    if (!plan) return null;
-    return applyInstallFields({ draft: plan.draft, fields });
-  }, [plan, fields]);
+  const answers = useMemo(() => buildInstallAnswers(fields), [fields]);
+  // The plan's own pick, not the picker's state: the picker starts null and the
+  // preview must not silently derive a different shape than the one on screen.
+  const {
+    preview,
+    pending: previewPending,
+    error: previewError,
+  } = useMcpInstallPreview(plan ? serverId : null, plan?.selectedRuntimeId ?? null, answers);
 
+  // Until the first preview lands the plan's own draft *is* the preview: no
+  // answer has been given yet, so the two derivations agree by construction.
+  const entry = preview?.entry ?? plan?.draft ?? null;
   const confirmation = useMemo(
     () =>
       buildCommandConfirmation({
-        command: draft?.command,
-        args: draft?.args ?? [],
+        preview: preview?.commandPreview ?? plan?.commandPreview,
         resolvedCommandPath: plan?.resolvedCommandPath,
         planPreview: plan?.commandPreview,
         secretValues,
         usesShell: plan?.usesShell ?? false,
       }),
-    [draft, plan, secretValues],
+    [preview, plan, secretValues],
   );
 
   if (isLoading || (!plan && isFetching)) {
@@ -114,7 +126,7 @@ export function McpInstallWizard({
     );
   }
 
-  if (error || !plan || !draft) {
+  if (error || !plan || !entry) {
     return (
       <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-xs text-destructive">
         {error instanceof Error ? error.message : t("mcp.installPlanFailed")}
@@ -124,7 +136,9 @@ export function McpInstallWizard({
 
   const secretKeys = secretFieldKeys(fields);
   const isLocal = confirmation.preview.length > 0;
-  const blocked = errors.length > 0 || (isLocal && !acknowledged);
+  // A preview in flight means the command on screen is not the one that would
+  // be installed, so approving it would approve a stale command.
+  const blocked = errors.length > 0 || (isLocal && !acknowledged) || previewPending || preview == null;
 
   const handleFieldChange = (scope: McpInstallInputScope, index: number, value: string) =>
     setFields((prev) => setFieldValue(prev, scope, index, value));
@@ -137,7 +151,7 @@ export function McpInstallWizard({
       return;
     }
     if (blocked) return;
-    await onSubmit({ ...draft, enabled });
+    await onSubmit({ ...entry, enabled });
   };
 
   return (
@@ -170,9 +184,9 @@ export function McpInstallWizard({
       <Section title={t("mcp.confirmSectionTitle")}>
         <McpCommandConfirm
           confirmation={confirmation}
-          env={buildEnvPreview(draft.env, secretKeys)}
-          headers={buildEnvPreview(draft.headers, secretKeys)}
-          url={draft.url ?? null}
+          env={buildEnvPreview(entry.env, secretKeys)}
+          headers={buildEnvPreview(entry.headers, secretKeys)}
+          url={entry.url ?? null}
           warnings={plan.warnings ?? []}
           secretPolicy={plan.secretPolicy}
           acknowledged={acknowledged}
@@ -192,6 +206,8 @@ export function McpInstallWizard({
       {showErrors && errors.length > 0 ? (
         <p className="text-xs text-destructive">{t("mcp.installMissingFields", { count: errors.length })}</p>
       ) : null}
+
+      {previewError ? <p className="text-xs text-destructive">{previewError.message}</p> : null}
 
       <div className="flex items-center justify-between gap-3 pt-1">
         {onCancel ? (

@@ -13,6 +13,7 @@ import {
   MCP_STORE,
   MCP_TOOL_STATUSES,
   mcpInstallPlan,
+  mcpInstallPreview,
   mcpMarketPage,
   mcpProbeReport,
 } from "./mcpData";
@@ -115,4 +116,10 @@ export const MCP_HANDLERS: DevMockHandlers = {
 
   // Install path
   mcp_market_install_plan: (args) => mcpInstallPlan(arg(args, "id"), args?.runtimeId as string | undefined),
+  mcp_market_install_preview: (args) =>
+    mcpInstallPreview(
+      arg(args, "id"),
+      args?.runtimeId as string | undefined,
+      (args?.answers as Record<string, unknown>[] | undefined) ?? [],
+    ),
 };

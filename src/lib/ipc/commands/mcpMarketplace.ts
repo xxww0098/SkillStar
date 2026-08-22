@@ -1,7 +1,9 @@
 import type {
   LocalFirstResult,
   McpCustomSource,
+  McpInstallAnswer,
   McpInstallPlan,
+  McpInstallPreview,
   McpMarketEntry,
   McpMarketServerDetail,
   McpPublisherSummary,
@@ -13,8 +15,9 @@ import type {
 
 /**
  * MCP marketplace — browse the merged MCP catalog local-first, then install
- * via `mcp_market_install_plan`, whose payload carries the prefilled draft that
- * the form finalizes and submits through the existing `create_mcp_server`.
+ * via `mcp_market_install_plan` for the confirmation payload and
+ * `mcp_market_install_preview` for the entry the collected answers produce,
+ * which the form submits through the existing `create_mcp_server`.
  *
  * The catalog is the merge of every enabled source (the official MCP Registry
  * as primary, GitHub's registry as an enrichment mirror, plus any user-added
@@ -85,5 +88,19 @@ export interface McpMarketplaceCommands {
   mcp_market_install_plan: {
     args: { id: string; runtimeId?: string };
     result: McpInstallPlan;
+  };
+
+  /**
+   * The same derivation with the user's answers folded in: the entry that
+   * would be written and the command line that would run, plus the required
+   * inputs still blank.
+   *
+   * Cheap by construction (no `PATH` walk, no filesystem), so the wizard calls
+   * it as the form is filled. **Never cache the result**: the answers carry the
+   * user's secrets, and a cache key holding a secret is a secret at rest.
+   */
+  mcp_market_install_preview: {
+    args: { id: string; runtimeId?: string; answers: McpInstallAnswer[] };
+    result: McpInstallPreview;
   };
 }

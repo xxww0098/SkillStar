@@ -867,7 +867,7 @@
     "confirmShell": "Shell",
     "confirmShellYes": "经由 shell 执行",
     "confirmShellNo": "不经 shell —— 直接执行启动器",
-    "confirmEdited": "你填写的值改变了这条命令行，它是按上面的值重新拼装的。",
+    "confirmEdited": "你填写的值改变了这条命令行，上面是它最终的样子。",
     "confirmAcknowledge": "我已看完上面的完整命令，确认安装这个 server。",
     "secretPolicyTitle": "密钥落点",
     "secretPolicyUserScoped": "所有目标都写在你的 home 目录下，因此密钥不会进入可能被提交的项目文件。",

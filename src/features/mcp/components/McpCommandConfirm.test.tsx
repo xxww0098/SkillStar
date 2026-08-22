@@ -14,8 +14,7 @@ const policy: McpSecretPolicy = {
 function renderConfirm(overrides: Partial<Parameters<typeof McpCommandConfirm>[0]> = {}) {
   const onAcknowledge = vi.fn();
   const confirmation = buildCommandConfirmation({
-    command: "npx",
-    args: ["-y", "@acme/server", "--root", "/Users/dev/My Files"],
+    preview: "npx -y @acme/server --root '/Users/dev/My Files'",
     resolvedCommandPath: "/usr/local/bin/npx",
     planPreview: "npx -y @acme/server --root '/Users/dev/My Files'",
   });
@@ -63,8 +62,7 @@ describe("McpCommandConfirm", () => {
     renderConfirm({
       requiresAcknowledgement: false,
       confirmation: buildCommandConfirmation({
-        command: null,
-        args: [],
+        preview: null,
         resolvedCommandPath: null,
         planPreview: null,
       }),
@@ -93,14 +91,13 @@ describe("McpCommandConfirm", () => {
   it("says the command was rebuilt when the user's answers changed it", () => {
     renderConfirm({
       confirmation: buildCommandConfirmation({
-        command: "npx",
-        args: ["-y", "@acme/server", "--port", "8080"],
+        preview: "npx -y @acme/server --port 8080",
         resolvedCommandPath: "/usr/local/bin/npx",
         planPreview: "npx -y @acme/server",
       }),
     });
 
-    expect(screen.getByText("你填写的值改变了这条命令行，它是按上面的值重新拼装的。")).toBeInTheDocument();
+    expect(screen.getByText("你填写的值改变了这条命令行，上面是它最终的样子。")).toBeInTheDocument();
   });
 
   it("escalates the secret-policy note when a target writes project-scoped config", () => {

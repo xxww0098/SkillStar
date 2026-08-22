@@ -1,54 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildCommandConfirmation,
-  buildEnvPreview,
-  maskSecrets,
-  renderMcpCommand,
-  SECRET_MASK,
-} from "./commandPreview";
-
-describe("renderMcpCommand", () => {
-  // These cases pin the port of `render_command` in
-  // crates/skillstar-app/src/mcp/install.rs. If the Rust quoting rule changes,
-  // one of these fails rather than the two previews silently diverging.
-  it("leaves plain arguments unquoted", () => {
-    expect(renderMcpCommand("npx", ["-y", "@modelcontextprotocol/server-filesystem"])).toBe(
-      "npx -y @modelcontextprotocol/server-filesystem",
-    );
-  });
-
-  it("single-quotes arguments containing whitespace", () => {
-    expect(renderMcpCommand("npx", ["--root", "/Users/dev/My Files"])).toBe("npx --root '/Users/dev/My Files'");
-  });
-
-  it("single-quotes an empty argument so it stays visible", () => {
-    expect(renderMcpCommand("cmd", [""])).toBe("cmd ''");
-  });
-
-  it("escapes embedded single quotes the POSIX way", () => {
-    expect(renderMcpCommand("cmd", ["it's"])).toBe("cmd 'it'\\''s'");
-  });
-
-  it("quotes an argument containing a double quote", () => {
-    expect(renderMcpCommand("cmd", ['say "hi"'])).toBe("cmd 'say \"hi\"'");
-  });
-
-  it("quotes non-ASCII whitespace that would otherwise split a word", () => {
-    expect(renderMcpCommand("cmd", ["a b"])).toBe("cmd 'a b'");
-    expect(renderMcpCommand("cmd", ["a　b"])).toBe("cmd 'a　b'");
-  });
-
-  it("never truncates, however long the command line is", () => {
-    const long = Array.from({ length: 200 }, (_, i) => `--flag${i}`);
-    const rendered = renderMcpCommand("npx", long);
-    expect(rendered.endsWith("--flag199")).toBe(true);
-    expect(rendered).not.toContain("…");
-  });
-
-  it("renders a bare command with no arguments", () => {
-    expect(renderMcpCommand("uvx")).toBe("uvx");
-  });
-});
+import { buildCommandConfirmation, buildEnvPreview, maskSecrets, SECRET_MASK } from "./commandPreview";
 
 describe("maskSecrets", () => {
   it("replaces every occurrence of a secret value", () => {
@@ -69,13 +20,12 @@ describe("maskSecrets", () => {
 
 describe("buildCommandConfirmation", () => {
   const base = {
-    command: "npx",
-    args: ["-y", "@acme/server"],
+    preview: "npx -y @acme/server",
     resolvedCommandPath: "/usr/local/bin/npx",
     planPreview: "npx -y @acme/server",
   };
 
-  it("re-renders the plan's command identically when nothing was edited", () => {
+  it("shows the backend's command untouched when nothing was edited", () => {
     const confirmation = buildCommandConfirmation(base);
     expect(confirmation.preview).toBe("npx -y @acme/server");
     expect(confirmation.editedSincePlan).toBe(false);
@@ -84,15 +34,15 @@ describe("buildCommandConfirmation", () => {
   });
 
   it("flags a command the user's own answers changed", () => {
-    const confirmation = buildCommandConfirmation({ ...base, args: [...base.args, "--port", "8080"] });
+    const confirmation = buildCommandConfirmation({ ...base, preview: "npx -y @acme/server --port 8080" });
     expect(confirmation.editedSincePlan).toBe(true);
     expect(confirmation.preview).toBe("npx -y @acme/server --port 8080");
   });
 
-  it("masks a secret that reached the argument list", () => {
+  it("masks a secret the backend rendered into the argument list", () => {
     const confirmation = buildCommandConfirmation({
       ...base,
-      args: ["--token", "sk-secret"],
+      preview: "npx --token sk-secret",
       secretValues: ["sk-secret"],
     });
     expect(confirmation.preview).toBe(`npx --token ${SECRET_MASK}`);
@@ -100,7 +50,7 @@ describe("buildCommandConfirmation", () => {
   });
 
   it("returns an empty preview for a remote server with no command", () => {
-    const confirmation = buildCommandConfirmation({ ...base, command: null, planPreview: null });
+    const confirmation = buildCommandConfirmation({ ...base, preview: null, planPreview: null });
     expect(confirmation).toMatchObject({ preview: "", resolvedPath: null, editedSincePlan: false });
   });
 

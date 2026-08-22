@@ -17,6 +17,7 @@
 //!   `skillstar_marketplace::{mcp_models, mcp_remote, mcp_snapshot}`.
 //! - McpRuntimeCandidate, McpRuntimeSelection, McpRuntimeShape, McpInstallPlan,
 //!   McpInstallInput, McpInstallInputScope, McpInstallInputVariable,
+//!   McpInstallAnswer, McpInstallPreview, McpInstallMissingInput,
 //!   McpSecretPolicy, McpSecretStorage come from `skillstar_app::mcp` (the
 //!   cross-domain use cases).
 //! - McpServerWithSync comes from
@@ -68,6 +69,9 @@ export type { McpInstallPlan } from "./generated/McpInstallPlan";
 export type { McpInstallInput } from "./generated/McpInstallInput";
 export type { McpInstallInputScope } from "./generated/McpInstallInputScope";
 export type { McpInstallInputVariable } from "./generated/McpInstallInputVariable";
+export type { McpInstallAnswer } from "./generated/McpInstallAnswer";
+export type { McpInstallPreview } from "./generated/McpInstallPreview";
+export type { McpInstallMissingInput } from "./generated/McpInstallMissingInput";
 export type { McpSecretPolicy } from "./generated/McpSecretPolicy";
 export type { McpSecretStorage } from "./generated/McpSecretStorage";
 

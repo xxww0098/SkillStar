@@ -1,4 +1,10 @@
-import type { McpInput, McpInputVariable, McpInstallInput, McpInstallInputScope, McpServerEntry } from "../../../types";
+import type {
+  McpInput,
+  McpInputVariable,
+  McpInstallAnswer,
+  McpInstallInput,
+  McpInstallInputScope,
+} from "../../../types";
 
 /**
  * `server.json` `Input` semantics → install-form model.
@@ -13,9 +19,11 @@ import type { McpInput, McpInputVariable, McpInstallInput, McpInstallInputScope,
  * (`promptString` + `password`, `pickString` + `options`) exposes, driven by
  * the registry instead of a hand-written config block.
  *
- * Nothing here talks to the backend. `mcp_market_install_plan` supplies the
- * inputs, this builds the form, and `applyInstallFields` folds the collected
- * values back into the draft that `create_mcp_server` receives.
+ * Nothing here assembles a launch spec. `mcp_market_install_plan` supplies the
+ * inputs, this builds the form and validates it for instant feedback, and
+ * `buildInstallAnswers` hands the collected values back to
+ * `mcp_market_install_preview` — which owns the one derivation of
+ * answers → entry → command line.
  */
 
 /** One `{curly_brace}` hole inside a field's `value` template. */
@@ -50,23 +58,6 @@ export interface McpInstallField {
   variables: McpInstallFieldVariable[];
   /** The backend's verdict: install must not proceed until this is supplied. */
   mustAsk: boolean;
-}
-
-const TEMPLATE_TOKEN = /\{([A-Za-z0-9_.-]+)\}/g;
-
-/**
- * Substitute the tokens a template declares.
- *
- * Unresolved tokens are left in place rather than replaced with an empty
- * string: a url with a visible `{TENANT}` hole tells the user what is missing;
- * one silently collapsed to `https://api.example.com//mcp` does not. This
- * mirrors the backend's `resolve_url`.
- */
-export function renderTemplate(template: string, values: Readonly<Record<string, string>>): string {
-  return template.replace(TEMPLATE_TOKEN, (whole, token: string) => {
-    const value = values[token];
-    return value != null && value !== "" ? value : whole;
-  });
 }
 
 /**
@@ -123,12 +114,24 @@ export function setFieldVariable(
   );
 }
 
-/** The value this field contributes, with its template resolved. */
-export function resolvedFieldValue(field: McpInstallField): string {
-  if (!field.templated) return field.value;
-  const values: Record<string, string> = {};
-  for (const variable of field.variables) values[variable.name] = variable.value;
-  return renderTemplate(field.value, values);
+/**
+ * The collected values, addressed the way the install plan numbered them.
+ *
+ * A pinned template contributes its `{curly_brace}` answers rather than itself:
+ * the backend re-reads the template from the catalog row, and the user is not
+ * allowed to edit it anyway.
+ */
+export function buildInstallAnswers(fields: readonly McpInstallField[]): McpInstallAnswer[] {
+  return fields.flatMap((field) =>
+    field.templated
+      ? field.variables.map((variable) => ({
+          scope: field.scope,
+          index: field.index,
+          variable: variable.name,
+          value: variable.value,
+        }))
+      : [{ scope: field.scope, index: field.index, value: field.value }],
+  );
 }
 
 export type McpFieldErrorCode = "required" | "notAChoice" | "notANumber" | "notABoolean";
@@ -200,81 +203,6 @@ export function secretFieldKeys(fields: readonly McpInstallField[]): string[] {
     }
   }
   return keys;
-}
-
-/**
- * Splice one argument's collected value into the launch args.
- *
- * The backend flattens `runtimeArguments[]` / `packageArguments[]` into `args`
- * *without* emitting placeholders, so a field the user still has to fill left
- * no slot behind. Named arguments therefore land right after their own flag
- * when the flag is already present (and as `flag value` appended when it is
- * not); positional arguments append. This is the one place where the frontend
- * reconstructs part of the command line, which is exactly why the confirmation
- * step re-renders the full command from the final args rather than trusting the
- * plan's precomputed preview.
- */
-export function spliceArgument(args: readonly string[], key: string, value: string): string[] {
-  if (!value) return [...args];
-  const flagIndex = args.indexOf(key);
-  if (flagIndex >= 0) {
-    const next = [...args];
-    next.splice(flagIndex + 1, 0, value);
-    return next;
-  }
-  // A key that looks like a flag is a named argument whose flag was dropped
-  // (blank value); anything else is the publisher's `valueHint` for a
-  // positional, which must never itself reach the command line.
-  return key.startsWith("-") ? [...args, key, value] : [...args, value];
-}
-
-export interface McpInstallDraftInput {
-  draft: McpServerEntry;
-  fields: readonly McpInstallField[];
-}
-
-/**
- * Fold the collected values into the draft `create_mcp_server` will receive.
- *
- * Each scope writes exactly the part of the launch spec it belongs to; nothing
- * is inferred from the field name. Empty values are dropped rather than written
- * as `""`, so an untouched optional env var does not end up pinning an empty
- * string into every tool's config.
- */
-export function applyInstallFields({ draft, fields }: McpInstallDraftInput): McpServerEntry {
-  const env: Record<string, string> = { ...(draft.env ?? {}) };
-  const headers: Record<string, string> = { ...(draft.headers ?? {}) };
-  let args = [...(draft.args ?? [])];
-  let url = draft.url ?? null;
-
-  for (const field of fields) {
-    const value = resolvedFieldValue(field);
-    switch (field.scope) {
-      case "environment":
-        if (value) env[field.key] = value;
-        else delete env[field.key];
-        break;
-      case "header":
-        if (value) headers[field.key] = value;
-        else delete headers[field.key];
-        break;
-      case "urlVariable":
-        if (url && value) url = renderTemplate(url, { [field.key]: value });
-        break;
-      case "runtimeArgument":
-      case "packageArgument":
-        if (field.mustAsk || !field.templated) args = spliceArgument(args, field.key, value);
-        break;
-    }
-  }
-
-  return {
-    ...draft,
-    env,
-    headers,
-    args,
-    url,
-  };
 }
 
 /** Group fields for rendering — one section per part of the launch spec. */

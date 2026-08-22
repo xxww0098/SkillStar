@@ -18,6 +18,8 @@ use super::install::{McpInstallInputScope, McpSecretStorage, build_install_plan_
 use super::presets::curated_server_to_preset;
 use super::runtime::{McpRuntimeShape, select_runtime_with};
 
+mod install_preview_tests;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -794,6 +796,7 @@ fn a_structurally_unusable_shape_is_never_prefilled_from() {
     assert_eq!(plan.selected_runtime_id.as_deref(), Some("package:1"));
     assert_eq!(plan.draft.command.as_deref(), Some("npx"));
 }
+
 
 // ---------------------------------------------------------------------------
 // Preset mapping

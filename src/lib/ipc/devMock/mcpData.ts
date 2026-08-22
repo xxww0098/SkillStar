@@ -644,6 +644,42 @@ export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
   };
 }
 
+/**
+ * `McpInstallPreview` — the entry one set of answers produces.
+ *
+ * The real derivation lives in Rust (`preview_install`), which substitutes into
+ * the structured argument list. The mock has no structured arguments to work
+ * from, so it folds answers into `env` / `headers` only and reuses the plan's
+ * command line: enough to exercise the wizard in a browser, never the authority
+ * on what gets installed.
+ */
+export function mcpInstallPreview(id: string, runtimeId: string | undefined, answers: MockRecord[]): MockRecord {
+  const plan = mcpInstallPlan(id, runtimeId);
+  const inputs = (plan.inputs as MockRecord[]) ?? [];
+  const draft = plan.draft as MockRecord;
+  const answerFor = (scope: unknown, index: unknown) =>
+    answers.find((a) => a.scope === scope && a.index === index && a.variable == null);
+
+  const env: Record<string, string> = {};
+  const headers: Record<string, string> = {};
+  const missing: MockRecord[] = [];
+  for (const input of inputs) {
+    const value = String(answerFor(input.scope, input.index)?.value ?? input.prefilled ?? "");
+    if (value) {
+      if (input.scope === "environment") env[String(input.key)] = value;
+      if (input.scope === "header") headers[String(input.key)] = value;
+    } else if (input.mustAsk) {
+      missing.push({ key: input.key, scope: input.scope, index: input.index, variable: null });
+    }
+  }
+
+  return {
+    entry: { ...draft, env, headers },
+    commandPreview: plan.commandPreview,
+    missing,
+  };
+}
+
 /** `McpProbeReport` for an installed server. */
 export function mcpProbeReport(id: string): MockRecord {
   const server = MCP_STORE.servers.find((s) => s.id === id);

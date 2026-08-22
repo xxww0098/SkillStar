@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { McpInput, McpInstallInput, McpServerEntry } from "../../../types";
+import type { McpInput, McpInstallInput } from "../../../types";
 import {
-  applyInstallFields,
+  buildInstallAnswers,
   buildInstallFields,
   groupInstallFields,
-  renderTemplate,
-  resolvedFieldValue,
   secretFieldKeys,
   setFieldValue,
   setFieldVariable,
-  spliceArgument,
   validateInstallFields,
 } from "./installForm";
 
@@ -40,28 +37,6 @@ function pinnedToken(patch: Partial<McpInstallInput> = {}): McpInstallInput {
     ...patch,
   });
 }
-
-const draft: McpServerEntry = {
-  id: "",
-  name: "server",
-  transport: "stdio",
-  command: "npx",
-  args: ["-y", "@acme/server"],
-  env: {},
-  headers: {},
-  enabled: {},
-  autoApproveAll: false,
-  sortIndex: 0,
-};
-
-describe("renderTemplate", () => {
-  it("leaves unresolved tokens visible instead of collapsing them", () => {
-    // A url with a visible {TENANT} hole says what is missing; one silently
-    // emptied to https://api.example.com//mcp does not.
-    expect(renderTemplate("https://{TENANT}.example.com/mcp", {})).toBe("https://{TENANT}.example.com/mcp");
-    expect(renderTemplate("https://{TENANT}.example.com/mcp", { TENANT: "acme" })).toBe("https://acme.example.com/mcp");
-  });
-});
 
 describe("buildInstallFields", () => {
   it("seeds from the plan's prefill rather than re-deriving it", () => {
@@ -102,7 +77,9 @@ describe("editing", () => {
   it("edits a variable inside a pinned value", () => {
     const next = setFieldVariable(buildInstallFields([pinnedToken()]), "header", 0, "TOKEN", "ghp_x");
 
-    expect(resolvedFieldValue(next[0])).toBe("Bearer ghp_x");
+    // The template itself stays pinned; only its hole is the user's.
+    expect(next[0].value).toBe("Bearer {TOKEN}");
+    expect(next[0].variables.map((v) => v.value)).toEqual(["ghp_x"]);
   });
 
   it("only touches the field with the matching scope and ordinal", () => {
@@ -138,7 +115,7 @@ describe("editing", () => {
 
     const next = setFieldVariable(fields, "header", 1, "TOKEN", "ghp_second");
 
-    expect(next.map((f) => resolvedFieldValue(f))).toEqual(["Bearer {TOKEN}", "Bearer ghp_second"]);
+    expect(next.map((f) => f.variables[0].value)).toEqual(["", "ghp_second"]);
   });
 });
 
@@ -195,83 +172,28 @@ describe("secretFieldKeys", () => {
   });
 });
 
-describe("spliceArgument", () => {
-  it("inserts a named argument's value right after its flag", () => {
-    expect(spliceArgument(["-y", "@acme/server", "--port"], "--port", "8080")).toEqual([
-      "-y",
-      "@acme/server",
-      "--port",
-      "8080",
+describe("buildInstallAnswers", () => {
+  it("addresses every answer by scope and ordinal, never by key", () => {
+    const fields = setFieldValue(
+      buildInstallFields([
+        declared({ key: "argument", scope: "packageArgument", index: 0, mustAsk: true }),
+        declared({ key: "argument", scope: "packageArgument", index: 1, mustAsk: true }),
+      ]),
+      "packageArgument",
+      1,
+      "/dst",
+    );
+
+    expect(buildInstallAnswers(fields)).toEqual([
+      { scope: "packageArgument", index: 0, value: "" },
+      { scope: "packageArgument", index: 1, value: "/dst" },
     ]);
   });
 
-  it("appends flag and value when the flag was dropped", () => {
-    expect(spliceArgument(["-y", "@acme/server"], "--port", "8080")).toEqual(["-y", "@acme/server", "--port", "8080"]);
-  });
+  it("sends a pinned template's variables rather than the template itself", () => {
+    const fields = setFieldVariable(buildInstallFields([pinnedToken()]), "header", 0, "TOKEN", "sk-x");
 
-  it("never puts a positional argument's value hint on the command line", () => {
-    expect(spliceArgument(["-y", "@acme/server"], "PATH_TO_DIRECTORY", "/srv")).toEqual(["-y", "@acme/server", "/srv"]);
-  });
-
-  it("adds nothing for an empty value", () => {
-    expect(spliceArgument(["-y"], "--port", "")).toEqual(["-y"]);
-  });
-});
-
-describe("applyInstallFields", () => {
-  it("routes each scope to the part of the launch spec it belongs to", () => {
-    const fields = [
-      setFieldValue(buildInstallFields([declared({ key: "API_KEY" })]), "environment", 0, "sk-x")[0],
-      setFieldValue(
-        buildInstallFields([declared({ key: "Authorization", scope: "header" })]),
-        "header",
-        0,
-        "Bearer y",
-      )[0],
-      setFieldValue(
-        buildInstallFields([declared({ key: "--port", scope: "packageArgument", mustAsk: true })]),
-        "packageArgument",
-        0,
-        "8080",
-      )[0],
-    ];
-
-    const entry = applyInstallFields({ draft: { ...draft, url: "https://{TENANT}.example.com" }, fields });
-
-    expect(entry.env).toEqual({ API_KEY: "sk-x" });
-    expect(entry.headers).toEqual({ Authorization: "Bearer y" });
-    expect(entry.args).toEqual(["-y", "@acme/server", "--port", "8080"]);
-  });
-
-  it("substitutes url variables into the endpoint", () => {
-    const fields = setFieldValue(
-      buildInstallFields([declared({ key: "TENANT", scope: "urlVariable", mustAsk: true })]),
-      "urlVariable",
-      0,
-      "acme",
-    );
-    const entry = applyInstallFields({ draft: { ...draft, url: "https://{TENANT}.example.com/mcp" }, fields });
-
-    expect(entry.url).toBe("https://acme.example.com/mcp");
-  });
-
-  it("drops an emptied value instead of pinning an empty string into every tool config", () => {
-    const seeded = buildInstallFields([declared({ key: "PORT", prefilled: "50325" })]);
-    const entry = applyInstallFields({
-      draft: { ...draft, env: { PORT: "50325" } },
-      fields: setFieldValue(seeded, "environment", 0, ""),
-    });
-
-    expect(entry.env).toEqual({});
-  });
-
-  it("leaves the draft object itself untouched", () => {
-    const before = JSON.stringify(draft);
-    applyInstallFields({
-      draft,
-      fields: setFieldValue(buildInstallFields([declared()]), "environment", 0, "x"),
-    });
-    expect(JSON.stringify(draft)).toBe(before);
+    expect(buildInstallAnswers(fields)).toEqual([{ scope: "header", index: 0, variable: "TOKEN", value: "sk-x" }]);
   });
 });
 

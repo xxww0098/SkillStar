@@ -262,6 +262,7 @@ pub fn run() {
             commands::mcp_marketplace::remove_mcp_source,
             commands::mcp_marketplace::set_mcp_source_enabled,
             commands::mcp_marketplace::mcp_market_install_plan,
+            commands::mcp_marketplace::mcp_market_install_preview,
             commands::github::check_gh_installed,
             commands::github::github_auth_status,
             commands::github::github_auth_start,

@@ -3,49 +3,15 @@
  *
  * Deeplink-style one-click installs are a demonstrated attack surface
  * (CursorJack), and the only effective mitigation is showing the user the
- * complete, untruncated, already-resolved command *before* it runs. The backend
- * ships `McpInstallPlan.commandPreview` for exactly that; this module exists
- * because the install form may still add argument values the plan could not
- * know about, and a confirmation that shows a stale command confirms nothing.
+ * complete, untruncated, already-resolved command *before* it runs.
  *
- * `renderMcpCommand` is a faithful port of `render_command` in
- * `crates/skillstar-app/src/mcp/install.rs`, quoting rule included, so that an
- * untouched plan re-renders byte-for-byte identically to the string the backend
- * produced (pinned by this module's tests). The output is for reading only —
- * nothing re-parses or executes it, and `usesShell` is `false` because the
- * launcher is exec'd directly.
+ * The command line itself is **rendered by the backend**
+ * (`skillstar_app::mcp::install::preview_install`) from the same entry it would
+ * write, so the string the user approves and the object that gets installed are
+ * one derivation. This module only prepares that string for display: masking
+ * the secrets the renderer must not echo back onto the screen, and saying
+ * whether the user's own answers changed the command since the plan was built.
  */
-
-/**
- * Rust's `char::is_whitespace` is the Unicode `White_Space` property, which is
- * not quite JavaScript's `\s` (Rust has U+0085, JS has U+FEFF). Spelled out so
- * the port cannot drift on an exotic argument.
- */
-const UNICODE_WHITESPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
-
-function needsQuoting(arg: string): boolean {
-  return arg === "" || UNICODE_WHITESPACE.test(arg) || arg.includes("'") || arg.includes('"');
-}
-
-/** Single-quote an argument the POSIX way, so the boundaries are visible. */
-function quoteArg(arg: string): string {
-  return `'${arg.replaceAll("'", "'\\''")}'`;
-}
-
-/**
- * Render the command line exactly as it will run.
- *
- * Arguments containing whitespace or quotes are shown single-quoted so the user
- * can see where each one starts and ends. Never truncated: the whole point is
- * that a malicious tail cannot hide past an ellipsis.
- */
-export function renderMcpCommand(command: string, args: readonly string[] = []): string {
-  let out = command;
-  for (const arg of args) {
-    out += ` ${needsQuoting(arg) ? quoteArg(arg) : arg}`;
-  }
-  return out;
-}
 
 /** Placeholder shown in place of a secret value. */
 export const SECRET_MASK = "••••••••";
@@ -57,6 +23,8 @@ export const SECRET_MASK = "••••••••";
  * line — but an argument-scoped input the publisher marked `isSecret` would
  * land in `args`, and the confirmation string is the one place a preview could
  * leak it back onto the screen (and into anything the user copies out of it).
+ * The backend renders the real command; masking happens here, at the edge that
+ * displays it.
  * Only non-empty values are masked, longest first, so a short secret that is a
  * substring of a longer one cannot leave a partial value behind.
  */
@@ -81,8 +49,9 @@ export interface McpCommandConfirmation {
 }
 
 export interface McpCommandConfirmationInput {
-  command: string | null | undefined;
-  args: readonly string[];
+  /** `McpInstallPreview.commandPreview` — the backend's rendering of the final
+   * command. Null or empty for a remote server, which runs nothing locally. */
+  preview: string | null | undefined;
   resolvedCommandPath: string | null | undefined;
   /** `McpInstallPlan.commandPreview`, for the "did anything change" check. */
   planPreview: string | null | undefined;
@@ -93,23 +62,22 @@ export interface McpCommandConfirmationInput {
 /**
  * Build the confirmation payload the install wizard blocks on.
  *
- * `editedSincePlan` is surfaced rather than hidden: when the user's own answers
- * changed the command line, the string they are approving is one this app
- * assembled, and that deserves to be said out loud next to it.
+ * `editedSincePlan` compares the backend's two renderings of the same
+ * derivation — the plan's, before any answer, against the preview's, after
+ * them — so it is true exactly when the user's own input changed what will
+ * run, and that deserves to be said out loud next to it.
  */
 export function buildCommandConfirmation({
-  command,
-  args,
+  preview,
   resolvedCommandPath,
   planPreview,
   secretValues = [],
   usesShell = false,
 }: McpCommandConfirmationInput): McpCommandConfirmation {
-  const trimmed = command?.trim() ?? "";
-  if (!trimmed) {
+  const rendered = preview?.trim() ?? "";
+  if (!rendered) {
     return { preview: "", resolvedPath: null, editedSincePlan: false, usesShell };
   }
-  const rendered = renderMcpCommand(trimmed, args);
   return {
     preview: maskSecrets(rendered, secretValues),
     resolvedPath: resolvedCommandPath?.trim() || null,

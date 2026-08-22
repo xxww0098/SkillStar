@@ -23,7 +23,7 @@ use skillstar_marketplace::{McpInput, McpInputVariable, McpRegistryServer};
 use skillstar_models::mcp::{MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime};
 use ts_rs::TS;
 
-use super::draft::{prefill, registry_to_entry_for, sanitize_key};
+use super::draft::{Answers, prefill, registry_to_entry_answered, registry_to_entry_for, sanitize_key};
 use super::runtime::{
     CandidateOrigin, McpRuntimeSelection, parse_candidate_id, select_runtime, select_runtime_with,
 };
@@ -91,6 +91,64 @@ pub struct McpInstallInput {
     /// template order, de-duplicated. Empty when there is no template.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<McpInstallInputVariable>,
+}
+
+/// One value the user supplied, addressed the way [`McpInstallPlan::inputs`]
+/// numbered the form.
+///
+/// `key` is deliberately not part of the address: a positional argument the
+/// publisher gave neither a name nor a `valueHint` falls back to the literal
+/// `"argument"`, so two of them would collide. `(scope, index, variable)` does
+/// not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallAnswer.ts")]
+pub struct McpInstallAnswer {
+    pub scope: McpInstallInputScope,
+    /// [`McpInstallInput::index`] — the ordinal within `scope`.
+    pub index: u32,
+    /// `None` addresses the input's own value; `Some(name)` addresses one
+    /// `{curly_brace}` inside its publisher-pinned template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variable: Option<String>,
+    pub value: String,
+}
+
+/// A required field the answers do not cover yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallMissingInput.ts")]
+pub struct McpInstallMissingInput {
+    /// The publisher's label, for the message. Not an identity — see
+    /// [`McpInstallInput::key`].
+    pub key: String,
+    pub scope: McpInstallInputScope,
+    pub index: u32,
+    /// Set when what is missing is one `{curly_brace}` inside a template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variable: Option<String>,
+}
+
+/// What [`preview_install`] returns: the entry as it would be written, the
+/// command line as it would run, and what is still missing.
+///
+/// The two are one derivation, not two: `command_preview` is rendered from
+/// `entry.args`, so the string the user approves and the object that gets
+/// written cannot drift apart.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallPreview.ts")]
+pub struct McpInstallPreview {
+    /// The entry these answers produce. `enabled` is still empty — picking
+    /// targets is the caller's step.
+    pub entry: McpServerEntry,
+    /// The complete command line, **never truncated**, for display only.
+    /// `None` for a remote server, which executes nothing locally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_preview: Option<String>,
+    /// Required inputs still unanswered. Empty means install may proceed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing: Vec<McpInstallMissingInput>,
 }
 
 /// Where a secret value physically ends up.
@@ -274,6 +332,98 @@ fn build_plan(
     }
 }
 
+/// Fold `answers` into the draft and re-render the command line.
+///
+/// **Pure**: no `PATH` lookup, no filesystem, no clock — so the install wizard
+/// can call it on every keystroke (debounced) and a future CLI can reuse it.
+/// The one expensive judgement, "which of this server's shapes can run here",
+/// already happened in [`build_install_plan`]; `runtime_id` is
+/// [`McpInstallPlan::selected_runtime_id`], the answer it settled on. Recovering
+/// that candidate needs only its id, so availability is assumed rather than
+/// probed — an id that does not resolve degrades to rank order, the same
+/// fillable-but-blocked draft the plan returns when nothing is installable.
+///
+/// Answers are substituted while the argument list is still structured and
+/// ordered, so `args` is generated **once** rather than patched afterwards.
+pub fn preview_install(
+    server: &McpRegistryServer,
+    runtime_id: Option<&str>,
+    answers: &[McpInstallAnswer],
+) -> McpInstallPreview {
+    let selection = select_runtime_with(server, &mut |_| true);
+    let candidate = selection.resolve(runtime_id);
+    let answers = Answers::new(answers);
+
+    let mut entry = registry_to_entry_answered(server, candidate, answers);
+    // A value nobody supplied is left out rather than pinned into every tool's
+    // config as an empty string.
+    entry.env.retain(|_, value| !value.is_empty());
+    entry.headers.retain(|_, value| !value.is_empty());
+
+    let command_preview = entry
+        .command
+        .as_deref()
+        .filter(|command| !command.trim().is_empty())
+        .map(|command| render_command(command, &entry.args));
+
+    McpInstallPreview {
+        missing: missing_inputs(server, candidate.map(|c| c.id.as_str()), answers),
+        command_preview,
+        entry,
+    }
+}
+
+/// The required fields `answers` still leaves blank.
+///
+/// Requiredness follows the same rule the form shows: `must_ask` for a plain
+/// field, and for a publisher-pinned template the requiredness of each
+/// `{curly_brace}` — the template itself is not editable, so it cannot be the
+/// thing that is missing.
+fn missing_inputs(
+    server: &McpRegistryServer,
+    candidate_id: Option<&str>,
+    answers: Answers<'_>,
+) -> Vec<McpInstallMissingInput> {
+    let mut out = Vec::new();
+    for input in collect_inputs(server, candidate_id) {
+        let index = input.index as usize;
+        let blank = |variable: Option<&str>, seed: &str| {
+            answers
+                .get(input.scope, index, variable)
+                .unwrap_or(seed)
+                .trim()
+                .is_empty()
+        };
+
+        if input.variables.is_empty() {
+            if input.must_ask && blank(None, &input.prefilled) {
+                out.push(McpInstallMissingInput {
+                    key: input.key.clone(),
+                    scope: input.scope,
+                    index: input.index,
+                    variable: None,
+                });
+            }
+            continue;
+        }
+
+        for variable in &input.variables {
+            if !(variable.variable.is_required || variable.variable.is_secret) {
+                continue;
+            }
+            if blank(Some(&variable.name), &variable.prefilled) {
+                out.push(McpInstallMissingInput {
+                    key: input.key.clone(),
+                    scope: input.scope,
+                    index: input.index,
+                    variable: Some(variable.name.clone()),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Render the command line exactly as it will run. Arguments that contain
 /// whitespace or quotes are shown single-quoted so the user can see where each
 /// one starts and ends — the string is for reading, never for re-parsing.
@@ -382,7 +532,7 @@ fn make_input(
 /// A token is `[A-Za-z0-9_.-]+` between braces; anything else is literal text,
 /// and a `{` that does not open a token is skipped rather than swallowing the
 /// rest of the string — `{a {B}}` still yields `B`.
-fn template_tokens(template: &str) -> Vec<String> {
+pub(super) fn template_tokens(template: &str) -> Vec<String> {
     fn is_token_byte(byte: u8) -> bool {
         byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-')
     }

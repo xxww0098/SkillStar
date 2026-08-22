@@ -867,7 +867,7 @@
     "confirmShell": "Shell",
     "confirmShellYes": "runs through a shell",
     "confirmShellNo": "no shell — the launcher is executed directly",
-    "confirmEdited": "Your answers changed this command line; it is rebuilt from the values above.",
+    "confirmEdited": "Your answers changed this command line; above is its final form.",
     "confirmAcknowledge": "I have read the full command above and want to install this server.",
     "secretPolicyTitle": "Where secrets are stored",
     "secretPolicyUserScoped": "Every target writes under your home directory, so no secret reaches a project file that could be committed.",
