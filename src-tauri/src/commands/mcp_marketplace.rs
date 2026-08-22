@@ -1,10 +1,10 @@
 //! Tauri commands for the **MCP marketplace**.
 //!
 //! Reads and syncs delegate to `skillstar_marketplace::mcp_snapshot`
-//! (local-first, multi-source); everything that turns a catalog row into
-//! something installable — the runtime-shape picker, the prefilled draft, the
-//! pre-install confirmation payload — delegates to `skillstar_app::mcp`, which
-//! is where the marketplace→models mapping belongs (AGENTS.md; audit §C.1).
+//! (local-first, multi-source); turning a catalog row into something
+//! installable — the pre-install confirmation payload — delegates to
+//! `skillstar_app::mcp`, which is where the marketplace→models mapping belongs
+//! (AGENTS.md; audit §C.1).
 //!
 //! This module owns command registration, argument/DTO shapes and error
 //! mapping. It holds no domain logic.
@@ -15,10 +15,9 @@ use skillstar_marketplace::{
     McpRegistryServer, McpServerPage, McpServerQuery, McpSourceDescriptor, SyncStateEntry,
     mcp_snapshot,
 };
-use skillstar_models::mcp::McpServerEntry;
 use tracing::{debug, error};
 
-use skillstar_app::mcp::{McpInstallPlan, McpRuntimeSelection};
+use skillstar_app::mcp::McpInstallPlan;
 
 const MCP_REGISTRY_SCOPE: &str = "mcp_registry";
 
@@ -177,16 +176,6 @@ fn load_registry_server(id: &str) -> Result<McpRegistryServer, AppError> {
         .ok_or_else(|| AppError::Other(format!("MCP server '{id}' not found in local snapshot")))
 }
 
-/// Every runtime shape this server publishes, ranked against the local
-/// machine, with the recommended pick. The user may install any of them.
-#[tauri::command]
-pub async fn mcp_market_runtime_candidates(id: String) -> Result<McpRuntimeSelection, AppError> {
-    debug!(target: "mcp_marketplace", id = %id, "mcp_market_runtime_candidates called");
-    Ok(skillstar_app::mcp::select_runtime(&load_registry_server(
-        &id,
-    )?))
-}
-
 /// The pre-install confirmation payload: the complete resolved command, the
 /// runtime alternatives, and every input the form must collect with its full
 /// `server.json` semantics.
@@ -203,28 +192,5 @@ pub async fn mcp_market_install_plan(
     Ok(skillstar_app::mcp::build_install_plan(
         &load_registry_server(&id)?,
         runtime_id.as_deref(),
-    ))
-}
-
-/// Convert a marketplace server into a prefilled, ready-to-edit
-/// [`McpServerEntry`] draft (id empty, secrets blank). The frontend finalizes it
-/// in the MCP server form and submits via the existing `create_mcp_server`.
-///
-/// `runtime_id` picks a specific shape from
-/// [`mcp_market_runtime_candidates`]; omitting it uses the recommendation.
-#[tauri::command]
-pub async fn mcp_market_entry_to_draft(
-    id: String,
-    runtime_id: Option<String>,
-) -> Result<McpServerEntry, AppError> {
-    debug!(target: "mcp_marketplace", id = %id, runtime = ?runtime_id, "mcp_market_entry_to_draft called");
-    let server = load_registry_server(&id)?;
-    let Some(runtime_id) = runtime_id else {
-        return Ok(skillstar_app::mcp::registry_to_entry(&server));
-    };
-    let selection = skillstar_app::mcp::select_runtime(&server);
-    Ok(skillstar_app::mcp::registry_to_entry_for(
-        &server,
-        selection.resolve(Some(&runtime_id)),
     ))
 }

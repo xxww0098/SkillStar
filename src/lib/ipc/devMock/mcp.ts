@@ -13,10 +13,8 @@ import {
   MCP_STORE,
   MCP_TOOL_STATUSES,
   mcpInstallPlan,
-  mcpMarketDraft,
   mcpMarketPage,
   mcpProbeReport,
-  mcpRuntimeSelection,
 } from "./mcpData";
 import { type DevMockHandlers, iso } from "./shared";
 
@@ -116,7 +114,5 @@ export const MCP_HANDLERS: DevMockHandlers = {
   },
 
   // Install path
-  mcp_market_runtime_candidates: (args) => mcpRuntimeSelection(arg(args, "id")),
   mcp_market_install_plan: (args) => mcpInstallPlan(arg(args, "id"), args?.runtimeId as string | undefined),
-  mcp_market_entry_to_draft: (args) => mcpMarketDraft(arg(args, "id")),
 };
