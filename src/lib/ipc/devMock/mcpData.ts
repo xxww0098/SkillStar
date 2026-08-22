@@ -153,8 +153,12 @@ export const MCP_PRESETS = [
     tags: ["files"],
     requiredEnv: [],
   },
+  // Curated-derived: id *is* the catalog row id, and `catalogId` routes the
+  // chip to the install wizard instead of the create form. The other two are
+  // built-ins, which have no catalog row and keep the form path.
   {
-    id: "preset-gh",
+    id: "mkt-github",
+    catalogId: "mkt-github",
     name: "github",
     description: "GitHub repos, issues and PRs.",
     homepage: "https://github.com/github/github-mcp-server",

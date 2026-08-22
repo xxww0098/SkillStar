@@ -8,7 +8,7 @@
 
 - `skillstar_models::mcp`：用户本地 MCP store、server patch、preset、tool status、sync result 和健康探测报告。
 - `skillstar_marketplace::{mcp_models, mcp_remote, mcp_snapshot}`：Marketplace Publisher、源描述符、registry package/remote、Input 语义、卡片查询与 detail。
-- `skillstar_app::mcp`：把前两者接起来的跨域 use case（形态候选、草稿、安装计划、preset 映射）。
+- `skillstar_app::mcp`：把前两者接起来的跨域 use case（形态候选、草稿、安装计划、preset 芯片编排与映射）。
 - `src-tauri::commands::mcp_commands::McpServerWithSync`：命令层返回的 server + per-tool sync DTO。
 
 这四组 Rust 类型通过 ts-rs 导出到 `src/types/generated/`，`src/types/mcp.ts` 只做 re-export。修改字段后运行 `bun run types:gen`；不得在 TypeScript 手写第二份大型 wire type。
@@ -157,7 +157,8 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 
 ## 前端职责
 
-- preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。
+- preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。这整段编排（初始化快照 → 列 curated → 过滤 recommended → 映射 → 合并去重）在 `skillstar_app::mcp::presets`，命令层只是适配器；快照 runtime 的装配（db 路径、data root、已装技能 loader）仍属宿主胶水（GUI 在 `src-tauri/src/core/marketplace_snapshot`，CLI 在 `skillstar_app::cli`）。
+- preset 芯片有两条安装路径，按 `McpPreset.catalogId` 这个显式标记分流，不靠「先试着解析目录行、解析不到再回退」：带 `catalogId` 的 curated 芯片打开安装向导（`McpInstallWizard`，与市场 tab 同一个入口，因而同样有运行时形态选择、密钥掩码密码框、必填标注和完整命令确认）；不带的内置 preset 没有目录行，继续预填新建表单。curated preset 的 id 本来就是目录行 id，所以芯片可以直接把它交给向导。
 - MCP 页面是 MCP 域的唯一入口，四个 tab 共用同一批 hook：**已安装**（`McpManager`）、**市场**（`McpMarketPage`，全目录分页浏览）、**工具**（`McpToolStatusPanel`）、**目录源**（`McpSourcesPanel`）。市场、工具、目录源三项此前完全没有 UI。
 - Marketplace MCP tab 保留 Publisher grid 入口；`McpPublisherDetail` 现在只是一层 hero，主体复用同一个 `McpMarketPage`，只是带上 `publisherId`。发布者页不再自己拉全量再内存过滤。
 - Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。
@@ -167,6 +168,7 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 - 安装向导必须展示完整命令预览与运行时候选；secret 字段必须掩码，且不得回显进日志。用户填写的参数会改变命令行，因此确认步骤显示的是 `mcp_market_install_preview` 按最终值渲染出的那一条——前端不持有任何参数拼装、模板替换或命令行渲染逻辑，只做掩码与即时的必填/格式/可选值校验（纯函数，即时反馈不该走一趟 IPC；后端的校验才是权威）。预览按 300ms 去抖调用，在途期间提交按钮禁用，避免批准一条过期的命令。向导提交的是答案 + 已确认的那条字符串，不是自己拼出来的 entry；提交时传的运行时形态是安装计划**选定**的那个（`selectedRuntimeId`），不是选择器的临时状态——`null` 会让后端回落到排序推荐，可能是另一种形态。本地（stdio）安装必须勾选确认框才能提交；远端形态零本地执行，不要求这次勾选。
 - 同步结果必须逐 target 展示成功/跳过/失败/已回滚/回滚失败，并给出错误原文、配置路径与备份路径；失败项可单条重试（`set_mcp_tool_enabled`）或整条重投（`sync_mcp_server`，`force`）。批次一致性（applied / rolledBack / drifted）由前端按同一语义从结果数组重算。
 - `autoApprove` / `disabledTools` / `timeout` 只有部分 target 会写入，表单必须按**当前选中的 target**说明谁会写、谁会忽略。这张表在 `lib/toolRegistry.ts`，SSOT 仍是 `specs.rs` 的各个 writer，两边必须同一次变更内落地。
+- 工具未检测提示（target 选择器里那句 `notDetectedSuffix`）由 `useMcpToolStatuses` 返回的 `noteForTool` 派生；已安装页与市场页都用它，不各写一份。
 - `KEY=VALUE` 解析在 `lib/kv.ts`：只 trim key，值默认 trim，但**加引号即逐字保留**。旧实现无条件 trim 值，会静默改写带首尾空格的密钥。
 
 ## 验证

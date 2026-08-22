@@ -15,7 +15,7 @@ use skillstar_marketplace::{
 
 use super::draft::{registry_to_entry_for, sanitize_key};
 use super::install::{McpInstallInputScope, McpSecretStorage, build_install_plan_with};
-use super::presets::curated_server_to_preset;
+use super::presets::{curated_server_to_preset, list_mcp_presets_with};
 use super::runtime::{McpRuntimeShape, select_runtime_with};
 
 mod install_preview_tests;
@@ -825,4 +825,67 @@ fn curated_rows_become_presets_with_required_env_and_publisher_tags() {
     );
     assert_eq!(preset.env.len(), 1);
     let _: BTreeMap<String, String> = preset.env;
+}
+
+/// The chip routes on this marker alone. "Try the wizard, fall back to the
+/// form if the row does not resolve" would hand a built-in preset's entry
+/// point to a transient catalog read.
+#[test]
+fn only_curated_presets_carry_a_catalog_row_id() {
+    let mut s = server("curated-one");
+    s.recommended = true;
+
+    assert_eq!(
+        curated_server_to_preset(&s).catalog_id.as_deref(),
+        Some("curated-one-id"),
+        "a curated preset's id is its catalog row id, so the wizard can resolve it"
+    );
+    for preset in skillstar_models::mcp::get_mcp_presets() {
+        assert_eq!(
+            preset.catalog_id, None,
+            "built-in preset '{}' has no catalog row and must keep the form path",
+            preset.id
+        );
+    }
+}
+
+/// Pins the A.3-f regression: presets used to be *either* the curated rows *or*
+/// the built-in catalog, and since only one curated row carries
+/// `recommended: true`, the UI ended up with a single chip.
+#[test]
+fn recommended_curated_rows_join_the_builtin_catalog_instead_of_replacing_it() {
+    let builtin = skillstar_models::mcp::get_mcp_presets();
+    let mut promoted = server("acme-promoted");
+    promoted.recommended = true;
+    let ordinary = server("acme-ordinary");
+
+    let merged = list_mcp_presets_with(|| Ok(vec![promoted, ordinary]));
+
+    assert_eq!(merged.len(), builtin.len() + 1);
+    assert!(merged.iter().any(|p| p.id == "acme-promoted-id"));
+    assert!(
+        !merged.iter().any(|p| p.id == "acme-ordinary-id"),
+        "only promoted curated rows belong in the preset chips"
+    );
+    for preset in &builtin {
+        assert!(
+            merged.iter().any(|p| p.id == preset.id),
+            "built-in preset '{}' must still reach the UI",
+            preset.id
+        );
+    }
+}
+
+/// A missing or corrupt snapshot DB degrades to "no curated additions", never
+/// to "no presets at all".
+#[test]
+fn a_failed_curated_read_still_serves_the_builtin_catalog() {
+    let builtin = skillstar_models::mcp::get_mcp_presets();
+
+    let merged = list_mcp_presets_with(|| Err(anyhow::anyhow!("snapshot db is unreadable")));
+
+    assert_eq!(
+        merged.iter().map(|p| &p.id).collect::<Vec<_>>(),
+        builtin.iter().map(|p| &p.id).collect::<Vec<_>>()
+    );
 }

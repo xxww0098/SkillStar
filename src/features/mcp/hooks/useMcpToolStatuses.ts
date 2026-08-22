@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { tauriInvoke } from "../../../lib/ipc";
 import { isMcpToolId, MCP_TOOL_IDS, type McpToolId, type McpToolStatus } from "../../../types";
 import { mcpKeys } from "../api/keys";
@@ -23,8 +24,14 @@ export interface McpToolStatusRow extends McpToolStatus {
  * Rows are ordered by `MCP_TOOL_IDS` and back-filled for any target the command
  * did not report, so the view is a complete list of what SkillStar can write to
  * rather than a list of what happened to answer.
+ *
+ * `noteForTool` is that view's one derived reading: the per-target note a picker
+ * shows beside an undetected tool. It lives here rather than in each host
+ * because both the store page and the marketplace page render target pickers,
+ * and two verbatim copies of the same derivation is one copy too many.
  */
 export function useMcpToolStatuses(enabled = true) {
+  const { t } = useTranslation();
   const query = useQuery<McpToolStatus[]>({
     queryKey: mcpKeys.toolStatuses(),
     queryFn: () => tauriInvoke("mcp_tool_statuses"),
@@ -50,8 +57,14 @@ export function useMcpToolStatuses(enabled = true) {
     );
   }, [query.data]);
 
+  const noteForTool = useMemo(() => {
+    const byId = new Map(statuses.map((status) => [status.toolId, status]));
+    return (toolId: McpToolId) => (byId.get(toolId)?.installed === false ? t("mcp.notDetectedSuffix") : null);
+  }, [statuses, t]);
+
   return {
     statuses,
+    noteForTool,
     installedCount: statuses.filter((status) => status.installed).length,
     isLoading: query.isLoading,
     isFetching: query.isFetching,

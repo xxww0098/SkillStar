@@ -287,6 +287,7 @@ fn curated_like(id: &str, name: &str) -> McpPreset {
         headers: Default::default(),
         tags: vec!["recommended".into()],
         required_env: Vec::new(),
+        catalog_id: Some(id.to_string()),
     }
 }
 

@@ -19,7 +19,8 @@
 //! - [`install`] — the pre-install confirmation payload (command preview + inputs),
 //!   the answers→entry fold behind it ([`install::preview_install`]), and the
 //!   submit-time verdict over that fold ([`install::prepare_install`]).
-//! - [`presets`] — curated catalog row → preset chip.
+//! - [`presets`] — the preset chips: curated catalog rows merged over the
+//!   built-in catalog, each row mapped to a chip.
 
 pub mod draft;
 pub mod install;
@@ -36,7 +37,7 @@ pub use install::{
     McpSecretPolicy, McpSecretStorage, build_install_plan, build_install_plan_with,
     prepare_install, preview_install,
 };
-pub use presets::curated_server_to_preset;
+pub use presets::{curated_server_to_preset, list_mcp_presets, list_mcp_presets_with};
 pub use runtime::{
     McpRuntimeCandidate, McpRuntimeSelection, McpRuntimeShape, select_runtime, select_runtime_with,
 };

@@ -11,20 +11,36 @@ import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
-import type { McpPreset, McpServerEntry, McpServerWithSync, McpSyncResult, McpToolId } from "../../../types";
+import type {
+  McpInstallOutcome,
+  McpPreset,
+  McpServerEntry,
+  McpServerWithSync,
+  McpSyncResult,
+  McpToolId,
+} from "../../../types";
 import { useMcpCatalogUpdates } from "../hooks/useMcpCatalogUpdates";
 import { useMcpProbe } from "../hooks/useMcpProbe";
-import { useMcpServers } from "../hooks/useMcpServers";
+import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
 import { resolveMcpToolFilter, selectMcpAgentTargets } from "../lib/agentTargets";
 import { failedMcpSyncCount, mergeMcpSyncResults, summarizeMcpSyncResults } from "../lib/syncResults";
+import { McpInstallWizard } from "./McpInstallWizard";
 import { McpProbePanel } from "./McpProbePanel";
 import { McpServerCard } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
 import { McpSyncResultsPanel } from "./McpSyncResultsPanel";
 
-/** Map a recommended preset into create-form seed values. */
+/**
+ * Map a *built-in* preset into create-form seed values.
+ *
+ * Only built-ins take this path. A curated preset carries `catalogId` and opens
+ * the install wizard instead, so it gets the runtime-shape picker, masked
+ * secret fields and the command confirmation that the store tab already gives
+ * the same catalog row — seeding this form would drop all three and write the
+ * server's API key as a plaintext line in a multi-line textarea.
+ */
 function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
   return {
     name: preset.name,
@@ -39,7 +55,12 @@ function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
   };
 }
 
-type DrawerMode = { type: "closed" } | { type: "create" } | { type: "edit"; id: string };
+type DrawerMode =
+  | { type: "closed" }
+  | { type: "create" }
+  | { type: "edit"; id: string }
+  /** A curated preset chip, installed through the same wizard as the store tab. */
+  | { type: "install"; catalogId: string };
 
 /** The last sync batch, kept so its per-target detail stays inspectable. */
 interface SyncBatch {
@@ -80,13 +101,14 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     toggleTool,
     syncAll,
     syncServer,
+    installFromMarket,
     importFromTools,
     syncing,
     retrySyncing,
     importing,
   } = useMcpServers();
   const { presets } = useMcpPresets();
-  const { statuses } = useMcpToolStatuses();
+  const { noteForTool } = useMcpToolStatuses();
   const updates = useMcpCatalogUpdates(servers);
   const probe = useMcpProbe();
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
@@ -101,11 +123,6 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const [toolFilter, setToolFilter] = useState<string | null>(null);
   const agentTargets = useMemo(() => selectMcpAgentTargets(profiles), [profiles]);
   const activeToolFilter = resolveMcpToolFilter(toolFilter, agentTargets);
-
-  const noteForTool = useMemo(() => {
-    const byId = new Map(statuses.map((status) => [status.toolId, status]));
-    return (toolId: McpToolId) => (byId.get(toolId)?.installed === false ? t("mcp.notDetectedSuffix") : null);
-  }, [statuses, t]);
 
   const filteredServers = useMemo(
     () =>
@@ -142,8 +159,47 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     setDrawer({ type: "create" });
   };
 
+  /**
+   * Curated chip → install wizard, built-in chip → create form.
+   *
+   * Routed on the explicit `catalogId` marker, never on "open the wizard and
+   * fall back if the row does not resolve": a built-in preset has no catalog
+   * row at all, and a transient catalog read must not decide whether its entry
+   * point still works.
+   */
   const pickPreset = (preset: McpPreset) => {
+    if (preset.catalogId) {
+      setDrawer({ type: "install", catalogId: preset.catalogId });
+      return;
+    }
     setCreateSeed((prev) => ({ key: prev.key + 1, defaults: presetToDefaults(preset) }));
+  };
+
+  /**
+   * Same verdict handling as the store tab: a refusal is an answer the wizard
+   * renders in place, not an error, so only a genuine failure gets a toast.
+   */
+  const handleInstall = async (submission: McpMarketInstallSubmission): Promise<McpInstallOutcome> => {
+    setSaving(true);
+    try {
+      const outcome = await installFromMarket(submission);
+      if (outcome.status === "installed") {
+        const failedCount = recordBatch(
+          t("mcp.syncBatchSave"),
+          outcome.installed.server.id,
+          outcome.installed.syncResults,
+        );
+        if (failedCount > 0) toast.warning(t("mcp.syncPartial", { count: failedCount }));
+        else toast.success(t("mcp.added"));
+        setDrawer({ type: "closed" });
+      }
+      return outcome;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      setSaving(false);
+    }
   };
 
   /**
@@ -432,13 +488,32 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         }}
         title={
           <span className="flex items-center gap-2 text-foreground">
-            <Boxes className="h-4 w-4 text-primary" />
-            {drawer.type === "edit" ? (editing?.name ?? t("mcp.title")) : t("mcp.addServer")}
+            {drawer.type === "install" ? (
+              <PackageSearch className="h-4 w-4 text-primary" />
+            ) : (
+              <Boxes className="h-4 w-4 text-primary" />
+            )}
+            {drawer.type === "edit"
+              ? (editing?.name ?? t("mcp.title"))
+              : drawer.type === "install"
+                ? t("mcp.installWizardTitle")
+                : t("mcp.addServer")}
           </span>
         }
-        subtitle={t("mcp.drawerSubtitle")}
+        subtitle={drawer.type === "install" ? t("mcp.installWizardSubtitle") : t("mcp.drawerSubtitle")}
       >
-        {drawer.type === "create" ? (
+        {drawer.type === "install" ? (
+          <McpInstallWizard
+            key={drawer.catalogId}
+            serverId={drawer.catalogId}
+            submitting={saving}
+            onSubmit={handleInstall}
+            // Back to the chips rather than closed: a mis-clicked chip should
+            // not cost the drawer.
+            onCancel={() => setDrawer({ type: "create" })}
+            noteForTool={noteForTool}
+          />
+        ) : drawer.type === "create" ? (
           <div className="space-y-4">
             {presets.length > 0 ? (
               <div className="rounded-lg border border-border/60 bg-background/40 p-3">

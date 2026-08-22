@@ -8,7 +8,7 @@ import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
 import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
-import type { McpInstallOutcome, McpToolId, ViewMode } from "../../../types";
+import type { McpInstallOutcome, ViewMode } from "../../../types";
 import { useMcpMarketPage } from "../hooks/useMcpMarketPage";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpSources } from "../hooks/useMcpSources";
@@ -49,13 +49,9 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
   const market = useMcpMarketPage({ publisherId });
   const { servers, installFromMarket } = useMcpServers();
   const { health } = useMcpSources();
-  const { statuses } = useMcpToolStatuses();
+  const { noteForTool } = useMcpToolStatuses();
 
   const installedIndex = useMemo(() => buildInstalledIndex(servers), [servers]);
-  const noteForTool = useMemo(() => {
-    const byId = new Map(statuses.map((status) => [status.toolId, status]));
-    return (toolId: McpToolId) => (byId.get(toolId)?.installed === false ? t("mcp.notDetectedSuffix") : null);
-  }, [statuses, t]);
 
   /**
    * A refused install is not an error: the wizard keeps the drawer open and
