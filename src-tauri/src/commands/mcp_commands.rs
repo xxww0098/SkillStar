@@ -107,12 +107,9 @@ pub async fn create_mcp_server(
     let path = mcp::mcp_store_path();
     let mut store = mcp::read_mcp_store(&path)?;
 
-    let created = mcp::create_server(&mut store, entry)?;
-    mcp::write_mcp_store(&store, &path)?;
-
-    let sync_results = mcp::sync_server_public_tools(&created, false);
+    let (server, sync_results) = mcp::create_server_and_sync(&mut store, &path, entry)?;
     Ok(McpServerWithSync {
-        server: created,
+        server,
         sync_results,
     })
 }

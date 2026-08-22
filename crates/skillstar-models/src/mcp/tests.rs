@@ -6,6 +6,7 @@ use super::*;
 /// with the rest of the test process, so they all take the same lock — see
 /// `tests_targets::SANDBOX_HOME_TEST_LOCK`.
 use super::tests_targets::SANDBOX_HOME_TEST_LOCK as LEGACY_DESKTOP_CONFIG_TEST_LOCK;
+use super::tests_targets::TempDir;
 
 fn reset_legacy_desktop_config() -> std::path::PathBuf {
     let path = resolve_legacy_claude_desktop_config_path().unwrap();
@@ -648,4 +649,117 @@ fn sync_all_keeps_legacy_cleanup_internal_and_only_for_existing_entries() {
         Some(&false)
     );
     std::fs::remove_file(path).ok();
+}
+
+// ── create + projection tests ───────────────────────────────────────────
+// `create_server_and_sync` is the only writer that persists the store itself,
+// before projecting. Both tests below pin that order through its observable
+// consequence: whatever the tools do, the entry is already on disk.
+
+/// Seed Codex's config in the sandbox home. Creating `~/.codex` is what makes
+/// the install probe report installed, so the public pass actually writes
+/// instead of returning `skipped` (create never forces).
+fn seed_codex_config(contents: &str) -> std::path::PathBuf {
+    let path = resolve_mcp_config_path("codex").unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, contents).unwrap();
+    path
+}
+
+#[test]
+fn create_and_sync_persists_the_store_then_projects_enabled_targets() {
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let codex_path = seed_codex_config("model = \"gpt-5\"\n");
+    let dir = TempDir::new("create-sync");
+    let store_path = dir.path().join("mcp_servers.json");
+
+    let mut entry = stdio("created-and-projected");
+    entry.enabled.insert("codex".into(), true);
+    let mut store = McpStore::default();
+    let (created, results) = create_server_and_sync(&mut store, &store_path, entry).unwrap();
+
+    assert!(!created.id.is_empty());
+    assert_eq!(store.servers, vec![created.clone()]);
+    // Persisted, not merely held in memory.
+    assert_eq!(
+        read_mcp_store(&store_path).unwrap().servers,
+        vec![created.clone()]
+    );
+
+    // One result per public target, and the enabled one really landed.
+    assert_eq!(results.len(), MCP_TOOL_IDS.len());
+    let codex = results
+        .iter()
+        .find(|result| result.tool_id == "codex")
+        .expect("codex result");
+    assert!(codex.success && !codex.skipped, "{codex:?}");
+    assert!(
+        std::fs::read_to_string(&codex_path)
+            .unwrap()
+            .contains(&created.name)
+    );
+
+    std::fs::remove_file(codex_path).ok();
+}
+
+#[test]
+fn create_and_sync_reports_a_refusing_target_and_keeps_the_entry_stored() {
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let malformed = "model = \"gpt-5\"\n[mcp_servers.kept\ncommand = \"npx\"\n";
+    let codex_path = seed_codex_config(malformed);
+    let dir = TempDir::new("create-sync-refused");
+    let store_path = dir.path().join("mcp_servers.json");
+
+    let mut entry = stdio("created-despite-bad-target");
+    entry.enabled.insert("codex".into(), true);
+    let mut store = McpStore::default();
+    let (created, results) = create_server_and_sync(&mut store, &store_path, entry)
+        .expect("a target that refuses the projection must not fail the create");
+
+    // The failure is reported per target — neither swallowed nor escalated.
+    let codex = results
+        .iter()
+        .find(|result| result.tool_id == "codex")
+        .expect("codex result");
+    assert!(!codex.success && codex.error.is_some(), "{codex:?}");
+    assert_eq!(std::fs::read_to_string(&codex_path).unwrap(), malformed);
+
+    // The entry survives in the store, in memory and on disk, so re-syncing
+    // is all it takes to finish the job.
+    assert_eq!(store.servers, vec![created.clone()]);
+    assert_eq!(read_mcp_store(&store_path).unwrap().servers, vec![created]);
+
+    std::fs::remove_file(codex_path).ok();
+}
+
+#[test]
+fn create_and_sync_projects_nothing_when_the_store_cannot_be_written() {
+    // The one order-dependent behaviour a test can observe: an unwritable
+    // store must leave every tool config untouched. Projecting first would
+    // put the server into Codex's config with nothing in the store pointing
+    // at it — an orphan no re-sync could find.
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let codex_before = "model = \"gpt-5\"\n";
+    let codex_path = seed_codex_config(codex_before);
+    let dir = TempDir::new("create-sync-unwritable");
+    // A regular file where the store's parent directory has to be.
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&blocked, "not a directory").unwrap();
+    let store_path = blocked.join("mcp_servers.json");
+
+    let mut entry = stdio("never-created");
+    entry.enabled.insert("codex".into(), true);
+    let mut store = McpStore::default();
+    assert!(create_server_and_sync(&mut store, &store_path, entry).is_err());
+
+    assert!(store.servers.is_empty(), "the store must not have committed");
+    assert_eq!(std::fs::read_to_string(&codex_path).unwrap(), codex_before);
+
+    std::fs::remove_file(codex_path).ok();
 }
