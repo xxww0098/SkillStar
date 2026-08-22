@@ -9,15 +9,23 @@
 //! This module owns command registration, argument/DTO shapes and error
 //! mapping. It holds no domain logic.
 
+use std::collections::BTreeMap;
+
+use serde::Serialize;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::{
     LocalFirstResult, McpCustomSource, McpMarketEntry, McpMarketServerDetail, McpPublisherSummary,
     McpRegistryServer, McpServerPage, McpServerQuery, McpSourceDescriptor, SyncStateEntry,
     mcp_snapshot,
 };
+use skillstar_models::mcp;
+use tauri::State;
 use tracing::{debug, error};
+use ts_rs::TS;
 
-use skillstar_app::mcp::{McpInstallAnswer, McpInstallPlan, McpInstallPreview};
+use skillstar_app::mcp::{McpInstallAnswer, McpInstallPlan, McpInstallPreview, McpInstallRejection};
+
+use super::mcp_commands::{McpServerWithSync, McpWriteLock};
 
 const MCP_REGISTRY_SCOPE: &str = "mcp_registry";
 
@@ -219,4 +227,78 @@ pub async fn mcp_market_install_preview(
         runtime_id.as_deref(),
         &answers,
     ))
+}
+
+/// What one install attempt produced: an entry that was written and projected,
+/// or a refusal that wrote nothing.
+///
+/// A sum type rather than an `Err`, because [`AppError`] serializes to a bare
+/// string — a refusal the UI has to tell apart from another refusal cannot
+/// survive that. The `installed` arm is verbatim what `create_mcp_server`
+/// returns, so the per-target success/skip/failure display is unchanged.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallOutcome.ts")]
+pub enum McpInstallOutcome {
+    /// Boxed only to keep the two arms a similar size (`clippy::large_enum_variant`);
+    /// `Box` is transparent to serde and to ts-rs, so the wire shape is unchanged.
+    #[serde(rename_all = "camelCase")]
+    Installed { installed: Box<McpServerWithSync> },
+    #[serde(rename_all = "camelCase")]
+    Rejected { rejection: McpInstallRejection },
+}
+
+/// Install a catalog row from the answers the user gave.
+///
+/// The entry is derived here, from the catalog row as it stands *now* — the
+/// renderer no longer assembles one. `approved_preview` is the string the user
+/// confirmed, and `skillstar_app::mcp::prepare_install` refuses unless the
+/// fresh derivation still renders it: the row is re-read at this moment, and a
+/// registry sync can rewrite it while the preview sits on screen.
+///
+/// The answers and the approved command may both contain secrets, so **only
+/// the row id and the runtime shape are logged** — never a value, never the
+/// command line.
+///
+/// Deliberately not `create_mcp_server`, which stays as-is for the manual "add
+/// server" form: that form submits an entry the user authored themselves, and
+/// enforcing a publisher's required inputs against it would be enforcing them
+/// against nothing.
+#[tauri::command]
+pub async fn mcp_market_install(
+    lock: State<'_, McpWriteLock>,
+    id: String,
+    runtime_id: Option<String>,
+    answers: Vec<McpInstallAnswer>,
+    enabled: BTreeMap<String, bool>,
+    approved_preview: String,
+) -> Result<McpInstallOutcome, AppError> {
+    debug!(
+        target: "mcp_marketplace",
+        id = %id, runtime = ?runtime_id, answers = answers.len(),
+        "mcp_market_install called"
+    );
+    let entry = match skillstar_app::mcp::prepare_install(
+        &load_registry_server(&id)?,
+        runtime_id.as_deref(),
+        &answers,
+        enabled,
+        &approved_preview,
+    ) {
+        Ok(entry) => entry,
+        Err(rejection) => return Ok(McpInstallOutcome::Rejected { rejection }),
+    };
+
+    let _guard = lock.0.lock().await;
+    let path = mcp::mcp_store_path();
+    let mut store = mcp::read_mcp_store(&path)?;
+    // Writes the store itself, before projecting — the order is that
+    // function's contract, not this adapter's choice.
+    let (server, sync_results) = mcp::create_server_and_sync(&mut store, &path, entry)?;
+    Ok(McpInstallOutcome::Installed {
+        installed: Box::new(McpServerWithSync {
+            server,
+            sync_results,
+        }),
+    })
 }

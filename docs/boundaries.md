@@ -194,7 +194,7 @@ crates/skillstar-marketplace/src/
 crates/skillstar-app/src/mcp/     # 跨域 use case（本域唯一编排层）
 ├── runtime.rs           #   运行时形态候选与排序
 ├── draft.rs             #   registry server → McpServerEntry 草稿（含来源指纹）
-├── install.rs           #   安装前确认负载（完整命令 + Input 表单 + secret 策略）与答案→entry 的折叠
+├── install.rs           #   安装前确认负载（完整命令 + Input 表单 + secret 策略）、答案→entry 的折叠，以及提交时的校验裁决（必填项 + 与已确认命令比对，纯函数，不做 IO）
 └── presets.rs           #   curated 行 → preset 芯片
 
 crates/skillstar-models/src/mcp/  # 本地 store 与投影

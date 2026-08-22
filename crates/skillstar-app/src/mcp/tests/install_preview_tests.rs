@@ -2,14 +2,17 @@
 //! arguments are flattened.
 //!
 //! Split out of the parent module only for size; it shares its fixtures and
-//! its injected-`PATH` discipline. `preview_install` needs no injection at all
-//! — it is pure, which is the property these tests are here to keep.
+//! its injected-`PATH` discipline. Neither `preview_install` nor the
+//! submit-time `prepare_install` over it needs any injection — both are pure,
+//! which is the property these tests are here to keep.
 
 use std::collections::BTreeMap;
 
 use skillstar_marketplace::{McpArgument, McpArgumentKind, McpInput, McpInputVariable};
 
-use super::super::install::{McpInstallAnswer, McpInstallMissingInput, preview_install};
+use super::super::install::{
+    McpInstallAnswer, McpInstallMissingInput, McpInstallRejection, prepare_install, preview_install,
+};
 use super::*;
 
 fn named(name: &str, input: McpInput) -> McpArgument {
@@ -365,4 +368,156 @@ fn an_untouched_form_previews_exactly_what_the_plan_showed() {
     let preview = preview_install(&s, plan.selected_runtime_id.as_deref(), &[]);
     assert_eq!(preview.command_preview, plan.command_preview);
     assert_eq!(preview.entry.args, plan.draft.args);
+}
+
+// ---------------------------------------------------------------------------
+// The submit-time verdict (`prepare_install`)
+// ---------------------------------------------------------------------------
+
+fn enabled_on(tool_id: &str) -> BTreeMap<String, bool> {
+    BTreeMap::from([(tool_id.to_string(), true)])
+}
+
+/// Required, unanswered, and the refusal has to say *which* field — "something
+/// is missing" would leave the user hunting through the form.
+#[test]
+fn prepare_refuses_a_missing_required_input_and_names_it() {
+    let mut s = server("needs-token");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env("TOKEN", secret_input())];
+    s.packages = vec![pkg];
+
+    let approved = preview_install(&s, Some("package:0"), &[])
+        .command_preview
+        .expect("stdio installs preview");
+
+    let rejection = prepare_install(
+        &s,
+        Some("package:0"),
+        &[],
+        enabled_on("claude-code"),
+        &approved,
+    )
+    .expect_err("a blank required input must not install");
+
+    assert_eq!(
+        rejection,
+        McpInstallRejection::MissingInputs {
+            missing: vec![McpInstallMissingInput {
+                key: "TOKEN".into(),
+                scope: McpInstallInputScope::Environment,
+                index: 0,
+                variable: None,
+            }],
+        }
+    );
+}
+
+/// The gap this seam closes: the catalog row is re-read at submit time, and a
+/// registry sync can rewrite it while the preview is on screen. A row that
+/// changed derives a different command, which is refused — and refused for a
+/// reason nobody can confuse with a blank field.
+#[test]
+fn prepare_refuses_a_command_that_no_longer_matches_the_approved_one() {
+    let s = with_package_arguments(
+        "resynced",
+        vec![named(
+            "--port",
+            McpInput {
+                default: Some("3000".into()),
+                ..Default::default()
+            },
+        )],
+    );
+
+    let rejection = prepare_install(
+        &s,
+        Some("package:0"),
+        &[],
+        enabled_on("claude-code"),
+        "npx -y @acme/x@1.2.0 --port 9999",
+    )
+    .expect_err("a command the user never approved must not install");
+
+    assert_eq!(rejection, McpInstallRejection::CommandChanged);
+    assert_ne!(
+        rejection,
+        McpInstallRejection::MissingInputs { missing: vec![] },
+        "the two refusals must stay distinguishable"
+    );
+}
+
+/// What the user approved is what gets written: the same entry the preview
+/// rendered from, with only the targets they picked stamped onto it.
+#[test]
+fn prepare_returns_the_previewed_entry_with_the_targets_stamped() {
+    let mut s = server("approved");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env("TOKEN", secret_input())];
+    s.packages = vec![pkg];
+
+    let answers = [answer(McpInstallInputScope::Environment, 0, "sk-live-42")];
+    let preview = preview_install(&s, Some("package:0"), &answers);
+    let approved = preview.command_preview.clone().expect("stdio previews");
+
+    let entry = prepare_install(
+        &s,
+        Some("package:0"),
+        &answers,
+        enabled_on("claude-code"),
+        &approved,
+    )
+    .expect("an approved, complete form installs");
+
+    assert_eq!(entry.command, preview.entry.command);
+    assert_eq!(entry.args, preview.entry.args);
+    assert_eq!(entry.env, preview.entry.env);
+    assert_eq!(entry.url, preview.entry.url);
+    assert_eq!(entry.enabled, enabled_on("claude-code"));
+    assert!(
+        preview.entry.enabled.is_empty(),
+        "picking targets is the caller's step, not the preview's"
+    );
+}
+
+/// A remote shape runs nothing locally, so there is no command line to confirm
+/// — the resolved url is what the confirmation step shows, and therefore what
+/// is compared.
+#[test]
+fn prepare_compares_the_resolved_url_for_a_remote_shape() {
+    let mut s = server("remote-approved");
+    let mut rem = remote("http", "https://{region}.acme.dev/mcp");
+    rem.variables = vec![env(
+        "region",
+        McpInput {
+            is_required: true,
+            ..Default::default()
+        },
+    )];
+    s.remotes = vec![rem];
+
+    let answers = [answer(McpInstallInputScope::UrlVariable, 0, "eu")];
+    let preview = preview_install(&s, Some("remote:0"), &answers);
+    assert_eq!(preview.command_preview, None);
+
+    let entry = prepare_install(
+        &s,
+        Some("remote:0"),
+        &answers,
+        enabled_on("claude-code"),
+        "https://eu.acme.dev/mcp",
+    )
+    .expect("a remote install confirms its url, not a command");
+    assert_eq!(entry.url.as_deref(), Some("https://eu.acme.dev/mcp"));
+
+    assert_eq!(
+        prepare_install(
+            &s,
+            Some("remote:0"),
+            &answers,
+            enabled_on("claude-code"),
+            "https://us.acme.dev/mcp",
+        ),
+        Err(McpInstallRejection::CommandChanged)
+    );
 }

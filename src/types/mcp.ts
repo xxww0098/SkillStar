@@ -18,10 +18,11 @@
 //! - McpRuntimeCandidate, McpRuntimeSelection, McpRuntimeShape, McpInstallPlan,
 //!   McpInstallInput, McpInstallInputScope, McpInstallInputVariable,
 //!   McpInstallAnswer, McpInstallPreview, McpInstallMissingInput,
-//!   McpSecretPolicy, McpSecretStorage come from `skillstar_app::mcp` (the
-//!   cross-domain use cases).
+//!   McpInstallRejection, McpSecretPolicy, McpSecretStorage come from
+//!   `skillstar_app::mcp` (the cross-domain use cases).
 //! - McpServerWithSync comes from
-//!   `skillstar` (src-tauri) `commands::mcp_commands`.
+//!   `skillstar` (src-tauri) `commands::mcp_commands`, McpInstallOutcome from
+//!   `commands::mcp_marketplace`.
 
 export type { McpServerEntry } from "./generated/McpServerEntry";
 export type { McpServerPatch } from "./generated/McpServerPatch";
@@ -72,10 +73,12 @@ export type { McpInstallInputVariable } from "./generated/McpInstallInputVariabl
 export type { McpInstallAnswer } from "./generated/McpInstallAnswer";
 export type { McpInstallPreview } from "./generated/McpInstallPreview";
 export type { McpInstallMissingInput } from "./generated/McpInstallMissingInput";
+export type { McpInstallRejection } from "./generated/McpInstallRejection";
 export type { McpSecretPolicy } from "./generated/McpSecretPolicy";
 export type { McpSecretStorage } from "./generated/McpSecretStorage";
 
 export type { McpServerWithSync } from "./generated/McpServerWithSync";
+export type { McpInstallOutcome } from "./generated/McpInstallOutcome";
 
 /** Sub-page navigation for drill-down views */
 

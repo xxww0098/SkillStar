@@ -680,6 +680,52 @@ export function mcpInstallPreview(id: string, runtimeId: string | undefined, ans
   };
 }
 
+/**
+ * `McpInstallOutcome` — what committing one install produces.
+ *
+ * The two refusals are the point of the mock: it re-derives the preview and
+ * refuses unless it still renders the approved string, so the browser dev path
+ * exercises the same two branches the Rust seam does. What it *cannot* fake is
+ * the reason those branches exist — a catalog row rewritten mid-wizard.
+ */
+export function mcpInstallOutcome(
+  id: string,
+  runtimeId: string | undefined,
+  answers: MockRecord[],
+  enabled: Record<string, boolean>,
+  approvedPreview: string,
+): MockRecord {
+  const preview = mcpInstallPreview(id, runtimeId, answers);
+  const entry = preview.entry as MockRecord;
+  const approvalTarget = String(preview.commandPreview ?? entry.url ?? "").trim();
+  if (approvalTarget !== approvedPreview.trim()) {
+    return { status: "rejected", rejection: { reason: "commandChanged" } };
+  }
+  const missing = (preview.missing as MockRecord[]) ?? [];
+  if (missing.length > 0) {
+    return { status: "rejected", rejection: { reason: "missingInputs", missing } };
+  }
+  return {
+    status: "installed",
+    installed: {
+      server: { ...entry, id: `mcp-installed-${id}`, enabled },
+      syncResults: Object.entries(enabled)
+        .filter(([, on]) => on)
+        .map(([toolId]) => ({
+          toolId,
+          serverId: `mcp-installed-${id}`,
+          success: true,
+          skipped: false,
+          configPath: `/Users/dev/.config/${toolId}/mcp.json`,
+          backupPath: null,
+          error: null,
+          rolledBack: false,
+          rollbackError: null,
+        })),
+    },
+  };
+}
+
 /** `McpProbeReport` for an installed server. */
 export function mcpProbeReport(id: string): MockRecord {
   const server = MCP_STORE.servers.find((s) => s.id === id);

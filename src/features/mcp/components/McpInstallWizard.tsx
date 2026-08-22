@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
-import type { McpInstallInputScope, McpServerEntry, McpToolId } from "../../../types";
+import type { McpInstallOutcome, McpInstallInputScope, McpInstallRejection, McpToolId } from "../../../types";
 import { buildCommandConfirmation, buildEnvPreview } from "../lib/commandPreview";
 import {
   buildInstallAnswers,
@@ -12,6 +12,7 @@ import {
   setFieldVariable,
   validateInstallFields,
 } from "../lib/installForm";
+import type { McpMarketInstallSubmission } from "../hooks/useMcpServers";
 import { useMcpInstallPlan } from "../hooks/useMcpInstallPlan";
 import { useMcpInstallPreview } from "../hooks/useMcpInstallPreview";
 import { McpCommandConfirm } from "./McpCommandConfirm";
@@ -33,6 +34,12 @@ import { McpToolTargetPicker } from "./McpToolTargetPicker";
  * string the user approves and the object that gets installed are one
  * derivation. While that round trip is in flight the command on screen is
  * stale, which is why submit is disabled until it lands.
+ *
+ * Submitting sends the answers and the approved command, not an entry: the
+ * backend derives it again from the catalog row as it stands at that moment
+ * and refuses if that no longer renders what was approved. A refusal keeps
+ * every value the user typed — it is an answer to be corrected or a command to
+ * be re-read, never a form to be filled twice.
  */
 
 interface McpInstallWizardProps {
@@ -40,7 +47,8 @@ interface McpInstallWizardProps {
   /** Tool ids to pre-enable, e.g. the ones the user already uses. */
   initialEnabled?: Readonly<Record<string, boolean>>;
   submitting: boolean;
-  onSubmit: (entry: McpServerEntry) => Promise<void> | void;
+  /** Commits through `mcp_market_install` and hands back its verdict. */
+  onSubmit: (submission: McpMarketInstallSubmission) => Promise<McpInstallOutcome>;
   onCancel?: () => void;
   /** Per-tool note, e.g. "not installed", from `mcp_tool_statuses`. */
   noteForTool?: (toolId: McpToolId) => string | null;
@@ -76,12 +84,17 @@ export function McpInstallWizard({
   const [enabled, setEnabled] = useState<Record<string, boolean>>({ ...(initialEnabled ?? {}) });
   const [acknowledged, setAcknowledged] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [rejection, setRejection] = useState<McpInstallRejection | null>(null);
+  // Bumped on a refused submit so the preview is re-derived from the row as it
+  // stands now; re-approving the stale command on screen would be refused again.
+  const [previewToken, setPreviewToken] = useState(0);
 
   if (plan && seededFor !== planKey) {
     setSeededFor(planKey);
     setFields(buildInstallFields(plan.inputs));
     setAcknowledged(false);
     setShowErrors(false);
+    setRejection(null);
   }
 
   const errors = useMemo(() => validateInstallFields(fields), [fields]);
@@ -101,7 +114,7 @@ export function McpInstallWizard({
     preview,
     pending: previewPending,
     error: previewError,
-  } = useMcpInstallPreview(plan ? serverId : null, plan?.selectedRuntimeId ?? null, answers);
+  } = useMcpInstallPreview(plan ? serverId : null, plan?.selectedRuntimeId ?? null, answers, previewToken);
 
   // Until the first preview lands the plan's own draft *is* the preview: no
   // answer has been given yet, so the two derivations agree by construction.
@@ -140,18 +153,38 @@ export function McpInstallWizard({
   // be installed, so approving it would approve a stale command.
   const blocked = errors.length > 0 || (isLocal && !acknowledged) || previewPending || preview == null;
 
-  const handleFieldChange = (scope: McpInstallInputScope, index: number, value: string) =>
+  const handleFieldChange = (scope: McpInstallInputScope, index: number, value: string) => {
+    setRejection(null);
     setFields((prev) => setFieldValue(prev, scope, index, value));
-  const handleVariableChange = (scope: McpInstallInputScope, index: number, variable: string, value: string) =>
+  };
+  const handleVariableChange = (scope: McpInstallInputScope, index: number, variable: string, value: string) => {
+    setRejection(null);
     setFields((prev) => setFieldVariable(prev, scope, index, variable, value));
+  };
 
   const handleSubmit = async () => {
     if (errors.length > 0) {
       setShowErrors(true);
       return;
     }
-    if (blocked) return;
-    await onSubmit({ ...entry, enabled });
+    if (blocked || preview == null) return;
+    setRejection(null);
+    // The unmasked string the confirmation was rendered from. Masking is for
+    // the screen; a masked command would never match what the backend derives.
+    // A thrown failure is the caller's to report; only a refusal is rendered
+    // here, because only a refusal is something to fix on this form.
+    const outcome = await onSubmit({
+      serverId,
+      runtimeId: plan.selectedRuntimeId ?? null,
+      answers,
+      enabled,
+      approvedPreview: preview.commandPreview ?? preview.entry.url ?? "",
+    }).catch(() => null);
+    if (outcome?.status !== "rejected") return;
+    setRejection(outcome.rejection);
+    // Whatever it was, the user has to look again before it can be approved.
+    setAcknowledged(false);
+    setPreviewToken((token) => token + 1);
   };
 
   return (
@@ -205,6 +238,16 @@ export function McpInstallWizard({
 
       {showErrors && errors.length > 0 ? (
         <p className="text-xs text-destructive">{t("mcp.installMissingFields", { count: errors.length })}</p>
+      ) : null}
+
+      {rejection ? (
+        <p className="text-xs text-destructive">
+          {rejection.reason === "missingInputs"
+            ? t("mcp.installRejectedMissing", {
+                fields: rejection.missing.map((input) => input.key).join(", "),
+              })
+            : t("mcp.installRejectedCommandChanged")}
+        </p>
       ) : null}
 
       {previewError ? <p className="text-xs text-destructive">{previewError.message}</p> : null}

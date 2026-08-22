@@ -16,8 +16,9 @@
 //! Layout:
 //! - [`runtime`] — rank the shapes a server publishes against this machine.
 //! - [`draft`] — registry server → prefilled `McpServerEntry`, provenance included.
-//! - [`install`] — the pre-install confirmation payload (command preview + inputs)
-//!   and the answers→entry fold behind it ([`install::preview_install`]).
+//! - [`install`] — the pre-install confirmation payload (command preview + inputs),
+//!   the answers→entry fold behind it ([`install::preview_install`]), and the
+//!   submit-time verdict over that fold ([`install::prepare_install`]).
 //! - [`presets`] — curated catalog row → preset chip.
 
 pub mod draft;
@@ -31,8 +32,9 @@ mod tests;
 pub use draft::{registry_to_entry, registry_to_entry_for};
 pub use install::{
     McpInstallAnswer, McpInstallInput, McpInstallInputScope, McpInstallInputVariable,
-    McpInstallMissingInput, McpInstallPlan, McpInstallPreview, McpSecretPolicy, McpSecretStorage,
-    build_install_plan, build_install_plan_with, preview_install,
+    McpInstallMissingInput, McpInstallPlan, McpInstallPreview, McpInstallRejection,
+    McpSecretPolicy, McpSecretStorage, build_install_plan, build_install_plan_with,
+    prepare_install, preview_install,
 };
 pub use presets::curated_server_to_preset;
 pub use runtime::{

@@ -832,6 +832,8 @@
     "installPlanFailed": "Could not build an install plan for this server.",
     "installConfirmAction": "Approve and install",
     "installMissingFields": "{{count}} fields still need a value.",
+    "installRejectedMissing": "Install refused: {{fields}} still needs a value.",
+    "installRejectedCommandChanged": "Install refused: the catalog entry changed while you were reading it, so this is no longer the command you approved. Review the command above and confirm it again.",
     "runtimeSectionTitle": "Runtime",
     "runtimeNone": "This server publishes no runnable shape.",
     "runtimeRecommended": "Recommended",

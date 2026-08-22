@@ -832,6 +832,8 @@
     "installPlanFailed": "无法为该 server 生成安装计划。",
     "installConfirmAction": "确认并安装",
     "installMissingFields": "还有 {{count}} 个字段需要填写。",
+    "installRejectedMissing": "安装被拒绝：{{fields}} 还需要填写。",
+    "installRejectedCommandChanged": "安装被拒绝：你阅读期间目录条目发生了变化，这已经不是你确认过的那条命令。请重新查看上面的命令并再次确认。",
     "runtimeSectionTitle": "运行时形态",
     "runtimeNone": "该 server 没有可运行的形态。",
     "runtimeRecommended": "推荐",

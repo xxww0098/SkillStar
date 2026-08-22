@@ -12,6 +12,7 @@ import {
   MCP_SOURCES,
   MCP_STORE,
   MCP_TOOL_STATUSES,
+  mcpInstallOutcome,
   mcpInstallPlan,
   mcpInstallPreview,
   mcpMarketPage,
@@ -121,5 +122,13 @@ export const MCP_HANDLERS: DevMockHandlers = {
       arg(args, "id"),
       args?.runtimeId as string | undefined,
       (args?.answers as Record<string, unknown>[] | undefined) ?? [],
+    ),
+  mcp_market_install: (args) =>
+    mcpInstallOutcome(
+      arg(args, "id"),
+      args?.runtimeId as string | undefined,
+      (args?.answers as Record<string, unknown>[] | undefined) ?? [],
+      (args?.enabled as Record<string, boolean> | undefined) ?? {},
+      String(args?.approvedPreview ?? ""),
     ),
 };

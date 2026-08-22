@@ -21,6 +21,13 @@ export function useMcpInstallPreview(
   serverId: string | null,
   runtimeId: string | null,
   answers: readonly McpInstallAnswer[],
+  /**
+   * Bump to re-derive from the catalog row as it stands *now*, with the same
+   * answers. The one caller that needs it is a submit refused because the row
+   * changed under the user: without a re-read the command on screen would still
+   * be the old one, and re-approving it would be refused again forever.
+   */
+  refreshToken = 0,
 ) {
   const [preview, setPreview] = useState<McpInstallPreview | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -63,7 +70,7 @@ export function useMcpInstallPreview(
     }, PREVIEW_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [serverId, runtimeId, answers]);
+  }, [serverId, runtimeId, answers, refreshToken]);
 
   return { preview, pending, error };
 }

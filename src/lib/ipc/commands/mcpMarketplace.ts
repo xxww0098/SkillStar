@@ -2,6 +2,7 @@ import type {
   LocalFirstResult,
   McpCustomSource,
   McpInstallAnswer,
+  McpInstallOutcome,
   McpInstallPlan,
   McpInstallPreview,
   McpMarketEntry,
@@ -15,9 +16,11 @@ import type {
 
 /**
  * MCP marketplace — browse the merged MCP catalog local-first, then install
- * via `mcp_market_install_plan` for the confirmation payload and
+ * via `mcp_market_install_plan` for the confirmation payload,
  * `mcp_market_install_preview` for the entry the collected answers produce,
- * which the form submits through the existing `create_mcp_server`.
+ * and `mcp_market_install` to commit it. The manual "add server" form keeps
+ * submitting through `create_mcp_server`: it carries a user-authored entry, so
+ * a publisher's required inputs have nothing to be enforced against.
  *
  * The catalog is the merge of every enabled source (the official MCP Registry
  * as primary, GitHub's registry as an enrichment mirror, plus any user-added
@@ -102,5 +105,28 @@ export interface McpMarketplaceCommands {
   mcp_market_install_preview: {
     args: { id: string; runtimeId?: string; answers: McpInstallAnswer[] };
     result: McpInstallPreview;
+  };
+
+  /**
+   * Commit the install. The backend re-derives the entry from these answers
+   * against the catalog row *as it stands now*, and refuses unless that still
+   * renders `approvedPreview` — the exact string the user confirmed (the
+   * command line, or the resolved url for a remote shape), **unmasked**;
+   * masking is a display concern and a masked string would never match.
+   *
+   * A refusal comes back as `{ status: "rejected" }` rather than a thrown
+   * error, because its two reasons — a required input still blank, and a row
+   * that changed under the user — have to be told apart, and an error is only
+   * a string on this wire.
+   */
+  mcp_market_install: {
+    args: {
+      id: string;
+      runtimeId?: string;
+      answers: McpInstallAnswer[];
+      enabled: Record<string, boolean>;
+      approvedPreview: string;
+    };
+    result: McpInstallOutcome;
   };
 }

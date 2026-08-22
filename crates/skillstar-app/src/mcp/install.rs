@@ -18,6 +18,8 @@
 //! values then land is [`McpSecretPolicy`] — see its docs for the deliberate
 //! limitation.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use skillstar_marketplace::{McpInput, McpInputVariable, McpRegistryServer};
 use skillstar_models::mcp::{MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime};
@@ -149,6 +151,29 @@ pub struct McpInstallPreview {
     /// Required inputs still unanswered. Empty means install may proceed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing: Vec<McpInstallMissingInput>,
+}
+
+/// Why [`prepare_install`] refused, kept as two reasons on purpose: one asks
+/// the user to supply something, the other asks them to look again. Collapsing
+/// them into one message would leave the user guessing which.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "reason", rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallRejection.ts")]
+pub enum McpInstallRejection {
+    /// Required inputs the answers still leave blank. Carries which ones, so
+    /// the message can name them rather than say "something is missing".
+    #[serde(rename_all = "camelCase")]
+    MissingInputs {
+        missing: Vec<McpInstallMissingInput>,
+    },
+    /// What these answers derive *now* is not what the user approved — the
+    /// command line for a local shape, the resolved url for a remote one.
+    ///
+    /// The catalog row is re-read at submit time, and a registry sync can
+    /// rewrite it while the preview sits on screen. Installing anyway would
+    /// install something nobody looked at, which is exactly the property the
+    /// confirmation step exists to provide.
+    CommandChanged,
 }
 
 /// Where a secret value physically ends up.
@@ -371,6 +396,63 @@ pub fn preview_install(
         command_preview,
         entry,
     }
+}
+
+/// Validate one set of answers against what the user approved and stamp the
+/// targets, or refuse with a reason they can act on.
+///
+/// A thin wrapper over [`preview_install`] rather than a second derivation:
+/// `missing` is already that call's required-input verdict, and
+/// `approved_preview` is compared against the string it just rendered. Two
+/// derivations here would be the very drift this seam removes.
+///
+/// **Pure**, like [`preview_install`]: no lock, no store, no projection. The
+/// write lock is Tauri state and cannot move into a domain crate, so the caller
+/// keeps the IO and this keeps the rules — which is what lets the rules be
+/// driven straight from a test, and reused by a CLI that has no Tauri at all.
+///
+/// `approved_preview` is the true, unmasked string. Masking is a display
+/// concern and belongs at the edge that displays it; masking before comparing
+/// would make every install with a secret among its arguments fail to match.
+pub fn prepare_install(
+    server: &McpRegistryServer,
+    runtime_id: Option<&str>,
+    answers: &[McpInstallAnswer],
+    enabled: BTreeMap<String, bool>,
+    approved_preview: &str,
+) -> Result<McpServerEntry, McpInstallRejection> {
+    let preview = preview_install(server, runtime_id, answers);
+
+    // Checked before the missing-input verdict: when the row has changed under
+    // the user, "fill in field X" would be an instruction about a form they
+    // have never seen. Re-confirming comes first. A genuinely blank required
+    // field renders the same command it did on screen, so this order hides
+    // nothing.
+    if approval_target(&preview) != approved_preview.trim() {
+        return Err(McpInstallRejection::CommandChanged);
+    }
+    if !preview.missing.is_empty() {
+        return Err(McpInstallRejection::MissingInputs {
+            missing: preview.missing,
+        });
+    }
+
+    let mut entry = preview.entry;
+    entry.enabled = enabled;
+    Ok(entry)
+}
+
+/// The one string the user actually confirmed. A remote shape executes nothing
+/// locally, so there is no command line to show it — the resolved url is what
+/// the confirmation step puts in front of them, and therefore what has to still
+/// hold at submit time.
+fn approval_target(preview: &McpInstallPreview) -> &str {
+    preview
+        .command_preview
+        .as_deref()
+        .or(preview.entry.url.as_deref())
+        .unwrap_or_default()
+        .trim()
 }
 
 /// The required fields `answers` still leaves blank.
