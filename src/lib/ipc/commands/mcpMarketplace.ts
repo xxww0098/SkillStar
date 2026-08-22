@@ -5,8 +5,6 @@ import type {
   McpMarketEntry,
   McpMarketServerDetail,
   McpPublisherSummary,
-  McpRuntimeSelection,
-  McpServerEntry,
   McpServerPage,
   McpServerQuery,
   McpSourceDescriptor,
@@ -14,9 +12,9 @@ import type {
 } from "../../../types";
 
 /**
- * MCP marketplace — browse the merged MCP catalog local-first, then install by
- * converting an entry into a prefilled `McpServerEntry` draft and submitting it
- * via the existing `create_mcp_server` command.
+ * MCP marketplace — browse the merged MCP catalog local-first, then install
+ * via `mcp_market_install_plan`, whose payload carries the prefilled draft that
+ * the form finalizes and submits through the existing `create_mcp_server`.
  *
  * The catalog is the merge of every enabled source (the official MCP Registry
  * as primary, GitHub's registry as an enrichment mirror, plus any user-added
@@ -80,12 +78,6 @@ export interface McpMarketplaceCommands {
   set_mcp_source_enabled: { args: { id: string; enabled: boolean }; result: McpSourceDescriptor[] };
 
   /**
-   * Every runtime shape the server publishes, ranked against this machine
-   * (remote streamable-http → sse → oci → mcpb → npm/pypi/nuget/cargo, with
-   * unavailable toolchains demoted), plus the recommended pick.
-   */
-  mcp_market_runtime_candidates: { args: { id: string }; result: McpRuntimeSelection };
-  /**
    * Pre-install confirmation payload: the complete untruncated command that
    * will run, the binary it resolves to, the runtime alternatives, and every
    * input the form must collect with full `server.json` semantics.
@@ -94,9 +86,4 @@ export interface McpMarketplaceCommands {
     args: { id: string; runtimeId?: string };
     result: McpInstallPlan;
   };
-  /**
-   * Convert a marketplace entry into a prefilled draft for the create form.
-   * `runtimeId` picks a specific candidate; omit it for the recommendation.
-   */
-  mcp_market_entry_to_draft: { args: { id: string; runtimeId?: string }; result: McpServerEntry };
 }
