@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use skillstar_marketplace::{
-    McpArgument, McpArgumentKind, McpInput, McpInputFormat, McpKeyValueInput,
+    McpArgument, McpArgumentKind, McpInput, McpInputFormat, McpInputVariable, McpKeyValueInput,
     McpRegistryPackageSummary, McpRegistryRemoteSummary, McpRegistryServer, McpServerKind,
     McpServerStatus, McpTransportSpec,
 };
@@ -480,6 +480,223 @@ fn the_install_plan_carries_full_input_semantics_for_the_form() {
 
     assert_eq!(plan.secret_policy.secret_keys, vec!["TOKEN".to_string()]);
     assert_eq!(plan.secret_policy.storage, McpSecretStorage::UserLevelConfig);
+}
+
+/// Two positional arguments the publisher gave neither a name nor a
+/// `valueHint` both fall back to the key `"argument"`. Their ordinal within the
+/// scope is what the form must address them by — without it, filling the first
+/// one also fills the second.
+#[test]
+fn two_positional_arguments_without_a_value_hint_stay_separately_addressable() {
+    let mut s = server("positionals");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.package_arguments = vec![
+        McpArgument {
+            kind: McpArgumentKind::Positional,
+            input: McpInput {
+                is_required: true,
+                description: Some("source".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        McpArgument {
+            kind: McpArgumentKind::Positional,
+            input: McpInput {
+                is_required: true,
+                description: Some("destination".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let positionals: Vec<_> = plan
+        .inputs
+        .iter()
+        .filter(|i| i.scope == McpInstallInputScope::PackageArgument)
+        .collect();
+
+    assert_eq!(positionals.len(), 2);
+    // The key collides — that is exactly the point.
+    assert_eq!(positionals[0].key, "argument");
+    assert_eq!(positionals[1].key, "argument");
+    // The ordinal does not, so `(scope, index)` still names one of the two.
+    assert_eq!(
+        (positionals[0].scope, positionals[0].index),
+        (McpInstallInputScope::PackageArgument, 0)
+    );
+    assert_eq!(
+        (positionals[1].scope, positionals[1].index),
+        (McpInstallInputScope::PackageArgument, 1)
+    );
+    assert_eq!(
+        positionals[1].input.description.as_deref(),
+        Some("destination")
+    );
+}
+
+/// The ordinal counts within a scope, not across the whole plan, so a form that
+/// groups by scope can index straight into its own section.
+#[test]
+fn the_ordinal_restarts_at_zero_for_every_scope() {
+    let mut s = server("ordinals");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env("A", McpInput::default()), env("B", McpInput::default())];
+    pkg.runtime_arguments = vec![McpArgument {
+        kind: McpArgumentKind::Named,
+        name: Some("--verbose".into()),
+        ..Default::default()
+    }];
+    pkg.package_arguments = vec![McpArgument {
+        kind: McpArgumentKind::Named,
+        name: Some("--port".into()),
+        ..Default::default()
+    }];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let numbering: Vec<_> = plan
+        .inputs
+        .iter()
+        .map(|i| (i.scope, i.index, i.key.as_str()))
+        .collect();
+
+    assert_eq!(
+        numbering,
+        vec![
+            (McpInstallInputScope::Environment, 0, "A"),
+            (McpInstallInputScope::Environment, 1, "B"),
+            (McpInstallInputScope::RuntimeArgument, 0, "--verbose"),
+            (McpInstallInputScope::PackageArgument, 0, "--port"),
+        ]
+    );
+}
+
+/// A publisher-pinned `value` is not the user's to edit, but the
+/// `{curly_braces}` inside it are. The plan seeds that sub-form so the frontend
+/// never scans the template itself.
+#[test]
+fn a_pinned_template_ships_its_variables_seeded_with_full_semantics() {
+    let mut s = server("template");
+    let mut rem = remote("http", "https://acme.dev/mcp");
+    rem.headers = vec![McpKeyValueInput {
+        name: "Authorization".into(),
+        input: McpInput {
+            value: Some("{SCHEME} {TOKEN} @{REGION} {TOKEN}".into()),
+            variables: BTreeMap::from([
+                (
+                    "TOKEN".to_string(),
+                    McpInputVariable {
+                        is_required: true,
+                        is_secret: true,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "REGION".to_string(),
+                    McpInputVariable {
+                        default: Some("us".into()),
+                        choices: vec!["us".into(), "eu".into()],
+                        ..Default::default()
+                    },
+                ),
+                ("UNUSED".to_string(), McpInputVariable::default()),
+            ]),
+            ..Default::default()
+        },
+    }];
+    s.remotes = vec![rem];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let header = plan
+        .inputs
+        .iter()
+        .find(|i| i.scope == McpInstallInputScope::Header)
+        .expect("the header is an input");
+
+    // Template order, de-duplicated, and a variable the template never mentions
+    // gets no field.
+    assert_eq!(
+        header
+            .variables
+            .iter()
+            .map(|v| v.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["SCHEME", "TOKEN", "REGION"]
+    );
+
+    // An undeclared token still needs a value, so it is reported as required.
+    let scheme = &header.variables[0];
+    assert!(scheme.variable.is_required && !scheme.variable.is_secret);
+    assert_eq!(scheme.variable.format, McpInputFormat::String);
+    assert_eq!(scheme.prefilled, "");
+
+    // A secret is never seeded — the form has to ask.
+    let token = &header.variables[1];
+    assert!(token.variable.is_secret);
+    assert_eq!(token.prefilled, "");
+
+    // An optional variable keeps the publisher's default and its closed set.
+    let region = &header.variables[2];
+    assert_eq!(region.variable.choices, vec!["us", "eu"]);
+    assert_eq!(region.prefilled, "us");
+}
+
+/// Variables resolve exactly one level: `McpInputVariable` has no `value` of
+/// its own, so nothing recurses even when a seeded value itself looks like a
+/// template.
+#[test]
+fn variables_resolve_only_one_level_deep() {
+    let mut s = server("one-level");
+    let mut rem = remote("http", "https://acme.dev/mcp");
+    rem.headers = vec![McpKeyValueInput {
+        name: "Authorization".into(),
+        input: McpInput {
+            value: Some("Bearer {OUTER}".into()),
+            variables: BTreeMap::from([(
+                "OUTER".to_string(),
+                McpInputVariable {
+                    default: Some("{INNER}".into()),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        },
+    }];
+    s.remotes = vec![rem];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let header = plan
+        .inputs
+        .iter()
+        .find(|i| i.scope == McpInstallInputScope::Header)
+        .expect("the header is an input");
+
+    assert_eq!(header.variables.len(), 1);
+    assert_eq!(header.variables[0].prefilled, "{INNER}");
+}
+
+/// An input with no pinned `value` has nothing to substitute, so it carries no
+/// variables even when the publisher declared some.
+#[test]
+fn an_input_without_a_template_carries_no_variables() {
+    let mut s = server("no-template");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env(
+        "TOKEN",
+        McpInput {
+            is_required: true,
+            variables: BTreeMap::from([("STRAY".to_string(), McpInputVariable::default())]),
+            ..Default::default()
+        },
+    )];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    assert!(plan.inputs[0].variables.is_empty());
 }
 
 /// Pins the claim `McpSecretPolicy`'s docs make: no MCP target keeps its config

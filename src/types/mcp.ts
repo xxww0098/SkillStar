@@ -16,8 +16,9 @@
 //!   the card query (McpServerQuery, McpSortKey, McpServerPage) come from
 //!   `skillstar_marketplace::{mcp_models, mcp_remote, mcp_snapshot}`.
 //! - McpRuntimeCandidate, McpRuntimeSelection, McpRuntimeShape, McpInstallPlan,
-//!   McpInstallInput, McpInstallInputScope, McpSecretPolicy, McpSecretStorage
-//!   come from `skillstar_app::mcp` (the cross-domain use cases).
+//!   McpInstallInput, McpInstallInputScope, McpInstallInputVariable,
+//!   McpSecretPolicy, McpSecretStorage come from `skillstar_app::mcp` (the
+//!   cross-domain use cases).
 //! - McpServerWithSync comes from
 //!   `skillstar` (src-tauri) `commands::mcp_commands`.
 
@@ -66,6 +67,7 @@ export type { McpRuntimeShape } from "./generated/McpRuntimeShape";
 export type { McpInstallPlan } from "./generated/McpInstallPlan";
 export type { McpInstallInput } from "./generated/McpInstallInput";
 export type { McpInstallInputScope } from "./generated/McpInstallInputScope";
+export type { McpInstallInputVariable } from "./generated/McpInstallInputVariable";
 export type { McpSecretPolicy } from "./generated/McpSecretPolicy";
 export type { McpSecretStorage } from "./generated/McpSecretStorage";
 

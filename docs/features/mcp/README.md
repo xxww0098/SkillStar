@@ -82,11 +82,13 @@
 
 - 一键安装本地 server 前，必须把**完整未截断的、已解析的**命令交给用户确认。这是规范的 MUST，也是 CursorJack 类 deeplink 攻击的唯一有效缓解。
 - 安装计划（`skillstar_app::mcp::install`）同时给出：将要执行的命令与参数、`PATH` 解析出的绝对路径（真正会被执行的那个二进制）、`usesShell: false`（launcher 直接 exec，registry 作者的参数字符串永远不进 `sh -c`）、全部运行时候选、以及每个表单字段的完整 Input 语义。
+- 表单字段按 `(scope, 序号)` 寻址，不按名字。位置参数没有名字，展示标签退化到 `valueHint` 或字面量 `argument`，两个都没有 `valueHint` 的位置参数因此共用同一个标签；只有所属 scope 内的序号能把它们分开，否则填第一个会连带改掉第二个。
 - `commandPreview` 只用于展示，永远不被重新解析或执行；含空格/引号的参数加单引号，好让用户看清每个参数的边界。
 
 ## 密钥分流
 
 - 表单按 Input 语义渲染：`isSecret` → 密码框、`choices` → 下拉必选、`format: filepath` → 文件选择器、`format: number/boolean` → 数字框/开关、`default` → 预填、`placeholder` → 灰字提示（**不是**值）、`value` 已设定 → 只读。
+- `value` 是模板时，它的 `{花括号}` 由安装计划直接下发成一份已播种的变量清单（每个变量带 `isRequired`/`isSecret`/`format`/`choices`/`default` 与初始值），前端不再自己扫描模板。变量只解析一层——schema 允许无限嵌套，实践中从未出现。
 - **落点取舍**：secret 值只写入用户级配置——SkillStar 自己的 `~/.skillstar/config/mcp_servers.json` 和每个启用工具位于 home 目录下的配置文件。SkillStar 不写任何项目级 MCP 配置，因此「密钥进版本控制」这一暴露面不存在，且这个结论由 `McpSecretPolicy::writes_project_scoped_config` 从真实解析出的路径实时计算，而不是硬编码断言。
 - **没有走系统凭证库**，尽管 `keyring` 已是 workspace 依赖。需要这个密钥的进程是 agent 工具本身（Claude Code / Codex / Cursor）在读它自己的配置文件；只存在 SkillStar 钥匙串里的密钥等于 MCP server 永远收不到的密钥，条目会装上然后静默起不来。这是能力限制，不是疏忽。
 

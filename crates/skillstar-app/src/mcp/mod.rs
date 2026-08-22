@@ -29,8 +29,8 @@ mod tests;
 
 pub use draft::{registry_to_entry, registry_to_entry_for};
 pub use install::{
-    McpInstallInput, McpInstallInputScope, McpInstallPlan, McpSecretPolicy, McpSecretStorage,
-    build_install_plan, build_install_plan_with,
+    McpInstallInput, McpInstallInputScope, McpInstallInputVariable, McpInstallPlan, McpSecretPolicy,
+    McpSecretStorage, build_install_plan, build_install_plan_with,
 };
 pub use presets::curated_server_to_preset;
 pub use runtime::{

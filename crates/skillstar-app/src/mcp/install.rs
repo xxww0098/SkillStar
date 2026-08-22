@@ -19,7 +19,7 @@
 //! limitation.
 
 use serde::{Deserialize, Serialize};
-use skillstar_marketplace::{McpInput, McpRegistryServer};
+use skillstar_marketplace::{McpInput, McpInputVariable, McpRegistryServer};
 use skillstar_models::mcp::{MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime};
 use ts_rs::TS;
 
@@ -45,15 +45,40 @@ pub enum McpInstallInputScope {
     PackageArgument,
 }
 
+/// One `{curly_braces}` hole inside an input's publisher-pinned `value`.
+///
+/// Seeded here rather than by the form, so the token list and the semantics
+/// behind each token have a single derivation. Nesting stops at this level:
+/// [`McpInputVariable`] has no `value` of its own, so a variable never carries
+/// variables.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallInputVariable.ts")]
+pub struct McpInstallInputVariable {
+    /// Token name, i.e. `TOKEN` for `{TOKEN}`.
+    pub name: String,
+    /// The publisher's declared semantics for this token, verbatim. A token
+    /// the publisher left undeclared is reported as a required plain string —
+    /// the template needs it either way.
+    pub variable: McpInputVariable,
+    /// The value the form starts at. Empty means the user must supply it.
+    pub prefilled: String,
+}
+
 /// One field the install form has to render.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "McpInstallInput.ts")]
 pub struct McpInstallInput {
     /// Env var name, header name, url variable name, or the argument's flag /
-    /// value hint.
+    /// value hint. **Not an identity**: a positional argument with neither a
+    /// name nor a `valueHint` falls back to the literal `"argument"`, so two of
+    /// them share this string. Address an input by `(scope, index)` instead.
     pub key: String,
     pub scope: McpInstallInputScope,
+    /// Position within `scope`, in the order the publisher declared it. This is
+    /// what tells two otherwise identical inputs apart.
+    pub index: u32,
     /// The publisher's declared semantics, verbatim: `isRequired`, `isSecret`,
     /// `format`, `choices`, `default`, `placeholder`, the `value` template and
     /// its nested `variables`.
@@ -62,6 +87,10 @@ pub struct McpInstallInput {
     pub prefilled: String,
     /// `true` when the form must collect a value before install can proceed.
     pub must_ask: bool,
+    /// The `{curly_braces}` this input's pinned `value` leaves for the user, in
+    /// template order, de-duplicated. Empty when there is no template.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<McpInstallInputVariable>,
 }
 
 /// Where a secret value physically ends up.
@@ -263,6 +292,11 @@ fn render_command(command: &str, args: &[String]) -> String {
     out
 }
 
+/// Collect the fields the form must render, each numbered within its own scope.
+///
+/// The ordinal is the identity: `key` is the publisher's label and a positional
+/// argument may not have one, so numbering per scope in declaration order is
+/// what keeps two hint-less positionals apart.
 fn collect_inputs(server: &McpRegistryServer, candidate_id: Option<&str>) -> Vec<McpInstallInput> {
     let mut out = Vec::new();
     match candidate_id.and_then(parse_candidate_id) {
@@ -270,17 +304,19 @@ fn collect_inputs(server: &McpRegistryServer, candidate_id: Option<&str>) -> Vec
             let Some(remote) = server.remotes.get(index) else {
                 return out;
             };
-            for header in &remote.headers {
+            for (ordinal, header) in remote.headers.iter().enumerate() {
                 out.push(make_input(
                     header.name.clone(),
                     McpInstallInputScope::Header,
+                    ordinal,
                     &header.input,
                 ));
             }
-            for variable in &remote.variables {
+            for (ordinal, variable) in remote.variables.iter().enumerate() {
                 out.push(make_input(
                     variable.name.clone(),
                     McpInstallInputScope::UrlVariable,
+                    ordinal,
                     &variable.input,
                 ));
             }
@@ -289,10 +325,11 @@ fn collect_inputs(server: &McpRegistryServer, candidate_id: Option<&str>) -> Vec
             let Some(package) = server.packages.get(index) else {
                 return out;
             };
-            for env in &package.environment_variables {
+            for (ordinal, env) in package.environment_variables.iter().enumerate() {
                 out.push(make_input(
                     env.name.clone(),
                     McpInstallInputScope::Environment,
+                    ordinal,
                     &env.input,
                 ));
             }
@@ -306,7 +343,7 @@ fn collect_inputs(server: &McpRegistryServer, candidate_id: Option<&str>) -> Vec
                     McpInstallInputScope::PackageArgument,
                 ),
             ] {
-                for arg in args {
+                for (ordinal, arg) in args.iter().enumerate() {
                     // Positional arguments have no name; `valueHint` is the
                     // publisher's own label for them.
                     let key = arg
@@ -314,7 +351,7 @@ fn collect_inputs(server: &McpRegistryServer, candidate_id: Option<&str>) -> Vec
                         .clone()
                         .or_else(|| arg.value_hint.clone())
                         .unwrap_or_else(|| "argument".to_string());
-                    out.push(make_input(key, scope, &arg.input));
+                    out.push(make_input(key, scope, ordinal, &arg.input));
                 }
             }
         }
@@ -323,14 +360,105 @@ fn collect_inputs(server: &McpRegistryServer, candidate_id: Option<&str>) -> Vec
     out
 }
 
-fn make_input(key: String, scope: McpInstallInputScope, input: &McpInput) -> McpInstallInput {
+fn make_input(
+    key: String,
+    scope: McpInstallInputScope,
+    index: usize,
+    input: &McpInput,
+) -> McpInstallInput {
     McpInstallInput {
         key,
         scope,
+        index: u32::try_from(index).unwrap_or(u32::MAX),
         prefilled: prefill(input),
         must_ask: input.needs_user_value(),
+        variables: seed_variables(input),
         input: input.clone(),
     }
+}
+
+/// Every `{curly_brace}` token in a template, in order, de-duplicated.
+///
+/// A token is `[A-Za-z0-9_.-]+` between braces; anything else is literal text,
+/// and a `{` that does not open a token is skipped rather than swallowing the
+/// rest of the string — `{a {B}}` still yields `B`.
+fn template_tokens(template: &str) -> Vec<String> {
+    fn is_token_byte(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-')
+    }
+
+    let bytes = template.as_bytes();
+    let mut out: Vec<String> = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'{' {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor + 1;
+        let mut end = start;
+        while end < bytes.len() && is_token_byte(bytes[end]) {
+            end += 1;
+        }
+        if end > start && bytes.get(end) == Some(&b'}') {
+            // Every byte in play is ASCII, so these are char boundaries.
+            let token = &template[start..end];
+            if !out.iter().any(|seen| seen == token) {
+                out.push(token.to_string());
+            }
+            cursor = end + 1;
+        } else {
+            cursor += 1;
+        }
+    }
+    out
+}
+
+/// The holes an input's pinned `value` leaves for the user to fill.
+///
+/// Tokens come from the template, not from the declared `variables` map: a
+/// publisher may declare a variable the template never mentions (no field for
+/// it) or leave a token undeclared (a field is still needed). Resolution is one
+/// level deep and stays that way — see [`McpInstallInputVariable`].
+fn seed_variables(input: &McpInput) -> Vec<McpInstallInputVariable> {
+    let Some(template) = input.value.as_deref().filter(|v| !v.trim().is_empty()) else {
+        return Vec::new();
+    };
+    template_tokens(template)
+        .into_iter()
+        .map(|name| {
+            let variable =
+                input
+                    .variables
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or_else(|| McpInputVariable {
+                        is_required: true,
+                        ..Default::default()
+                    });
+            McpInstallInputVariable {
+                prefilled: variable_seed(&variable),
+                variable,
+                name,
+            }
+        })
+        .collect()
+}
+
+/// [`prefill`]'s precedence, applied to one variable: anything required or
+/// secret is blanked so the form has to ask, otherwise the publisher's
+/// `default` — and a `choices` list with exactly one entry is not a choice.
+fn variable_seed(variable: &McpInputVariable) -> String {
+    if variable.is_required || variable.is_secret {
+        return String::new();
+    }
+    variable
+        .default
+        .clone()
+        .unwrap_or_else(|| match variable.choices.as_slice() {
+            [only] => only.clone(),
+            _ => String::new(),
+        })
 }
 
 fn secret_policy(secret_keys: Vec<String>) -> McpSecretPolicy {

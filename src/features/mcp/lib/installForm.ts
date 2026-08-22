@@ -27,8 +27,15 @@ export interface McpInstallFieldVariable {
 }
 
 export interface McpInstallField {
+  /**
+   * The publisher's label for this field — shown, never used to find it. Two
+   * positional arguments with no name and no `valueHint` share the key
+   * `"argument"`, so `(scope, index)` is the identity.
+   */
   key: string;
   scope: McpInstallInputScope;
+  /** Position within `scope`, straight from the install plan. */
+  index: number;
   input: McpInput;
   /**
    * Current value. For a templated field this is the *rendered* template and is
@@ -47,16 +54,6 @@ export interface McpInstallField {
 
 const TEMPLATE_TOKEN = /\{([A-Za-z0-9_.-]+)\}/g;
 
-/** Every `{curly_brace}` token in a template, in order, de-duplicated. */
-export function templateTokens(value: string | null | undefined): string[] {
-  if (!value) return [];
-  const out: string[] = [];
-  for (const match of value.matchAll(TEMPLATE_TOKEN)) {
-    if (!out.includes(match[1])) out.push(match[1]);
-  }
-  return out;
-}
-
 /**
  * Substitute the tokens a template declares.
  *
@@ -72,64 +69,52 @@ export function renderTemplate(template: string, values: Readonly<Record<string,
   });
 }
 
-function variableSeed(variable: McpInputVariable): string {
-  if (variable.isRequired || variable.isSecret) return "";
-  return variable.default ?? (variable.choices?.length === 1 ? variable.choices[0] : "") ?? "";
-}
-
 /**
  * Build the editable form for one install plan's inputs.
  *
- * The seed value is the plan's `prefilled` (which already applies the schema's
- * precedence: a publisher `value` wins, anything required/secret is blanked so
- * the form has to ask, otherwise `default`), so this never re-derives it.
+ * Every seed comes from the plan — `prefilled` for the field, and the already
+ * resolved `variables` list for a pinned template — so neither the schema's
+ * precedence rules nor the `{curly_brace}` scan is duplicated here.
  */
 export function buildInstallFields(inputs: readonly McpInstallInput[] | null | undefined): McpInstallField[] {
-  return (inputs ?? []).map((declared) => {
-    const template = declared.input.value?.trim() ? declared.input.value : null;
-    const tokens = templateTokens(template);
-    const declaredVariables = declared.input.variables ?? {};
-    return {
-      key: declared.key,
-      scope: declared.scope,
-      input: declared.input,
-      value: declared.prefilled,
-      templated: template != null,
-      variables: tokens.map((name) => {
-        const variable: McpInputVariable = declaredVariables[name] ?? {
-          isRequired: true,
-          isSecret: false,
-          format: "string",
-        };
-        return { name, variable, value: variableSeed(variable) };
-      }),
-      mustAsk: declared.mustAsk,
-    };
-  });
+  return (inputs ?? []).map((declared) => ({
+    key: declared.key,
+    scope: declared.scope,
+    index: declared.index,
+    input: declared.input,
+    value: declared.prefilled,
+    templated: Boolean(declared.input.value?.trim()),
+    variables: (declared.variables ?? []).map(({ name, variable, prefilled }) => ({
+      name,
+      variable,
+      value: prefilled,
+    })),
+    mustAsk: declared.mustAsk,
+  }));
 }
 
 /** Replace one field's own value (non-templated fields only). */
 export function setFieldValue(
   fields: readonly McpInstallField[],
-  key: string,
   scope: McpInstallInputScope,
+  index: number,
   value: string,
 ): McpInstallField[] {
   return fields.map((field) =>
-    field.key === key && field.scope === scope && !field.templated ? { ...field, value } : field,
+    field.scope === scope && field.index === index && !field.templated ? { ...field, value } : field,
   );
 }
 
 /** Replace one `{curly_brace}` variable inside a templated field. */
 export function setFieldVariable(
   fields: readonly McpInstallField[],
-  key: string,
   scope: McpInstallInputScope,
+  index: number,
   name: string,
   value: string,
 ): McpInstallField[] {
   return fields.map((field) =>
-    field.key === key && field.scope === scope
+    field.scope === scope && field.index === index
       ? {
           ...field,
           variables: field.variables.map((variable) => (variable.name === name ? { ...variable, value } : variable)),
@@ -149,8 +134,9 @@ export function resolvedFieldValue(field: McpInstallField): string {
 export type McpFieldErrorCode = "required" | "notAChoice" | "notANumber" | "notABoolean";
 
 export interface McpFieldError {
-  key: string;
   scope: McpInstallInputScope;
+  /** Ordinal within `scope` — the same identity the setters take. */
+  index: number;
   /** Set when the failure belongs to one `{curly_brace}` variable. */
   variable?: string;
   code: McpFieldErrorCode;
@@ -184,22 +170,22 @@ export function validateInstallFields(fields: readonly McpInstallField[]): McpFi
       for (const { name, variable, value } of field.variables) {
         if (!value.trim()) {
           if (variable.isRequired || variable.isSecret) {
-            errors.push({ key: field.key, scope: field.scope, variable: name, code: "required" });
+            errors.push({ scope: field.scope, index: field.index, variable: name, code: "required" });
           }
           continue;
         }
         const code = checkFormat(variable.format, variable.choices, value);
-        if (code) errors.push({ key: field.key, scope: field.scope, variable: name, code });
+        if (code) errors.push({ scope: field.scope, index: field.index, variable: name, code });
       }
       continue;
     }
 
     if (!field.value.trim()) {
-      if (field.mustAsk) errors.push({ key: field.key, scope: field.scope, code: "required" });
+      if (field.mustAsk) errors.push({ scope: field.scope, index: field.index, code: "required" });
       continue;
     }
     const code = checkFormat(field.input.format, field.input.choices, field.value);
-    if (code) errors.push({ key: field.key, scope: field.scope, code });
+    if (code) errors.push({ scope: field.scope, index: field.index, code });
   }
   return errors;
 }

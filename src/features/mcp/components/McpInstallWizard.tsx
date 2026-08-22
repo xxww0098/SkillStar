@@ -126,10 +126,10 @@ export function McpInstallWizard({
   const isLocal = confirmation.preview.length > 0;
   const blocked = errors.length > 0 || (isLocal && !acknowledged);
 
-  const handleFieldChange = (key: string, scope: McpInstallInputScope, value: string) =>
-    setFields((prev) => setFieldValue(prev, key, scope, value));
-  const handleVariableChange = (key: string, scope: McpInstallInputScope, variable: string, value: string) =>
-    setFields((prev) => setFieldVariable(prev, key, scope, variable, value));
+  const handleFieldChange = (scope: McpInstallInputScope, index: number, value: string) =>
+    setFields((prev) => setFieldValue(prev, scope, index, value));
+  const handleVariableChange = (scope: McpInstallInputScope, index: number, variable: string, value: string) =>
+    setFields((prev) => setFieldVariable(prev, scope, index, variable, value));
 
   const handleSubmit = async () => {
     if (errors.length > 0) {
