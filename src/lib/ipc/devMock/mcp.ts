@@ -129,6 +129,6 @@ export const MCP_HANDLERS: DevMockHandlers = {
       args?.runtimeId as string | undefined,
       (args?.answers as Record<string, unknown>[] | undefined) ?? [],
       (args?.enabled as Record<string, boolean> | undefined) ?? {},
-      String(args?.approvedPreview ?? ""),
+      String(args?.approvedTarget ?? ""),
     ),
 };

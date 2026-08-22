@@ -134,6 +134,13 @@ pub(crate) fn prefill(input: &McpInput) -> String {
     input.default.clone().unwrap_or_default()
 }
 
+/// Env vars / headers as `name -> value`.
+///
+/// A value nobody supplied is left out rather than pinned into every tool's
+/// config as an empty string. Dropped *here* rather than by the caller, so the
+/// plan's own draft and the answered preview agree from the first frame — when
+/// only the preview filtered, the confirmation flashed blank rows for the
+/// ~300 ms before the first preview landed.
 fn key_values(
     items: &[McpKeyValueInput],
     scope: McpInstallInputScope,
@@ -143,7 +150,20 @@ fn key_values(
         .iter()
         .enumerate()
         .map(|(index, item)| (item.name.clone(), answers.value(scope, index, &item.input)))
+        .filter(|(_, value)| !value.is_empty())
         .collect()
+}
+
+/// Does this named argument expect a value after its flag?
+///
+/// The schema has no field that says so, so the publisher's own signals stand
+/// in: anything they gave a `default`, a `valueHint` or a `choices` list is a
+/// flag that takes an argument. A flag with none of the three is a genuine
+/// boolean switch (`--verbose`) and is emitted alone.
+fn takes_a_value(arg: &McpArgument) -> bool {
+    arg.input.default.as_deref().is_some_and(|d| !d.is_empty())
+        || arg.value_hint.as_deref().is_some_and(|h| !h.trim().is_empty())
+        || !arg.input.choices.is_empty()
 }
 
 /// Flatten `runtimeArguments[]` / `packageArguments[]` into a command line.
@@ -152,6 +172,11 @@ fn key_values(
 /// the publisher set one. `placeholder` and `valueHint` are deliberately not
 /// emitted — they are display hints, and pushing them would put the string
 /// "PATH_TO_DIRECTORY" on the real command line.
+///
+/// A flag whose value came out empty is dropped together with its value: an
+/// optional `--port` the user cleared used to ship as a dangling `--port`, which
+/// most servers fail to parse. Only value-taking flags are dropped this way —
+/// see [`takes_a_value`].
 pub(crate) fn argument_tokens(
     args: &[McpArgument],
     scope: McpInstallInputScope,
@@ -159,12 +184,15 @@ pub(crate) fn argument_tokens(
 ) -> Vec<String> {
     let mut out = Vec::new();
     for (index, arg) in args.iter().enumerate() {
+        let value = answers.value(scope, index, &arg.input);
         if arg.kind == McpArgumentKind::Named
             && let Some(name) = arg.name.as_deref().filter(|n| !n.trim().is_empty())
         {
+            if value.is_empty() && takes_a_value(arg) {
+                continue;
+            }
             out.push(name.to_string());
         }
-        let value = answers.value(scope, index, &arg.input);
         if !value.is_empty() {
             out.push(value);
         }

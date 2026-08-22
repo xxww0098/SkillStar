@@ -15,7 +15,7 @@ use skillstar_marketplace::{
 
 use super::draft::{registry_to_entry_for, sanitize_key};
 use super::install::{McpInstallInputScope, McpSecretStorage, build_install_plan_with};
-use super::presets::{curated_server_to_preset, list_mcp_presets_with};
+use super::presets::{curated_server_to_preset, load_curated_servers, list_mcp_presets_with};
 use super::runtime::{McpRuntimeShape, select_runtime_with};
 
 mod install_preview_tests;
@@ -268,8 +268,15 @@ fn npm_package_becomes_an_npx_stdio_entry() {
         vec!["-y", "@modelcontextprotocol/server-filesystem@1.2.0"]
     );
     assert_eq!(entry.env.get("ROOT").map(String::as_str), Some("/tmp"));
-    // Secret blanked: the form must ask.
-    assert_eq!(entry.env.get("API_KEY").map(String::as_str), Some(""));
+    // The form must ask for the secret, so the draft carries no value for it —
+    // and carries no *row* for it either: an empty string here would be pinned
+    // into every tool's config, and would make the plan's draft disagree with
+    // the answered preview, which drops blanks.
+    assert!(
+        !entry.env.contains_key("API_KEY"),
+        "a value nobody supplied must be left out, not written blank: {:?}",
+        entry.env
+    );
 }
 
 #[test]
@@ -818,12 +825,14 @@ fn curated_rows_become_presets_with_required_env_and_publisher_tags() {
     assert_eq!(preset.required_env, vec!["Z_AI_API_KEY".to_string()]);
     assert!(preset.tags.contains(&"recommended".to_string()));
     assert!(preset.tags.contains(&"bigmodel".to_string()));
-    assert_eq!(
-        preset.env.get("Z_AI_API_KEY").map(String::as_str),
-        Some(""),
-        "a preset must not pretend to know a secret"
+    assert!(
+        !preset.env.contains_key("Z_AI_API_KEY"),
+        "a preset must not pretend to know a secret, nor pin it blank: {:?}",
+        preset.env
     );
-    assert_eq!(preset.env.len(), 1);
+    // `required_env` is what tells the UI to ask for it; `env` only carries
+    // values the registry actually supplied.
+    assert!(preset.env.is_empty());
     let _: BTreeMap<String, String> = preset.env;
 }
 
@@ -874,6 +883,28 @@ fn recommended_curated_rows_join_the_builtin_catalog_instead_of_replacing_it() {
             preset.id
         );
     }
+}
+
+/// The host bootstraps the snapshot runtime (db path, data root, skill
+/// loaders); this crate only opens what it configured. Nothing in the read path
+/// fails when that bootstrap never ran — the default runtime points at a temp
+/// dir, so every query succeeds and returns nothing, and the curated chips
+/// simply vanish. Pinned as a refusal instead, which the caller already turns
+/// into a logged warning plus the built-in catalog.
+#[test]
+fn an_unconfigured_snapshot_runtime_is_refused_rather_than_read_as_empty() {
+    assert!(
+        skillstar_marketplace::snapshot::runtime_is_default(),
+        "no test in this crate configures the snapshot runtime; if one now does, \
+         this test needs its own isolation rather than a relaxed assertion"
+    );
+
+    let err = load_curated_servers()
+        .expect_err("an unconfigured host must not read as 'no curated rows'");
+    assert!(
+        err.to_string().contains("never configured"),
+        "the refusal has to name the cause, not just fail: {err}"
+    );
 }
 
 /// A missing or corrupt snapshot DB degrades to "no curated additions", never

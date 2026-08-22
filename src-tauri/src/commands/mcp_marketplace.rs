@@ -251,14 +251,17 @@ pub enum McpInstallOutcome {
 /// Install a catalog row from the answers the user gave.
 ///
 /// The entry is derived here, from the catalog row as it stands *now* — the
-/// renderer no longer assembles one. `approved_preview` is the string the user
-/// confirmed, and `skillstar_app::mcp::prepare_install` refuses unless the
-/// fresh derivation still renders it: the row is re-read at this moment, and a
-/// registry sync can rewrite it while the preview sits on screen.
+/// renderer no longer assembles one. `approved_target` is
+/// `McpInstallPreview::approval_target` as the wizard received it — the command
+/// line (or resolved url) *plus* the environment, the headers and the config key
+/// the confirmation step showed beside it — and
+/// `skillstar_app::mcp::prepare_install` refuses unless the fresh derivation
+/// still produces it: the row is re-read at this moment, and a registry sync can
+/// rewrite it while the preview sits on screen.
 ///
-/// The answers and the approved command may both contain secrets, so **only
-/// the row id and the runtime shape are logged** — never a value, never the
-/// command line.
+/// The answers and the approved target may both contain secrets, so **only the
+/// row id and the runtime shape are logged** — never a value, never the command
+/// line.
 ///
 /// Deliberately not `create_mcp_server`, which stays as-is for the manual "add
 /// server" form: that form submits an entry the user authored themselves, and
@@ -271,7 +274,7 @@ pub async fn mcp_market_install(
     runtime_id: Option<String>,
     answers: Vec<McpInstallAnswer>,
     enabled: BTreeMap<String, bool>,
-    approved_preview: String,
+    approved_target: String,
 ) -> Result<McpInstallOutcome, AppError> {
     debug!(
         target: "mcp_marketplace",
@@ -283,7 +286,7 @@ pub async fn mcp_market_install(
         runtime_id.as_deref(),
         &answers,
         enabled,
-        &approved_preview,
+        &approved_target,
     ) {
         Ok(entry) => entry,
         Err(rejection) => return Ok(McpInstallOutcome::Rejected { rejection }),

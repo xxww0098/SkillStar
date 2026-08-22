@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use skillstar_marketplace::McpRegistryServer;
 use skillstar_models::mcp::{McpPreset, get_mcp_presets, merge_mcp_presets};
 use tracing::warn;
@@ -21,7 +21,7 @@ use super::draft::registry_to_entry;
 
 /// Every preset chip the UI offers, curated rows first.
 ///
-/// Reads the local snapshot; no network. See [`list_mcp_presets_with`] for the
+/// Reads the local snapshot; no network. See `list_mcp_presets_with` for the
 /// rule this applies to whatever the read returns.
 pub fn list_mcp_presets() -> Vec<McpPreset> {
     list_mcp_presets_with(load_curated_servers)
@@ -33,7 +33,7 @@ pub fn list_mcp_presets() -> Vec<McpPreset> {
 /// full curated catalog stays behind the marketplace browser. A read that fails
 /// is logged and treated as an empty promotion list, which is what keeps the
 /// built-in catalog reaching the UI when the snapshot DB is gone or unreadable.
-pub fn list_mcp_presets_with(
+pub(crate) fn list_mcp_presets_with(
     load_curated: impl FnOnce() -> Result<Vec<McpRegistryServer>>,
 ) -> Vec<McpPreset> {
     let curated = match load_curated() {
@@ -54,8 +54,16 @@ pub fn list_mcp_presets_with(
 ///
 /// The snapshot *runtime* (db path, data root, installed-skill loaders) is host
 /// bootstrap and stays with the host — `src-tauri/src/core/marketplace_snapshot`
-/// for the GUI, `cli::mod` for the CLI. This only opens what they configured.
-fn load_curated_servers() -> Result<Vec<McpRegistryServer>> {
+/// for the GUI, `cli::mod` for the CLI. This only opens what they configured,
+/// and `initialize` succeeds against the unconfigured default too: it points at
+/// a temp dir, which reads as an empty catalog. Refused rather than served,
+/// because "the host forgot to bootstrap" and "this machine has no curated rows"
+/// are the same empty list otherwise — and the caller already degrades a failed
+/// read to the built-in catalog with a warning in the log.
+pub(super) fn load_curated_servers() -> Result<Vec<McpRegistryServer>> {
+    if skillstar_marketplace::snapshot::runtime_is_default() {
+        bail!("marketplace snapshot runtime was never configured by the host");
+    }
     skillstar_marketplace::snapshot::initialize()
         .context("initialize marketplace snapshot for MCP presets")?;
     skillstar_marketplace::mcp_snapshot::list_curated_mcp_servers()
@@ -63,7 +71,7 @@ fn load_curated_servers() -> Result<Vec<McpRegistryServer>> {
 }
 
 /// Map one curated registry row into a preset chip.
-pub fn curated_server_to_preset(server: &McpRegistryServer) -> McpPreset {
+pub(crate) fn curated_server_to_preset(server: &McpRegistryServer) -> McpPreset {
     let draft = registry_to_entry(server);
 
     // Union across packages rather than only the selected one: the chip lists

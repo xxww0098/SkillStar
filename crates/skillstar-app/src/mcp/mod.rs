@@ -37,7 +37,7 @@ pub use install::{
     McpSecretPolicy, McpSecretStorage, build_install_plan, build_install_plan_with,
     prepare_install, preview_install,
 };
-pub use presets::{curated_server_to_preset, list_mcp_presets, list_mcp_presets_with};
+pub use presets::list_mcp_presets;
 pub use runtime::{
     McpRuntimeCandidate, McpRuntimeSelection, McpRuntimeShape, select_runtime, select_runtime_with,
 };

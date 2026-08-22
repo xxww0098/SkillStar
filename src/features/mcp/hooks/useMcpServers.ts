@@ -22,8 +22,11 @@ export interface McpMarketInstallSubmission {
   runtimeId: string | null;
   answers: readonly McpInstallAnswer[];
   enabled: Record<string, boolean>;
-  /** The exact string the user confirmed, unmasked. */
-  approvedPreview: string;
+  /**
+   * `McpInstallPreview.approvalTarget` verbatim, unmasked — the backend's own
+   * rendering of everything the confirmation step showed. Never rebuilt here.
+   */
+  approvedTarget: string;
 }
 
 const MCP_STALE_TIME_MS = 30_000;
@@ -76,7 +79,7 @@ export function useMcpServers() {
         ...(submission.runtimeId ? { runtimeId: submission.runtimeId } : {}),
         answers: [...submission.answers],
         enabled: submission.enabled,
-        approvedPreview: submission.approvedPreview,
+        approvedTarget: submission.approvedTarget,
       }),
     onSuccess: invalidate,
   });

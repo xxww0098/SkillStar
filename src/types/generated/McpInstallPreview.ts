@@ -22,6 +22,13 @@ entry: McpServerEntry,
  */
 commandPreview?: string | null, 
 /**
+ * Everything the confirmation step put in front of the user, folded into
+ * one opaque comparable string — see [`approval_target`]. The caller
+ * echoes this back to [`prepare_install`] verbatim; deriving it a second
+ * time at the edge is what let the two drift apart.
+ */
+approvalTarget: string, 
+/**
  * Required inputs still unanswered. Empty means install may proceed.
  */
 missing?: Array<McpInstallMissingInput>, };

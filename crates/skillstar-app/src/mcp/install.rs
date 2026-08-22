@@ -17,6 +17,17 @@
 //! `choices`, a file picker for `format: "filepath"`, and so on. Where those
 //! values then land is [`McpSecretPolicy`] — see its docs for the deliberate
 //! limitation.
+//!
+//! **What this module validates, and what it does not.** [`prepare_install`]
+//! enforces *requiredness* only: a required input left blank is refused, and so
+//! is a set of answers that no longer derives what the user approved. The rest
+//! of the publisher's `Input` semantics — `choices` membership, `format`
+//! (`number` / `boolean` / `filepath`) — are checked by the renderer, which is
+//! also the thing that can offer a select or a file picker instead of a text
+//! box. A caller with no renderer (the CLI the spec anticipates) therefore gets
+//! the requiredness and re-confirmation guarantees, but must apply `choices` and
+//! `format` itself: [`McpInstallInput::input`] carries them verbatim for exactly
+//! that reason.
 
 use std::collections::BTreeMap;
 
@@ -148,6 +159,11 @@ pub struct McpInstallPreview {
     /// `None` for a remote server, which executes nothing locally.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_preview: Option<String>,
+    /// Everything the confirmation step put in front of the user, folded into
+    /// one opaque comparable string — see [`approval_target`]. The caller
+    /// echoes this back to [`prepare_install`] verbatim; deriving it a second
+    /// time at the edge is what let the two drift apart.
+    pub approval_target: String,
     /// Required inputs still unanswered. Empty means install may proceed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing: Vec<McpInstallMissingInput>,
@@ -166,8 +182,9 @@ pub enum McpInstallRejection {
     MissingInputs {
         missing: Vec<McpInstallMissingInput>,
     },
-    /// What these answers derive *now* is not what the user approved — the
-    /// command line for a local shape, the resolved url for a remote one.
+    /// What these answers derive *now* is not what the user approved — not
+    /// only the command line or the resolved url, but the environment, the
+    /// headers and the config key that were on screen beside it.
     ///
     /// The catalog row is re-read at submit time, and a registry sync can
     /// rewrite it while the preview sits on screen. Installing anyway would
@@ -379,12 +396,7 @@ pub fn preview_install(
     let candidate = selection.resolve(runtime_id);
     let answers = Answers::new(answers);
 
-    let mut entry = registry_to_entry_answered(server, candidate, answers);
-    // A value nobody supplied is left out rather than pinned into every tool's
-    // config as an empty string.
-    entry.env.retain(|_, value| !value.is_empty());
-    entry.headers.retain(|_, value| !value.is_empty());
-
+    let entry = registry_to_entry_answered(server, candidate, answers);
     let command_preview = entry
         .command
         .as_deref()
@@ -393,6 +405,7 @@ pub fn preview_install(
 
     McpInstallPreview {
         missing: missing_inputs(server, candidate.map(|c| c.id.as_str()), answers),
+        approval_target: approval_target(&entry, command_preview.as_deref()),
         command_preview,
         entry,
     }
@@ -403,23 +416,25 @@ pub fn preview_install(
 ///
 /// A thin wrapper over [`preview_install`] rather than a second derivation:
 /// `missing` is already that call's required-input verdict, and
-/// `approved_preview` is compared against the string it just rendered. Two
-/// derivations here would be the very drift this seam removes.
+/// `approved_target` is compared against the [`McpInstallPreview::approval_target`]
+/// it just derived. Two derivations here would be the very drift this seam
+/// removes.
 ///
 /// **Pure**, like [`preview_install`]: no lock, no store, no projection. The
 /// write lock is Tauri state and cannot move into a domain crate, so the caller
 /// keeps the IO and this keeps the rules — which is what lets the rules be
 /// driven straight from a test, and reused by a CLI that has no Tauri at all.
 ///
-/// `approved_preview` is the true, unmasked string. Masking is a display
-/// concern and belongs at the edge that displays it; masking before comparing
-/// would make every install with a secret among its arguments fail to match.
+/// `approved_target` is the true, unmasked [`McpInstallPreview::approval_target`]
+/// the confirmation step was rendered from. Masking is a display concern and
+/// belongs at the edge that displays it; masking before comparing would make
+/// every install with a secret in its environment fail to match.
 pub fn prepare_install(
     server: &McpRegistryServer,
     runtime_id: Option<&str>,
     answers: &[McpInstallAnswer],
     enabled: BTreeMap<String, bool>,
-    approved_preview: &str,
+    approved_target: &str,
 ) -> Result<McpServerEntry, McpInstallRejection> {
     let preview = preview_install(server, runtime_id, answers);
 
@@ -428,7 +443,7 @@ pub fn prepare_install(
     // have never seen. Re-confirming comes first. A genuinely blank required
     // field renders the same command it did on screen, so this order hides
     // nothing.
-    if approval_target(&preview) != approved_preview.trim() {
+    if preview.approval_target != approved_target.trim() {
         return Err(McpInstallRejection::CommandChanged);
     }
     if !preview.missing.is_empty() {
@@ -442,17 +457,36 @@ pub fn prepare_install(
     Ok(entry)
 }
 
-/// The one string the user actually confirmed. A remote shape executes nothing
-/// locally, so there is no command line to show it — the resolved url is what
-/// the confirmation step puts in front of them, and therefore what has to still
-/// hold at submit time.
-fn approval_target(preview: &McpInstallPreview) -> &str {
-    preview
-        .command_preview
-        .as_deref()
-        .or(preview.entry.url.as_deref())
+/// Everything the user actually confirmed, in one comparable string.
+///
+/// Not just the command line. The confirmation step renders the environment and
+/// the header tables beside it, and the config key every tool's file is written
+/// under comes from `entry.name` — so all four have to still hold at submit
+/// time. Comparing the command line alone let a registry sync add
+/// `environmentVariables: [{ name: "HTTP_PROXY", … }]` to a row whose `args` it
+/// never touched: byte-identical command, and a proxy the user never saw
+/// written into every enabled tool's config.
+///
+/// A remote shape executes nothing locally, so there is no command line to show
+/// it — the resolved url takes that slot.
+///
+/// JSON rather than a joined string because the values are publisher-controlled:
+/// a newline or a `=` inside one must not be able to forge a row and make two
+/// different approvals compare equal. The maps are `BTreeMap`s, so the encoding
+/// is order-stable. The result is opaque — nothing parses it, and it is never
+/// shown to the user, who reads [`McpInstallPreview::command_preview`] instead.
+fn approval_target(entry: &McpServerEntry, command_preview: Option<&str>) -> String {
+    let target = command_preview
+        .or(entry.url.as_deref())
         .unwrap_or_default()
-        .trim()
+        .trim();
+    serde_json::json!({
+        "name": entry.name,
+        "target": target,
+        "env": entry.env,
+        "headers": entry.headers,
+    })
+    .to_string()
 }
 
 /// The required fields `answers` still leaves blank.

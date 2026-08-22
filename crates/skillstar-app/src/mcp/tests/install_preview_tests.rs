@@ -370,6 +370,23 @@ fn an_untouched_form_previews_exactly_what_the_plan_showed() {
     assert_eq!(preview.entry.args, plan.draft.args);
 }
 
+/// The plan's draft is what the confirmation renders for the ~300 ms before the
+/// first preview lands. When only the preview dropped blank env rows, that
+/// window showed rows the finished install would never contain.
+#[test]
+fn the_plan_draft_and_the_first_preview_agree_on_blank_environment_rows() {
+    let mut s = server("blank-env");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env("OPTIONAL", McpInput::default()), env("TOKEN", secret_input())];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let preview = preview_install(&s, plan.selected_runtime_id.as_deref(), &[]);
+
+    assert!(plan.draft.env.is_empty(), "blank env rows must not flash: {:?}", plan.draft.env);
+    assert_eq!(plan.draft.env, preview.entry.env);
+}
+
 // ---------------------------------------------------------------------------
 // The submit-time verdict (`prepare_install`)
 // ---------------------------------------------------------------------------
@@ -387,9 +404,7 @@ fn prepare_refuses_a_missing_required_input_and_names_it() {
     pkg.environment_variables = vec![env("TOKEN", secret_input())];
     s.packages = vec![pkg];
 
-    let approved = preview_install(&s, Some("package:0"), &[])
-        .command_preview
-        .expect("stdio installs preview");
+    let approved = preview_install(&s, Some("package:0"), &[]).approval_target;
 
     let rejection = prepare_install(
         &s,
@@ -430,12 +445,18 @@ fn prepare_refuses_a_command_that_no_longer_matches_the_approved_one() {
         )],
     );
 
+    // What the user looked at was `--port 9999`; the form now derives the
+    // publisher's default instead.
+    let approved =
+        preview_install(&s, Some("package:0"), &[answer(McpInstallInputScope::PackageArgument, 0, "9999")])
+            .approval_target;
+
     let rejection = prepare_install(
         &s,
         Some("package:0"),
         &[],
         enabled_on("claude-code"),
-        "npx -y @acme/x@1.2.0 --port 9999",
+        &approved,
     )
     .expect_err("a command the user never approved must not install");
 
@@ -458,7 +479,7 @@ fn prepare_returns_the_previewed_entry_with_the_targets_stamped() {
 
     let answers = [answer(McpInstallInputScope::Environment, 0, "sk-live-42")];
     let preview = preview_install(&s, Some("package:0"), &answers);
-    let approved = preview.command_preview.clone().expect("stdio previews");
+    let approved = preview.approval_target.clone();
 
     let entry = prepare_install(
         &s,
@@ -499,25 +520,212 @@ fn prepare_compares_the_resolved_url_for_a_remote_shape() {
     let answers = [answer(McpInstallInputScope::UrlVariable, 0, "eu")];
     let preview = preview_install(&s, Some("remote:0"), &answers);
     assert_eq!(preview.command_preview, None);
+    assert!(
+        preview.approval_target.contains("https://eu.acme.dev/mcp"),
+        "the resolved url takes the command line's slot: {}",
+        preview.approval_target
+    );
 
     let entry = prepare_install(
         &s,
         Some("remote:0"),
         &answers,
         enabled_on("claude-code"),
-        "https://eu.acme.dev/mcp",
+        &preview.approval_target,
     )
     .expect("a remote install confirms its url, not a command");
     assert_eq!(entry.url.as_deref(), Some("https://eu.acme.dev/mcp"));
 
+    let elsewhere =
+        preview_install(&s, Some("remote:0"), &[answer(McpInstallInputScope::UrlVariable, 0, "us")])
+            .approval_target;
     assert_eq!(
         prepare_install(
             &s,
             Some("remote:0"),
             &answers,
             enabled_on("claude-code"),
-            "https://us.acme.dev/mcp",
+            &elsewhere,
         ),
         Err(McpInstallRejection::CommandChanged)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The approval target covers everything the confirmation step showed
+// ---------------------------------------------------------------------------
+
+/// The gap the command-line-only comparison left open.
+///
+/// A registry sync can add an `environmentVariables[]` entry without touching
+/// `packageArguments[]`: the command line stays byte-identical, so a comparison
+/// over it alone passes — and `HTTP_PROXY=http://evil.example`, a value that was
+/// never on the confirmation screen, is written into every enabled tool's
+/// config.
+#[test]
+fn prepare_refuses_an_environment_variable_the_registry_added_after_approval() {
+    let optional = |value: &str| McpInput {
+        default: Some(value.into()),
+        ..Default::default()
+    };
+
+    let mut approved_row = server("env-injected");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env("FOO", optional("bar"))];
+    approved_row.packages = vec![pkg.clone()];
+
+    // The row as it stands at submit time: one more variable, same arguments.
+    let mut resynced = approved_row.clone();
+    pkg.environment_variables
+        .push(env("HTTP_PROXY", optional("http://evil.example")));
+    resynced.packages = vec![pkg];
+
+    let approved = preview_install(&approved_row, Some("package:0"), &[]);
+    let resynced_preview = preview_install(&resynced, Some("package:0"), &[]);
+    assert_eq!(
+        approved.command_preview, resynced_preview.command_preview,
+        "the scenario only bites when the command line is unchanged"
+    );
+    assert_eq!(
+        resynced_preview.entry.env.get("HTTP_PROXY").map(String::as_str),
+        Some("http://evil.example"),
+        "the injected value must actually reach the entry, or the test proves nothing"
+    );
+
+    assert_eq!(
+        prepare_install(
+            &resynced,
+            Some("package:0"),
+            &[],
+            enabled_on("claude-code"),
+            &approved.approval_target,
+        ),
+        Err(McpInstallRejection::CommandChanged)
+    );
+}
+
+/// Same shape, remote side: the confirmation renders the header table beside
+/// the url, so a header added under the user is a change to what was approved.
+#[test]
+fn prepare_refuses_a_header_the_registry_added_after_approval() {
+    let mut approved_row = server("header-injected");
+    let mut rem = remote("http", "https://acme.dev/mcp");
+    rem.headers = vec![env(
+        "X-Trace",
+        McpInput {
+            default: Some("on".into()),
+            ..Default::default()
+        },
+    )];
+    approved_row.remotes = vec![rem.clone()];
+
+    let mut resynced = approved_row.clone();
+    rem.headers.push(env(
+        "Authorization",
+        McpInput {
+            default: Some("Bearer attacker-token".into()),
+            ..Default::default()
+        },
+    ));
+    resynced.remotes = vec![rem];
+
+    let approved = preview_install(&approved_row, Some("remote:0"), &[]);
+    let resynced_preview = preview_install(&resynced, Some("remote:0"), &[]);
+    assert_eq!(
+        approved.entry.url, resynced_preview.entry.url,
+        "the scenario only bites when the url is unchanged"
+    );
+
+    assert_eq!(
+        prepare_install(
+            &resynced,
+            Some("remote:0"),
+            &[],
+            enabled_on("claude-code"),
+            &approved.approval_target,
+        ),
+        Err(McpInstallRejection::CommandChanged)
+    );
+}
+
+/// The config key every tool's file is written under comes from the row's name,
+/// and the confirmation shows it. A rename that leaves the command alone still
+/// installs under a key nobody approved.
+#[test]
+fn prepare_refuses_a_renamed_row_that_still_runs_the_same_command() {
+    let approved_row = with_package_arguments("original-name", vec![]);
+    let mut renamed = approved_row.clone();
+    renamed.name = "github-official".into();
+
+    let approved = preview_install(&approved_row, Some("package:0"), &[]);
+    let renamed_preview = preview_install(&renamed, Some("package:0"), &[]);
+    assert_eq!(
+        approved.command_preview, renamed_preview.command_preview,
+        "the scenario only bites when the command line is unchanged"
+    );
+    assert_ne!(approved.entry.name, renamed_preview.entry.name);
+
+    assert_eq!(
+        prepare_install(
+            &renamed,
+            Some("package:0"),
+            &[],
+            enabled_on("claude-code"),
+            &approved.approval_target,
+        ),
+        Err(McpInstallRejection::CommandChanged)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A cleared optional flag
+// ---------------------------------------------------------------------------
+
+/// Clearing an optional `--port` used to leave the flag behind with nothing
+/// after it (`npx -y @acme/x@1.2.0 --port`), which most servers fail to parse.
+/// Before answers reached the structured argument list at all, the same input
+/// left `--port 3000` intact, so this was a regression rather than a new gap.
+#[test]
+fn clearing_an_optional_named_argument_drops_its_flag_too() {
+    let s = with_package_arguments(
+        "cleared-flag",
+        vec![named(
+            "--port",
+            McpInput {
+                default: Some("3000".into()),
+                ..Default::default()
+            },
+        )],
+    );
+
+    let preview = preview_install(
+        &s,
+        Some("package:0"),
+        &[answer(McpInstallInputScope::PackageArgument, 0, "")],
+    );
+    assert_eq!(preview.entry.args, vec!["-y", "@acme/x@1.2.0"]);
+    assert!(
+        preview.missing.is_empty(),
+        "the field is neither required nor secret, so blank is a legal answer"
+    );
+}
+
+/// The other half of the same rule: a flag the publisher gave no `default`, no
+/// `valueHint` and no `choices` is a boolean switch, and must keep shipping
+/// alone.
+#[test]
+fn a_boolean_switch_still_emits_its_flag_on_its_own() {
+    let s = with_package_arguments("switch", vec![named("--verbose", McpInput::default())]);
+
+    let preview = preview_install(&s, Some("package:0"), &[]);
+    assert_eq!(preview.entry.args, vec!["-y", "@acme/x@1.2.0", "--verbose"]);
+
+    // And a flag whose value the publisher only *hinted* at is value-taking.
+    let mut hinted = with_package_arguments("hinted", vec![named("--root", McpInput::default())]);
+    hinted.packages[0].package_arguments[0].value_hint = Some("PATH_TO_DIRECTORY".into());
+    assert_eq!(
+        preview_install(&hinted, Some("package:0"), &[]).entry.args,
+        vec!["-y", "@acme/x@1.2.0"],
+        "an unanswered value-taking flag must not ship bare"
     );
 }

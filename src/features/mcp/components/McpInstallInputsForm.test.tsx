@@ -90,12 +90,17 @@ describe("McpInstallInputsForm", () => {
     expect(screen.getByText("Directory the agent may read")).toBeInTheDocument();
   });
 
-  it("renders a per-field validation error", () => {
+  // The wizard passes a non-empty `errors` list only after a submit attempt —
+  // see `McpInstallWizard.test.tsx`, which pins that the submit button stays
+  // enabled so this path is reachable at all. Before that it was dead: field
+  // errors also disabled the button, so nothing ever asked for the markers.
+  it("marks the offending field and names the failure", () => {
     renderForm(
       [declared({ key: "API_KEY", mustAsk: true, input: input({ isRequired: true }) })],
       [{ scope: "environment", index: 0, code: "required" }],
     );
     expect(screen.getByText("必填")).toBeInTheDocument();
+    expect(screen.getByLabelText(/API_KEY/).className).toContain("border-destructive");
   });
 
   it("renders nothing when the plan declares no inputs", () => {

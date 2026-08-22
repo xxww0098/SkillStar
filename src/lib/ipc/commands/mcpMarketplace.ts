@@ -110,9 +110,12 @@ export interface McpMarketplaceCommands {
   /**
    * Commit the install. The backend re-derives the entry from these answers
    * against the catalog row *as it stands now*, and refuses unless that still
-   * renders `approvedPreview` — the exact string the user confirmed (the
-   * command line, or the resolved url for a remote shape), **unmasked**;
-   * masking is a display concern and a masked string would never match.
+   * produces `approvedTarget` — `McpInstallPreview.approvalTarget` exactly as
+   * the preview handed it over, **unmasked**. It covers everything the
+   * confirmation step showed: the command line (or the resolved url for a
+   * remote shape), the environment, the headers and the config key. Never
+   * rebuild it here — deriving it a second time at the edge is what let a
+   * registry sync slip an unseen `HTTP_PROXY` past the check.
    *
    * A refusal comes back as `{ status: "rejected" }` rather than a thrown
    * error, because its two reasons — a required input still blank, and a row
@@ -125,7 +128,7 @@ export interface McpMarketplaceCommands {
       runtimeId?: string;
       answers: McpInstallAnswer[];
       enabled: Record<string, boolean>;
-      approvedPreview: string;
+      approvedTarget: string;
     };
     result: McpInstallOutcome;
   };

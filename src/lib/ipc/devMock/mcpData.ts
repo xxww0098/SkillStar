@@ -677,11 +677,30 @@ export function mcpInstallPreview(id: string, runtimeId: string | undefined, ans
     }
   }
 
+  const entry = { ...draft, env, headers };
   return {
-    entry: { ...draft, env, headers },
+    entry,
     commandPreview: plan.commandPreview,
+    approvalTarget: mockApprovalTarget(entry, plan.commandPreview as string | null),
     missing,
   };
+}
+
+/**
+ * `McpInstallPreview.approvalTarget` — everything the confirmation step showed,
+ * in one comparable string. Mirrors `approval_target` in
+ * `skillstar_app::mcp::install`: command line (or url) plus env, headers and the
+ * config key, JSON-encoded so a value carrying a newline cannot forge a row.
+ */
+function mockApprovalTarget(entry: MockRecord, commandPreview: string | null): string {
+  const sorted = (values: unknown) =>
+    Object.fromEntries(Object.entries((values as Record<string, string>) ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+  return JSON.stringify({
+    env: sorted(entry.env),
+    headers: sorted(entry.headers),
+    name: String(entry.name ?? ""),
+    target: String(commandPreview ?? entry.url ?? "").trim(),
+  });
 }
 
 /**
@@ -697,12 +716,11 @@ export function mcpInstallOutcome(
   runtimeId: string | undefined,
   answers: MockRecord[],
   enabled: Record<string, boolean>,
-  approvedPreview: string,
+  approvedTarget: string,
 ): MockRecord {
   const preview = mcpInstallPreview(id, runtimeId, answers);
   const entry = preview.entry as MockRecord;
-  const approvalTarget = String(preview.commandPreview ?? entry.url ?? "").trim();
-  if (approvalTarget !== approvedPreview.trim()) {
+  if (String(preview.approvalTarget) !== approvedTarget.trim()) {
     return { status: "rejected", rejection: { reason: "commandChanged" } };
   }
   const missing = (preview.missing as MockRecord[]) ?? [];
