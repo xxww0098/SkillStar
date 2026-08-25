@@ -42,6 +42,9 @@ pub struct PatrolStatus {
 pub struct PatrolCheckEvent {
     pub name: String,
     pub update_available: bool,
+    /// Upstream removal/rename recorded for the Skill, if any.
+    #[serde(default)]
+    pub upstream_change: Option<skillstar_core::types::UpstreamChange>,
     pub skills_checked: u64,
     pub updates_found: u64,
 }

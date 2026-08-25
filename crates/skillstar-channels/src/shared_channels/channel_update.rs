@@ -82,8 +82,7 @@ where
         let (channel, repository, manifest) = match remote {
             Ok(value) => value,
             Err(error) => {
-                let remote_state_changed =
-                    mark_failure(&mut store.subscriptions[index], &error);
+                let remote_state_changed = mark_failure(&mut store.subscriptions[index], &error);
                 if let Some(mut snapshot) = previous {
                     snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
@@ -137,8 +136,7 @@ where
         let snapshot = match snapshot {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                let remote_state_changed =
-                    mark_failure(&mut store.subscriptions[index], &error);
+                let remote_state_changed = mark_failure(&mut store.subscriptions[index], &error);
                 if let Some(mut snapshot) = previous {
                     snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
@@ -544,7 +542,9 @@ where
                 Ok(inspection) => inspection,
                 Err(error) => ChannelUpdateInspection::Divergent {
                     reason: LocalDivergenceReason::SnapshotFailed,
-                    suggested_local_name: skillstar_skills::skill_update::suggested_local_name(&installed.id),
+                    suggested_local_name: skillstar_skills::skill_update::suggested_local_name(
+                        &installed.id,
+                    ),
                     error: Some(error.message),
                 },
             };
@@ -624,7 +624,9 @@ fn removed_item(installed: &ChannelSubscribedSkill) -> ChannelUpdateItem {
         from_content_hash: Some(installed.release_content_hash.clone()),
         to_content_hash: None,
         block_reason: Some(ChannelUpdateBlockReason::RemovedUpstream),
-        suggested_local_name: Some(skillstar_skills::skill_update::suggested_local_name(&installed.id)),
+        suggested_local_name: Some(skillstar_skills::skill_update::suggested_local_name(
+            &installed.id,
+        )),
         error: None,
         pinned_target: None,
         error_code: None,

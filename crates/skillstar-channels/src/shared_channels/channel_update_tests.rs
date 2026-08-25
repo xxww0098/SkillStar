@@ -238,7 +238,9 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
                     .unwrap()
                     .get(&skill.id.to_ascii_lowercase())
                     .copied()
-                    .unwrap_or(skillstar_skills::skill_update::LocalDivergenceReason::ContentChanged),
+                    .unwrap_or(
+                        skillstar_skills::skill_update::LocalDivergenceReason::ContentChanged,
+                    ),
                 suggested_local_name: format!("{}.local", skill.id),
                 error: None,
             })

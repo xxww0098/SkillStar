@@ -11,7 +11,7 @@ pub mod config;
 pub mod types;
 
 pub use check::{
-    check_skill_update_local_in_session, collect_hub_skills,
+    check_hub_skills_local_in_session, check_skill_update_local_in_session, collect_hub_skills,
     detect_new_skills_in_cached_repos, prefetch_failed_repos_in_session,
 };
 pub use config::{load_config, save_config};

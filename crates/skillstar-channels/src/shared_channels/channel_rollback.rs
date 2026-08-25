@@ -7,9 +7,9 @@ use super::{
     SHARED_CHANNEL_MUTATION_GATE, SharedChannelError, SharedChannelErrorCode,
     SharedChannelRegistry, validate_manifest,
 };
-use skillstar_skills::skill_update::LocalDivergenceResolution;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use skillstar_skills::skill_update::LocalDivergenceResolution;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

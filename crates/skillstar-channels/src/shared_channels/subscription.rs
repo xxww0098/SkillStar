@@ -297,7 +297,6 @@ pub trait ChannelSubscriptionInstaller: Send + Sync {
         &self,
         request: ChannelInstallRequest,
     ) -> Result<ChannelInstallReceipt, SharedChannelError>;
-
     async fn rollback(&self, receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError>;
 
     async fn verify_and_commit_install(
@@ -805,7 +804,10 @@ where
         let previous_store = store.clone();
         let previous_clone_url = stored.clone_url.clone();
         let route_changed = subscription_route_changed
-            || !skillstar_skills::source_resolver::same_remote_url(&previous_clone_url, &repository.clone_url);
+            || !skillstar_skills::source_resolver::same_remote_url(
+                &previous_clone_url,
+                &repository.clone_url,
+            );
         let stored = &mut store.channels[stored_index];
         stored.owner = repository.owner_login.clone();
         stored.name = repository.name.clone();
@@ -852,8 +854,8 @@ where
             return Ok(refreshed);
         }
 
-        let _update_guard =
-            skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+        let _update_guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+            .map_err(|error| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::Storage,
                     format!("Unable to lock repository route migration: {error}"),
@@ -861,19 +863,25 @@ where
             })?;
 
         let lock_path = self.subscriptions.repository_route_lockfile();
-        let _lock_guard = skillstar_skills::lockfile::get_mutex().lock().map_err(|_| {
-            SharedChannelError::new(
-                SharedChannelErrorCode::Storage,
-                "Lockfile mutex poisoned during repository route migration",
-            )
-        })?;
-        let mut lockfile = match lock_path.as_deref() {
-            Some(lock_path) => skillstar_skills::lockfile::Lockfile::load(lock_path).map_err(|error| {
+        let _lock_guard = skillstar_skills::lockfile::get_mutex()
+            .lock()
+            .map_err(|_| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::Storage,
-                    format!("Unable to read repository routes from the Skill lockfile: {error}"),
+                    "Lockfile mutex poisoned during repository route migration",
                 )
-            })?,
+            })?;
+        let mut lockfile = match lock_path.as_deref() {
+            Some(lock_path) => {
+                skillstar_skills::lockfile::Lockfile::load(lock_path).map_err(|error| {
+                    SharedChannelError::new(
+                        SharedChannelErrorCode::Storage,
+                        format!(
+                            "Unable to read repository routes from the Skill lockfile: {error}"
+                        ),
+                    )
+                })?
+            }
             None => skillstar_skills::lockfile::Lockfile::default(),
         };
         let previous_lockfile = lockfile.clone();
@@ -899,12 +907,13 @@ where
                     }
                     continue;
                 };
-                if !skillstar_skills::source_resolver::same_remote_url(&entry.git_url, previous_skill_url)
-                    && !skillstar_skills::source_resolver::same_remote_url(
-                        &entry.git_url,
-                        &repository.clone_url,
-                    )
-                {
+                if !skillstar_skills::source_resolver::same_remote_url(
+                    &entry.git_url,
+                    previous_skill_url,
+                ) && !skillstar_skills::source_resolver::same_remote_url(
+                    &entry.git_url,
+                    &repository.clone_url,
+                ) {
                     return Err(SharedChannelError::new(
                         SharedChannelErrorCode::Integrity,
                         format!(
@@ -912,7 +921,10 @@ where
                         ),
                     ));
                 }
-                if !skillstar_skills::source_resolver::same_remote_url(&entry.git_url, &repository.clone_url) {
+                if !skillstar_skills::source_resolver::same_remote_url(
+                    &entry.git_url,
+                    &repository.clone_url,
+                ) {
                     entry.git_url = repository.clone_url.clone();
                     lockfile_changed = true;
                 }

@@ -269,7 +269,10 @@ fn snapshot_published_tree(
             let _ = child.wait();
             let _ = unpack_reader.join();
             let _ = stderr_reader.join();
-            session.emit(skillstar_skills::git::transport::GitOperationPhase::Cancelled, remote);
+            session.emit(
+                skillstar_skills::git::transport::GitOperationPhase::Cancelled,
+                remote,
+            );
             return Err(cancelled_error());
         }
         match child.try_wait() {
@@ -295,8 +298,11 @@ fn snapshot_published_tree(
         return Err(scanner_error(session));
     }
 
-    let discovered =
-        skillstar_skills::discovery::discover_skills_without_dedup(&extraction, true, Some(repository_name));
+    let discovered = skillstar_skills::discovery::discover_skills_without_dedup(
+        &extraction,
+        true,
+        Some(repository_name),
+    );
     let mut skills = Vec::with_capacity(discovered.len());
     let mut identities = std::collections::HashSet::new();
     for skill in discovered {
@@ -313,9 +319,10 @@ fn snapshot_published_tree(
         } else {
             extraction.join(&skill.folder_path)
         };
-        let snapshot = skillstar_skills::content::snapshot_path(&skill.id, &root).map_err(|_| {
-            integrity_error("A Skill in the channel draft could not be hashed safely")
-        })?;
+        let snapshot =
+            skillstar_skills::content::snapshot_path(&skill.id, &root).map_err(|_| {
+                integrity_error("A Skill in the channel draft could not be hashed safely")
+            })?;
         skills.push(ChannelDraftSkill {
             id: skill.id,
             content_root: skill.folder_path,
@@ -329,7 +336,9 @@ fn snapshot_published_tree(
     })
 }
 
-fn scanner_error(session: &skillstar_skills::git::transport::GitOperationSession) -> SharedChannelError {
+fn scanner_error(
+    session: &skillstar_skills::git::transport::GitOperationSession,
+) -> SharedChannelError {
     if session.is_cancelled() {
         cancelled_error()
     } else {
@@ -451,9 +460,10 @@ mod tests {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "attributes"]);
         let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
-        let expected = skillstar_skills::content::snapshot_path("writer", &repo.join("skills/writer"))
-            .unwrap()
-            .content_hash;
+        let expected =
+            skillstar_skills::content::snapshot_path("writer", &repo.join("skills/writer"))
+                .unwrap()
+                .content_hash;
 
         let snapshot = snapshot_published_tree(
             &repo,
@@ -486,9 +496,10 @@ mod tests {
         run_git(&source, &["commit", "-m", "main"]);
         let remote = temp.path().join("remote.git");
         run_git(&source, &["clone", "--bare", ".", remote.to_str().unwrap()]);
-        let scanner = GitChannelDraftScanner::new(skillstar_skills::git_skill::GitSkillFacade::new(
-            skillstar_skills::git::transport::GitOperationSession::public(),
-        ));
+        let scanner =
+            GitChannelDraftScanner::new(skillstar_skills::git_skill::GitSkillFacade::new(
+                skillstar_skills::git::transport::GitOperationSession::public(),
+            ));
         let repository = RemoteRepository {
             id: 42,
             owner_id: 7,

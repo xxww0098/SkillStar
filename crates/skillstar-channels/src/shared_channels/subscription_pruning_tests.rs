@@ -215,15 +215,15 @@ fn pruning_an_unsupported_schema_fails_closed() {
     .unwrap();
     value["schema_version"] = Value::from(99);
     let payload = serde_json::to_vec(&value).unwrap();
-    skillstar_core::infra::fs_ops::atomic_write(
-        &DiskChannelSubscriptionRegistry::path(),
-        &payload,
-    )
-    .unwrap();
+    skillstar_core::infra::fs_ops::atomic_write(&DiskChannelSubscriptionRegistry::path(), &payload)
+        .unwrap();
 
     let error = prune_removed_skills(&["writer".to_string()]).unwrap_err();
 
-    assert_eq!(error.code, SharedChannelErrorCode::SubscriptionSchemaUnsupported);
+    assert_eq!(
+        error.code,
+        SharedChannelErrorCode::SubscriptionSchemaUnsupported
+    );
     assert_eq!(
         std::fs::read(DiskChannelSubscriptionRegistry::path()).unwrap(),
         payload,

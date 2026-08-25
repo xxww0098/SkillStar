@@ -32,18 +32,18 @@ pub(crate) fn managed_repository_for_url(
     let subscriptions = DiskChannelSubscriptionRegistry
         .load_mutable()?
         .subscriptions;
-    if let Some(subscription) = subscriptions.iter().find(|subscription| {
-        subscription
-            .repository_url_aliases
-            .iter()
-            .any(|alias| skillstar_skills::source_resolver::same_remote_url(alias, repository_url))
-            || subscription.skills.iter().any(|skill| {
+    if let Some(subscription) =
+        subscriptions.iter().find(|subscription| {
+            subscription.repository_url_aliases.iter().any(|alias| {
+                skillstar_skills::source_resolver::same_remote_url(alias, repository_url)
+            }) || subscription.skills.iter().any(|skill| {
                 skillstar_skills::source_resolver::same_remote_url(
                     &skill.provenance.repository_url,
                     repository_url,
                 )
             })
-    }) {
+        })
+    {
         return Ok(Some(subscription.repository_id));
     }
 
@@ -57,7 +57,10 @@ pub(crate) fn managed_repository_for_url(
         .into_iter()
         .find(|channel| {
             subscribed_ids.contains(&channel.repository_id)
-                && skillstar_skills::source_resolver::same_remote_url(&channel.clone_url, repository_url)
+                && skillstar_skills::source_resolver::same_remote_url(
+                    &channel.clone_url,
+                    repository_url,
+                )
         })
         .map(|channel| channel.repository_id))
 }
@@ -296,7 +299,9 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
             .skills
             .iter()
             .map(|skill| {
-                skillstar_skills::source_resolver::normalize_remote_url(&skill.provenance.repository_url)
+                skillstar_skills::source_resolver::normalize_remote_url(
+                    &skill.provenance.repository_url,
+                )
             })
             .collect::<std::collections::BTreeSet<_>>();
         let mut aliases = std::collections::BTreeSet::new();
@@ -316,7 +321,8 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
                 || !valid_hash(&skill.release_content_hash)
                 || !valid_hash(&skill.baseline_hash)
                 || skill.baseline_hash != skill.release_content_hash
-                || skill.release_content_hash_version != skillstar_skills::content::SNAPSHOT_HASH_VERSION
+                || skill.release_content_hash_version
+                    != skillstar_skills::content::SNAPSHOT_HASH_VERSION
                 || skill.baseline_hash_version != skillstar_skills::content::SNAPSHOT_HASH_VERSION
                 || skill.provenance.repository_id != subscription.repository_id
                 || !valid_repository_url(&skill.provenance.repository_url)
@@ -449,7 +455,8 @@ fn valid_auto_update_state(state: &super::ChannelAutoUpdateState) -> bool {
     }
     let mut applied = std::collections::BTreeSet::new();
     if run.applied_skill_ids.iter().any(|id| {
-        skillstar_skills::content::validate_skill_name(id).is_err() || !applied.insert(id.to_ascii_lowercase())
+        skillstar_skills::content::validate_skill_name(id).is_err()
+            || !applied.insert(id.to_ascii_lowercase())
     }) {
         return false;
     }
@@ -551,7 +558,8 @@ fn read_only_view(schema_version: u32, subscription: &Value) -> Option<ChannelSu
         .collect::<Option<Vec<_>>>()?;
     let mut seen = std::collections::BTreeSet::new();
     if selected_skill_ids.iter().any(|id| {
-        skillstar_skills::content::validate_skill_name(id).is_err() || !seen.insert(id.to_ascii_lowercase())
+        skillstar_skills::content::validate_skill_name(id).is_err()
+            || !seen.insert(id.to_ascii_lowercase())
     }) {
         return None;
     }

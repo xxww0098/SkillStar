@@ -6,10 +6,10 @@ use super::{
     SharedChannelErrorCode, SharedChannelGateway, SharedChannelRegistry, SharedChannelRole,
     SharedChannelStatus, project_role, validate_remote_repository,
 };
-use skillstar_skills::git::transport::GitOperationPhase;
-use skillstar_skills::git_skill::GitSkillFacade;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use skillstar_skills::git::transport::GitOperationPhase;
+use skillstar_skills::git_skill::GitSkillFacade;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -91,8 +91,8 @@ impl ExistingRepositoryScanner for GitExistingRepositoryScanner {
         if session.is_cancelled() {
             return Err(cancelled_error());
         }
-        let _transaction_guard =
-            skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|_| {
+        let _transaction_guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+            .map_err(|_| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::Storage,
                     "Unable to lock the repository cache for channel registration",
@@ -749,14 +749,18 @@ fn materialize_all_skill_directories(
     directories.sort_unstable();
     directories.dedup();
     if !directories.is_empty() {
-        skillstar_skills::git::ops::apply_sparse_checkout_in_session(repository_dir, &directories, session)
-            .map_err(|_| {
-                if session.is_cancelled() {
-                    cancelled_error()
-                } else {
-                    inventory_io_error()
-                }
-            })?;
+        skillstar_skills::git::ops::apply_sparse_checkout_in_session(
+            repository_dir,
+            &directories,
+            session,
+        )
+        .map_err(|_| {
+            if session.is_cancelled() {
+                cancelled_error()
+            } else {
+                inventory_io_error()
+            }
+        })?;
     }
     if session.is_cancelled() {
         return Err(cancelled_error());

@@ -4,8 +4,8 @@ use super::{
     ChannelReleaseManifest, ChannelSkillProvenance, ChannelSubscribedSkill,
     ChannelSubscriptionInstaller, RemoteRepository, SharedChannelError, SharedChannelErrorCode,
 };
-use skillstar_skills::git_skill::GitSkillFacade;
 use async_trait::async_trait;
+use skillstar_skills::git_skill::GitSkillFacade;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone)]
@@ -51,8 +51,8 @@ impl ChannelSubscriptionInstaller for GitChannelSubscriptionInstaller {
     ) -> Result<ChannelInstallReceipt, SharedChannelError> {
         let git = self.git.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     install_error(format!("Unable to lock channel installation: {error}"))
                 })?;
             install_blocking(&git, request)
@@ -64,8 +64,8 @@ impl ChannelSubscriptionInstaller for GitChannelSubscriptionInstaller {
     async fn rollback(&self, receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError> {
         let names = receipt.newly_installed_skill_ids.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     install_error(format!(
                         "Unable to lock channel installation rollback: {error}"
                     ))
@@ -83,8 +83,8 @@ impl ChannelSubscriptionInstaller for GitChannelSubscriptionInstaller {
     ) -> Result<(), SharedChannelError> {
         let receipt = receipt.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     install_error(format!(
                         "Unable to lock channel installation commit: {error}"
                     ))
@@ -141,12 +141,13 @@ fn install_blocking(
         })
         .map(|skill| (skill.id.to_ascii_lowercase(), skill))
         .collect::<BTreeMap<_, _>>();
-    let existing_lock = skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-        .map_err(|error| {
-            install_error(format!(
-                "Unable to read installed Skill provenance: {error}"
-            ))
-        })?;
+    let existing_lock =
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
+            .map_err(|error| {
+                install_error(format!(
+                    "Unable to read installed Skill provenance: {error}"
+                ))
+            })?;
     let hub_skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let mut targets = Vec::new();
 
@@ -250,7 +251,8 @@ fn install_blocking(
         .iter()
         .map(|skill| skill.id.clone())
         .collect::<Vec<_>>();
-    let project_summary = skillstar_skills::projects::cascade_skill_update_to_projects(&canonical_ids);
+    let project_summary =
+        skillstar_skills::projects::cascade_skill_update_to_projects(&canonical_ids);
     deployment_failures.extend(
         project_summary
             .failures
@@ -304,11 +306,12 @@ fn installed_receipt(
 
 fn verify_install_receipt(receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError> {
     let lockfile =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path()).map_err(|error| {
-            install_error(format!(
-                "Unable to verify installed Skill provenance: {error}"
-            ))
-        })?;
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
+            .map_err(|error| {
+                install_error(format!(
+                    "Unable to verify installed Skill provenance: {error}"
+                ))
+            })?;
     for skill in &receipt.skills {
         verify_installed_skill(skill, &lockfile)?;
     }
@@ -325,10 +328,12 @@ fn verify_installed_skill(
         .find(|entry| entry.name.eq_ignore_ascii_case(&skill.id))
         .ok_or_else(content_integrity_error)?;
     let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(&skill.id);
-    let checkout = skillstar_skills::repo_link::repo_root_of(&hub_path).ok_or_else(content_integrity_error)?;
-    let head =
-        skillstar_skills::git::ops::rev_parse(&checkout, "HEAD").map_err(|_| content_integrity_error())?;
-    let current = skillstar_skills::content::snapshot(&skill.id).map_err(|_| content_integrity_error())?;
+    let checkout =
+        skillstar_skills::repo_link::repo_root_of(&hub_path).ok_or_else(content_integrity_error)?;
+    let head = skillstar_skills::git::ops::rev_parse(&checkout, "HEAD")
+        .map_err(|_| content_integrity_error())?;
+    let current =
+        skillstar_skills::content::snapshot(&skill.id).map_err(|_| content_integrity_error())?;
     if current.content_hash != skill.release_content_hash
         || skill.baseline_hash != skill.release_content_hash
         || !head.eq_ignore_ascii_case(&skill.provenance.git_ref)
@@ -350,11 +355,12 @@ fn rollback_install_receipt_preserving_changes(
     receipt: &ChannelInstallReceipt,
 ) -> Result<(), SharedChannelError> {
     let lockfile =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path()).map_err(|error| {
-            install_error(format!(
-                "Unable to inspect staged install rollback: {error}"
-            ))
-        })?;
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
+            .map_err(|error| {
+                install_error(format!(
+                    "Unable to inspect staged install rollback: {error}"
+                ))
+            })?;
     let mut failures = Vec::new();
     for name in receipt.newly_installed_skill_ids.iter().rev() {
         let Some(skill) = receipt
@@ -369,7 +375,8 @@ fn rollback_install_receipt_preserving_changes(
             failures.push(format!("{name}: current content changed and was preserved"));
             continue;
         }
-        if let Err(error) = skillstar_skills::skill_install::uninstall_skill_locked_unchecked(name) {
+        if let Err(error) = skillstar_skills::skill_install::uninstall_skill_locked_unchecked(name)
+        {
             failures.push(format!("{name}: {error}"));
         }
     }
@@ -406,8 +413,10 @@ fn subscribed_skill_from_lock(
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case(&release.id))
         .ok_or_else(content_integrity_error)?;
-    if !skillstar_skills::source_resolver::same_remote_url(&entry.git_url, &request.repository.clone_url)
-        || entry.git_ref.as_deref() != Some(request.manifest.commit_sha.as_str())
+    if !skillstar_skills::source_resolver::same_remote_url(
+        &entry.git_url,
+        &request.repository.clone_url,
+    ) || entry.git_ref.as_deref() != Some(request.manifest.commit_sha.as_str())
         || entry.source_folder.as_deref().unwrap_or_default() != release.content_root
     {
         return Err(selection_conflict(&release.id));
@@ -460,7 +469,8 @@ fn selection_conflict(id: &str) -> SharedChannelError {
 fn rollback_new_installs(names: &[String]) -> Result<(), SharedChannelError> {
     let mut failures = Vec::new();
     for name in names.iter().rev() {
-        if let Err(error) = skillstar_skills::skill_install::uninstall_skill_locked_unchecked(name) {
+        if let Err(error) = skillstar_skills::skill_install::uninstall_skill_locked_unchecked(name)
+        {
             failures.push(format!("{name}: {error}"));
         }
     }
@@ -498,11 +508,11 @@ fn install_error(message: impl Into<String>) -> SharedChannelError {
 #[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
-    use skillstar_skills::git::transport::GitOperationSession;
     use crate::shared_channels::{
         CHANNEL_RELEASE_MANIFEST_VERSION, ChannelPublisherIdentity, ChannelReleaseManifest,
         ChannelReleaseSkill, ChannelSkillReleaseStatus, RemoteRepository, RepositoryPermissions,
     };
+    use skillstar_skills::git::transport::GitOperationSession;
     use std::collections::HashMap;
     use std::ffi::OsStr;
     use std::fs;
@@ -554,9 +564,11 @@ mod tests {
             git(&repository, &["add", "."])?;
             git(&repository, &["commit", "-qm", "release"])?;
             let commit = git_output(&repository, &["rev-parse", "HEAD"])?;
-            let release_hash =
-                skillstar_skills::content::snapshot_path("writer", &repository.join("skills/writer"))?
-                    .content_hash;
+            let release_hash = skillstar_skills::content::snapshot_path(
+                "writer",
+                &repository.join("skills/writer"),
+            )?
+            .content_hash;
             let cache = skillstar_core::infra::paths::repos_cache_dir().join(format!(
                 "{}--ref--{}",
                 skillstar_skills::source_resolver::cache_dir_name("acme/channel"),
@@ -570,7 +582,8 @@ mod tests {
             fs::create_dir_all(&agent_copy)?;
             fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;
 
-            let project_entry = skillstar_skills::projects::register_project(project.to_str().unwrap())?;
+            let project_entry =
+                skillstar_skills::projects::register_project(project.to_str().unwrap())?;
             let mut agents = HashMap::new();
             agents.insert("codex".to_string(), vec!["writer".to_string()]);
             let mut deploy_modes = HashMap::new();

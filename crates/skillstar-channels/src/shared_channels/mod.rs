@@ -8,8 +8,8 @@ mod channel_removal;
 mod channel_removal_installer;
 mod channel_rollback;
 mod channel_update;
-mod channel_update_types;
 mod channel_update_installer;
+mod channel_update_types;
 mod channel_update_validation;
 mod existing;
 mod git_read;
@@ -140,7 +140,9 @@ fn generic_checkout_is_mutable(skill_path: &std::path::Path) -> anyhow::Result<b
     for entry in entries {
         let entry = entry?;
         let sibling_path = entry.path();
-        if skillstar_skills::repo_link::repo_root_of(&sibling_path).as_ref() != Some(&requested_root) {
+        if skillstar_skills::repo_link::repo_root_of(&sibling_path).as_ref()
+            != Some(&requested_root)
+        {
             continue;
         }
         let sibling = entry.file_name().to_string_lossy().into_owned();
@@ -158,7 +160,8 @@ pub(crate) fn generic_installed_skill_is_mutable(
     if managed_repository_for_skill(skill_id)?.is_some() {
         return Ok(false);
     }
-    let lockfile = skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())?;
+    let lockfile =
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())?;
     let entry = lockfile
         .skills
         .iter()

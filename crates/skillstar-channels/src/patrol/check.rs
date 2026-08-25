@@ -8,9 +8,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
-use skillstar_skills::local_skill;
 use crate::patrol::types::HubSkillEntry;
-use skillstar_skills::update_checker;
+use skillstar_skills::local_skill;
+use skillstar_skills::update_checker::{self, UpstreamStatus};
 use skillstar_skills::{repo_link, repo_scanner};
 
 /// Check a single skill for available updates without network (after prefetch).
@@ -22,8 +22,51 @@ pub fn check_skill_update_local_in_session(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
     session: &skillstar_skills::git::transport::GitOperationSession,
-) -> Option<bool> {
+) -> Option<UpstreamStatus> {
     let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock().ok()?;
+    check_skill_update_local_unlocked(skill_name, skill_path, failed_fetch_roots, session)
+}
+
+/// Check every hub skill under one transaction lock, using bounded worker
+/// threads so local `git rev-parse` child processes overlap.
+pub fn check_hub_skills_local_in_session(
+    skills: &[HubSkillEntry],
+    failed_fetch_roots: &HashSet<PathBuf>,
+    session: &skillstar_skills::git::transport::GitOperationSession,
+) -> Vec<(String, Option<UpstreamStatus>)> {
+    if skills.is_empty() {
+        return Vec::new();
+    }
+    let Ok(_guard) = skillstar_skills::skill_update::acquire_update_transaction_lock() else {
+        return skills
+            .iter()
+            .map(|entry| (entry.name.clone(), None))
+            .collect();
+    };
+    skillstar_core::infra::parallel::map_bounded(
+        skills.to_vec(),
+        skillstar_core::infra::parallel::blocking_concurrency_limit(),
+        |entry| {
+            if session.is_cancelled() {
+                return (entry.name, None);
+            }
+            let result = check_skill_update_local_unlocked(
+                &entry.name,
+                &entry.path,
+                failed_fetch_roots,
+                session,
+            );
+            (entry.name, result)
+        },
+    )
+}
+
+fn check_skill_update_local_unlocked(
+    skill_name: &str,
+    skill_path: &Path,
+    failed_fetch_roots: &HashSet<PathBuf>,
+    session: &skillstar_skills::git::transport::GitOperationSession,
+) -> Option<UpstreamStatus> {
     if !matches!(
         crate::shared_channels::generic_installed_skill_is_mutable(skill_name, skill_path),
         Ok(true)
@@ -31,13 +74,13 @@ pub fn check_skill_update_local_in_session(
         return None;
     }
     if repo_link::is_repo_cached(skill_path) {
-        return update_checker::check_update_local(skill_path, failed_fetch_roots);
+        return update_checker::check_upstream_status(skill_path, failed_fetch_roots, None, session);
     }
 
     // Fallback for non-repo-cached hub skills.
     let _ = skillstar_skills::git::ops::ensure_worktree_checked_out_in_session(skill_path, session);
     match skillstar_skills::git::ops::check_update_in_session(skill_path, session) {
-        Ok(update_available) => Some(update_available),
+        Ok(update_available) => Some(UpstreamStatus::from_available(update_available)),
         Err(err) => {
             warn!(
                 target: "patrol",
@@ -130,14 +173,23 @@ pub fn prefetch_failed_repos_in_session(
 }
 
 /// Detect newly available skills in already-fetched repo caches.
-pub fn detect_new_skills_in_cached_repos() -> Vec<skillstar_skills::repo_scanner::RepoNewSkill> {
-    repo_scanner::detect_new_skills_in_cached_repos()
+pub fn detect_new_skills_in_cached_repos(
+    session: &skillstar_skills::git::transport::GitOperationSession,
+) -> Vec<skillstar_skills::repo_scanner::RepoNewSkill> {
+    repo_scanner::detect_new_skills_in_cached_repos(session)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn check_hub_skills_batch_is_empty_for_no_skills() {
+        let session = skillstar_skills::git::transport::GitOperationSession::public();
+        let out = check_hub_skills_local_in_session(&[], &HashSet::new(), &session);
+        assert!(out.is_empty());
+    }
 
     #[test]
     fn collect_hub_skills_skips_local_and_missing_dir() {
