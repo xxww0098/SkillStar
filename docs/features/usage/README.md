@@ -21,7 +21,11 @@
 - **不是每个 OAuth catalog 都有 token 交换腿。** `anthropic` 全程只读 Claude Code 自己的登录态，从不 POST token、从不写回凭证，因此 `token_endpoint` 不在它的路径上（见下节）。
 - refresh 只用窄 patch 更新 fetcher-owned runtime 字段，不能用网络请求开始时的旧整行覆盖用户刚修改的 metadata 或凭证。
 - OAuth finalize 与 `local_import` 都在对应 catalog 的 `refresh_guard` 锁内完成写入，和 refresh 同属一个 serialization domain。
+- Antigravity 的“从本地导入”与切号使用同一读取优先级：macOS 当前桌面版本优先读 `gemini` / `antigravity` Keychain，旧版或未检测到系统凭据时再读 `state.vscdb`；导入本身会刷新一次 Google token 后保存为 SkillStar subscription。
 - 可覆盖 OAuth client credential 的 provider 按 env → compile-time → `oauth_clients.json` → built-in fallback 解析；要求外部凭证的 provider 保留自己的专用配置模块。
+- Antigravity 使用参考项目同源的公开 Google OAuth 客户端作为内置 fallback；仍可用 `SKILLSTAR_ANTIGRAVITY_CLIENT_ID` / `SKILLSTAR_ANTIGRAVITY_CLIENT_SECRET` 或 `~/.skillstar/config/antigravity_oauth.json` 覆盖。这里的 client secret 属于桌面 OAuth 客户端标识，不是用户账号凭证；账号的 access/refresh token 仍只进加密 subscription storage。
+- Antigravity 额度先调用 `loadCodeAssist` 获取 plan、credits 和 `cloudaicompanionProject`，再把项目 ID 传给 Cloud Code。项目字段同时兼容字符串和 `{ "id": ... }` 对象。Cloud Code 请求按 daily → daily sandbox → production 回退；优先使用 `retrieveUserQuotaSummary` 返回的用户可见 5h/weekly buckets，只有摘要接口没有可用窗口时才回退到 `fetchAvailableModels` 的模型 quota。汇总卡按最紧张（消耗百分比最高）的窗口计算，`UsageWindow.used` 与 `percent` 始终表示已消耗比例，不能把剩余比例写入 `used`。
+- Antigravity 模型列表不是固定枚举：已知模型按产品分组，新增的 Gemini/Claude/GPT/Image 模型只要带 `quotaInfo.remainingFraction` 也必须显示；无法抓取模型额度时保留 plan/credits，同时在 `usage.error` 显示原因，401 仍按认证失效处理。配额刷新优先调用 `retrieveUserQuotaSummary`；只有该 endpoint 明确返回 404/405 时才回退 `fetchAvailableModels`，有效但为空的 summary 不再额外发起模型目录请求。卡片在窄宽度下把已知的 Gemini、Claude/GPT 周额度与 5 小时额度压缩为可扫描的短标签，并保留完整原始标签作为悬浮说明；重置倒计时与进度条同行，避免四个窗口把卡片纵向拉长。
 
 ### Anthropic Claude 特例：只读采纳，不参与轮换
 
@@ -51,26 +55,30 @@
 - 分级实现见 `UsageError::{http_status, transport, is_transient}`、`request::RequestError::{is_auth_error, is_transient}` 与 `SubscriptionUsage::from_refresh_error`。
 - 没有 token 交换腿的 fetcher（`anthropic`）在额度请求上复用同一张表的另一半：`Resp::is_auth_error()` 判 401，其余非 2xx 交给 `UsageError::http_status`，传输失败交给 `UsageError::transport`。不允许再写第二套状态码匹配。
 
-## CLI 账号切换：软链直通快照
+## 本地工具账号切换：CLI 软链与 IDE 适配器
 
-切号的本质是「让 CLI 下次读凭证时读到另一个账号的凭证」。SkillStar **不持有凭证**，只持有
-CLI 凭证文件的快照；CLI 的 live 路径是指向当前快照的软链。CLI 自己轮换 token 时直接写穿到
-快照，所以不存在「陈旧拷贝」，也就不需要检测轮换再回抄。路线选择与后果见
+切号的本质是「让目标应用下次读凭证时读到另一个账号的凭证」。SkillStar **不持有凭证**，CLI
+账号使用凭证文件快照和软链；CLI 自己轮换 token 时直接写穿到快照，所以不存在「陈旧拷贝」。
+Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们真实使用的 OAuth 存储。路线选择与后果见
 [../../decisions.md](../../decisions.md)。
 
 - `skillstar-app::usage_switch` 是唯一跨 Usage/Models 的账号激活 facade；Tauri command 不直接理解 provider 凭证文件 schema。
 - 快照落点 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json`，权限 0600，走后端解析真实数据目录（`SKILLSTAR_DATA_DIR` 等覆盖继续生效）。**一份快照是整个 CLI 凭证文件**，不是其中一个账号的片段 —— 软链只能整文件替身。
 - live 路径必须是 CLI 自己读的那个文件，并尊重上游 env 覆盖：`CODEX_HOME`、`GROK_HOME`、`XDG_DATA_HOME`（OpenCode 用 `$XDG_DATA_HOME/opencode/auth.json`，不是 config 目录）。`SKILLSTAR_TOOL_SYNC_HOME` 沙箱优先级最高，测试不得逃逸。
-- 支持哪些 catalog 由 target 注册表推导（`usage_switch::target_for`），不是手抄白名单：有适配器才 `supports_cli_switch`。Cursor / Antigravity 是 IDE，凭证在 `state.vscdb`，保持不支持。
+- 支持哪些 catalog 由切换适配器推导，不是 UI 手抄白名单：CLI 账号走 `usage_switch::target_for`，Antigravity 和 Cursor 走独立的 IDE 凭证适配器。Antigravity 的“当前账号”优先读取 macOS Keychain 的 `gemini` / `antigravity` 条目；没有该条目时读取 `state.vscdb` 中 `antigravityUnifiedStateSync.oauthToken`。Cursor 的当前账号读取其 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken` 和 `cursorAuth/cachedEmail`，都不是 Usage 的 active pin。
+- Antigravity 切换顺序：取得 catalog 锁 → 读取并解密目标账号 → 写入并验证 macOS Keychain（当前桌面版本）或生成官方 Unified OAuth protobuf、在 SQLite 事务内写入 `state.vscdb`（旧版/其它平台）→ 回读并校验 refresh token → 最后才落 active pin。目标存储不存在、无法写入或回读不一致时，pin 保持旧值并明确显示“切换未生效”。
+- Antigravity OAuth 登录完成后，如果目标卡原本就是 active，会立即按同一适配器把新凭证投影回 IDE；普通刷新也会把 active 卡的 token rotation 投影回 IDE，避免 Usage 与 IDE 分叉。
+- Cursor 切换顺序：取得 catalog 锁 → 解密目标 access/refresh token → 在 SQLite 事务内同时写入 `cursorAuth/*` 和 Cursor 镜像 key → 回读 access/refresh/email 校验 → 最后才落 active pin。Cursor 缺少本地 `state.vscdb` 或凭证不完整时不会只改 pin，而是明确返回“切换未生效”。Cursor 本地导入也读取同一组 key；一次 OAuth 会话读取在同一 SQLite 连接和查询中取得四个字段，避免跨连接快照。
+- Cursor 的 IDE 进程可能自行轮换 token；Usage 刷新前先采纳仍属于当前卡的本地新 token，刷新后再把新 token 投影回 `state.vscdb`，避免 refresh token 双花和卡片/IDE 分叉。
 - 每个 catalog 使用进程内 async mutex + CLI 自己的 OS file lock（Grok 用官方 `auth.json.lock` 并回写 `PID:秒` holder 行；无官方锁的 CLI 用私有 `<file>.skillstar.lock`）。软链消灭的是陈旧拷贝，**不是** refresh token 单次使用的双花竞态，所以锁必须保留。
 - activate 顺序：取锁 → 捕获 live 现有凭证（备份 + 归属判定 + 吸收）→ 准备快照 → 原子替换 live 为软链 → 回读校验 → keychain 等副作用 → **最后**才落 pin。任何一步失败都保留旧 pin 与旧 live 文件；软链已换但后续失败时回滚到原来的软链或备份。
 - 「失败发生在替换之前还是之后」不靠调用方猜：`usage_switch::error` 里 `ActivationError` 带一个 `Stage`（`BeforeReplace` / `AfterReplace { target_installed }`），回滚与否只看它。替换前失败时旧凭证原封不动，回滚才是破坏；`target_installed=false`（bind 自己失败）时第二存储从未被写过，回滚不再多跑一次 keychain。
 - 托管层的失败面是**真枚举不是字符串**：`CustodyError`（路径解析 / 锁 / 读 / 写 / 原子替换 / 软链 / 回读校验 / 归属冲突 / 快照缺失损坏）、`MaterializeError`（订阅行凑不出 CLI 能用的凭证）、`ExternalStoreError`（macOS keychain）。面向用户的中文文案由变体生成，命令层只做 `SwitchOutcome.error` 字符串适配。计数门禁见 `scripts/internal/check_error_strings.sh`。
-- 对账判据是**内容不是文件类型**：三态 `LinkedTo / Diverged / Missing`，只比 access_token 字符串，不比整个 JSON（CLI 会加自己的字段）。CLI 用 `rename()` 把软链冲成实体文件、内容却一致时判 `LinkedTo` 并静默重建软链。
+- 对账判据是**内容不是文件类型**：三态 `LinkedTo / Diverged / Missing`；CLI 比 access_token 字符串，Antigravity 比 refresh_token，不比整个 JSON（CLI 会加自己的字段）。CLI 用 `rename()` 把软链冲成实体文件、内容却一致时判 `LinkedTo` 并静默重建软链。
 - pin（`active_per_catalog.json`）是这个三态的缓存，不是第二个真相源；`reconcile` 随时可以从磁盘重建它。UI 的「当前」badge 读 `reconcile_cli_accounts` 命令而不是读 pin（见下面「Usage 卡片与 active 状态」）。
-- `reconcile_cli_accounts` 在每个 catalog 自己的 serialization domain 里跑，且对没装该 CLI 的机器不取锁 —— 取锁会为了确认“什么都没有”而先把 CLI 的家目录和锁文件创建出来。
+- `reconcile_cli_accounts` 在每个 catalog 自己的 serialization domain 里跑，且对没有本地工具凭证的机器不取 CLI 锁 —— 取锁会为了确认“什么都没有”而先把 CLI 的家目录和锁文件创建出来。
 - 删除 subscription 时先 `forget_subscription_session`：删快照，且若它正是当前 live 的软链目标，先把 live 还原成一份实体文件拷贝 —— 悬空软链不是「已登出」，是「登不上」。
-- 不向通用 `Subscription` 增加 provider-specific 字段；provider 只实现 `CliCredentialTarget`（路径、锁、access_token 提取、身份、materialize、absorb、可选的第二存储）。
+- 不向通用 `Subscription` 增加 provider-specific 字段；CLI provider 实现 `CliCredentialTarget`（路径、锁、access_token 提取、身份、materialize、absorb、可选的第二存储），IDE provider 使用独立适配器。
 
 ### 软链盖不住的三个洞
 
@@ -83,19 +91,26 @@ CLI 凭证文件的快照；CLI 的 live 路径是指向当前快照的软链。
 - credits endpoint 决定当前 weekly/monthly period；weekly 是严格 percent-only，不能用 calendar-month 金额伪造绝对周额度。
 - calendar-month spend 作为次级 credit 展示，不再生成第二条“monthly quota”。零 on-demand cap 不显示。
 - 周额度本轮缺失时可携带上次已知 weekly window，避免闪回错误月视图。
+- Grok 卡片页脚的“重置额度”是账号级、显式确认的上游 mutation：先调用 `ConsumerUiSvc.GetRemainingResets` 选择最早过期的未过期 token，再调用 `ConsumerUiSvc.RedeemReset(token_id)` 消耗一次真实 reset credit；成功后等待账单投影收敛并重新读取该卡。卡片同时展示这份接口返回的未过期 token 数量（`剩余 N 次`）；没有可用 token 时显示 `剩余 0 次` 并禁用操作。它不等同于刷新，也不允许在供应商分组层面模糊选择账号；没有可用 token 时直接报错且不改本地额度。
 - CLI snapshot 用稳定 subject/user identity 归属；冲突 identity fail closed。token 必须满足 Grok CLI scopes，写入前后均验证，并保护外部进程并发改写。
 
 ## Usage 卡片与 active 状态
 
 - **「当前」badge 的真相是对账结果，不是 pin。** pin（`get_active_subscriptions`）记录用户点过哪张卡；`reconcile_cli_accounts` 返回每个 catalog 的三态，是 CLI 下次实际会读到的东西。两者冲突时文件赢。
-- 三态在 UI 上各自有话说，**不折成布尔**：`LinkedTo` → 绿色「当前」；`Diverged` → 琥珀「CLI 非此账号」并说明 CLI 现在用的不是这张卡（浮窗还给一条“点重新同步把它指回来”）；`Missing` → 灰色「CLI 未登录」。Diverged/Missing 不得静默渲染成“未激活”。
+- 三态在 UI 上各自有话说，**不折成布尔**：`LinkedTo` → 绿色「当前」；`Diverged` → 琥珀「本地工具非此账号」并说明 CLI/IDE 现在用的不是这张卡（浮窗还给一条“点重新同步把它指回来”）；`Missing` → 灰色「本地工具未登录」。Diverged/Missing 不得静默渲染成“未激活”。
 - pin 说 A 而 live 是 B 时，绿色 badge 挂在 B 上；A 只有在自己被 pin 时才显示 Diverged。卡片高亮环同样跟随对账结果。
-- 没有 CLI 适配器的 catalog（IDE、纯 API key）不在对账 map 里，回落到 pin —— 那里没有文件可以反驳它，pin 就是全部真相。首帧对账未回来时同样回落到 pin，不会先喊一声“没有当前账号”。
+- 没有切换适配器的 catalog（纯 API key 等）不在对账 map 里，回落到 pin —— 那里没有文件可以反驳它，pin 就是全部真相。Antigravity 虽然是 IDE，但有独立的 state.vscdb 对账适配器；首帧对账未回来时同样回落到 pin，不会先喊一声“没有当前账号”。
 - `setActive` 的返回值是后端真相：只有返回行 `is_active=true` 时，前端才 demote 同 catalog sibling。
 - CLI 切换被拒绝时，保留旧 badge，并使用“switch not applied”反馈；不能乐观宣称目标已激活。切换后紧跟一次对账，所以被拒时旧 badge 是被**重新确认**的，不只是没被改。
 - card 使用 shell + body registry + primitives；特化 catalog 在 `bodyRegistry.ts` 明确注册 ownsBalance/ownsCredits/reset ownership。
-- 所有额度条共享 `UsageMeter` primitive（标签+已用徽章 / 大号等宽数字 / `ProgressTrack` / 脚注+重置芯片）；货币/绝对/百分比额度读作同一套语法，各渲染器只组合它，不自绘盒子。
+- 卡片空间节奏（Operate）：品牌带只负责认出是哪张卡（logo / 标题 / 本地工具状态 / plan），不是视觉高潮。`UsageCardMetaStrip` 只在有例外时出现（需重登 / 无凭证 / 未由 meter 拥有的 reset / 备注），不是常驻第三段。剩余额度的数字 + 进度条是主阅读目标。费用/续费是页脚工具带里的一行可选事实，与操作同一行，不再做成 KPI 瓷砖；同步时间挂在刷新按钮的 title。主卡与占位卡共享 `usageCardSlotClassName`。供应商网格里卡片吃满 `minmax(280px, 1fr)`，占位卡单独限宽。
+- 卡片品牌带必须完整显示账号身份与套餐语义：邮箱标题不得用省略号截断，允许在窄卡内换行；右上角 plan 徽章原样保留上游等级和倍数（例如 `MAX20X` 就显示 `MAX20X`），不得只显示 `MAX` 或 `PRO`，也不得自行插入空格或改大小写。
+- 卡片品牌带的账号标题预留两行高度，下面的本地工具状态预留一行固定槽；因此同一供应商内某张卡显示「当前」或邮箱恰好换行时，不会把重置条和额度主体单独推低。超过两行的异常长身份仍允许自然撑开，不能用省略号伪造完整邮箱。
+- Usage 页头部提供持久化的邮箱隐私开关；开启后所有卡片只显示遮罩身份，原始邮箱仍留在订阅数据中，不能影响切号、刷新、对账或后端请求。
+- 同一供应商的横向卡片使用最高卡片的高度作为行高，较短卡片的主体和页脚保持底部对齐；邮箱换行不会让同一行的操作位置参差不齐。
+- 所有额度条共享 `UsageMeter` primitive（标签+已用徽章 / 大号等宽数字 / `ProgressTrack` / 脚注+重置芯片）；货币/绝对/百分比额度读作同一套语法，各渲染器只组合它，不自绘嵌套卡片。鉴权方式、CLI 能力徽标、计费周期和「即将重置」提示文案不占卡片：前三项在编辑对话框，重置紧急度由倒计时着色和卡片描边承担。
 - 重置倒计时归属唯一律：meter 只在 `windowRendersOwnReset(window)` 为真时渲染自身重置芯片，否则由 card MetaStrip 顶部显示；二者互补，同一 reset 绝不出现两次。
+- Cursor 的 Total/分类明细只保留卡片级主 reset，分类行不重复显示同一个 7d 倒计时；DeepSeek 的余额卡以可用余额为唯一主视觉，状态、分析提示和余额构成作为无嵌套卡片的次级分组。
 - 主卡与独立窗口共享逻辑 body，不共享 chrome。浮窗使用 dark chrome + `LightBodySurface`，compact body 的品牌 CSS vars 必须来自 `brandThemes.ts`。
 - 每个 catalog 的品牌 header、bar 和 glow 只在 `src/features/usage/lib/brandThemes.ts` 定义；卡片内不得硬编码另一套颜色。
 - 有品牌主题 ≠ 有特化 body。只输出「百分比 + 重置时间」这种限流窗口的 catalog（`codex`、`anthropic`）走 `DefaultUsageBody` → `UsageWindowBar` → `UsageMeter`，**不在 `bodyRegistry` 注册**；`bodyRegistry.test.ts` 把特化集合锁死，就是为了让“新增 catalog 顺手造一个 `DefaultUsageBody` 克隆”这件事失败。

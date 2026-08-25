@@ -16,8 +16,9 @@ Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以�
 （公开 target `gemini-cli` → `~/.gemini/settings.json`）；轴②Models 工具同步**仍未接入**。
 裸 id `gemini` 只是 MCP 的 cleanup 墓碑，永远不是 target（见
 [MCP 的墓碑与公开后继规则](../mcp/README.md#墓碑与它的公开后继distinct-id--subsumption)）。
-Antigravity 与 Antigravity CLI 同样落在 `~/.gemini/` 下，但它们是 Google Antigravity，
-与 Gemini CLI 是不同产品，三者的 profile 互不顶替。Usage/Cloud Code 中的 Gemini **模型名**
+Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 Gemini CLI 是不同
+产品，两个 profile 互不顶替。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
+**一个** Agent profile，部署时再扇出到三份 `builtin/skills`，见下面的[镜像目录](#镜像目录一个-profile多份技能目录)。Usage/Cloud Code 中的 Gemini **模型名**
 与 Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store 的 `gemini`
 字段仅用于迁移读取。
 
@@ -64,7 +65,8 @@ Antigravity 与 Antigravity CLI 同样落在 `~/.gemini/` 下，但它们是 Goo
 - 上游没有全局技能目录的 Agent 使用 `unsupported()`（非 `none`），`has_global_skills()` /
   `supports_global()` 会把它从全局选择和部署中排除；**builtin 的项目路径仍须按上游填写且非空**
   （见 `builtin_agent_fields_are_well_formed`）。
-- 两个 Agent 可以共享 home 根目录（如 Antigravity、Antigravity CLI 与 Gemini CLI 都落在 `~/.gemini/` 下）；注册表只表达各自真实技能目标，不从共享根推断安装状态，更不能因为共享前缀就让一个 profile 顶替另一个产品。
+- 两个 Agent 可以共享 home 根目录（如 Antigravity 与 Gemini CLI 都落在 `~/.gemini/` 下）；注册表只表达各自真实技能目标，不从共享根推断安装状态，更不能因为共享前缀就让一个 profile 顶替另一个产品。
+- 同一产品的多个安装状态**不拆成多个 Agent**，用镜像目录表达（见下一节）。
 - 加一行 builtin 时还要同步前端的图标镜像：`src/components/ui/icons/agentIcons.ts` 的 `AGENT_ICON_BY_ID` 与 `agentIcons.test.ts` 里的 `BUILTIN_AGENT_IDS`。漏掉不会报错，只会让该 Agent 静默退回 LobeHub 通用字形。
 - 路径一律正斜杠；Windows 反斜杠输入由后端归一化。
 
@@ -76,6 +78,24 @@ Settings 的 Agent 列表自带**搜索 + 状态筛选**（全部 / 已启用 / 
 显示名和 id；状态段的计数基于搜索结果；任一筛选生效时列表不再折叠成前 10 条，无匹配时
 给出重置入口。纯函数在 `src/features/settings/lib/agentFilters.ts`，UI 在
 `src/features/settings/components/AgentListFilterBar.tsx`，新增 Agent 无需任何改动。
+
+#### 镜像目录：一个 profile，多份技能目录
+
+同一个产品可能有多个并存的安装状态，各自读自己的技能目录。它们**不是**多个 Agent：
+拆行会让用户在 Settings 里看到重复条目，还得逐个启用才能全部同步到。
+
+`builtin.rs` 的 `GLOBAL_MIRROR_DEFS` 表达这种关系：profile 的 `global_skills_dir` 仍是
+唯一记账真相（链接计数、部署状态、一键解绑都只看它），部署层在每次 link/unlink 后把它
+的软链重放（reconcile）到全部镜像目录（`deployment/mirror.rs`）。重放是幂等对账，所以
+后装的状态、被产品升级重新解包过的目录都会在下一次部署时自动补齐。
+
+目前只有 Antigravity：一个 `antigravity` profile，镜像到 app / CLI / IDE 三种状态的
+`~/.gemini/antigravity{,-cli,-ide}/builtin/skills`。约束：
+
+- 镜像目录的父目录（`builtin/`）由产品自己创建，不存在即视为该状态未安装，SkillStar 不代建。
+- 镜像里只删软链，绝不动真实目录 —— 产品自带的内置技能就住在旁边。
+- 弃用的 per-state id（`antigravity-cli` / `antigravity-ide`）通过 `compatible_profile_id`
+  与 CLI 的 `normalize_agent_ids` 折叠到 `antigravity`，旧配置和 `--agent antigravity-cli` 继续可用。
 
 ### 2. 登记图标
 
@@ -95,6 +115,13 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
   canonicalization 会按路径处理。
 
 ### 4. 测试与文档
+
+卡组对单个 Agent 的批量 link/unlink 必须走一次
+`batch_toggle_skills_for_agent` IPC，而不是由前端循环调用单项命令。后端 tracing 以
+`operation_id` 关联整批操作，并在开始、单项失败和汇总结束事件中记录 Agent、方向、总数、
+成功数、失败数与耗时；批次报告保留每个失败 Skill 的完整 error chain。遇到目标位置已有
+非 SkillStar 管理的真实目录时必须 fail closed、保留该目录，并把 Skill 名与冲突路径同时
+返回给 UI。
 
 - 若 Agent 有特殊性质（无全局目录 / 共享 home 根 / 非 universal 项目路径），在
   `crates/skillstar-agents/src/builtin.rs` 测试区加一条守卫测试
@@ -133,6 +160,24 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
   `modelRoles`）。声明写在 `tool_sync::agents` 注册表的 `roles` 列，UI 与 writer 都读它。
   角色词表、回落语义、写盘跳过回报与能力裁剪见
   [models/README.md](../models/README.md#角色路由跨-agent)，不在此重复。
+
+### Maka 注册说明
+
+Maka（Apache Maka Incubating，命令 `maka`，Desktop 应用名 `Maka`）是
+SkillStar 扩展行，不在 vercel-labs 上游 id 内。Desktop、TUI 与 CLI 共用同一套
+Runtime Host 与 released `Maka` profile。
+
+- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区：全局技能目录 `~/.maka/skills`，
+  项目级 `.maka/skills`；`skillstar-skills::discovery` 的优先级目录包含
+  `.maka/skills`。Maka 同时扫描 `.agents/skills` 作为跨客户端兼容路径，但
+  client-specific 的 `.maka/skills` 优先级更高，因此 SkillStar 只部署到专属目录。
+- `~/.maka/skill-sources` 是 Maka Desktop 自己的 managed skill source catalog，
+  **不纳入** SkillStar 的发现、部署与卸载。
+- 目前轴①（Skills 分发）与 MCP 写入都已接入。MCP 落点是 OS config dir 下
+  `Maka/workspaces/default/mcp.json`（与 released Desktop / `maka` CLI 共用的
+  `Maka` profile；开发隔离用的 `Maka Dev` 不写）。wire format 为顶层
+  `version: 2` + `mcpServers.<name>`，无 `type`：stdio 靠 `command`，远端靠
+  `url` + `transport: streamable-http | sse`。轴② Models 工具同步**未接入**。
 
 ---
 

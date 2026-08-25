@@ -112,13 +112,13 @@
 - 后果：JSON 型 multi Agent 的写盘语义修一处即全修，新 JSON 型 Agent 只写 build_block + 指针落点；Codex 的写盘语义变化仍需单独维护；未来若出现第二个 TOML 型 multi Agent，再评估 TOML 骨架（届时有两个 adapter 证明 seam）。
 - 证据：`crates/skillstar-models/src/tool_sync/multi_provider.rs`（`sync_json_blocks_inner` 及两个调用方），`tool_sync/tests/part4.rs` 的逐字节断言测试在重构前后原样通过。
 
-## D-013：私有共享身份采用 GitHub App 设备流与系统凭据存储
+## D-013：私有共享身份采用 GitHub App 设备流与应用私有文件存储
 
 - 日期：2026-08-05
 - 状态：accepted
 - 背景：私有共享频道需要用户身份和可撤销的 GitHub 权限，但要求用户粘贴 PAT、共享仓库凭据或依赖机器上预先配置的 `gh` 都会扩大秘密暴露面，并让 GUI、CLI 与 Git 传输使用不同身份来源。
-- 决策：第一版只支持 `github.com`，使用注册的 SkillStar GitHub App 设备授权流获取用户 access/refresh token。公开的 App client ID 由构建配置提供；桌面应用不携带 client secret、App private key 或 PAT。token 与 GitHub 返回的到期元数据只写入 OS 系统凭据存储，设备码和解析后的用户身份只存在进程内。认证 facade 以 GitHub gateway、credential store 和 clock 为测试接缝；生产 HTTP 每次通过 `probe_http_client` 获取当前代理配置。
-- 后果：发布构建必须配置已启用 Device Flow 的 GitHub App client ID；缺失时登录动作明确不可用，但已有凭据仍可登出。GitHub App 安装范围与仓库权限继续由 GitHub 控制，SkillStar 不建立第二套身份或 ACL。GitHub Enterprise Server、PAT 和全局 `gh` credential 不进入第一版认证路径。
+- 决策：第一版只支持 `github.com`，使用注册的 SkillStar GitHub App 设备授权流获取用户 access/refresh token。公开的 App client ID 由构建配置提供；桌面应用不携带 client secret、App private key 或 PAT。token 与 GitHub 返回的到期元数据写入 `SKILLSTAR_DATA_DIR/state/github_auth.json`，首次创建和每次更新保持 Unix `0600`；设备码和解析后的用户身份只存在进程内。认证 facade 以 GitHub gateway、credential store 和 clock 为测试接缝；生产 HTTP 每次通过 `probe_http_client` 获取当前代理配置。GitHub 认证不访问 OS 系统钥匙串，避免应用启动触发系统密码授权。
+- 后果：发布构建必须配置已启用 Device Flow 的 GitHub App client ID；缺失时登录动作明确不可用，但已有凭据仍可登出。现有钥匙串凭据不自动迁移，切换后需要重新登录一次；之后启动只读取本地私有文件。GitHub App 安装范围与仓库权限继续由 GitHub 控制，SkillStar 不建立第二套身份或 ACL。GitHub Enterprise Server、PAT 和全局 `gh` credential 不进入第一版认证路径。
 
 ## D-014：私有 Git 认证采用操作级 askpass session
 
@@ -303,9 +303,9 @@
 - 日期：2026-08-14
 - 状态：accepted
 - 背景：原实现把订阅行的凭证**拷贝**进 CLI 的 live 凭证文件。CLI 自己也会轮换 token 并写回同一个文件，于是两份拷贝必然发散；Grok 那条链路里的 lease / sha256 乐观并发 / 临时 pin / 回读逐字段比对 / 提交回滚，全部是在管理这个发散 —— 而发散是这个抽象自己造出来的。同一时期 codex 与 opencode 只是裸写：codex 无任何锁与回滚（后台刷新会踢掉 Codex CLI 的登录），opencode 硬要 `api_key_encrypted` 而它的 catalog auth mode 是 Cookie|Manual，那条切号链路 100% 走 fail 分支，UI 却常驻一个永远点不通的入口。
-- 决策：live 路径不再持有凭证，**它是指向快照的软链**；快照 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json` 是唯一真相。一份快照是**整个** CLI 凭证文件（软链只能整文件替身），不是其中一个账号的片段。三家 catalog 共用一套 custody 引擎（capture → prepare → 换软链 → 回读 → 副作用 → 落 pin），各自只实现 `CliCredentialTarget`：路径、锁、access_token 提取、身份、materialize、absorb。对账比**内容**不比文件类型，三态 `LinkedTo / Diverged / Missing`，只比 access_token 字符串。`supports_cli_switch` 由 target 注册表推导而不是手抄白名单。Cursor / Antigravity 保持不支持：凭证在 `state.vscdb`，是另一套机制。
+- 决策：live 路径不再持有凭证，**它是指向快照的软链**；快照 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json` 是唯一真相。一份快照是**整个** CLI 凭证文件（软链只能整文件替身），不是其中一个账号的片段。三家 CLI catalog 共用一套 custody 引擎（capture → prepare → 换软链 → 回读 → 副作用 → 落 pin），各自只实现 `CliCredentialTarget`：路径、锁、access_token 提取、身份、materialize、absorb。对账比**内容**不比文件类型，三态 `LinkedTo / Diverged / Missing`，只比 access_token 字符串。`supports_cli_switch` 由 target 注册表推导而不是手抄白名单。Cursor / Antigravity 不强行塞进软链引擎：它们通过独立 IDE adapter 事务性写入并回读验证各自的 `state.vscdb`/系统凭证。
 - 后果：获得——CLI 轮换 token 时写穿到快照，快照永远新鲜，「检测轮换再回抄」这类代码整体消失；`auth_mode` 与「能否切号」解耦（opencode 只要 CLI 里登录过就能切，不再需要 SkillStar 持有 API Key），那条死链路自然消失；pin 降级为可由 `reconcile` 重建的缓存，不再是第二个真相源；codex 第一次获得与 grok 同级的锁、备份、回读与回滚，「切换被拒时保留旧 badge」从只对 xai 成立变成全域成立。承担——(1) **整文件快照意味着同一个文件里其它 provider 的登录会跟着账号一起切**：opencode 的 `auth.json` 是 `providerID → 凭证` 的扁平表，在账号 A 期间登录的 anthropic 会留在 A 的快照里，切到 B 后不可见（切回 A 即恢复，不会丢失）。做成「只换本 provider 那一段」就必须回到拷贝语义，也就把发散请回来了，因此不做。(2) 软链盖不住三个洞，必须显式处理：macOS Codex 以 keychain 为准（activate 写、reconcile 吸收、写入改成 read-modify-write）；CLI 用 `rename()` 会把软链冲成实体文件（内容一致即判 `LinkedTo` 并静默重建）；Windows 无软链权限时降级为拷贝并在日志显式标注 `LinkMode::Copy`。(3) refresh token 单次使用的双花竞态**不会**因软链消失 —— 软链消灭的是陈旧拷贝，不是「谁先刷谁让对方失效」—— 所以 CLI 自己的文件锁（Grok 官方 `auth.json.lock` 及其 `PID:秒` holder 行）、刷新前 adopt、刷新后回投这三件事全部保留，只是从 xai 专属变成全域通用。
-- 证据：`crates/skillstar-app/src/usage_switch/{custody.rs,target.rs,keychain.rs,target/*}` 与 `custody_tests.rs`（实体文件内容一致判 LinkedTo、CLI 轮换后快照自动新鲜、activate 失败时旧 pin 与旧 live 完好、forget 掉当前 active 后 live 仍是可用实体文件、opencode 无 API Key 也能切）；行为契约见 [features/usage/README.md](./features/usage/README.md)。
+- 证据：`crates/skillstar-app/src/usage_switch/{custody.rs,cursor.rs,target.rs,keychain.rs,target/*}`、`crates/skillstar-usage/src/vscdb.rs` 与 `custody_tests.rs`（实体文件内容一致判 LinkedTo、CLI 轮换后快照自动新鲜、Cursor 两账号切换真实写入并回读 state.vscdb、IDE 切换失败时不移动 pin、opencode 无 API Key 也能切）；行为契约见 [features/usage/README.md](./features/usage/README.md)。
 
 ## D-034：DTO 投影拥有前端契约，有重构节奏的域类型不直接暴露给 ts-rs
 
@@ -360,6 +360,24 @@
 - 决策：从 v3 的最后一个提交拉一个 worktree，用同一份 fixture 跑真实 writer，把产物原样存进 `tool_sync/tests/golden_v3/`；新测试拿同一份 fixture 走真实迁移再走新 writer，逐字节比对。Codex 是唯一豁免（它的输出必须变，见 D-038），豁免范围收窄到「本来就写 `responses` 的 `api.openai.com` 行仍然逐字节相同」，其余变化在 `part6` 里按行为单独断言。fixture 目录从 formatter 的管辖范围里排除——格式化它就等于销毁它的用途。
 - 后果：获得——三个真实回归当场暴露：OMP 角色名 `smol` 被规范化成 `fast` 后会写进 OMP 不认识的键、角色写入顺序随内部改名而重排、模型目录移出 store 后 OpenCode 块丢失 `limit`/`cost`。这三个都不会被任何手写断言发现。承担——fixture 与其构造函数必须逐字保持一致，否则比对失去意义；构造函数因此在测试里完整写出而不是复用 helper。
 - 证据：`crates/skillstar-models/src/tool_sync/tests/golden.rs`、`crates/skillstar-models/src/tool_sync/tests/golden_v3/`。
+
+## D-040：frontmatter 门禁以公开 Agent Skills 规范为准
+
+- 日期：2026-08-19
+- 状态：accepted
+- 背景：D-019 把 Anthropic `quick_validate.py` 的尖括号限制当成通用生态规则，导致 Vercel 官方技能因 description 中合法的 `` `<ViewTransition>` `` 文本被拒绝；公开 Agent Skills 规范只要求 description 非空且不超过 1024 字符。扫描 UI 又把任何 issue code 固定解释成“缺少 name/description”，掩盖了真实原因。
+- 决策：尖括号不再产生 frontmatter issue，也不阻断安装；其余门禁保持不变。扫描预览直接把后端 issue code 映射为具体本地化原因，不再重建或概括后端规则。此决策仅取代 D-019 的“description 含尖括号”条款。
+- 后果：符合公开规范且描述中含 JSX、HTML 或占位符的技能可以安装；具体元数据问题仍 fail-closed，并在 UI 中准确显示。
+- 证据：`crates/skillstar-skills/src/validation.rs`、`src/features/my-skills/components/import-modal/SelectSkillsPhase.tsx` 及对应回归测试。
+
+## D-041：上游移除/更名在检查期可见，处理复用移除流程，迁移是一等操作
+
+- 日期：2026-08-21
+- 状态：accepted
+- 背景：作者会删除、改名或把 Skill 移到别的桶（mattpocock/skills 的 in-progress 明说"可能随时变动或消失"）。此前这只在用户恰好更新同仓库别的 Skill、pull 之后才以阻塞对话框出现；改名则表现为"一个被删 + 一个新技能"，用户得自己卸旧装新并重配 Agent。
+- 决策：更新检查把 tracked ref 上的路径消失记为 `upstream_change: removed`，并用 `git diff -M` / frontmatter `name` 判定后继；`update_state` 仍是唯一所有者，`update_available` 语义不变。移除的处理入口直接复用既有「来源已不再提供」对话框与 `resolve_skill_update`；改名由 `skillstar-app::skill_migration` 作为跨域 use case 一步完成（安装后继、沿用 Agent/项目部署、卸载旧条目）。不新增第二套"待处理"对话框，也不把不可更新项混进「更新 N 项」。
+- 后果：用户在卡片上就能看到并处理上游变动；后继判定是启发式（`-M` 相似度或同名），判错时用户仍可走"移除 + 从 ghost 安装"的手动路径。迁移不是单事务：install 与 uninstall 各自持更新锁，中间失败按步骤报告，下一次检查会把残留旧条目标为 `removed` 供用户收尾。
+- 证据：`crates/skillstar-skills/src/update_checker.rs`（`UpstreamStatus`）、`crates/skillstar-skills/src/update_state.rs`、`crates/skillstar-app/src/skill_migration.rs`、`src/features/my-skills/`。
 
 ## 新增记录格式
 

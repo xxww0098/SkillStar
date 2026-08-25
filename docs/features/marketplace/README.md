@@ -19,6 +19,7 @@
 - publisher/detail 页面与主列表复用同一 local-first flow；缺 description 时不在浏览器临时 hydrate 另一份数据。
 - DB 操作优先短生命周期 WAL connection，避免进程级单 connection lock 阻塞并发读。
 - 所有远程 HTTP 使用 `probe_http_client`，GitHub repo 操作遵循 mirror/fallback。
+- 同一个仓库有两个写入方：`publisher_repos:<publisher>` 来自 `/official` 聚合（仓库清单完整，但会保留仓库已经不再提供的技能），`repo_skills:<source>` 来自仓库页（当前状态）。仓库页一旦同步成功就是该仓库技能行的唯一权威，聚合刷新只给从未抓过仓库页的仓库做种子；仓库卡片上的技能数由本地技能行推导，没有行时才回退到聚合计数，因此卡片与点进去看到的列表不会不一致。
 - taxonomy/pack command surface 未挂前端，crate API 与 SQLite 表保留。
 
 ## 多源拉取与内容寻址

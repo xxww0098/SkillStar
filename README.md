@@ -72,7 +72,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 ### 桌面体验与安全
 
 - 中英文界面、系统 Tray、后台巡检和签名应用内更新。
-- Settings 可通过 GitHub App 设备授权登录 `github.com`，无需粘贴 PAT；access/refresh token 只进入系统凭据存储，代理、刷新、失效与登出状态均可见。该身份用于后续私有共享频道能力，所需 App 权限会在界面中解释。
+- Settings 可通过 GitHub App 设备授权登录 `github.com`，无需粘贴 PAT；access/refresh token 只进入应用数据目录下的私有文件，不访问 macOS 钥匙串，代理、刷新、失效与登出状态均可见。该身份用于后续私有共享频道能力，所需 App 权限会在界面中解释。
 - 登录后可直接扫描、安装和更新当前身份有权访问的私有 `github.com` Skill 仓库，无需另外配置 `gh` 或全局 Git 凭据。认证只在单次 Git 操作期间提供；私有操作遵循 SkillStar 代理、支持取消，并且不会把 token 写入仓库 remote 或 Git 配置。
 - SSH 首次连接使用 host-key TOFU，在认证材料发送前完成信任检查。
 - 所有业务 HTTP 统一遵循 SkillStar proxy 配置；GitHub mirror 不修改用户全局 Git 配置。GitHub 加速与商店加速均支持候选链：主源不可达时按序尝试配置的镜像，全部失败才回退直连，且只用于公开仓库。
@@ -180,6 +180,8 @@ cd SkillStar
 bun install
 bun run tauri dev
 ```
+
+本地 GitHub 设备登录需要公开的 App Client ID。复制 `.env.example` 为 `.env`，填入 `SKILLSTAR_GITHUB_APP_CLIENT_ID` 后重启应用；官方 Release 已编进二进制，不必这一步。
 
 质量校验：
 
