@@ -28,6 +28,7 @@ export const MCP_TOOL_LABELS: Record<McpToolId, string> = {
   cline: "Cline",
   "gemini-cli": "Gemini CLI",
   zed: "Zed",
+  maka: "Maka",
 };
 
 /** Optional entry fields whose projection is tool-specific. */

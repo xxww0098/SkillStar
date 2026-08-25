@@ -21,44 +21,52 @@ export function McpServerCard({ server, agentTargets, updateVersion, onOpen, onT
   const isRemote = server.transport === "http" || server.transport === "sse";
   const summary = isRemote ? server.url : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
   const TransportIcon = isRemote ? Globe : Terminal;
+  const description = server.description?.trim();
+  const bodyText = description && description !== summary ? description : null;
+  const hasBadges = Boolean(updateVersion || server.autoApproveAll);
+  const hasFooter = agentTargets.length > 0;
 
   return (
     <CardTemplate
       className="group cursor-pointer"
       onClick={onOpen}
       topRightSlot={
-        <span className="flex items-center gap-1">
-          {updateVersion ? (
-            <span
-              title={t("mcp.updateAvailableHint", {
-                installed: server.installedVersion ?? "?",
-                latest: updateVersion,
-              })}
-              className="inline-flex items-center gap-0.5 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400"
-            >
-              <ArrowUpCircle className="h-2.5 w-2.5" />
-              {t("mcp.badgeUpdateAvailable")}
-            </span>
-          ) : null}
-          {server.autoApproveAll ? (
-            <span
-              title={t("mcp.autoApproveAllHint")}
-              className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
-            >
-              <Zap className="h-2.5 w-2.5" />
-              {t("mcp.yoloBadge")}
-            </span>
-          ) : null}
-          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {server.transport}
+        hasBadges ? (
+          <span className="flex items-center gap-1">
+            {updateVersion ? (
+              <span
+                title={t("mcp.updateAvailableHint", {
+                  installed: server.installedVersion ?? "?",
+                  latest: updateVersion,
+                })}
+                className="inline-flex items-center gap-0.5 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-400 paper:text-sky-700"
+              >
+                <ArrowUpCircle className="h-2.5 w-2.5" />
+                {t("mcp.badgeUpdateAvailable")}
+              </span>
+            ) : null}
+            {server.autoApproveAll ? (
+              <span
+                title={t("mcp.autoApproveAllHint")}
+                className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 paper:text-amber-700"
+              >
+                <Zap className="h-2.5 w-2.5" />
+                {t("mcp.yoloBadge")}
+              </span>
+            ) : null}
           </span>
-        </span>
+        ) : null
       }
-      headerClassName="pr-28"
+      headerClassName={hasBadges ? "pr-28" : undefined}
       header={
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-            <TransportIcon className={cn("h-4 w-4", isRemote ? "text-sky-500" : "text-emerald-500")} />
+            <TransportIcon
+              className={cn(
+                "h-4 w-4",
+                isRemote ? "text-sky-400 paper:text-sky-600" : "text-emerald-400 paper:text-emerald-600",
+              )}
+            />
           </div>
           <div className="min-w-0">
             <CardTitle className="truncate ss-card-title" title={server.name}>
@@ -70,30 +78,28 @@ export function McpServerCard({ server, agentTargets, updateVersion, onOpen, onT
           </div>
         </div>
       }
-      bodyClassName="flex-1"
-      body={
-        <CardDescription className="ss-card-desc">
-          {server.description || (isRemote ? server.url : summary) || "—"}
-        </CardDescription>
-      }
-      footerClassName="ss-card-footer flex items-center mt-auto rounded-b-xl"
+      bodyClassName={bodyText ? "flex-1" : undefined}
+      body={bodyText ? <CardDescription className="ss-card-desc">{bodyText}</CardDescription> : undefined}
+      footerClassName={hasFooter ? "ss-card-footer flex items-center mt-auto rounded-b-xl" : undefined}
       footer={
-        <div className="relative z-10 flex min-w-0 flex-1 items-center justify-end gap-1.5">
-          <AgentTargetCarousel
-            items={agentTargets.map(({ toolId, profile }) => {
-              const selected = server.enabled[toolId] ?? false;
-              return {
-                id: toolId,
-                profile,
-                selected,
-                title: `${profile.display_name} ${selected ? t("mcp.toggleOff") : t("mcp.toggleOn")}`,
-              };
-            })}
-            onToggle={({ id, selected }) => {
-              onToggleTool(id, selected !== true);
-            }}
-          />
-        </div>
+        hasFooter ? (
+          <div className="relative z-10 flex min-w-0 flex-1 items-center justify-end gap-1.5">
+            <AgentTargetCarousel
+              items={agentTargets.map(({ toolId, profile }) => {
+                const selected = server.enabled[toolId] ?? false;
+                return {
+                  id: toolId,
+                  profile,
+                  selected,
+                  title: `${profile.display_name} ${selected ? t("mcp.toggleOff") : t("mcp.toggleOn")}`,
+                };
+              })}
+              onToggle={({ id, selected }) => {
+                onToggleTool(id, selected !== true);
+              }}
+            />
+          </div>
+        ) : undefined
       }
     />
   );

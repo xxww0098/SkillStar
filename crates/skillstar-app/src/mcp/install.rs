@@ -20,7 +20,9 @@
 
 use serde::{Deserialize, Serialize};
 use skillstar_marketplace::{McpInput, McpRegistryServer};
-use skillstar_models::mcp::{MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime};
+use skillstar_models::mcp::{
+    MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime,
+};
 use ts_rs::TS;
 
 use super::draft::{prefill, registry_to_entry_for, sanitize_key};

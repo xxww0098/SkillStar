@@ -144,9 +144,7 @@ pub async fn list_mcp_sources() -> Result<Vec<McpSourceDescriptor>, AppError> {
 /// Add (or replace) a user registry URL or local JSON directory file. Returns
 /// the full source list so the caller never has to re-read it.
 #[tauri::command]
-pub async fn add_mcp_source(
-    source: McpCustomSource,
-) -> Result<Vec<McpSourceDescriptor>, AppError> {
+pub async fn add_mcp_source(source: McpCustomSource) -> Result<Vec<McpSourceDescriptor>, AppError> {
     debug!(target: "mcp_marketplace", id = %source.id, "add_mcp_source called");
     mcp_snapshot::add_mcp_source(source).map_err(|e| AppError::Other(e.to_string()))
 }

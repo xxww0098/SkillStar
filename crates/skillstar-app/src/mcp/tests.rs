@@ -92,7 +92,10 @@ fn ranks_streamable_http_above_sse_above_oci_above_mcpb_above_plain_packages() {
         package("mcpb", "mcpb", "acme.mcpb"),
         package("oci", "docker", "acme/x"),
     ];
-    s.remotes = vec![remote("sse", "https://acme.dev/sse"), remote("http", "https://acme.dev/mcp")];
+    s.remotes = vec![
+        remote("sse", "https://acme.dev/sse"),
+        remote("http", "https://acme.dev/mcp"),
+    ];
 
     let selection = select_runtime_with(&s, &mut everything_installed);
     let shapes: Vec<McpRuntimeShape> = selection.candidates.iter().map(|c| c.shape).collect();
@@ -120,10 +123,7 @@ fn sse_is_offered_but_always_flagged_as_deprecated() {
     let candidate = &selection.candidates[0];
     assert!(candidate.installable);
     assert!(
-        candidate
-            .warnings
-            .iter()
-            .any(|w| w.contains("deprecated")),
+        candidate.warnings.iter().any(|w| w.contains("deprecated")),
         "SSE must carry a deprecation warning: {:?}",
         candidate.warnings
     );
@@ -137,12 +137,17 @@ fn sse_is_offered_but_always_flagged_as_deprecated() {
 fn a_missing_local_toolchain_loses_to_one_that_is_installed() {
     let mut s = server("mixed");
     // OCI outranks npm on paper, but this machine has no docker.
-    s.packages = vec![package("oci", "docker", "acme/x"), package("npm", "npx", "@acme/x")];
+    s.packages = vec![
+        package("oci", "docker", "acme/x"),
+        package("npm", "npx", "@acme/x"),
+    ];
 
     let selection = select_runtime_with(&s, &mut |command| command == "npx");
     assert_eq!(selection.recommended_id.as_deref(), Some("package:1"));
 
-    let docker = selection.candidate("package:0").expect("oci candidate listed");
+    let docker = selection
+        .candidate("package:0")
+        .expect("oci candidate listed");
     assert_eq!(docker.runtime_available, Some(false));
     assert!(!docker.installable);
     assert!(docker.blocked_reason.as_deref().unwrap().contains("docker"));
@@ -167,7 +172,13 @@ fn mcpb_is_listed_but_blocked_and_flags_a_missing_hash() {
     let selection = select_runtime_with(&s, &mut everything_installed);
     let candidate = &selection.candidates[0];
     assert!(!candidate.installable);
-    assert!(candidate.blocked_reason.as_deref().unwrap().contains("fileSha256"));
+    assert!(
+        candidate
+            .blocked_reason
+            .as_deref()
+            .unwrap()
+            .contains("fileSha256")
+    );
     assert!(
         candidate.warnings.iter().any(|w| w.contains("fileSha256")),
         "a bundle without a declared hash must say so"
@@ -194,7 +205,13 @@ fn cargo_without_a_runtime_hint_is_blocked_because_there_is_no_one_shot_runner()
     let selection = select_runtime_with(&s, &mut everything_installed);
     let candidate = &selection.candidates[0];
     assert!(!candidate.installable);
-    assert!(candidate.blocked_reason.as_deref().unwrap().contains("cargo install"));
+    assert!(
+        candidate
+            .blocked_reason
+            .as_deref()
+            .unwrap()
+            .contains("cargo install")
+    );
 }
 
 #[test]
@@ -278,7 +295,10 @@ fn oci_package_becomes_a_docker_run_entry() {
     let selection = select_runtime_with(&s, &mut everything_installed);
     let entry = registry_to_entry_for(&s, selection.resolve(None));
     assert_eq!(entry.command.as_deref(), Some("docker"));
-    assert_eq!(entry.args, vec!["run", "-i", "--rm", "mcp/everything:1.2.0"]);
+    assert_eq!(
+        entry.args,
+        vec!["run", "-i", "--rm", "mcp/everything:1.2.0"]
+    );
 }
 
 #[test]
@@ -326,7 +346,10 @@ fn the_provenance_fingerprint_is_filled_from_the_registry_row() {
     let selection = select_runtime_with(&s, &mut everything_installed);
     let entry = registry_to_entry_for(&s, selection.resolve(None));
 
-    assert_eq!(entry.registry_name.as_deref(), Some("io.github.acme/provenance"));
+    assert_eq!(
+        entry.registry_name.as_deref(),
+        Some("io.github.acme/provenance")
+    );
     assert_eq!(entry.source_id.as_deref(), Some("official"));
     // The chosen package's version, not the server-level one.
     assert_eq!(entry.installed_version.as_deref(), Some("1.2.0"));
@@ -429,7 +452,10 @@ fn the_command_preview_is_complete_and_never_shell_executed() {
         preview,
         "npx -y @acme/server@1.2.0 '/Users/me/My Documents'"
     );
-    assert_eq!(plan.args.last().map(String::as_str), Some("/Users/me/My Documents"));
+    assert_eq!(
+        plan.args.last().map(String::as_str),
+        Some("/Users/me/My Documents")
+    );
 }
 
 #[test]
@@ -479,7 +505,10 @@ fn the_install_plan_carries_full_input_semantics_for_the_form() {
     assert!(!data_dir.must_ask);
 
     assert_eq!(plan.secret_policy.secret_keys, vec!["TOKEN".to_string()]);
-    assert_eq!(plan.secret_policy.storage, McpSecretStorage::UserLevelConfig);
+    assert_eq!(
+        plan.secret_policy.storage,
+        McpSecretStorage::UserLevelConfig
+    );
 }
 
 /// Pins the claim `McpSecretPolicy`'s docs make: no MCP target keeps its config

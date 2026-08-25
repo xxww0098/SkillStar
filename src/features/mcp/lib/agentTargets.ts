@@ -44,6 +44,7 @@ const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   cline: "cline",
   "gemini-cli": "gemini-cli",
   zed: "zed",
+  maka: "maka",
 };
 
 export interface McpAgentTarget {

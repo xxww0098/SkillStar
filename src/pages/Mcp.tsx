@@ -41,7 +41,7 @@ export function Mcp({ onOpenMarket }: McpProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <nav className="flex shrink-0 items-center gap-1 border-b border-border bg-sidebar px-6 py-1.5">
+      <nav className="flex shrink-0 items-center gap-1 border-b border-border/70 bg-sidebar px-6 py-2">
         {TABS.map(({ id, icon: Icon, label }) => (
           <button
             key={id}
@@ -49,13 +49,13 @@ export function Mcp({ onOpenMarket }: McpProps) {
             onClick={() => setTab(id)}
             aria-current={tab === id ? "page" : undefined}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 cursor-pointer focus-ring select-none",
               tab === id
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                ? "bg-primary/18 text-primary font-semibold ring-1 ring-inset ring-primary/30 shadow-2xs dark:bg-primary/20"
+                : "text-muted-foreground font-medium hover:bg-muted/50 hover:text-foreground",
             )}
           >
-            <Icon className="h-3.5 w-3.5" />
+            <Icon className="h-3.5 w-3.5" strokeWidth={tab === id ? 2.4 : 2} />
             {t(label)}
           </button>
         ))}
