@@ -11,7 +11,7 @@ export { DefaultUsageBody } from "./DefaultUsageBody";
 export { UsageCardHeader, type UsageCardHeaderProps } from "./UsageCardHeader";
 export { UsageCardMetaStrip, type UsageCardMetaStripProps } from "./UsageCardMetaStrip";
 export { UsageCardFooter, type UsageCardFooterProps } from "./UsageCardFooter";
-export { usageCardShellClassName } from "./usageCardShell";
+export { usageCardShellClassName, usageCardSlotClassName } from "./usageCardShell";
 export { LightBodySurface, type LightBodySurfaceProps } from "./LightBodySurface";
 export { surfaceAllows, SURFACE_ATTACHMENTS, type AttachmentSurface, type AttachmentKind } from "./surfaceAttachments";
 export * from "./primitives";

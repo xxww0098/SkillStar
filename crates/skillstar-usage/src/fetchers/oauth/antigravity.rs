@@ -221,11 +221,15 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
     if let Some(pid) = &load.project_id {
         subscription.note = Some(pid.clone());
     }
-    let breakdown = cloud_code::fetch_model_quotas(&access_token, load.project_id.as_deref())
-        .await
-        .unwrap_or_default();
+    let (breakdown, quota_error) =
+        fetch_model_quota_snapshot(&access_token, load.project_id.as_deref()).await?;
 
-    Ok(usage_from_load(&subscription.id, &load, breakdown))
+    Ok(usage_from_load(
+        &subscription.id,
+        &load,
+        breakdown,
+        quota_error,
+    ))
 }
 
 async fn load_code_assist_with_project_fallback(
@@ -270,11 +274,29 @@ async fn build_usage(
         }
     };
 
-    let breakdown = cloud_code::fetch_model_quotas(access_token, load.project_id.as_deref())
-        .await
-        .unwrap_or_default();
+    let (breakdown, quota_error) =
+        fetch_model_quota_snapshot(access_token, load.project_id.as_deref()).await?;
 
-    Ok(usage_from_load(subscription_id, &load, breakdown))
+    Ok(usage_from_load(
+        subscription_id,
+        &load,
+        breakdown,
+        quota_error,
+    ))
+}
+
+async fn fetch_model_quota_snapshot(
+    access_token: &str,
+    project_id: Option<&str>,
+) -> UsageResult<(Vec<UsageWindow>, Option<String>)> {
+    match cloud_code::fetch_model_quotas(access_token, project_id).await {
+        Ok(windows) => Ok((windows, None)),
+        Err(UsageError::AuthRequired) => Err(UsageError::AuthRequired),
+        Err(error) => Ok((
+            Vec::new(),
+            Some(format!("Antigravity 模型额度刷新失败：{error}")),
+        )),
+    }
 }
 
 async fn ensure_fresh_access_token(subscription: &mut Subscription) -> UsageResult<()> {
@@ -307,17 +329,32 @@ fn usage_from_load(
     subscription_id: &str,
     load: &LoadCodeAssistResult,
     breakdown: Vec<UsageWindow>,
+    error: Option<String>,
 ) -> SubscriptionUsage {
     let monthly = if breakdown.is_empty() {
         None
     } else {
-        let avg =
-            breakdown.iter().filter_map(|w| w.percent).sum::<i32>() / breakdown.len().max(1) as i32;
+        // The card represents the account's limiting quota. An average would
+        // hide a nearly exhausted 5h/weekly bucket behind an untouched one.
+        // `used` and `percent` share the same consumed-percent semantics as
+        // every other UsageWindow in the app.
+        let used_pct = breakdown
+            .iter()
+            .filter_map(|window| {
+                window.percent.or_else(|| {
+                    window.total.filter(|total| *total > 0).map(|total| {
+                        ((window.used.saturating_mul(100)) / total).clamp(0, 100) as i32
+                    })
+                })
+            })
+            .max()
+            .unwrap_or(0)
+            .clamp(0, 100);
         Some(UsageWindow {
             label: "模型额度".to_string(),
-            used: (100 - avg).max(0) as i64,
+            used: used_pct as i64,
             total: Some(100),
-            percent: Some(avg),
+            percent: Some(used_pct),
             reset_at: None,
             breakdown,
         })
@@ -332,7 +369,7 @@ fn usage_from_load(
         monthly,
         balance: None,
         credits: load.credits.clone(),
-        error: None,
+        error,
         api_keys: Vec::new(),
         deepseek_analytics: None,
     }
@@ -356,5 +393,64 @@ mod tests {
         assert!(url.contains("https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fexperimentsandconfigs"));
         assert!(!url.contains("681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j"));
         assert!(!url.contains("code_challenge"));
+    }
+
+    #[test]
+    fn keeps_quota_fetch_error_visible_when_load_succeeds() {
+        let load = LoadCodeAssistResult {
+            raw: serde_json::json!({}),
+            plan_name: "PRO".to_string(),
+            project_id: Some("projects/alpha".to_string()),
+            tier_id: None,
+            credits: Vec::new(),
+        };
+
+        let usage = usage_from_load(
+            "sub-1",
+            &load,
+            Vec::new(),
+            Some("Antigravity 模型额度刷新失败：fetchAvailableModels 状态码 403".to_string()),
+        );
+
+        assert_eq!(usage.plan_name.as_deref(), Some("PRO"));
+        assert_eq!(
+            usage.error.as_deref(),
+            Some("Antigravity 模型额度刷新失败：fetchAvailableModels 状态码 403")
+        );
+    }
+
+    #[test]
+    fn summary_uses_the_most_consumed_quota_and_keeps_window_semantics_consistent() {
+        let load = LoadCodeAssistResult {
+            raw: serde_json::json!({}),
+            plan_name: "PRO".to_string(),
+            project_id: Some("projects/alpha".to_string()),
+            tier_id: None,
+            credits: Vec::new(),
+        };
+        let breakdown = vec![
+            UsageWindow {
+                label: "Gemini Models · Weekly Limit".to_string(),
+                used: 0,
+                total: Some(100),
+                percent: Some(0),
+                reset_at: None,
+                breakdown: Vec::new(),
+            },
+            UsageWindow {
+                label: "Claude and GPT models · Five Hour Limit".to_string(),
+                used: 95,
+                total: Some(100),
+                percent: Some(95),
+                reset_at: None,
+                breakdown: Vec::new(),
+            },
+        ];
+
+        let usage = usage_from_load("sub-1", &load, breakdown, None);
+        let monthly = usage.monthly.expect("summary window");
+
+        assert_eq!(monthly.used, 95);
+        assert_eq!(monthly.percent, Some(95));
     }
 }

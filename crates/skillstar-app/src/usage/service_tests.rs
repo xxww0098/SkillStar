@@ -125,10 +125,12 @@ fn non_network_and_already_hinted_errors_pass_through_unchanged() {
 fn only_auth_required_latches_reauth_and_blanks_the_card() {
     let previous = snapshot_with_window("s1", "7d", 61);
 
-    let (latch, snapshot) =
-        refresh_failure("s1", Some(&previous), &UsageError::AuthRequired);
+    let (latch, snapshot) = refresh_failure("s1", Some(&previous), &UsageError::AuthRequired);
 
-    assert!(latch, "a dead credential is the one case that needs re-login");
+    assert!(
+        latch,
+        "a dead credential is the one case that needs re-login"
+    );
     assert!(!snapshot.has_quota_data());
     assert_eq!(snapshot.error.as_deref(), Some("登录已失效，请重新授权。"));
 }
@@ -578,7 +580,7 @@ async fn await_oauth_completion_rejects_unknown_pending_id() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn import_from_local_rejects_catalogs_without_local_credentials() {
-    let err = import_subscription_from_local("cursor".into())
+    let err = import_subscription_from_local("some-other-tool".into())
         .await
         .unwrap_err();
     assert!(err.to_string().contains("不支持从本地导入"), "{err}");

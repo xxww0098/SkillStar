@@ -66,11 +66,8 @@ export function UsageCardBody({ subscription: sub, brandColorHex, density, surfa
       {showManual && <ManualUsage sub={sub} density={density} />}
       {showEmptyHint && <p className="py-1 text-[11px] text-zinc-400 italic">{t("usage.awaitingUsageRefresh")}</p>}
       {showError && (
-        <p
-          className="line-clamp-3 rounded-lg border border-amber-500/10 bg-amber-500/[0.04] p-2 text-[11px] text-amber-500/90"
-          title={usage?.error ?? usageError ?? undefined}
-        >
-          ⚠ {usageError}
+        <p className="line-clamp-3 text-[11px] text-amber-600" title={usage?.error ?? usageError ?? undefined}>
+          {usageError}
         </p>
       )}
       {showApiKeys && <OpenCodeApiKeyCopyBar subscriptionId={sub.id} apiKeys={apiKeys} />}
@@ -92,41 +89,29 @@ function BalanceLine({
   const available = balance.is_available;
   const symbol = balance.currency === "CNY" ? "¥" : balance.currency === "USD" ? "$" : `${balance.currency} `;
   return (
-    <div
-      className="relative flex flex-col overflow-hidden rounded-xl border p-3"
-      style={{ backgroundColor: `${c}08`, borderColor: `${c}1A` }}
-    >
-      <div
-        className="pointer-events-none absolute top-0 right-0 h-12 w-12 rounded-full filter blur-md"
-        style={{ backgroundColor: `${c}0D` }}
-      />
-      <div className="mb-0.5 flex items-center justify-between gap-2">
-        <span className="text-[10px] font-medium tracking-wider uppercase" style={{ color: c }}>
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold" style={{ color: c }}>
           {t("usage.balanceLabel")}
         </span>
         {available != null && (
           <span
             className={
-              available
-                ? "rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 ring-1 ring-emerald-200/60"
-                : "rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 ring-1 ring-amber-200/60"
+              available ? "text-[10px] font-semibold text-emerald-700" : "text-[10px] font-semibold text-amber-700"
             }
           >
             {available ? t("usage.deepseekAvailable") : t("usage.deepseekUnavailable")}
           </span>
         )}
       </div>
-      <div className="font-mono text-xl font-bold tabular-nums drop-shadow-sm" style={{ color: c }}>
+      <div className="font-mono text-xl font-bold tabular-nums" style={{ color: c }}>
         {symbol}
         {fmt(balance.total)}
       </div>
       {(balance.granted > 0 || balance.topped_up > 0) && (
-        <div
-          className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1 pt-1.5 text-[9px] text-muted-foreground/80"
-          style={{ borderTopColor: `${c}0D`, borderTopWidth: 1 }}
-        >
+        <div className="flex justify-between gap-2 text-[10px] text-zinc-500">
           <span>{t("usage.balanceGrantedOnly", { granted: fmt(balance.granted) })}</span>
-          <span className="text-right">{t("usage.balanceTopupOnly", { topup: fmt(balance.topped_up) })}</span>
+          <span>{t("usage.balanceTopupOnly", { topup: fmt(balance.topped_up) })}</span>
         </div>
       )}
     </div>
@@ -138,11 +123,8 @@ function CreditsLine({ credits, brandColor = "10B981" }: { credits: CreditInfo[]
   if (!credits || credits.length === 0) return null;
   const c = brandColor.startsWith("#") ? brandColor : `#${brandColor}`;
   return (
-    <div
-      className="relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border p-3"
-      style={{ backgroundColor: `${c}06`, borderColor: `${c}14` }}
-    >
-      <div className="text-[10px] font-semibold tracking-wider uppercase" style={{ color: c }}>
+    <div className="space-y-2">
+      <div className="text-[11px] font-semibold" style={{ color: c }}>
         {t("usage.creditsLabel")}
       </div>
       {credits.map((credit, i) => (
@@ -164,7 +146,7 @@ function CreditProgressItem({ credit }: { credit: CreditInfo }) {
 
   if (!parsed) {
     return (
-      <div className="flex flex-col gap-0.5 rounded-xl bg-white/45 px-2 py-1.5 text-[10px]">
+      <div className="flex flex-col gap-0.5 text-[10px]">
         <div className="flex items-center justify-between gap-2">
           <span className="capitalize text-zinc-500">{label}</span>
           <span className="font-mono font-semibold tabular-nums text-zinc-800">{credit.credit_amount ?? "—"}</span>
@@ -293,7 +275,7 @@ function OpenCodeApiKeyCopyBar({
   };
 
   return (
-    <div className="space-y-1.5 rounded-lg border border-zinc-200/60 bg-zinc-50/80 px-2.5 py-1.5">
+    <div className="space-y-1.5">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-[9px] font-medium tracking-wider text-zinc-500 uppercase">

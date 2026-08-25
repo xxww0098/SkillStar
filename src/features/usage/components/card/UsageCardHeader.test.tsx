@@ -8,11 +8,11 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-function renderHeader(cliBadge: CliAccountBadge) {
+function renderHeader(cliBadge: CliAccountBadge, catalogId = "xai", displayName = "Grok · alice") {
   return render(
     <UsageCardHeader
-      catalogId="xai"
-      displayName="Grok · alice"
+      catalogId={catalogId}
+      displayName={displayName}
       brandColorHex="2563EB"
       theme={getBrandTheme("xai", "2563EB")}
       planName={null}
@@ -60,5 +60,40 @@ describe("UsageCardHeader CLI badge", () => {
     expect(new Set([current, diverged, missing]).size).toBe(3);
     expect(current).toContain("emerald");
     expect(diverged).toContain("amber");
+  });
+
+  it("uses IDE wording for Antigravity's diverged and missing states", () => {
+    const { unmount } = renderHeader("diverged", "antigravity");
+    expect(screen.getByText("usage.cardIdeDiverged")).toBeInTheDocument();
+    unmount();
+
+    renderHeader("missing", "antigravity");
+    expect(screen.getByText("usage.cardIdeMissing")).toBeInTheDocument();
+    expect(screen.queryByText("usage.cardCliMissing")).not.toBeInTheDocument();
+  });
+
+  it("uses IDE wording for Cursor's diverged and missing states", () => {
+    const { unmount } = renderHeader("diverged", "cursor");
+    expect(screen.getByText("usage.cardIdeDiverged")).toBeInTheDocument();
+    unmount();
+
+    renderHeader("missing", "cursor");
+    expect(screen.getByText("usage.cardIdeMissing")).toBeInTheDocument();
+    expect(screen.queryByText("usage.cardCliMissing")).not.toBeInTheDocument();
+  });
+
+  it("keeps the complete email identity in the heading", () => {
+    const email = "account.with.a.long.local.part@example.com";
+    renderHeader("none", "cursor", email);
+
+    expect(screen.getByRole("heading", { name: email })).toBeInTheDocument();
+  });
+
+  it("reserves the same title and tool-status rhythm with or without a current badge", () => {
+    renderHeader("current", "cursor", "account@example.com");
+
+    const heading = screen.getByRole("heading", { name: "account@example.com" });
+    expect(heading).toHaveClass("min-h-[2.25rem]");
+    expect(heading.nextElementSibling).toHaveClass("h-[18px]");
   });
 });

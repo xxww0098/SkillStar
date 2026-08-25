@@ -98,6 +98,28 @@ export function localizeCategoryLabel(label: string, t: TFunction): string {
   return key ? t(key) : label;
 }
 
+/**
+ * Keep Antigravity's four quota rows readable in the narrow subscription card.
+ * The full upstream label remains available as the tooltip title.
+ */
+export function formatAntigravityQuotaLabel(raw: string, t: TFunction): { display: string; title: string } {
+  const cleaned = raw.replace(/\s+(?:Remaining|Left|Available)$/i, "").trim();
+  const match = cleaned.match(/^(Gemini Models|Claude and GPT models)\s*·\s*(Weekly Limit|Five Hour Limit)$/i);
+  if (!match) return { display: raw, title: raw };
+
+  const groupKey = match[1].toLowerCase().startsWith("gemini")
+    ? "usage.antigravityGeminiModels"
+    : "usage.antigravityClaudeGptModels";
+  const bucketKey = match[2].toLowerCase().startsWith("weekly")
+    ? "usage.antigravityWeeklyLimit"
+    : "usage.antigravityFiveHourLimit";
+
+  return {
+    display: `${t(groupKey)} · ${t(bucketKey)}`,
+    title: cleaned,
+  };
+}
+
 export function localizeWindowLabel(label: string, t: TFunction): string {
   const stripped = label.replace(/\s+\$.*$/, "").trim();
   const key = WINDOW_KEYS[stripped] ?? WINDOW_KEYS[label];
@@ -155,7 +177,7 @@ export function isAbsoluteQuotaWindow(window: {
   if (window.label === "5h" || window.label === "7d") return false;
   const total = window.total;
   if (total == null || total <= 0) return false;
-  if (total === 100 && window.used <= 100) return false;
+  if (total === 100) return false;
   return true;
 }
 

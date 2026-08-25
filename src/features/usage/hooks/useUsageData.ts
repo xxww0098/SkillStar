@@ -135,11 +135,45 @@ export function useUsageData() {
         setLoading(true);
         setError(null);
         try {
-          const [cat, subs] = await Promise.all([usageApi.listCatalog(), usageApi.listSubscriptions()]);
-          setCatalog(cat);
-          setSubscriptions(subs);
-          await loadCliAccounts();
-          await refreshSummary();
+          // Fire all four IPCs in one slot. Result-wrap list so a catalog/subs
+          // reject cannot fail-fast and return while reconcile is still on the
+          // wire (that would leak the FIFO past a live CLI repair).
+          const catalogP = usageApi.listCatalog().then(
+            (value) => ({ ok: true as const, value }),
+            (error) => ({ ok: false as const, error }),
+          );
+          const subsP = usageApi.listSubscriptions().then(
+            (value) => ({ ok: true as const, value }),
+            (error) => ({ ok: false as const, error }),
+          );
+          const cliP = usageApi.reconcileCliAccounts().then(
+            (value) => value,
+            (err) => {
+              if (import.meta.env.DEV) console.warn("[usage] CLI account reconcile failed", err);
+              return null;
+            },
+          );
+          const summaryP = Promise.all([usageApi.getUsageSummary(), usageApi.getSubscriptionAlerts()]).then(
+            (pair) => pair,
+            (err) => {
+              if (import.meta.env.DEV) console.warn("[usage] summary fetch failed", err);
+              return null;
+            },
+          );
+
+          const [catR, subsR, cli, pair] = await Promise.all([catalogP, subsP, cliP, summaryP]);
+          if (!catR.ok || !subsR.ok) {
+            const err = !catR.ok ? catR.error : subsR.error;
+            setError(err instanceof Error ? err.message : String(err));
+            return;
+          }
+          setCatalog(catR.value);
+          setSubscriptions(subsR.value);
+          if (cli !== null) setCliAccounts(cli);
+          if (pair !== null) {
+            setSummary(pair[0]);
+            setAlerts(pair[1]);
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           setError(msg);
@@ -147,7 +181,7 @@ export function useUsageData() {
           setLoading(false);
         }
       }),
-    [enqueue, loadCliAccounts, refreshSummary],
+    [enqueue],
   );
 
   useEffect(() => {
@@ -213,6 +247,18 @@ export function useUsageData() {
         const updated = await usageApi.refreshSubscriptionUsage(id);
         setSubscriptions((prev) => prev.map((s) => (s.id === id ? updated : s)));
         // A refresh can rotate the active account's credentials into the CLI.
+        await loadCliAccounts();
+        await refreshSummary();
+        return updated;
+      }),
+    [enqueue, loadCliAccounts, refreshSummary],
+  );
+
+  const resetQuota = useCallback(
+    (id: string) =>
+      enqueue(async () => {
+        const updated = await usageApi.resetSubscriptionQuota(id);
+        setSubscriptions((prev) => prev.map((s) => (s.id === id ? updated : s)));
         await loadCliAccounts();
         await refreshSummary();
         return updated;
@@ -336,6 +382,7 @@ export function useUsageData() {
       update,
       remove,
       refreshOne,
+      resetQuota,
       refreshAll,
       reorder,
       dismissAlert,
@@ -357,6 +404,7 @@ export function useUsageData() {
       update,
       remove,
       refreshOne,
+      resetQuota,
       refreshAll,
       reorder,
       dismissAlert,

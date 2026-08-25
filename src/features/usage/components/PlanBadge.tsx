@@ -42,13 +42,18 @@ export function PlanBadge({ plan, variant = "default", className }: PlanBadgePro
   if (!plan) return null;
   const normalized = plan.trim();
   if (normalized.length === 0) return null;
-  const upper = normalized.toUpperCase();
-  const tone = variant === "onBrand" ? TONE_ON_BRAND : (TONE_MAP[upper] ?? TONE_DEFAULT);
-  const display = upper.length > 6 ? `${upper.slice(0, 6)}…` : upper;
+  const display = normalized;
+  const toneKey = Object.keys(TONE_MAP).find((key) =>
+    display
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .startsWith(key),
+  );
+  const tone = variant === "onBrand" ? TONE_ON_BRAND : (TONE_MAP[toneKey ?? display] ?? TONE_DEFAULT);
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1",
+        "inline-flex max-w-full items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] leading-tight font-semibold tracking-wider ring-1",
         tone.bg,
         tone.text,
         tone.ring,

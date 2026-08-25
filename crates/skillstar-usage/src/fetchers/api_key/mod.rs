@@ -121,10 +121,7 @@ mod tests {
     fn only_401_maps_to_auth_required() {
         let spec = spec_without_hint();
 
-        assert!(matches!(
-            map_err(spec, http(401)),
-            UsageError::AuthRequired
-        ));
+        assert!(matches!(map_err(spec, http(401)), UsageError::AuthRequired));
 
         for status in [403, 404, 429, 500, 503] {
             let mapped = map_err(spec, http(status));

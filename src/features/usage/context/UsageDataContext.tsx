@@ -13,6 +13,7 @@ type UsageDataContextValue = ReturnType<typeof useUsageData> & {
   /** Optional `catalogId` scopes the batch to one provider (sidebar category). */
   refreshAllWithUi: (catalogId?: string | null) => Promise<void>;
   refreshOneWithUi: (id: string) => Promise<void>;
+  resetQuotaWithUi: (id: string) => Promise<void>;
   autoRefresh: ReturnType<typeof useUsageAutoRefreshSettings>;
 };
 
@@ -101,6 +102,27 @@ export function UsageDataProvider({ children }: { children: ReactNode }) {
     [t, value.refreshOne, value.subscriptions, withRefreshLock],
   );
 
+  const resetQuotaWithUi = useCallback(
+    async (id: string) => {
+      const current = value.subscriptions.find((sub) => sub.id === id);
+      const name = current?.display_name ?? t("usage.subscriptionFallbackName");
+      const toastId = `usage-reset-quota-${id}`;
+      toast.loading(t("usage.resetQuotaInProgress", { name }), { id: toastId });
+
+      try {
+        await withRefreshLock(async () => value.resetQuota(id));
+        toast.success(t("usage.resetQuotaDone", { name }), { id: toastId });
+      } catch (err) {
+        toast.error(t("usage.resetQuotaFailed", { name, error: formatRefreshError(err, t) }), {
+          id: toastId,
+          duration: 7000,
+        });
+        throw err;
+      }
+    },
+    [t, value.resetQuota, value.subscriptions, withRefreshLock],
+  );
+
   useUsageAutoRefreshRunner(
     { enabled: autoRefresh.autoRefreshEnabled, intervalMs: autoRefresh.intervalMs },
     refreshAllWithUi,
@@ -121,9 +143,10 @@ export function UsageDataProvider({ children }: { children: ReactNode }) {
       refreshingAll,
       refreshAllWithUi,
       refreshOneWithUi,
+      resetQuotaWithUi,
       autoRefresh,
     }),
-    [value, refreshBusy, refreshingAll, refreshAllWithUi, refreshOneWithUi, autoRefresh],
+    [value, refreshBusy, refreshingAll, refreshAllWithUi, refreshOneWithUi, resetQuotaWithUi, autoRefresh],
   );
 
   return <UsageDataContext.Provider value={ctx}>{children}</UsageDataContext.Provider>;

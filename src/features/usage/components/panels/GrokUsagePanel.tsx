@@ -26,15 +26,8 @@ interface GrokUsagePanelProps {
  * - Legacy monthly plans: monetary monthly bar via shared `UsageWindowBar`.
  * - On-demand cap chip only when present (backend omits $0).
  */
-export function GrokUsagePanel({
-  usage,
-  brandColorHex,
-  brandColor = "52525B",
-  density = "comfortable",
-}: GrokUsagePanelProps) {
+export function GrokUsagePanel({ usage, density = "comfortable" }: GrokUsagePanelProps) {
   const { t } = useTranslation();
-  const hex = brandColorHex ?? brandColor;
-  const accent = hex.startsWith("#") ? hex : `#${hex}`;
   const compact = density === "compact";
   const weekly = usage.weekly;
   const monthly = usage.monthly;
@@ -47,17 +40,14 @@ export function GrokUsagePanel({
   }
 
   return (
-    <div className={cn("space-y-3", compact && "space-y-2")}>
+    <div className={cn("space-y-2", compact && "space-y-1.5")}>
       {weekly && <GrokWeeklyBar window={weekly} compact={compact} />}
       {/* Prefer weekly as the gating bar; still surface legacy monthly absolute quota when both exist. */}
       {monthly && (!weekly || (monthly.total != null && monthly.total > 0 && monthly.used > 0)) && (
         <UsageWindowBar window={monthly} compact={compact} />
       )}
       {(parsedSpend || onDemandCap) && (
-        <div
-          className={cn("space-y-2 rounded-2xl border p-3", compact && "p-2")}
-          style={{ backgroundColor: `${accent}06`, borderColor: `${accent}14` }}
-        >
+        <div className="space-y-2">
           {parsedSpend && (
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -100,7 +90,6 @@ function GrokWeeklyBar({ window, compact }: { window: UsageWindow; compact?: boo
   return (
     <UsageMeter
       label={label}
-      tag={t("usage.grokWeeklyBadge")}
       dot="brand"
       usedPercent={usedPercent}
       showUsedBadge={false}

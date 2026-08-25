@@ -20,6 +20,7 @@ export const usageApi = {
   deleteSubscription: (id: string) => invoke<void>("delete_subscription", { id }),
   reorderSubscriptions: (ids: string[]) => invoke<void>("reorder_subscriptions", { ids }),
   refreshSubscriptionUsage: (id: string) => invoke<Subscription>("refresh_subscription_usage", { id }),
+  resetSubscriptionQuota: (id: string) => invoke<Subscription>("reset_subscription_quota", { id }),
   /** When `catalogId` is set, only that provider's subscriptions are refreshed
    *  (e.g. Grok page → only `xai` rows). Returns the full subscription list. */
   refreshAllSubscriptions: (catalogId?: string | null) =>

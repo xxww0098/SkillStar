@@ -39,6 +39,15 @@ use crate::storage;
 use crate::subscription::{CreditInfo, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
+#[path = "reset.rs"]
+mod reset;
+#[cfg(test)]
+pub(super) use reset::{
+    GrokResetToken, decode_grpc_web_frames, decode_remaining_resets_response,
+    encode_grpc_web_frame, encode_redeem_reset_request, encode_varint, select_reset_token,
+};
+use reset::{redeem_available_reset, remaining_reset_credits};
+
 const AUTHORIZE_URL: &str = "https://auth.x.ai/oauth2/authorize";
 const TOKEN_URL: &str = "https://auth.x.ai/oauth2/token";
 static CLIENT_ID: LazyLock<String> = LazyLock::new(|| {
@@ -63,6 +72,10 @@ const SCOPES: &str = concat!(
 const CALLBACK_PORT: u16 = 56121;
 const CALLBACK_PATH: &str = "/callback";
 const BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing";
+/// Grok's web client exposes a separate consumer-billing gRPC-Web service for
+/// spending a reset credit. This is intentionally not the JSON billing
+/// endpoint above: querying billing only redraws the existing quota.
+const CONSUMER_UI_SERVICE_URL: &str = "https://grok.com/prod.mc.billing.ConsumerUiSvc";
 /// The `credits`-format billing view. Same endpoint, different projection: it
 /// drops the `monthlyLimit`/`used` numbers but adds `currentPeriod`
 /// (`{ type: USAGE_PERIOD_TYPE_WEEKLY|_MONTHLY, start, end }`) plus a
@@ -75,6 +88,7 @@ const BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing";
 /// `/usage` shows (weekly limit left + monthly limit).
 const BILLING_CREDITS_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const DEFAULT_PLAN_NAME: &str = "Grok";
+const GROK_RESET_CREDITS: &str = "grok-reset-credits";
 
 /// The current usage period reported by `?format=credits`. `weekly` is
 /// `Some(true)` for a weekly-reset plan, `Some(false)` for monthly, and `None`
@@ -391,6 +405,51 @@ pub async fn refresh_for_cli_switch(subscription: &mut Subscription) -> UsageRes
     Ok(())
 }
 
+/// Consume one of the account's available Grok usage-reset credits, then
+/// return the newly-reset billing snapshot.
+///
+/// Grok's web client first lists unexpired reset tokens and then redeems one
+/// explicit token id. Keeping that two-step flow here is important: the reset
+/// is a real provider-side mutation, not a local refresh or a billing-cache
+/// invalidation.
+pub async fn reset_quota(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
+    if subscription.catalog_id != "xai" {
+        return Err(UsageError::Other(format!(
+            "Grok quota reset received catalog {}",
+            subscription.catalog_id
+        )));
+    }
+
+    if token_refresh::needs_refresh(subscription.access_token_expires_at) {
+        refresh_xai_tokens(subscription).await?;
+        maybe_upgrade_xai_title(subscription);
+    }
+
+    let access_token =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
+    let reset_result = redeem_available_reset(&access_token).await;
+    let access_token = match reset_result {
+        Ok(()) => access_token,
+        Err(UsageError::AuthRequired) => {
+            refresh_xai_tokens(subscription).await?;
+            maybe_upgrade_xai_title(subscription);
+            let refreshed_token = crate::fetchers::decrypt_required(
+                &subscription.access_token_encrypted,
+                "access_token",
+            )?;
+            redeem_available_reset(&refreshed_token).await?;
+            refreshed_token
+        }
+        Err(error) => return Err(error),
+    };
+
+    // The web client gives the billing projection two seconds to converge
+    // after RedeemReset. Match that provider-side propagation window before
+    // rebuilding the card snapshot.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    fetch_with_token(&subscription.id, &access_token).await
+}
+
 async fn refresh_xai_tokens(subscription: &mut Subscription) -> UsageResult<()> {
     let rt_cipher = subscription
         .refresh_token_encrypted
@@ -465,8 +524,22 @@ async fn fetch_with_token(
     // Best-effort: the monthly numbers come from the default view above; the
     // weekly progress bar (period type, reset, `creditUsagePercent`) comes from
     // the credits view.
-    let period = fetch_current_period(&client, access_token).await;
+    let (period, reset_credits) = tokio::join!(
+        fetch_current_period(&client, access_token),
+        remaining_reset_credits(access_token),
+    );
     let mut usage = build_subscription_usage(subscription_id, &payload, period)?;
+
+    // Keep reset credits in the existing provider-specific credits projection
+    // so the frontend can show the real count without adding a generic field
+    // to every provider's usage snapshot.
+    if let Ok(count) = reset_credits {
+        usage.credits.push(CreditInfo {
+            credit_type: GROK_RESET_CREDITS.to_string(),
+            credit_amount: Some(count.to_string()),
+            minimum_credit_amount_for_usage: None,
+        });
+    }
 
     // Card-shape stability: a weekly Grok plan must keep its weekly bar across
     // refreshes. The credits view is slow (~2.5s) and best-effort, so a single

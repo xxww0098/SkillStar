@@ -1,6 +1,6 @@
 import { Reorder, useDragControls } from "framer-motion";
 import { ChevronDown, ListCollapse, ListTree, Plus } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type PointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,8 +18,11 @@ interface UsageGridProps {
   /** `catalog_id -> which account that CLI is actually serving`; each card
    *  draws its "current" badge from this rather than from the pin. */
   cliAccounts?: Record<string, CliAccountState>;
+  hideAccountEmails?: boolean;
   filter: CatalogFilter;
   onRefresh: (id: string) => Promise<void>;
+  /** Consume one real provider-side Grok reset credit for a subscription. */
+  onResetQuota?: (id: string) => Promise<void>;
   refreshDisabled?: boolean;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -34,7 +37,15 @@ interface UsageGridProps {
 
 type CardCallbacks = Pick<
   UsageGridProps,
-  "onRefresh" | "onEdit" | "onDelete" | "onReauth" | "onSetActive" | "onSwitchToCli" | "refreshDisabled" | "cliAccounts"
+  | "onRefresh"
+  | "onResetQuota"
+  | "onEdit"
+  | "onDelete"
+  | "onReauth"
+  | "onSetActive"
+  | "onSwitchToCli"
+  | "refreshDisabled"
+  | "cliAccounts"
 >;
 
 interface ProviderGroup {
@@ -44,13 +55,17 @@ interface ProviderGroup {
   sortIndex: number;
 }
 
+const NOOP_BROWSE = () => undefined;
+
 export function UsageGrid({
   subscriptions,
   allSubscriptions,
   catalog,
   cliAccounts,
+  hideAccountEmails = false,
   filter,
   onRefresh,
+  onResetQuota,
   refreshDisabled = false,
   onEdit,
   onDelete,
@@ -113,16 +128,20 @@ export function UsageGrid({
     onReorder(mergeSubscriptionOrder(allIds, movableIds, newMovableOrder));
   };
 
-  const cardCallbacks: CardCallbacks = {
-    onRefresh,
-    refreshDisabled,
-    onEdit,
-    onDelete,
-    onReauth,
-    onSetActive,
-    onSwitchToCli,
-    cliAccounts,
-  };
+  const cardCallbacks: CardCallbacks = useMemo(
+    () => ({
+      onRefresh,
+      onResetQuota,
+      refreshDisabled,
+      onEdit,
+      onDelete,
+      onReauth,
+      onSetActive,
+      onSwitchToCli,
+      cliAccounts,
+    }),
+    [onRefresh, onResetQuota, refreshDisabled, onEdit, onDelete, onReauth, onSetActive, onSwitchToCli, cliAccounts],
+  );
 
   const gridClass = "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";
 
@@ -139,6 +158,7 @@ export function UsageGrid({
           key={sub.id}
           subscription={sub}
           catalog={catalogById.get(sub.catalog_id)}
+          hideAccountEmails={hideAccountEmails}
           itemClassName={itemClassName}
           {...cardCallbacks}
         />
@@ -188,7 +208,7 @@ export function UsageGrid({
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
       {isHomeView ? (
         subscriptions.length === 0 ? (
-          <UsageHomeEmpty onBrowseProviders={onBrowseProviders ?? (() => undefined)} />
+          <UsageHomeEmpty onBrowseProviders={onBrowseProviders ?? NOOP_BROWSE} />
         ) : (
           renderProviderRows()
         )
@@ -213,18 +233,20 @@ export function UsageGrid({
                     </p>
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onAddNew(providerEntry.id)}
-                  className="max-w-[min(240px,55%)] shrink-0 overflow-hidden"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span className="truncate">
-                    {t("usage.addProviderSubscription", { provider: providerEntry.display_name })}
-                  </span>
-                </Button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddNew(providerEntry.id)}
+                    className="max-w-[min(240px,55%)] shrink-0 overflow-hidden"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span className="truncate">
+                      {t("usage.addProviderSubscription", { provider: providerEntry.display_name })}
+                    </span>
+                  </Button>
+                </div>
               </div>
               {renderReorderGrid()}
             </div>
@@ -257,34 +279,36 @@ function ProviderSubscriptionRow({
       aria-label={`${displayName} ${countLabel}`}
       className="border-b border-border/45 py-3 first:pt-0 last:border-b-0"
     >
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        aria-controls={groupId}
-        onClick={onToggle}
-        className={cn(
-          "flex w-full items-center gap-2.5 rounded-xl px-1 py-1 text-left transition-colors focus-ring",
-          "hover:bg-muted/20",
-        )}
-      >
-        <ProviderLogo
-          catalogId={group.catalogId}
-          displayName={displayName}
-          brandColor={brandColor}
-          size="sm"
-          className="shrink-0"
-        />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
-          <p className="truncate text-[11px] text-muted-foreground">{countLabel}</p>
-        </div>
-        <ChevronDown
+      <div className="flex w-full items-center gap-1.5">
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          aria-controls={groupId}
+          onClick={onToggle}
           className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
-            collapsed && "-rotate-90",
+            "flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-1 py-1 text-left transition-colors focus-ring",
+            "hover:bg-muted/20",
           )}
-        />
-      </button>
+        >
+          <ProviderLogo
+            catalogId={group.catalogId}
+            displayName={displayName}
+            brandColor={brandColor}
+            size="sm"
+            className="shrink-0"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{countLabel}</p>
+          </div>
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
+              collapsed && "-rotate-90",
+            )}
+          />
+        </button>
+      </div>
       {!collapsed && (
         <div id={groupId} className="mt-3 min-w-0">
           {children}
@@ -294,32 +318,41 @@ function ProviderSubscriptionRow({
   );
 }
 
-function DraggableSubscriptionCard({
+const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
   subscription,
   catalog,
+  hideAccountEmails,
   itemClassName,
   ...callbacks
 }: {
   subscription: Subscription;
   catalog: CatalogEntry | undefined;
+  hideAccountEmails: boolean;
   itemClassName?: string;
 } & CardCallbacks) {
   const dragControls = useDragControls();
+  const onDragHandlePointerDown = useCallback(
+    (event: PointerEvent) => {
+      dragControls.start(event);
+    },
+    [dragControls],
+  );
 
   return (
     <Reorder.Item
       value={subscription}
       dragListener={false}
       dragControls={dragControls}
-      className={cn("list-none", itemClassName)}
+      className={cn("list-none flex", itemClassName)}
       whileDrag={{ scale: 1.02, zIndex: 30 }}
     >
       <SubscriptionCard
         subscription={subscription}
         catalog={catalog}
-        onDragHandlePointerDown={(e) => dragControls.start(e)}
+        hideAccountEmails={hideAccountEmails}
+        onDragHandlePointerDown={onDragHandlePointerDown}
         {...callbacks}
       />
     </Reorder.Item>
   );
-}
+});

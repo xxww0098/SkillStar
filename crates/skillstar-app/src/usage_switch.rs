@@ -25,17 +25,19 @@
 //! | `codex`    | Codex CLI | `$CODEX_HOME/auth.json` + macOS keychain    |
 //! | `xai`      | Grok CLI  | `$GROK_HOME/auth.json`                      |
 //! | `opencode` | OpenCode  | `$XDG_DATA_HOME/opencode/auth.json`         |
+//! | `antigravity` | Antigravity IDE | `state.vscdb` / system credential |
+//! | `cursor` | Cursor IDE | `state.vscdb`                               |
 //!
-//! Support is derived from that registry ([`target_for`]), not from a
-//! hand-maintained whitelist, so the UI affordance cannot outlive the
-//! adapter. Cursor and Antigravity are IDEs whose credentials live in
-//! `state.vscdb` under an entirely different mechanism; they stay
-//! unsupported on purpose.
+//! CLI support is derived from that registry ([`target_for`]); Antigravity is
+//! handled by its own IDE credential adapter because it does not fit the
+//! whole-file JSON/symlink model.
 //!
 //! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
 //! (subscriptions, crypto, storage) and `skillstar-models` (tool_sync path
 //! resolution and rolling backups) without either depending on the other.
 
+mod antigravity;
+mod cursor;
 mod custody;
 mod error;
 #[cfg(target_os = "macos")]
@@ -58,14 +60,16 @@ pub use custody::LinkMode;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SwitchOutcome {
-    /// CLI tool id that was targeted (`"codex"` / `"opencode"` / `"grok"`).
+    /// Target id that was updated (`"codex"` / `"opencode"` / `"grok"` /
+    /// `"antigravity"`).
     pub tool_id: String,
     /// Resolved credential file that was (or would be) bound.
     pub config_path: String,
     /// Path to the rolling backup taken before the live file was replaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
-    /// `true` on macOS when the Codex keychain entry was updated too.
+    /// `true` when an external credential store (for example the macOS
+    /// Keychain) was updated too.
     #[serde(default)]
     pub keychain_updated: bool,
     /// How the live path ended up bound: [`LinkMode::Symlink`] pass-through, or
@@ -109,6 +113,18 @@ impl SwitchOutcome {
             link_mode: None,
             success: false,
             error: Some(error.into()),
+        }
+    }
+
+    fn direct_ok(catalog_id: &str, config_path: &std::path::Path, keychain_updated: bool) -> Self {
+        Self {
+            tool_id: catalog_id.to_string(),
+            config_path: config_path.to_string_lossy().to_string(),
+            backup_path: None,
+            keychain_updated,
+            link_mode: None,
+            success: true,
+            error: None,
         }
     }
 
@@ -180,10 +196,12 @@ fn target_for(catalog_id: &str) -> Option<&'static dyn CliCredentialTarget> {
         .find(|target| target.catalog_id() == catalog_id)
 }
 
-/// Whether this catalog's account can be switched in a real CLI. Surfaced to
-/// the UI so it hides the affordance for IDE-backed providers.
+/// Whether this catalog's account can be switched in the real local tool.
+/// The DTO field keeps its historical `supports_cli_switch` name for wire
+/// compatibility, but Antigravity is an IDE-backed adapter here.
 pub fn supports_cli_switch(catalog_id: &str) -> bool {
     target_for(catalog_id).is_some()
+        || matches!(catalog_id, antigravity::CATALOG_ID | cursor::CATALOG_ID)
 }
 
 /// Result returned by the activation facade.
@@ -202,6 +220,8 @@ pub struct ActivationResult {
 /// lock stays.
 pub struct CliRefreshLease {
     target: Option<&'static dyn CliCredentialTarget>,
+    antigravity: bool,
+    cursor: bool,
     _lease: Option<CustodyLease>,
 }
 
@@ -233,6 +253,26 @@ pub async fn activate_subscription(subscription_id: &str) -> UsageResult<Activat
     let catalog_id = storage::get_subscription(subscription_id)?.catalog_id;
     let subscription_id = subscription_id.to_string();
     skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id.clone(), || async move {
+        if catalog_id == antigravity::CATALOG_ID {
+            return blocking(move || {
+                let (subscription, switch_result) = antigravity::activate(&subscription_id)?;
+                Ok(ActivationResult {
+                    subscription,
+                    switch_result,
+                })
+            })
+            .await;
+        }
+        if catalog_id == cursor::CATALOG_ID {
+            return blocking(move || {
+                let (subscription, switch_result) = cursor::activate(&subscription_id)?;
+                Ok(ActivationResult {
+                    subscription,
+                    switch_result,
+                })
+            })
+            .await;
+        }
         let Some(target) = target_for(&catalog_id) else {
             // Non-CLI catalogs still get a pin; it is a UI preference, not a
             // claim about any file on disk.
@@ -308,6 +348,24 @@ fn activate_blocking(
 pub async fn resync_active_subscription(catalog_id: &str) -> UsageResult<SwitchOutcome> {
     let catalog_id = catalog_id.to_string();
     skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id.clone(), || async move {
+        if catalog_id == antigravity::CATALOG_ID {
+            let active = storage::get_active_subscription(&catalog_id)?
+                .ok_or_else(|| other(format!("catalog {catalog_id} 还没有设置活跃账号")))?;
+            return blocking(move || {
+                let subscription = storage::get_subscription(&active)?;
+                antigravity::sync(&subscription)
+            })
+            .await;
+        }
+        if catalog_id == cursor::CATALOG_ID {
+            let active = storage::get_active_subscription(&catalog_id)?
+                .ok_or_else(|| other(format!("catalog {catalog_id} 还没有设置活跃账号")))?;
+            return blocking(move || {
+                let subscription = storage::get_subscription(&active)?;
+                cursor::sync(&subscription)
+            })
+            .await;
+        }
         let Some(target) = target_for(&catalog_id) else {
             return Ok(SwitchOutcome::unsupported(&catalog_id));
         };
@@ -331,7 +389,29 @@ pub async fn resync_active_subscription(catalog_id: &str) -> UsageResult<SwitchO
 /// both cases the caller falls back to the pin, which is exactly today's
 /// behaviour and never a worse claim than the one being replaced.
 pub async fn reconcile_cli_accounts() -> UsageResult<HashMap<String, CliAccountState>> {
-    let mut states = HashMap::with_capacity(TARGETS.len());
+    let mut states = HashMap::with_capacity(TARGETS.len() + 2);
+    match reconcile_cli_account(antigravity::CATALOG_ID).await {
+        Ok(Some(state)) => {
+            states.insert(antigravity::CATALOG_ID.to_string(), state);
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            catalog = antigravity::CATALOG_ID,
+            %error,
+            "could not read which Antigravity account is serving; falling back to the pin"
+        ),
+    }
+    match reconcile_cli_account(cursor::CATALOG_ID).await {
+        Ok(Some(state)) => {
+            states.insert(cursor::CATALOG_ID.to_string(), state);
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            catalog = cursor::CATALOG_ID,
+            %error,
+            "could not read which Cursor account is serving; falling back to the pin"
+        ),
+    }
     for target in TARGETS {
         let catalog_id = target.catalog_id();
         match reconcile_cli_account(catalog_id).await {
@@ -358,6 +438,12 @@ pub async fn reconcile_cli_accounts() -> UsageResult<HashMap<String, CliAccountS
 pub async fn reconcile_cli_account(catalog_id: &str) -> UsageResult<Option<CliAccountState>> {
     let catalog_id = catalog_id.to_string();
     skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id.clone(), || async move {
+        if catalog_id == antigravity::CATALOG_ID {
+            return blocking(|| antigravity::reconcile().map(Some)).await;
+        }
+        if catalog_id == cursor::CATALOG_ID {
+            return blocking(|| cursor::reconcile().map(Some)).await;
+        }
         let Some(target) = target_for(&catalog_id) else {
             return Ok(None);
         };
@@ -397,9 +483,27 @@ pub fn forget_subscription_session(catalog_id: &str, subscription_id: &str) -> U
 /// Previously Grok-only, which is why SkillStar's background refresh could
 /// silently revoke the Codex CLI's own refresh-token generation.
 pub async fn acquire_cli_refresh_lease(catalog_id: &str) -> UsageResult<CliRefreshLease> {
+    if catalog_id == antigravity::CATALOG_ID {
+        return Ok(CliRefreshLease {
+            target: None,
+            antigravity: true,
+            cursor: false,
+            _lease: None,
+        });
+    }
+    if catalog_id == cursor::CATALOG_ID {
+        return Ok(CliRefreshLease {
+            target: None,
+            antigravity: false,
+            cursor: true,
+            _lease: None,
+        });
+    }
     let Some(target) = target_for(catalog_id) else {
         return Ok(CliRefreshLease {
             target: None,
+            antigravity: false,
+            cursor: false,
             _lease: None,
         });
     };
@@ -408,6 +512,8 @@ pub async fn acquire_cli_refresh_lease(catalog_id: &str) -> UsageResult<CliRefre
         let lease = custody.lock()?;
         Ok(CliRefreshLease {
             target: Some(target),
+            antigravity: false,
+            cursor: false,
             _lease: Some(lease),
         })
     })
@@ -424,6 +530,22 @@ pub fn adopt_active_cli_session_before_refresh(
     subscription: &mut Subscription,
     lease: &CliRefreshLease,
 ) -> UsageResult<()> {
+    if lease.antigravity {
+        if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
+            == Some(subscription.id.as_str())
+        {
+            antigravity::adopt_active_session(subscription)?;
+        }
+        return Ok(());
+    }
+    if lease.cursor {
+        if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
+            == Some(subscription.id.as_str())
+        {
+            cursor::adopt_active_session(subscription)?;
+        }
+        return Ok(());
+    }
     let Some(target) = lease.target else {
         return Ok(());
     };
@@ -444,6 +566,22 @@ pub fn sync_refreshed_active_subscription(
     subscription: &mut Subscription,
     lease: &CliRefreshLease,
 ) -> UsageResult<Option<SwitchOutcome>> {
+    if lease.cursor {
+        if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
+            != Some(subscription.id.as_str())
+        {
+            return Ok(None);
+        }
+        return Ok(Some(cursor::sync(subscription)?));
+    }
+    if lease.antigravity {
+        if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
+            != Some(subscription.id.as_str())
+        {
+            return Ok(None);
+        }
+        return Ok(Some(antigravity::sync(subscription)?));
+    }
     let Some(target) = lease.target else {
         return Ok(None);
     };
@@ -469,37 +607,33 @@ mod custody_tests;
 mod tests {
     use super::*;
 
-    /// The predicate is the registry, so an entry can never be advertised
-    /// without an adapter behind it (the OpenCode chip used to be exactly
-    /// that: permanently visible, permanently failing).
+    /// Every advertised entry has a real adapter behind it (the OpenCode chip
+    /// used to be exactly that: permanently visible, permanently failing).
     #[test]
     fn supports_cli_switch_follows_the_target_registry() {
         for catalog in ["codex", "opencode", "xai"] {
             assert!(supports_cli_switch(catalog), "{catalog}");
             assert_eq!(target_for(catalog).unwrap().catalog_id(), catalog);
         }
-        // IDEs keep their credentials in state.vscdb — a different mechanism,
-        // deliberately out of scope. `anthropic` is out of scope for a second
-        // reason: the fetcher only ever *reads* Claude Code's own login, so
-        // there is no snapshot for custody to take.
-        for catalog in [
-            "cursor",
-            "antigravity",
-            "deepseek",
-            "glm",
-            "stepfun",
-            "anthropic",
-        ] {
+        assert!(supports_cli_switch("antigravity"));
+        assert!(target_for("antigravity").is_none());
+        assert!(supports_cli_switch("cursor"));
+        assert!(target_for("cursor").is_none());
+
+        // Other IDEs keep their credentials outside an implemented adapter.
+        // `anthropic` is out of scope for a second reason: the fetcher only
+        // ever reads Claude Code's own login, so there is no snapshot to take.
+        for catalog in ["deepseek", "glm", "stepfun", "anthropic"] {
             assert!(!supports_cli_switch(catalog), "{catalog}");
         }
     }
 
     #[test]
     fn unsupported_outcome_carries_no_error() {
-        let outcome = SwitchOutcome::unsupported("cursor");
+        let outcome = SwitchOutcome::unsupported("deepseek");
         assert!(!outcome.success);
         assert!(outcome.error.is_none(), "unsupported is not a failure");
-        assert_eq!(outcome.tool_id, "cursor");
+        assert_eq!(outcome.tool_id, "deepseek");
     }
 
     #[test]

@@ -175,12 +175,8 @@ mod tests {
 
     #[test]
     fn other_client_errors_stay_plain_fetcher_errors() {
-        let error = parse_token_body(
-            400,
-            r#"{"error":"unsupported_grant_type"}"#,
-            "Codex token",
-        )
-        .unwrap_err();
+        let error = parse_token_body(400, r#"{"error":"unsupported_grant_type"}"#, "Codex token")
+            .unwrap_err();
         assert!(matches!(error, UsageError::Fetcher(_)), "{error:?}");
         assert!(!error.is_transient());
         assert!(error.to_string().contains("unsupported_grant_type"));

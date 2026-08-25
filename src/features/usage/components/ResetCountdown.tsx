@@ -1,4 +1,3 @@
-import { AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
@@ -80,31 +79,4 @@ export function priorityCardClass(resetAt: number, usedPercent: number, mode: Re
   if (!isPriorityResetUrgency(urgency)) return "";
   if (urgency === "critical" || urgency === "urgent") return "border-orange-500/25";
   return "border-amber-500/20";
-}
-
-function priorityHintClass(urgency: ResetUrgency): string {
-  if (urgency === "critical" || urgency === "urgent") {
-    return "text-orange-600 dark:text-orange-400";
-  }
-  return "text-amber-700 dark:text-amber-400";
-}
-
-interface UsagePriorityHintProps {
-  resetAt: number;
-  usedPercent?: number;
-  mode?: ResetUrgencyMode;
-}
-
-/** One-line reminder below the card header when reset is approaching. */
-export function UsagePriorityHint({ resetAt, usedPercent = 0, mode = "billing" }: UsagePriorityHintProps) {
-  const { t } = useTranslation();
-  const state = getResetState(resetAt, { usedPercent, mode });
-  if (!isPriorityResetUrgency(state.urgency)) return null;
-
-  return (
-    <p className={cn("flex items-start gap-1.5 text-[10px] leading-snug", priorityHintClass(state.urgency))}>
-      <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
-      <span>{t("usage.priorityUseHint")}</span>
-    </p>
-  );
 }

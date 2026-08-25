@@ -400,6 +400,58 @@ pub async fn refresh_subscription_usage(id: String) -> Result<SubscriptionDto, A
     refresh_subscription_usage_inner(id).await
 }
 
+/// Consume one real Grok reset credit for exactly one subscription card.
+/// Unlike [`refresh_subscription_usage`], this calls xAI's provider-side reset
+/// mutation before reading the resulting billing snapshot.
+pub async fn reset_subscription_quota(id: String) -> Result<SubscriptionDto, AppError> {
+    let catalog_id = storage::get_subscription(&id).map_err(map_err)?.catalog_id;
+    if catalog_id != "xai" {
+        return Err(AppError::Other(format!(
+            "Usage: quota reset is only supported for Grok subscriptions (got `{catalog_id}`)"
+        )));
+    }
+
+    skillstar_usage::refresh_guard::with_catalog_refresh(&catalog_id, || async move {
+        let mut sub = storage::get_subscription(&id).map_err(map_err)?;
+        if sub.catalog_id != "xai" || sub.auth_mode != AuthMode::OAuth {
+            return Err(AppError::Other(
+                "Usage: Grok quota reset requires an xAI OAuth subscription".into(),
+            ));
+        }
+
+        let reset_result = skillstar_usage::fetchers::oauth::xai::reset_quota(&mut sub).await;
+        // A reset can refresh an expiring OAuth access token before the
+        // provider mutation. Persist that narrow credential change even when
+        // the later billing projection fails, so the next click does not use
+        // an obsolete token.
+        sub = storage::patch_fetcher_state(&sub).map_err(map_err)?;
+
+        let usage = match reset_result {
+            Ok(usage) => {
+                sub.requires_reauth = false;
+                storage::patch_fetcher_state(&sub).map_err(map_err)?;
+                storage::save_usage_snapshot(usage.clone()).map_err(map_err)?;
+                usage
+            }
+            Err(error) => {
+                if matches!(error, UsageError::AuthRequired) {
+                    sub.requires_reauth = true;
+                    storage::patch_fetcher_state(&sub).map_err(map_err)?;
+                }
+                return Err(map_err(error));
+            }
+        };
+
+        let active = storage::list_active_per_catalog().map_err(map_err)?;
+        Ok(fill_active(
+            SubscriptionDto::from_parts(sub, Some(usage)),
+            &active,
+        ))
+    })
+    .await
+    .map_err(map_err)?
+}
+
 /// Rows for the macOS Dock right-click menu and tray menu: one `"<account> · <status>"` line
 /// per subscription, ordered most-urgent (least remaining) first.
 pub fn dock_menu_lines_for_lang(lang: &str) -> Vec<String> {
@@ -619,8 +671,8 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     pending_state::remove(&pending_id);
     let mut sub = result.map_err(map_err)?;
     let mut switch_result = None;
-    if sub.catalog_id == "xai"
-        && storage::get_active_subscription("xai")
+    if matches!(sub.catalog_id.as_str(), "xai" | "antigravity")
+        && storage::get_active_subscription(&sub.catalog_id)
             .map_err(map_err)?
             .as_deref()
             == Some(sub.id.as_str())

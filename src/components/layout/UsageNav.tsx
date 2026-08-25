@@ -66,11 +66,11 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t("usage.searchCatalog")}
-              className="h-7 w-full rounded-md border border-border/50 bg-muted/30 pl-7 pr-2 text-[12px] text-foreground transition placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+              className="h-7 w-full rounded-md border border-border/70 bg-background/60 pl-7 pr-2 text-[12px] text-foreground transition placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-2xs"
             />
             <Search
               aria-hidden
-              className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"
+              className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/70"
             />
           </div>
         </div>
@@ -129,12 +129,14 @@ function NavItem({ label, description, count, selected, onClick, collapsed, logo
         aria-current={selected ? "page" : undefined}
         className={cn(
           "relative mx-auto mb-1 flex h-9 w-9 items-center justify-center rounded-lg transition duration-150 cursor-pointer focus-ring",
-          selected ? "bg-primary/10 text-primary ring-1 ring-primary/25" : "text-muted-foreground hover:bg-muted/40",
+          selected
+            ? "bg-primary/18 text-primary ring-1 ring-primary/30 shadow-2xs dark:bg-primary/22"
+            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
         )}
       >
         {logo ?? <span className="text-[11px] font-semibold">{label.charAt(0)}</span>}
         {count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold text-primary-foreground">
+          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold text-primary-foreground shadow-xs">
             {count > 9 ? "9+" : count}
           </span>
         )}
@@ -148,22 +150,24 @@ function NavItem({ label, description, count, selected, onClick, collapsed, logo
       onClick={onClick}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition duration-150 cursor-pointer focus-ring",
+        "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition duration-150 cursor-pointer focus-ring select-none",
         selected
-          ? "bg-primary/10 font-medium text-primary ring-1 ring-primary/25"
-          : "text-muted-foreground hover:bg-muted/30",
+          ? "bg-primary/18 font-semibold text-primary ring-1 ring-primary/30 shadow-2xs dark:bg-primary/20"
+          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
       )}
     >
       {logo}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[12px]">{label}</div>
-        {description && <div className="truncate text-[10px] text-muted-foreground/70">{description}</div>}
+        <div className="truncate text-[12px] font-medium text-foreground">{label}</div>
+        {description && <div className="truncate text-[10px] text-muted-foreground/80">{description}</div>}
       </div>
       {count > 0 && (
         <span
           className={cn(
-            "inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
-            selected ? "bg-primary/20 text-primary" : "bg-muted/60 text-muted-foreground",
+            "inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums",
+            selected
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "bg-muted/80 text-muted-foreground border border-border/50",
           )}
         >
           {count}

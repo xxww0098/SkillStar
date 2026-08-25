@@ -27,14 +27,14 @@ oauth_region?: string | null,
  */
 is_active: boolean, manual_quota: ManualQuota | null, note: string | null, sort_index: number, created_at: number, updated_at: number, usage: SubscriptionUsage | null, 
 /**
- * Outcome of the last CLI account-switch attempt (set by
- * `set_active_subscription` when it also pushes credentials to the CLI).
+ * Outcome of the last local-tool account-switch attempt (set by
+ * `set_active_subscription` when it also writes the target credential).
  * Absent when no switch was attempted.
  */
 switch_result?: SwitchOutcome | null, 
 /**
- * Whether this catalog maps to a CLI whose credentials SkillStar can
- * switch (codex / opencode / grok). IDE-only catalogs (cursor, …)
- * are `false` — the UI hides the "sync to CLI" affordance for them.
+ * Whether SkillStar can switch the real local tool credential for this
+ * catalog (CLI JSON custody or an IDE-specific adapter). The wire name is
+ * retained for compatibility with existing frontend types.
  */
 supports_cli_switch: boolean, };

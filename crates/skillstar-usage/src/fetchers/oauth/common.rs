@@ -175,11 +175,18 @@ impl SubscriptionBuilder {
 /// was requested, the row vanished, or it is not this catalog's OAuth row —
 /// in which case the caller falls back to creating a fresh subscription
 /// rather than hijacking someone else's.
-pub fn reauth_target(catalog_id: &str, target_subscription_id: Option<&str>) -> Option<Subscription> {
-    let id = target_subscription_id.map(str::trim).filter(|id| !id.is_empty())?;
-    crate::storage::get_subscription(id).ok().filter(|existing| {
-        existing.catalog_id == catalog_id && existing.auth_mode == AuthMode::OAuth
-    })
+pub fn reauth_target(
+    catalog_id: &str,
+    target_subscription_id: Option<&str>,
+) -> Option<Subscription> {
+    let id = target_subscription_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    crate::storage::get_subscription(id)
+        .ok()
+        .filter(|existing| {
+            existing.catalog_id == catalog_id && existing.auth_mode == AuthMode::OAuth
+        })
 }
 
 /// Rebind a freshly built subscription onto `existing`'s identity so the
@@ -209,9 +216,12 @@ pub fn carry_over_user_metadata(
     // wins when the stored one is a placeholder — the same rule
     // `apply_email_title` uses on every refresh.
     let fresh_title = fresh.display_name.clone();
-    fresh.display_name =
-        prefer_email_title(&existing.display_name, Some(&fresh_title), catalog_placeholders)
-            .unwrap_or_else(|| existing.display_name.clone());
+    fresh.display_name = prefer_email_title(
+        &existing.display_name,
+        Some(&fresh_title),
+        catalog_placeholders,
+    )
+    .unwrap_or_else(|| existing.display_name.clone());
 }
 
 /// Generates the `pub async fn fetch(subscription: &mut Subscription)`

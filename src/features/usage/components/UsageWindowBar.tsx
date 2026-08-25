@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   formatQuotaNumber,
   formatUsdCents,
+  formatAntigravityQuotaLabel,
   isAbsoluteQuotaWindow,
   isBreakdownQuotaWindow,
   isMonetaryQuota,
@@ -22,6 +23,8 @@ import { ResetCountdown } from "./ResetCountdown";
 interface UsageWindowBarProps {
   window: UsageWindow;
   compact?: boolean;
+  catalogId?: string;
+  showCategoryReset?: boolean;
 }
 
 /**
@@ -29,17 +32,17 @@ interface UsageWindowBarProps {
  * `UsageMeter` grammar so monetary, absolute, and percent-only quotas read as
  * one system across providers; compact windows stay a slim category row.
  */
-export function UsageWindowBar({ window, compact }: UsageWindowBarProps) {
+export function UsageWindowBar({ window, compact, catalogId, showCategoryReset = true }: UsageWindowBarProps) {
   if (compact) {
-    return <UsageCategoryBar window={window} />;
+    return <UsageCategoryBar window={window} catalogId={catalogId} showReset={showCategoryReset} />;
   }
 
   if (isMonetaryQuota(window)) {
-    return <UsageQuotaPanel window={window} />;
+    return <UsageQuotaPanel window={window} catalogId={catalogId} showCategoryReset={showCategoryReset} />;
   }
 
   if (isBreakdownQuotaWindow(window)) {
-    return <UsageBreakdownQuotaPanel window={window} />;
+    return <UsageBreakdownQuotaPanel window={window} catalogId={catalogId} showCategoryReset={showCategoryReset} />;
   }
 
   if (isAbsoluteQuotaWindow(window)) {
@@ -50,24 +53,43 @@ export function UsageWindowBar({ window, compact }: UsageWindowBarProps) {
 }
 
 /** Nested per-category breakdown, shared by monetary + percent parent windows. */
-function BreakdownBlock({ breakdown }: { breakdown: UsageWindow[] }) {
+function BreakdownBlock({
+  breakdown,
+  catalogId,
+  showCategoryReset,
+}: {
+  breakdown: UsageWindow[];
+  catalogId?: string;
+  showCategoryReset: boolean;
+}) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-2 rounded-xl border border-zinc-200/70 bg-zinc-50/60 p-2.5">
-      <div>
-        <p className="text-[10px] font-bold text-zinc-800">{t("usage.usageByCategory")}</p>
-        <p className="mt-0.5 text-[10px] leading-snug text-zinc-500">{t("usage.categoryUsageHint")}</p>
-      </div>
-      <div className="space-y-2.5">
+    <div className="space-y-2 pt-1">
+      <p className="text-[11px] font-semibold text-zinc-600">{t("usage.usageByCategory")}</p>
+      <div className="space-y-2">
         {breakdown.map((sub, i) => (
-          <UsageWindowBar key={`${sub.label}-${i}`} window={sub} compact />
+          <UsageWindowBar
+            key={`${sub.label}-${i}`}
+            window={sub}
+            compact
+            catalogId={catalogId}
+            showCategoryReset={showCategoryReset}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function UsageQuotaPanel({ window }: { window: UsageWindow }) {
+function UsageQuotaPanel({
+  window,
+  catalogId,
+  showCategoryReset,
+}: {
+  window: UsageWindow;
+  catalogId?: string;
+  showCategoryReset: boolean;
+}) {
   const { t } = useTranslation();
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
   const remainingPct = Math.max(0, 100 - percent);
@@ -95,58 +117,116 @@ function UsageQuotaPanel({ window }: { window: UsageWindow }) {
       }
       footNoteClass={remainingTone.text}
     >
-      {hasBreakdown ? <BreakdownBlock breakdown={window.breakdown!} /> : null}
+      {hasBreakdown ? (
+        <BreakdownBlock breakdown={window.breakdown!} catalogId={catalogId} showCategoryReset={showCategoryReset} />
+      ) : null}
     </UsageMeter>
   );
 }
 
-function UsageBreakdownQuotaPanel({ window }: { window: UsageWindow }) {
+function UsageBreakdownQuotaPanel({
+  window,
+  catalogId,
+  showCategoryReset,
+}: {
+  window: UsageWindow;
+  catalogId?: string;
+  showCategoryReset: boolean;
+}) {
   const { t } = useTranslation();
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
   const remainingPct = Math.max(0, 100 - percent);
+  const showRemainingBadge = catalogId === "antigravity";
 
   return (
     <UsageMeter
       label={localizeWindowLabel(window.label, t)}
       usedPercent={percent}
+      badgePercent={showRemainingBadge ? remainingPct : undefined}
+      badgeTitle={showRemainingBadge ? t("usage.remainingPercent", { percent: remainingPct }) : undefined}
       resetAt={window.reset_at}
       showReset={windowRendersOwnReset(window)}
       resetMode="billing"
-      footNote={`${t("usage.remaining")} ${remainingPct}%`}
+      footNote={showRemainingBadge ? null : `${t("usage.remaining")} ${remainingPct}%`}
     >
-      <BreakdownBlock breakdown={window.breakdown!} />
+      <BreakdownBlock breakdown={window.breakdown!} catalogId={catalogId} showCategoryReset={showCategoryReset} />
     </UsageMeter>
   );
 }
 
-function UsageCategoryBar({ window }: { window: UsageWindow }) {
+function UsageCategoryBar({
+  window,
+  catalogId,
+  showReset,
+}: {
+  window: UsageWindow;
+  catalogId?: string;
+  showReset: boolean;
+}) {
   const { t } = useTranslation();
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
   const rawLabel = localizeCategoryLabel(window.label, t);
-  const label = canonicalizeAntigravityModelName(rawLabel);
+  const canonicalLabel = canonicalizeAntigravityModelName(rawLabel);
+  const { display: label, title } =
+    catalogId === "antigravity"
+      ? formatAntigravityQuotaLabel(canonicalLabel, t)
+      : { display: canonicalLabel, title: rawLabel };
   const tone = pickConsumedTone(percent);
   const monetary = isMonetaryQuota(window);
-  const hasAbsolute = window.total != null && window.total > 0;
+  const hasAbsolute = isAbsoluteQuotaWindow(window);
   const rightLabel = monetary
     ? `${formatUsdCents(window.used)}${window.total != null ? ` / ${formatUsdCents(window.total)}` : ""} · ${percent}%`
     : hasAbsolute
       ? `${formatQuotaNumber(window.used)} / ${formatQuotaNumber(window.total ?? 0)} · ${percent}%`
-      : t("usage.usedPercent", { percent });
+      : `${percent}%`;
+
+  const hasInlineReset = catalogId === "antigravity" && showReset && Boolean(window.reset_at);
+  const track = (
+    <ProgressTrack
+      className={hasInlineReset ? "w-full" : undefined}
+      usedPercent={percent}
+      size="category"
+      tone="consumed"
+    />
+  );
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2 text-[10px]">
-        <span className="truncate font-medium text-zinc-700" title={label}>
+    <div
+      className={cn("space-y-1.5", hasInlineReset && "grid grid-cols-[minmax(0,1fr)_max-content] gap-x-2 gap-y-1.5")}
+    >
+      <div
+        className={cn(
+          "flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-tight",
+          hasInlineReset && "col-span-2",
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate font-medium text-zinc-700" title={title}>
           {label}
         </span>
-        <span className={cn("shrink-0 tabular-nums", tone.text)}>{rightLabel}</span>
+        <span className={cn("shrink-0 whitespace-nowrap text-right font-mono tabular-nums", tone.text)}>
+          {rightLabel}
+        </span>
       </div>
-      <ProgressTrack usedPercent={percent} size="category" tone="consumed" />
-      {window.reset_at ? (
-        <div className="flex justify-end">
-          <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode="rateLimit" />
-        </div>
-      ) : null}
+      {hasInlineReset ? (
+        <>
+          {track}
+          <ResetCountdown
+            resetAt={window.reset_at!}
+            usedPercent={percent}
+            mode="rateLimit"
+            className="justify-self-end"
+          />
+        </>
+      ) : (
+        <>
+          {track}
+          {showReset && window.reset_at ? (
+            <div className="flex justify-end">
+              <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode="rateLimit" />
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -186,7 +266,7 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
   const remainingPct = Math.max(0, 100 - percent);
   const label = localizeWindowLabel(window.label, t);
   const isRateLimit = window.label === "5h" || window.label === "7d";
-  const hasAbsolute = window.total != null && window.total > 0 && !(window.total === 100 && window.used <= 100);
+  const hasAbsolute = isAbsoluteQuotaWindow(window);
   const remainingAbs = hasAbsolute && window.total != null ? Math.max(0, window.total - window.used) : null;
   const tone = pickRateLimitUsageTone(percent);
   let figure: ReactNode = null;
