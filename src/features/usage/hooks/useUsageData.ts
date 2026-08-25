@@ -162,9 +162,14 @@ export function useUsageData() {
           );
 
           const [catR, subsR, cli, pair] = await Promise.all([catalogP, subsP, cliP, summaryP]);
-          if (!catR.ok || !subsR.ok) {
-            const err = !catR.ok ? catR.error : subsR.error;
-            setError(err instanceof Error ? err.message : String(err));
+          // Narrow each result on its own: TS cannot infer `subsR.ok === false`
+          // from the combined `!catR.ok || !subsR.ok` guard.
+          if (!catR.ok) {
+            setError(catR.error instanceof Error ? catR.error.message : String(catR.error));
+            return;
+          }
+          if (!subsR.ok) {
+            setError(subsR.error instanceof Error ? subsR.error.message : String(subsR.error));
             return;
           }
           setCatalog(catR.value);
