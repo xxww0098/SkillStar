@@ -155,7 +155,10 @@ mod tests {
             normalize_bypass(" localhost , 127.0.0.1 "),
             "localhost,127.0.0.1"
         );
-        assert_eq!(normalize_bypass("localhost,,127.0.0.1"), "localhost,127.0.0.1");
+        assert_eq!(
+            normalize_bypass("localhost,,127.0.0.1"),
+            "localhost,127.0.0.1"
+        );
 
         // Entry shapes reqwest accepts are passed through verbatim.
         assert_eq!(normalize_bypass("*"), "*");

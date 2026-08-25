@@ -412,8 +412,7 @@ pub fn worktree_is_clean(repo_path: &Path) -> Result<bool> {
         let mut codes = line.chars();
         let index_code = codes.next().unwrap_or(' ');
         let worktree_code = codes.next().unwrap_or(' ');
-        !matches!(index_code, 'M' | 'T' | 'A' | 'U')
-            && !matches!(worktree_code, 'M' | 'T' | 'U')
+        !matches!(index_code, 'M' | 'T' | 'A' | 'U') && !matches!(worktree_code, 'M' | 'T' | 'U')
     }))
 }
 
@@ -430,6 +429,96 @@ pub fn checkout_in_session(
 ) -> Result<String> {
     let remote = remote_origin_url(repo_path)?;
     run_remote_git(repo_path, args, &remote, session)
+}
+
+/// Read the blob at `<revision>:<path>` through the operation session.
+///
+/// In a partial (`blob:none`) clone an object that was never checked out is
+/// fetched lazily, so this is a remote operation: it must honor the session's
+/// proxy, mirror, and credential policy exactly like a checkout. Blobs larger
+/// than `max_bytes` are refused before being loaded into memory.
+pub fn read_blob_in_session(
+    repo_path: &Path,
+    revision: &str,
+    path: &str,
+    max_bytes: u64,
+    session: &GitOperationSession,
+) -> Result<String> {
+    let spec = format!("{revision}:{path}");
+    let remote = remote_origin_url(repo_path)?;
+    let size: u64 = run_remote_git(repo_path, &["cat-file", "-s", &spec], &remote, session)?
+        .trim()
+        .parse()
+        .with_context(|| format!("git cat-file -s returned no size for '{spec}'"))?;
+    if size > max_bytes {
+        return Err(anyhow!(
+            "'{spec}' is {size} bytes, above the {max_bytes}-byte limit"
+        ));
+    }
+    run_remote_git(repo_path, &["cat-file", "blob", &spec], &remote, session)
+}
+
+/// One `R` record of `git diff -M --name-status` between two revisions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedPath {
+    pub from: String,
+    pub to: String,
+    /// Similarity percentage git assigned (100 = identical content).
+    pub similarity: u8,
+}
+
+/// Renames git detects between `from` and `to`, limited to `pathspecs`.
+///
+/// Similarity needs both blobs, so in a partial clone this may lazy-fetch the
+/// `to` side — hence the session. Keep `pathspecs` tight (the folder that
+/// disappeared plus the folders that appeared) so only those blobs are pulled.
+pub fn diff_renames_in_session(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+    pathspecs: &[&str],
+    session: &GitOperationSession,
+) -> Result<Vec<RenamedPath>> {
+    let remote = remote_origin_url(repo_path)?;
+    let mut args = vec![
+        "diff",
+        "-M",
+        "--name-status",
+        "--diff-filter=R",
+        "-z",
+        from,
+        to,
+        "--",
+    ];
+    args.extend(pathspecs);
+    let output = transport::execute_remote_git(Some(repo_path), &args, &remote, session, true)
+        .map_err(anyhow::Error::from)?;
+    Ok(parse_rename_records(&output.stdout))
+}
+
+/// `-z` output is `R<score>\0<from>\0<to>\0` per rename; anything else
+/// (`A`, `D`, `M` records) carries one path and is skipped.
+fn parse_rename_records(output: &str) -> Vec<RenamedPath> {
+    let mut fields = output.split('\0');
+    let mut renames = Vec::new();
+    while let Some(status) = fields.next() {
+        if status.is_empty() {
+            continue;
+        }
+        let Some(from) = fields.next() else { break };
+        if let Some(score) = status.strip_prefix('R') {
+            let Some(to) = fields.next() else { break };
+            renames.push(RenamedPath {
+                from: from.to_string(),
+                to: to.to_string(),
+                similarity: score.parse().unwrap_or(0).min(100),
+            });
+        } else if status.starts_with('C') {
+            // Copies also carry two paths; not a rename, just keep in step.
+            let _ = fields.next();
+        }
+    }
+    renames
 }
 
 /// Restore a repository to a previously captured commit after a failed update.
@@ -651,11 +740,7 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
     }
 }
 
-fn run_git_with_mirror(
-    repo_path: &Path,
-    args: &[&str],
-    mirror: Option<&str>,
-) -> Result<String> {
+fn run_git_with_mirror(repo_path: &Path, args: &[&str], mirror: Option<&str>) -> Result<String> {
     let mut cmd = command_with_path("git");
     // Mirror args (-c url.*.insteadOf) must precede the subcommand.
     // For local-only operations (rev-parse, reset) this is harmless.
@@ -690,238 +775,4 @@ fn run_remote_git(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn check_update_returns_false_when_up_to_date() -> Result<()> {
-        let temp_root = make_temp_root("up-to-date")?;
-        let source = setup_remote_and_source(&temp_root)?;
-
-        write_and_push_commit(&source, "README.md", "v1", "initial")?;
-        let local = clone_remote_to_local(&temp_root)?;
-
-        assert!(!check_update(&local)?);
-
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn check_update_returns_true_when_remote_has_new_commit() -> Result<()> {
-        let temp_root = make_temp_root("remote-new-commit")?;
-        let source = setup_remote_and_source(&temp_root)?;
-
-        write_and_push_commit(&source, "README.md", "v1", "initial")?;
-        let local = clone_remote_to_local(&temp_root)?;
-        assert!(!check_update(&local)?);
-
-        write_and_push_commit(&source, "README.md", "v2", "second")?;
-
-        assert!(check_update(&local)?);
-
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn find_repo_root_finds_git_ancestor() -> Result<()> {
-        let temp_root = make_temp_root("find-root")?;
-        let repo = temp_root.join("repo");
-        fs::create_dir_all(&repo)?;
-        run_git(&repo, &["init"])?;
-        let nested = repo.join("deep").join("nested");
-        fs::create_dir_all(&nested)?;
-
-        assert_eq!(find_repo_root(&nested), Some(repo.clone()));
-        assert_eq!(find_repo_root(&repo), Some(repo.clone()));
-
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn find_repo_root_returns_none_outside_repo() -> Result<()> {
-        let temp_root = make_temp_root("no-root")?;
-        assert_eq!(find_repo_root(&temp_root), None);
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn compute_tree_hash_on_real_repo() -> Result<()> {
-        let temp_root = make_temp_root("tree-hash")?;
-        let repo = temp_root.join("repo");
-        fs::create_dir_all(&repo)?;
-        run_git(&repo, &["init"])?;
-        fs::write(repo.join("file.txt"), "hello")?;
-        run_git(&repo, &["add", "file.txt"])?;
-        run_git(
-            &repo,
-            &[
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.com",
-                "commit",
-                "-m",
-                "init",
-            ],
-        )?;
-
-        let hash = compute_tree_hash(&repo)?;
-        assert!(!hash.is_empty());
-        assert_eq!(hash.len(), 40);
-
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn compute_tree_hash_fallback_on_non_git_path() -> Result<()> {
-        let temp_root = make_temp_root("no-git")?;
-        let result = compute_tree_hash(&temp_root);
-        assert!(result.is_err());
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn ensure_worktree_checked_out_materializes_files() -> Result<()> {
-        let temp_root = make_temp_root("worktree")?;
-        let source = temp_root.join("source");
-        fs::create_dir_all(&source)?;
-        run_git(&source, &["init"])?;
-        fs::write(source.join("a.txt"), "a")?;
-        run_git(&source, &["add", "a.txt"])?;
-        run_git(
-            &source,
-            &[
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.com",
-                "commit",
-                "-m",
-                "init",
-            ],
-        )?;
-
-        let dest = temp_root.join("dest");
-        run_git(&temp_root, &["clone", source.to_str().unwrap(), "dest"])?;
-
-        // Simulate a historical install with only .git present
-        for entry in fs::read_dir(&dest)? {
-            let entry = entry?;
-            if entry.file_name() != ".git" {
-                if entry.file_type()?.is_dir() {
-                    fs::remove_dir_all(entry.path())?;
-                } else {
-                    fs::remove_file(entry.path())?;
-                }
-            }
-        }
-        assert!(!dest.join("a.txt").exists());
-
-        let fixed = ensure_worktree_checked_out(&dest)?;
-        assert!(fixed);
-        assert!(dest.join("a.txt").exists());
-
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    #[test]
-    fn list_tree_paths_returns_file_names() -> Result<()> {
-        let temp_root = make_temp_root("ls-tree")?;
-        let repo = temp_root.join("repo");
-        fs::create_dir_all(&repo)?;
-        run_git(&repo, &["init"])?;
-        fs::write(repo.join("top.txt"), "top")?;
-        fs::create_dir_all(repo.join("sub"))?;
-        fs::write(repo.join("sub").join("nested.txt"), "nested")?;
-        #[cfg(unix)]
-        fs::write(repo.join("line\nbreak.txt"), "odd")?;
-        run_git(&repo, &["add", "."])?;
-        run_git(
-            &repo,
-            &[
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.com",
-                "commit",
-                "-m",
-                "init",
-            ],
-        )?;
-
-        let paths = list_tree_paths(&repo)?;
-        assert!(paths.contains(&"top.txt".to_string()));
-        assert!(paths.contains(&"sub/nested.txt".to_string()));
-        #[cfg(unix)]
-        assert!(paths.contains(&"line\nbreak.txt".to_string()));
-
-        let _ = fs::remove_dir_all(temp_root);
-        Ok(())
-    }
-
-    fn make_temp_root(suffix: &str) -> Result<PathBuf> {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("Failed to read system time")?
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "skillstar-git-ops-{}-{}-{}",
-            suffix,
-            std::process::id(),
-            stamp
-        ));
-        fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
-        Ok(dir)
-    }
-
-    fn setup_remote_and_source(root: &Path) -> Result<PathBuf> {
-        let source = root.join("source");
-
-        run_git(root, &["init", "--bare", "remote.git"])?;
-        run_git(root, &["clone", "remote.git", "source"])?;
-        Ok(source)
-    }
-
-    fn clone_remote_to_local(root: &Path) -> Result<PathBuf> {
-        let local = root.join("local");
-        run_git(root, &["clone", "remote.git", "local"])?;
-        Ok(local)
-    }
-
-    fn write_and_push_commit(
-        repo_path: &Path,
-        file_name: &str,
-        content: &str,
-        message: &str,
-    ) -> Result<()> {
-        fs::write(repo_path.join(file_name), content)
-            .with_context(|| format!("Failed to write {}", file_name))?;
-
-        run_git(repo_path, &["add", file_name])?;
-        run_git(
-            repo_path,
-            &[
-                "-c",
-                "user.name=Test User",
-                "-c",
-                "user.email=test@example.com",
-                "commit",
-                "-m",
-                message,
-            ],
-        )?;
-        run_git(repo_path, &["push", "-u", "origin", "HEAD"])?;
-
-        Ok(())
-    }
-}
+mod tests;

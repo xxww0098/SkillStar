@@ -100,8 +100,7 @@ fn normalize_mirror_url(raw: &str) -> Option<String> {
     } else {
         format!("{trimmed}/")
     };
-    (with_slash.starts_with("https://") || with_slash.starts_with("http://"))
-        .then_some(with_slash)
+    (with_slash.starts_with("https://") || with_slash.starts_with("http://")).then_some(with_slash)
 }
 
 /// Preferred mirror URL (first candidate), for compatibility with callers

@@ -410,6 +410,31 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Reveal or open a directory in the operating system's default file manager.
+pub fn open_in_file_manager(path: &Path) -> anyhow::Result<()> {
+    let path_str = path.to_string_lossy().to_string();
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("/usr/bin/open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to open folder: {e}"))?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to open folder: {e}"))?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to open folder: {e}"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{atomic_write, create_symlink_or_copy, remove_link_or_copy};
@@ -427,7 +452,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"v\":2}");
 
         let leftovers: Vec<_> = std::fs::read_dir(target.parent().unwrap())
-            .unwrap()            .filter_map(|e| e.ok())
+            .unwrap()
+            .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(

@@ -173,6 +173,11 @@ pub fn patrol_state_path() -> PathBuf {
     state_dir().join("patrol.json")
 }
 
+/// `state/github_auth.json` — GitHub access/refresh credentials.
+pub fn github_auth_path() -> PathBuf {
+    state_dir().join("github_auth.json")
+}
+
 /// `state/projects.json` — registered projects manifest.
 pub fn projects_manifest_path() -> PathBuf {
     state_dir().join("projects.json")

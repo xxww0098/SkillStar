@@ -30,6 +30,36 @@ pub enum SkillType {
     Local,
 }
 
+/// A Skill the tracked source no longer ships at its installed path, found by
+/// an update check (read-only, before any pull).
+///
+/// `kind` is a tag so the shape can grow other upstream events later without
+/// the UI having to guess from which optional fields are set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UpstreamChange {
+    Removed {
+        /// Non-colliding `<name>.local` candidate, so the "keep a local copy"
+        /// exit can be offered without another round trip.
+        suggested_local_name: String,
+        /// The Skill the source appears to have renamed or moved this one
+        /// into, when one was found at the tracked revision.
+        successor: Option<UpstreamSuccessor>,
+    },
+}
+
+/// Where a removed Skill went, as far as the tracked revision tells.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpstreamSuccessor {
+    pub skill_id: String,
+    /// Repository-relative folder at the tracked revision.
+    pub folder_path: String,
+    pub description: String,
+    /// `git diff -M` similarity (0–100) of the two `SKILL.md` files, or `None`
+    /// when the match came from an identical frontmatter `name` instead.
+    pub similarity: Option<u8>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub name: String,
@@ -41,6 +71,10 @@ pub struct Skill {
     pub stars: u32,
     pub installed: bool,
     pub update_available: bool,
+    /// What the tracked source did with this Skill since it was installed,
+    /// when that is something other than an ordinary content update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_change: Option<UpstreamChange>,
     pub last_updated: String,
     pub git_url: String,
     pub tree_hash: Option<String>,
@@ -70,6 +104,7 @@ impl Skill {
             stars,
             installed: false,
             update_available: false,
+            upstream_change: None,
             last_updated: chrono::Utc::now().to_rfc3339(),
             git_url,
             tree_hash: None,
