@@ -71,10 +71,12 @@ mod tests {
 
     #[test]
     fn filters_enabled_global_profiles_only() {
-        let profiles = [profile("codex", true, true),
+        let profiles = [
+            profile("codex", true, true),
             profile("grok", true, false),
             profile("opencode", false, true),
-            profile("claude", true, true)];
+            profile("claude", true, true),
+        ];
         let enabled = profiles
             .iter()
             .filter(|p| p.enabled && p.has_global_skills())

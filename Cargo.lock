@@ -7106,10 +7106,12 @@ name = "skillstar-app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dirs",
  "futures",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -7197,7 +7199,6 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "chrono",
- "keyring",
  "reqwest 0.13.3",
  "serde",
  "serde_json",

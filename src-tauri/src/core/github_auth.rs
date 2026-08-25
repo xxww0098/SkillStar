@@ -11,7 +11,7 @@ use skillstar_git::transport::{
     GitAuthMaterial, GitOperationProgress, GitOperationSession, GitProgressSink,
 };
 use skillstar_github_auth::{
-    GitHubAuthError, GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
+    FileCredentialStore, GitHubAuthError, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
 use skillstar_skills::git_skill::GitSkillFacade;
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 pub type ProductionGitHubAuth =
-    GitHubAuthFacade<ProductionGitHubGateway, KeyringCredentialStore, SystemClock>;
+    GitHubAuthFacade<ProductionGitHubGateway, FileCredentialStore, SystemClock>;
 
 pub struct GitHubAuthState {
     facade: ProductionGitHubAuth,
@@ -40,7 +40,7 @@ impl GitHubAuthState {
     pub fn new() -> Self {
         let facade = GitHubAuthFacade::new(
             ProductionGitHubGateway::from_environment(),
-            KeyringCredentialStore,
+            FileCredentialStore::default(),
             SystemClock,
         );
         Self {

@@ -24,7 +24,7 @@ enum InstallScope {
 }
 
 fn git_skill_facade() -> Result<GitSkillFacade, String> {
-    Ok(GitSkillFacade::from_keyring())
+    Ok(GitSkillFacade::from_file_store())
 }
 
 #[derive(Debug)]
@@ -375,7 +375,11 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) -> Vec<String> {
                 "✓ Adopted {} skill(s) into ~/.skillstar/hub/local.",
                 result.adopted.len()
             );
-            result.adopted.into_iter().map(|adopted| adopted.name).collect()
+            result
+                .adopted
+                .into_iter()
+                .map(|adopted| adopted.name)
+                .collect()
         }
         Err(err) => {
             eprintln!("✗ Adoption failed: {err}");
@@ -624,7 +628,8 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
         };
 
         for name in skill_filter {
-            let target = skillstar_skills::skill_install::find_target_skill(&skills_found, Some(name), name);
+            let target =
+                skillstar_skills::skill_install::find_target_skill(&skills_found, Some(name), name);
             let already_installed = target
                 .map(|s| skills_dir.join(&s.id).exists())
                 .unwrap_or(false);
@@ -662,7 +667,11 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
             return;
         };
 
-        let target = skillstar_skills::skill_install::find_target_skill(&skills_found, explicit_name, &name_hint);
+        let target = skillstar_skills::skill_install::find_target_skill(
+            &skills_found,
+            explicit_name,
+            &name_hint,
+        );
         if let Some(skill) = target {
             println!("  • {} (skill found in repo, would be installed)", skill.id);
         } else {

@@ -205,9 +205,23 @@ pub async fn clean_repo_cache() -> Result<usize, AppError> {
 /// Manually check all cached repos for new uninstalled skills.
 /// Returns the list after filtering out dismissed entries.
 #[tauri::command]
-pub async fn check_new_repo_skills() -> Result<Vec<repo_scanner::RepoNewSkill>, AppError> {
-    let new_skills =
-        tokio::task::spawn_blocking(repo_scanner::detect_new_skills_in_cached_repos).await?;
+pub async fn check_new_repo_skills(
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<Vec<repo_scanner::RepoNewSkill>, AppError> {
+    // Reading an upstream SKILL.md out of a partial clone can lazy-fetch the
+    // blob, so it runs under the same Git session policy as an update check.
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let session = facade.session().clone();
+    let new_skills = tokio::task::spawn_blocking(move || {
+        repo_scanner::detect_new_skills_in_cached_repos(&session)
+    })
+    .await;
+    auth_state.finish_git_operation(&session_id);
+    let new_skills = new_skills?;
 
     let dismissed = dismissed_skills::load_dismissed();
     let dismissed_set: std::collections::HashSet<&str> =

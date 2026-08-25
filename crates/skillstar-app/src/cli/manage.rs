@@ -63,7 +63,7 @@ pub fn cmd_update(name: Option<&str>) {
         return;
     }
 
-    let git = GitSkillFacade::from_keyring();
+    let git = GitSkillFacade::from_file_store();
 
     // Goes through the same batch transaction and divergence contract as the
     // GUI. A terminal can resolve blocked Skills interactively; redirected
@@ -287,9 +287,10 @@ pub fn cmd_remove(opts: RemoveOpts<'_>) {
         if let Ok(dir_entries) = std::fs::read_dir(&hub_dir) {
             for entry in dir_entries.flatten() {
                 if let Some(name) = entry.file_name().to_str()
-                    && is_user_hub_entry(name) {
-                        names.insert(name.to_string());
-                    }
+                    && is_user_hub_entry(name)
+                {
+                    names.insert(name.to_string());
+                }
             }
         }
         names.into_iter().collect()
