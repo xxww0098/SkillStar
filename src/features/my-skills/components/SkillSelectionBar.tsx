@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MOTION_TRANSITION } from "../../../comm/motion";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { selectTargetableAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import { agentIconCls, cn } from "../../../lib/utils";
@@ -99,12 +100,18 @@ export function SkillSelectionBar({
     "hidden sm:inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded border border-current/20 bg-current/5 font-mono text-[9px] leading-none opacity-0 group-hover:opacity-60 transition-opacity duration-150";
 
   return (
+    /**
+     * Takes its full height on the first frame and only fades/slides its own
+     * content in. Animating `height: 0 -> auto` here re-laid out the whole
+     * column on every frame of the reveal, and since each card below is a
+     * `layout="position"` motion element, framer-motion re-measured every card
+     * on every one of those frames — the visible stutter when a card is picked.
+     */
     <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
-      className={`relative z-40 ${linkMenuOpen ? "overflow-visible" : "overflow-hidden"}`}
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={MOTION_TRANSITION.fadeFast}
+      className="relative z-40 overflow-visible"
     >
       {/* Glass bar */}
       <div

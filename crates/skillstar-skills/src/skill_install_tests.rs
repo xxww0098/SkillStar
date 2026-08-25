@@ -147,8 +147,11 @@ mod direct_clone_gate_tests {
 
         // A plain filesystem path defeats the repo-cache scan, forcing the
         // direct-clone fallback path.
-        let error = install_skill(repo.path().to_string_lossy().to_string(), Some("demo".into()))
-            .unwrap_err();
+        let error = install_skill(
+            repo.path().to_string_lossy().to_string(),
+            Some("demo".into()),
+        )
+        .unwrap_err();
         assert!(error.contains("not installable"), "{error}");
         assert!(error.contains("description"), "{error}");
         let hub = skillstar_core::infra::paths::hub_skills_dir();
@@ -180,8 +183,11 @@ mod direct_clone_gate_tests {
             .unwrap();
         assert!(status.success());
 
-        let skill = install_skill(repo.path().to_string_lossy().to_string(), Some("demo".into()))
-            .expect("valid root skill installs via the fallback path");
+        let skill = install_skill(
+            repo.path().to_string_lossy().to_string(),
+            Some("demo".into()),
+        )
+        .expect("valid root skill installs via the fallback path");
         assert_eq!(skill.name, "demo");
     }
 }

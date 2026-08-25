@@ -15,10 +15,21 @@ describe("PublisherAvatar", () => {
 
     fireEvent.error(localImage);
     const remoteImage = screen.getByRole("img", { name: "example-publisher" });
-    expect(remoteImage).toHaveAttribute("src", "https://avatars.githubusercontent.com/example-publisher?size=120");
+    expect(remoteImage).toHaveAttribute("src", "https://github.com/example-publisher.png?size=120");
 
     fireEvent.error(remoteImage);
     expect(screen.queryByRole("img", { name: "example-publisher" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("example-publisher publisher")).toBeInTheDocument();
+  });
+
+  it("reuses a cached fallback so remounts skip the local-then-remote walk", () => {
+    const first = render(<PublisherAvatar name="cached-pub" />);
+    fireEvent.error(screen.getByRole("img", { name: "cached-pub" }));
+    fireEvent.error(screen.getByRole("img", { name: "cached-pub" }));
+    first.unmount();
+
+    render(<PublisherAvatar name="cached-pub" />);
+    expect(screen.queryByRole("img", { name: "cached-pub" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("cached-pub publisher")).toBeInTheDocument();
   });
 });

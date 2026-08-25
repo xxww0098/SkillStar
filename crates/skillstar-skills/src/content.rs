@@ -588,8 +588,7 @@ fn format_sha256(digest: &[u8]) -> String {
 
 pub fn read_raw(name: &str) -> Result<String, AppError> {
     validate_skill_name(name)?;
-    let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
-    let effective_dir = resolve_content_dir(name).unwrap_or_else(|| resolve_skill_dir(&skill_dir));
+    let effective_dir = resolve_content_dir(name).ok_or_else(|| not_found(name))?;
     let skill_md = effective_dir.join("SKILL.md");
     if !skill_md.exists() {
         return Err(not_found(name));
@@ -603,7 +602,8 @@ pub fn delete_local(name: &str) -> Result<(), AppError> {
         crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
             AppError::Other(format!("Unable to lock local Skill deletion: {error}"))
         })?;
-    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
+    crate::skill_mutation::policy()
+        .ensure_skill_mutation_allowed(name)
         .map_err(|error| AppError::Other(error.to_string()))?;
     if !local_skill::is_local_skill(name) {
         return Err(AppError::Other(format!(
@@ -626,7 +626,7 @@ pub fn list_files(name: &str) -> Result<Vec<String>, AppError> {
         return Err(not_found(name));
     }
 
-    let effective_dir = resolve_content_dir(name).unwrap_or_else(|| resolve_skill_dir(&skill_dir));
+    let effective_dir = resolve_content_dir(name).ok_or_else(|| not_found(name))?;
     let mut files = Vec::new();
     collect_files_recursive(&effective_dir, &effective_dir, &mut files);
     files.sort();
@@ -641,7 +641,7 @@ pub fn read(name: &str) -> Result<SkillContent, AppError> {
     }
 
     materialize_managed_worktree(&skill_dir)?;
-    let effective_dir = resolve_content_dir(name).unwrap_or(skill_dir);
+    let effective_dir = resolve_content_dir(name).ok_or_else(|| not_found(name))?;
     let skill_path = effective_dir.join("SKILL.md");
     if !skill_path.exists() {
         return Err(not_found(name));
@@ -657,14 +657,15 @@ pub fn update(name: &str, content: &str) -> Result<(), AppError> {
         crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
             AppError::Other(format!("Unable to lock Skill content update: {error}"))
         })?;
-    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
+    crate::skill_mutation::policy()
+        .ensure_skill_mutation_allowed(name)
         .map_err(|error| AppError::Other(error.to_string()))?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {
         return Err(not_found(name));
     }
 
-    let effective_dir = resolve_content_dir(name).unwrap_or(skill_dir);
+    let effective_dir = resolve_content_dir(name).ok_or_else(|| not_found(name))?;
     let skill_path = effective_dir.join("SKILL.md");
     if !skill_path.exists() {
         return Err(not_found(name));
@@ -674,13 +675,14 @@ pub fn update(name: &str, content: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-pub(crate) fn resolve_content_dir(name: &str) -> Option<PathBuf> {
+pub fn resolve_content_dir(name: &str) -> Option<PathBuf> {
+    validate_skill_name(name).ok()?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {
         return None;
     }
 
-    let effective_dir = resolve_skill_dir(&skill_dir);
+    let effective_dir = canonical_managed_path(&resolve_skill_dir(&skill_dir))?;
     if effective_dir.join("SKILL.md").exists() {
         return Some(effective_dir);
     }
@@ -688,11 +690,51 @@ pub(crate) fn resolve_content_dir(name: &str) -> Option<PathBuf> {
     if let Some(source_folder) = lockfile_source_folder(name) {
         let nested = effective_dir.join(source_folder);
         if nested.join("SKILL.md").exists() {
-            return Some(nested);
+            return canonical_managed_path(&nested);
         }
     }
 
     find_nested_skill_dir_by_name(&effective_dir, name)
+        .and_then(|path| canonical_managed_path(&path))
+}
+
+/// Resolve the local or hub skill directory path for opening or inspecting.
+pub fn resolve_skill_folder(name: &str) -> Option<PathBuf> {
+    validate_skill_name(name).ok()?;
+
+    let local = skillstar_core::infra::paths::local_skills_dir().join(name);
+    if local.exists() {
+        return canonical_managed_path(&local);
+    }
+
+    if let Some(content_dir) = resolve_content_dir(name)
+        && let Some(content_dir) = canonical_managed_path(&content_dir)
+    {
+        return Some(content_dir);
+    }
+
+    let hub = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    hub.exists()
+        .then(|| resolve_skill_dir(&hub))
+        .and_then(|path| canonical_managed_path(&path))
+}
+
+/// Canonicalize a user-opened path and keep it inside SkillStar's managed hub.
+///
+/// Hub entries may be symlinks or junctions into the repo cache, but an
+/// arbitrary link must never turn the native file-manager command into an
+/// escape hatch to an unrelated directory.
+fn canonical_managed_path(path: &Path) -> Option<PathBuf> {
+    let hub_root = std::fs::canonicalize(skillstar_core::infra::paths::hub_root()).ok()?;
+    let target = std::fs::canonicalize(path).ok()?;
+    target.starts_with(hub_root).then_some(target)
+}
+
+/// Open or reveal the resolved skill directory in the native file manager.
+pub fn open_skill_folder(name: &str) -> anyhow::Result<()> {
+    let target = resolve_skill_folder(name)
+        .ok_or_else(|| anyhow::anyhow!("Skill directory not found for '{name}'"))?;
+    skillstar_core::infra::fs_ops::open_in_file_manager(&target)
 }
 
 fn resolve_skill_dir(skill_dir: &Path) -> PathBuf {
@@ -726,6 +768,9 @@ fn find_nested_skill_dir_by_name(root: &Path, skill_name: &str) -> Option<PathBu
 
         for entry in entries.flatten() {
             let path = entry.path();
+            if skillstar_core::infra::fs_ops::is_link(&path) {
+                continue;
+            }
             if !path.is_dir() {
                 continue;
             }
@@ -757,6 +802,9 @@ fn collect_files_recursive(root: &Path, dir: &Path, files: &mut Vec<String>) {
             continue;
         }
 
+        if skillstar_core::infra::fs_ops::is_link(&path) {
+            continue;
+        }
         if path.is_dir() {
             collect_files_recursive(root, &path, files);
         } else if let Ok(relative) = path.strip_prefix(root) {

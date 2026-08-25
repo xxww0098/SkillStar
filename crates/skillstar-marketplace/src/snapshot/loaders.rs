@@ -294,10 +294,16 @@ pub(crate) fn load_publisher_repos_snapshot(
 ) -> Result<Vec<PublisherRepo>> {
     let mut stmt = conn
         .prepare(
-            "SELECT source, repo_name, skill_count, installs, installs_label, url
-             FROM marketplace_repo
-             WHERE publisher_name = ?1
-             ORDER BY installs DESC, repo_name ASC",
+            // The card's skill count is derived from the rows the repo
+            // drill-down renders, so the two can never disagree. The stored
+            // column only fills in for a repo whose skills were never fetched.
+            "SELECT r.source, r.repo_name,
+                    COALESCE(NULLIF((SELECT COUNT(*) FROM marketplace_repo_skill rs
+                                     WHERE rs.source = r.source), 0), r.skill_count),
+                    r.installs, r.installs_label, r.url
+             FROM marketplace_repo r
+             WHERE r.publisher_name = ?1
+             ORDER BY r.installs DESC, r.repo_name ASC",
         )
         .context("Failed to prepare publisher repo snapshot query")?;
 

@@ -5,15 +5,15 @@
 
 use crate::git::transport::GitOperationSession;
 use crate::git::transport::NoopGitProgressSink;
-use skillstar_github_auth::{
-    GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
-};
 use crate::installed_skill::{self, SkillUpdateState};
 use crate::repo_scanner::{self, ScanResult, SkillInstallTarget};
 use crate::skill_update::{
     LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
 };
 use crate::{Skill, local_skill, skill_install, skill_update};
+use skillstar_github_auth::{
+    FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -27,10 +27,10 @@ impl GitSkillFacade {
         Self { session }
     }
 
-    pub fn from_keyring() -> Self {
+    pub fn from_file_store() -> Self {
         let auth = GitHubAuthFacade::new(
             ProductionGitHubGateway::from_environment(),
-            KeyringCredentialStore,
+            FileCredentialStore::default(),
             SystemClock,
         );
         Self::new(GitOperationSession::new(

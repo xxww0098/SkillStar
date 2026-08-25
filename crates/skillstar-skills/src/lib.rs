@@ -40,9 +40,9 @@ pub mod skill_install;
 mod skill_install_removal_tests;
 pub mod skill_pack;
 pub mod skill_update;
+pub mod update_api;
 pub mod update_checker;
 pub mod update_state;
-pub mod update_api;
 pub mod validation;
 
 // Agent / project / deployment / patrol / terminal

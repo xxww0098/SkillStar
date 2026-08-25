@@ -8,7 +8,14 @@ import type { LocalDivergenceResolution } from "../../../types";
 import { AGENTS } from "./appShell";
 import { type DevMockHandlers, getAcpConfigState, iso } from "./shared";
 import { DECKS, DEMO_TUTORIAL_HTML, PROJECTS } from "./skillsData";
-import { devListSkills, devResolveSkillUpdate, devSkillUpdateStates, devUpdateSkills } from "./skillsUpdateStore";
+import {
+  devGhostSkills,
+  devListSkills,
+  devMigrateRenamedSkill,
+  devResolveSkillUpdate,
+  devSkillUpdateStates,
+  devUpdateSkills,
+} from "./skillsUpdateStore";
 
 function demoSkillTutorial(args: Record<string, unknown>) {
   const skillName = String(args.name ?? "pdf-tools");
@@ -37,7 +44,9 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
   resolve_skill_update: (args) =>
     devResolveSkillUpdate(String(args?.name ?? ""), args?.resolution as LocalDivergenceResolution),
   refresh_skill_updates: () => devSkillUpdateStates(),
-  check_new_repo_skills: () => [],
+  migrate_renamed_skill: (args) => devMigrateRenamedSkill(String(args?.name ?? "")),
+  open_skill_folder: () => undefined,
+  check_new_repo_skills: () => devGhostSkills(),
   get_dismissed_new_skills: () => [],
   read_skill_content: (args) => ({
     name: String((args?.name as string) ?? "pdf-tools"),
@@ -81,6 +90,10 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
       },
     ];
   },
+  batch_toggle_skills_for_agent: (args) => ({
+    succeeded: ((args?.skillNames as string[]) ?? []).slice(),
+    failed: [],
+  }),
   list_skill_groups: () => DECKS,
   list_projects: () => PROJECTS,
   get_project_skills: () => ({

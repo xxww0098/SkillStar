@@ -3,9 +3,8 @@
 //! Aligned with the open Agent Skills ecosystem: the [agentskills.io
 //! specification](https://agentskills.io) (name + description required,
 //! description drives agent triggering), the `npx skills` installer (skills
-//! without `name`/`description` are not valid), Anthropic's
-//! `skill-creator/scripts/quick_validate.py` (length caps, no angle brackets
-//! in description), and SkillStar's own install contract.
+//! without `name`/`description` are not valid), and SkillStar's own install
+//! contract.
 //!
 //! The split is deliberately two-tier, mirroring the ecosystem:
 //! - **Blocking** issues make a skill un-installable through the repo install
@@ -23,9 +22,6 @@ use std::path::Path;
 pub const MAX_NAME_CHARS: usize = 64;
 /// Spec cap for `description` (agentskills.io: 1–1024 chars).
 pub const MAX_DESCRIPTION_CHARS: usize = 1024;
-/// `description` must not contain angle brackets (quick_validate.py ban,
-/// prompt-injection guard).
-const FORBIDDEN_DESCRIPTION_CHARS: [char; 2] = ['<', '>'];
 /// Manifest size guard, shared with discovery (single source of truth).
 pub const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
@@ -52,8 +48,6 @@ pub enum FrontmatterIssue {
     DescriptionNotString,
     /// `description` longer than [`MAX_DESCRIPTION_CHARS`].
     DescriptionTooLong,
-    /// `description` contains `<` or `>`.
-    DescriptionHasAngleBrackets,
 }
 
 impl FrontmatterIssue {
@@ -69,7 +63,6 @@ impl FrontmatterIssue {
             Self::MissingDescription => "missing_description",
             Self::DescriptionNotString => "description_not_string",
             Self::DescriptionTooLong => "description_too_long",
-            Self::DescriptionHasAngleBrackets => "description_has_angle_brackets",
         }
     }
 
@@ -83,7 +76,6 @@ impl FrontmatterIssue {
                 | Self::MissingDescription
                 | Self::DescriptionNotString
                 | Self::DescriptionTooLong
-                | Self::DescriptionHasAngleBrackets
         )
     }
 
@@ -94,9 +86,7 @@ impl FrontmatterIssue {
             Self::MissingFrontmatter => "SKILL.md has no YAML frontmatter block",
             Self::MalformedFrontmatter => "SKILL.md frontmatter is not valid YAML",
             Self::MissingName => "frontmatter has no `name` (falls back to the directory name)",
-            Self::NameTooLong => {
-                "frontmatter `name` exceeds 64 characters (Agent Skills spec cap)"
-            }
+            Self::NameTooLong => "frontmatter `name` exceeds 64 characters (Agent Skills spec cap)",
             Self::NameNotKebabCase => {
                 "frontmatter `name` is not kebab-case (lowercase letters, digits, hyphens)"
             }
@@ -106,9 +96,6 @@ impl FrontmatterIssue {
             Self::DescriptionNotString => "frontmatter `description` must be a string",
             Self::DescriptionTooLong => {
                 "frontmatter `description` exceeds 1024 characters (Agent Skills spec cap)"
-            }
-            Self::DescriptionHasAngleBrackets => {
-                "frontmatter `description` must not contain `<` or `>`"
             }
         }
     }
@@ -136,7 +123,6 @@ impl FrontmatterReport {
             FrontmatterIssue::MissingDescription,
             FrontmatterIssue::DescriptionNotString,
             FrontmatterIssue::DescriptionTooLong,
-            FrontmatterIssue::DescriptionHasAngleBrackets,
             FrontmatterIssue::NameTooLong,
             FrontmatterIssue::MalformedFrontmatter,
             FrontmatterIssue::UnreadableManifest,
@@ -246,7 +232,14 @@ pub fn inspect_skill_frontmatter(skill_dir: &Path) -> FrontmatterReport {
         };
     };
 
-    let parsed = parse_frontmatter(&content);
+    inspect_skill_frontmatter_content(&content)
+}
+
+/// Same report as [`inspect_skill_frontmatter`] for a `SKILL.md` that is not
+/// on disk — e.g. read straight out of a Git object for a revision that has
+/// not been checked out yet.
+pub fn inspect_skill_frontmatter_content(content: &str) -> FrontmatterReport {
+    let parsed = parse_frontmatter(content);
     let mut issues = Vec::new();
 
     if !parsed.has_frontmatter {
@@ -277,12 +270,6 @@ pub fn inspect_skill_frontmatter(skill_dir: &Path) -> FrontmatterReport {
         Some(description) => {
             if description.chars().count() > MAX_DESCRIPTION_CHARS {
                 issues.push(FrontmatterIssue::DescriptionTooLong);
-            }
-            if description
-                .chars()
-                .any(|c| FORBIDDEN_DESCRIPTION_CHARS.contains(&c))
-            {
-                issues.push(FrontmatterIssue::DescriptionHasAngleBrackets);
             }
         }
     }
@@ -358,7 +345,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_skill(dir.path(), "---\nname: my-skill\n---\n\n# Body\n");
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report.issues.contains(&FrontmatterIssue::MissingDescription));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::MissingDescription)
+        );
         assert!(!report.is_installable());
         let error = ensure_installable(dir.path()).unwrap_err();
         assert!(error.contains("description"), "{error}");
@@ -369,9 +360,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_skill(dir.path(), "# No frontmatter at all\n");
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report.issues.contains(&FrontmatterIssue::MissingFrontmatter));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::MissingFrontmatter)
+        );
         assert!(report.issues.contains(&FrontmatterIssue::MissingName));
-        assert!(report.issues.contains(&FrontmatterIssue::MissingDescription));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::MissingDescription)
+        );
         assert!(!report.is_installable());
     }
 
@@ -392,12 +391,13 @@ mod tests {
     #[test]
     fn non_string_description_blocks() {
         let dir = tempfile::tempdir().unwrap();
-        write_skill(
-            dir.path(),
-            "---\nname: my-skill\ndescription: 12345\n---\n",
-        );
+        write_skill(dir.path(), "---\nname: my-skill\ndescription: 12345\n---\n");
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report.issues.contains(&FrontmatterIssue::DescriptionNotString));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::DescriptionNotString)
+        );
         assert!(!report.is_installable());
     }
 
@@ -410,22 +410,24 @@ mod tests {
             &format!("---\nname: my-skill\ndescription: {long}\n---\n"),
         );
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report.issues.contains(&FrontmatterIssue::DescriptionTooLong));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::DescriptionTooLong)
+        );
         assert!(!report.is_installable());
     }
 
     #[test]
-    fn angle_brackets_in_description_block() {
+    fn angle_brackets_in_description_are_allowed() {
         let dir = tempfile::tempdir().unwrap();
         write_skill(
             dir.path(),
-            "---\nname: my-skill\ndescription: Runs <script>alert(1)</script>\n---\n",
+            "---\nname: vercel-react-view-transitions\ndescription: Uses the `<ViewTransition>` component\n---\n",
         );
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report
-            .issues
-            .contains(&FrontmatterIssue::DescriptionHasAngleBrackets));
-        assert!(!report.is_installable());
+        assert!(report.issues.is_empty(), "{:?}", report.issues);
+        assert!(report.is_installable());
     }
 
     #[test]
@@ -453,14 +455,13 @@ mod tests {
     #[test]
     fn malformed_yaml_blocks() {
         let dir = tempfile::tempdir().unwrap();
-        write_skill(
-            dir.path(),
-            "---\nname: [unclosed\n---\n",
-        );
+        write_skill(dir.path(), "---\nname: [unclosed\n---\n");
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report
-            .issues
-            .contains(&FrontmatterIssue::MalformedFrontmatter));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::MalformedFrontmatter)
+        );
         assert!(!report.is_installable());
     }
 
@@ -468,9 +469,11 @@ mod tests {
     fn oversized_or_missing_manifest_blocks() {
         let dir = tempfile::tempdir().unwrap();
         let report = inspect_skill_frontmatter(dir.path());
-        assert!(report
-            .issues
-            .contains(&FrontmatterIssue::UnreadableManifest));
+        assert!(
+            report
+                .issues
+                .contains(&FrontmatterIssue::UnreadableManifest)
+        );
         assert!(!report.is_installable());
     }
 

@@ -1,4 +1,3 @@
-use skillstar_agents::{self as agent_profile, AgentProfile};
 use crate::git::ops as git_ops;
 use crate::lockfile::LockEntry;
 pub use crate::update_state::SkillUpdateState;
@@ -8,6 +7,7 @@ use crate::{
     repo_link, update_checker, update_state,
 };
 use anyhow::{Context, Result, anyhow};
+use skillstar_agents::{self as agent_profile, AgentProfile};
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
 };
@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tracing::warn;
+use tracing::{debug, warn};
 
 static SKILL_CACHE: LazyLock<RwLock<Option<Vec<Skill>>>> = LazyLock::new(|| RwLock::new(None));
 
@@ -92,7 +92,10 @@ fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
         match policy.managed_repository_for_skill(&skill.name) {
             // A shared channel owns it: its updates come from the channel flow,
             // never from the generic update badge.
-            Ok(Some(_)) => skill.update_available = false,
+            Ok(Some(_)) => {
+                skill.update_available = false;
+                skill.upstream_change = None;
+            }
             Ok(None) => {}
             // Ownership is unknown — typically a corrupt or future-versioned
             // subscription registry. This used to be folded in with the line
@@ -131,7 +134,7 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     // Ensure every skill in skills-local/ has a hub symlink before scanning
     local_skill::reconcile_hub_symlinks();
 
-    let lock_map = Arc::new(load_lock_map());
+    let lock_map = load_lock_map();
     let profiles: Arc<[AgentProfile]> = Arc::from(agent_profile::list_profiles());
     let skill_dirs = collect_skill_dirs(&skillstar_core::infra::paths::hub_skills_dir(), None)?;
 
@@ -139,36 +142,30 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
         return Ok(Vec::new());
     }
 
-    let semaphore = Arc::new(Semaphore::new(skill_metadata_concurrency_limit()));
+    let work: Vec<(PathBuf, Option<LockEntry>)> = skill_dirs
+        .into_iter()
+        .filter_map(|path| {
+            let name = skill_name_from_path(&path)?;
+            if name.starts_with('.') {
+                return None;
+            }
+            let lock_entry = lock_map.get(&name).cloned();
+            Some((path, lock_entry))
+        })
+        .collect();
+    let built = tokio::task::spawn_blocking(move || {
+        skillstar_core::infra::parallel::map_bounded(
+            work,
+            skillstar_core::infra::parallel::blocking_concurrency_limit(),
+            |(path, lock_entry)| build_installed_skill(path, lock_entry, &profiles),
+        )
+    })
+    .await
+    .map_err(|err| anyhow!("installed-skill task failed: {}", err))?;
 
-    let mut tasks = JoinSet::new();
-    let skill_count = skill_dirs.len();
-
-    for path in skill_dirs {
-        let Some(name) = skill_name_from_path(&path) else {
-            continue;
-        };
-        if name.starts_with('.') {
-            continue;
-        }
-        let lock_entry = lock_map.get(&name).cloned();
-        let profiles = Arc::clone(&profiles);
-        let permit = semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .context("Failed to acquire installed-skill metadata permit")?;
-
-        tasks.spawn_blocking(move || {
-            let _permit = permit;
-            build_installed_skill(path, lock_entry, &profiles)
-        });
-    }
-
-    let mut skills = Vec::with_capacity(skill_count);
-    while let Some(result) = tasks.join_next().await {
-        let skill = result.map_err(|err| anyhow!("installed-skill task failed: {}", err))??;
-        skills.push(skill);
+    let mut skills = Vec::with_capacity(built.len());
+    for skill in built {
+        skills.push(skill?);
     }
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
@@ -233,97 +230,76 @@ pub async fn refresh_skill_updates_in_session(
     // Any failure (private repo, rate limit, network, non-github source)
     // falls back to the git fetch path below, so correctness never depends
     // on the API.
-    let api_remote: Arc<std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree>> =
-        Arc::new(api_prefetch_remote_trees(&skill_dirs).await);
+    let api_remote: Arc<
+        std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree>,
+    > = Arc::new(api_prefetch_remote_trees(&skill_dirs).await);
     let api_ok_roots: std::collections::HashSet<std::path::PathBuf> =
         api_remote.keys().cloned().collect();
 
-    // Pre-fetch: deduplicate repo-cached skills by repo root and fetch each
-    // repo once (skipping repos already answered by the GitHub API). This
-    // avoids N redundant `git fetch` calls when N skills share the same
-    // repository.
-    // Returns the set of repo roots where fetch failed (e.g. shallow file
-    // race). Skills in failed repos will preserve their existing update state.
-    let failed_fetch_roots: Arc<std::collections::HashSet<std::path::PathBuf>> = {
-        let dirs = skill_dirs.clone();
-        let session = session.clone();
-        let skip = api_ok_roots.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let _guard = crate::skill_update::acquire_update_transaction_lock()?;
-            let safe_dirs = dirs
-                .into_iter()
-                .filter(|path| {
-                    skill_name_from_path(path).is_some_and(|name| {
-                        matches!(
-                            crate::skill_mutation::policy().installed_skill_is_mutable(&name, path),
-                            Ok(true)
-                        )
-                    })
-                })
-                .collect::<Vec<_>>();
-            Ok::<_, anyhow::Error>(
-                update_checker::prefetch_unique_repos_in_session_skipping(&safe_dirs, &session, &skip),
-            )
-        })
-        .await
-        .unwrap_or_else(|_| Ok(Default::default()))
-        .unwrap_or_default();
-        Arc::new(result)
-    };
-
-    let semaphore = Arc::new(Semaphore::new(update_check_concurrency_limit()));
-    let mut tasks = JoinSet::new();
-    let skill_count = skill_dirs.len();
-
-    for path in skill_dirs {
-        let Some(name) = skill_name_from_path(&path) else {
-            continue;
+    // Pre-fetch unique repos (skipping GitHub API hits), then compare every
+    // skill locally. One transaction lock covers the whole blocking section so
+    // worker threads are not serialized on the non-reentrant mutex.
+    let session = session.clone();
+    let api_trees = Arc::clone(&api_remote);
+    let skip = api_ok_roots;
+    let states = tokio::task::spawn_blocking(move || {
+        let Ok(_guard) = crate::skill_update::acquire_update_transaction_lock() else {
+            return Ok(Vec::new());
         };
+        let safe_dirs = skill_dirs
+            .iter()
+            .filter(|path| {
+                skill_name_from_path(path).is_some_and(|name| {
+                    matches!(
+                        crate::skill_mutation::policy().installed_skill_is_mutable(&name, path),
+                        Ok(true)
+                    )
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let failed_fetch_roots =
+            update_checker::prefetch_unique_repos_in_session_skipping(&safe_dirs, &session, &skip);
+        let jobs = skill_dirs
+            .into_iter()
+            .filter_map(|path| {
+                let name = skill_name_from_path(&path)?;
+                if local_skill::is_local_skill(&name) {
+                    return None;
+                }
+                Some((name, path))
+            })
+            .collect::<Vec<_>>();
+        Ok::<_, anyhow::Error>(skillstar_core::infra::parallel::map_bounded(
+            jobs,
+            skillstar_core::infra::parallel::blocking_concurrency_limit(),
+            |(name, path)| {
+                if session.is_cancelled()
+                    || !matches!(
+                        crate::skill_mutation::policy().installed_skill_is_mutable(&name, &path),
+                        Ok(true)
+                    )
+                {
+                    return (name, None);
+                }
+                let update_available =
+                    refresh_single_skill_update(&path, &failed_fetch_roots, &api_trees, &session);
+                (name, update_available)
+            },
+        ))
+    })
+    .await
+    .map_err(|err| anyhow!("skill-update task failed: {}", err))??;
 
-        // Skip local skills — they have no git remote to check
-        if local_skill::is_local_skill(&name) {
-            continue;
-        }
-
-        let permit = semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .context("Failed to acquire update-check permit")?;
-
-        let failed_roots = Arc::clone(&failed_fetch_roots);
-        let api_trees = Arc::clone(&api_remote);
-        let session = session.clone();
-        tasks.spawn_blocking(move || {
-            let _permit = permit;
-            let Ok(_guard) = crate::skill_update::acquire_update_transaction_lock() else {
-                return (name, None);
-            };
-            if !matches!(
-                crate::skill_mutation::policy().installed_skill_is_mutable(&name, &path),
-                Ok(true)
-            ) {
-                return (name, None);
-            }
-            let update_available = refresh_single_skill_update(&path, &failed_roots, &api_trees, &session);
-            (name, update_available)
-        });
-    }
-
-    let mut states = Vec::with_capacity(skill_count);
-    while let Some(result) = tasks.join_next().await {
-        let (name, update_available) =
-            result.map_err(|err| anyhow!("skill-update task failed: {}", err))?;
-        // None means "fetch failed, status unknown" — skip so the previous
-        // cached value is preserved and the UI doesn't falsely clear the
-        // update badge.
-        if let Some(available) = update_available {
-            states.push(SkillUpdateState {
-                name,
-                update_available: available,
-            });
-        }
-    }
+    let mut states = states
+        .into_iter()
+        .filter_map(|(name, status)| {
+            // None means "fetch failed, status unknown" — skip so the previous
+            // cached value is preserved and the UI doesn't falsely clear the
+            // update badge.
+            Some(status?.into_state(name))
+        })
+        .collect::<Vec<_>>();
 
     states.sort_by(|left, right| left.name.cmp(&right.name));
     // Skills whose fetch failed were never pushed, so they keep their previous
@@ -436,6 +412,7 @@ fn build_installed_skill(
         stars: 0,
         installed: true,
         update_available: false,
+        upstream_change: None,
         last_updated: lock_entry
             .as_ref()
             .map(|entry| entry.installed_at.clone())
@@ -459,28 +436,23 @@ fn refresh_single_skill_update(
     failed_fetch_roots: &std::collections::HashSet<std::path::PathBuf>,
     api_remote: &std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree>,
     session: &crate::git::transport::GitOperationSession,
-) -> Option<bool> {
+) -> Option<update_checker::UpstreamStatus> {
     // For repo-cached skills, the repo has already been fetched by
     // prefetch_unique_repos (or answered by the GitHub API fast path); only
     // compare local HEAD vs the remote. Returns None when the prefetch failed
     // for this skill's repo.
     if repo_link::is_repo_cached(path) {
         let api = repo_link::repo_root_of(path).and_then(|root| api_remote.get(&root));
-        if let Some(api) = api {
-            return update_checker::check_update_local_with_api_entry(
-                path,
-                failed_fetch_roots,
-                Some(api),
-            );
-        }
-        return update_checker::check_update_local(path, failed_fetch_roots);
+        return update_checker::check_upstream_status(path, failed_fetch_roots, api, session);
     }
     let _ = git_ops::ensure_worktree_checked_out_in_session(path, session);
     // `Err` means the check itself failed (offline, broken .git, git missing) —
     // that is "unknown", not "up to date". Returning `Some(false)` here would
     // let one offline scan overwrite a real badge with `false` and persist it,
     // which is exactly what the repo-cached path above refuses to do.
-    git_ops::check_update_in_session(path, session).ok()
+    git_ops::check_update_in_session(path, session)
+        .ok()
+        .map(update_checker::UpstreamStatus::from_available)
 }
 
 /// One unauthenticated GitHub Trees API call per unique github.com repo,
@@ -512,12 +484,13 @@ async fn api_prefetch_remote_trees(
         let Some(entry) = lock.skills.iter().find(|entry| entry.name == name) else {
             continue;
         };
-        let Some((owner, repo)) =
-            crate::update_api::owner_repo_from_git_url(&entry.git_url)
-        else {
+        let Some((owner, repo)) = crate::update_api::owner_repo_from_git_url(&entry.git_url) else {
             continue;
         };
-        let pinned = entry.git_ref.as_deref().filter(|git_ref| !git_ref.is_empty());
+        let pinned = entry
+            .git_ref
+            .as_deref()
+            .filter(|git_ref| !git_ref.is_empty());
         let Some(git_ref) = crate::update_api::remote_ref_for(&root, pinned) else {
             continue;
         };
@@ -554,7 +527,15 @@ async fn api_prefetch_remote_trees(
     while let Some(joined) = tasks.join_next().await {
         match joined {
             Ok((root, Ok(tree))) => {
-                out.insert(root, tree);
+                if api_tree_is_at_tracked_tip(&root, &tree) {
+                    out.insert(root, tree);
+                } else {
+                    debug!(
+                        target: "update_checker",
+                        path = %root.display(),
+                        "remote tip moved past the tracked ref — taking the git fetch path so it catches up"
+                    );
+                }
             }
             Ok((_root, Err(error))) => {
                 warn!(
@@ -573,6 +554,24 @@ async fn api_prefetch_remote_trees(
         }
     }
     out
+}
+
+/// The API tree may stand in for a fetch only while the remote tip is the
+/// commit the tracked ref already holds. Once upstream moves, the repository
+/// takes the git fetch path instead, so `origin/HEAD` (or the pinned
+/// `FETCH_HEAD`) and everything that reads it — new-skill detection above
+/// all — catch up; comparing against the API alone would leave them stale
+/// forever.
+fn api_tree_is_at_tracked_tip(repo_root: &Path, tree: &crate::update_api::ApiRemoteTree) -> bool {
+    let tracked = if update_checker::configured_git_ref(repo_root).is_some() {
+        "FETCH_HEAD"
+    } else {
+        "origin/HEAD"
+    };
+    let Ok(local_tip) = git_ops::rev_parse(repo_root, &format!("{tracked}^{{commit}}")) else {
+        return false;
+    };
+    tree.subtree_hash(None) == Some(local_tip.as_str())
 }
 
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {
@@ -599,18 +598,6 @@ fn skill_name_from_path(path: &Path) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-fn skill_metadata_concurrency_limit() -> usize {
-    std::thread::available_parallelism()
-        .map(|parallelism| parallelism.get().clamp(2, 8))
-        .unwrap_or(4)
-}
-
-fn update_check_concurrency_limit() -> usize {
-    std::thread::available_parallelism()
-        .map(|parallelism| parallelism.get().clamp(2, 4))
-        .unwrap_or(3)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,6 +612,7 @@ mod tests {
             stars: 0,
             installed: true,
             update_available: false,
+            upstream_change: None,
             last_updated: String::new(),
             git_url: String::new(),
             tree_hash: None,
@@ -653,10 +641,12 @@ mod tests {
                 update_state::SkillUpdateState {
                     name: "recorded-update".to_string(),
                     update_available: true,
+                    upstream_change: None,
                 },
                 update_state::SkillUpdateState {
                     name: "recorded-current".to_string(),
                     update_available: false,
+                    upstream_change: None,
                 },
             ],
         );
@@ -668,6 +658,61 @@ mod tests {
         assert!(
             !skills[1].update_available,
             "unscanned skills stay as built"
+        );
+    }
+}
+
+#[cfg(test)]
+mod api_tip_tests {
+    use super::api_tree_is_at_tracked_tip;
+    use crate::update_api::ApiRemoteTree;
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn api_tree_only_replaces_the_fetch_while_upstream_sits_on_the_tracked_tip() {
+        let temp = tempfile::tempdir().unwrap();
+        let remote = temp.path().join("remote");
+        std::fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "--initial-branch=main"]);
+        git(&remote, &["config", "user.email", "test@example.com"]);
+        git(&remote, &["config", "user.name", "SkillStar Tests"]);
+        std::fs::write(remote.join("SKILL.md"), "v1").unwrap();
+        git(&remote, &["add", "."]);
+        git(&remote, &["commit", "-q", "-m", "v1"]);
+        let clone = temp.path().join("clone");
+        git(
+            temp.path(),
+            &["clone", "-q", remote.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+        let tracked_tip = git(&clone, &["rev-parse", "origin/HEAD"]);
+
+        let at_tip = ApiRemoteTree {
+            folders: HashMap::from([(String::new(), tracked_tip)]),
+        };
+        assert!(api_tree_is_at_tracked_tip(&clone, &at_tip));
+
+        let moved = ApiRemoteTree {
+            folders: HashMap::from([(String::new(), "a".repeat(40))]),
+        };
+        assert!(
+            !api_tree_is_at_tracked_tip(&clone, &moved),
+            "a moved upstream must fall back to the git fetch"
         );
     }
 }

@@ -27,13 +27,15 @@ pub const API_TIMEOUT: Duration = Duration::from_secs(10);
 /// (repos beyond the cap fall back to the git fetch path).
 pub const MAX_API_REPOS_PER_CYCLE: usize = 40;
 /// Concurrency for the API pre-pass.
-pub const API_CONCURRENCY: usize = 4;
+pub const API_CONCURRENCY: usize = 8;
 
 /// Remote subtree hashes for one repository, obtained from the Trees API.
 ///
-/// `folders[""]` holds the root tree SHA; every other key is a directory
-/// path relative to the repo root. Values are git tree object SHAs, i.e. the
-/// same values `git rev-parse <ref>:<folder>` produces locally.
+/// `folders[""]` holds the Trees API top-level `sha`. When the API is
+/// queried with a branch or commit (the production path), GitHub puts that
+/// **commit SHA** in `sha`, not `commit.tree.sha`. Every other key is a
+/// directory path relative to the repo root and a real git tree SHA — the
+/// same value `git rev-parse <ref>:<folder>` produces locally.
 #[derive(Debug, Clone, Default)]
 pub struct ApiRemoteTree {
     pub folders: HashMap<String, String>,
@@ -91,9 +93,10 @@ pub fn owner_repo_from_git_url(url: &str) -> Option<(String, String)> {
 /// locally — the caller falls back to the git fetch path.
 pub fn remote_ref_for(repo_root: &Path, pinned_ref: Option<&str>) -> Option<String> {
     if let Some(pinned) = pinned_ref
-        && !pinned.is_empty() {
-            return Some(pinned.to_string());
-        }
+        && !pinned.is_empty()
+    {
+        return Some(pinned.to_string());
+    }
     let output = skillstar_core::infra::path_env::command_with_path("git")
         .current_dir(repo_root)
         .args(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
@@ -111,8 +114,8 @@ pub fn remote_ref_for(repo_root: &Path, pinned_ref: Option<&str>) -> Option<Stri
 
 /// Parse the recursive Trees API response body into subtree hashes.
 pub fn parse_tree_response(body: &str) -> Result<ApiRemoteTree> {
-    let value: serde_json::Value = serde_json::from_str(body)
-        .with_context(|| "Failed to parse GitHub Trees API response")?;
+    let value: serde_json::Value =
+        serde_json::from_str(body).with_context(|| "Failed to parse GitHub Trees API response")?;
     if value["truncated"].as_bool().unwrap_or(false) {
         return Err(anyhow!(
             "GitHub Trees API response was truncated (repository too large for the fast path)"
@@ -125,13 +128,16 @@ pub fn parse_tree_response(body: &str) -> Result<ApiRemoteTree> {
     if let Some(entries) = value["tree"].as_array() {
         for entry in entries {
             if entry["type"].as_str() == Some("tree")
-                && let (Some(path), Some(sha)) = (entry["path"].as_str(), entry["sha"].as_str()) {
-                    folders.insert(path.to_string(), sha.to_string());
-                }
+                && let (Some(path), Some(sha)) = (entry["path"].as_str(), entry["sha"].as_str())
+            {
+                folders.insert(path.to_string(), sha.to_string());
+            }
         }
     }
     if folders.is_empty() {
-        return Err(anyhow!("GitHub Trees API response contained no tree entries"));
+        return Err(anyhow!(
+            "GitHub Trees API response contained no tree entries"
+        ));
     }
     Ok(ApiRemoteTree { folders })
 }
@@ -154,7 +160,10 @@ pub async fn fetch_remote_subtree_hashes(
     );
     let response = client
         .get(&url)
-        .header("User-Agent", concat!("SkillStar/", env!("CARGO_PKG_VERSION")))
+        .header(
+            "User-Agent",
+            concat!("SkillStar/", env!("CARGO_PKG_VERSION")),
+        )
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -196,14 +205,8 @@ mod tests {
     fn owner_repo_parsing() {
         for (url, expected) in [
             ("https://github.com/owner/repo", Some(("owner", "repo"))),
-            (
-                "https://github.com/owner/repo.git",
-                Some(("owner", "repo")),
-            ),
-            (
-                "https://github.com/owner/repo/",
-                Some(("owner", "repo")),
-            ),
+            ("https://github.com/owner/repo.git", Some(("owner", "repo"))),
+            ("https://github.com/owner/repo/", Some(("owner", "repo"))),
             ("git@github.com:owner/repo.git", Some(("owner", "repo"))),
             (
                 "ssh://git@github.com/owner/repo.git",
@@ -238,6 +241,9 @@ mod tests {
         }"#;
 
         let tree = parse_tree_response(body).expect("valid response parses");
+        // Production queries use a branch/commit, and GitHub then puts that
+        // commit SHA in `sha`. The parser still stores whatever the API
+        // returned at the root; the checker accepts either object type.
         assert_eq!(tree.subtree_hash(None), Some("root-tree-sha"));
         assert_eq!(tree.subtree_hash(Some("skills")), Some("skills-tree"));
         assert_eq!(tree.subtree_hash(Some("skills/demo")), Some("demo-tree"));

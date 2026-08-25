@@ -24,7 +24,7 @@ use crate::git::transport::{
     GitAuthMaterial, GitOperationSession, NoopGitProgressSink, execute_remote_command,
 };
 use skillstar_github_auth::{
-    GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
+    FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
 
 use super::gh_rest::{GhRestClient, GhRestErrorCode};
@@ -206,12 +206,14 @@ fn is_git_installed() -> bool {
 pub(super) enum PublishIdentity {
     /// No stored credential, or GitHub rejected the one we have.
     SignedOut,
-    SignedIn { login: String },
+    SignedIn {
+        login: String,
+    },
 }
 
 /// Resolve the publishing identity from the stored GitHub App credential.
 fn publish_identity() -> PublishIdentity {
-    let Ok(client) = GhRestClient::from_keyring() else {
+    let Ok(client) = GhRestClient::from_file_store() else {
         return PublishIdentity::SignedOut;
     };
     match client.current_login() {
@@ -254,7 +256,7 @@ pub fn check_status() -> GhStatus {
 fn publish_session() -> GitOperationSession {
     let auth = GitHubAuthFacade::new(
         ProductionGitHubGateway::from_environment(),
-        KeyringCredentialStore,
+        FileCredentialStore::default(),
         SystemClock,
     );
     GitOperationSession::new(
@@ -287,7 +289,7 @@ pub struct UserRepo {
 /// organization repository can finally be chosen as a publish target — the
 /// previous `gh repo list <login>` call could only ever see personal ones.
 pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
-    let client = GhRestClient::from_keyring()?;
+    let client = GhRestClient::from_file_store()?;
     Ok(client
         .list_repositories(limit)?
         .into_iter()
@@ -306,7 +308,7 @@ pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
 /// picks a repo. Skills always publish under `skills/<name>`, so we list that
 /// directory rather than the repo root.
 pub fn inspect_repo_folders(repo_full_name: &str) -> Result<Vec<String>> {
-    let client = GhRestClient::from_keyring()?;
+    let client = GhRestClient::from_file_store()?;
     Ok(client.list_skill_folders(repo_full_name)?)
 }
 
@@ -457,14 +459,14 @@ pub fn publish_skill(
     // the library is installed, so refusing those made "share the Skill I use"
     // impossible — but they mean different things afterwards, which
     // `publish_copies_content` decides.
-    let (skill_source_resolved, was_link) =
-        if skillstar_core::infra::fs_ops::is_link(&skill_source) {
-            let resolved = skillstar_core::infra::fs_ops::read_link_resolved(&skill_source)
-                .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
-            (resolved, true)
-        } else {
-            (skill_source.clone(), false)
-        };
+    let (skill_source_resolved, was_link) = if skillstar_core::infra::fs_ops::is_link(&skill_source)
+    {
+        let resolved = skillstar_core::infra::fs_ops::read_link_resolved(&skill_source)
+            .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
+        (resolved, true)
+    } else {
+        (skill_source.clone(), false)
+    };
     let publishes_a_copy = publish_copies_content(
         was_link,
         &skill_source_resolved,
@@ -514,7 +516,7 @@ pub fn publish_skill(
         (url.to_string(), url.to_string(), cache, false)
     } else {
         // Create a new repo
-        let client = GhRestClient::from_keyring()?;
+        let client = GhRestClient::from_file_store()?;
         let cache = get_publish_cache_dir(repo_name);
         std::fs::create_dir_all(&cache)?;
 
@@ -604,7 +606,8 @@ pub fn publish_skill(
     // updates — with nothing in the UI saying so.
     if lockfile_mode.should_commit() && !publishes_a_copy {
         use crate::lockfile::{LockEntry, Lockfile};
-        let tree_hash = skillstar_git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
+        let tree_hash =
+            skillstar_git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
         let _lock = crate::lockfile::get_mutex()
             .lock()
             .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;

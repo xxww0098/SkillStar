@@ -19,11 +19,8 @@ pub trait SkillMutationPolicy: Send + Sync + 'static {
     fn ensure_repository_mutation_allowed(&self, repository_url: &str) -> anyhow::Result<()>;
 
     /// Whether the installed skill at `skill_path` may be touched generically.
-    fn installed_skill_is_mutable(
-        &self,
-        skill_id: &str,
-        skill_path: &Path,
-    ) -> anyhow::Result<bool>;
+    fn installed_skill_is_mutable(&self, skill_id: &str, skill_path: &Path)
+    -> anyhow::Result<bool>;
 
     /// Repository id of the channel managing `skill_id`, if any.
     fn managed_repository_for_skill(&self, skill_id: &str) -> anyhow::Result<Option<u64>>;

@@ -56,6 +56,9 @@ interface SkillGridProps {
   onInstall?: (url: string, name: string) => void;
   /** Optional: omitted in read-only scopes (e.g. remote) where SkillCard suppresses update. */
   onUpdate?: (name: string) => void;
+  onResolveRemoved?: (name: string) => void;
+  onMigrate?: (name: string) => void;
+  migratingNames?: Set<string>;
   onVisibleCountChange?: (visible: number, total: number) => void;
   scrollParentRef?: RefObject<HTMLElement | null>;
   emptyMessage?: string;
@@ -73,6 +76,8 @@ interface SkillGridProps {
   onDismissGhost?: (repoSource: string, skillId: string) => void;
   onDismissGhostRepo?: (repoSource: string) => void;
   onGhostClick?: (skill: RepoNewSkill) => void;
+  /** A ghost an installed Skill was renamed into: migrate instead of installing afresh. */
+  onMigrateGhost?: (skill: RepoNewSkill) => void;
   getRemoteCardProps?: (skill: Skill) => SkillCardRemoteContext | undefined;
 }
 
@@ -151,6 +156,9 @@ export function SkillGrid({
   onSkillClick,
   onInstall,
   onUpdate,
+  onResolveRemoved,
+  onMigrate,
+  migratingNames,
   onVisibleCountChange,
   scrollParentRef,
   emptyMessage,
@@ -168,6 +176,7 @@ export function SkillGrid({
   onDismissGhost,
   onDismissGhostRepo,
   onGhostClick,
+  onMigrateGhost,
   getRemoteCardProps,
 }: SkillGridProps) {
   const { t } = useTranslation();
@@ -221,6 +230,17 @@ export function SkillGrid({
     onVisibleCountChange?.(skills.length, skills.length);
   }, [onVisibleCountChange, skills.length]);
 
+  // Card height is content-driven and differs per caller, so the
+  // `content-visibility` skip in index.css cannot reserve space from a
+  // constant. Measure the first card (the same rule exempts it from skipping)
+  // and publish it; off-screen cards inherit it as their intrinsic size.
+  useLayoutEffect(() => {
+    const element = containerRef.current;
+    const first = element?.querySelector<HTMLElement>(":scope > .ss-cards-grid > *, :scope > .ss-cards-list > *");
+    if (!element || !first) return;
+    element.style.setProperty("--ss-card-h", `${Math.round(first.getBoundingClientRect().height)}px`);
+  }, [viewMode, containerWidth, skills.length]);
+
   const ghostGroups = useMemo(() => {
     if (!ghostSkills || ghostSkills.length === 0) return [];
     const groups: Map<string, RepoNewSkill[]> = new Map();
@@ -260,6 +280,9 @@ export function SkillGrid({
       onClick={onSkillClick}
       onInstall={onInstall}
       onUpdate={onUpdate}
+      onResolveRemoved={onResolveRemoved}
+      onMigrate={onMigrate}
+      migrating={migratingNames?.has(skill.name)}
       compact={viewMode === "list"}
       selectable={selectable}
       selected={selectedSkills?.has(skill.name)}
@@ -312,6 +335,7 @@ export function SkillGrid({
                       onInstall={onInstallGhost}
                       onDismiss={onDismissGhost}
                       onClick={onGhostClick}
+                      onMigrate={onMigrateGhost}
                     />
                   ))}
                 </AnimatePresence>

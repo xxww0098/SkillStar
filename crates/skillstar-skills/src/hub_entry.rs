@@ -23,11 +23,8 @@ use skillstar_core::infra::fs_ops;
 /// scan_install`, `skill_pack` and `skill_bundle`. Every one of them is a
 /// dot-prefixed name, so `is_managed_hub_entry` stays correct even if a new
 /// prefix is added without updating this list; the list only drives sweeping.
-pub const STAGING_PREFIXES: [&str; 3] = [
-    ".skillstar-remove-",
-    ".skillstar-install-",
-    ".importing-",
-];
+pub const STAGING_PREFIXES: [&str; 3] =
+    [".skillstar-remove-", ".skillstar-install-", ".importing-"];
 
 /// True when a hub directory entry is a real installed Skill rather than
 /// staging residue or a dotfile.

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { Skill } from "../../../types";
+import type { AgentProfile, Skill } from "../../../types";
 import { SkillCard } from "./SkillCard";
 
 const MOCK_SKILL: Skill = {
@@ -13,19 +13,47 @@ const MOCK_SKILL: Skill = {
   last_updated: "2026-08-01T00:00:00Z",
   git_url: "https://github.com/owner/test-skill",
   tree_hash: "hash123",
-  category: "None",
+  category: "Hot",
   author: "owner",
   topics: [],
   source: "owner/repo",
+  rank: 3,
+};
+
+const LIBRARY_PROFILE: AgentProfile = {
+  id: "claude",
+  display_name: "Claude",
+  icon: "claude",
+  global_skills_dir: "~/.claude/skills",
+  project_skills_rel: ".claude/skills",
+  installed: true,
+  enabled: true,
+  synced_count: 0,
 };
 
 describe("SkillCard", () => {
-  it("renders installed state when installed and no updates", () => {
+  it("omits the idle installed mark in the library — every card is already installed", () => {
+    render(
+      <SkillCard
+        skill={MOCK_SKILL}
+        onClick={vi.fn()}
+        selectable
+        profiles={[LIBRARY_PROFILE]}
+        onToggleAgent={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("已安装")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hot")).not.toBeInTheDocument();
+    expect(screen.queryByText("#3")).not.toBeInTheDocument();
+  });
+
+  it("shows a quiet installed mark on the marketplace, not a celebration chip", () => {
     render(<SkillCard skill={MOCK_SKILL} onClick={vi.fn()} />);
-    const installedBadge = screen.getByText("已安装");
-    expect(installedBadge).toBeInTheDocument();
-    expect(installedBadge.className).toContain("bg-emerald-500/10");
-    expect(installedBadge.className).toContain("text-emerald-700");
+    const installed = screen.getByText("已安装");
+    expect(installed).toBeInTheDocument();
+    expect(installed.className).not.toContain("bg-emerald");
+    expect(screen.getByText("#3")).toBeInTheDocument();
+    expect(screen.queryByText("Hot")).not.toBeInTheDocument();
   });
 
   it("renders install button when not installed", () => {
@@ -37,15 +65,13 @@ describe("SkillCard", () => {
     expect(onInstall).toHaveBeenCalledWith(MOCK_SKILL.git_url, MOCK_SKILL.name);
   });
 
-  it("renders prominent update button when update is available and triggers onUpdate", () => {
+  it("renders an update action when an update is available and triggers onUpdate", () => {
     const onUpdate = vi.fn();
     render(<SkillCard skill={{ ...MOCK_SKILL, update_available: true }} onClick={vi.fn()} onUpdate={onUpdate} />);
 
     const updateBtn = screen.getByRole("button", { name: /更新/i });
     expect(updateBtn).toBeInTheDocument();
-    // Verify amber styling class is present
-    expect(updateBtn.className).toContain("bg-amber-500/12");
-    expect(updateBtn.className).toContain("text-amber-700");
+    expect(updateBtn.className).toContain("text-amber-300");
 
     fireEvent.click(updateBtn);
     expect(onUpdate).toHaveBeenCalledWith(MOCK_SKILL.name);
@@ -57,5 +83,99 @@ describe("SkillCard", () => {
     const updatingBtn = screen.getByRole("button", { name: /更新中/i });
     expect(updatingBtn).toBeInTheDocument();
     expect(updatingBtn).toBeDisabled();
+  });
+
+  it("toggles selection when clicking the avatar checkbox", () => {
+    const onSelect = vi.fn();
+    render(<SkillCard skill={MOCK_SKILL} onClick={vi.fn()} selectable onSelect={onSelect} />);
+
+    const selectBtn = screen.getByRole("button", { name: MOCK_SKILL.name });
+    expect(selectBtn).toBeInTheDocument();
+    fireEvent.click(selectBtn);
+    expect(onSelect).toHaveBeenCalledWith(MOCK_SKILL.name);
+  });
+
+  it("renders a clickable local badge for local skills that calls open_skill_folder", async () => {
+    const localSkill: Skill = {
+      ...MOCK_SKILL,
+      name: "my-local-skill",
+      skill_type: "local",
+      source: undefined,
+    };
+    render(<SkillCard skill={localSkill} onClick={vi.fn()} />);
+
+    const localBtn = screen.getByRole("button", { name: /本地/i });
+    expect(localBtn).toBeInTheDocument();
+    fireEvent.click(localBtn);
+  });
+
+  it("offers a one-step migration when upstream renamed the skill", () => {
+    const onMigrate = vi.fn();
+    const onUpdate = vi.fn();
+    render(
+      <SkillCard
+        skill={{
+          ...MOCK_SKILL,
+          update_available: true,
+          upstream_change: {
+            kind: "removed",
+            suggested_local_name: "test-skill.local",
+            successor: {
+              skill_id: "test-skill-spec",
+              folder_path: "skills/engineering/test-skill-spec",
+              description: "Renamed",
+              similarity: 91,
+            },
+          },
+        }}
+        onClick={vi.fn()}
+        onUpdate={onUpdate}
+        onMigrate={onMigrate}
+        selectable
+        profiles={[LIBRARY_PROFILE]}
+        onToggleAgent={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("迁移到 test-skill-spec"));
+    expect(onMigrate).toHaveBeenCalledWith("test-skill");
+    // A renamed skill cannot be "updated" in place — the rename wins the slot.
+    expect(screen.queryByText("更新")).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("offers the removal exits when upstream dropped the skill outright", () => {
+    const onResolveRemoved = vi.fn();
+    render(
+      <SkillCard
+        skill={{
+          ...MOCK_SKILL,
+          upstream_change: { kind: "removed", suggested_local_name: "test-skill.local", successor: null },
+        }}
+        onClick={vi.fn()}
+        onResolveRemoved={onResolveRemoved}
+        selectable
+        profiles={[LIBRARY_PROFILE]}
+        onToggleAgent={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("上游已移除"));
+    expect(onResolveRemoved).toHaveBeenCalledWith("test-skill");
+  });
+
+  it("keeps local skills free of upstream chips", () => {
+    render(
+      <SkillCard
+        skill={{
+          ...MOCK_SKILL,
+          skill_type: "local",
+          upstream_change: { kind: "removed", suggested_local_name: "x", successor: null },
+        }}
+        onClick={vi.fn()}
+        selectable
+        profiles={[LIBRARY_PROFILE]}
+        onToggleAgent={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("上游已移除")).not.toBeInTheDocument();
   });
 });

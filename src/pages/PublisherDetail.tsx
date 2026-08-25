@@ -2,15 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tauriInvoke } from "../lib/ipc";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowUp, ChevronRight, ExternalLink, Folder, GitBranch, Package, Search } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DetailPanel } from "../components/layout/DetailPanel";
 import { PageToolbar } from "../components/layout/PageToolbar";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ExternalAnchor } from "../components/ui/ExternalAnchor";
 import { Input } from "../components/ui/input";
-import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { SkillGridSkeleton } from "../components/ui/Skeleton";
 import { marketplaceKeys } from "../features/marketplace/api/keys";
 import { PublisherAvatar } from "../components/shared/PublisherAvatar";
@@ -19,12 +19,6 @@ import { useSkills } from "../features/my-skills/hooks/useSkills";
 import type { LocalFirstResult } from "../types";
 import { cn, formatInstalls } from "../lib/utils";
 import type { OfficialPublisher, PublisherRepo, Skill } from "../types";
-
-const DetailPanel = lazy(() =>
-  import("../components/layout/DetailPanel").then((mod) => ({
-    default: mod.DetailPanel,
-  })),
-);
 
 interface PublisherDetailProps {
   publisher: OfficialPublisher;
@@ -125,10 +119,15 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
       tauriInvoke("sync_marketplace_scope", {
         scope: `repo_skills:${repoSource}`,
       }),
-    onSuccess: () =>
+    onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: marketplaceKeys.repoSkills(repoSource ?? ""),
-      }),
+      });
+      // The repo card's skill count is derived from the rows this sync rewrote.
+      queryClient.invalidateQueries({
+        queryKey: marketplaceKeys.publisherRepos(publisher.name),
+      });
+    },
   });
 
   useEffect(() => {
@@ -525,6 +524,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                     columnStrategy="auto-fill"
                     minColumnWidth={320}
                     onSkillClick={handleSkillClick}
+                    selectedSkills={selectedSkill ? new Set([selectedSkill.name]) : undefined}
                     onInstall={handleInstall}
                     installingNames={installingNames}
                     onUpdate={handleUpdate}
@@ -555,22 +555,14 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
       </div>
 
       {selectedSkill && (
-        <Suspense
-          fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-full max-w-md h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
-              <LoadingLogo size="sm" />
-            </div>
-          }
-        >
-          <DetailPanel
-            skill={selectedSkill}
-            onClose={() => setSelectedSkill(null)}
-            onInstall={handleInstall}
-            onUpdate={handleUpdate}
-            onUninstall={handleUninstall}
-            onReinstall={handleReinstall}
-          />
-        </Suspense>
+        <DetailPanel
+          skill={selectedSkill}
+          onClose={() => setSelectedSkill(null)}
+          onInstall={handleInstall}
+          onUpdate={handleUpdate}
+          onUninstall={handleUninstall}
+          onReinstall={handleReinstall}
+        />
       )}
     </div>
   );

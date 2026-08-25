@@ -51,7 +51,7 @@ pub fn scan_skills_in_repo_at(
     annotate_discovered_skills(discovered, repo_url)
 }
 
-fn annotate_discovered_skills(
+pub(super) fn annotate_discovered_skills(
     mut discovered: Vec<DiscoveredSkill>,
     repo_url: &str,
 ) -> Vec<DiscoveredSkill> {

@@ -26,6 +26,7 @@ import {
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
 import { selectTargetableAgentProfiles, supportsGlobalDeploy } from "../lib/agentProfiles";
+import { tauriInvoke } from "../lib/ipc";
 import { cn } from "../lib/utils";
 import type { SkillCardDeck } from "../types";
 
@@ -38,7 +39,7 @@ interface SkillCardsProps {
 export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPreSelected }: SkillCardsProps) {
   const { t } = useTranslation();
   const { groups, loading, createGroup, updateGroup, deleteGroup, duplicateGroup } = useSkillCards();
-  const { skills, installSkill, toggleSkillForAgent } = useSkills();
+  const { skills, installSkill } = useSkills();
   const { profiles } = useAgentProfiles();
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -99,7 +100,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
     async (
       group: SkillCardDeck,
       agentId: string,
-      agentName: string,
+      _agentName: string,
       installedSkillNames: string[],
       allLinked: boolean,
     ) => {
@@ -109,23 +110,32 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
 
       setLinkState((prev) => ({ ...prev, [key]: "linking" }));
       try {
-        let failed = 0;
-        for (const skillName of installedSkillNames) {
-          try {
-            await toggleSkillForAgent(skillName, agentId, !allLinked, agentName);
-          } catch (e) {
-            failed += 1;
-            if (import.meta.env.DEV) console.error("Batch toggle failed for skill:", skillName, e);
-          }
-        }
+        const report = await tauriInvoke("batch_toggle_skills_for_agent", {
+          skillNames: installedSkillNames,
+          agentId,
+          enable: !allLinked,
+          operationId: crypto.randomUUID(),
+        });
+        const failed = report.failed.length;
 
         if (failed > 0) {
+          const visibleFailures = report.failed
+            .slice(0, 3)
+            .map((failure) => `${failure.skill_name}: ${failure.error}`)
+            .join("\n");
+          const hiddenCount = Math.max(0, failed - 3);
           toast.error(
-            t("skillCards.batchTogglePartialFailed", {
-              failed,
-              total: installedSkillNames.length,
-              defaultValue: "Failed to update {{failed}}/{{total}} links",
-            }),
+            [
+              t("skillCards.batchTogglePartialFailed", {
+                failed,
+                total: installedSkillNames.length,
+                defaultValue: "Couldn't update {{failed}}/{{total}} links",
+              }),
+              visibleFailures,
+              hiddenCount > 0 ? `+${hiddenCount}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n"),
           );
         }
 
@@ -150,7 +160,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
         });
       }
     },
-    [linkState, toggleSkillForAgent, updateGroup, t],
+    [linkState, updateGroup, t],
   );
 
   const handleDelete = async (id: string) => {
@@ -203,8 +213,8 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
         }
         filters={
           !loading ? (
-            <div className="h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-background/50 shadow-sm text-xs font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
-              <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+            <div className="h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-background/60 shadow-2xs text-xs font-bold text-foreground tabular-nums whitespace-nowrap shrink-0">
+              <Layers className="w-3.5 h-3.5 text-primary" />
               {filteredGroups.length}
             </div>
           ) : undefined

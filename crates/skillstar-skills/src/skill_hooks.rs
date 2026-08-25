@@ -85,12 +85,16 @@ static HOOK_TARGETS: &[HookTarget] = &[
 
 impl HookTarget {
     fn path(&self, home: &Path) -> PathBuf {
-        self.rel_path.iter().fold(home.to_path_buf(), |acc, s| acc.join(s))
+        self.rel_path
+            .iter()
+            .fold(home.to_path_buf(), |acc, s| acc.join(s))
     }
 }
 
 fn hook_target(agent_id: &str) -> Option<&'static HookTarget> {
-    HOOK_TARGETS.iter().find(|target| target.agent_id == agent_id)
+    HOOK_TARGETS
+        .iter()
+        .find(|target| target.agent_id == agent_id)
 }
 
 /// Agents this module can write hooks for, in table order.
@@ -478,7 +482,11 @@ mod tests {
     fn rejects_a_command_that_cannot_be_traced_back() {
         let temp = TempDir::new().unwrap();
         let home = home_with_codex(temp.path());
-        let skill = skill_with_hooks(temp.path(), "demo", one_hook("PreToolUse", "npx impeccable"));
+        let skill = skill_with_hooks(
+            temp.path(),
+            "demo",
+            one_hook("PreToolUse", "npx impeccable"),
+        );
 
         let err = sync_skill_hooks(&home, &skill, "codex").unwrap_err();
         assert!(
@@ -545,7 +553,10 @@ mod tests {
 
         assert_eq!(remove_skill_hooks(&home, &mine, "codex").unwrap(), 1);
 
-        let entries = events_of(&home, "codex")["PreToolUse"].as_array().unwrap().clone();
+        let entries = events_of(&home, "codex")["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .clone();
         assert_eq!(entries.len(), 1);
         assert!(
             entries[0]["hooks"][0]["command"]
@@ -562,7 +573,11 @@ mod tests {
         let home = home_with_codex(temp.path());
         // `foo` is a prefix of `foobar`; a substring test would let `foo` own —
         // and on uninstall delete — `foobar`'s hook.
-        let foo = skill_with_hooks(temp.path(), "foo", one_hook("PreToolUse", "${SKILL_DIR}/a.sh"));
+        let foo = skill_with_hooks(
+            temp.path(),
+            "foo",
+            one_hook("PreToolUse", "${SKILL_DIR}/a.sh"),
+        );
         let foobar = skill_with_hooks(
             temp.path(),
             "foobar",

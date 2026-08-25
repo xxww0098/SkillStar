@@ -3,6 +3,27 @@
 
 export type SkillCategory = "Hot" | "Popular" | "Rising" | "New" | "None";
 
+/** Where a removed Skill went at the tracked revision, when detection found it. */
+export interface UpstreamSuccessor {
+  skill_id: string;
+  /** Repository-relative folder at the tracked revision. */
+  folder_path: string;
+  description: string;
+  /** `git diff -M` similarity (0–100) of the two SKILL.md files, or null when
+   *  the match came from an identical frontmatter `name` instead. */
+  similarity: number | null;
+}
+
+/** The tracked source no longer ships this Skill at its installed path — found
+ *  by an update check, before any pull. `update_available` stays a separate,
+ *  content-only signal. */
+export type UpstreamChange = {
+  kind: "removed";
+  /** Non-colliding `<name>.local` candidate for the "keep a local copy" exit. */
+  suggested_local_name: string;
+  successor: UpstreamSuccessor | null;
+};
+
 export interface Skill {
   name: string;
   description: string;
@@ -12,6 +33,7 @@ export interface Skill {
   stars: number;
   installed: boolean;
   update_available: boolean;
+  upstream_change?: UpstreamChange | null;
   last_updated: string;
   git_url: string;
   tree_hash: string | null;
@@ -28,6 +50,20 @@ export interface Skill {
 export interface SkillUpdateState {
   name: string;
   update_available: boolean;
+  upstream_change?: UpstreamChange | null;
+}
+
+/** Return type of `migrate_renamed_skill`: the successor was installed and
+ *  the old entry removed; anything that did not carry over is listed. */
+export interface SkillMigrationReport {
+  installed: string;
+  removed: string;
+  agents_relinked: string[];
+  agent_failures: string[];
+  projects_relinked: string[];
+  project_failures: string[];
+  /** The old entry is still installed; the next check reports it as removed. */
+  removal_failure: string | null;
 }
 
 /** Return type of the `update_skill` command. When a repo-cached skill is

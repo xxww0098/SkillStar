@@ -114,6 +114,7 @@ fn new_skill_from_install(
         stars: 0,
         installed: true,
         update_available: false,
+        upstream_change: None,
         last_updated: chrono::Utc::now().to_rfc3339(),
         git_url,
         tree_hash,
@@ -297,7 +298,8 @@ fn install_skill_in_session_locked(
     let name_hint = derive_name_hint(&url, name.as_deref());
     crate::content::validate_skill_name(&name_hint)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
-    crate::skill_mutation::policy().ensure_skill_mutation_allowed(&name_hint)
+    crate::skill_mutation::policy()
+        .ensure_skill_mutation_allowed(&name_hint)
         .map_err(|error| error.to_string())?;
     ensure_generic_repository_input_mutable(&url)?;
 
@@ -402,13 +404,15 @@ pub fn install_skills_batch_in_session(
     }
 
     for name in names {
-        crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
+        crate::skill_mutation::policy()
+            .ensure_skill_mutation_allowed(name)
             .map_err(|error| error.to_string())?;
     }
 
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
-    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&parsed.repo_url)
+    crate::skill_mutation::policy()
+        .ensure_repository_mutation_allowed(&parsed.repo_url)
         .map_err(|error| error.to_string())?;
     let skills_dir = paths::hub_skills_dir();
     let (repo_url, _source, repo_dir, skills_found) =
@@ -528,7 +532,8 @@ pub fn install_skill_pack_in_session(
         .map_err(|error| format!("Unable to lock Skill pack installation: {error}"))?;
     let parsed = crate::source_resolver::Source::parse(&url)
         .map_err(|error| format!("Invalid source: {error}"))?;
-    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&parsed.repo_url)
+    crate::skill_mutation::policy()
+        .ensure_repository_mutation_allowed(&parsed.repo_url)
         .map_err(|error| error.to_string())?;
     let (_repo_url, source, repo_dir, _) =
         fetch_repo_scanned_detailed_in_session(&url, false, session)
@@ -549,7 +554,8 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
         .map_err(|error| format!("Unable to lock Skill removal: {error}"))?;
-    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
+    crate::skill_mutation::policy()
+        .ensure_skill_mutation_allowed(name)
         .map_err(|error| error.to_string())?;
     uninstall_skill_locked_unchecked(name)
 }
@@ -572,17 +578,17 @@ pub fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String> {
 
 fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
     if let Ok(source) = crate::source_resolver::Source::parse(input) {
-        return crate::skill_mutation::policy().ensure_repository_mutation_allowed(
-            &source.repo_url,
-        )
-        .map_err(|error| error.to_string());
+        return crate::skill_mutation::policy()
+            .ensure_repository_mutation_allowed(&source.repo_url)
+            .map_err(|error| error.to_string());
     }
     let path = std::path::Path::new(input);
     if !path.exists() {
         return Ok(());
     }
     if let Ok(remote) = crate::git::ops::remote_origin_url(path) {
-        crate::skill_mutation::policy().ensure_repository_mutation_allowed(&remote)
+        crate::skill_mutation::policy()
+            .ensure_repository_mutation_allowed(&remote)
             .map_err(|error| error.to_string())?;
     }
     let canonical = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
@@ -594,7 +600,8 @@ fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
             .and_then(|root| std::fs::canonicalize(root).ok())
             .is_some_and(|root| root == canonical);
         if same_checkout {
-            crate::skill_mutation::policy().ensure_skill_mutation_allowed(&entry.name)
+            crate::skill_mutation::policy()
+                .ensure_skill_mutation_allowed(&entry.name)
                 .map_err(|error| error.to_string())?;
         }
     }

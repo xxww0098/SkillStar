@@ -8,6 +8,7 @@ import type {
   Skill,
   SkillCardDeck,
   SkillContent,
+  SkillMigrationReport,
   SkillTutorial,
   SkillUpdateReport,
   SkillUpdateState,
@@ -28,6 +29,8 @@ export interface SkillCommands {
     args: { name: string; resolution: LocalDivergenceResolution };
     result: ResolveSkillUpdateResult;
   };
+  migrate_renamed_skill: { args: { name: string }; result: SkillMigrationReport };
+  open_skill_folder: { args: { name: string }; result: void };
 
   // Skill content (editor)
   read_skill_file_raw: { args: { name: string }; result: string };

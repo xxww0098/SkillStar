@@ -45,16 +45,18 @@ pub async fn install_skill(
         let skill = facade.install_skill(url, name)?;
         // Match the CLI: after a successful hub install, deploy the skill to
         // every Agent the user has enabled in Settings.
-        skillstar_app::global_deploy::deploy_to_enabled_global_agents(std::slice::from_ref(&skill.name))
-            .map_err(|error| {
-                tracing::warn!(
-                    target: "cmd",
-                    skill = %skill.name,
-                    error = %error,
-                    "hub install succeeded but Agent deployment failed"
-                );
-                error
-            })?;
+        skillstar_app::global_deploy::deploy_to_enabled_global_agents(std::slice::from_ref(
+            &skill.name,
+        ))
+        .map_err(|error| {
+            tracing::warn!(
+                target: "cmd",
+                skill = %skill.name,
+                error = %error,
+                "hub install succeeded but Agent deployment failed"
+            );
+            error
+        })?;
         Ok(skill)
     })
     .await;
@@ -148,5 +150,36 @@ pub async fn resolve_skill_update(
     auth_state.finish_git_operation(&session_id);
     result
         .map_err(|e| AppError::Other(format!("update resolution task panicked: {e}")))?
+        .map_err(AppError::Anyhow)
+}
+
+#[tauri::command]
+pub async fn open_skill_folder(name: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || {
+        skillstar_skills::content::open_skill_folder(&name).map_err(AppError::Anyhow)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("open_skill_folder task panicked: {e}")))?
+}
+
+/// Install the successor an update check recorded for `name`, carry its
+/// Agent/Project deployments over, and remove `name`.
+#[tauri::command]
+pub async fn migrate_renamed_skill(
+    name: String,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<skillstar_app::skill_migration::SkillMigrationReport, AppError> {
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        skillstar_app::skill_migration::migrate_renamed_skill(&name, &facade)
+    })
+    .await;
+    auth_state.finish_git_operation(&session_id);
+    result
+        .map_err(|e| AppError::Other(format!("skill migration task panicked: {e}")))?
         .map_err(AppError::Anyhow)
 }

@@ -27,6 +27,9 @@ export interface RepoNewSkill {
   skill_id: string;
   folder_path: string;
   description: string;
+  /** Installed Skill the last update check identified this one as the
+   *  successor of — the source renamed or moved it here. */
+  renamed_from?: string | null;
 }
 
 export interface MarketplaceResult {

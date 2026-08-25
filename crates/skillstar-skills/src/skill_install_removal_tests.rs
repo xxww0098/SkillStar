@@ -96,4 +96,3 @@ fn hub_removal_restores_content_and_lockfile_when_metadata_commit_fails() {
             .any(|entry| entry.name == "writer")
     );
 }
-

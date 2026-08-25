@@ -3,7 +3,7 @@
 //! Publishing used to shell out to the `gh` CLI, which authenticated as the
 //! machine's global GitHub CLI login and inherited the process proxy
 //! environment. Both are single-sourced here instead: every request carries the
-//! SkillStar GitHub App credential from the system keyring (D-013) and is built
+//! SkillStar GitHub App credential from the private app data file (D-013) and is built
 //! on the shared proxy-aware client, so the publish path cannot drift away from
 //! the identity and proxy policy the rest of the app obeys.
 //!
@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use skillstar_github_auth::{
-    GitHubAuthError, GitHubAuthErrorCode, GitHubAuthFacade, KeyringCredentialStore,
+    FileCredentialStore, GitHubAuthError, GitHubAuthErrorCode, GitHubAuthFacade,
     ProductionGitHubGateway, SystemClock,
 };
 
@@ -278,15 +278,15 @@ impl<T: GhRestTransport> fmt::Debug for GhRestClient<T> {
 }
 
 impl GhRestClient<ReqwestGhRestTransport> {
-    /// Bind to the GitHub App credential stored in the system keyring.
+    /// Bind to the GitHub App credential stored in the private app data file.
     ///
     /// Fails when the user has not signed in to SkillStar or the access token
     /// has expired, which is what makes publishing follow the same identity as
     /// every other remote operation.
-    pub fn from_keyring() -> Result<Self, GhRestError> {
+    pub fn from_file_store() -> Result<Self, GhRestError> {
         let auth = GitHubAuthFacade::new(
             ProductionGitHubGateway::from_environment(),
-            KeyringCredentialStore,
+            FileCredentialStore::default(),
             SystemClock,
         );
         let credential = auth.api_credential().map_err(GhRestError::from_auth)?;
@@ -389,9 +389,9 @@ impl<T: GhRestTransport> GhRestClient<T> {
             // fast-forward.
             "auto_init": false,
         });
-        let response = self
-            .transport
-            .post_json(&format!("{API_ROOT}/user/repos"), &self.token, &body)?;
+        let response =
+            self.transport
+                .post_json(&format!("{API_ROOT}/user/repos"), &self.token, &body)?;
         ensure_status(&response, &[201])?;
         let created: RepositoryResponse = parse_json(&response.body)?;
         if created.clone_url.trim().is_empty() {
@@ -486,10 +486,7 @@ fn classify_status(response: &GhRestResponse) -> GhRestError {
             GhRestErrorCode::Unauthorized,
             "GitHub could not find that repository for the signed-in user; install or authorize the SkillStar GitHub App for it, then retry",
         ),
-        422 => GhRestError::new(
-            GhRestErrorCode::Rejected,
-            rejection_message(&response.body),
-        ),
+        422 => GhRestError::new(GhRestErrorCode::Rejected, rejection_message(&response.body)),
         _ => GhRestError::new(
             GhRestErrorCode::Protocol,
             format!("GitHub answered the publish request with status {status}"),

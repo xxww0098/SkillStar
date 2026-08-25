@@ -17,9 +17,11 @@ import type {
   LocalDivergenceResolution,
   RepoNewSkill,
   Skill,
+  SkillMigrationReport,
   SkillUpdateReport,
   SkillUpdateRunReport,
   SkillUpdateState,
+  UpstreamChange,
 } from "../../../types";
 import i18n from "../../../i18n";
 import { useLocalDivergenceResolver } from "./useLocalDivergenceResolver";
@@ -27,9 +29,29 @@ import { useLocalDivergenceResolver } from "./useLocalDivergenceResolver";
 const SKILLS_QUERY_KEY = ["skills"] as const;
 const SKILL_UPDATES_QUERY_KEY = ["skills", "updates"] as const;
 const GHOST_SKILLS_QUERY_KEY = ["skills", "ghost"] as const;
+const EMPTY_GHOST_SKILLS: RepoNewSkill[] = [];
 const SKILL_LIST_REFRESH_INTERVAL_MS = 30_000;
 const SKILL_UPDATE_REFRESH_FOREGROUND_MS = 5 * 60 * 1000;
 const SKILL_UPDATE_REFRESH_BACKGROUND_MS = 15 * 60 * 1000;
+
+function sameUpstreamChange(
+  left: UpstreamChange | null | undefined,
+  right: UpstreamChange | null | undefined,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+/** Merge one check result into a cached Skill, keeping identity when nothing changed. */
+function withUpdateState(
+  skill: Skill,
+  state: { update_available: boolean; upstream_change?: UpstreamChange | null },
+): Skill {
+  const upstream = state.upstream_change ?? null;
+  if (skill.update_available === state.update_available && sameUpstreamChange(skill.upstream_change, upstream)) {
+    return skill;
+  }
+  return { ...skill, update_available: state.update_available, upstream_change: upstream };
+}
 
 function getSkillUpdateRefreshIntervalMs(): number {
   const isVisible = typeof document === "undefined" ? true : !document.hidden;
@@ -59,7 +81,7 @@ function useSkillsState() {
     (updates: SkillUpdateState[]) => {
       if (updates.length === 0) return;
 
-      const updatesByName = new Map(updates.map((update) => [update.name, update.update_available]));
+      const updatesByName = new Map(updates.map((update) => [update.name, update]));
 
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.length === 0) return prev;
@@ -69,12 +91,11 @@ function useSkillsState() {
         // response can no longer re-assert a badge the update just cleared.
         let changed = false;
         const next = prev.map((skill) => {
-          const updateAvailable = updatesByName.get(skill.name);
-          if (updateAvailable === undefined || updateAvailable === skill.update_available) {
-            return skill;
-          }
-          changed = true;
-          return { ...skill, update_available: updateAvailable };
+          const update = updatesByName.get(skill.name);
+          if (!update) return skill;
+          const merged = withUpdateState(skill, update);
+          if (merged !== skill) changed = true;
+          return merged;
         });
 
         return changed ? next : prev;
@@ -107,6 +128,31 @@ function useSkillsState() {
     }
   }, [updatesQuery.data, applyUpdateStates]);
 
+  // ── Ghost Skills (new repo skills) ────────────────────────────────
+
+  const ghostQuery = useQuery({
+    queryKey: GHOST_SKILLS_QUERY_KEY,
+    queryFn: () => tauriInvoke("check_new_repo_skills"),
+    enabled: skills.length > 0,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+
+  const ghostSkills = ghostQuery.data ?? EMPTY_GHOST_SKILLS;
+  const refetchGhosts = ghostQuery.refetch;
+
+  // The update check is what fetches each repository's tracked ref, so Skills
+  // added upstream only become visible once it has run. Re-read them after
+  // every completed check — mount, the periodic interval, and the toolbar
+  // refresh. Keyed on the timestamp, not the data: an unchanged result keeps
+  // its identity and would never retrigger.
+  const updatesCheckedAt = updatesQuery.dataUpdatedAt;
+  useEffect(() => {
+    if (updatesCheckedAt > 0) {
+      void refetchGhosts();
+    }
+  }, [updatesCheckedAt, refetchGhosts]);
+
   const refetchSkills = skillsQuery.refetch;
   const refetchUpdates = updatesQuery.refetch;
 
@@ -122,8 +168,7 @@ function useSkillsState() {
           });
         }
 
-        await refetchSkills();
-        await refetchUpdates();
+        await Promise.all([refetchSkills(), refetchUpdates()]);
       } catch (e) {
         setRefreshError(String(e));
       }
@@ -149,25 +194,18 @@ function useSkillsState() {
   // Rust backend emits "patrol://skill-checked"; merge into query cache. The
   // payload is the state patrol recorded, not the raw check result — a finding
   // overtaken by an update mid-check has already lost to it backend-side.
-  useTauriEvent<{ name: string; update_available: boolean }>("patrol://skill-checked", ({ name, update_available }) => {
-    queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
-      const skill = prev.find((item) => item.name === name);
-      if (!skill || skill.update_available === update_available) return prev;
-      return prev.map((item) => (item.name === name ? { ...item, update_available } : item));
-    });
-  });
-
-  // ── Ghost Skills (new repo skills) ────────────────────────────────
-
-  const ghostQuery = useQuery({
-    queryKey: GHOST_SKILLS_QUERY_KEY,
-    queryFn: () => tauriInvoke("check_new_repo_skills"),
-    enabled: skills.length > 0,
-    refetchOnWindowFocus: false,
-    staleTime: 60_000,
-  });
-
-  const ghostSkills = ghostQuery.data ?? [];
+  useTauriEvent<{ name: string; update_available: boolean; upstream_change?: UpstreamChange | null }>(
+    "patrol://skill-checked",
+    (state) => {
+      queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
+        const skill = prev.find((item) => item.name === state.name);
+        if (!skill) return prev;
+        const merged = withUpdateState(skill, state);
+        if (merged === skill) return prev;
+        return prev.map((item) => (item.name === state.name ? merged : item));
+      });
+    },
+  );
 
   // Listen for patrol event to update ghost skills
   useTauriEvent<RepoNewSkill[]>("patrol://new-skills-detected", (payload) => {
@@ -196,11 +234,11 @@ function useSkillsState() {
         await tauriInvoke("dismiss_new_skill", { key });
       } catch (e) {
         // Revert on failure: re-fetch
-        void ghostQuery.refetch();
+        void refetchGhosts();
         throw new Error(String(e));
       }
     },
-    [queryClient, ghostQuery],
+    [queryClient, refetchGhosts],
   );
 
   const dismissGhostRepo = useCallback(
@@ -218,11 +256,11 @@ function useSkillsState() {
       try {
         await tauriInvoke("dismiss_new_skills_batch", { keys });
       } catch (e) {
-        void ghostQuery.refetch();
+        void refetchGhosts();
         throw new Error(String(e));
       }
     },
-    [queryClient, ghostQuery],
+    [queryClient, refetchGhosts],
   );
 
   const installMutation = useMutation({
@@ -238,10 +276,12 @@ function useSkillsState() {
     },
   });
 
+  const installSkillMutate = installMutation.mutateAsync;
+
   const installGhostSkill = useCallback(
     async (skill: RepoNewSkill) => {
       try {
-        const installed = await installMutation.mutateAsync({ url: skill.repo_url, name: skill.skill_id });
+        const installed = await installSkillMutate({ url: skill.repo_url, name: skill.skill_id });
         // Remove from ghost list after successful install
         queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, (prev = []) =>
           prev.filter((s) => s.skill_id !== skill.skill_id || s.repo_source !== skill.repo_source),
@@ -251,7 +291,7 @@ function useSkillsState() {
         throw new Error(String(e));
       }
     },
-    [installMutation, queryClient],
+    [installSkillMutate, queryClient],
   );
 
   const uninstallMutation = useMutation({
@@ -260,16 +300,17 @@ function useSkillsState() {
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => prev.filter((item) => item.name !== name));
     },
   });
+  const uninstallSkillMutate = uninstallMutation.mutateAsync;
 
   const installSkill = useCallback(
     async (url: string, name?: string) => {
       try {
-        return await installMutation.mutateAsync({ url, name });
+        return await installSkillMutate({ url, name });
       } catch (e) {
         throw new Error(String(e));
       }
     },
-    [installMutation],
+    [installSkillMutate],
   );
 
   /** Re-scan one repository at full depth and reinstall every discovered Skill. */
@@ -304,12 +345,12 @@ function useSkillsState() {
   const uninstallSkill = useCallback(
     async (name: string) => {
       try {
-        await uninstallMutation.mutateAsync(name);
+        await uninstallSkillMutate(name);
       } catch (e) {
         throw new Error(String(e));
       }
     },
-    [uninstallMutation],
+    [uninstallSkillMutate],
   );
 
   /** The one way to update skills. The backend collapses names sharing a
@@ -451,6 +492,55 @@ function useSkillsState() {
       };
     },
     [resolveBlocked, updateSkills],
+  );
+
+  /**
+   * Upstream dropped this Skill and nothing replaced it: offer the same two
+   * exits the blocked-update dialog offers — keep a local copy or remove —
+   * now, instead of waiting for a sibling's pull to run into it. Resolves to
+   * null when the Skill carries no such change (nothing to ask).
+   */
+  const resolveRemovedSkill = useCallback(
+    async (name: string) => {
+      const skill = queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY)?.find((item) => item.name === name);
+      const change = skill?.upstream_change;
+      if (!change || change.kind !== "removed") return null;
+      const outcome = await resolveBlocked([
+        { name, reason: "source_removed", suggested_local_name: change.suggested_local_name, error: null },
+      ]);
+      // The resolution may have pulled the sibling that took over the checkout.
+      if (outcome.updated.length > 0 || outcome.uninstalled.length > 0) void refetchUpdates();
+      return outcome;
+    },
+    [queryClient, refetchUpdates, resolveBlocked],
+  );
+
+  const [pendingMigrationNames, setPendingMigrationNames] = useState<Set<string>>(new Set());
+
+  /** Install the successor upstream renamed `name` into, carry its
+   *  deployments over, and drop the old entry — one backend use case. */
+  const migrateRenamedSkill = useCallback(
+    async (name: string): Promise<SkillMigrationReport> => {
+      setPendingMigrationNames((prev) => new Set(prev).add(name));
+      try {
+        const report = await tauriInvoke("migrate_renamed_skill", { name });
+        queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, (prev = []) =>
+          prev.filter((ghost) => ghost.skill_id !== report.installed && ghost.renamed_from !== name),
+        );
+        await queryClient.refetchQueries({ queryKey: SKILLS_QUERY_KEY, exact: true });
+        void refetchUpdates();
+        return report;
+      } catch (e) {
+        throw new Error(String(e));
+      } finally {
+        setPendingMigrationNames((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
+      }
+    },
+    [queryClient, refetchUpdates],
   );
 
   /** Single-skill convenience over {@link runSkillUpdate}. Every page uses this
@@ -607,6 +697,9 @@ function useSkillsState() {
       updateSkills,
       runSkillUpdate,
       resolveSkillUpdate,
+      resolveRemovedSkill,
+      migrateRenamedSkill,
+      pendingMigrationNames,
       toggleSkillForAgent,
       batchRemoveSkillsFromAllAgents,
       pendingAgentToggleKeys,
@@ -632,6 +725,9 @@ function useSkillsState() {
       updateSkills,
       runSkillUpdate,
       resolveSkillUpdate,
+      resolveRemovedSkill,
+      migrateRenamedSkill,
+      pendingMigrationNames,
       toggleSkillForAgent,
       batchRemoveSkillsFromAllAgents,
       pendingAgentToggleKeys,
@@ -658,4 +754,15 @@ export function useSkills() {
     throw new Error("useSkills must be used within a SkillsProvider");
   }
   return context;
+}
+
+/** Sidebar chrome only needs two numbers; keep App off the full skills list.
+ *  The amber count is "needs attention": content updates plus Skills their
+ *  source removed or renamed. The toolbar's "update N" stays content-only. */
+export function useSkillBadgeCounts() {
+  const { ghostSkills, skills } = useSkills();
+  return {
+    ghostSkillCount: ghostSkills.length,
+    pendingUpdatesCount: skills.filter((skill) => skill.update_available || skill.upstream_change).length,
+  };
 }

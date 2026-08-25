@@ -110,7 +110,15 @@ export function SelectSkillsPhase({
           {filteredSkills.map((skill) => {
             const isInstalled = skill.already_installed;
             const isSelected = selectedSkills.has(skill.id);
-            const hasFrontmatterIssues = (skill.frontmatter_issues ?? []).length > 0;
+            const frontmatterIssues = skill.frontmatter_issues ?? [];
+            const hasFrontmatterIssues = frontmatterIssues.length > 0;
+            const frontmatterIssueHint = frontmatterIssues
+              .map((issue) =>
+                t(`githubImportModal.frontmatterIssues.${issue}`, {
+                  defaultValue: issue,
+                }),
+              )
+              .join("; ");
             const uniqueKey = skill.folder_path || skill.id;
 
             return (
@@ -179,10 +187,10 @@ export function SelectSkillsPhase({
                       {hasFrontmatterIssues && (
                         <span
                           className="text-micro px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 font-medium shrink-0 flex items-center gap-1"
-                          title={`${t("githubImportModal.invalidSkill")}: ${t("githubImportModal.invalidSkillHint")}`}
+                          title={frontmatterIssueHint}
                         >
                           <TriangleAlert className="w-2.5 h-2.5" />
-                          {t("githubImportModal.invalidSkill")}
+                          {t("githubImportModal.metadataIssue")}
                         </span>
                       )}
                     </div>
