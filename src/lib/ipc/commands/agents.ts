@@ -18,8 +18,16 @@ export interface BatchSkillToggleFailure {
   error: string;
 }
 
+export interface BatchSkillToggleSkip {
+  skill_name: string;
+  code: string;
+  path: string;
+  reason: string;
+}
+
 export interface BatchSkillToggleReport {
   succeeded: string[];
+  skipped: BatchSkillToggleSkip[];
   failed: BatchSkillToggleFailure[];
 }
 

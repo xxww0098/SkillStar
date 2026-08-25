@@ -92,6 +92,7 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
   },
   batch_toggle_skills_for_agent: (args) => ({
     succeeded: ((args?.skillNames as string[]) ?? []).slice(),
+    skipped: [],
     failed: [],
   }),
   list_skill_groups: () => DECKS,

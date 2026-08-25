@@ -1,6 +1,6 @@
 use skillstar_agents as agent_profile;
 use skillstar_core::infra::error::AppError;
-use skillstar_skills::deployment;
+use skillstar_skills::deployment::{self, ToggleSkillOutcome};
 use skillstar_skills::installed_skill;
 use std::time::Instant;
 
@@ -11,22 +11,40 @@ pub struct BatchSkillToggleFailure {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchSkillToggleSkip {
+    pub skill_name: String,
+    pub code: String,
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BatchSkillToggleReport {
     pub succeeded: Vec<String>,
+    pub skipped: Vec<BatchSkillToggleSkip>,
     pub failed: Vec<BatchSkillToggleFailure>,
 }
 
 fn run_batch_toggle<F>(skill_names: &[String], mut toggle: F) -> BatchSkillToggleReport
 where
-    F: FnMut(&str) -> anyhow::Result<()>,
+    F: FnMut(&str) -> anyhow::Result<ToggleSkillOutcome>,
 {
     let mut report = BatchSkillToggleReport {
         succeeded: Vec::with_capacity(skill_names.len()),
+        skipped: Vec::new(),
         failed: Vec::new(),
     };
     for skill_name in skill_names {
         match toggle(skill_name) {
-            Ok(()) => report.succeeded.push(skill_name.clone()),
+            Ok(ToggleSkillOutcome::Applied) => report.succeeded.push(skill_name.clone()),
+            Ok(ToggleSkillOutcome::Skipped { code, path, reason }) => {
+                report.skipped.push(BatchSkillToggleSkip {
+                    skill_name: skill_name.clone(),
+                    code,
+                    path,
+                    reason,
+                })
+            }
             Err(error) => report.failed.push(BatchSkillToggleFailure {
                 skill_name: skill_name.clone(),
                 error: format!("{error:#}"),
@@ -105,6 +123,19 @@ pub async fn batch_toggle_skills_for_agent(
     let report = run_batch_toggle(&skill_names, |skill_name| {
         deployment::toggle_skill_for_agent(skill_name, &agent_id, enable)
     });
+    for skip in &report.skipped {
+        tracing::warn!(
+            target: "cmd::agents",
+            operation = "batch_toggle_skills_for_agent",
+            phase = "item_skipped",
+            operation_id,
+            agent_id,
+            enable,
+            skill_name = %skip.skill_name,
+            reason = %skip.reason,
+            "batch Agent skill toggle item skipped"
+        );
+    }
     for failure in &report.failed {
         tracing::warn!(
             target: "cmd::agents",
@@ -123,18 +154,24 @@ pub async fn batch_toggle_skills_for_agent(
         installed_skill::invalidate_cache();
     }
     let succeeded = report.succeeded.len();
+    let skipped = report.skipped.len();
     let failed = report.failed.len();
     let elapsed_ms = started.elapsed().as_millis() as u64;
     if failed == 0 {
         tracing::info!(
             target: "cmd::agents",
             operation = "batch_toggle_skills_for_agent",
-            phase = "completed",
+            phase = if skipped == 0 {
+                "completed"
+            } else {
+                "completed_with_skips"
+            },
             operation_id,
             agent_id,
             enable,
             total,
             succeeded,
+            skipped,
             failed,
             elapsed_ms,
             "batch Agent skill toggle completed"
@@ -149,6 +186,7 @@ pub async fn batch_toggle_skills_for_agent(
             enable,
             total,
             succeeded,
+            skipped,
             failed,
             elapsed_ms,
             "batch Agent skill toggle completed with failures"
@@ -209,23 +247,40 @@ pub async fn remove_custom_agent_profile(id: String) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::run_batch_toggle;
+    use skillstar_skills::deployment::ToggleSkillOutcome;
 
     #[test]
-    fn batch_toggle_report_keeps_successes_and_names_each_failure() {
-        let skills = vec!["writing-shape".to_string(), "research".to_string()];
+    fn batch_toggle_report_separates_skips_from_failures() {
+        let skills = vec![
+            "writing-shape".to_string(),
+            "research".to_string(),
+            "missing".to_string(),
+        ];
         let report = run_batch_toggle(&skills, |name| {
-            if name == "research" {
-                anyhow::bail!(
-                    "Cannot link Skill 'research': target '/tmp/skills/research' is an unmanaged real directory"
-                );
-            }
-            Ok(())
+            match name {
+            "research" => Ok(ToggleSkillOutcome::Skipped {
+                code: "unmanaged_real_directory".into(),
+                path: "/tmp/skills/research".into(),
+                reason: "name collision: target '/tmp/skills/research' is an unmanaged real directory (left in place)"
+                    .into(),
+            }),
+            "missing" => anyhow::bail!("Skill 'missing' not found in hub"),
+            _ => Ok(ToggleSkillOutcome::Applied),
+        }
         });
 
         assert_eq!(report.succeeded, vec!["writing-shape"]);
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].skill_name, "research");
+        assert_eq!(report.skipped[0].code, "unmanaged_real_directory");
+        assert_eq!(report.skipped[0].path, "/tmp/skills/research");
+        assert!(
+            report.skipped[0]
+                .reason
+                .contains("unmanaged real directory")
+        );
         assert_eq!(report.failed.len(), 1);
-        assert_eq!(report.failed[0].skill_name, "research");
-        assert!(report.failed[0].error.contains("unmanaged real directory"));
-        assert!(report.failed[0].error.contains("/tmp/skills/research"));
+        assert_eq!(report.failed[0].skill_name, "missing");
+        assert!(report.failed[0].error.contains("not found in hub"));
     }
 }

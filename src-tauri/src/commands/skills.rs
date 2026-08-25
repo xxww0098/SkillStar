@@ -90,13 +90,29 @@ pub async fn toggle_skill_for_agent(
         enable,
         "toggle_skill_for_agent called"
     );
-    deployment::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| {
+    let outcome = deployment::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| {
         tracing::error!(target: "cmd", skill_name, agent_id, enable, error = %e, "toggle_skill_for_agent failed");
         AppError::Anyhow(e)
     })?;
-    installed_skill::invalidate_cache();
-    tracing::info!(target: "cmd", skill_name, agent_id, enable, "toggle_skill_for_agent completed");
-    Ok(())
+    match outcome {
+        deployment::ToggleSkillOutcome::Applied => {
+            installed_skill::invalidate_cache();
+            tracing::info!(target: "cmd", skill_name, agent_id, enable, "toggle_skill_for_agent completed");
+            Ok(())
+        }
+        deployment::ToggleSkillOutcome::Skipped { reason, path, .. } => {
+            tracing::warn!(
+                target: "cmd",
+                skill_name,
+                agent_id,
+                enable,
+                reason = %reason,
+                path = %path,
+                "toggle_skill_for_agent skipped due to name collision"
+            );
+            Err(AppError::Other(reason))
+        }
+    }
 }
 
 #[tauri::command]

@@ -931,7 +931,11 @@
     "installAllFailedDetailed": "无法安装：{{names}}",
     "noMatching": "没有匹配的卡组",
     "tryDifferent": "请尝试其他搜索词。",
-    "batchTogglePartialFailed": "有 {{failed}}/{{total}} 个链接未能更新"
+    "batchTogglePartialFailed": "有 {{failed}}/{{total}} 个链接未能更新",
+    "batchTogglePartialSkipped": "已跳过 {{skipped}}/{{total}} 个链接：目标名称已被占用，未覆盖原目录",
+    "batchToggleMoreSkipped": "另有 {{count}} 个，详见后台日志",
+    "skipUnmanagedDirItem": "{{name}}：{{path}} 是未经 SkillStar 管理的真实目录，已保留原内容",
+    "openOccupiedFolder": "打开该目录"
   },
   "projects": {
     "title": "项目",

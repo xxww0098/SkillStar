@@ -18,6 +18,7 @@ import { PublishSkillModal } from "../features/my-skills/components/PublishSkill
 import { useDeckInstallProgress } from "../features/my-skills/hooks/useDeckInstallProgress";
 import { useSkillCards } from "../features/my-skills/hooks/useSkillCards";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
+import { firstSkipPath, formatBatchToggleSkip } from "../features/my-skills/lib/batchToggleSkip";
 import {
   normalizeSkillName,
   normalizeSkillSources,
@@ -117,6 +118,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
           operationId: crypto.randomUUID(),
         });
         const failed = report.failed.length;
+        const skipped = report.skipped.length;
 
         if (failed > 0) {
           const visibleFailures = report.failed
@@ -137,10 +139,51 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
               .filter(Boolean)
               .join("\n"),
           );
+        } else if (skipped > 0) {
+          // Name collisions (e.g. Hermes owns ~/.hermes/skills/research as a
+          // category folder) are expected — surface them as a soft notice so
+          // "link all" still feels successful for every skill that could link.
+          // Reason must stay explicit: users need the path + "left in place".
+          const visibleSkips = report.skipped.slice(0, 3).map((skip) => formatBatchToggleSkip(skip, t));
+          const hiddenCount = Math.max(0, skipped - 3);
+          const occupiedPath = firstSkipPath(report.skipped);
+          toast.message(
+            t("skillCards.batchTogglePartialSkipped", {
+              skipped,
+              total: installedSkillNames.length,
+              defaultValue: "Skipped {{skipped}}/{{total}} links — name already occupied on that Agent (left in place)",
+            }),
+            {
+              description: [
+                ...visibleSkips,
+                hiddenCount > 0
+                  ? t("skillCards.batchToggleMoreSkipped", {
+                      count: hiddenCount,
+                      defaultValue: "+{{count}} more (see logs for full list)",
+                    })
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+              duration: 10000,
+              action: occupiedPath
+                ? {
+                    label: t("skillCards.openOccupiedFolder", { defaultValue: "Open folder" }),
+                    onClick: () => {
+                      void tauriInvoke("open_folder", { path: occupiedPath }).catch((err) => {
+                        if (import.meta.env.DEV) console.error("open_folder failed:", err);
+                      });
+                    },
+                  }
+                : undefined,
+            },
+          );
         }
 
         // Record the deck's own claim on this Agent. Skipped when every Skill
         // failed — nothing moved on disk, so the rail must not change either.
+        // Skips still count as "handled" (the path is intentionally left alone),
+        // so a batch of all-skips still claims the Agent.
         if (failed < installedSkillNames.length) {
           const current = group.agent_links ?? [];
           const nextLinks = allLinked ? current.filter((id) => id !== agentId) : [...new Set([...current, agentId])];

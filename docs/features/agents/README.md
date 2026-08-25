@@ -120,8 +120,10 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
 `batch_toggle_skills_for_agent` IPC，而不是由前端循环调用单项命令。后端 tracing 以
 `operation_id` 关联整批操作，并在开始、单项失败和汇总结束事件中记录 Agent、方向、总数、
 成功数、失败数与耗时；批次报告保留每个失败 Skill 的完整 error chain。遇到目标位置已有
-非 SkillStar 管理的真实目录时必须 fail closed、保留该目录，并把 Skill 名与冲突路径同时
-返回给 UI。
+非 SkillStar 管理的真实目录时必须 fail closed、保留该目录：该项记为 `skipped`（code
+`unmanaged_real_directory` + 冲突路径），不得记为 `failed`，也不得覆盖。UI 用界面语言说明
+原因，并提供「打开该目录」；关闭 toast 即表示接受跳过。单项 `toggle_skill_for_agent` 仍把
+同一种碰撞映射为错误，避免用户以为已经链上。
 
 - 若 Agent 有特殊性质（无全局目录 / 共享 home 根 / 非 universal 项目路径），在
   `crates/skillstar-agents/src/builtin.rs` 测试区加一条守卫测试

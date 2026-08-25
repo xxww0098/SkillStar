@@ -931,7 +931,11 @@
     "installAllFailedDetailed": "Couldn't install: {{names}}",
     "noMatching": "No matching decks",
     "tryDifferent": "Try a different search term.",
-    "batchTogglePartialFailed": "Couldn't update {{failed}}/{{total}} links"
+    "batchTogglePartialFailed": "Couldn't update {{failed}}/{{total}} links",
+    "batchTogglePartialSkipped": "Skipped {{skipped}}/{{total}} links — name already occupied on that Agent (left in place)",
+    "batchToggleMoreSkipped": "+{{count}} more (see logs for full list)",
+    "skipUnmanagedDirItem": "{{name}}: {{path}} is an unmanaged folder and was left in place",
+    "openOccupiedFolder": "Open folder"
   },
   "projects": {
     "title": "Projects",
