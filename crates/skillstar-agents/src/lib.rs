@@ -26,6 +26,19 @@ pub fn list_profiles() -> Vec<AgentProfile> {
     registry::AgentRegistry::load(&TomlPrefsStore).into_profiles()
 }
 
+/// Extra directories that must receive the same global deployments as the
+/// profile's `global_skills_dir`.
+///
+/// Empty for every Agent with a single skills directory. Antigravity is the
+/// exception: one profile, three installed states, each reading its own
+/// `builtin/skills` (see `builtin::GLOBAL_MIRROR_DEFS`).
+pub fn global_mirror_dirs(agent_id: &str) -> Vec<std::path::PathBuf> {
+    builtin::mirror_dirs(
+        registry::compatible_profile_id(agent_id),
+        &skillstar_core::infra::paths::home_dir(),
+    )
+}
+
 /// Add (or replace by id) a custom agent profile.
 pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
     custom::add(def, &TomlPrefsStore)

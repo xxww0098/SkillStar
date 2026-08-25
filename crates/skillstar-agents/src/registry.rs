@@ -62,12 +62,14 @@ pub fn find_profile<'a>(profiles: &'a [AgentProfile], agent_id: &str) -> Result<
         .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))
 }
 
-/// Map upstream canonical ids onto SkillStar's three legacy persisted ids.
+/// Map upstream canonical ids onto SkillStar's three legacy persisted ids, and
+/// Antigravity's per-state ids onto the single profile that serves all three.
 pub fn compatible_profile_id(agent_id: &str) -> &str {
     match agent_id {
         "claude-code" => "claude",
         "kiro-cli" => "kiro",
         "hermes-agent" => "hermes",
+        "antigravity-cli" | "antigravity-ide" => "antigravity",
         id => id,
     }
 }

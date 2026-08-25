@@ -1,3 +1,4 @@
+mod mirror;
 mod status;
 
 pub use status::{
@@ -156,8 +157,20 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
             || target.exists())
             && !remove_managed_entry_for_overwrite(&target)?
         {
-            tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
-            anyhow::bail!("Target cannot be overwritten because it is a real directory");
+            tracing::error!(
+                target: "sync",
+                operation = "toggle_skill_for_agent",
+                skill_name,
+                agent_id,
+                target = %target.display(),
+                "refusing to overwrite unmanaged real directory"
+            );
+            anyhow::bail!(
+                "Cannot link Skill '{}' to Agent '{}': target '{}' is an unmanaged real directory",
+                skill_name,
+                agent_id,
+                target.display()
+            );
         }
         // Symlink → junction → directory-copy ladder, same semantics as
         // project-level deploys (Windows without Developer Mode must not fail).
@@ -192,6 +205,7 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         tracing::info!(target: "sync", skill_name, agent_id, "Skill unlinked successfully");
     }
 
+    mirror::sync(&profile.id, &profile.global_skills_dir);
     Ok(())
 }
 
@@ -206,7 +220,9 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
             continue;
         }
         let target = profile.global_skills_dir.join(skill_name);
-        match remove_entry_for_unlink(&target) {
+        let outcome = remove_entry_for_unlink(&target);
+        mirror::sync(&profile.id, &profile.global_skills_dir);
+        match outcome {
             Ok(true) => {
                 removed_from.push(profile.display_name.clone());
             }
@@ -272,6 +288,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
         }
     }
 
+    mirror::sync(&profile.id, skills_dir);
     tracing::info!(target: "sync", agent_id, removed, "unlink_all_skills_from_agent completed");
     Ok(removed)
 }
@@ -331,6 +348,7 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
         );
     }
 
+    mirror::sync(&profile.id, &profile.global_skills_dir);
     tracing::info!(target: "sync", skill_name, agent_id, "unlink_skill_from_agent completed");
     Ok(())
 }
@@ -435,6 +453,8 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             }
         }
     }
+
+    mirror::sync(&profile.id, target_dir);
 
     // `agent_links` is part of the cached installed-skill snapshot, so every
     // exit that may have changed a link must drop the cache — including the
@@ -552,6 +572,7 @@ pub fn batch_deploy_skills_to_agents(
                 )),
             }
         }
+        mirror::sync(&agent_id, &target_dir);
     }
 
     // Same contract as `batch_link_skills_to_agent`: deployments made before a
