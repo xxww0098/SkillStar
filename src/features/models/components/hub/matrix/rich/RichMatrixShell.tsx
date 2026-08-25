@@ -85,7 +85,7 @@ export function RichMatrixShell({
           is a bordered filler column (grid lines, not blank). Extra agents
           still force horizontal scroll via min-w on agent cols.
         */}
-      <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-border/55 bg-card/50 [-webkit-overflow-scrolling:touch]">
+      <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-border/80 bg-card/70 shadow-sm [-webkit-overflow-scrolling:touch]">
         <table className="w-full min-w-max border-collapse text-left text-xs">
           <colgroup>
             <col className="w-[200px]" />
@@ -96,11 +96,11 @@ export function RichMatrixShell({
             <col />
           </colgroup>
           <thead>
-            <tr className="border-b border-border/50">
+            <tr className="border-b border-border/70">
               <th
                 className={cn(
                   "sticky left-0 z-30 w-[200px] min-w-[200px] max-w-[200px] px-4 py-3 text-center",
-                  "border-r border-border/70 bg-muted font-semibold text-muted-foreground",
+                  "border-r border-border/80 bg-muted font-bold text-foreground",
                   "shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
                 )}
               >
@@ -113,7 +113,7 @@ export function RichMatrixShell({
                   <th
                     key={column.columnId}
                     className={cn(
-                      "border-r border-border/35 bg-muted/40 px-2 py-3 text-center font-semibold",
+                      "border-r border-border/50 bg-muted/60 px-2 py-3 text-center font-bold",
                       wide ? "w-[168px] min-w-[168px] max-w-[168px]" : "w-[152px] min-w-[152px] max-w-[152px]",
                     )}
                   >
@@ -121,7 +121,7 @@ export function RichMatrixShell({
                   </th>
                 );
               })}
-              <th className="min-w-[48px] bg-muted/40" aria-hidden />
+              <th className="min-w-[48px] bg-muted/60" aria-hidden />
             </tr>
           </thead>
           <tbody>
@@ -136,12 +136,15 @@ export function RichMatrixShell({
                 const ready = providerReady(provider);
                 const rowActive = data.selectedProviderId === provider.id;
                 return (
-                  <tr key={provider.id} className="border-b border-border/35 last:border-0">
+                  <tr
+                    key={provider.id}
+                    className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors"
+                  >
                     <td
                       className={cn(
                         "sticky left-0 z-20 w-[200px] min-w-[200px] max-w-[200px] px-4 py-3",
-                        "border-r border-border/70 shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
-                        rowActive ? "bg-primary/[0.04]" : "bg-card",
+                        "border-r border-border/80 shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
+                        rowActive ? "bg-primary/[0.08]" : "bg-card",
                       )}
                     >
                       <ProviderCol

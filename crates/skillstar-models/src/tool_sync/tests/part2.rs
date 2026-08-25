@@ -280,7 +280,10 @@ fn test_resync_active_tools_syncs_correct_tools() {
             );
             map.insert(
                 "codex".to_string(),
-                AgentBinding::single(BindingEntry::new("test-uuid-1234".to_string(), "model-b".to_string())),
+                AgentBinding::single(BindingEntry::new(
+                    "test-uuid-1234".to_string(),
+                    "model-b".to_string(),
+                )),
             );
             map
         },
@@ -300,7 +303,6 @@ fn test_resync_active_tools_syncs_correct_tools() {
 
 #[test]
 fn test_resync_active_tools_provider_not_found() {
-
     let store = ProvidersStoreV4::default();
     let results = resync_active_tools(&store, "nonexistent-id");
 
@@ -324,7 +326,10 @@ fn test_resync_active_tools_skips_other_providers() {
             // Claude Code uses a different provider
             map.insert(
                 "claude-code".to_string(),
-                AgentBinding::single(BindingEntry::new("other-provider-id".to_string(), "other-model".to_string())),
+                AgentBinding::single(BindingEntry::new(
+                    "other-provider-id".to_string(),
+                    "other-model".to_string(),
+                )),
             );
             // Codex uses our provider
             map.insert(

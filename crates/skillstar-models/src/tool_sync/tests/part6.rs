@@ -6,8 +6,8 @@
 use super::*;
 use crate::providers::migrate::{DropReason, MigrationReport};
 use crate::providers::{
-    AgentBinding, Credential, FlatProvidersStore, ProviderEntryFlat, Tri, ToolActivation,
-    ToolBinding, migrate::migrate_v3_to_v4,
+    AgentBinding, Credential, FlatProvidersStore, ProviderEntryFlat, ToolActivation, ToolBinding,
+    Tri, migrate::migrate_v3_to_v4,
 };
 
 fn codex_binding(entries: Vec<BindingEntry>) -> AgentBinding {
@@ -85,8 +85,7 @@ fn codex_points_at_the_responses_endpoint_not_the_chat_one() {
     .unwrap();
 
     let table: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let block = table["model_providers"].as_table().unwrap()
-        [&skillstar_managed_key(&provider.id)]
+    let block = table["model_providers"].as_table().unwrap()[&skillstar_managed_key(&provider.id)]
         .as_table()
         .unwrap();
     assert_eq!(
@@ -164,7 +163,10 @@ base_url = "https://mine.example.com/v1"
         providers.contains_key("skillstar_keepme12"),
         "fixing one broken binding must not throw away a working one"
     );
-    assert!(providers.contains_key("mine"), "user tables are untouchable");
+    assert!(
+        providers.contains_key("mine"),
+        "user tables are untouchable"
+    );
     assert_eq!(
         table["model_provider"].as_str().unwrap(),
         "skillstar_keepme12",
@@ -406,6 +408,9 @@ fn the_repair_removes_the_claude_desktop_marker_and_its_binding() {
 
     repair_agent_configs(&mut store, &mut report);
 
-    assert!(!marker.exists(), "Claude Desktop is planned, not implemented");
+    assert!(
+        !marker.exists(),
+        "Claude Desktop is planned, not implemented"
+    );
     assert!(!store.bindings.contains_key("claude-desktop"));
 }

@@ -171,7 +171,9 @@ pub(crate) fn sync_to_claude_code_inner(
 /// the row (in which case the writer degrades to base URL + token rather than
 /// panicking on a lookup that should never fail).
 fn claude_role_defs() -> &'static [crate::providers::RoleDef] {
-    agent_spec("claude-code").map(|spec| spec.roles).unwrap_or(&[])
+    agent_spec("claude-code")
+        .map(|spec| spec.roles)
+        .unwrap_or(&[])
 }
 
 /// Remove SkillStar-managed Claude env keys (Official / unsync shared path).
@@ -226,9 +228,7 @@ fn role_model_field(
 ) -> Value {
     roles
         .get(role)
-        .filter(|target| {
-            target.provider_id.trim().is_empty() || target.provider_id == provider.id
-        })
+        .filter(|target| target.provider_id.trim().is_empty() || target.provider_id == provider.id)
         .map(|target| target.model.trim())
         .filter(|model| !model.is_empty())
         .map(|model| Value::String(model.to_string()))

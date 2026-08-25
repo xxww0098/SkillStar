@@ -23,7 +23,11 @@ pub(crate) fn openai_base(provider: &Provider) -> &str {
 
 /// v3's `base_url_anthropic`.
 pub(crate) fn anthropic_base(provider: &Provider) -> &str {
-    provider.endpoints.anthropic_messages.as_deref().unwrap_or("")
+    provider
+        .endpoints
+        .anthropic_messages
+        .as_deref()
+        .unwrap_or("")
 }
 
 /// The `/v1/responses` endpoint, the only one Codex ≥0.95 can use.
@@ -52,9 +56,5 @@ pub(crate) fn default_model(provider: &Provider) -> &str {
 /// an empty URL — an agent config naming a provider with `base_url = ""` fails
 /// at request time with an error that points nowhere near the cause.
 pub(crate) fn serves(provider: &Provider, wire: RequiredWire) -> bool {
-    !provider
-        .endpoint_for(wire)
-        .unwrap_or("")
-        .trim()
-        .is_empty()
+    !provider.endpoint_for(wire).unwrap_or("").trim().is_empty()
 }

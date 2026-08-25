@@ -64,11 +64,7 @@ impl ResolvedConnection {
                 .literal_secret()
                 .unwrap_or_default()
                 .to_string(),
-            base_url_openai: provider
-                .endpoints
-                .openai_chat
-                .clone()
-                .unwrap_or_default(),
+            base_url_openai: provider.endpoints.openai_chat.clone().unwrap_or_default(),
             base_url_anthropic: provider
                 .endpoints
                 .anthropic_messages
@@ -156,7 +152,9 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = store_file(tmp.path(), vec![relay("p1")]);
 
-        let err = resolve_connection_at(&path, "ghost").unwrap_err().to_string();
+        let err = resolve_connection_at(&path, "ghost")
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("ghost"), "{err}");
     }

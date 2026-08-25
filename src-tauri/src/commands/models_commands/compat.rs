@@ -36,8 +36,8 @@
 //! [`Credential`]: skillstar_models::providers::Credential
 
 use skillstar_models::providers::{
-    AgentBinding, Credential, Endpoints, ModelRef, Provider, ProviderEntryFlat,
-    ProviderPatchFlat, ProvidersStoreV4, ToolActivation, ToolBinding, derive_responses_endpoint,
+    AgentBinding, Credential, Endpoints, ModelRef, Provider, ProviderEntryFlat, ProviderPatchFlat,
+    ProvidersStoreV4, ToolActivation, ToolBinding, derive_responses_endpoint,
 };
 
 /// Project one v4 row into the v3 shape the renderer reads.

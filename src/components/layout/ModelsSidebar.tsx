@@ -30,7 +30,7 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
           type="button"
           onClick={onAddProvider}
           title={t("models.sidebar.addProvider")}
-          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary transition hover:bg-primary/20"
+          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-primary/35 bg-primary/15 text-primary transition hover:bg-primary/25 shadow-xs"
         >
           <Plug className="h-4 w-4" />
         </button>
@@ -41,8 +41,8 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
             onClick={() => onSelectProvider(p.id)}
             title={p.name}
             className={cn(
-              "flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border bg-background/40 transition hover:bg-card-hover",
-              selectedProviderId === p.id ? "border-primary/45 bg-primary/10" : "border-border/55",
+              "flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border bg-background/60 transition hover:bg-card-hover shadow-2xs",
+              selectedProviderId === p.id ? "border-primary bg-primary/20 ring-1 ring-primary/40" : "border-border/80",
             )}
           >
             <ProviderBrandIcon
@@ -60,8 +60,8 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
 
   return (
     <div className="flex flex-col gap-3 py-1">
-      <div className="rounded-xl border border-primary/15 bg-primary/[0.04] px-3 py-3">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary/90">
+      <div className="rounded-xl border border-primary/25 bg-primary/[0.08] px-3 py-3 shadow-xs">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary">
           <Sparkles className="h-3 w-3" />
           {t("models.sidebar.workbench")}
         </div>
@@ -69,7 +69,7 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
         <button
           type="button"
           onClick={onAddProvider}
-          className="mt-2.5 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground transition hover:bg-primary/90"
+          className="mt-2.5 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground shadow-xs transition hover:bg-primary-hover active:scale-[0.98]"
         >
           <Plug className="h-3 w-3" />
           {t("models.sidebar.addProvider")}
@@ -78,7 +78,7 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
 
       {recent.length > 0 ? (
         <div className="space-y-1">
-          <div className="flex items-center gap-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          <div className="flex items-center gap-1 px-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
             <Server className="h-3 w-3" />
             {t("models.sidebar.recent")}
           </div>
@@ -91,14 +91,14 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
                   type="button"
                   onClick={() => onSelectProvider(p.id)}
                   className={cn(
-                    "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition",
+                    "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition select-none",
                     active
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                      ? "bg-primary/18 text-primary font-semibold ring-1 ring-primary/30 shadow-2xs dark:bg-primary/20"
+                      : "text-muted-foreground hover:bg-muted/40 hover:text-foreground font-medium",
                   )}
                 >
                   <ProviderBrandIcon presetId={p.preset_id} providerName={p.name} iconColor={p.icon_color} size="xs" />
-                  <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
                 </button>
               );
             })}

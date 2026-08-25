@@ -52,7 +52,7 @@ fn remote_format_has_type_key(tool_id: &str) -> bool {
         // `claude-code` above on purpose — the two Claude surfaces document
         // opposite rules, and writing Code's `type` into Chat's file would
         // hand that client a key it does not read.
-        "grok" | "windsurf" | "gemini-cli" | "zed" | "claude-desktop-chat" => false,
+        "grok" | "windsurf" | "gemini-cli" | "zed" | "claude-desktop-chat" | "maka" => false,
         other => panic!(
             "tool '{other}' is in the registry but not in the wire-type policy table — decide whether a remote entry in its format carries a `type` key and record it here"
         ),
@@ -72,7 +72,7 @@ fn stdio_type_token(tool_id: &str) -> Option<&'static str> {
         // Cline's documented `type` values are `streamableHttp` and `sse`
         // only — a local server is identified by having a `command`.
         "cline" => None,
-        "grok" | "windsurf" | "gemini-cli" | "zed" | "claude-desktop-chat" => None,
+        "grok" | "windsurf" | "gemini-cli" | "zed" | "claude-desktop-chat" | "maka" => None,
         other => {
             panic!("tool '{other}' is in the registry but not in the stdio wire-type policy table")
         }
@@ -289,6 +289,45 @@ fn claude_desktop_chat_writes_mcpservers_and_preserves_the_rest() {
     assert_eq!(root["mcpServers"]["managed"]["command"], "npx");
     assert!(root.get("servers").is_none(), "{root}");
     assert!(root.get("context_servers").is_none(), "{root}");
+}
+
+/// Maka records remote transport in `transport`, not `type`, and wraps the
+/// file with `version: 2`. Writing Claude's `type` here would be a key Maka
+/// does not read; omitting `version` would leave a v1 file Maka then refuses
+/// to put `protocol` on later.
+#[test]
+fn maka_writes_transport_enabled_and_version_without_type() {
+    let local = maka_spec(&stdio("local"));
+    assert_eq!(local["command"], "npx");
+    assert_eq!(local["args"][1], "example-mcp");
+    assert_eq!(local["env"]["API_KEY"], "secret");
+    assert_eq!(local["enabled"], true);
+    assert!(local.get("type").is_none(), "{local}");
+    assert!(local.get("transport").is_none(), "{local}");
+
+    let over_http = maka_spec(&http("remote"));
+    assert_eq!(over_http["url"], "https://example.com/mcp");
+    assert_eq!(over_http["transport"], "streamable-http");
+    assert_eq!(over_http["enabled"], true);
+    assert!(over_http.get("type").is_none(), "{over_http}");
+    assert!(over_http.get("httpUrl").is_none(), "{over_http}");
+    assert!(over_http.get("serverUrl").is_none(), "{over_http}");
+
+    let over_sse = maka_spec(&sse("remote"));
+    assert_eq!(over_sse["url"], "https://example.com/sse");
+    assert_eq!(over_sse["transport"], "sse");
+    assert!(over_sse.get("type").is_none(), "{over_sse}");
+
+    let dir = TempDir::new("maka-version");
+    let path = dir.path().join("mcp.json");
+    std::fs::write(&path, r#"{"theme":"keep","mcpServers":{}}"#).unwrap();
+    let spec = mcp_tool_spec("maka").expect("public target");
+    (spec.upsert)(&path, &stdio("managed")).unwrap();
+    let root: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(root["version"], 2);
+    assert_eq!(root["theme"], "keep");
+    assert_eq!(root["mcpServers"]["managed"]["command"], "npx");
+    assert_eq!(root["mcpServers"]["managed"]["enabled"], true);
 }
 
 /// Zed decides local vs remote from which key is present, with no `type`.

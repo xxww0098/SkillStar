@@ -182,10 +182,7 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
 /// their whole binding when *any* entry references the provider (every managed
 /// table must stay consistent), single-provider agents only when the *active*
 /// entry does. Retired / unknown tool ids (e.g. removed `gemini`) are skipped.
-pub fn resync_active_tools(
-    store: &ProvidersStoreV4,
-    provider_id: &str,
-) -> Vec<ToolSyncResultFlat> {
+pub fn resync_active_tools(store: &ProvidersStoreV4, provider_id: &str) -> Vec<ToolSyncResultFlat> {
     if !store.providers.iter().any(|p| p.id == provider_id) {
         // Provider not found — return a single error result
         return vec![ToolSyncResultFlat {

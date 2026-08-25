@@ -82,9 +82,7 @@ impl ModelRef {
 /// Note that "reasoning off" and "reasoning tier = none" are different
 /// requests: the former omits the reasoning block entirely (`effort: None`),
 /// the latter sends an explicit `none` (`effort: Some(Effort::None)`).
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, TS,
-)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "Effort.ts")]
 pub enum Effort {
@@ -250,7 +248,11 @@ impl ProvidersStoreV4 {
 
     /// Whether any binding can still reach the given provider through an
     /// endpoint the agent's wire protocol requires.
-    pub fn provider_caps_deny(&self, provider_id: &str, wire: super::provider::RequiredWire) -> bool {
+    pub fn provider_caps_deny(
+        &self,
+        provider_id: &str,
+        wire: super::provider::RequiredWire,
+    ) -> bool {
         let Some(provider) = self.provider(provider_id) else {
             return false;
         };

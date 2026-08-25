@@ -138,7 +138,9 @@ fn registry_role_chains_terminate_at_a_declared_role() {
         for def in spec.roles {
             let mut current = def;
             for _ in 0..spec.roles.len() {
-                let Some(next_id) = current.inherits else { break };
+                let Some(next_id) = current.inherits else {
+                    break;
+                };
                 let next = spec.roles.iter().find(|d| d.id == next_id);
                 assert!(
                     next.is_some(),
@@ -236,8 +238,8 @@ fn claude_role_mapping_lands_in_the_env_block() {
     let path = tmp.path().join("settings.json");
     sync_to_claude_code_inner(&provider, "entry-model", &binding.roles, &path).unwrap();
 
-    let env: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
-        .unwrap();
+    let env: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let env = &env["env"];
     assert_eq!(env["ANTHROPIC_MODEL"], "entry-model");
     assert_eq!(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku-fast");
@@ -415,7 +417,11 @@ fn a_fully_writable_role_map_reports_no_drops() {
 
     let result = sync_tool_binding(&store, "omp");
     assert!(result.success);
-    assert!(result.dropped_roles.is_empty(), "{:?}", result.dropped_roles);
+    assert!(
+        result.dropped_roles.is_empty(),
+        "{:?}",
+        result.dropped_roles
+    );
 }
 
 // ---------------------------------------------------------------------------

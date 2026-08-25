@@ -151,12 +151,12 @@ pub fn load_or_migrate_store_v4(path: &Path) -> Result<LoadedStore, StoreError> 
         path: path.to_path_buf(),
         detail: e.to_string(),
     })?;
-    serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{FEFF}')).map_err(|e| {
-        StoreError::Corrupted {
+    serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{FEFF}')).map_err(
+        |e| StoreError::Corrupted {
             path: path.to_path_buf(),
             detail: e.to_string(),
-        }
-    })?;
+        },
+    )?;
 
     // Step 0 — two backups, and abort if either fails.
     take_migration_backups(path)?;

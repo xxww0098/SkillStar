@@ -34,7 +34,8 @@ pub async fn test_endpoints_latency(
 ) -> Result<Vec<EndpointLatencyResult>, AppError> {
     let api_key = match provider_id.as_deref() {
         Some(id) if !id.is_empty() => {
-            let conn = providers::resolve_connection(id).map_err(|e| AppError::Other(e.to_string()))?;
+            let conn =
+                providers::resolve_connection(id).map_err(|e| AppError::Other(e.to_string()))?;
             Some(conn.api_key).filter(|k| !k.is_empty())
         }
         _ => None,
@@ -115,9 +116,7 @@ pub async fn fetch_provider_model_catalog(
 ///
 /// Returns the raw JSON response (the frontend parses it by `balance_parser`).
 #[tauri::command]
-pub async fn query_provider_balance(
-    provider_id: String,
-) -> Result<serde_json::Value, AppError> {
+pub async fn query_provider_balance(provider_id: String) -> Result<serde_json::Value, AppError> {
     let conn =
         providers::resolve_connection(&provider_id).map_err(|e| AppError::Other(e.to_string()))?;
     // The preset id is what selects the response parser, and it lives on the

@@ -81,8 +81,8 @@ fn test_cache_override() -> Option<PathBuf> {
 fn test_sandbox_cache_dir() -> PathBuf {
     use std::sync::LazyLock;
     static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-        let dir = std::env::temp_dir()
-            .join(format!("skillstar-catalog-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("skillstar-catalog-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         dir
     });
@@ -157,7 +157,8 @@ pub fn write_catalog_at(path: &Path, entries: &[ModelCatalogEntry]) -> Result<()
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let json = serde_json::to_string_pretty(entries).context("failed to serialize model catalog")?;
+    let json =
+        serde_json::to_string_pretty(entries).context("failed to serialize model catalog")?;
     let temp = path.with_extension("json.tmp");
     std::fs::write(&temp, json.as_bytes())
         .with_context(|| format!("failed to write {}", temp.display()))?;
@@ -179,17 +180,16 @@ pub fn persist_extracted(
 ) -> usize {
     let mut written = 0;
     for catalog in catalogs {
-        let entries: Vec<ModelCatalogEntry> =
-            match serde_json::from_value(catalog.raw.clone()) {
-                Ok(entries) => entries,
-                Err(e) => {
-                    warnings.push(format!(
+        let entries: Vec<ModelCatalogEntry> = match serde_json::from_value(catalog.raw.clone()) {
+            Ok(entries) => entries,
+            Err(e) => {
+                warnings.push(format!(
                         "provider {}: cached model catalog was not in the expected shape and was dropped ({e})",
                         catalog.provider_id
                     ));
-                    continue;
-                }
-            };
+                continue;
+            }
+        };
         match write_catalog(&catalog.provider_id, &entries) {
             Ok(()) => written += 1,
             Err(e) => warnings.push(format!(

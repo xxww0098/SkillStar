@@ -98,6 +98,34 @@ fn json_mcpservers_upsert_refuses_non_object_mcp_servers() {
     assert_eq!(read_bytes(&path), before);
 }
 
+/// Maka's store refuses a future wrapper version rather than erase it. SkillStar
+/// must do the same: a write that does not understand the schema would drop
+/// fields the next Maka release needs.
+#[test]
+fn maka_upsert_refuses_unknown_schema_version() {
+    let sandbox = TempConfigDir::new("maka-future");
+    let path = sandbox.seed(
+        "mcp.json",
+        r#"{"version":99,"mcpServers":{"keep":{"command":"npx"}}}"#,
+    );
+    let before = read_bytes(&path);
+
+    let err = maka_upsert(
+        &path,
+        "new-server",
+        serde_json::json!({"command": "uvx", "enabled": true}),
+    )
+    .expect_err("unknown Maka schema must not be overwritten");
+
+    assert!(
+        format!("{err:#}").contains("Unsupported MCP config version"),
+        "error should name the problem: {err:#}"
+    );
+    assert_eq!(read_bytes(&path), before);
+    assert!(maka_remove(&path, "keep").is_err());
+    assert_eq!(read_bytes(&path), before);
+}
+
 #[test]
 fn opencode_upsert_refuses_to_rewrite_malformed_config() {
     let sandbox = TempConfigDir::new("opencode");

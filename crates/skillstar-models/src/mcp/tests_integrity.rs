@@ -504,13 +504,19 @@ fn the_desktop_chat_config_path_resolves_inside_the_sandbox_home() {
     let path = resolve_claude_desktop_chat_config_path().unwrap();
 
     assert!(path.is_absolute(), "{path:?}");
-    assert!(path.ends_with("Claude/claude_desktop_config.json"), "{path:?}");
+    assert!(
+        path.ends_with("Claude/claude_desktop_config.json"),
+        "{path:?}"
+    );
     assert_eq!(
         path,
         resolve_mcp_config_path(LEGACY_CLAUDE_DESKTOP_TOOL_ID).unwrap(),
         "the tombstone and the public target must own the same file"
     );
-    assert_eq!(path, resolve_mcp_config_path(CLAUDE_DESKTOP_CHAT_TOOL_ID).unwrap());
+    assert_eq!(
+        path,
+        resolve_mcp_config_path(CLAUDE_DESKTOP_CHAT_TOOL_ID).unwrap()
+    );
 
     // The sandbox root is a temp dir; the real home must be nowhere near it.
     assert!(
@@ -518,7 +524,33 @@ fn the_desktop_chat_config_path_resolves_inside_the_sandbox_home() {
         "{path:?} escaped the tool-sync sandbox"
     );
     if let Some(real_home) = dirs::home_dir() {
-        assert!(!path.starts_with(&real_home), "{path:?} points at the real home");
+        assert!(
+            !path.starts_with(&real_home),
+            "{path:?} points at the real home"
+        );
+    }
+}
+
+/// Maka's MCP file lives under the OS config dir, same sandbox as Desktop Chat.
+#[test]
+fn the_maka_config_path_resolves_inside_the_sandbox_home() {
+    let path = resolve_maka_config_path().unwrap();
+
+    assert!(path.is_absolute(), "{path:?}");
+    assert!(
+        path.ends_with("Maka/workspaces/default/mcp.json"),
+        "{path:?}"
+    );
+    assert_eq!(path, resolve_mcp_config_path("maka").unwrap());
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "{path:?} escaped the tool-sync sandbox"
+    );
+    if let Some(real_home) = dirs::home_dir() {
+        assert!(
+            !path.starts_with(&real_home),
+            "{path:?} points at the real home"
+        );
     }
 }
 

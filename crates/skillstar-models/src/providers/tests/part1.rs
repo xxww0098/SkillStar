@@ -261,9 +261,8 @@ fn test_get_all_presets_flat_unique_ids() {
 #[test]
 fn test_get_all_presets_flat_categories() {
     let presets = get_all_presets_flat();
-    let count = |category: PresetCategory| {
-        presets.iter().filter(|p| p.category == category).count()
-    };
+    let count =
+        |category: PresetCategory| presets.iter().filter(|p| p.category == category).count();
     assert_eq!(count(PresetCategory::Domestic), 8);
     assert_eq!(count(PresetCategory::Relay), 2);
     // The split that retired the id whitelist: Grok is a vendor you reach with
@@ -330,10 +329,7 @@ fn test_create_from_preset_deepseek() {
         result.endpoints.anthropic_messages.as_deref(),
         Some("https://api.deepseek.com/anthropic")
     );
-    assert_eq!(
-        result.credential.literal_secret(),
-        Some("sk-test-key-123")
-    );
+    assert_eq!(result.credential.literal_secret(), Some("sk-test-key-123"));
     assert!(result.models.is_empty());
     assert_eq!(result.default_model, None);
     assert_eq!(result.preset_id, Some("deepseek".to_string()));
@@ -375,9 +371,7 @@ fn test_create_from_preset_official_stable_ids() {
     assert_eq!(codex.id, CODEX_OFFICIAL_ID);
     assert_eq!(codex.preset_id.as_deref(), Some(CODEX_OFFICIAL_ID));
     assert!(codex.endpoints.is_empty());
-    assert!(
-        matches!(&codex.credential, Credential::ExternalCli { surface } if surface == "codex")
-    );
+    assert!(matches!(&codex.credential, Credential::ExternalCli { surface } if surface == "codex"));
 }
 
 #[test]
@@ -415,8 +409,6 @@ fn test_ensure_official_providers_idempotent() {
 fn test_bind_claude_official_skips_the_endpoint_gate() {
     let mut store = ProvidersStoreV4::default();
     assert!(ensure_official_providers(&mut store));
-    let entry =
-        bind_provider(&mut store, "claude-code", CLAUDE_OFFICIAL_ID, None, None).unwrap();
+    let entry = bind_provider(&mut store, "claude-code", CLAUDE_OFFICIAL_ID, None, None).unwrap();
     assert_eq!(entry.provider_id, CLAUDE_OFFICIAL_ID);
 }
-

@@ -1,7 +1,7 @@
 //! Agent binding, config-file, installation and conflict-detection commands.
 
-use super::*;
 use super::compat;
+use super::*;
 
 // ---------------------------------------------------------------------------
 // Tool config commands

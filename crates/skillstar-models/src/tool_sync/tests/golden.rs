@@ -143,7 +143,10 @@ fn v3_fixture() -> FlatProvidersStore {
 /// impossible to express rather than merely discouraged.
 fn migrated(
     _cache: &DataDirSandbox,
-) -> (Vec<Provider>, std::collections::HashMap<String, AgentBinding>) {
+) -> (
+    Vec<Provider>,
+    std::collections::HashMap<String, AgentBinding>,
+) {
     let outcome = migrate_v3_to_v4(v3_fixture(), &crate::providers::get_all_presets_flat());
     for catalog in &outcome.catalogs {
         let entries: Vec<crate::providers::ModelCatalogEntry> =

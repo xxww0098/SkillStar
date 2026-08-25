@@ -37,8 +37,8 @@ pub(crate) fn resolve_from_flat_store(
     provider_id: &str,
 ) -> Result<String> {
     let path = providers::flat_store_path();
-    let loaded = providers::load_or_migrate_store_v4(&path)
-        .context("Failed to read provider store")?;
+    let loaded =
+        providers::load_or_migrate_store_v4(&path).context("Failed to read provider store")?;
     let store = loaded.store;
 
     let provider = store
@@ -314,7 +314,8 @@ pub fn resolve_provider_ref(config: &mut AiConfig) -> Result<()> {
         return Ok(());
     };
 
-    resolve_provider_ref_parts(config, &provider_ref.agent_id, &provider_ref.provider_id).map(|_| ())
+    resolve_provider_ref_parts(config, &provider_ref.agent_id, &provider_ref.provider_id)
+        .map(|_| ())
 }
 
 pub fn resolve_runtime_config(config: &AiConfig) -> Result<AiConfig> {
