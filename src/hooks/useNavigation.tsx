@@ -170,6 +170,8 @@ interface NavigationActions {
   clearUsageCreateRequest: () => void;
   openModelsDrawer: (req: Omit<ModelsDrawerRequest, "nonce">) => void;
   clearModelsDrawerRequest: () => void;
+  /** Warm a page's lazy chunk before the user commits to it (hover/focus). */
+  prefetchPage: (page: NavPage) => void;
 }
 
 type NavigationContext = NavigationState & NavigationActions;
@@ -406,6 +408,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clearUsageCreateRequest,
       openModelsDrawer,
       clearModelsDrawerRequest,
+      prefetchPage,
     }),
     [
       activePage,
@@ -431,6 +434,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clearUsageCreateRequest,
       openModelsDrawer,
       clearModelsDrawerRequest,
+      prefetchPage,
     ],
   );
 

@@ -534,9 +534,9 @@ export function Settings({
     <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-background">
       <div
         data-tauri-drag-region
-        className="h-12 flex items-center px-6 border-b border-border/40 bg-card/40 backdrop-blur-xl z-10 shrink-0"
+        className="h-14 flex items-center px-6 border-b border-border/70 bg-sidebar z-10 shrink-0"
       >
-        <h1 className="text-sm font-semibold leading-none">{t("settings.title")}</h1>
+        <h1 className="text-sm font-bold tracking-tight text-foreground leading-none">{t("settings.title")}</h1>
       </div>
 
       <motion.main

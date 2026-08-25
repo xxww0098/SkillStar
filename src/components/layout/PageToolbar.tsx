@@ -57,13 +57,15 @@ export function PageToolbar({ title, search, filters, actions, className, childr
   return (
     <div
       data-tauri-drag-region
-      className={cn("h-14 flex items-center gap-3 px-6 border-b border-border bg-sidebar shrink-0", className)}
+      className={cn("h-14 flex items-center gap-3 px-6 border-b border-border/70 bg-sidebar shrink-0", className)}
     >
       {/* ── Left zone: Title + Search ── */}
       {title && (
         <div className="flex items-center shrink-0 h-8 whitespace-nowrap">
-          <div className="text-sm font-semibold text-foreground">{title}</div>
-          <div className="w-px h-5 ml-4 mr-1 bg-border" />
+          <div className="text-sm font-bold text-foreground tracking-tight [&_h1]:text-sm [&_h1]:font-bold [&_h1]:text-foreground [&_h1]:tracking-tight">
+            {title}
+          </div>
+          <div className="w-px h-5 ml-4 mr-1 bg-border/80" />
         </div>
       )}
 

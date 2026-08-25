@@ -17,7 +17,7 @@ vi.mock("react-i18next", () => {
     "skillTutorial.generateFailed": "Guide generation failed: {{message}}",
     "skillTutorial.hideOld": "Hide old guide",
     "skillTutorial.iframeTitle": "{{skillName}} usage guide",
-    "skillTutorial.loadFailed": "Failed to load tutorial status",
+    "skillTutorial.loadFailed": "Couldn't load the usage guide",
     "skillTutorial.metadata": "{{fileCount}} files · {{totalBytes}} · {{generatedAt}}",
     "skillTutorial.oldIframeTitle": "Old usage guide for {{skillName}}",
     "skillTutorial.oldVersionBadge": "Old version",
@@ -166,7 +166,7 @@ describe("SkillTutorialPanel", () => {
 
     renderPanel(queryClient);
 
-    expect(await screen.findByText("Failed to load tutorial status")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load the usage guide")).toBeInTheDocument();
     expect(screen.queryByTitle("demo usage guide")).not.toBeInTheDocument();
     expect(screen.queryByText("Matches current version")).not.toBeInTheDocument();
   });

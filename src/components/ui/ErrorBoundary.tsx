@@ -1,5 +1,6 @@
 import type { ErrorInfo, ReactNode } from "react";
 import { Component } from "react";
+import i18n from "../../i18n";
 
 interface Props {
   children: ReactNode;
@@ -32,12 +33,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private formatErrorDetails(): string {
     const { error, errorInfo } = this.state;
-    if (!error) return "Unknown error";
+    if (!error) return i18n.t("common.unknownError");
     const parts: string[] = [];
     if (error.name && error.name !== "Error") {
       parts.push(`[${error.name}]`);
     }
-    parts.push(error.message || "Unknown error");
+    parts.push(error.message || i18n.t("common.unknownError"));
     if (error.stack) {
       // Show first few stack frames for context
       const stackLines = error.stack.split("\n").slice(1, 4).join("\n");
@@ -62,8 +63,8 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center text-destructive text-2xl">
             !
           </div>
-          <h2 className="text-heading-md">Something went wrong</h2>
-          <p className="text-caption max-w-md">An unexpected error occurred. You can try reloading the page.</p>
+          <h2 className="text-heading-md">{i18n.t("common.errorBoundaryTitle")}</h2>
+          <p className="text-caption max-w-md">{i18n.t("common.errorBoundaryDescription")}</p>
           <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-3 max-w-lg overflow-auto max-h-40 text-left whitespace-pre-wrap break-words">
             {this.formatErrorDetails()}
           </pre>
@@ -72,13 +73,13 @@ export class ErrorBoundary extends Component<Props, State> {
               onClick={this.handleReload}
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover transition-colors"
             >
-              Reload
+              {i18n.t("common.errorBoundaryReload")}
             </button>
             <button
               onClick={() => window.location.reload()}
               className="px-4 py-2 rounded-lg bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-colors"
             >
-              Restart App
+              {i18n.t("common.errorBoundaryRestart")}
             </button>
           </div>
         </div>

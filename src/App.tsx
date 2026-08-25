@@ -1,11 +1,10 @@
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { Sidebar } from "./components/layout/Sidebar";
 import { LoadingLogo } from "./components/ui/LoadingLogo";
 import { Toaster } from "./components/ui/sonner";
 import { UsageDataProvider } from "./features/usage/context/UsageDataContext";
-import { useSkills } from "./features/my-skills/hooks/useSkills";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNavigation } from "./hooks/useNavigation";
 import { useTauriSetup } from "./hooks/useTauriSetup";
@@ -47,8 +46,6 @@ const MAIN_CONTENT_PAD_EXPANDED_PX = 8 + 180;
 /** `w-14` is 3.5rem; default 16px root → 56px. */
 const MAIN_CONTENT_PAD_COLLAPSED_PX = 8 + 56;
 
-const noop = () => {};
-
 function UsageModeShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
   if (appMode === "usage") {
@@ -61,8 +58,6 @@ function AppContent() {
   const nav = useNavigation();
   const prefersReducedMotion = useReducedMotion();
   const updater = useUpdater();
-  const { ghostSkills, skills } = useSkills();
-  const pendingUpdatesCount = useMemo(() => skills.filter((s) => s.update_available).length, [skills]);
   const lastClipboardValue = useRef("");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
@@ -225,7 +220,6 @@ function AppContent() {
           key="publisher-detail"
           initial={{ opacity: 0, x: 30 }}
           animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
           className="flex-1 min-w-0 flex overflow-hidden"
         >
@@ -239,7 +233,6 @@ function AppContent() {
           key="mcp-publisher-detail"
           initial={{ opacity: 0, x: 30 }}
           animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
           className="flex-1 min-w-0 flex overflow-hidden"
         >
@@ -316,7 +309,7 @@ function AppContent() {
         <Sidebar
           activePage={nav.activePage}
           onNavigate={nav.navigate}
-          onPrefetch={noop}
+          onPrefetch={nav.prefetchPage}
           collapsed={sidebarCollapsed}
           onToggleCollapse={handleToggleCollapse}
           updateStatus={updater.state.status}
@@ -328,27 +321,22 @@ function AppContent() {
           onSkip={updater.skip}
           onDismiss={updater.dismiss}
           onRetry={updater.retry}
-          ghostSkillCount={ghostSkills.length}
-          pendingUpdatesCount={pendingUpdatesCount}
         />
-        <div
-          id="main-content"
-          className="h-full w-full flex flex-col overflow-hidden pt-0 transition-[padding-left] duration-200 ease-out will-change-[padding-left]"
-          style={mainContentStyle}
-        >
+        <div id="main-content" className="h-full w-full flex flex-col overflow-hidden pt-0" style={mainContentStyle}>
           <div className="ss-main-chrome">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={nav.appMode === "models" ? "models" : nav.appMode === "usage" ? "usage" : nav.activePage}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: prefersReducedMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-              >
-                <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
-              </motion.div>
-            </AnimatePresence>
+            {/* No `AnimatePresence mode="wait"`: it made every switch wait out the
+                outgoing page's exit animation before the incoming one even mounted,
+                so the cheapest 200ms of a page switch was spent showing nothing.
+                The incoming page now mounts immediately and fades itself in. */}
+            <motion.div
+              key={nav.appMode === "models" ? "models" : nav.appMode === "usage" ? "usage" : nav.activePage}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: prefersReducedMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            >
+              <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
+            </motion.div>
           </div>
         </div>
         <CommandPalette

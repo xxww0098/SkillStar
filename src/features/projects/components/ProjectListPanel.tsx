@@ -34,10 +34,10 @@ export function ProjectListPanel({
             key={project.name}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "group !h-auto cursor-pointer rounded-xl transition-all duration-300",
+              "group !h-auto cursor-pointer rounded-xl transition-all duration-150",
               selectedProject?.name === project.name
-                ? "bg-primary/5 border-primary/20 shadow-sm ring-1 ring-primary/10"
-                : "hover:bg-muted/80 border-transparent hover:-translate-y-[1px] hover:shadow-sm",
+                ? "bg-primary/18 border-primary/40 shadow-2xs ring-1 ring-primary/30 dark:bg-primary/20"
+                : "hover:bg-muted/80 border-border/40 hover:-translate-y-[1px] hover:shadow-2xs",
             )}
             role="button"
             tabIndex={0}
@@ -53,18 +53,20 @@ export function ProjectListPanel({
                 <div
                   className={cn(
                     "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                    selectedProject?.name === project.name ? "bg-primary/10" : "bg-muted",
+                    selectedProject?.name === project.name
+                      ? "bg-primary/20 border border-primary/30 text-primary shadow-xs"
+                      : "bg-muted text-foreground/70 border border-border/40",
                   )}
                 >
                   <FolderOpen
                     className={cn(
                       "w-4 h-4",
-                      selectedProject?.name === project.name ? "text-primary" : "text-muted-foreground",
+                      selectedProject?.name === project.name ? "text-primary" : "text-foreground/70",
                     )}
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{project.name}</div>
+                  <div className="text-sm font-semibold text-foreground truncate">{project.name}</div>
                   <div className="text-micro text-muted-foreground truncate font-mono" title={project.path}>
                     {project.path}
                   </div>
