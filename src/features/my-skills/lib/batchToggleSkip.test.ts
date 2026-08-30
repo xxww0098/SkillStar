@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstSkipPath, formatBatchToggleSkip, SKIP_UNMANAGED_REAL_DIRECTORY } from "./batchToggleSkip";
 
 const t = (key: string, options?: Record<string, unknown>) => {
-  if (key === "skillCards.skipUnmanagedDirItem") {
+  if (key === "skillToggle.skipUnmanagedDirItem") {
     return `${options?.name} occupies ${options?.path}`;
   }
   return key;

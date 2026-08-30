@@ -25,11 +25,7 @@ struct Envelope {
     success: bool,
     #[serde(default)]
     code: i32,
-    // Kept for API-contract completeness — GLM's business-error message
-    // (e.g. `success: false` with a 200 status). Not consumed yet; wire into
-    // `error` in `fetch()` if GLM business errors need surfacing verbatim.
     #[serde(default)]
-    #[allow(dead_code)]
     msg: Option<String>,
     #[serde(default)]
     data: Value,
@@ -37,6 +33,16 @@ struct Envelope {
 
 pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<SubscriptionUsage> {
     let quota = fetch_quota(api_key).await?;
+    // GLM answers business errors (expired coding plan, region block) with HTTP
+    // 200 + `{"success":false,"data":null}`. Without this gate the snapshot is
+    // an all-empty card with `error: None`, which the caller stores as a
+    // successful refresh — same criterion the secondary calls already use.
+    if !quota.success && quota.code != 200 {
+        return Err(UsageError::Fetcher(format!(
+            "GLM 业务错误：{}",
+            quota.msg.unwrap_or_else(|| format!("code={}", quota.code))
+        )));
+    }
     let model_url = format!("{GLM_MONITOR_BASE}/model-usage?{}", usage_time_query());
     let tool_url = format!("{GLM_MONITOR_BASE}/tool-usage?{}", usage_time_query());
 

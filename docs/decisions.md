@@ -186,8 +186,8 @@
 - 日期：2026-08-10
 - 状态：accepted
 - 背景：patrol/批量刷新每小时对每个唯一 repo 执行 `git fetch`，只为判断是否有技能内容变化（fetch 后还需本地 rev-parse 对比 subtree hash）。`npx skills` 用 GitHub Trees API 的目录 tree SHA 直接做远程对比，避免包传输。SkillStar 的 Git 认证纪律（D-014）要求 token 只在 askpass 子进程环境内存在。
-- 决策：新增 `skillstar-skills::update_api`：对 `github.com` 来源且能本地解析远端 ref（pinned ref 或 `origin/HEAD` symbolic ref）的 repo，每个 cycle 至多 40 个 repo、并发 4、超时 10s，以**匿名** `GET /repos/{o}/{r}/git/trees/{ref}?recursive=1` 获取递归树；目录条目 sha 即本地对比所需的 subtree hash。成功 → 该 repo 跳过 prefetch fetch，`check_update_local_with_api` 对比本地 HEAD subtree hash 与 API hash（缺失目录 → None 保留徽标）。任何失败（私有仓库 404、限流 403、网络、truncated）→ 回退既有 git fetch 路径；匿名 API 不携带凭据，凭据纪律不变。`prefetch_unique_repos_in_session_skipping` 与 `check_update_local_with_api_entry` 保持既有 None/Some 契约与 revision 裁决。
-- 后果：github.com 公共来源的更新检测从网络 fetch 降为一个轻量 API 调用；私有/非 github 来源继续走 git fetch。API 故障只影响速度不影响正确性。匿名限流（60/h/IP）由每 cycle 40 repo 上限与 403 回退共同兜底。
+- 决策：新增 `skillstar-skills::update_api`：对 `github.com` 来源且能本地解析远端 ref（pinned ref 或 `origin/HEAD` symbolic ref）的 repo，每个 cycle 至多 40 个 repo、并发 8、超时 10s，以 `GET /repos/{o}/{r}/git/trees/{ref}`（非递归）获取顶层树；目录条目 sha 即本地对比所需的 subtree hash。成功 → 该 repo 跳过 prefetch fetch，`check_update_local_with_api` 对比本地 HEAD subtree hash 与 API hash（缺失目录 → None 保留徽标）。任何失败（私有仓库 404、限流 403、网络、truncated）→ 回退既有 git fetch 路径。HTTP Bearer 只在用户**已经**持有 SkillStar GitHub App session 时附带，把额度从匿名 60/h/IP 提到认证 5000/h；未登录保持匿名。凭据不出 Git session（D-014）。`X-RateLimit-Remaining: 0` / HTTP 429 写入进程内冷却至 `X-RateLimit-Reset`，本 cycle 未发出的 API 调用直接跳过；401/403/404/限流是设计内回退，记 debug 不记 warn。`prefetch_unique_repos_in_session_skipping` 与 `check_update_local_with_api_entry` 保持既有 None/Some 契约与 revision 裁决。
+- 后果：github.com 公共来源的更新检测从网络 fetch 降为一个轻量 API 调用；已登录用户不再把同 IP 的匿名额度打爆；私有/非 github 来源继续走 git fetch。API 故障只影响速度不影响正确性。匿名限流（60/h/IP）由每 cycle 40 repo 上限、认证回退与冷却窗口共同兜底。
 - 证据：`crates/skillstar-skills/src/{update_api.rs,update_checker.rs,installed_skill.rs}` 及 `api_remote_hashes_drive_update_detection_without_fetching` 等测试。
 
 ## D-021：仓库发现对齐生态容器目录深度与 Claude Code 插件清单
@@ -205,7 +205,7 @@
 - 状态：accepted
 - 背景：三名只读审查 agent（安装路径/死代码/解耦）确认 D-019 门禁在 scan_install/bundle/pack/adopt_folder/频道安装处生效，但发现三个可绕过入口：`install_skill` 的直接 clone 回退把门禁失败当 Ok(None) 后整库克隆且不校验；share_install embedded 走未门禁的 `local_skill::create`；projects/import 直接调 `adopt_existing_dir_locked` 不校验。同时：CLI 的 `find_target_skill_preview` 与域版存在已证实的语义漂移（显式 name 不匹配时预览误报 would-be-installed），`derive_name_hint` 双实现，`src-tauri/Cargo.toml` 把 4 个无条件 import 的内部 crate 声明成 macOS-only 目标依赖（Linux/Windows CI 提交后必红）。
 - 决策：① 三个绕过入口全部接入 `validation::ensure_installable`：直接 clone 后校验、失败删克隆并返回可行动错误；embedded 创建后校验、失败回滚删除；项目导入逐技能校验、失败跳过并告警。② 删除经全仓 grep 证实的死代码：`adopt_existing_dir`/`validate_agent_ids`/`card_window_labels`/patrol 两个 sessionless wrapper/`normalize_repo_url` shim/S3 路径 helper/`TutorialLoadResult` 别名/`SkillCandidate.skill_md_path` 死字段/`shared.rs` 与 `src-tauri/src/core/path_env.rs` 两个一行垫片/根 re-export 裁剪（仅留 `Skill`/`SkillContent`/`discover_skills`）。③ 名称解析单一化：`source_resolver::derive_skill_name_hint`（Source-aware）成为唯一实现，域安装与 CLI 共用；`find_target_skill` 提升为 pub，CLI 删除内联副本。④ 4 个内部 crate 依赖移入通用 `[dependencies]`。
-- 后果：门禁对任何安装入口都 fail-closed；预览与实装不再出现结论分歧；非 macOS 平台构建不再缺 crate；`skillstar-skills` 对外根路径只剩 3 个 re-export。死代码删除均为全仓零调用验证，不影响行为；`AgentProfile.installed`、`skillstar-git` sessionless wrappers、repo_history 写路径、ACP full-access 分支按审查结论保留待后续确认。
+- 后果：门禁对任何安装入口都 fail-closed；预览与实装不再出现结论分歧；非 macOS 平台构建不再缺 crate；`skillstar-skills` 对外根路径只剩 3 个 re-export。死代码删除均为全仓零调用验证，不影响行为；`AgentProfile.installed`、`skillstar-git` sessionless wrappers、repo_history 写路径、ACP full-access 分支按审查结论保留待后续确认(2026-08-27 对抗审查轮已处理其中两项:sessionless wrappers 经全仓零调用复核后删除;repo_history 写路径在 `scan_github_repo` 成功分支接线,历史不再只读不写)。
 - 证据：`crates/skillstar-skills/src/{skill_install,share_install,validation,source_resolver,discovery,local_skill}.rs`、`crates/skillstar-skills/src/projects/import.rs`、`crates/skillstar-app/src/cli/`、`crates/skillstar-channels/src/patrol/`、`src-tauri/Cargo.toml`、`direct_clone_gate_tests` 等测试；编排 run `run_3c969aa725f6`（REVIEW-A2/B/C2）。
 
 ## D-023：拉取多源化：Git mirror 候选链 + Marketplace host 链 + 内容寻址增量
@@ -378,6 +378,24 @@
 - 决策：更新检查把 tracked ref 上的路径消失记为 `upstream_change: removed`，并用 `git diff -M` / frontmatter `name` 判定后继；`update_state` 仍是唯一所有者，`update_available` 语义不变。移除的处理入口直接复用既有「来源已不再提供」对话框与 `resolve_skill_update`；改名由 `skillstar-app::skill_migration` 作为跨域 use case 一步完成（安装后继、沿用 Agent/项目部署、卸载旧条目）。不新增第二套"待处理"对话框，也不把不可更新项混进「更新 N 项」。
 - 后果：用户在卡片上就能看到并处理上游变动；后继判定是启发式（`-M` 相似度或同名），判错时用户仍可走"移除 + 从 ghost 安装"的手动路径。迁移不是单事务：install 与 uninstall 各自持更新锁，中间失败按步骤报告，下一次检查会把残留旧条目标为 `removed` 供用户收尾。
 - 证据：`crates/skillstar-skills/src/update_checker.rs`（`UpstreamStatus`）、`crates/skillstar-skills/src/update_state.rs`、`crates/skillstar-app/src/skill_migration.rs`、`src/features/my-skills/`。
+
+## D-042：移除 skill-pack 功能残骸（CLI、store、读侧），而不是补全安装链
+
+- 日期：2026-08-28
+- 状态：accepted
+- 背景：2026-08-27 对抗审查证实 pack 安装链(`install_pack`/`detect_pack`)全仓不可达且 `git log -S "PackAction::Install"` 为空——没有任何已发布版本写过 `packs.json`。删除安装链后,README 记录的 `skillstar doctor` / `pack list` / `pack remove` 只能对一个永远为空的 store 打印 "No packs installed."。二选一:补全安装链让功能成立,或整体移除。
+- 决策：整体移除。删 CLI 三命令(`Doctor`/`Pack` clap 变体、`cmd_doctor`/`cmd_pack_list`/`cmd_pack_remove`)、`skill_pack` 模块读侧(`list_packs`/`remove_pack`/`doctor_*` + store 类型)、`paths::packs_path` 与 legacy `packs.json` 迁移行、README 条目。理由:功能从未对用户成立(store 从未被写入),不存在破坏;真正的技能打包分发已由 bundle(.agd)与 share code 覆盖。
+- 后果：`skillstar` CLI 少三个从未产生过效果的子命令;`.claude-plugin` 式 pack 若将来要做,从 git 历史(本决策前一提交)取回并重新设计,而不是在空 store 上续写。`marketplace_pack*` 表的 DDL 按迁移不可删原则保留为惰性 schema。
+- 证据：`crates/skillstar-app/src/cli/{mod,manage}.rs`、已删除的 `crates/skillstar-skills/src/skill_pack*`、`README.md`、2026-08-27/28 对抗审查记录(errors.md 同日条目)。
+
+## D-043：Agent 技能主开关持久化恢复意图，而不持久化 Agent 归属
+
+- 日期：2026-08-30
+- 状态：accepted
+- 背景：Settings 的旧「所有已安装技能」主开关用当前 Hub inventory 推导动作：部分状态会补齐 Hub 缺口，全量关闭会清空当前链接。它既不能表达「只暂时停用本目录原有集合」，也在刷新或重启后不知道该恢复哪些名字。把集合按 Agent id 保存同样是错误模型：多个 profile 可以合法解析到同一个物理 Global skills 目录，磁盘没有 entry 的 per-Agent ownership 事实（D-024）。
+- 决策：`profiles.toml` 增加 recovery-only journal，键是暂停当刻解析到的物理 Global skills 目录，值是**仍待恢复**的排序去重 Skill 名称。`skillstar-app::agent_managed_skills` 在首次停用前原子落盘精确活动集合，再逐项临时移除；完成后只保留实际已消失的名字。若 journal 存在，恢复只尝试其中目前仍缺失的名字；成功或用户手动放回的名字删除，Hub 源缺失、受保护冲突或失败则保留。当前活动集合永远从磁盘重读，journal 不作为链接真相，也不把目录 entry 归给任一 profile。路径后来解析到其他地方时不得按 id 迁移或重新部署旧 journal。
+- 后果：获得——暂停/恢复跨刷新与重启保持精确集合，且恢复路径没有枚举 Hub inventory 的入口；共享目录天然共用状态和 pending 范围。承担——恢复源已从 Hub 删除时会保留可重试项而非“看似完成”；journal 是 D-024「磁盘即真相」的狭窄例外，只表达用户主动发起的恢复意图，因此必须在每个动作后以磁盘状态收敛，不能扩张为 ownership/provenance store。
+- 证据：`crates/skillstar-agents/src/profile_storage.rs`、`crates/skillstar-app/src/agent_managed_skills.rs`、`src-tauri/src/commands/agents.rs`、`src/features/settings/lib/agentSkillSync.ts`。
 
 ## 新增记录格式
 

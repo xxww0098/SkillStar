@@ -13,7 +13,6 @@ import {
   MCP_STORE,
   MCP_TOOL_STATUSES,
   mcpInstallPlan,
-  mcpMarketDraft,
   mcpMarketPage,
   mcpProbeReport,
   mcpRuntimeSelection,
@@ -32,23 +31,11 @@ export const MCP_HANDLERS: DevMockHandlers = {
   probe_mcp_server: (args) => mcpProbeReport(arg(args, "id")),
 
   // MCP marketplace
-  list_mcp_market_servers_local: () => ({
-    data: MCP_MARKET,
-    snapshot_status: "fresh",
-    snapshot_updated_at: iso(0),
-  }),
   query_mcp_market_servers_local: (args) => ({
     data: mcpMarketPage((args?.query as Record<string, unknown>) ?? {}),
     snapshot_status: "fresh",
     snapshot_updated_at: iso(0),
   }),
-  search_mcp_market_local: (args) => {
-    const q = arg(args, "query").toLowerCase();
-    const data = q
-      ? MCP_MARKET.filter((m) => m.name.toLowerCase().includes(q) || m.description.toLowerCase().includes(q))
-      : MCP_MARKET;
-    return { data, snapshot_status: "fresh", snapshot_updated_at: iso(0) };
-  },
   get_mcp_market_server_detail_local: (args) => {
     const id = arg(args, "id");
     const entry = MCP_MARKET.find((m) => m.id === id);
@@ -59,30 +46,7 @@ export const MCP_HANDLERS: DevMockHandlers = {
       snapshot_updated_at: iso(0),
     };
   },
-  list_mcp_servers_by_publisher_local: (args) => {
-    const publisherId = arg(args, "publisherId").toLowerCase();
-    const data =
-      publisherId === "github" || publisherId === ""
-        ? MCP_MARKET
-        : MCP_MARKET.filter((m) => (m.source ?? "").toLowerCase() === publisherId);
-    return {
-      data,
-      snapshot_status: "fresh",
-      snapshot_updated_at: iso(0),
-    };
-  },
   sync_mcp_market_scope: () => undefined,
-  get_mcp_market_sync_states: () => [
-    {
-      scope: "mcp_registry",
-      last_success_at: iso(0),
-      last_attempt_at: iso(0),
-      last_error: null,
-      next_refresh_at: iso(-0.5),
-      schema_version: 13,
-      degraded_reason: "github stopped after 50 pages (rate limit); the mirror's contribution is partial",
-    },
-  ],
   get_mcp_source_sync_states: () => MCP_SOURCE_SYNC_STATES,
 
   // Catalog sources
@@ -118,5 +82,4 @@ export const MCP_HANDLERS: DevMockHandlers = {
   // Install path
   mcp_market_runtime_candidates: (args) => mcpRuntimeSelection(arg(args, "id")),
   mcp_market_install_plan: (args) => mcpInstallPlan(arg(args, "id"), args?.runtimeId as string | undefined),
-  mcp_market_entry_to_draft: (args) => mcpMarketDraft(arg(args, "id")),
 };

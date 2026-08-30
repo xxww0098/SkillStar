@@ -518,37 +518,6 @@ pub fn install_skills_batch_in_session(
     Ok(installed_skills)
 }
 
-/// Install all skills from a repo that contains a skillpack.toml manifest.
-/// Returns the list of installed skill names.
-pub fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
-    install_skill_pack_in_session(url, &crate::git::transport::GitOperationSession::public())
-}
-
-pub fn install_skill_pack_in_session(
-    url: String,
-    session: &crate::git::transport::GitOperationSession,
-) -> Result<Vec<String>, String> {
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock Skill pack installation: {error}"))?;
-    let parsed = crate::source_resolver::Source::parse(&url)
-        .map_err(|error| format!("Invalid source: {error}"))?;
-    crate::skill_mutation::policy()
-        .ensure_repository_mutation_allowed(&parsed.repo_url)
-        .map_err(|error| error.to_string())?;
-    let (_repo_url, source, repo_dir, _) =
-        fetch_repo_scanned_detailed_in_session(&url, false, session)
-            .map_err(|error| format!("{error:#}"))?;
-
-    // Detect pack manifest
-    crate::skill_pack::detect_pack(&repo_dir)
-        .map_err(|e| format!("Failed to detect skill pack: {}", e))?
-        .ok_or_else(|| "No skillpack.toml found in repository".to_string())?;
-
-    // Install via skill_pack module
-    crate::skill_pack::install_pack_locked(&repo_dir, &source, &url)
-        .map_err(|e| format!("Pack install failed: {}", e))
-}
-
 pub fn uninstall_skill(name: &str) -> Result<(), String> {
     crate::content::validate_skill_name(name)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;

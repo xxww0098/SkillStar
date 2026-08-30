@@ -7,7 +7,7 @@
 //! Split by concern to keep each file navigable:
 //! - [`host_crud`] — managed/system host list + CRUD + import.
 //! - [`connection`] — connection probe + host-key TOFU acceptance.
-//! - [`remote_skills`] — remote skill discovery / push / migrate / git ops.
+//! - [`remote_skills`] — remote skill discovery / push / migrate / delete.
 //!
 //! This `mod.rs` keeps only the shared connection plumbing (`with_session`,
 //! host resolution, the Tauri progress sink, error mapping) that all three
@@ -34,7 +34,6 @@ use tauri::{AppHandle, Emitter};
 /// Re-exported DTOs so the command signatures stay terse.
 pub use skillstar_sync::ssh::{
     ConnectionTestResult, DiscoveryResult, MigrateResult, PushResult, RemoteSkill,
-    RemoteSkillContent, RemoteSkillUpdateState,
 };
 
 /// The Tauri event channel the frontend listens on for connection progress.

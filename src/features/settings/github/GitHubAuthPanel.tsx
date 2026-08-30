@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Github } from "../../../components/ui/icons/Github";
 import { openExternalUrl } from "../../../lib/externalOpen";
-import { cn } from "../../../lib/utils";
+import { cn, copyToClipboard } from "../../../lib/utils";
 import type { useGitHubAuth } from "./useGitHubAuth";
 
 export type GitHubAuthController = ReturnType<typeof useGitHubAuth>;
@@ -56,13 +56,9 @@ function useCopy(): { copied: boolean; copy: (value: string) => Promise<boolean>
   }, [copied]);
 
   const copy = useCallback(async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      return true;
-    } catch {
-      return false;
-    }
+    const ok = await copyToClipboard(value);
+    if (ok) setCopied(true);
+    return ok;
   }, []);
 
   return { copied, copy };

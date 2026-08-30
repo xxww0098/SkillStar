@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { openExternalUrl } from "@/lib/externalOpen";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { usageApi } from "../api";
 import { selectableAuthModes } from "../lib/authModes";
 import { authModeLabel } from "../lib/usageLabels";
@@ -444,10 +444,9 @@ export function SubscriptionEditDialog({
 
   const copyAuthLink = async () => {
     if (!oauthStart?.auth_url) return;
-    try {
-      await navigator.clipboard.writeText(oauthStart.auth_url);
+    if (await copyToClipboard(oauthStart.auth_url)) {
       toast.success(t("usage.oauthLinkCopied"));
-    } catch {
+    } else {
       toast.error(t("common.copyFailed", { defaultValue: "Copy failed" }));
     }
   };
@@ -455,16 +454,6 @@ export function SubscriptionEditDialog({
   const openOAuthLink = async () => {
     if (!oauthStart?.auth_url) return;
     await openExternalUrl(oauthStart.auth_url);
-  };
-
-  const copyDeviceCode = async () => {
-    if (!oauthStart?.user_code) return;
-    try {
-      await navigator.clipboard.writeText(oauthStart.user_code);
-      toast.success(t("usage.oauthCodeCopied"));
-    } catch {
-      toast.error(t("common.copyFailed", { defaultValue: "Copy failed" }));
-    }
   };
 
   const submitOAuthCallback = async () => {
@@ -617,7 +606,6 @@ export function SubscriptionEditDialog({
             onStartOAuth={startOAuthFlow}
             onCopyAuthLink={copyAuthLink}
             onOpenOAuthLink={openOAuthLink}
-            onCopyDeviceCode={copyDeviceCode}
             onSubmitCallback={submitOAuthCallback}
             onCancelOAuth={cancelOAuth}
           />

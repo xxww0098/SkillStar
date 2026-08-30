@@ -309,3 +309,88 @@ fn toggle_skips_an_unmanaged_real_directory_without_overwriting_it() -> Result<(
 
     result
 }
+
+/// "Unlink all" sweeps a whole directory rather than a path the user named, so
+/// it must leave anything SkillStar did not deploy in place. That currently
+/// holds because `fs_ops::remove_link_or_copy` refuses to delete a directory
+/// without `SKILL.md`; this locks the end-to-end behaviour so the sweep cannot
+/// grow its own deletion path and quietly lose the guarantee.
+#[test]
+fn unlink_all_leaves_unmanaged_entries_in_place() -> Result<()> {
+    let _guard = crate::lock_test_env();
+    invalidate_profile_cache();
+
+    let tmp = tempfile::tempdir()?;
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home)?;
+
+    let previous_home = std::env::var_os("HOME");
+    let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+    let previous_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
+    set_env("HOME", &home);
+    set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
+    remove_env("CLAUDE_CONFIG_DIR");
+    #[cfg(windows)]
+    let previous_userprofile = std::env::var_os("USERPROFILE");
+    #[cfg(windows)]
+    set_env("USERPROFILE", &home);
+
+    let result = (|| -> Result<()> {
+        invalidate_profile_cache();
+        make_skill_dir(
+            &skillstar_core::infra::paths::hub_skills_dir(),
+            "demo-skill",
+        );
+        let deployed = batch_deploy_skills_to_agents(
+            &["demo-skill".to_string()],
+            &["claude".to_string()],
+            crate::projects::ProjectDeployMode::Symlink,
+        )?;
+        assert_eq!(deployed, 1);
+
+        // Things SkillStar did not put there: a loose file, and a real
+        // directory that is not a skill (no SKILL.md).
+        let skills_dir = home.join(".claude/skills");
+        fs::write(skills_dir.join("notes.md"), "user notes\n")?;
+        let scratch = skills_dir.join("scratch");
+        fs::create_dir_all(&scratch)?;
+        fs::write(scratch.join("todo.txt"), "not a skill\n")?;
+
+        let removed = unlink_all_skills_from_agent("claude")?;
+        assert_eq!(removed, 1, "only the managed deployment should be removed");
+        assert!(
+            skills_dir.join("demo-skill").symlink_metadata().is_err(),
+            "expected the managed deployment to be gone"
+        );
+        assert!(
+            skills_dir.join("notes.md").is_file(),
+            "expected an unmanaged file to survive unlink-all"
+        );
+        assert!(
+            scratch.join("todo.txt").is_file(),
+            "expected an unmanaged directory to survive unlink-all"
+        );
+        Ok(())
+    })();
+
+    match previous_home {
+        Some(value) => set_env("HOME", value),
+        None => remove_env("HOME"),
+    }
+    match previous_data_dir {
+        Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+        None => remove_env("SKILLSTAR_DATA_DIR"),
+    }
+    match previous_claude_config_dir {
+        Some(value) => set_env("CLAUDE_CONFIG_DIR", value),
+        None => remove_env("CLAUDE_CONFIG_DIR"),
+    }
+    #[cfg(windows)]
+    match previous_userprofile {
+        Some(value) => set_env("USERPROFILE", value),
+        None => remove_env("USERPROFILE"),
+    }
+    invalidate_profile_cache();
+
+    result
+}

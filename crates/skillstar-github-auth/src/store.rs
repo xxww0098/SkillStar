@@ -156,7 +156,10 @@ mod tests {
         assert_eq!(loaded.refresh_token(), Some("refresh-secret"));
         assert!(path.is_file());
         #[cfg(unix)]
-        assert_eq!(fs::metadata(&path).expect("metadata").permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).expect("metadata").permissions().mode() & 0o777,
+            0o600
+        );
 
         store.delete().expect("delete file credential");
         assert!(store.load().expect("load deleted credential").is_none());

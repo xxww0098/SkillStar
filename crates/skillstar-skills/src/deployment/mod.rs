@@ -86,11 +86,20 @@ fn require_enabled_global_profile<'a>(
     Ok(profile)
 }
 
-fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
-    let is_link = skillstar_core::infra::fs_ops::is_link(path);
-    let is_copy = path.is_dir() && path.join("SKILL.md").exists();
+/// Whether `path` is a deployment SkillStar owns: a link/junction into the
+/// hub, or a directory copy carrying `SKILL.md`.
+///
+/// Anything else in an Agent's skills directory belongs to the user or to the
+/// Agent itself. `fs_ops::remove_link_or_copy` enforces the same rule before it
+/// deletes a directory, so this is the read-side twin of that guard — use it
+/// wherever a caller needs to *classify* an entry rather than remove one.
+fn is_managed_deployment(path: &Path) -> bool {
+    skillstar_core::infra::fs_ops::is_link(path)
+        || (path.is_dir() && path.join("SKILL.md").exists())
+}
 
-    if !is_link && !is_copy {
+fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
+    if !is_managed_deployment(path) {
         return Ok(false);
     }
 
@@ -363,9 +372,9 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
         let entry = entry?;
         let path = entry.path();
         // Include symlinks/junctions AND copy-based deployments
-        let is_managed = skillstar_core::infra::fs_ops::is_link(&path)
-            || (path.is_dir() && path.join("SKILL.md").exists());
-        if is_managed && let Some(name) = entry.file_name().to_str() {
+        if is_managed_deployment(&path)
+            && let Some(name) = entry.file_name().to_str()
+        {
             names.push(name.to_string());
         }
     }

@@ -58,6 +58,9 @@ pub(crate) fn resolve_from_flat_store(
     let role_model = |role: &str| {
         roles
             .and_then(|roles| roles.get(role))
+            .filter(|target| {
+                target.provider_id.trim().is_empty() || target.provider_id == provider_id
+            })
             .map(|target| target.model.trim())
             .filter(|model| !model.is_empty())
             .map(str::to_string)

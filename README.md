@@ -157,14 +157,11 @@ skillstar remove <name> [name...]
 skillstar remove --all
 ```
 
-### 创建、发布与工具包
+### 创建与发布
 
 ```bash
 skillstar init [name]       # create 仍作为兼容 alias
 skillstar publish
-skillstar doctor [name]
-skillstar pack list
-skillstar pack remove <name>
 skillstar gui
 ```
 

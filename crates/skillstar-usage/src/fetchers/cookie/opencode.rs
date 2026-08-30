@@ -103,17 +103,16 @@ pub async fn fetch(
         .header("Referer", CONSOLE_BASE)
         .send()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("OpenCode 页面请求失败：{}", e)))?;
+        .map_err(|e| UsageError::transport("OpenCode 页面", e))?;
 
     let status = go_page.status().as_u16();
     if status == 401 || status == 403 {
         return Err(UsageError::AuthRequired);
     }
     if !go_page.status().is_success() {
-        return Err(UsageError::Fetcher(format!(
-            "OpenCode 页面返回 {}，请检查 Cookie 是否有效。",
-            status
-        )));
+        // Body not read yet; 401/403 already returned above, so the old
+        // "check your Cookie" hint no longer applied here anyway.
+        return Err(UsageError::http_status("OpenCode 页面", status, ""));
     }
 
     let final_url = go_page.url().to_string();
@@ -203,7 +202,7 @@ async fn call_server_fn_get(
         .header("X-Server-Id", server_fn_id)
         .send()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("OpenCode _server 请求失败：{}", e)))
+        .map_err(|e| UsageError::transport("OpenCode _server", e))
 }
 
 /// Build the serialized `args` JSON for a single-argument server function call.

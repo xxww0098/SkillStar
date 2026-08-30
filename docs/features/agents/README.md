@@ -125,6 +125,14 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
 原因，并提供「打开该目录」；关闭 toast 即表示接受跳过。单项 `toggle_skill_for_agent` 仍把
 同一种碰撞映射为错误，避免用户以为已经链上。
 
+Settings 的「当前受管技能」主开关不是 Agent 的启用开关，也不是 Hub 同步。它通过
+`get_agent_managed_skills_state` / `toggle_agent_managed_skills` 调用
+`skillstar-app::agent_managed_skills`：暂停前先把该物理 Global skills 目录的精确活动名字
+原子写入 `profiles.toml`，随后仅临时移除这些名字；恢复只尝试 journal 中仍缺失的名字。
+失败、Hub 源已消失或未受管目录冲突的项会留在 journal，不得用 Hub 其他技能补齐。journal 按
+解析后的目录而非 Agent id 保存，因此共享目录的所有 profile 共同显示、共同 pending；它只记录
+恢复意图，绝不声称目录 entry 属于某个 profile，也不会修改冻结的 `AgentProfile` 8 字段契约。
+
 - 若 Agent 有特殊性质（无全局目录 / 共享 home 根 / 非 universal 项目路径），在
   `crates/skillstar-agents/src/builtin.rs` 测试区加一条守卫测试
   （参考 `project_only_agents_have_no_global_path` 与共享/专属路径测试）。

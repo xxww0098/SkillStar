@@ -47,7 +47,7 @@
 - [ ] `debt:ERR-03:crates/skillstar-models` · production facet 下仍有 1 个裸 unwrap（`tool_sync/omp_provider.rs:198`）。
 - [ ] `debt:ERR-03:crates/skillstar-skills` · production facet 下仍有 1 个裸 unwrap（`skill_group.rs:166`）。
 - [ ] `debt:ERR-03:crates/skillstar-usage` · production facet 下仍有 1 个裸 unwrap（`oauth/local_server.rs:269`）。
-- [ ] `debt:ERR-03:src-tauri` · production facet 下仍有 8 个裸 unwrap（`core/acp_client/{client.rs,runner.rs}`）。
+- [ ] `debt:ERR-03:src-tauri` · production facet 下仍有 2 个裸 unwrap（`core/acp_client/runner.rs:158,159`）。
 - [ ] `debt:UNSAFE-01:Cargo.toml` · workspace 尚未统一设置 `unsafe_code = "deny"` 并只对确需 FFI 的 crate 定点放开；当前生产 unsafe 集中在 `src-tauri`。
 - [ ] `debt:UNSAFE-02:src-tauri` · `main.rs` Windows FFI 与 `core/dock_menu.rs` macOS runtime hook 共 6 个 unsafe 构造，尚未逐块用精确 `// SAFETY:` 前置条件覆盖。
 

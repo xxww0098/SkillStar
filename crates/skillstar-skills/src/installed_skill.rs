@@ -14,6 +14,7 @@ use skillstar_core::types::{
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -120,10 +121,6 @@ fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
     skills
 }
 
-pub async fn list_installed_skills_fast() -> Result<Vec<Skill>> {
-    list_installed_skills().await
-}
-
 pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     if let Ok(cache) = SKILL_CACHE.read()
         && let Some(skills) = &*cache
@@ -163,10 +160,7 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     .await
     .map_err(|err| anyhow!("installed-skill task failed: {}", err))?;
 
-    let mut skills = Vec::with_capacity(built.len());
-    for skill in built {
-        skills.push(skill?);
-    }
+    let mut skills: Vec<Skill> = built.into_iter().collect::<Result<Vec<_>, _>>()?;
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
 
@@ -177,11 +171,6 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     }
 
     Ok(skills)
-}
-
-pub async fn refresh_skill_updates() -> Result<Vec<SkillUpdateState>> {
-    let session = crate::git::transport::GitOperationSession::public();
-    refresh_skill_updates_in_session(&session).await
 }
 
 pub async fn refresh_skill_updates_in_session(
@@ -225,11 +214,12 @@ pub async fn refresh_skill_updates_in_session(
         return Ok(Vec::new());
     }
 
-    // GitHub API fast path: one unauthenticated Trees API call per unique
-    // github.com repo replaces the per-repo git fetch for update *detection*.
-    // Any failure (private repo, rate limit, network, non-github source)
-    // falls back to the git fetch path below, so correctness never depends
-    // on the API.
+    // GitHub API fast path: one Trees API call per unique github.com repo
+    // replaces the per-repo git fetch for update *detection*. Signed-in
+    // sessions use the App token (authenticated budget); otherwise the call
+    // is anonymous. Any failure (private repo, rate limit, network,
+    // non-github source) falls back to the git fetch path below, so
+    // correctness never depends on the API.
     let api_remote: Arc<
         std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree>,
     > = Arc::new(api_prefetch_remote_trees(&skill_dirs).await);
@@ -246,20 +236,8 @@ pub async fn refresh_skill_updates_in_session(
         let Ok(_guard) = crate::skill_update::acquire_update_transaction_lock() else {
             return Ok(Vec::new());
         };
-        let safe_dirs = skill_dirs
-            .iter()
-            .filter(|path| {
-                skill_name_from_path(path).is_some_and(|name| {
-                    matches!(
-                        crate::skill_mutation::policy().installed_skill_is_mutable(&name, path),
-                        Ok(true)
-                    )
-                })
-            })
-            .cloned()
-            .collect::<Vec<_>>();
         let failed_fetch_roots =
-            update_checker::prefetch_unique_repos_in_session_skipping(&safe_dirs, &session, &skip);
+            update_checker::prefetch_unique_repos_in_session_skipping(&skill_dirs, &session, &skip);
         let jobs = skill_dirs
             .into_iter()
             .filter_map(|path| {
@@ -455,14 +433,23 @@ fn refresh_single_skill_update(
         .map(update_checker::UpstreamStatus::from_available)
 }
 
-/// One unauthenticated GitHub Trees API call per unique github.com repo,
-/// replacing the per-repo `git fetch` for update *detection*. Repos that
-/// cannot use the API (non-github host, no lock entry, no resolvable remote
-/// ref) are simply absent from the result and fall back to the fetch path.
+/// One GitHub Trees API call per unique github.com repo, replacing the
+/// per-repo `git fetch` for update *detection*. Repos that cannot use the
+/// API (non-github host, no lock entry, no resolvable remote ref, or an
+/// active rate-limit cooldown) are simply absent from the result and fall
+/// back to the fetch path.
 async fn api_prefetch_remote_trees(
     skill_dirs: &[PathBuf],
 ) -> std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree> {
     use crate::update_api::{ApiRemoteTree, MAX_API_REPOS_PER_CYCLE};
+
+    if crate::update_api::api_fast_path_blocked() {
+        debug!(
+            target: "update_checker",
+            "GitHub API rate limit cooldown active — skipping fast path"
+        );
+        return std::collections::HashMap::new();
+    }
 
     // A missing or unreadable lockfile simply disables the fast path.
     let Ok(lock) = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()) else {
@@ -506,6 +493,8 @@ async fn api_prefetch_remote_trees(
         return std::collections::HashMap::new();
     }
 
+    let token: Option<Arc<str>> = crate::update_api::optional_github_api_token().map(Arc::from);
+    let abort = Arc::new(AtomicBool::new(false));
     let semaphore = Arc::new(Semaphore::new(crate::update_api::API_CONCURRENCY));
     let mut tasks = JoinSet::new();
     for (root, owner, repo, git_ref) in candidates {
@@ -514,19 +503,33 @@ async fn api_prefetch_remote_trees(
             .acquire_owned()
             .await
             .expect("semaphore permits are never released elsewhere");
+        let token = token.clone();
+        let abort = Arc::clone(&abort);
         tasks.spawn(async move {
             let _permit = permit;
-            let result =
-                crate::update_api::fetch_remote_subtree_hashes(&owner, &repo, &git_ref).await;
-            (root, result)
+            if abort.load(Ordering::Relaxed) {
+                return (root, None);
+            }
+            let result = crate::update_api::fetch_remote_subtree_hashes(
+                &owner,
+                &repo,
+                &git_ref,
+                token.as_deref(),
+            )
+            .await;
+            if result.as_ref().is_err_and(|error| error.is_rate_limited()) {
+                abort.store(true, Ordering::Relaxed);
+            }
+            (root, Some(result))
         });
     }
 
     let mut out: std::collections::HashMap<PathBuf, ApiRemoteTree> =
         std::collections::HashMap::new();
+    let mut logged_rate_limit = false;
     while let Some(joined) = tasks.join_next().await {
         match joined {
-            Ok((root, Ok(tree))) => {
+            Ok((root, Some(Ok(tree)))) => {
                 if api_tree_is_at_tracked_tip(&root, &tree) {
                     out.insert(root, tree);
                 } else {
@@ -537,13 +540,31 @@ async fn api_prefetch_remote_trees(
                     );
                 }
             }
-            Ok((_root, Err(error))) => {
+            Ok((_, Some(Err(error)))) if error.is_rate_limited() => {
+                if !logged_rate_limit {
+                    logged_rate_limit = true;
+                    debug!(
+                        target: "update_checker",
+                        error = %error,
+                        "GitHub API rate limit reached — falling back to git fetch"
+                    );
+                }
+            }
+            Ok((_, Some(Err(error)))) if error.is_expected() => {
+                debug!(
+                    target: "update_checker",
+                    error = %error,
+                    "GitHub API update-check fast path unavailable — falling back to git fetch"
+                );
+            }
+            Ok((_, Some(Err(error)))) => {
                 warn!(
                     target: "update_checker",
                     error = %error,
                     "GitHub API update-check fast path failed — falling back to git fetch"
                 );
             }
+            Ok((_, None)) => {}
             Err(error) => {
                 warn!(
                     target: "update_checker",
@@ -563,11 +584,7 @@ async fn api_prefetch_remote_trees(
 /// all — catch up; comparing against the API alone would leave them stale
 /// forever.
 fn api_tree_is_at_tracked_tip(repo_root: &Path, tree: &crate::update_api::ApiRemoteTree) -> bool {
-    let tracked = if update_checker::configured_git_ref(repo_root).is_some() {
-        "FETCH_HEAD"
-    } else {
-        "origin/HEAD"
-    };
+    let tracked = update_checker::tracked_update_ref(repo_root);
     let Ok(local_tip) = git_ops::rev_parse(repo_root, &format!("{tracked}^{{commit}}")) else {
         return false;
     };
@@ -698,7 +715,12 @@ mod api_tip_tests {
         let clone = temp.path().join("clone");
         git(
             temp.path(),
-            &["clone", "-q", remote.to_str().unwrap(), clone.to_str().unwrap()],
+            &[
+                "clone",
+                "-q",
+                remote.to_str().unwrap(),
+                clone.to_str().unwrap(),
+            ],
         );
         let tracked_tip = git(&clone, &["rev-parse", "origin/HEAD"]);
 

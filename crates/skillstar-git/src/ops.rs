@@ -131,39 +131,21 @@ pub fn compute_subtree_hash(repo_path: &Path, folder_path: &str) -> Result<Strin
 ///
 /// Always uses `--depth 1 --single-branch` to minimise network transfer
 /// and disk usage. Skills only need the latest snapshot, not full history.
-pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
-    clone_repo_in_session(url, dest, &GitOperationSession::public())
-}
-
 pub fn clone_repo_in_session(url: &str, dest: &Path, session: &GitOperationSession) -> Result<()> {
-    clone_repo_shallow_inner(url, dest, true, session)
+    run_git_clone(url, dest, true, session)
 }
 
 /// Shallow-clone a repository (depth=1) for fast scanning.
 ///
 /// Only fetches the latest commit – ideal for repo scanning where full
-/// history is unnecessary.  Unlike `clone_repo`, does *not* pass
+/// history is unnecessary.  Unlike `clone_repo_in_session`, does *not* pass
 /// `--single-branch` so remote tracking refs are created for update checks.
-pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
-    clone_repo_shallow_in_session(url, dest, &GitOperationSession::public())
-}
-
 pub fn clone_repo_shallow_in_session(
     url: &str,
     dest: &Path,
     session: &GitOperationSession,
 ) -> Result<()> {
-    clone_repo_shallow_inner(url, dest, false, session)
-}
-
-/// Shared implementation for shallow clones.
-fn clone_repo_shallow_inner(
-    url: &str,
-    dest: &Path,
-    single_branch: bool,
-    session: &GitOperationSession,
-) -> Result<()> {
-    run_git_clone(url, dest, single_branch, session)
+    run_git_clone(url, dest, false, session)
 }
 
 fn run_git_clone(
@@ -203,10 +185,6 @@ fn run_git_clone_attempt(
 /// clone is extremely small (typically <500KB even for large repos). Callers
 /// must follow up with `git sparse-checkout set <dirs>` + `git checkout` to
 /// materialize only the directories they need.
-pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
-    clone_repo_sparse_in_session(url, dest, &GitOperationSession::public())
-}
-
 pub fn clone_repo_sparse_in_session(
     url: &str,
     dest: &Path,
@@ -226,12 +204,9 @@ pub fn clone_repo_sparse_in_session(
 
 /// Configure sparse-checkout for a repo and materialize the given directories.
 ///
-/// Expects the repo to have been cloned with `clone_repo_sparse`. Sets cone-mode
-/// sparse-checkout to the given directory patterns then runs `git checkout`.
-pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
-    apply_sparse_checkout_in_session(repo_path, dirs, &GitOperationSession::public())
-}
-
+/// Expects the repo to have been cloned with `clone_repo_sparse_in_session`.
+/// Sets cone-mode sparse-checkout to the given directory patterns then runs
+/// `git checkout`.
 pub fn apply_sparse_checkout_in_session(
     repo_path: &Path,
     dirs: &[&str],
@@ -329,6 +304,14 @@ pub fn check_update(repo_path: &Path) -> Result<bool> {
 }
 
 pub fn check_update_in_session(repo_path: &Path, session: &GitOperationSession) -> Result<bool> {
+    // Every git call below only sets the working directory, so without a `.git`
+    // here git discovery walks *up* and operates on an ancestor repository —
+    // shallow-fetching a user repo SkillStar was never pointed at. Fail closed;
+    // callers map `Err` to "unknown" and keep the last successful badge.
+    if !repo_path.join(".git").exists() {
+        return Err(anyhow!("{} is not a git repository", repo_path.display()));
+    }
+
     // Depth-1 fetch: updates remote refs without downloading extra history.
     // Retry on shallow-file race condition.
     run_git_shallow_fetch_in_session(repo_path, &["fetch", "--depth", "1", "--quiet"], session)?;
@@ -348,10 +331,6 @@ pub fn check_update_in_session(repo_path: &Path, session: &GitOperationSession) 
 /// - Shallow clones stay shallow (git pull can re-deepen).
 /// - The result is always exactly at origin HEAD (no merge conflicts).
 /// - Network transfer is bounded to a single commit.
-pub fn pull_repo(repo_path: &Path) -> Result<()> {
-    pull_repo_in_session(repo_path, &GitOperationSession::public())
-}
-
 pub fn pull_repo_in_session(repo_path: &Path, session: &GitOperationSession) -> Result<()> {
     run_git_shallow_fetch_in_session(repo_path, &["fetch", "--depth", "1", "--quiet"], session)?;
 
@@ -400,7 +379,8 @@ impl std::error::Error for WorktreeDirty {}
 
 /// Whether the repository worktree has uncommitted *modifications*.
 ///
-/// Only modified/added/staged/unmerged tracked entries count as dirty.
+/// Only modified/added/renamed/copied/staged/unmerged tracked entries count
+/// as dirty.
 /// Untracked files survive `git reset --hard` untouched, and deleted files
 /// are restored from the index — neither loses user data — while a modified
 /// tracked file would be overwritten. This also keeps sparse checkouts whose
@@ -412,7 +392,8 @@ pub fn worktree_is_clean(repo_path: &Path) -> Result<bool> {
         let mut codes = line.chars();
         let index_code = codes.next().unwrap_or(' ');
         let worktree_code = codes.next().unwrap_or(' ');
-        !matches!(index_code, 'M' | 'T' | 'A' | 'U') && !matches!(worktree_code, 'M' | 'T' | 'U')
+        !matches!(index_code, 'M' | 'T' | 'A' | 'U' | 'R' | 'C')
+            && !matches!(worktree_code, 'M' | 'T' | 'U')
     }))
 }
 
@@ -522,10 +503,6 @@ fn parse_rename_records(output: &str) -> Vec<RenamedPath> {
 }
 
 /// Restore a repository to a previously captured commit after a failed update.
-pub fn reset_to_revision(repo_path: &Path, revision: &str) -> Result<()> {
-    reset_to_revision_in_session(repo_path, revision, &GitOperationSession::public())
-}
-
 pub fn reset_to_revision_in_session(
     repo_path: &Path,
     revision: &str,
@@ -548,10 +525,6 @@ pub fn sparse_checkout_paths(repo_path: &Path) -> Option<Vec<String>> {
         })
 }
 
-pub fn restore_sparse_checkout_paths(repo_path: &Path, paths: &[String]) -> Result<()> {
-    restore_sparse_checkout_paths_in_session(repo_path, paths, &GitOperationSession::public())
-}
-
 pub fn restore_sparse_checkout_paths_in_session(
     repo_path: &Path,
     paths: &[String],
@@ -570,10 +543,6 @@ pub fn restore_sparse_checkout_paths_in_session(
 /// A repo-cached Skill supplies its source folder so siblings in the same
 /// checkout remain untouched until the user resolves them too. A standalone
 /// clone supplies `None`, which restores the complete checkout.
-pub fn restore_worktree_to_head(repo_path: &Path, pathspec: Option<&str>) -> Result<()> {
-    restore_worktree_to_head_in_session(repo_path, pathspec, &GitOperationSession::public())
-}
-
 pub fn restore_worktree_to_head_in_session(
     repo_path: &Path,
     pathspec: Option<&str>,
@@ -656,10 +625,6 @@ fn validate_relative_pathspec(pathspec: &str) -> Result<()> {
 /// shallow repo concurrently, Git can fail with:
 ///   `fatal: shallow file has changed since we read it`
 /// This is a transient condition — retrying after a short backoff resolves it.
-pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> {
-    run_git_shallow_fetch_in_session(repo_path, args, &GitOperationSession::public())
-}
-
 pub fn run_git_shallow_fetch_in_session(
     repo_path: &Path,
     args: &[&str],

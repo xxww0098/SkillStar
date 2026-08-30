@@ -257,28 +257,13 @@ fn discovery_rejects_oversized_skill_manifests() {
 }
 
 #[test]
-fn skill_discovery_config_preserves_legacy_full_depth_mapping() {
-    assert_eq!(
-        SkillDiscoveryConfig::new(false).mode(),
-        DiscoveryMode::RootFirst
-    );
-    assert_eq!(
-        SkillDiscoveryConfig::new(true).mode(),
-        DiscoveryMode::FullDepth
-    );
-    assert!(!SkillDiscoveryConfig::root_first().is_full_depth());
-    assert!(SkillDiscoveryConfig::full_depth_mode().is_full_depth());
-}
-
-#[test]
 fn skill_discovery_pipeline_matches_compatibility_api() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
 
     write_skill_md(&repo.join("skills/demo/SKILL.md"), "demo", "demo").unwrap();
 
-    let from_pipeline =
-        SkillDiscovery::new(repo, SkillDiscoveryConfig::root_first()).discover();
+    let from_pipeline = SkillDiscovery::new(repo, false).discover();
     let from_compat = discover_skills(repo, false);
 
     assert_eq!(from_pipeline.len(), 1);
@@ -293,7 +278,7 @@ fn skill_discovery_candidate_keeps_root_path_and_frontmatter() {
     let repo = dir.path().join("owner--repo");
     write_skill_md(&repo.join("SKILL.md"), "root-name", "root-desc").unwrap();
 
-    let discovery = SkillDiscovery::new(&repo, SkillDiscoveryConfig::root_first());
+    let discovery = SkillDiscovery::new(&repo, false);
     let candidates = discovery.collect_candidates();
 
     assert_eq!(candidates.len(), 1);

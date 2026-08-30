@@ -35,6 +35,19 @@ fn check_update_returns_true_when_remote_has_new_commit() -> Result<()> {
 }
 
 #[test]
+fn check_update_refuses_a_directory_without_its_own_git() -> Result<()> {
+    // A plain hub directory (bundle/pack install) must not let git discovery
+    // escape upwards and fetch an ancestor repository.
+    let plain = tempfile::tempdir()?;
+    fs::create_dir_all(plain.path().join("skills/plain"))?;
+
+    let error = check_update(&plain.path().join("skills/plain")).unwrap_err();
+    assert!(error.to_string().contains("not a git repository"));
+
+    Ok(())
+}
+
+#[test]
 fn find_repo_root_finds_git_ancestor() -> Result<()> {
     let temp_root = make_temp_root("find-root")?;
     let repo = temp_root.join("repo");

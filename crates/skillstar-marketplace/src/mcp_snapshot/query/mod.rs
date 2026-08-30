@@ -15,9 +15,9 @@ mod publishers;
 mod sync_state;
 mod write;
 
+pub(crate) use cards::query_cards;
 #[cfg(test)]
-pub(crate) use cards::build_fts_match;
-pub(crate) use cards::{load_cards, load_cards_by_publisher, query_cards, search_cards};
+pub(crate) use cards::{build_fts_match, load_cards, load_cards_by_publisher, search_cards};
 pub(crate) use detail::{load_curated_servers, load_full_server};
 pub(crate) use publishers::load_publishers;
 #[cfg(test)]
@@ -26,4 +26,6 @@ pub(crate) use sync_state::{
     is_fresh, mark_attempt, mark_error, mark_scope_error, mark_scope_success,
     mark_success_with_meta, read_source_states, read_sync_state, source_scope,
 };
-pub(crate) use write::{count_servers, replace_servers};
+#[cfg(test)]
+pub(crate) use write::count_servers;
+pub(crate) use write::replace_servers;

@@ -317,10 +317,10 @@ fn hydrate(store: &mut Store) {
     }
     store.hydrated = true;
     for (name, stored) in load_snapshot() {
-        store
-            .states
-            .entry(name)
-            .or_insert(Stamped { stored, revision: 0 });
+        store.states.entry(name).or_insert(Stamped {
+            stored,
+            revision: 0,
+        });
     }
 }
 
@@ -539,7 +539,11 @@ mod tests {
         reload_for_test();
         assert_eq!(upstream_change("gamma"), Some(removed(Some(successor()))));
         assert_eq!(successors(), vec![("gamma".to_string(), successor())]);
-        assert_eq!(get("alpha"), Some(true), "legacy entries are kept alongside");
+        assert_eq!(
+            get("alpha"),
+            Some(true),
+            "legacy entries are kept alongside"
+        );
 
         let mut skills = [skill("gamma")];
         apply_to(&mut skills);

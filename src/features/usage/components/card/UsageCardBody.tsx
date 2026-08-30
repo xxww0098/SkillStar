@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { usageApi } from "../../api";
 import { computeHasAutoUsage } from "../../lib/hasAutoUsage";
 import { formatUsageErrorForDisplay } from "../../lib/usageErrors";
@@ -263,7 +263,10 @@ function OpenCodeApiKeyCopyBar({
         return;
       }
       // Clipboard only after invoke — never render full key in React state.
-      await navigator.clipboard.writeText(key);
+      if (!(await copyToClipboard(key))) {
+        toast.error(t("usage.copyApiKeyFailed"));
+        return;
+      }
       setCopied(true);
       toast.success(t("usage.copyApiKeySuccess"));
       setTimeout(() => setCopied(false), 2000);

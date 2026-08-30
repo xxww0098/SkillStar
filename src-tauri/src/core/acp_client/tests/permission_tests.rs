@@ -1,13 +1,13 @@
-use super::super::*;
+use super::super::client::SkillStarClient;
+use super::super::runner::read_only_capabilities;
 use agent_client_protocol::{self as acp, Client as _};
 use std::sync::{Arc, Mutex};
 
-fn test_client(policy: AcpAccessPolicy) -> SkillStarClient {
+fn test_client() -> SkillStarClient {
     SkillStarClient::new(
         Arc::new(Mutex::new(String::new())),
         |_| {},
         std::env::temp_dir(),
-        policy,
     )
 }
 
@@ -61,7 +61,7 @@ fn selected_permission_id(response: acp::RequestPermissionResponse) -> Option<St
 
 #[tokio::test]
 async fn read_only_permission_allows_safe_kinds_once() {
-    let client = test_client(AcpAccessPolicy::ReadOnly);
+    let client = test_client();
 
     for kind in [
         acp::ToolKind::Read,
@@ -81,7 +81,7 @@ async fn read_only_permission_allows_safe_kinds_once() {
 
 #[tokio::test]
 async fn read_only_permission_allows_only_trusted_title_when_kind_is_missing() {
-    let client = test_client(AcpAccessPolicy::ReadOnly);
+    let client = test_client();
 
     for title in [
         "Read SKILL.md",
@@ -112,7 +112,7 @@ async fn read_only_permission_allows_only_trusted_title_when_kind_is_missing() {
 
 #[tokio::test]
 async fn read_only_permission_rejects_mutating_external_and_unknown_kinds() {
-    let client = test_client(AcpAccessPolicy::ReadOnly);
+    let client = test_client();
 
     for kind in [
         acp::ToolKind::Edit,
@@ -137,7 +137,7 @@ async fn read_only_permission_rejects_mutating_external_and_unknown_kinds() {
 
 #[tokio::test]
 async fn read_only_permission_never_falls_back_to_allow_always() {
-    let client = test_client(AcpAccessPolicy::ReadOnly);
+    let client = test_client();
     let request = acp::RequestPermissionRequest::new(
         "session-1",
         acp::ToolCallUpdate::new(
@@ -167,7 +167,7 @@ async fn read_only_permission_never_falls_back_to_allow_always() {
 
 #[tokio::test]
 async fn read_only_client_hard_rejects_write_and_terminal_methods() {
-    let client = test_client(AcpAccessPolicy::ReadOnly);
+    let client = test_client();
     let write = client
         .write_text_file(acp::WriteTextFileRequest::new(
             "session-1",
@@ -195,7 +195,6 @@ async fn read_only_file_reads_are_strictly_rooted_in_work_dir() {
         Arc::new(Mutex::new(String::new())),
         |_| {},
         work_dir.path().to_path_buf(),
-        AcpAccessPolicy::ReadOnly,
     );
     let inside = client
         .read_text_file(acp::ReadTextFileRequest::new("session-1", "inside.txt"))
@@ -211,16 +210,8 @@ async fn read_only_file_reads_are_strictly_rooted_in_work_dir() {
 
 #[test]
 fn read_only_capabilities_declare_only_text_reads() {
-    let capabilities = capabilities_for_policy(AcpAccessPolicy::ReadOnly);
+    let capabilities = read_only_capabilities();
     assert!(capabilities.fs.read_text_file);
     assert!(!capabilities.fs.write_text_file);
     assert!(!capabilities.terminal);
-}
-
-#[test]
-fn full_capabilities_preserve_setup_access() {
-    let capabilities = capabilities_for_policy(AcpAccessPolicy::Full);
-    assert!(capabilities.fs.read_text_file);
-    assert!(capabilities.fs.write_text_file);
-    assert!(capabilities.terminal);
 }

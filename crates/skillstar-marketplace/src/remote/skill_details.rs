@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use ts_rs::TS;
 
 use super::*;
@@ -291,86 +291,6 @@ pub struct AiKeywordSearchResult {
     pub total_count: u32,
     /// Maps each keyword → list of skill names it found.
     pub keyword_skill_map: HashMap<String, Vec<String>>,
-}
-
-/// Search skills.sh concurrently with multiple keywords and merge results.
-///
-/// Each keyword is searched in parallel (bounded to 4 concurrent requests).
-/// Results are deduplicated by skill name, keeping the entry with the highest
-/// install count. Returns per-keyword attribution for frontend filtering.
-pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearchResult> {
-    if keywords.is_empty() {
-        return Ok(AiKeywordSearchResult {
-            skills: Vec::new(),
-            total_count: 0,
-            keyword_skill_map: HashMap::new(),
-        });
-    }
-
-    let mut join_set: tokio::task::JoinSet<Result<(String, MarketplaceResult)>> =
-        tokio::task::JoinSet::new();
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
-
-    for keyword in keywords.iter().cloned() {
-        let permit = semaphore.clone();
-        join_set.spawn(async move {
-            let _permit = permit
-                .acquire_owned()
-                .await
-                .map_err(|_| anyhow!("search semaphore closed"))?;
-            debug!(target: "ai_search", keyword = %keyword, "searching keyword");
-            let result = search_skills_sh(&keyword, 50).await?;
-            Ok((keyword, result))
-        });
-    }
-
-    // Merge all results, dedup by name keeping highest install count.
-    // Also track which keyword found which skill names.
-    let mut seen: HashMap<String, Skill> = HashMap::new();
-    let mut keyword_skill_map: HashMap<String, Vec<String>> = HashMap::new();
-
-    while let Some(result) = join_set.join_next().await {
-        match result {
-            Ok(Ok((keyword, market_result))) => {
-                let mut names_for_keyword = Vec::new();
-                for skill in market_result.skills {
-                    let key = skill.name.to_lowercase();
-                    names_for_keyword.push(skill.name.clone());
-                    let entry = seen.entry(key).or_insert_with(|| skill.clone());
-                    if skill.stars > entry.stars {
-                        *entry = skill;
-                    }
-                }
-                keyword_skill_map.insert(keyword, names_for_keyword);
-            }
-            Ok(Err(e)) => {
-                warn!(target: "ai_search", error = %e, "keyword search error");
-            }
-            Err(e) => {
-                warn!(target: "ai_search", error = %e, "task join error");
-            }
-        }
-    }
-
-    let mut skills: Vec<Skill> = seen.into_values().collect();
-    skills.sort_by_key(|s| std::cmp::Reverse(s.stars));
-    for (i, skill) in skills.iter_mut().enumerate() {
-        skill.rank = Some((i + 1) as u32);
-    }
-    let total_count = skills.len() as u32;
-
-    info!(
-        target: "ai_search",
-        unique_skills = total_count,
-        keywords = keywords.len(),
-        "merged search results"
-    );
-
-    Ok(AiKeywordSearchResult {
-        skills,
-        total_count,
-        keyword_skill_map,
-    })
 }
 
 // ── Tests ───────────────────────────────────────────────────────────

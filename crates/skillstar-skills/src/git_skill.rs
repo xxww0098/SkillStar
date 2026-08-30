@@ -56,15 +56,6 @@ impl GitSkillFacade {
         repo_scanner::scan_repo_with_mode_in_session(input, full_depth, &self.session)
     }
 
-    pub fn discover_skills(
-        &self,
-        input: &str,
-        full_depth: bool,
-    ) -> Result<Vec<repo_scanner::DiscoveredSkill>, String> {
-        skill_install::fetch_repo_scanned_in_session(input, full_depth, &self.session)
-            .map(|(_, _, _, skills)| skills)
-    }
-
     pub fn fetch_repo_scanned(
         &self,
         input: &str,
@@ -219,10 +210,6 @@ impl GitSkillFacade {
 
     pub fn install_skills_batch(&self, url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
         skill_install::install_skills_batch_in_session(url, names, &self.session)
-    }
-
-    pub fn install_skill_pack(&self, url: String) -> Result<Vec<String>, String> {
-        skill_install::install_skill_pack_in_session(url, &self.session)
     }
 
     pub fn update_skill(&self, name: &str) -> anyhow::Result<UpdateResult> {

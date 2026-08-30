@@ -34,63 +34,6 @@ pub struct DiscoveredSkill {
     pub frontmatter_issues: Vec<String>,
 }
 
-/// Configures how a repository should be scanned for skills.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SkillDiscoveryConfig {
-    mode: DiscoveryMode,
-}
-
-impl SkillDiscoveryConfig {
-    pub fn new(full_depth: bool) -> Self {
-        Self {
-            mode: DiscoveryMode::from_full_depth(full_depth),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn root_first() -> Self {
-        Self {
-            mode: DiscoveryMode::RootFirst,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn full_depth_mode() -> Self {
-        Self {
-            mode: DiscoveryMode::FullDepth,
-        }
-    }
-
-    pub fn mode(self) -> DiscoveryMode {
-        self.mode
-    }
-
-    pub fn is_full_depth(self) -> bool {
-        self.mode.is_full_depth()
-    }
-}
-
-/// High-level discovery behavior for repository scans.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiscoveryMode {
-    RootFirst,
-    FullDepth,
-}
-
-impl DiscoveryMode {
-    fn from_full_depth(full_depth: bool) -> Self {
-        if full_depth {
-            Self::FullDepth
-        } else {
-            Self::RootFirst
-        }
-    }
-
-    fn is_full_depth(self) -> bool {
-        matches!(self, Self::FullDepth)
-    }
-}
-
 /// Internal raw discovery item before it is normalized into a public skill.
 #[derive(Debug, Clone)]
 struct SkillCandidate {
@@ -126,12 +69,15 @@ impl SkillCandidate {
 #[derive(Debug, Clone, Copy)]
 pub struct SkillDiscovery<'a> {
     repo_dir: &'a Path,
-    config: SkillDiscoveryConfig,
+    full_depth: bool,
 }
 
 impl<'a> SkillDiscovery<'a> {
-    pub fn new(repo_dir: &'a Path, config: SkillDiscoveryConfig) -> Self {
-        Self { repo_dir, config }
+    pub fn new(repo_dir: &'a Path, full_depth: bool) -> Self {
+        Self {
+            repo_dir,
+            full_depth,
+        }
     }
 
     pub fn discover(&self) -> Vec<DiscoveredSkill> {
@@ -148,7 +94,7 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     fn selected_skill_md_paths(&self) -> Vec<PathBuf> {
-        if self.config.is_full_depth() {
+        if self.full_depth {
             return find_all_skill_md_files(self.repo_dir);
         }
 
@@ -174,9 +120,10 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     fn normalize_candidates(&self, candidates: Vec<SkillCandidate>) -> Vec<DiscoveredSkill> {
-        let candidates = match self.config.mode() {
-            DiscoveryMode::RootFirst => self.limit_to_root_candidate(candidates),
-            DiscoveryMode::FullDepth => candidates,
+        let candidates = if self.full_depth {
+            candidates
+        } else {
+            self.limit_to_root_candidate(candidates)
         };
 
         candidates
@@ -394,7 +341,7 @@ fn is_safe_repository_directory(base_dir: &Path, directory: &Path) -> bool {
 ///
 /// This is a **pure filesystem scan** — it does not consult the lockfile.
 pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill> {
-    SkillDiscovery::new(repo_dir, SkillDiscoveryConfig::new(full_depth)).discover()
+    SkillDiscovery::new(repo_dir, full_depth).discover()
 }
 
 /// Full discovery without identity deduplication, for integrity-sensitive
@@ -404,7 +351,7 @@ pub fn discover_skills_without_dedup(
     full_depth: bool,
     root_default_name: Option<&str>,
 ) -> Vec<DiscoveredSkill> {
-    let discovery = SkillDiscovery::new(repo_dir, SkillDiscoveryConfig::new(full_depth));
+    let discovery = SkillDiscovery::new(repo_dir, full_depth);
     let mut candidates = discovery.collect_candidates();
     if let Some(root_default_name) = root_default_name {
         for candidate in &mut candidates {
@@ -580,8 +527,8 @@ fn extract_frontmatter(skill_md_path: &Path) -> SkillFrontmatter {
 }
 
 #[cfg(test)]
-mod tests;
+mod depth_and_plugin_tests;
 #[cfg(test)]
 mod frontmatter_issue_tests;
 #[cfg(test)]
-mod depth_and_plugin_tests;
+mod tests;

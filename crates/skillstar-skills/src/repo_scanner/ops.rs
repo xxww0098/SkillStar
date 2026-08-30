@@ -37,11 +37,7 @@ pub fn pull_repo_skill_update_in_session(
         return Err(git_ops::WorktreeDirty.into());
     }
 
-    let reset_target = if update_checker::configured_git_ref(&repo_root).is_some() {
-        "FETCH_HEAD"
-    } else {
-        "origin/HEAD"
-    };
+    let reset_target = update_checker::tracked_update_ref(&repo_root);
     git_ops::checkout_in_session(&repo_root, &["reset", "--hard", reset_target], session)
         .context("Failed to execute git reset for repo-cached update")?;
 

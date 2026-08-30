@@ -170,6 +170,7 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
   };
 
   const resetAndClose = () => {
+    setLoading(false);
     setCode("");
     setPassword("");
     setPreview(null);

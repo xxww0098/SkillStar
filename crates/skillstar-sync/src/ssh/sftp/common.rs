@@ -1,15 +1,12 @@
 //! Shared SFTP plumbing used by the push / list / delete operations.
 //!
-//! Holds the low-level pieces every operation needs: opening an SFTP session,
-//! `mkdir -p` over SFTP, and atomic file read/write. The operation-specific
-//! logic lives in the sibling [`super::push`], [`super::list`] and
-//! [`super::delete`] modules.
+//! Holds the low-level pieces every operation needs: opening an SFTP session
+//! and `mkdir -p` over SFTP. The operation-specific logic lives in the sibling
+//! [`super::push`], [`super::list`] and [`super::delete`] modules.
 
 use anyhow::{Context, Result};
 use russh::client::Handle;
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::OpenFlags;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::ssh::client::SshHandler;
 
@@ -104,56 +101,6 @@ pub(crate) async fn ensure_remote_dir(sftp: &SftpSession, remote_path: &str) -> 
         // SFTP returns Failure for existing dirs — treat as success either way.
         if let Ok(()) = sftp.create_dir(&dir).await {}
     }
-    Ok(())
-}
-
-// ── file IO ──────────────────────────────────────────────────────────
-
-/// Read an entire remote file into memory using SFTP.
-///
-/// Opens the file for reading and drains it via `AsyncReadExt::read_to_end`.
-/// Returns the raw bytes. The caller is responsible for interpreting the
-/// content (e.g. UTF-8 text for SKILL.md).
-pub async fn read_remote_file(sftp: &SftpSession, remote_path: &str) -> Result<Vec<u8>> {
-    let mut file = sftp
-        .open(remote_path)
-        .await
-        .with_context(|| format!("open remote {} for read", remote_path))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .await
-        .with_context(|| format!("read remote {}", remote_path))?;
-    Ok(buf)
-}
-
-/// Write bytes to a remote file using an atomic temp→rename pattern.
-///
-/// The file is first written to `{remote_path}.skillstar.tmp`, then renamed
-/// over the target. This mirrors the pattern used by `upload_local_skill_tree`
-/// so that interrupted writes never leave a partially-written final file.
-pub async fn write_remote_file(sftp: &SftpSession, remote_path: &str, bytes: &[u8]) -> Result<()> {
-    let parent = remote_path.rsplit_once('/').map(|(p, _)| p).unwrap_or(".");
-    ensure_remote_dir(sftp, parent).await?;
-
-    let tmp_path = format!("{}.skillstar.tmp", remote_path);
-    let mut file = sftp
-        .open_with_flags(
-            &tmp_path,
-            OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
-        )
-        .await
-        .with_context(|| format!("open remote {} for write", tmp_path))?;
-    file.write_all(bytes)
-        .await
-        .with_context(|| format!("write remote {}", tmp_path))?;
-    file.flush().await.ok();
-    drop(file);
-
-    let _ = sftp.remove_file(remote_path).await;
-    sftp.rename(&tmp_path, remote_path)
-        .await
-        .with_context(|| format!("rename {} -> {}", tmp_path, remote_path))?;
-
     Ok(())
 }
 

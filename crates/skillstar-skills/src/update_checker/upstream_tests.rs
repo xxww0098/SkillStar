@@ -62,9 +62,21 @@ fn a_folder_gone_at_the_tracked_ref_is_removed_and_its_move_is_found() {
         git(&remote, &["init", "-q", "--initial-branch=main"]);
         git(&remote, &["config", "user.email", "test@example.com"]);
         git(&remote, &["config", "user.name", "SkillStar Tests"]);
-        write_skill(&remote, "skills/one", &manifest("one", "First skill", &long_body("one")));
-        write_skill(&remote, "skills/keep", &manifest("keep", "Kept skill", &long_body("keep")));
-        write_skill(&remote, "skills/three", &manifest("three", "Third", &long_body("three")));
+        write_skill(
+            &remote,
+            "skills/one",
+            &manifest("one", "First skill", &long_body("one")),
+        );
+        write_skill(
+            &remote,
+            "skills/keep",
+            &manifest("keep", "Kept skill", &long_body("keep")),
+        );
+        write_skill(
+            &remote,
+            "skills/three",
+            &manifest("three", "Third", &long_body("three")),
+        );
         git(&remote, &["add", "."]);
         git(&remote, &["commit", "-q", "-m", "initial"]);
 
@@ -73,13 +85,22 @@ fn a_folder_gone_at_the_tracked_ref_is_removed_and_its_move_is_found() {
         let repo_dir = cache.join("acme--demo");
         git(
             &cache,
-            &["clone", "-q", remote.to_str().unwrap(), repo_dir.to_str().unwrap()],
+            &[
+                "clone",
+                "-q",
+                remote.to_str().unwrap(),
+                repo_dir.to_str().unwrap(),
+            ],
         );
 
         let hub = skillstar_core::infra::paths::hub_skills_dir();
         fs::create_dir_all(&hub)?;
         let mut lock = lockfile::Lockfile::default();
-        for (name, folder) in [("one", "skills/one"), ("keep", "skills/keep"), ("three", "skills/three")] {
+        for (name, folder) in [
+            ("one", "skills/one"),
+            ("keep", "skills/keep"),
+            ("three", "skills/three"),
+        ] {
             skillstar_core::infra::fs_ops::create_symlink(&repo_dir.join(folder), &hub.join(name))?;
             lock.upsert(lock_entry(name, folder));
         }
@@ -99,7 +120,10 @@ fn a_folder_gone_at_the_tracked_ref_is_removed_and_its_move_is_found() {
         // `git mv` needs the destination parent to exist already.
         fs::create_dir_all(remote.join("skills/engineering"))?;
         fs::create_dir_all(remote.join("skills/misc"))?;
-        git(&remote, &["mv", "skills/one", "skills/engineering/one-spec"]);
+        git(
+            &remote,
+            &["mv", "skills/one", "skills/engineering/one-spec"],
+        );
         fs::write(
             remote.join("skills/engineering/one-spec/SKILL.md"),
             manifest("one-spec", "First skill", &long_body("one")),
@@ -108,7 +132,11 @@ fn a_folder_gone_at_the_tracked_ref_is_removed_and_its_move_is_found() {
         git(&remote, &["mv", "skills/three", "skills/misc/three-new"]);
         fs::write(
             remote.join("skills/misc/three-new/SKILL.md"),
-            manifest("three", "Third, rewritten", "Completely different text now.\n"),
+            manifest(
+                "three",
+                "Third, rewritten",
+                "Completely different text now.\n",
+            ),
         )?;
         git(&remote, &["add", "-A"]);
         git(&remote, &["commit", "-q", "-m", "reshuffle"]);
@@ -134,8 +162,7 @@ fn a_folder_gone_at_the_tracked_ref_is_removed_and_its_move_is_found() {
         }
         match check("keep", &none) {
             Some(UpstreamStatus::Removed(UpstreamChange::Removed {
-                successor: None,
-                ..
+                successor: None, ..
             })) => {}
             other => panic!("expected a plain removal, got {other:?}"),
         }

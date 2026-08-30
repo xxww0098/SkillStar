@@ -266,10 +266,6 @@
     @apply flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-l-[26px] rounded-r-none border border-border/80 bg-card/80 shadow-[0_24px_80px_-40px_var(--color-shadow)] ring-1 ring-glass-ring;
   }
 
-  .ss-floating-page-inner {
-    @apply flex min-h-0 min-w-0 flex-1 overflow-hidden;
-  }
-
   .ss-page-stack {
     @apply space-y-6;
     container-type: inline-size;
@@ -666,63 +662,9 @@
   :root[data-bg-style="paper"] .modal-surface-subtle {
     background-color: var(--color-card);
   }
-
-  /* ── Drag-to-reorder (classList-driven, zero React re-renders) ── */
-
-  .drag-source-active {
-    opacity: 0.35 !important;
-    pointer-events: none;
-    transition: opacity 0.15s ease;
-  }
-
-  .drag-drop-above {
-    position: relative;
-  }
-  .drag-drop-above::before {
-    content: "";
-    position: absolute;
-    top: -2px;
-    left: 16px;
-    right: 16px;
-    height: 3px;
-    border-radius: 999px;
-    background: var(--color-primary);
-    z-index: 50;
-    pointer-events: none;
-    animation: drag-indicator-in 0.12s ease-out;
-  }
-
-  .drag-drop-below {
-    position: relative;
-  }
-  .drag-drop-below::after {
-    content: "";
-    position: absolute;
-    bottom: -2px;
-    left: 16px;
-    right: 16px;
-    height: 3px;
-    border-radius: 999px;
-    background: var(--color-primary);
-    z-index: 50;
-    pointer-events: none;
-    animation: drag-indicator-in 0.12s ease-out;
-  }
 }
 
 /* ========== Keyframes ========== */
-
-/* Drag indicator bounce-in — subtle scale-in for drop position lines */
-@keyframes drag-indicator-in {
-  0% {
-    transform: scaleX(0.3);
-    opacity: 0;
-  }
-  100% {
-    transform: scaleX(1);
-    opacity: 1;
-  }
-}
 
 /* Shimmer loading effect — GPU-accelerated via ::after pseudo-element */
 @keyframes shimmer {
@@ -818,21 +760,6 @@
 
 .animate-success-glow {
   animation: success-glow 0.8s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* Splash fade-out */
-@keyframes splash-fade-out {
-  0% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    pointer-events: none;
-  }
-}
-
-.animate-splash-exit {
-  animation: splash-fade-out 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* Scan line — vertical sweep for security panel */

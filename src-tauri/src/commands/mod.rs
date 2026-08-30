@@ -10,13 +10,11 @@ pub mod network;
 pub mod patrol;
 pub mod projects;
 pub mod shell;
-pub mod shell_rc;
 pub mod updater;
 pub mod usage_commands;
 pub mod usage_windows;
 
 pub use network::*;
-pub use shell_rc::*;
 
 mod adopt_folder;
 mod bundles;

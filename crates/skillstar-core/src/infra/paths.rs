@@ -36,7 +36,9 @@ use std::path::PathBuf;
 /// Default: `~/.skillstar/` (all platforms)
 /// Override: `SKILLSTAR_DATA_DIR`
 pub fn data_root() -> PathBuf {
-    if let Ok(dir) = std::env::var("SKILLSTAR_DATA_DIR") {
+    if let Ok(dir) = std::env::var("SKILLSTAR_DATA_DIR")
+        && !dir.trim().is_empty()
+    {
         let expanded = shellexpand_home(&dir);
         return PathBuf::from(expanded);
     }
@@ -48,7 +50,9 @@ pub fn data_root() -> PathBuf {
 /// Default: `~/.skillstar/hub`
 /// Override: `SKILLSTAR_HUB_DIR`
 pub fn hub_root() -> PathBuf {
-    if let Ok(dir) = std::env::var("SKILLSTAR_HUB_DIR") {
+    if let Ok(dir) = std::env::var("SKILLSTAR_HUB_DIR")
+        && !dir.trim().is_empty()
+    {
         let expanded = shellexpand_home(&dir);
         return PathBuf::from(expanded);
     }
@@ -191,11 +195,6 @@ pub fn project_detail_dir(name: &str) -> PathBuf {
 /// `state/groups.json` — skill groups.
 pub fn groups_path() -> PathBuf {
     state_dir().join("groups.json")
-}
-
-/// `state/packs.json` — skill packs registry.
-pub fn packs_path() -> PathBuf {
-    state_dir().join("packs.json")
 }
 
 /// `state/repo_history.json` — repo import history.

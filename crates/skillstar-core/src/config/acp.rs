@@ -76,11 +76,8 @@ fn normalize_builtin_label(config: &mut AcpConfig) {
 
 pub fn save_config(config: &AcpConfig) -> anyhow::Result<()> {
     let p = config_path();
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let content = serde_json::to_string_pretty(config)?;
-    std::fs::write(&p, content)?;
+    crate::infra::fs_ops::atomic_write(&p, content.as_bytes())?;
     Ok(())
 }
 

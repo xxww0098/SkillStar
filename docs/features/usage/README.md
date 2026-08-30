@@ -15,7 +15,7 @@
 
 ## OAuth 与刷新
 
-- OAuth 启动返回 auth URL、pending id 和可选 device code；前端展示后轮询/回调完成。
+- OAuth 启动返回 auth URL 和 pending id；前端展示后轮询/回调完成。所有 provider 都走浏览器跳转，没有 device code 流（`OAuthStartInfo::browser` 是唯一构造函数）。
 - 编辑既有 subscription 发起 OAuth 时，pending state 带原 subscription id；**每个 OAuth catalog 都必须把它传到 finalize**，成功后原位替换并保留用户 metadata/sort order，不新增重复卡片。用户自定义的卡片标题优先于登录带回的邮箱，只有占位标题会被升级。
 - 所有 OAuth token 交换与刷新走 `oauth::token_endpoint::post_token`，fetcher 不自建 token POST 与错误映射。
 - **不是每个 OAuth catalog 都有 token 交换腿。** `anthropic` 全程只读 Claude Code 自己的登录态，从不 POST token、从不写回凭证，因此 `token_endpoint` 不在它的路径上（见下节）。

@@ -18,24 +18,6 @@ pub enum ProjectDeployMode {
     Copy,
 }
 
-/// Deploy a skill from hub into a project directory.
-///
-/// Always tries symlink first; if symlink creation fails (e.g. on Windows
-/// without Developer Mode on a cross-drive path), falls back to a full
-/// directory copy automatically. The caller no longer needs to specify a mode.
-pub fn deploy_skill_auto(source: &Path, target: &Path) -> Result<()> {
-    let was_copy = skillstar_core::infra::fs_ops::create_symlink_or_copy(source, target)?;
-    if was_copy {
-        tracing::info!(
-            target: "sync",
-            source = %source.display(),
-            target = %target.display(),
-            "Symlink failed, deployed via copy fallback",
-        );
-    }
-    Ok(())
-}
-
 /// Deploy a skill from hub into a project directory using an explicit mode.
 ///
 /// - [`ProjectDeployMode::Symlink`] tries symlink/junction first and
@@ -43,12 +25,26 @@ pub fn deploy_skill_auto(source: &Path, target: &Path) -> Result<()> {
 ///   Windows without Developer Mode on a cross-drive path).
 /// - [`ProjectDeployMode::Copy`] always performs a full directory copy with
 ///   no live link to the hub.
+///
+/// There is deliberately no mode-less "auto" variant: a caller that already
+/// knows it is refreshing a copy must not fall back into symlink-first, or it
+/// downgrades a deployment the user explicitly chose.
 pub fn deploy_skill_with_mode(source: &Path, target: &Path, mode: ProjectDeployMode) -> Result<()> {
     match mode {
-        ProjectDeployMode::Symlink => deploy_skill_auto(source, target),
-        ProjectDeployMode::Copy => {
-            skillstar_core::infra::fs_ops::create_copy_deploy(source, target)?;
+        ProjectDeployMode::Symlink => {
+            let was_copy = skillstar_core::infra::fs_ops::create_symlink_or_copy(source, target)?;
+            if was_copy {
+                tracing::info!(
+                    target: "sync",
+                    source = %source.display(),
+                    target = %target.display(),
+                    "Symlink failed, deployed via copy fallback",
+                );
+            }
             Ok(())
+        }
+        ProjectDeployMode::Copy => {
+            skillstar_core::infra::fs_ops::create_copy_deploy(source, target)
         }
     }
 }

@@ -7,7 +7,6 @@
 ## 所有权
 
 - `skillstar-skills` 拥有技能 install/update/bundle/local/repo scan、lockfile/update detection、Agent registry、项目 manifest、deployment 和 patrol。无消费者的旧 terminal backend 不作为公共子系统保留。
-- `skillstar-skills::skill_hooks` 拥有技能自带 hook 的解析与逐 Agent 落盘。它与 deployment 共用安装管道但不共用代码路径：deployment 投放惰性 Markdown，skill_hooks 写入可执行载荷，两者的门禁与归属规则不同。
 - `skillstar-core` 只提供共享 `Skill` 契约与基础设施，不拥有技能 lockfile/update detection。
 - `src-tauri/src/commands/` 只转发 DTO、State 和事件；CLI 安装/管理复用相同 facade。
 - 搜索结果安装等跨 marketplace/skills 流程由 `skillstar-app` 编排。
@@ -41,7 +40,7 @@
 - GUI 的 `install_skill` / `install_from_scan` 安装成功后自动部署到 Settings 已启用且支持全局技能的 Agent（编排在 `skillstar-app::global_deploy`，command 只做调度）；语义与 CLI 一致：已链接项跳过、没有启用 Agent 时不部署、部分 Agent 部署失败时以错误返回并明确“hub 安装已成功但部署不完整”。
 - repo scan 默认 root-first；仓库根有合法 `SKILL.md` 时首先视作一个技能，也可显式启用全深度 discovery。
 - 技能 id 优先使用 frontmatter `name`，再回退目录名；根技能可回退仓库名。
-- 安装与扫描必须走同一 frontmatter 质量门禁（`skillstar-skills::validation`）：`description` 缺失/非字符串/超 1024 字符、`name` 超 64 字符、frontmatter 缺失或 YAML 损坏的技能在 repo-scan 安装、`install_skill` 的直接 clone 回退、share-code embedded、pack 安装、bundle 导出/导入、本地目录采用（`adopt_folder` 与项目导入）处 fail-closed；`description` 中的 `<` / `>` 是合法文本，不作为门禁。错误必须列出全部失败技能与可行动原因；`name` 缺失（回退目录名）与非 kebab-case 属于咨询级，不阻塞。`DiscoveredSkill.frontmatter_issues` 把稳定 issue code 传给前端，扫描预览必须逐项显示具体原因，不得把所有问题概括为缺少 `name` / `description`。`install_skill` 的直接 clone 回退对克隆结果同样校验，失败删除克隆并返回与 scan 路径一致的可行动错误。
+- 安装与扫描必须走同一 frontmatter 质量门禁（`skillstar-skills::validation`）：`description` 缺失/非字符串/超 1024 字符、`name` 超 64 字符、frontmatter 缺失或 YAML 损坏的技能在 repo-scan 安装、`install_skill` 的直接 clone 回退、share-code embedded、bundle 导出/导入、本地目录采用（`adopt_folder` 与项目导入）处 fail-closed；`description` 中的 `<` / `>` 是合法文本，不作为门禁。错误必须列出全部失败技能与可行动原因；`name` 缺失（回退目录名）与非 kebab-case 属于咨询级，不阻塞。`DiscoveredSkill.frontmatter_issues` 把稳定 issue code 传给前端，扫描预览必须逐项显示具体原因，不得把所有问题概括为缺少 `name` / `description`。`install_skill` 的直接 clone 回退对克隆结果同样校验，失败删除克隆并返回与 scan 路径一致的可行动错误。
 - 仓库技能发现对齐生态：priority 容器目录（`skills/`、`.claude/skills/` 等）最多走 3 层，含 SKILL.md 的目录遮蔽其下内容，仓库根保持 1 层；`.claude-plugin/marketplace.json` 与 `plugin.json` 声明的本地 `./` 前缀技能路径以声明深度加入扫描（越界/非 `./` 路径拒绝，manifest 只提供位置不执行插件逻辑）。
 - CLI `install` 与 `add` 是同一命令，来源解析兼容 `npx skills add` 的常用形式：`owner/repo`、`owner/repo/path`、`owner/repo@skill`、GitHub/GitLab tree URL、HTTPS/SSH Git URL、本地 `.ags`/`.agd` 和包含 `SKILL.md` 的本地目录。tree URL 的 ref 与 subpath 必须在 clone/scan 阶段生效，不能把网页 URL 直接交给 Git。
 - 多技能来源在交互模式中选择 Skill；`-y` 未显式指定 Skill 时安装发现到的全部 Skill。`--skill '*'` 只展开全部 Skill，`--agent '*'` 只展开全部目标 Agent；`--all` 等价于两者加 `-y`。
@@ -49,7 +48,7 @@
 - 项目部署补装按仓库 URL 并发；任一缺失 Skill 安装失败时先汇总相关名称和底层原因并终止，不得继续注册项目或同步部署。
 - 未显式指定 Agent 时，只使用用户已在 Settings 手动启用的 Agent；SkillStar 不探测本机是否安装了对应 binary、桌面应用或配置目录。`-y` 下没有已启用 Agent 时直接报错，不得回退到全部 Agent。显式 `--agent` 与显式 `--all` 始终优先。
 - 交互安装在未显式给出 `--global`/`--project` 时选择 Project 或 Global scope；`-y` 默认 Project。Project 部署进入项目技能目录并登记 `skills-list.json`，Global 部署进入所选 Agent 的用户级技能目录；两者都以 SkillStar hub 为内部 canonical source。
-- 默认部署为 link-first；多个目标时交互选择 symlink/copy，`--copy` 必须真实强制目录复制，不能只改变日志。相同目标目录只物化一次——**当前仅 CLI 的 `batch_deploy_skills_to_agents` 以 `seen_dirs` 兑现该不变量**；GUI 的全局部署逐 profile 迭代，靠"目标已存在则跳过"达成幂等，尚未按物理目录去重。D-024 要求把它泛化为全局不变量。
+- 默认部署为 link-first；多个目标时交互选择 symlink/copy，`--copy` 必须真实强制目录复制，不能只改变日志。相同目标目录只物化一次：Global 侧 CLI 与 GUI 共用 `batch_deploy_skills_to_agents`，由它的 `seen_dirs` 按解析后的物理目录去重。GUI 的 `global_deploy` 只负责按 Settings 的 `enabled` 投影出目标集合再交给它，不再逐 profile 迭代，因此共享 `~/.agents/skills` 的 Agent 不会被重复物化。D-024 余下的 provenance 归属仍未收敛。
 - 与 `vercel-labs/skills` 兼容的 Agent 共用项目级 `.agents/skills`。共享目录是 universal install surface；Agent 归属只用于 UI/manifest，不得重复部署或让一个 Agent 的移除误删另一个仍在使用的共享目录。**该约束当前两侧均未兑现**（Global 侧无任何归属记录，Project 侧 cleanup/clear/rebuild 三条路径不查 manifest），根因、失败清单与自检见 [errors.md](../../errors.md) 同日条目，目标模型见 [decisions.md](../../decisions.md) D-024。
 - update 使用 staged swap；刷新失败不得先删除用户现有可用 link/copy。失败按 Agent 聚合并显式返回。
 - repo-backed 技能的 update 徽标按 Skill 粒度判定：比较该 Skill 目录在本地 HEAD 与 fetched ref（`origin/HEAD` 或 `FETCH_HEAD`）的 subtree hash，只有目录内容实际变化的 Skill 亮徽标；同 checkout 其他 Skill 不因 repo 级 HEAD 变化误报。subtree 无法解析（来源移动/删除该目录）时保留旧徽标状态。
@@ -82,7 +81,7 @@
 - 历史回滚成功后只固定该 Skill 的精确 release target，频道整体已评审 target 不倒退。固定项继续展示最新版本与差异，但手动“应用安全更新”和自动升级都跳过它，直到用户显式“恢复跟随频道”。恢复动作原子清除 pin 并重新产生最新升级计划，不在同一步骤隐式覆盖本地内容；之后仍按手动或受保护自动策略应用。pin 和最近计划持久化，重启后不得丢失。
 - 当最新已验证 Release 不再包含某个已安装 Skill 时，该项进入独立的 `removed_from_channel` 状态；SkillStar 不删文件、不清 Agent/Project 部署，也不让它阻止同频道其他干净 Skill 升级。用户可显式选择“卸载”，复用既有 Hub、lockfile、Agent 与 Project 清理语义；或“转为本地副本”，先按完整内容快照创建可编辑、冲突安全的本地 Skill，再解除原项的频道 provenance/跟踪。默认本地名为 `<name>.local`，冲突时使用 `.local.2` 等候选，且允许用户编辑。
 - 卸载或转为本地副本成功后，该 Skill 从订阅的 tracked/known/pin 集合中移除，其他逐项升级事实不变。若发布者以后重新加入同名 Skill，它只作为未选中的新安装通知；即便重加发生在用户尚未处理移除时，既有 removal tombstone 也继续阻止普通更新，必须先完成卸载或转本地，再由用户显式“安装并跟踪”。重新安装会验证精确 manifest/commit/hash 并走 staged install，不得覆盖已转换的本地副本。
-- 仍被订阅跟踪的频道 Skill 由频道事务独占所有权；通用 My Skills 的默认分支扫描/重装、普通更新、本地分歧继续更新、内容编辑/删除、本地创建/收养/旧版迁移、bundle/pack 导入移除、项目扫描导入和普通卸载入口必须在任何 fetch/reset 或文件写入前拒绝这些名称及其受管仓库，不能绕过频道 remote state、不可变 Release 与 tracked/known/pin 元数据。通用更新徽标也不得投影频道 Skill。用户只能在频道面板按升级、removed 或 revoked 流程处理；解除跟踪或转为本地副本后才恢复通用操作。
+- 仍被订阅跟踪的频道 Skill 由频道事务独占所有权；通用 My Skills 的默认分支扫描/重装、普通更新、本地分歧继续更新、内容编辑/删除、本地创建/收养/旧版迁移、bundle 导入移除、项目扫描导入和普通卸载入口必须在任何 fetch/reset 或文件写入前拒绝这些名称及其受管仓库，不能绕过频道 remote state、不可变 Release 与 tracked/known/pin 元数据。通用更新徽标也不得投影频道 Skill。用户只能在频道面板按升级、removed 或 revoked 流程处理；解除跟踪或转为本地副本后才恢复通用操作。
 - 逐 Skill 拒绝只覆盖按名字操作的入口，覆盖不到整目录级的全局存储维护，因此这四条路径按各自语义单独处理。三条 `force_delete_*` 是用户显式的破坏性重置：允许删除频道 Skill，但必须在任何删除动作之前把被删名字回报给 gate 拥有者，由订阅侧同步剪掉 tracked/pin 并清空已存的升级评审快照；订阅本身及 known 集合保留，用户随后仍能从频道面板重新安装。回报失败（例如订阅 store 处于未来 schema 无法安全改写）必须中止整次重置，不能留下"Skill 已删、订阅仍在跟踪"——那种名字既装不回也删不掉。
 - 频道注册表与订阅 store 是"已安装内容的归属记录"，不是用户偏好，与 lockfile 同级；因此应用配置强制删除保留这两个文件，只清理真正的配置项。若把归属记录连同配置一起删掉，Hub 里的频道 Skill 会失去频道身份，普通更新路径随后会用匿名会话去 fetch 私有频道仓库并永久失败，而 gate 已不再拦截。
 - 断链清理属于日常维护而非重置，必须整体跳过频道所有权 Skill：断链的频道 Skill 由频道面板修复，清理既不删它的 Hub 入口也不剪它的 lockfile 条目，更不改订阅。所有权查询失败一律按"属于频道"处理，读取错误不得升级为删除。存储概览仍会把这类断链计入 broken 数，清理后计数不归零是预期结果。
@@ -109,7 +108,7 @@
 - 一次 update 是一个事务：pull、lockfile hash 写入、同 checkout 兄弟技能的 hash 扇出、Agent relink、项目 cascade 和 update state 清除必须走同一入口。pull 后若完整 baseline 或 lockfile 原子保存失败，先恢复旧 Git revision、旧 sparse-checkout 配置与更新前受管内容，再返回失败；`.skillstar`、编辑器临时文件等不属于 baseline 的运行时文件不得被回滚清理。GUI 与 CLI 走同一入口，任何调用方都不得只做 pull。
 - 批量 update 每个 repo 只拉一次；未被拉取但内容随之移动的技能报告为 `skipped`，失败的 repo 把它本会覆盖的全部名字报告为 `failed`，不得计入成功。
 - `update_available` 的判定可能过期：一次扫描开始后若该技能被更新，扫描结果作废。该规则由 `update_state` 按技能名的 revision 裁决，扫描以起始 revision 提交。patrol 事件是通知而非记录，其载荷是已裁决后的状态。
-- 更新检测对 `github.com` 来源优先走匿名 GitHub Trees API 快速路径（`skillstar-skills::update_api`）：每个 cycle 至多 40 个 repo、并发 8、超时 10s，子目录 tree SHA 即远程 subtree hash，成功则跳过该 repo 的 prefetch fetch，直接对比本地 HEAD subtree hash。但"成功"还要求响应顶层 commit SHA 仍等于本地 tracked ref（`origin/HEAD`，pinned 时为 `FETCH_HEAD`）：上游 tip 已前进的仓库改走 `git fetch`，让 tracked ref 跟上——新技能检测读的就是它，只对比 API 会让它永远停在旧 tip。仓库根技能不能把 Trees 响应顶层 `sha` 当成 tree SHA：用 branch/commit 查询时 GitHub 把 **commit SHA** 放进 `sha`，真正的 tree 在 commit 对象里；根技能因此同时接受「本地 `HEAD` == 远程 sha」或「本地 `HEAD^{tree}` == 远程 sha」。API 失败（私有仓库、限流、网络、truncated）或来源不是 github.com 一律回退既有 `git fetch` 路径，凭据不出 Git session，判定语义（失败保留徽标、目录消失保留徽标、revision 裁决）不变。
+- 更新检测对 `github.com` 来源优先走 GitHub Trees API 快速路径（`skillstar-skills::update_api`）：每个 cycle 至多 40 个 repo、并发 8、超时 10s，子目录 tree SHA 即远程 subtree hash，成功则跳过该 repo 的 prefetch fetch，直接对比本地 HEAD subtree hash。已有 GitHub App session 时请求带 Bearer（认证额度）；否则匿名。但"成功"还要求响应顶层 commit SHA 仍等于本地 tracked ref（`origin/HEAD`，pinned 时为 `FETCH_HEAD`）：上游 tip 已前进的仓库改走 `git fetch`，让 tracked ref 跟上——新技能检测读的就是它，只对比 API 会让它永远停在旧 tip。仓库根技能不能把 Trees 响应顶层 `sha` 当成 tree SHA：用 branch/commit 查询时 GitHub 把 **commit SHA** 放进 `sha`，真正的 tree 在 commit 对象里；根技能因此同时接受「本地 `HEAD` == 远程 sha」或「本地 `HEAD^{tree}` == 远程 sha」。API 失败（私有仓库、限流、网络、truncated）或来源不是 github.com 一律回退既有 `git fetch` 路径；限流写入进程冷却，401/403/404 不打 warn。凭据不出 Git session，判定语义（失败保留徽标、目录消失保留徽标、revision 裁决）不变。
 
 ## Agent 注册、手动启用与项目检测
 
@@ -120,33 +119,22 @@
 - Settings 按上述顺序默认只展示前 10 个 Agent；超过 10 个时在列表底部显示剩余数量，并由用户显式展开全部或收起回前 10 个。总数不超过 10 个时不渲染折叠控件。
 - 冻结的 8 字段 `AgentProfile` 暂时保留 `installed` 以兼容 Tauri IPC；该字段只镜像手动 `enabled` 状态，不再表达系统安装探测。新代码不得以 `installed` 作为可见性或默认值来源。
 - MCP rail 只在手动启用 profile 的基础上叠加静态能力映射，不再用 MCP tool 安装探测决定是否渲染；真实写入失败由执行动作返回。SSH 远端 discovery 属于用户显式连接后的远端目录扫描，不复用本机激活规则。
-- Settings 的 Agent 行在“已链接技能明细尚未加载”时可用 `synced_count` 作为初始摘要；一旦 `list_linked_skills` 返回，计数徽标和展开明细必须共同以该列表为准，空数组是有效的 `0`，不得回退到旧摘要。展开状态下即使计数为 `0` 也保留收起入口；收起后不展示零计数徽标。
+- Settings 的 Agent 行在“已链接技能明细尚未加载”时可用 `synced_count` 作为初始摘要；一旦 `get_agent_managed_skills_state` 返回，计数徽标和展开明细必须共同以其 `active_skill_names` 为准，空数组是有效的 `0`，不得回退到旧摘要。展开状态下即使计数为 `0` 也保留收起入口；收起后不展示零计数徽标。
+- 已手动启用且支持 Global skills 的 Agent 行提供紧凑的「当前受管技能」开关。它**不枚举 Hub 安装列表，也不改变 profile 启用状态**：没有恢复 journal 时，后端先原子持久化该目录当时精确的 `active_skill_names`，再临时停用其中成功移除的项；有 journal 时，只尝试恢复其中仍缺失的名字。恢复绝不补齐后来安装、目录中从未存在或已经退出 Hub 的其他技能。失败和受保护的冲突继续留在 journal，供下次恢复重试；恢复成功、或该名字已被手动放回目录后，才从 journal 删除。Hub 中已不存在的恢复源同样保留为未完成项，绝不以其他 Hub 技能替代。
+- 此暂停/恢复状态由 `profiles.toml` 按后端解析的物理 Global skills 目录持久化，而不是按 Agent id 持久化。共享目录的每个 Agent 行必须显示同一暂停状态和影响提示、共同禁用进行中操作，并在结束后一起刷新；它不把共享目录伪装成独立的 per-Agent ownership。
 - `project_skills_rel` 允许多个 Agent 共享；兼容 open agent skills 规范的 Agent 使用 `.agents/skills`。空字符串仍表达 global-only；Windows 输入统一规范为 `/`。
-- **Global 侧的 `global_skills_dir` 同样允许多个 Agent 解析到同一物理目录**，这不是异常配置而是生态约定。共享组由 `BUILTIN_AGENT_DEFS` 派生，不在文档手抄计数；判定必须按解析后的目录而非 agent id。自定义 Agent 的 `global_skills_dir` 今天在 `custom.rs` 的 `add()` 中**零校验**（只校验 `project_skills_rel`），因此可以指向任一内置共享目录。
+- **Global 侧的 `global_skills_dir` 同样允许多个 Agent 解析到同一物理目录**，这不是异常配置而是生态约定。共享组由 `BUILTIN_AGENT_DEFS` 派生，不在文档手抄计数；判定必须按解析后的目录而非 agent id。自定义 Agent 的 `global_skills_dir` 在 `custom.rs` 的 `add()` 中只做一条窄校验：展开 `~` 后不得等于家目录本身或文件系统根——「取消全部链接」会遍历该目录并删掉其中的符号链接，这两个值会把它变成一次家目录清扫。指向内置共享目录、不在 `$HOME` 下、末段不叫 `skills` 都仍然允许，那是生态约定而非错误配置。
 - 项目检测按路径聚合：唯一且存在的路径可作为项目导入候选；共享且存在的路径返回 `ambiguous_groups`，供 UI/调用方选择一个 manifest owner。它不反向激活 Settings profile。以下三点是**已知与实现不符**（见 D-024）：`detect_project_agents` 未校验项目是否已注册；`scan` 不去重（`.agents/skills` 的一个技能会按共用该路径的每个 profile 各产出一条，去重目前由前端补做）；`rebuild` 的 owner 是先到先得且不过滤启用状态，并抢在 disambiguation 之前落定，因此 `ambiguous_groups` 的选择弹窗在正常开项目流程里不会出现。真正按路径去重的只有 sync 的 `build_path_plans` 与增量安装的 `add_skills_to_project_with_mode`。
 - Project registration 必须先于 scan/import/sync。检测、manifest 与部署逻辑均由 `skillstar-skills` facade 提供。
 
 ## 部署 reconciliation
 
 - Project sync 同时增加选中技能、移除陈旧技能并清理空 Agent 目录；零技能 Agent 不保留 active 选择。**当前 `clear_project_symlinks` 清空的是目录下全部条目而非仅 manifest 中的陈旧项**，因此共享目录里未登记的技能会被一并清掉；同理 `remove_skill_from_all_projects` 不查 manifest。两者都待 D-024 的 provenance 谓词收敛。
-- 部署能力阶梯是 symlink → junction → copy。`deploy_modes` **是当前生效的配置，不是遗留字段**：sync 读它决定 symlink/copy，增量安装会写它。已知缺陷：stale copy 刷新走 symlink-first 的 `deploy_skill_auto`，会把用户显式选择的 copy 静默降级，而 manifest 中的 `deploy_modes` 仍写着 copy；不带 `--copy` 的 CLI 项目安装也会把整条共享路径的 mode 覆写回 symlink。
+- 部署能力阶梯是 symlink → junction → copy。`deploy_modes` **是当前生效的配置，不是遗留字段**：sync 读它决定 symlink/copy，增量安装会写它。stale copy 刷新必须按 copy 重建：`refresh_stale_copies` 进入重建分支时目标必然是 copy（symlink 与不存在的条目都已跳过），走 symlink-first 路径会把用户显式选择的 copy 静默降级，而 manifest 中的 `deploy_modes` 仍写着 copy。`projects::types` 因此只暴露带 mode 的 `deploy_skill_with_mode`，不提供无 mode 的 auto 变体。已知缺陷：不带 `--copy` 的 CLI 项目安装仍会把整条共享路径的 mode 覆写回 symlink。
 - 全局 toggle/batch 与项目 deploy 使用同一能力阶梯。批处理执行全部项并返回累计失败，不在第一项失败时中止。
 - 更新后的 `resync_existing_links` 同时刷新 link 和 copy；新部署先在 staging 路径建立，再原子替换。
 - 打开项目时，copy 部署通过内容 hash 检测 stale；仅刷新仍被 manifest 选择的技能，不复活用户主动删除的条目。
 - unlink 对 link、junction 和 copy 都使用统一删除入口；missing 视为幂等成功。
-
-## 技能自带 Hook
-
-技能的第二种载荷。技能目录下的 `hooks/hooks.json` 使用 Claude Code hook 格式；`skillstar-skills::skill_hooks` 是唯一写入面。
-
-- **一份载荷，不做翻译。** Claude 的 `~/.claude/settings.json` 的 `hooks` 与 Codex 的 `~/.codex/hooks.json` 的 `hooks` 使用同一套 PascalCase 事件名和同一种条目结构（`{matcher?, hooks: [{type, command, timeout?}]}`），只有落点不同，因此注册表只记录「哪个 Agent、哪个文件」两列。Codex `config.toml` 里的 `pre_tool_use` 一类 snake_case 是信任账本键，不是事件名，不得当作第二种方言。
-- **Agent 入表的门槛是实测。** 只有其 hook 文件被真实读取、事件结构确认与上述格式一致的 Agent 才加一行；凭厂商文档加行会写出永不触发的 hook。当前两行：`claude`、`codex`。
-- **写入只是提议，不等于启用。** Codex 按 `[hooks.state."<文件>:<事件>:<索引>:<索引>"].trusted_hash` 逐条记录信任，未被信任的条目不执行（绕过需要 `--dangerously-bypass-hook-trust`）。Hook 是可执行载荷而非惰性 Markdown，因此不得随技能安装静默下发，必须是逐技能的显式用户动作。
-- **归属零状态推导**，与 [decisions.md](../../decisions.md) D-024 同源：不写 sidecar 台账，命令必须经 `${SKILL_DIR}`（同时接受生态既有的 `${CLAUDE_PLUGIN_ROOT}`）展开为技能绝对路径，归属判据是「命令中出现该技能目录，且其后紧跟路径分隔符或字符串结尾」。判据是「后接分隔符」而非「后一个字符不像文件名」：POSIX 文件名几乎允许所有标点，排除法只是一张想得起来的字符清单，`…/skills/foo+bar/run` 会被 `foo` 误认领。技能目录的尾部分隔符在比较前归一，否则同步传 `…/foo`、卸载传 `…/foo/` 会让条目变成删不掉的孤儿。
-- **写入即可移除**是不变量，两条 fail-closed 门禁守它：展开后不满足上述判据的命令拒绝写入；不含任何 `command` 的条目（空 `hooks` 数组或全是非 command handler）同样拒绝——它能被写进去却永远判不出归属。声明为空数组的事件不创建键，否则该键无主、清理时也不会被剪掉。
-- **就地覆写而非追加**：信任账本的键含条目索引，移动邻居条目会静默作废其 `trusted_hash` 并让用户为已审过的 hook 重新授权。等量重同步不移动任何外部条目；增删条目仍会重编号，属已知上限（见模块内 `ponytail:` 注释）。
-- 目标 Agent 的配置目录不存在时拒绝写入，不代为创建——否则 SkillStar 会让探测方误认为该 Agent 已安装。
-- 同步报告返回实际写入的事件名。Agent 会静默忽略不认识的事件键，因此「写了什么」必须如实回报，不能让永不触发的 hook 看起来像安装成功。**不做 per-Agent 事件白名单过滤**：各 Agent 事件集确实不同（Claude 有 `PostToolUseFailure`/`StopFailure`/`TeammateIdle`，均不在 Codex 的 hook 迁移事件表中），但 Codex 公布的表同时漏掉了其信任账本证明会执行的 `Stop`，据此构造白名单会拒掉能用的 hook。误拒比如实回报一次空转更糟。
 
 ## 本地创作、Bundle 与 Share
 

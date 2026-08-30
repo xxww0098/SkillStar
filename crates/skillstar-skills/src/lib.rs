@@ -34,11 +34,9 @@ pub mod repo_scanner;
 pub mod share_install;
 pub mod skill_bundle;
 pub mod skill_group;
-pub mod skill_hooks;
 pub mod skill_install;
 #[cfg(test)]
 mod skill_install_removal_tests;
-pub mod skill_pack;
 pub mod skill_update;
 pub mod update_api;
 pub mod update_checker;

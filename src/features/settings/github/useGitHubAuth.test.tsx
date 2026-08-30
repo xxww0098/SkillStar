@@ -52,6 +52,43 @@ describe("useGitHubAuth", () => {
     expect(result.current.status?.state).toBe("signed_out");
   });
 
+  it("keeps polling after a transient network failure", async () => {
+    let polls = 0;
+    mockedInvoke.mockImplementation(async (command) => {
+      if (command === "github_auth_status") return { state: "signed_out" };
+      if (command === "github_auth_start") {
+        return {
+          user_code: "ABCD-EFGH",
+          verification_uri: "https://github.com/login/device",
+          expires_at: "2026-08-05T10:15:00Z",
+          // Poll immediately so the retry does not need fake timers.
+          interval_seconds: 0,
+        };
+      }
+      if (command === "github_auth_poll") {
+        polls += 1;
+        if (polls === 1) throw { code: "network", message: "connection reset" };
+        return {
+          state: "connected",
+          connection: {
+            state: "connected",
+            identity: { id: 42, login: "octocat", avatar_url: null },
+            access_expires_at: null,
+          },
+        };
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const { result } = renderHook(() => useGitHubAuth());
+    await waitFor(() => expect(result.current.status?.state).toBe("signed_out"));
+
+    await act(() => result.current.start());
+    // Without the re-arm the scheduler never fires a second poll and this times out.
+    await waitFor(() => expect(result.current.status?.state).toBe("connected"));
+    expect(polls).toBeGreaterThan(1);
+  });
+
   it("preserves structured proxy outcomes", async () => {
     mockedInvoke.mockRejectedValueOnce({
       code: "proxy",

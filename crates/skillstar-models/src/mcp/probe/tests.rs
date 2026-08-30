@@ -406,22 +406,3 @@ fn stdio_entries_key_on_the_launched_process() {
     different.args = vec!["-y".into(), "server-y".into()];
     assert_ne!(epoch_cache_key(&a), epoch_cache_key(&different));
 }
-
-#[test]
-fn a_missing_stdio_runtime_names_the_command() {
-    let mut entry = blank_entry("needs-runtime", "stdio");
-    entry.command = Some("skillstar-definitely-not-a-real-binary".into());
-    let err = check_stdio_runtime(&entry).unwrap_err().to_string();
-    assert!(
-        err.contains("skillstar-definitely-not-a-real-binary"),
-        "{err}"
-    );
-    assert!(err.contains("not found"), "{err}");
-}
-
-#[test]
-fn remote_entries_need_no_local_runtime() {
-    let mut entry = blank_entry("remote", "http");
-    entry.url = Some("https://example.com/mcp".into());
-    assert!(check_stdio_runtime(&entry).is_ok());
-}

@@ -1,4 +1,5 @@
 use skillstar_agents as agent_profile;
+use skillstar_app::agent_managed_skills;
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment::{self, ToggleSkillOutcome};
 use skillstar_skills::installed_skill;
@@ -193,6 +194,67 @@ pub async fn batch_toggle_skills_for_agent(
         );
     }
     Ok(report)
+}
+
+#[tauri::command]
+pub async fn get_agent_managed_skills_state(
+    agent_id: String,
+) -> Result<agent_managed_skills::AgentManagedSkillsState, AppError> {
+    agent_managed_skills::get_agent_managed_skills_state(&agent_id)
+        .map_err(|error| AppError::Other(error.to_string()))
+}
+
+#[tauri::command]
+pub async fn toggle_agent_managed_skills(
+    agent_id: String,
+    operation_id: String,
+) -> Result<agent_managed_skills::AgentManagedSkillsToggleReport, AppError> {
+    let started = Instant::now();
+    tracing::info!(
+        target: "cmd::agents",
+        operation = "toggle_agent_managed_skills",
+        phase = "started",
+        operation_id,
+        agent_id,
+        "temporary Agent managed-skills toggle started"
+    );
+
+    let result = agent_managed_skills::toggle_agent_managed_skills(&agent_id).map_err(|error| {
+        tracing::error!(
+            target: "cmd::agents",
+            operation = "toggle_agent_managed_skills",
+            phase = "failed",
+            operation_id,
+            agent_id,
+            error = %error,
+            "temporary Agent managed-skills toggle failed"
+        );
+        AppError::Other(error.to_string())
+    });
+
+    if let Ok(report) = &result {
+        if !report.succeeded.is_empty() {
+            installed_skill::invalidate_cache();
+        }
+        tracing::info!(
+            target: "cmd::agents",
+            operation = "toggle_agent_managed_skills",
+            phase = if report.failed.is_empty() {
+                "completed"
+            } else {
+                "completed_with_failures"
+            },
+            operation_id,
+            agent_id,
+            action = ?report.action,
+            succeeded = report.succeeded.len(),
+            skipped = report.skipped.len(),
+            failed = report.failed.len(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "temporary Agent managed-skills toggle completed"
+        );
+    }
+    result
 }
 
 #[tauri::command]

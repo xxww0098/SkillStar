@@ -13,9 +13,9 @@
 //!    (worker threads, one git child process each). When a GitHub API fast
 //!    path answered for a repo ([`crate::update_api`]), that repo is skipped —
 //!    the authoritative remote hashes come from the API instead.
-//! 2. **Compare**: [`check_update_local`] compares `HEAD` vs `origin/HEAD`
-//!    without network access; [`check_update_local_with_api`] compares
-//!    against API-provided subtree hashes when available.
+//! 2. **Compare**: [`check_update_local_with_api_entry`] compares `HEAD` vs
+//!    `origin/HEAD` without network access, or against API-provided subtree
+//!    hashes when available.
 //!
 //! This avoids N redundant fetches when N skills share the same repo.
 
@@ -266,25 +266,11 @@ where
 
 // ── Update Detection ────────────────────────────────────────────────
 
-/// Check if a repo-backed skill has updates available **without fetching**.
+/// Check a repo-cached skill against GitHub API-provided remote hashes,
+/// loading the lockfile entry internally.
 ///
 /// `None` means "the prefetch failed for this skill's repo, status unknown" —
 /// callers must preserve the previous state rather than clearing the badge.
-pub fn check_update_local(
-    skill_path: &Path,
-    failed_fetch_roots: &HashSet<PathBuf>,
-) -> Option<bool> {
-    let entry = lock_entry_for_path(skill_path);
-    check_update_local_with(
-        skill_path,
-        failed_fetch_roots,
-        repo_link::repo_root_of,
-        entry.as_ref(),
-    )
-}
-
-/// Check a repo-cached skill against GitHub API-provided remote hashes,
-/// loading the lockfile entry internally like [`check_update_local`].
 pub fn check_update_local_with_api_entry(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
@@ -354,9 +340,20 @@ where
 
     if let Some(api) = api_remote {
         let source_folder = entry.and_then(|entry| entry.source_folder.clone());
-        // The API tree is the remote truth. If the folder no longer exists
-        // remotely, preserve the previous badge rather than clearing it.
-        let remote = api.subtree_hash(source_folder.as_deref())?;
+        // The API listing is shallow: commit SHA plus top-level dirs. Deeper
+        // folders resolve from the local tracked ref instead — identical by
+        // construction, since the tip gate in `api_prefetch_remote_trees`
+        // only admits trees whose commit IS the local tracked commit. A
+        // folder in neither place no longer exists remotely; return `None`
+        // so the previous badge is preserved rather than cleared.
+        let remote = match api.subtree_hash(source_folder.as_deref()) {
+            Some(sha) => sha.to_string(),
+            None => subtree_hash_at(
+                &repo_root,
+                tracked_update_ref(&repo_root),
+                source_folder.as_deref(),
+            )?,
+        };
         // No fetch happened for API-covered repos, so HEAD is still the
         // installed commit — exactly the local baseline to compare against.
         let local = subtree_hash_at(&repo_root, "HEAD", source_folder.as_deref())?;
@@ -383,11 +380,7 @@ where
     // HEAD change alone no longer lights every badge of a shared checkout;
     // only Skills whose content actually moved report an update.
     if let Some(folder) = entry.and_then(|entry| entry.source_folder.clone()) {
-        let remote_ref = if configured_git_ref(&repo_root).is_some() {
-            "FETCH_HEAD"
-        } else {
-            "origin/HEAD"
-        };
+        let remote_ref = tracked_update_ref(&repo_root);
         let local = subtree_hash_at(&repo_root, "HEAD", Some(&folder));
         let remote = subtree_hash_at(&repo_root, remote_ref, Some(&folder));
         if let (Some(local), Some(remote)) = (local, remote) {
@@ -422,11 +415,7 @@ fn subtree_hash_at(repo_root: &Path, git_ref: &str, source_folder: Option<&str>)
 
 fn compare_heads(repo_root: &Path) -> Option<bool> {
     let local_head = git_ops::rev_parse(repo_root, "HEAD").ok()?;
-    let remote_ref = if configured_git_ref(repo_root).is_some() {
-        "FETCH_HEAD"
-    } else {
-        "origin/HEAD"
-    };
+    let remote_ref = tracked_update_ref(repo_root);
     let remote_head = git_ops::rev_parse(repo_root, remote_ref).ok()?;
     Some(!local_head.is_empty() && !remote_head.is_empty() && local_head != remote_head)
 }

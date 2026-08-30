@@ -29,14 +29,11 @@ pub use progress::{
 };
 pub use sftp::{
     DiscoveryResult, KNOWN_AGENT_SKILL_DIRS, PushResult, RemoteAgentDir, RemoteAgentSkills,
-    discover_remote_skills, read_remote_file, write_remote_file,
+    discover_remote_skills,
 };
 pub use store::HostsStore;
 pub use system_config::{find_host_by_alias, parse_system_hosts};
-pub use types::{
-    AuthMethod, KnownHost, RemoteSkill, RemoteSkillContent, RemoteSkillLayout,
-    RemoteSkillUpdateState, SshHostDef, SystemHost,
-};
+pub use types::{AuthMethod, KnownHost, RemoteSkill, RemoteSkillLayout, SshHostDef, SystemHost};
 
 /// The russh session handle returned by [`client::connect`].
 pub type Session = russh::client::Handle<client::SshHandler>;

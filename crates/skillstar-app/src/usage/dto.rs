@@ -378,10 +378,6 @@ pub struct MonthlySpendEntry {
 pub struct OAuthStartDto {
     pub pending_id: String,
     pub auth_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verification_uri: Option<String>,
 }
 
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`

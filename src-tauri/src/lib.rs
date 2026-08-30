@@ -160,14 +160,12 @@ pub fn run() {
             setup_deep_links(app);
             core::channel_auto_update::start(app.handle());
 
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
+            tauri::async_runtime::spawn(async {
                 if let Err(err) =
                     core::marketplace_snapshot::refresh_startup_scopes_if_needed().await
                 {
                     error!(target: "marketplace_snapshot", "startup refresh failed: {err}");
                 }
-                let _ = app_handle.emit("marketplace://ready", ());
             });
 
             // ── Windows: force webview resize to fix WebView2 bounds desync ──
@@ -250,14 +248,10 @@ pub fn run() {
             commands::marketplace::ai_search_marketplace_local,
             commands::marketplace::sync_marketplace_scope,
             commands::marketplace::get_marketplace_sync_states,
-            commands::mcp_marketplace::list_mcp_market_servers_local,
             commands::mcp_marketplace::query_mcp_market_servers_local,
             commands::mcp_marketplace::list_mcp_publishers_local,
-            commands::mcp_marketplace::list_mcp_servers_by_publisher_local,
-            commands::mcp_marketplace::search_mcp_market_local,
             commands::mcp_marketplace::get_mcp_market_server_detail_local,
             commands::mcp_marketplace::sync_mcp_market_scope,
-            commands::mcp_marketplace::get_mcp_market_sync_states,
             commands::mcp_marketplace::get_mcp_source_sync_states,
             commands::mcp_marketplace::list_mcp_sources,
             commands::mcp_marketplace::add_mcp_source,
@@ -265,7 +259,6 @@ pub fn run() {
             commands::mcp_marketplace::set_mcp_source_enabled,
             commands::mcp_marketplace::mcp_market_runtime_candidates,
             commands::mcp_marketplace::mcp_market_install_plan,
-            commands::mcp_marketplace::mcp_market_entry_to_draft,
             commands::github::check_gh_installed,
             commands::github::github_auth_status,
             commands::github::github_auth_start,
@@ -329,6 +322,8 @@ pub fn run() {
             commands::agents::unlink_all_skills_from_agent,
             commands::agents::batch_link_skills_to_agent,
             commands::agents::batch_toggle_skills_for_agent,
+            commands::agents::get_agent_managed_skills_state,
+            commands::agents::toggle_agent_managed_skills,
             commands::agents::list_linked_skills,
             commands::agents::unlink_skill_from_agent,
             commands::agents::batch_remove_skills_from_all_agents,
@@ -353,8 +348,6 @@ pub fn run() {
             commands::test_github_mirror,
             commands::get_marketplace_mirror_config,
             commands::save_marketplace_mirror_config,
-            commands::write_codex_env_to_zshrc,
-            commands::read_codex_env_from_zshrc,
             commands::projects::register_project,
             commands::projects::list_projects,
             commands::projects::get_project_skills,
@@ -384,10 +377,6 @@ pub fn run() {
             commands::github::force_delete_repo_caches,
             commands::github::force_delete_app_config,
             commands::github::clean_broken_skills,
-            commands::github::install_pack_from_url,
-            commands::github::list_installed_packs,
-            commands::github::remove_installed_pack,
-            commands::github::get_pack_doctor,
             commands::github::check_new_repo_skills,
             commands::github::dismiss_new_skill,
             commands::github::get_dismissed_new_skills,
@@ -483,7 +472,6 @@ pub fn run() {
             // Usage floating card windows (multi-window)
             commands::usage_windows::open_usage_card_window,
             commands::usage_windows::close_usage_card_window,
-            commands::usage_windows::close_all_usage_card_windows,
             // SSH remote skill management
             commands::list_ssh_hosts,
             commands::add_ssh_host,
@@ -497,13 +485,6 @@ pub fn run() {
             commands::push_skill_to_remote,
             commands::migrate_remote_skill_to_hub,
             commands::delete_remote_skill,
-            commands::push_skills_to_remote,
-            commands::read_remote_skill_content,
-            commands::write_remote_skill_content,
-            commands::pull_remote_skill,
-            commands::toggle_remote_agent_link,
-            commands::install_remote_skill,
-            commands::check_remote_skill_updates,
             update_tray_language,
         ])
         .build(tauri::generate_context!())

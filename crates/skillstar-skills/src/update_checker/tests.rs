@@ -166,8 +166,10 @@ fn api_remote_hashes_drive_update_detection_without_fetching() {
         Some(false)
     );
 
-    // The skill's folder vanished from the remote tree → unknown, not "no
-    // update" (the previous badge must survive).
+    // The API listing is shallow (non-recursive): a folder missing from it
+    // resolves from the local tracked ref instead — the tip gate guarantees
+    // both hold identical hashes, and here the un-fetched tracked ref still
+    // matches HEAD.
     let api = crate::update_api::ApiRemoteTree::default();
     assert_eq!(
         check_update_local_with_api(
@@ -176,6 +178,24 @@ fn api_remote_hashes_drive_update_detection_without_fetching() {
             Some(&api),
             repo_root_of,
             Some(&entry)
+        ),
+        Some(false)
+    );
+
+    // A folder that resolves nowhere — absent from the API listing AND from
+    // the local tracked ref — is unknown, not "no update" (the previous
+    // badge must survive).
+    let ghost_entry = LockEntry {
+        source_folder: Some("skills/ghost".into()),
+        ..entry.clone()
+    };
+    assert_eq!(
+        check_update_local_with_api(
+            &skill_link,
+            &HashSet::new(),
+            Some(&api),
+            repo_root_of,
+            Some(&ghost_entry)
         ),
         None
     );
@@ -186,13 +206,7 @@ fn api_remote_hashes_drive_update_detection_without_fetching() {
     folders.insert("skills/demo".to_string(), v2_hash);
     let api = crate::update_api::ApiRemoteTree { folders };
     assert_eq!(
-        check_update_local_with_api(
-            &skill_link,
-            &failed,
-            Some(&api),
-            repo_root_of,
-            Some(&entry)
-        ),
+        check_update_local_with_api(&skill_link, &failed, Some(&api), repo_root_of, Some(&entry)),
         None
     );
 }
@@ -388,8 +402,7 @@ fn github_trees_api_commit_ish_sha_does_not_badge_an_up_to_date_root_skill() {
 #[test]
 fn unresolvable_repo_root_reports_no_update() {
     let dir = tempfile::tempdir().unwrap();
-    let result =
-        check_update_local_with(&dir.path().join("nope"), &HashSet::new(), |_| None, None);
+    let result = check_update_local_with(&dir.path().join("nope"), &HashSet::new(), |_| None, None);
     assert_eq!(
         result,
         Some(false),

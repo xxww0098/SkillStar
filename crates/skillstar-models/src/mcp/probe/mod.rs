@@ -219,32 +219,6 @@ pub fn clear_mcp_epoch_cache() {
 }
 
 // ---------------------------------------------------------------------------
-// Pre-install runtime check
-// ---------------------------------------------------------------------------
-
-/// Check that an stdio entry's launcher exists before anything is installed.
-///
-/// Without this the first sign of a missing `uvx` is the agent failing to
-/// start the server minutes later, with an error the user sees inside a
-/// different application. Running it at install time turns that into a
-/// specific, actionable message at the moment the user can still act on it.
-///
-/// Remote entries have no local runtime, so they always pass.
-pub fn check_stdio_runtime(entry: &McpServerEntry) -> Result<()> {
-    if matches!(entry.transport.as_str(), "http" | "sse") {
-        return Ok(());
-    }
-    let command = entry
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|c| !c.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("stdio MCP server '{}' requires a command", entry.name))?;
-    resolve_runtime(command)?;
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
 // Public probe entry point
 // ---------------------------------------------------------------------------
 

@@ -219,9 +219,22 @@ async fn patrol_loop(
             .await
             {
                 Ok(failed) => Arc::new(failed),
+                // An empty set would mean "every repo fetched cleanly", so the
+                // check step below would compare against stale refs and persist
+                // `update_available = false` over real badges. A failed prefetch
+                // is "unknown": abandon the cycle (releasing the git session the
+                // same way every other mid-loop exit does) and retry next tick.
                 Err(err) => {
                     warn!(target: "patrol", error = %err, "failed to prefetch repos");
-                    Arc::new(std::collections::HashSet::new())
+                    git_session.cancel();
+                    if let Some(session_id) = registered_session_id.as_deref() {
+                        auth_state.finish_git_operation(session_id);
+                    }
+                    clear_git_session(&state, git_session.id());
+                    tokio::select! {
+                        _ = tokio::time::sleep(interval) => continue,
+                        _ = cancel_rx.changed() => break,
+                    }
                 }
             };
 
@@ -337,7 +350,7 @@ async fn patrol_loop(
 
         let detect_session = git_session.clone();
         let new_skills_result = tokio::task::spawn_blocking(move || {
-            patrol::detect_new_skills_in_cached_repos(&detect_session)
+            skillstar_skills::repo_scanner::detect_new_skills_in_cached_repos(&detect_session)
         })
         .await;
 

@@ -1,17 +1,12 @@
 //! ACP (Agent Client Protocol) integration for SkillStar.
 //!
 //! Launches an external Agent (Claude Code / OpenCode / Codex) as a subprocess
-//! and sends it a task to analyse a skill repo and generate a working setup
-//! script.  The agent does ALL the heavy lifting.
-#![allow(dead_code)]
-
+//! and drives a read-only conversation about a skill repo: the agent may read
+//! files under the session's working directory and nothing else.
 mod client;
 mod runner;
 
 #[cfg(test)]
 mod tests;
 
-#[allow(unused_imports)]
-pub use client::*;
-#[allow(unused_imports)]
-pub use runner::*;
+pub use runner::run_read_only_conversation_via_acp;

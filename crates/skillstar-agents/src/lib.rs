@@ -39,6 +39,25 @@ pub fn global_mirror_dirs(agent_id: &str) -> Vec<std::path::PathBuf> {
     )
 }
 
+/// Skill names temporarily suspended from one physical Global skills directory.
+///
+/// This recovery journal is keyed by the resolved directory, never by an Agent
+/// id, because multiple profiles may legitimately share one folder.
+pub fn suspended_global_skill_names(target: &std::path::Path) -> Vec<String> {
+    profile_storage::suspended_global_skill_names(target, &TomlPrefsStore)
+}
+
+/// Replace the recovery-only set for one physical Global skills directory.
+///
+/// An empty set clears the completed journal. Writes are atomic so a pause
+/// intent reaches disk before any linked skill can be removed.
+pub fn replace_suspended_global_skill_names(
+    target: &std::path::Path,
+    names: &[String],
+) -> Result<()> {
+    profile_storage::replace_suspended_global_skill_names(target, names, &TomlPrefsStore)
+}
+
 /// Add (or replace by id) a custom agent profile.
 pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
     custom::add(def, &TomlPrefsStore)
@@ -71,12 +90,13 @@ pub(crate) fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 mod tests {
     use super::builtin::{BuiltinSpec, builtin_agent_data};
-    use super::profile_storage::{MemPrefsStore, PrefsStore, TomlPrefsStore};
+    use super::profile_storage::{self, MemPrefsStore, PrefsStore, TomlPrefsStore};
     use super::spec::AgentSpec;
-    use super::validation::validate_project_skills_rel;
+    use super::validation::{validate_global_skills_dir, validate_project_skills_rel};
     use super::*;
     use anyhow::Result;
     use std::ffi::OsStr;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -89,6 +109,36 @@ mod tests {
 
     fn remove_env<K: AsRef<OsStr>>(key: K) {
         unsafe { std::env::remove_var(key) }
+    }
+
+    #[test]
+    fn suspended_global_skill_names_are_directory_scoped_and_normalized() -> Result<()> {
+        let store = MemPrefsStore::new();
+        let temp = tempfile::tempdir()?;
+        let target = temp.path().join("shared").join("skills");
+        std::fs::create_dir_all(&target)?;
+        let other_target = temp.path().join("other").join("skills");
+        std::fs::create_dir_all(&other_target)?;
+
+        profile_storage::replace_suspended_global_skill_names(
+            &target,
+            &[" beta ".to_string(), "alpha".to_string(), "alpha".to_string()],
+            &store,
+        )?;
+
+        assert_eq!(
+            profile_storage::suspended_global_skill_names(&target, &store),
+            vec!["alpha", "beta"],
+            "a physical directory owns one sorted recovery set",
+        );
+        assert!(
+            profile_storage::suspended_global_skill_names(&other_target, &store).is_empty(),
+            "a different directory must not inherit a suspended set",
+        );
+
+        profile_storage::replace_suspended_global_skill_names(&target, &[], &store)?;
+        assert!(profile_storage::suspended_global_skill_names(&target, &store).is_empty());
+        Ok(())
     }
 
     #[test]
@@ -128,6 +178,50 @@ mod tests {
         assert!(validate_project_skills_rel(".ollama/rules").is_err());
         assert!(validate_project_skills_rel("./skills").is_err());
         assert!(validate_project_skills_rel(".foo bar/skills").is_err());
+    }
+
+    #[test]
+    fn validate_global_skills_dir_refuses_only_sweepable_roots() {
+        let home = Path::new("/home/dev");
+
+        // Allowed: the project-only agent's empty value, a dir under home, the
+        // shared ecosystem dir, and an absolute path outside home. None of
+        // these can be required to look a particular way.
+        assert!(validate_global_skills_dir(Path::new(""), home).is_ok());
+        assert!(validate_global_skills_dir(&home.join(".dsh/skills"), home).is_ok());
+        assert!(validate_global_skills_dir(&home.join(".agents/skills"), home).is_ok());
+        assert!(validate_global_skills_dir(Path::new("/opt/agent-skills"), home).is_ok());
+
+        // Refused: "unlink all" would sweep the entire directory.
+        assert!(validate_global_skills_dir(home, home).is_err());
+        assert!(validate_global_skills_dir(Path::new("/"), home).is_err());
+    }
+
+    #[test]
+    fn add_custom_profile_refuses_a_global_dir_that_would_sweep_home() {
+        let _guard = env_lock();
+        let store = MemPrefsStore::new();
+
+        let error = custom::add(
+            CustomProfileDef {
+                id: "custom_home".into(),
+                display_name: "Home".into(),
+                global_skills_dir: "~/".into(),
+                project_skills_rel: String::new(),
+                icon_data_uri: None,
+            },
+            &store,
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("home directory"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            store.load().custom_profiles.is_empty(),
+            "a refused profile must not be persisted"
+        );
     }
 
     #[test]

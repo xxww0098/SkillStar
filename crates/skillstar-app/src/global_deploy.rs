@@ -16,72 +16,56 @@
 //!   instead of pretending everything synced.
 
 /// Link `skill_names` into every enabled global-skill Agent profile.
-/// Link `skill_names` into every enabled global-skill Agent profile.
 ///
 /// Returns the ids of the Agents the skills were (already or newly) linked
 /// to. Errors when at least one enabled Agent could not be deployed.
 pub fn deploy_to_enabled_global_agents(skill_names: &[String]) -> Result<Vec<String>, String> {
-    let profiles = skillstar_agents::list_profiles();
-    let enabled_ids = profiles
+    let enabled_ids = skillstar_agents::list_profiles()
         .iter()
         .filter(|profile| profile.enabled && profile.has_global_skills())
         .map(|profile| profile.id.clone())
         .collect::<Vec<_>>();
 
-    let mut deployed_to = Vec::with_capacity(enabled_ids.len());
-    let mut failures = Vec::new();
-    for agent_id in enabled_ids {
-        match skillstar_skills::deployment::batch_link_skills_to_agent(skill_names, &agent_id) {
-            Ok(_) => deployed_to.push(agent_id),
-            Err(err) => failures.push(format!("{agent_id}: {err:#}")),
-        }
+    // No enabled global Agent is a no-op, not an error: the hub install stands
+    // on its own. `batch_deploy_skills_to_agents` rejects an empty target list,
+    // so that case has to be answered here.
+    if enabled_ids.is_empty() {
+        return Ok(enabled_ids);
     }
 
-    if failures.is_empty() {
-        Ok(deployed_to)
-    } else {
-        Err(format!(
-            "Installed to the hub but failed to deploy to {} Agent(s): {}",
-            failures.len(),
-            failures.join("; ")
-        ))
-    }
+    // Filtering on `enabled` above is what the per-Agent entry point would
+    // re-check, so this reuses the CLI deploy instead of looping: it is the
+    // path that deduplicates targets by resolved directory, which matters for
+    // the Agents that share one (`~/.agents/skills`).
+    skillstar_skills::deployment::batch_deploy_skills_to_agents(
+        skill_names,
+        &enabled_ids,
+        skillstar_skills::projects::ProjectDeployMode::Symlink,
+    )
+    .map(|_| enabled_ids)
+    .map_err(|err| format!("Installed to the hub but deployment is incomplete: {err:#}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use skillstar_agents::AgentProfile;
+    use super::*;
+    use crate::test_support::{ENV_LOCK, EnvGuard};
 
-    fn profile(id: &str, enabled: bool, global_skills: bool) -> AgentProfile {
-        AgentProfile {
-            id: id.to_string(),
-            display_name: id.to_string(),
-            icon: String::new(),
-            global_skills_dir: if global_skills {
-                std::path::PathBuf::from(format!("/tmp/{id}/skills"))
-            } else {
-                std::path::PathBuf::new()
-            },
-            project_skills_rel: String::new(),
-            installed: true,
-            enabled,
-            synced_count: 0,
-        }
-    }
+    /// With nothing enabled the hub install still stands on its own, so this
+    /// stays a no-op instead of surfacing the "No target agents selected"
+    /// error the underlying batch deploy returns for an empty target list.
+    #[tokio::test]
+    async fn no_enabled_agent_is_a_no_op() {
+        let _lock = ENV_LOCK.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::set(&[
+            ("SKILLSTAR_DATA_DIR", &temp.path().join("data")),
+            ("SKILLSTAR_HUB_DIR", &temp.path().join("hub")),
+        ]);
 
-    #[test]
-    fn filters_enabled_global_profiles_only() {
-        let profiles = [
-            profile("codex", true, true),
-            profile("grok", true, false),
-            profile("opencode", false, true),
-            profile("claude", true, true),
-        ];
-        let enabled = profiles
-            .iter()
-            .filter(|p| p.enabled && p.has_global_skills())
-            .map(|p| p.id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(enabled, vec!["codex", "claude"]);
+        assert_eq!(
+            deploy_to_enabled_global_agents(&["demo-skill".to_string()]).unwrap(),
+            Vec::<String>::new()
+        );
     }
 }

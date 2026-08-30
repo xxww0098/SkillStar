@@ -202,7 +202,7 @@ fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
 
     let output =
         serde_json::to_string_pretty(&json).context("Failed to serialize Claude Code config")?;
-    std::fs::write(config_path, output)
+    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok(backup_path)
@@ -389,8 +389,11 @@ fn sync_claude_desktop_binding_inner(
         "model": model,
         "note": "SkillStar binding marker; Claude Desktop native write-path TBD",
     });
-    std::fs::write(path, serde_json::to_string_pretty(&body)?)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    skillstar_core::infra::fs_ops::atomic_write(
+        path,
+        serde_json::to_string_pretty(&body)?.as_bytes(),
+    )
+    .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(first_backup)
 }
 

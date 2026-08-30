@@ -126,12 +126,14 @@ pub(crate) fn sync_json_blocks_inner(
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    let mut root: Value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| init_root())
-    } else {
-        init_root()
+    let mut root: Value = match read_existing_config(config_path)? {
+        Some(content) => serde_json::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse {} — fix or remove it before syncing",
+                config_path.display()
+            )
+        })?,
+        None => init_root(),
     };
 
     let file_label = config_path
@@ -175,7 +177,7 @@ pub(crate) fn sync_json_blocks_inner(
 
     let output = serde_json::to_string_pretty(&root)
         .with_context(|| format!("Failed to serialize {file_label}"))?;
-    std::fs::write(config_path, output)
+    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok((backup_path, active_pointer))
@@ -317,12 +319,14 @@ pub fn sync_codex_binding_inner(
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    let mut table: toml::Table = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        toml::from_str(&content).unwrap_or_default()
-    } else {
-        toml::Table::new()
+    let mut table: toml::Table = match read_existing_config(config_path)? {
+        Some(content) => toml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse {} — fix or remove it before syncing",
+                config_path.display()
+            )
+        })?,
+        None => toml::Table::new(),
     };
 
     // Official active → clear SkillStar top-level pointers so Codex uses native
@@ -382,7 +386,7 @@ pub fn sync_codex_binding_inner(
     }
 
     let output = toml::to_string_pretty(&table).context("Failed to serialize Codex config.toml")?;
-    std::fs::write(config_path, output)
+    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok(first_backup)
@@ -616,7 +620,10 @@ pub(crate) fn unsync_codex_all_at(auth_path: &Path, config_path: &Path) -> Resul
         if let Some(obj) = json.as_object_mut() {
             obj.remove("OPENAI_API_KEY");
         }
-        std::fs::write(auth_path, serde_json::to_string_pretty(&json)?)?;
+        skillstar_core::infra::fs_ops::atomic_write(
+            auth_path,
+            serde_json::to_string_pretty(&json)?.as_bytes(),
+        )?;
     }
 
     if config_path.exists() {
@@ -635,7 +642,10 @@ pub(crate) fn unsync_codex_all_at(auth_path: &Path, config_path: &Path) -> Resul
                 table.remove("model_providers");
             }
         }
-        std::fs::write(config_path, toml::to_string_pretty(&table)?)?;
+        skillstar_core::infra::fs_ops::atomic_write(
+            config_path,
+            toml::to_string_pretty(&table)?.as_bytes(),
+        )?;
     }
     Ok(())
 }
@@ -689,7 +699,10 @@ pub(crate) fn unsync_codex_entry_at(provider_id: &str, config_path: &Path) -> Re
         table.remove("model_providers");
     }
 
-    std::fs::write(config_path, toml::to_string_pretty(&table)?)?;
+    skillstar_core::infra::fs_ops::atomic_write(
+        config_path,
+        toml::to_string_pretty(&table)?.as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -723,7 +736,10 @@ pub fn unsync_opencode_all() -> Result<()> {
         }
     }
 
-    std::fs::write(&config_path, serde_json::to_string_pretty(&json)?)?;
+    skillstar_core::infra::fs_ops::atomic_write(
+        &config_path,
+        serde_json::to_string_pretty(&json)?.as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -749,7 +765,10 @@ pub(crate) fn unsync_pi_all_at(models_path: &Path, settings_path: &Path) -> Resu
         {
             providers.retain(|k, _| !is_skillstar_managed_key(k));
         }
-        std::fs::write(models_path, serde_json::to_string_pretty(&json)?)?;
+        skillstar_core::infra::fs_ops::atomic_write(
+            models_path,
+            serde_json::to_string_pretty(&json)?.as_bytes(),
+        )?;
     }
 
     if settings_path.exists() {
@@ -764,7 +783,10 @@ pub(crate) fn unsync_pi_all_at(models_path: &Path, settings_path: &Path) -> Resu
             create_rolling_backup(settings_path)?;
             root.remove("defaultProvider");
             root.remove("defaultModel");
-            std::fs::write(settings_path, serde_json::to_string_pretty(&json)?)?;
+            skillstar_core::infra::fs_ops::atomic_write(
+                settings_path,
+                serde_json::to_string_pretty(&json)?.as_bytes(),
+            )?;
         }
     }
     Ok(())

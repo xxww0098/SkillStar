@@ -20,7 +20,7 @@ use skillstar_core::infra::fs_ops;
 /// Staging prefixes used by the hub write paths.
 ///
 /// Keep in sync with the paths built in `skill_install`, `repo_scanner::
-/// scan_install`, `skill_pack` and `skill_bundle`. Every one of them is a
+/// scan_install` and `skill_bundle`. Every one of them is a
 /// dot-prefixed name, so `is_managed_hub_entry` stays correct even if a new
 /// prefix is added without updating this list; the list only drives sweeping.
 pub const STAGING_PREFIXES: [&str; 3] =

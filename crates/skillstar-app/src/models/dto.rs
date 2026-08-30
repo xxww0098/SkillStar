@@ -22,7 +22,7 @@
 use serde::{Deserialize, Serialize};
 use skillstar_models::providers::{
     AgentBinding, BindingEntry, CapSource, Credential, CredentialKind, Endpoints, ModelRef,
-    Provider, ProviderCaps, ProvidersStoreV4, Tri,
+    Provider, ProviderCaps, ProvidersStoreV4,
 };
 use std::collections::{BTreeMap, HashMap};
 use ts_rs::TS;
@@ -198,15 +198,6 @@ impl From<ProvidersStoreV4> for ProvidersStoreDto {
                 .collect(),
         }
     }
-}
-
-/// Whether a capability bit currently denies a binding.
-///
-/// Exposed as a helper rather than baked into the DTO so the frontend and the
-/// backend cannot disagree about what `Unknown` means: it is "ask the user to
-/// probe", never "deny".
-pub fn cap_denies(cap: Tri) -> bool {
-    cap.is_denied()
 }
 
 #[cfg(test)]

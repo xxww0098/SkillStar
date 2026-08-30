@@ -168,7 +168,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
               duration: 10000,
               action: occupiedPath
                 ? {
-                    label: t("skillCards.openOccupiedFolder", { defaultValue: "Open folder" }),
+                    label: t("skillToggle.openOccupiedFolder", { defaultValue: "Open folder" }),
                     onClick: () => {
                       void tauriInvoke("open_folder", { path: occupiedPath }).catch((err) => {
                         if (import.meta.env.DEV) console.error("open_folder failed:", err);

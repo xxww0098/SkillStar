@@ -50,13 +50,11 @@ pub fn detect_new_skills_in_cached_repos(session: &GitOperationSession) -> Vec<R
         let norm_url = source_resolver::normalize_remote_url(&entry.git_url);
         installed_repo.insert(entry.name.clone(), norm_url.clone());
         repo_groups.entry(norm_url).or_insert_with(|| {
-            let source = entry
-                .git_url
-                .strip_prefix("https://github.com/")
-                .unwrap_or(&entry.git_url)
-                .trim_end_matches(".git")
-                .trim_end_matches('/')
-                .to_string();
+            // Must match the install-time derivation (`Source::parse(...).short`),
+            // or non-GitHub repos never map to their cache directory.
+            let source = source_resolver::Source::parse(&entry.git_url)
+                .map(|parsed| parsed.short)
+                .unwrap_or_else(|_| entry.git_url.clone());
             (source, entry.git_url.clone())
         });
     }
@@ -359,11 +357,21 @@ mod tests {
             none
         ));
         assert!(skill_discover::is_container_skill_dir("skills/demo", none));
-        assert!(skill_discover::is_container_skill_dir(".claude/skills/demo", none));
-        assert!(!skill_discover::is_container_skill_dir("examples/demo", none));
-        assert!(!skill_discover::is_container_skill_dir("skills/a/b/c/d", none));
+        assert!(skill_discover::is_container_skill_dir(
+            ".claude/skills/demo",
+            none
+        ));
+        assert!(!skill_discover::is_container_skill_dir(
+            "examples/demo",
+            none
+        ));
+        assert!(!skill_discover::is_container_skill_dir(
+            "skills/a/b/c/d",
+            none
+        ));
         assert!(
-            !skill_discover::is_container_skill_dir("skills/a/b", |path| path == "skills/a/SKILL.md"),
+            !skill_discover::is_container_skill_dir("skills/a/b", |path| path
+                == "skills/a/SKILL.md"),
             "a skill shadows everything nested below it"
         );
     }

@@ -503,7 +503,7 @@ async fn fetch_with_token(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("Grok billing 请求失败: {}", e)))?;
+        .map_err(|e| UsageError::transport("Grok billing", e))?;
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
@@ -511,11 +511,11 @@ async fn fetch_with_token(
         return Err(UsageError::AuthRequired);
     }
     if !status.is_success() {
-        return Err(UsageError::Fetcher(format!(
-            "Grok billing 状态码 {}: {}",
-            status,
-            body.chars().take(200).collect::<String>()
-        )));
+        return Err(UsageError::http_status(
+            "Grok billing",
+            status.as_u16(),
+            &body,
+        ));
     }
 
     let payload: Value = serde_json::from_str(&body)

@@ -227,7 +227,7 @@ fn subscription_email(subscription: &Subscription) -> Option<String> {
     subscription
         .oauth_account_id
         .as_deref()
-        .or_else(|| Some(subscription.display_name.as_str()))
+        .or(Some(subscription.display_name.as_str()))
         .map(str::trim)
         .filter(|value| value.contains('@'))
         .map(str::to_string)

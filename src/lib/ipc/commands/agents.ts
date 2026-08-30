@@ -31,6 +31,19 @@ export interface BatchSkillToggleReport {
   failed: BatchSkillToggleFailure[];
 }
 
+/** Current directory links plus the exact temporary recovery set. */
+export interface AgentManagedSkillsState {
+  active_skill_names: string[];
+  suspended_skill_names: string[];
+}
+
+export type AgentManagedSkillsAction = "paused" | "restored";
+
+export interface AgentManagedSkillsToggleReport extends BatchSkillToggleReport {
+  action: AgentManagedSkillsAction;
+  state: AgentManagedSkillsState;
+}
+
 /** Global agent profile configuration + per-agent skill links. */
 export interface AgentCommands {
   list_agent_profiles: { args: Record<string, never>; result: AgentProfile[] };
@@ -43,6 +56,14 @@ export interface AgentCommands {
   batch_toggle_skills_for_agent: {
     args: { skillNames: string[]; agentId: string; enable: boolean; operationId: string };
     result: BatchSkillToggleReport;
+  };
+  get_agent_managed_skills_state: {
+    args: { agentId: string };
+    result: AgentManagedSkillsState;
+  };
+  toggle_agent_managed_skills: {
+    args: { agentId: string; operationId: string };
+    result: AgentManagedSkillsToggleReport;
   };
   list_linked_skills: { args: { agentId: string }; result: string[] };
   unlink_skill_from_agent: { args: { skillName: string; agentId: string }; result: void };

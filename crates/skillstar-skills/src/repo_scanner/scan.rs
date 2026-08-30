@@ -79,12 +79,9 @@ pub(super) fn annotate_discovered_skills(
 
         if let Some(name) = legacy_name {
             skill.id = name;
-            skill.already_installed = hub_skills_dir.join(&skill.id).exists()
-                || lock_entries.iter().any(|entry| {
-                    entry.name == skill.id
-                        && source_resolver::same_remote_url(&entry.git_url, repo_url)
-                        && option_str_eq(entry.source_folder.as_deref(), source_folder)
-                });
+            // A lockfile entry for this exact source exists — that is what
+            // produced `legacy_name` — so the skill is installed by definition.
+            skill.already_installed = true;
         } else {
             skill.already_installed = hub_skills_dir.join(&skill.id).exists();
         }

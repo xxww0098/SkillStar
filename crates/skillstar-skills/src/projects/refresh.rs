@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use super::index::list_projects;
 use super::store::load_skills_list;
-use super::types::{deploy_skill_auto, ensure_project_root_exists};
+use super::types::ensure_project_root_exists;
 use skillstar_agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 
@@ -152,7 +152,12 @@ fn refresh_stale_copies_inner(
                 );
                 continue;
             }
-            match deploy_skill_auto(&source, &target) {
+            // This branch is reached only for copy deployments (symlinks and
+            // absent entries are skipped above), so re-deploy as a copy. Going
+            // through the symlink-first path here would silently downgrade a
+            // copy the user explicitly chose, while `deploy_modes` still says
+            // `copy`.
+            match fs_ops::create_copy_deploy(&source, &target) {
                 Ok(()) => report.refreshed += 1,
                 Err(e) => {
                     report.failures.push(format!(

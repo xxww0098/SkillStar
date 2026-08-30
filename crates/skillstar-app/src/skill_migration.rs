@@ -177,7 +177,9 @@ mod tests {
         update_state::reset_for_test();
 
         let facade = GitSkillFacade::new(GitOperationSession::public());
-        let error = migrate_renamed_skill("nope", &facade).unwrap_err().to_string();
+        let error = migrate_renamed_skill("nope", &facade)
+            .unwrap_err()
+            .to_string();
         assert!(
             error.contains("No upstream successor"),
             "a Skill nothing points at must not be touched: {error}"

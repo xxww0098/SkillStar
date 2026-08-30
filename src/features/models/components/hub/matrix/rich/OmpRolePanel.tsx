@@ -2,7 +2,7 @@ import { Check, ChevronDown, Copy, Eraser, Route, Sparkles, X } from "lucide-rea
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../../components/ui/button";
-import { cn } from "../../../../../../lib/utils";
+import { cn, copyToClipboard } from "../../../../../../lib/utils";
 import type {
   OmpRoleTarget,
   OmpSettings,
@@ -165,13 +165,9 @@ export function OmpRolePanel({ binding, providers, onClose, chrome = "popover" }
   }, [roles]);
 
   const handleCopy = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(command);
+    if (await copyToClipboard(command)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* clipboard unavailable in some shells */
     }
   }, [command]);
 

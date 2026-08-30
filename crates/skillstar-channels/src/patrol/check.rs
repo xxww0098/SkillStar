@@ -10,22 +10,8 @@ use tracing::warn;
 
 use crate::patrol::types::HubSkillEntry;
 use skillstar_skills::local_skill;
+use skillstar_skills::repo_link;
 use skillstar_skills::update_checker::{self, UpstreamStatus};
-use skillstar_skills::{repo_link, repo_scanner};
-
-/// Check a single skill for available updates without network (after prefetch).
-///
-/// Returns `None` when the repo fetch failed for this skill's root so callers
-/// can skip emitting and preserve the previous badge.
-pub fn check_skill_update_local_in_session(
-    skill_name: &str,
-    skill_path: &Path,
-    failed_fetch_roots: &HashSet<PathBuf>,
-    session: &skillstar_skills::git::transport::GitOperationSession,
-) -> Option<UpstreamStatus> {
-    let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock().ok()?;
-    check_skill_update_local_unlocked(skill_name, skill_path, failed_fetch_roots, session)
-}
 
 /// Check every hub skill under one transaction lock, using bounded worker
 /// threads so local `git rev-parse` child processes overlap.
@@ -74,7 +60,12 @@ fn check_skill_update_local_unlocked(
         return None;
     }
     if repo_link::is_repo_cached(skill_path) {
-        return update_checker::check_upstream_status(skill_path, failed_fetch_roots, None, session);
+        return update_checker::check_upstream_status(
+            skill_path,
+            failed_fetch_roots,
+            None,
+            session,
+        );
     }
 
     // Fallback for non-repo-cached hub skills.
@@ -170,13 +161,6 @@ pub fn prefetch_failed_repos_in_session(
         .cloned()
         .collect::<Vec<_>>();
     update_checker::prefetch_unique_repos_in_session(&safe_paths, session)
-}
-
-/// Detect newly available skills in already-fetched repo caches.
-pub fn detect_new_skills_in_cached_repos(
-    session: &skillstar_skills::git::transport::GitOperationSession,
-) -> Vec<skillstar_skills::repo_scanner::RepoNewSkill> {
-    repo_scanner::detect_new_skills_in_cached_repos(session)
 }
 
 #[cfg(test)]

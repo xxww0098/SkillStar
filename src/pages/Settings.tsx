@@ -1,8 +1,11 @@
 import { motion } from "framer-motion";
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { toast as sonnerToast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { AiProviderSection } from "../features/models/components/settings/AiProviderSection";
 import { DevModeBanner } from "../features/settings/components/DevModeBanner";
+import { globalSkillsTargetKey } from "../features/settings/lib/agentSkillSync";
+import { GlobalSkillsTargetReadGuard } from "../features/settings/lib/globalSkillsTargetReadGuard";
 import { AboutSection } from "../features/settings/sections/AboutSection";
 import { AcpSection } from "../features/settings/sections/AcpSection";
 import { AgentConnectionsSection } from "../features/settings/sections/AgentConnectionsSection";
@@ -22,8 +25,11 @@ import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useAiConfig } from "../hooks/useAiConfig";
 import { useAutoSaveConfig } from "../hooks/useAutoSaveConfig";
 import { setLanguage } from "../i18n";
+import { supportsGlobalDeploy } from "../lib/agentProfiles";
 import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from "../lib/backgroundStyle";
+import { firstSkipPath, formatBatchToggleSkip } from "../lib/batchToggleSkip";
 import { tauriInvoke } from "../lib/ipc";
+import type { AgentManagedSkillsState } from "../lib/ipc/commands/agents";
 import { toast } from "../lib/toast";
 import type { SettingsFocusTarget } from "../lib/utils";
 import type { AiConfig, GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig, StorageOverview } from "../types";
@@ -61,6 +67,7 @@ export function Settings({
     toggleProfile,
     addCustomProfile,
     removeCustomProfile,
+    refresh: refreshProfiles,
   } = useAgentProfiles();
 
   useEffect(() => onBackgroundRunChanged(setBackgroundRun), []);
@@ -148,6 +155,10 @@ export function Settings({
     expandedAgentId: null,
     linkedSkills: {},
   });
+  const [pendingSkillTargetKeys, setPendingSkillTargetKeys] = useState<Record<string, true>>({});
+  const pendingSkillTargetKeysRef = useRef(new Set<string>());
+  const linkedSkillsReadGuardRef = useRef(new GlobalSkillsTargetReadGuard());
+  const [managedSkillStates, setManagedSkillStates] = useState<Record<string, AgentManagedSkillsState>>({});
 
   const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
   const [fetchingStorage, setFetchingStorage] = useState(false);
@@ -237,6 +248,71 @@ export function Settings({
     return () => window.removeEventListener("skillstar:settings-focus", handleFocusEvent as EventListener);
   }, [focusSettingsSection]);
 
+  const targetMembersForProfile = useCallback(
+    (profile: (typeof profiles)[number]) => {
+      const targetKey = globalSkillsTargetKey(profile.global_skills_dir);
+      return profiles.filter(
+        (candidate) =>
+          supportsGlobalDeploy(candidate) && globalSkillsTargetKey(candidate.global_skills_dir) === targetKey,
+      );
+    },
+    [profiles],
+  );
+
+  const applyLinkedSkillsToTarget = useCallback(
+    (profile: (typeof profiles)[number], linkedSkillNames: string[]) => {
+      for (const member of targetMembersForProfile(profile)) {
+        dispatchAgent({ type: "SET_LINKED_SKILLS", agentId: member.id, skills: linkedSkillNames });
+      }
+    },
+    [targetMembersForProfile],
+  );
+
+  const applyManagedSkillsStateToTarget = useCallback(
+    (profile: (typeof profiles)[number], state: AgentManagedSkillsState) => {
+      applyLinkedSkillsToTarget(profile, state.active_skill_names);
+      setManagedSkillStates((previous) => ({
+        ...previous,
+        [globalSkillsTargetKey(profile.global_skills_dir)]: state,
+      }));
+    },
+    [applyLinkedSkillsToTarget],
+  );
+
+  const refreshLinkedSkillsForTarget = useCallback(
+    async (profile: (typeof profiles)[number], canApply: () => boolean = () => true) => {
+      const readToken = linkedSkillsReadGuardRef.current.begin(profile.global_skills_dir);
+      const state = await tauriInvoke("get_agent_managed_skills_state", { agentId: profile.id });
+
+      if (canApply() && linkedSkillsReadGuardRef.current.accepts(readToken)) {
+        applyManagedSkillsStateToTarget(profile, state);
+      }
+      return state;
+    },
+    [applyManagedSkillsStateToTarget],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const targetRepresentatives = new Map<string, (typeof profiles)[number]>();
+
+    for (const profile of profiles) {
+      if (!profile.enabled || !supportsGlobalDeploy(profile)) continue;
+      const targetKey = globalSkillsTargetKey(profile.global_skills_dir);
+      if (!targetRepresentatives.has(targetKey)) targetRepresentatives.set(targetKey, profile);
+    }
+
+    for (const profile of targetRepresentatives.values()) {
+      void refreshLinkedSkillsForTarget(profile, () => !cancelled).catch((error) => {
+        if (import.meta.env.DEV) console.error("Failed to preload linked skills:", error);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profiles, refreshLinkedSkillsForTarget]);
+
   // ── Agent handlers ─────────────────────────────────────────────────────────
 
   const handleToggle = useCallback(
@@ -259,28 +335,179 @@ export function Settings({
       }
       dispatchAgent({ type: "SET_EXPANDED_AGENT", agentId });
       try {
-        const skills = await tauriInvoke("list_linked_skills", { agentId });
-        dispatchAgent({ type: "SET_LINKED_SKILLS", agentId, skills });
+        const profile = profiles.find((candidate) => candidate.id === agentId);
+        if (profile && supportsGlobalDeploy(profile)) {
+          await refreshLinkedSkillsForTarget(profile);
+        } else {
+          const skills = await tauriInvoke("list_linked_skills", { agentId });
+          dispatchAgent({ type: "SET_LINKED_SKILLS", agentId, skills });
+        }
       } catch (e) {
         if (import.meta.env.DEV) console.error("Failed to list linked skills:", e);
         toast.error(t("settings.listLinkedFailed"));
       }
     },
-    [agentState.expandedAgentId, t],
+    [agentState.expandedAgentId, profiles, refreshLinkedSkillsForTarget, t],
   );
 
   const handleUnlinkSingle = useCallback(
     async (skillName: string, agentId: string) => {
+      const profile = profiles.find((candidate) => candidate.id === agentId);
+      if (profile && supportsGlobalDeploy(profile)) {
+        linkedSkillsReadGuardRef.current.invalidate(profile.global_skills_dir);
+      }
+
       try {
         await tauriInvoke("unlink_skill_from_agent", { skillName, agentId });
-        dispatchAgent({ type: "REMOVE_LINKED_SKILL", agentId, skillName });
+        if (profile && supportsGlobalDeploy(profile)) {
+          await refreshLinkedSkillsForTarget(profile);
+        } else {
+          dispatchAgent({ type: "REMOVE_LINKED_SKILL", agentId, skillName });
+        }
+        await refreshProfiles();
         notifySkillsRefresh();
       } catch (e) {
         if (import.meta.env.DEV) console.error("Unlink failed:", e);
         toast.error(t("settings.unlinkFailed"));
       }
     },
-    [t, notifySkillsRefresh],
+    [profiles, refreshLinkedSkillsForTarget, refreshProfiles, t, notifySkillsRefresh],
+  );
+
+  const handleToggleAllSkills = useCallback(
+    async (profile: (typeof profiles)[number]) => {
+      if (!profile.enabled || !supportsGlobalDeploy(profile)) return;
+
+      const targetKey = globalSkillsTargetKey(profile.global_skills_dir);
+      if (pendingSkillTargetKeysRef.current.has(targetKey)) return;
+
+      linkedSkillsReadGuardRef.current.invalidate(profile.global_skills_dir);
+      pendingSkillTargetKeysRef.current.add(targetKey);
+      setPendingSkillTargetKeys((previous) => ({ ...previous, [targetKey]: true }));
+
+      try {
+        const report = await tauriInvoke("toggle_agent_managed_skills", {
+          agentId: profile.id,
+          operationId: crypto.randomUUID(),
+        });
+
+        // Discard reads that began while the backend was mutating this target,
+        // then apply the command's authoritative state before the final disk read.
+        linkedSkillsReadGuardRef.current.invalidate(profile.global_skills_dir);
+        applyManagedSkillsStateToTarget(profile, report.state);
+
+        let refreshFailed = false;
+        try {
+          await Promise.all([refreshLinkedSkillsForTarget(profile), refreshProfiles()]);
+        } catch (error) {
+          refreshFailed = true;
+          if (import.meta.env.DEV) console.error("Failed to refresh managed-skills state:", error);
+        }
+        notifySkillsRefresh();
+
+        const failed = report.failed.length;
+        const skipped = report.skipped.length;
+        const total = report.succeeded.length + skipped + failed;
+        const occupiedPath = firstSkipPath(report.skipped);
+        const visibleFailures = report.failed.slice(0, 3).map((failure) => failure.skill_name + ": " + failure.error);
+        const visibleSkips = report.skipped.slice(0, 3).map((skip) => formatBatchToggleSkip(skip, t));
+        const hiddenFailures = Math.max(0, failed - visibleFailures.length);
+        const hiddenSkips = Math.max(0, skipped - visibleSkips.length);
+        const details = [
+          ...visibleFailures,
+          hiddenFailures > 0
+            ? t("settings.managedSkillsMoreFailures", {
+                count: hiddenFailures,
+                defaultValue: "+{{count}} more failures",
+              })
+            : "",
+          ...visibleSkips,
+          hiddenSkips > 0
+            ? t("settings.managedSkillsMoreSkipped", { count: hiddenSkips, defaultValue: "+{{count}} more skipped" })
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const openFolderAction = occupiedPath
+          ? {
+              label: t("skillToggle.openOccupiedFolder", { defaultValue: "Open folder" }),
+              onClick: () => {
+                void tauriInvoke("open_folder", { path: occupiedPath }).catch((error) => {
+                  if (import.meta.env.DEV) console.error("open_folder failed:", error);
+                });
+              },
+            }
+          : undefined;
+
+        if (failed > 0) {
+          sonnerToast.error(
+            t(
+              report.action === "paused"
+                ? skipped > 0
+                  ? "settings.managedSkillsPausePartialMixed"
+                  : "settings.managedSkillsPausePartialFailed"
+                : skipped > 0
+                  ? "settings.managedSkillsRestorePartialMixed"
+                  : "settings.managedSkillsRestorePartialFailed",
+              {
+                failed,
+                skipped,
+                total,
+                defaultValue:
+                  skipped > 0
+                    ? "Couldn't finish {{failed}}/{{total}} skills; skipped {{skipped}} existing folders"
+                    : "Couldn't finish {{failed}}/{{total}} skills",
+              },
+            ),
+            { description: details, duration: 10000, action: openFolderAction },
+          );
+        } else if (skipped > 0) {
+          sonnerToast.message(
+            t(
+              report.action === "paused"
+                ? "settings.managedSkillsPausePartialSkipped"
+                : "settings.managedSkillsRestorePartialSkipped",
+              {
+                skipped,
+                total,
+                defaultValue: "Skipped {{skipped}}/{{total}} skills; existing folders were left in place",
+              },
+            ),
+            { description: details, duration: 10000, action: openFolderAction },
+          );
+        } else {
+          toast.success(
+            t(report.action === "paused" ? "settings.managedSkillsPaused" : "settings.managedSkillsRestored", {
+              count: report.succeeded.length,
+              name: profile.display_name,
+              defaultValue:
+                report.action === "paused"
+                  ? "Temporarily paused {{count}} skills in {{name}}"
+                  : "Restored {{count}} paused skills in {{name}}",
+            }),
+          );
+        }
+
+        if (refreshFailed) toast.warning(t("settings.managedSkillsRefreshFailed"));
+      } catch (error) {
+        if (import.meta.env.DEV) console.error("Failed to toggle managed skills:", error);
+        try {
+          await Promise.all([refreshLinkedSkillsForTarget(profile), refreshProfiles()]);
+          notifySkillsRefresh();
+        } catch (refreshError) {
+          if (import.meta.env.DEV) console.error("Failed to recover managed-skills state:", refreshError);
+        }
+        toast.error(t("settings.managedSkillsOperationFailed"));
+      } finally {
+        pendingSkillTargetKeysRef.current.delete(targetKey);
+        setPendingSkillTargetKeys((previous) => {
+          const next = { ...previous };
+          delete next[targetKey];
+          return next;
+        });
+      }
+    },
+    [applyManagedSkillsStateToTarget, notifySkillsRefresh, profiles, refreshLinkedSkillsForTarget, refreshProfiles, t],
   );
 
   // ── Language & appearance handlers ───────────────────────────────────────
@@ -566,9 +793,12 @@ export function Settings({
                   profilesLoading={profilesLoading}
                   expandedAgentId={agentState.expandedAgentId}
                   linkedSkills={agentState.linkedSkills}
+                  managedSkillStates={managedSkillStates}
+                  pendingSkillTargetKeys={pendingSkillTargetKeys}
                   onToggleProfile={handleToggle}
                   onToggleExpand={toggleExpand}
                   onUnlinkSkill={handleUnlinkSingle}
+                  onToggleAllSkills={handleToggleAllSkills}
                   onAddCustomProfile={addCustomProfile}
                   onRemoveCustomProfile={removeCustomProfile}
                 />

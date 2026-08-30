@@ -2,6 +2,41 @@
 
 状态：active
 
+## 2026-08-27 - clippy 棘轮在热缓存下读到 0，照它的提示锁定基线会让冷构建 CI 挂掉
+
+- Symptom: 本地刚跑过 `cargo clippy` 后立即执行 `scripts/internal/check_clippy_ratchet.sh`，输出 `summary: 0 clippy diagnostics (baseline: 1)` 并主动提示 `note: count dropped below baseline — lower scripts/internal/clippy_baseline.txt to lock in the improvement`。照做把基线改成 0，CI 冷构建时真实计数仍是 1，`1 > 0` 直接失败。
+- Root cause: 脚本靠 `grep -c '^warning:'` 数 `cargo clippy` 的 stdout，而 cargo 对**未变更且已缓存**的 crate 不会重新发出诊断。热缓存下 `skillstar-usage` 不重编译，那条 `needless_lifetimes`（在冻结的 `fetchers/oauth/cursor.rs`，按项目规则不得修改）就不出现在输出里，计数虚假归零。脚本本身不区分"真的修好了"和"这次没编译它"。
+- Fix: 采信该脚本的计数前，先强制目标 crate 重编译（`touch` 相关源文件，或 `cargo clean -p <crate>`）再跑。基线维持 1；那一条属于冻结文件，不可清零。
+- Self-check: `touch crates/skillstar-usage/src/fetchers/oauth/cursor.rs && bash scripts/internal/check_clippy_ratchet.sh` 必须报 `1 clippy diagnostics`。同一陷阱适用于任何以编译器输出为计数源的门禁。
+
+## 2026-08-27 - 更新检查在普通目录里让 git 向上逃逸到用户的其他仓库
+
+- Symptom: 无明显症状,这正是危险处。hub 里的普通目录技能(bundle 导入、pack 安装、手工放入)每次巡检都会在自己目录里跑 `git fetch --depth 1`;当任何祖先目录是真仓库(`$HOME` 的 dotfiles 仓库、被版本管理的 `~/.skillstar`),git 解析到的是**那个**仓库,于是 SkillStar 定期对用户无关的仓库做浅取,并拿它的 HEAD 与 FETCH_HEAD 算出技能的更新徽章。
+- Root cause: 所有 git 调用只设 `current_dir`,不设 `-C` / `--git-dir` / `GIT_CEILING_DIRECTORIES`,所以 git 会向上走查找 `.git`。`ensure_worktree_checked_out_in_session` 自带 `if !repo_path.join(".git").exists() { return Ok(false) }` 守卫,但紧挨着它的 `check_update_in_session` 没有 —— 同一对调用里一个 fail-closed 一个不设防。
+- Fix: 守卫放进共享的 `check_update_in_session`(`crates/skillstar-git/src/ops.rs`),不是放进某一个调用方 —— patrol 与前台刷新是两个调用方,只修一个会漏。返回 `Err` 而非 `Ok(false)`:两个调用方都刻意把失败映射为"未知"以免用假的 `false` 覆盖真实徽章。
+- Self-check: `cargo test -p skillstar-git --locked check_update_refuses_a_directory_without_its_own_git`。凡是靠 cwd 定位仓库的 git 包装函数,都要问一句"目标不是仓库时会发生什么"。
+
+## 2026-08-27 - 删 UI 不删后端,留下一串永远走不到的代码
+
+- Symptom: 一批功能"看起来实现了"但用户永远触发不到:Codex 写 `~/.zshrc` 的 385 行后端 + Tauri 命令 + 前端 IPC 声明齐全,却没有任何按钮;`OAuthStartInfo` 的 `user_code`/`verification_uri` 恒为 `None`,前端却有整块设备码 UI 等着渲染;skill-pack 的 `list`/`remove`/`doctor` CLI 操作一个没有写入方的 store。
+- Root cause: 提交 `8e53552 chore(models): remove dead code and promote prototype to production paths` 只删了前端调用点,后端命令、域实现、IPC 声明、文档承诺原样留下。死代码不会自己报错:内部 workspace crate 里的 `pub` 项不触发 dead_code lint,Tauri 命令注册了就"被使用",`#![allow(dead_code)]` 还会主动压掉信号。文档因此长期描述着不存在的行为。
+- Fix: 按"入口 → 域实现 → 命令 → IPC 声明 → devMock → locale key → 文档"整条链一次性删净,并摘掉掩盖信号的 `#![allow(dead_code)]`。
+- Self-check: 删除任何 UI 调用点后,反向追一遍它独占的后端链路。判断"是废弃还是没接线"用 `git log -S '<命令名>' -- src/`:前端历史上出现过则是被删的功能(继续删干净),从未出现过则是没接线的脚手架(同样删,但要在功能文档里写清缺口)。
+
+## 2026-08-27 - tool-sync 把解析失败的用户配置静默重建成仅含托管块的骨架
+
+- Symptom: 用户的 `~/.codex/config.toml`（或 OpenCode/Pi/OMP/Claude 的 JSON/YAML 配置）里有一个语法错误后,下一次 provider 同步"成功",但文件里只剩 SkillStar 托管块——用户自己的 MCP servers、profiles、OAuth token 全部消失。滚动备份只保留 5 份,后续自动 resync 会把最后一份好备份也轮换掉。
+- Root cause: 同步写入路径在读现有文件时用 `unwrap_or_default()` / `unwrap_or_else(|_| init_root())` 把解析失败当成"文件不存在",随后整文件重写。这正是 store_v4 模块文档点名要终结的 v3 缺陷,且同文件的 unsync 路径早已 fail-closed(`with_context(...)?`),形成双标。
+- Fix: 所有 sync 写入方统一走 `backup_merge::read_existing_config`:文件缺失或空白 → 从头初始化;存在但解析失败 → 硬错误 `Failed to parse … — fix or remove it before syncing`。同时全部写入点从裸 `fs::write` 换成 `skillstar_core::infra::fs_ops::atomic_write`,崩溃不再截断配置。
+- Self-check: 往沙箱 `~/.codex/config.toml` 写一行非法 TOML 后触发同步,必须报错且文件字节不变;`cargo test -p skillstar-models --locked tool_sync`。
+
+## 2026-08-27 - 非 GitHub 仓库的上游新增技能检测永远静默跳过
+
+- Symptom: 从 GitLab/SSH 源安装的技能一切正常,但上游新增技能的 ghost 检测从不出现;无日志、无报错。
+- Root cause: `detect_new_skills_in_cached_repos` 自己用 `strip_prefix("https://github.com/")` 推导 cache 目录 key,而安装路径用 `Source::parse(url).short`。两套推导只在 GitHub https URL 上碰巧一致;GitLab/SSH 源算出的目录名对不上,`.git` 存在性检查失败后 `continue` 静默丢弃。同一份 key 出现两套推导逻辑时,不一致就是这种"只对主流路径生效"的静默缺陷。
+- Fix: detect 侧改用与安装完全相同的 `Source::parse(&git_url).map(|s| s.short)`,失败回退原始 URL。
+- Self-check: `cargo test -p skillstar-skills --locked repo_scanner`;手工:GitLab 源安装后上游加技能,fetch 后 ghost 卡必须出现。
+
 ## 2026-08-21 - 上游新增的 Skill 永远检测不到，刷新按钮也无效
 
 - Symptom: `mattpocock/skills` 新增 `skills/in-progress/implement-spec` 一小时后，My Skills 既没有 ghost 卡也没有推送；点右上角刷新毫无变化。本地 cache 的 `HEAD` 与 `origin/HEAD` 都停在前一天的 commit。

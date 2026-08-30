@@ -244,24 +244,36 @@ fn known_hosts_path() -> PathBuf {
     skillstar_core::infra::paths::ssh_known_hosts_path()
 }
 
-/// Load all accepted host-key fingerprints.
-pub fn load_known_hosts() -> Vec<KnownHost> {
+/// Read the TOFU store, failing closed on damage.
+///
+/// A missing or empty file is the legitimate "no host accepted yet" state and
+/// yields an empty list. Content that is present but unparseable is an error,
+/// so a rewrite can never silently reset every accepted fingerprint.
+fn read_known_hosts() -> Result<Vec<KnownHost>> {
     let path = known_hosts_path();
     let Ok(content) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let file: KnownHostsFile = serde_json::from_str(&content).unwrap_or_default();
-    file.hosts
+    if content.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let file: KnownHostsFile =
+        serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
+    Ok(file.hosts)
+}
+
+/// Load all accepted host-key fingerprints. Missing/corrupt file → empty list.
+pub fn load_known_hosts() -> Vec<KnownHost> {
+    read_known_hosts().unwrap_or_default()
 }
 
 /// Record an accepted fingerprint for `host_id`. Replaces any prior entry for
 /// the same host id.
 pub fn accept_host_key(host_id: &str, host: &str, fingerprint: &str) -> Result<()> {
     let path = known_hosts_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).context("create known_hosts dir")?;
-    }
-    let mut entries = load_known_hosts();
+    // Fail closed: never rewrite a store we could not read, or the surviving
+    // entries would be dropped along with the damage.
+    let mut entries = read_known_hosts()?;
     entries.retain(|e| e.host_id != host_id);
     entries.push(KnownHost {
         host_id: host_id.to_string(),
@@ -270,7 +282,8 @@ pub fn accept_host_key(host_id: &str, host: &str, fingerprint: &str) -> Result<(
     });
     let content = serde_json::to_string_pretty(&KnownHostsFile { hosts: entries })
         .context("serialize known_hosts")?;
-    std::fs::write(&path, content).context("write known_hosts")?;
+    skillstar_core::infra::fs_ops::atomic_write(&path, content.as_bytes())
+        .context("persist known_hosts")?;
     Ok(())
 }
 
@@ -393,5 +406,34 @@ mod tests {
         accept_host_key("ssh_1", "host:22", "SHA256:bbb").unwrap();
         assert_eq!(known_fingerprint("ssh_1"), Some("SHA256:bbb".into()));
         assert_eq!(load_known_hosts().len(), 1);
+    }
+
+    #[test]
+    fn corrupt_known_hosts_is_not_silently_reset() {
+        let _g = DataDirGuard::new();
+        accept_host_key("ssh_1", "host:22", "SHA256:aaa").unwrap();
+        let path = known_hosts_path();
+        let good = std::fs::read_to_string(&path).unwrap();
+
+        // Simulate a torn write: JSON truncated mid-object (ASCII, so slicing
+        // at a byte index is safe here).
+        let torn = good[..good.len() / 2].to_string();
+        std::fs::write(&path, &torn).unwrap();
+        assert!(
+            accept_host_key("ssh_2", "h2:22", "SHA256:bbb").is_err(),
+            "a rewrite over unparseable content must fail closed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            torn,
+            "the damaged store must not be replaced by a fresh single-entry file"
+        );
+
+        // An empty or missing file is still the legitimate "nothing accepted
+        // yet" state, not corruption.
+        std::fs::write(&path, "").unwrap();
+        assert!(load_known_hosts().is_empty());
+        accept_host_key("ssh_2", "h2:22", "SHA256:bbb").unwrap();
+        assert_eq!(known_fingerprint("ssh_2"), Some("SHA256:bbb".into()));
     }
 }

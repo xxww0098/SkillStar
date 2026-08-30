@@ -59,6 +59,8 @@ export function ImportBundleModal({ open: isOpen, onClose, onImported }: ImportB
     } catch (e: unknown) {
       setError(String(e));
       setPhase("error");
+    } finally {
+      setLoading(false);
     }
   };
 

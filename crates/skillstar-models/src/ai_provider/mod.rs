@@ -9,7 +9,6 @@ pub mod openai_client;
 pub mod resolve;
 pub mod skill_pick;
 
-#[allow(unused_imports)]
 pub use config::{AiConfig, AiProviderRef, ApiFormat, FormatPreset};
 
 // Config load/save, concurrency limiting, crypto, and legacy TOML/meta parsing.
@@ -635,7 +634,6 @@ pub async fn extract_search_keywords(config: &AiConfig, user_query: &str) -> Res
 
 // ── Skill Pick (delegated to skill_pick.rs) ─────────────────────────
 
-#[allow(unused_imports)]
 pub use skill_pick::{SkillPickCandidate, SkillPickRecommendation, SkillPickResponse, pick_skills};
 
 /// Test API connectivity with a minimal request.

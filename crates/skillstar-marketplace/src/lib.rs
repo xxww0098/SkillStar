@@ -33,9 +33,7 @@ pub use remote::{
 pub use skillstar_core::types::skill::{
     OfficialPublisher, Skill, SkillCategory, SkillType, extract_github_source_from_url,
 };
-pub use snapshot::{
-    LocalFirstResult, MarketplacePack, SnapshotRuntimeConfig, SnapshotStatus, SyncStateEntry,
-};
+pub use snapshot::{LocalFirstResult, SnapshotRuntimeConfig, SnapshotStatus, SyncStateEntry};
 
 #[cfg(test)]
 mod contract_tests {

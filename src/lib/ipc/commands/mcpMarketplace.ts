@@ -2,11 +2,9 @@ import type {
   LocalFirstResult,
   McpCustomSource,
   McpInstallPlan,
-  McpMarketEntry,
   McpMarketServerDetail,
   McpPublisherSummary,
   McpRuntimeSelection,
-  McpServerEntry,
   McpServerPage,
   McpServerQuery,
   McpSourceDescriptor,
@@ -14,9 +12,9 @@ import type {
 } from "../../../types";
 
 /**
- * MCP marketplace — browse the merged MCP catalog local-first, then install by
- * converting an entry into a prefilled `McpServerEntry` draft and submitting it
- * via the existing `create_mcp_server` command.
+ * MCP marketplace — browse the merged MCP catalog local-first, then install via
+ * `mcp_market_install_plan`, whose plan carries the prefilled `McpServerEntry`
+ * draft the form submits through the existing `create_mcp_server` command.
  *
  * The catalog is the merge of every enabled source (the official MCP Registry
  * as primary, GitHub's registry as an enrichment mirror, plus any user-added
@@ -27,15 +25,6 @@ import type {
  * `src-tauri/src/commands/mcp_marketplace.rs`.
  */
 export interface McpMarketplaceCommands {
-  /**
-   * Unpaginated read of every card. The merged catalog is ~21k rows, so this
-   * is only appropriate for small publisher buckets — use
-   * `query_mcp_market_servers_local` for browsing.
-   */
-  list_mcp_market_servers_local: {
-    args: Record<string, never>;
-    result: LocalFirstResult<McpMarketEntry[]>;
-  };
   /**
    * Filtered / sorted / paginated card query. Every field of `McpServerQuery`
    * has a Rust-side default, so pass only the ones you set. The result carries
@@ -49,21 +38,11 @@ export interface McpMarketplaceCommands {
     args: Record<string, never>;
     result: McpPublisherSummary[];
   };
-  list_mcp_servers_by_publisher_local: {
-    args: { publisherId: string };
-    result: LocalFirstResult<McpMarketEntry[]>;
-  };
-  search_mcp_market_local: {
-    args: { query: string; limit?: number };
-    result: LocalFirstResult<McpMarketEntry[]>;
-  };
   get_mcp_market_server_detail_local: {
     args: { id: string };
     result: LocalFirstResult<McpMarketServerDetail | null>;
   };
   sync_mcp_market_scope: { args: { scope: string }; result: void };
-  /** Aggregate freshness of the whole catalog. */
-  get_mcp_market_sync_states: { args: Record<string, never>; result: SyncStateEntry[] };
   /**
    * One row per source (`mcp_registry:<sourceId>`), each with its own
    * `lastError` and `degradedReason` — this is what lets the UI say "this sync
@@ -94,9 +73,4 @@ export interface McpMarketplaceCommands {
     args: { id: string; runtimeId?: string };
     result: McpInstallPlan;
   };
-  /**
-   * Convert a marketplace entry into a prefilled draft for the create form.
-   * `runtimeId` picks a specific candidate; omit it for the recommendation.
-   */
-  mcp_market_entry_to_draft: { args: { id: string; runtimeId?: string }; result: McpServerEntry };
 }
