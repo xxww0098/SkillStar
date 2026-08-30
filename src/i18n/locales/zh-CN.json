@@ -919,7 +919,10 @@
     "upstreamRenamed": "已更名为 {{name}}",
     "resolveRemoved": "处理",
     "migrate": "迁移到 {{name}}",
-    "migrating": "迁移中..."
+    "migrating": "迁移中...",
+    "openLocalDir": "{{label}}（点击打开本地目录）",
+    "openRepo": "{{source}}（点击在浏览器中打开仓库）",
+    "openAuthor": "@{{author}}（点击在浏览器中打开主页）"
   },
   "selectionBar": {
     "selected": "已选 {{count}} 个",

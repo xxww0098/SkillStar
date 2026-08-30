@@ -919,7 +919,10 @@
     "upstreamRenamed": "Renamed to {{name}}",
     "resolveRemoved": "Resolve",
     "migrate": "Migrate to {{name}}",
-    "migrating": "Migrating..."
+    "migrating": "Migrating...",
+    "openLocalDir": "{{label}} (open local folder)",
+    "openRepo": "{{source}} (open repository in browser)",
+    "openAuthor": "@{{author}} (open profile in browser)"
   },
   "selectionBar": {
     "selected": "{{count}} selected",

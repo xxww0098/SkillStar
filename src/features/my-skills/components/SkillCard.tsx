@@ -226,7 +226,7 @@ function SkillCardInner({
             }
           }}
           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 hover:border-emerald-500/50 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors cursor-pointer group/local shadow-2xs"
-          title={`${t("toolbar.local")} (点击打开本地目录)`}
+          title={t("skillCard.openLocalDir", { label: t("toolbar.local") })}
         >
           <HardDrive className="w-2.5 h-2.5 group-hover/local:scale-110 transition-transform" />
           <span className="group-hover/local:underline">{t("toolbar.local")}</span>
@@ -247,7 +247,7 @@ function SkillCardInner({
             handleExternalAnchorClick(e, repoUrl);
           }}
           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-muted/80 text-foreground/80 border border-border/70 truncate max-w-[180px] hover:bg-muted hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer group/repo shadow-2xs"
-          title={`${skill.source} (点击在浏览器中打开仓库)`}
+          title={t("skillCard.openRepo", { source: skill.source })}
         >
           <GitBranch className="w-2.5 h-2.5 shrink-0 opacity-70 group-hover/repo:text-primary transition-colors" />
           <span className="truncate group-hover/repo:underline">{skill.source}</span>
@@ -266,7 +266,7 @@ function SkillCardInner({
             handleExternalAnchorClick(e, authorUrl);
           }}
           className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-muted/70 text-foreground/75 border border-border/60 hover:bg-muted hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer group/author shadow-2xs"
-          title={`@${skill.author} (点击在浏览器中打开主页)`}
+          title={t("skillCard.openAuthor", { author: skill.author })}
         >
           <span className="group-hover/author:underline">@{skill.author}</span>
         </a>
