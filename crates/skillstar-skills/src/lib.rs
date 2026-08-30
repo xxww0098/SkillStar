@@ -12,7 +12,7 @@
 //! |---|---|
 //! | [`lockfile`] / [`update_checker`] / [`update_api`] | Installed-skill records and repo update detection |
 //! | [`projects`] / [`deployment`] | Project manifest, link-copy deploy |
-//! | [`validation`] / [`discovery`] / [`plugin_manifest`] | Frontmatter gate, repo scan, plugin manifests |
+//! | [`validation`] / [`discovery`] / [`plugin_manifest`] | Frontmatter gate, repo scan, plugin manifests; pack-root shims |
 //! | library modules | install, update, bundle, local, repo scan, groups |
 
 pub mod content;
@@ -22,6 +22,7 @@ pub mod git;
 pub mod git_skill;
 pub mod hub_entry;
 pub mod lockfile;
+mod pack_layout;
 mod plugin_manifest;
 pub mod skill_mutation;
 pub mod source_resolver;
@@ -40,9 +41,9 @@ pub mod skill_install;
 mod skill_install_removal_tests;
 pub mod skill_pack;
 pub mod skill_update;
+pub mod update_api;
 pub mod update_checker;
 pub mod update_state;
-pub mod update_api;
 pub mod validation;
 
 // Agent / project / deployment / patrol / terminal

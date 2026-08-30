@@ -12,11 +12,16 @@
 //! | Priority dirs | Checked first; falls back to full scan if empty | Skipped |
 //! | Recursive scan | Only if priority dirs are empty | Always performed |
 //!
-//! This matches `npx skills add` behavior.
+//! This matches `npx skills add` behavior, with one pack-layout exception:
+//! a repo-root `SKILL.md` that merely mirrors `skills/<name>/` (same
+//! identity) is a one-level-scanner shim, not the install unit. See
+//! `pack_layout`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+pub use crate::pack_layout::source_priority;
 
 // ── Data Types ──────────────────────────────────────────────────────
 
@@ -101,19 +106,23 @@ struct SkillCandidate {
 
 impl SkillCandidate {
     fn discovered_skill(self) -> DiscoveredSkill {
-        let id = self
-            .frontmatter
-            .name
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(self.default_name);
-
         DiscoveredSkill {
-            id,
+            id: self.identity(),
             folder_path: self.folder_path,
             description: self.frontmatter.description,
             already_installed: false,
             frontmatter_issues: self.frontmatter.issues,
         }
+    }
+
+    fn identity(&self) -> String {
+        self.frontmatter
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.default_name.clone())
     }
 
     fn is_repo_root(&self) -> bool {
@@ -174,6 +183,7 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     fn normalize_candidates(&self, candidates: Vec<SkillCandidate>) -> Vec<DiscoveredSkill> {
+        let candidates = Self::strip_root_pack_shim(candidates);
         let candidates = match self.config.mode() {
             DiscoveryMode::RootFirst => self.limit_to_root_candidate(candidates),
             DiscoveryMode::FullDepth => candidates,
@@ -183,6 +193,31 @@ impl<'a> SkillDiscovery<'a> {
             .into_iter()
             .map(SkillCandidate::discovered_skill)
             .collect()
+    }
+
+    /// Drop a repo-root SKILL.md that only exists so one-level scanners can
+    /// load the pack. The canonical nested skill is the install unit.
+    fn strip_root_pack_shim(candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
+        let Some(root_id) = candidates
+            .iter()
+            .find(|candidate| candidate.is_repo_root())
+            .map(SkillCandidate::identity)
+        else {
+            return candidates;
+        };
+        let has_canonical_twin = candidates.iter().any(|candidate| {
+            !candidate.is_repo_root()
+                && candidate.identity().eq_ignore_ascii_case(&root_id)
+                && crate::pack_layout::is_canonical_skill_folder(&candidate.folder_path)
+        });
+        if has_canonical_twin {
+            candidates
+                .into_iter()
+                .filter(|candidate| !candidate.is_repo_root())
+                .collect()
+        } else {
+            candidates
+        }
     }
 
     fn limit_to_root_candidate(&self, candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
@@ -435,25 +470,7 @@ fn default_root_skill_name(repo_dir: &Path) -> String {
 }
 
 fn discovered_skill_priority(skill: &DiscoveredSkill) -> u8 {
-    if skill.folder_path.is_empty() {
-        4
-    } else {
-        source_priority(&skill.folder_path)
-    }
-}
-
-pub fn source_priority(folder_path: &str) -> u8 {
-    if folder_path.starts_with("source/skills") || folder_path.starts_with("source\\skills") {
-        3
-    } else if folder_path.starts_with(".agent/skills")
-        || folder_path.starts_with(".agent\\skills")
-        || folder_path.starts_with(".agents/skills")
-        || folder_path.starts_with(".agents\\skills")
-    {
-        2
-    } else {
-        1
-    }
+    crate::pack_layout::discovered_folder_priority(&skill.folder_path)
 }
 
 // ── Filesystem Scanning ───────────────────────────────────────────────
@@ -506,8 +523,7 @@ pub fn find_all_skill_md_files(dir: &Path) -> Vec<PathBuf> {
 
 fn is_safe_skill_manifest(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.file_type().is_file()
-            && metadata.len() <= crate::validation::MAX_MANIFEST_BYTES
+        metadata.file_type().is_file() && metadata.len() <= crate::validation::MAX_MANIFEST_BYTES
     })
 }
 
@@ -530,7 +546,11 @@ fn extract_frontmatter(skill_md_path: &Path) -> SkillFrontmatter {
     SkillFrontmatter {
         name: report.name,
         description: report.description.unwrap_or_default(),
-        issues: report.issues.iter().map(|issue| issue.as_code().to_string()).collect(),
+        issues: report
+            .issues
+            .iter()
+            .map(|issue| issue.as_code().to_string())
+            .collect(),
     }
 }
 
@@ -651,6 +671,11 @@ mod tests {
     #[test]
     fn source_priority_ordering() {
         assert!(source_priority("source/skills/foo") > source_priority(".agents/skills/foo"));
+        assert!(source_priority("skills/foo") > source_priority(".agents/skills/foo"));
+        assert_eq!(
+            source_priority("skills/foo"),
+            source_priority("source/skills/foo")
+        );
         assert!(source_priority(".agents/skills/foo") > source_priority(".claude/skills/foo"));
         // Singular `.agent/skills` (Antigravity CLI official path) ranks the
         // same as the legacy plural form.
@@ -866,11 +891,21 @@ mod frontmatter_issue_tests {
 
         let skills = discover_skills(&repo, true);
         let valid = skills.iter().find(|s| s.id == "valid").unwrap();
-        assert!(valid.frontmatter_issues.is_empty(), "{:?}", valid.frontmatter_issues);
+        assert!(
+            valid.frontmatter_issues.is_empty(),
+            "{:?}",
+            valid.frontmatter_issues
+        );
 
         let bare = skills.iter().find(|s| s.id == "bare").unwrap();
-        assert!(bare.frontmatter_issues.contains(&"missing_description".to_string()));
-        assert!(bare.frontmatter_issues.contains(&"missing_frontmatter".to_string()));
+        assert!(
+            bare.frontmatter_issues
+                .contains(&"missing_description".to_string())
+        );
+        assert!(
+            bare.frontmatter_issues
+                .contains(&"missing_frontmatter".to_string())
+        );
     }
 }
 
@@ -950,7 +985,10 @@ mod depth_and_plugin_tests {
             }"#,
         )
         .unwrap();
-        write_skill_md(&repo.join("plugins/review/skills/review/SKILL.md"), "review");
+        write_skill_md(
+            &repo.join("plugins/review/skills/review/SKILL.md"),
+            "review",
+        );
 
         let skills = discover_skills(&repo, false);
         let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();

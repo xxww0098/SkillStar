@@ -361,6 +361,15 @@
 - 后果：获得——三个真实回归当场暴露：OMP 角色名 `smol` 被规范化成 `fast` 后会写进 OMP 不认识的键、角色写入顺序随内部改名而重排、模型目录移出 store 后 OpenCode 块丢失 `limit`/`cost`。这三个都不会被任何手写断言发现。承担——fixture 与其构造函数必须逐字保持一致，否则比对失去意义；构造函数因此在测试里完整写出而不是复用 helper。
 - 证据：`crates/skillstar-models/src/tool_sync/tests/golden.rs`、`crates/skillstar-models/src/tool_sync/tests/golden_v3/`。
 
+## D-040：pack 根目录 SKILL.md 垫片不是安装单元
+
+- 日期：2026-08-30
+- 状态：accepted
+- 背景：impeccable 风格的技能包（如 `xxww0098/rust-skills`）把正文放在 `skills/<name>/`，同时在仓库根放一份同 identity 的 `SKILL.md`，好让一层扫描器把整仓当作技能目录。SkillStar 的 root-first 发现把根 `SKILL.md` 当成唯一技能，`folder_path` 为空就会把整个仓库（测试、脚本、各 harness 副本）链接进 Hub。全深度扫描也会因根路径优先级 4 赢过 `skills/`。
+- 决策：发现阶段先剥掉「根 SKILL.md 与 `skills/` 或 `source/skills/` 下同 identity 技能」的垫片，再执行 root-first / 去重。`skills/` 与 `source/skills/` 同为规范目录，优先级高于 `.claude/skills` 等 harness 副本。真正的单技能仓库（根 SKILL.md 没有同名 catalog 副本）行为不变。`.claude-plugin/plugin.json` 的 `skills` 同时接受字符串路径和数组。
+- 后果：`skillstar add xxww0098/rust-skills` 安装 `skills/rust`，不再把整仓当技能。一层扫描器仍可继续使用根垫片。
+- 证据：`crates/skillstar-skills/src/{pack_layout.rs,discovery.rs,plugin_manifest.rs}` 及 `pack_root_shim_installs_canonical_skills_folder` 测试。
+
 ## 新增记录格式
 
 ```text

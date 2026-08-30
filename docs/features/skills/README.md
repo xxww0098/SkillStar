@@ -38,10 +38,10 @@
 - 已安装列表先从本地快照返回，远程 update check 在有界后台任务中执行。
 - repo-cache 安装只创建指向共享 checkout 的 link，**绝不改写 checkout 内被 git 跟踪的文件**：provenance（git_url/source_folder）只存 lockfile，CLI 与 GUI 安装路径产物一致。共享 checkout 对安装只读，保证 update 的 `git reset --hard` 不会抹掉本地注入的元数据而自造内容分歧。
 - GUI 的 `install_skill` / `install_from_scan` 安装成功后自动部署到 Settings 已启用且支持全局技能的 Agent（编排在 `skillstar-app::global_deploy`，command 只做调度）；语义与 CLI 一致：已链接项跳过、没有启用 Agent 时不部署、部分 Agent 部署失败时以错误返回并明确“hub 安装已成功但部署不完整”。
-- repo scan 默认 root-first；仓库根有合法 `SKILL.md` 时首先视作一个技能，也可显式启用全深度 discovery。
+- repo scan 默认 root-first；仓库根有合法 `SKILL.md` 时首先视作一个技能，也可显式启用全深度 discovery。**例外**：根 `SKILL.md` 与 `skills/<name>/`（或 `source/skills/`）下技能 identity 相同时，根文件是一层扫描器垫片，不是安装单元；安装 `skills/<name>`，不把整仓链接进 Hub。
 - 技能 id 优先使用 frontmatter `name`，再回退目录名；根技能可回退仓库名。
 - 安装与扫描必须走同一 frontmatter 质量门禁（`skillstar-skills::validation`）：`description` 缺失/非字符串/超 1024 字符/含尖括号、`name` 超 64 字符、frontmatter 缺失或 YAML 损坏的技能在 repo-scan 安装、`install_skill` 的直接 clone 回退、share-code embedded、pack 安装、bundle 导出/导入、本地目录采用（`adopt_folder` 与项目导入）处 fail-closed，错误必须列出全部失败技能与可行动原因；`name` 缺失（回退目录名）与非 kebab-case 属于咨询级，不阻塞。`DiscoveredSkill.frontmatter_issues` 把稳定 issue code 传给前端展示。`install_skill` 的直接 clone 回退对克隆结果同样校验，失败删除克隆并返回与 scan 路径一致的可行动错误。
-- 仓库技能发现对齐生态：priority 容器目录（`skills/`、`.claude/skills/` 等）最多走 3 层，含 SKILL.md 的目录遮蔽其下内容，仓库根保持 1 层；`.claude-plugin/marketplace.json` 与 `plugin.json` 声明的本地 `./` 前缀技能路径以声明深度加入扫描（越界/非 `./` 路径拒绝，manifest 只提供位置不执行插件逻辑）。
+- 仓库技能发现对齐生态：priority 容器目录（`skills/`、`.claude/skills/` 等）最多走 3 层，含 SKILL.md 的目录遮蔽其下内容，仓库根保持 1 层；同 identity 去重时 `skills/` 与 `source/skills/` 高于 harness 副本。`.claude-plugin/marketplace.json` 与 `plugin.json` 声明的本地 `./` 前缀技能路径以声明深度加入扫描（`skills` 字段接受字符串或数组；越界/非 `./` 路径拒绝，manifest 只提供位置不执行插件逻辑）。
 - CLI `install` 与 `add` 是同一命令，来源解析兼容 `npx skills add` 的常用形式：`owner/repo`、`owner/repo/path`、`owner/repo@skill`、GitHub/GitLab tree URL、HTTPS/SSH Git URL、本地 `.ags`/`.agd` 和包含 `SKILL.md` 的本地目录。tree URL 的 ref 与 subpath 必须在 clone/scan 阶段生效，不能把网页 URL 直接交给 Git。
 - 多技能来源在交互模式中选择 Skill；`-y` 未显式指定 Skill 时安装发现到的全部 Skill。`--skill '*'` 只展开全部 Skill，`--agent '*'` 只展开全部目标 Agent；`--all` 等价于两者加 `-y`。
 - 卡组补装或重装携带明确 Skill identity 时采用 fail-closed：若仓库扫描成功但不再包含该 identity（包括只发现一个不同 identity），不得把整个多技能仓库作为单 Skill 回退安装；错误必须列出缺失名称，并提示来源可能已删除或重命名。卡组进度表示已处理数量而非成功数量，部分或全部失败反馈列出具体 Skill 名并优先展示首个后端原因。
