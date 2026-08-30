@@ -32,6 +32,10 @@ const PLANTED_REL = path.relative(ROOT, PLANTED);
 // exit and run afterEach cleanup under a busy full-suite worker.
 const GATE_PROCESS_TIMEOUT_MS = 15_000;
 const GATE_TEST_TIMEOUT_MS = GATE_PROCESS_TIMEOUT_MS + 5_000;
+// Windows may release the child-scanned fixture handles shortly after bash
+// exits. Keep cleanup bounded rather than leaving an orphan for the next test.
+const FIXTURE_CLEANUP_RETRIES = 3;
+const FIXTURE_CLEANUP_RETRY_DELAY_MS = 100;
 
 type Run = {
   status: number;
@@ -78,7 +82,12 @@ function plant(relPath: string, contents: string): string {
 }
 
 afterEach(() => {
-  rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  rmSync(FIXTURE_DIR, {
+    recursive: true,
+    force: true,
+    maxRetries: FIXTURE_CLEANUP_RETRIES,
+    retryDelay: FIXTURE_CLEANUP_RETRY_DELAY_MS,
+  });
 });
 
 describe("check_ts_orphan_modules.sh", () => {
