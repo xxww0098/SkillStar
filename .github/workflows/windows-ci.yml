@@ -63,6 +63,12 @@ name: Windows CI
 #    `C:Users…`. Pin test repos to LF (`core.autocrlf=false`, `* -text`)
 #    before the first commit; do not assert Unix `\n` against an autocrlf
 #    checkout. Compare Windows paths by `Path::components`, not display().
+#
+# 9. A dangling hub junction must still resolve to the shared checkout.
+#    `std::fs::canonicalize` fails when `skills/alpha` is already gone, and
+#    the raw Windows path may be `RUNNER~1` while the cache dir is
+#    `runneradmin`. `is_inside` / `repo_root_of` use
+#    `canonicalize_existing_prefix`. Do not skip SourceMissing on Windows.
 on:
   push:
     branches: [main]

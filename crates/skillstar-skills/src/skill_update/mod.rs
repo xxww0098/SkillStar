@@ -409,12 +409,7 @@ fn actual_repo_pathspec(skill_path: &Path, repo_root: &Path) -> Result<Option<St
                 skill_path.display()
             )
         })?;
-    let target = canonicalize_with_missing_tail(&target).with_context(|| {
-        format!(
-            "failed to resolve managed Skill target '{}'",
-            target.display()
-        )
-    })?;
+    let target = skillstar_core::infra::fs_ops::canonicalize_existing_prefix(&target);
     let repo_root = std::fs::canonicalize(repo_root).with_context(|| {
         format!(
             "failed to resolve managed repository '{}'",
@@ -441,27 +436,9 @@ fn actual_repo_pathspec(skill_path: &Path, repo_root: &Path) -> Result<Option<St
 }
 
 fn canonicalize_with_missing_tail(path: &Path) -> Result<std::path::PathBuf> {
-    let mut existing = path.to_path_buf();
-    let mut tail = Vec::new();
-    loop {
-        match std::fs::canonicalize(&existing) {
-            Ok(mut canonical) => {
-                for component in tail.iter().rev() {
-                    canonical.push(component);
-                }
-                return Ok(canonical);
-            }
-            Err(error) => {
-                let Some(name) = existing.file_name().map(|name| name.to_os_string()) else {
-                    return Err(error.into());
-                };
-                tail.push(name);
-                if !existing.pop() {
-                    return Err(error.into());
-                }
-            }
-        }
-    }
+    Ok(skillstar_core::infra::fs_ops::canonicalize_existing_prefix(
+        path,
+    ))
 }
 
 fn update_skill_unchecked_locked(

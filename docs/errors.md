@@ -2,6 +2,14 @@
 
 状态：active
 
+## 2026-08-31 - Windows dangling junction 对不上 cache，SourceMissing 被吃掉
+
+- Symptom: Windows CI 只红 `source_dropped::a_dropped_skill_whose_content_is_already_gone_can_only_be_removed`：`blocked` 是 `[]`，期望 `[("alpha", SourceMissing)]`。Linux/macOS 绿。harness / CRLF / deny 已过。
+- Root cause: 测试先 `reset --hard` 掉 cache 里的 `skills/alpha`，hub 链变 dangling。`repo_root_of` / `is_inside` 对目标做 `canonicalize`，缺尾巴就失败，退回生路径。Windows temp 常是 `C:\Users\RUNNER~1\...`，cache 目录 canonicalize 成 `runneradmin`，前缀对不上，alpha 不再算共享 checkout 成员，update 只看 beta。
+- Fix: `fs_ops::canonicalize_existing_prefix` 先 canonicalize 还在的前缀再拼回缺失尾巴。`is_inside` / `repo_root_of` / pathspec 共用它。不要在 Windows 上跳过 SourceMissing。
+- Files: `crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-skills/src/repo_link.rs`、`crates/skillstar-skills/src/skill_update/mod.rs`。
+- Self-check: `cargo test -p skillstar-skills --locked --lib dangling_cache_link source_dropped::a_dropped_skill_whose_content_is_already_gone`。
+
 ## 2026-08-31 - Windows gitconfig `insteadOf` 吃掉反斜杠；checkout 变成 CRLF
 
 - Symptom: Windows CI 在 store-v4 变绿之后，`skillstar-skills` harness / private-facade 报 `fatal: 'C:UsersRUNNER~1…' does not appear to be a git repository`；部分 update 测试左边是 `echo remote-v2\r\n`。macOS/Linux 绿。此前被 fail-fast 挡住。

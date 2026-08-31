@@ -57,7 +57,7 @@ where
         return None;
     }
     let target = fs_ops::read_link_resolved(skill_path).ok()?;
-    let target = std::fs::canonicalize(&target).unwrap_or(target);
+    let target = fs_ops::canonicalize_existing_prefix(&target);
     find_repo_root(&target)
 }
 
@@ -68,9 +68,8 @@ fn is_inside(target: &Path, repo_cache_dir: &Path) -> bool {
     // while the configured cache path can retain the shorter spelling.  Compare
     // canonical spellings when both paths exist so those links still classify
     // as belonging to the shared checkout.
-    let target = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
-    let repo_cache_dir =
-        std::fs::canonicalize(repo_cache_dir).unwrap_or_else(|_| repo_cache_dir.to_path_buf());
+    let target = fs_ops::canonicalize_existing_prefix(target);
+    let repo_cache_dir = fs_ops::canonicalize_existing_prefix(repo_cache_dir);
     let target = normalize(&target);
     let cache = normalize(&repo_cache_dir);
     target == cache || target.starts_with(&(cache + "/"))
@@ -95,6 +94,7 @@ fn normalize(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::ops as git_ops;
     use std::fs;
 
     #[test]
@@ -155,6 +155,36 @@ mod tests {
         assert_eq!(
             repo_root_of_with(&link, repo_cache.path(), |path| Some(path.to_path_buf())),
             None
+        );
+    }
+
+    #[test]
+    fn dangling_cache_link_still_resolves_the_shared_checkout() {
+        let repo_cache = tempfile::tempdir().unwrap();
+        let repo = repo_cache.path().join("acme--demo");
+        let skill = repo.join("skills").join("alpha");
+        fs::create_dir_all(&skill).unwrap();
+        fs::create_dir_all(repo.join(".git")).unwrap();
+
+        let hub = tempfile::tempdir().unwrap();
+        let link = hub.path().join("alpha");
+        fs_ops::create_symlink(&skill, &link).expect("hub link");
+
+        assert!(is_repo_cached_with(&link, repo_cache.path()));
+        assert_eq!(
+            repo_root_of_with(&link, repo_cache.path(), git_ops::find_repo_root),
+            Some(std::fs::canonicalize(&repo).unwrap())
+        );
+
+        fs::remove_dir_all(&skill).unwrap();
+        assert!(
+            is_repo_cached_with(&link, repo_cache.path()),
+            "a dangling hub link must still belong to the cache"
+        );
+        assert_eq!(
+            repo_root_of_with(&link, repo_cache.path(), git_ops::find_repo_root),
+            Some(std::fs::canonicalize(&repo).unwrap()),
+            "SourceMissing depends on resolving the checkout after the folder is gone"
         );
     }
 
