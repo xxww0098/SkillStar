@@ -3,7 +3,7 @@ import { toast } from "../../../lib/toast";
 import type { Skill } from "../../../types";
 
 interface UseMarketplaceActionsParams {
-  installSkill: (url: string, name?: string) => Promise<Skill>;
+  installSkill: (url: string, name?: string, agentId?: string) => Promise<Skill>;
   updateSkill: (name: string) => Promise<Skill>;
   uninstallSkill: (name: string) => Promise<unknown>;
   /** Page-owned: applies an optimistic patch to a skill across all marketplace state slices. */
@@ -36,7 +36,7 @@ export function useMarketplaceActions({
   t,
 }: UseMarketplaceActionsParams) {
   const handleInstall = useCallback(
-    async (url: string, name: string) => {
+    async (url: string, name: string, agentId?: string) => {
       if (!url || !name) return;
 
       setInstallingNames((prev) => {
@@ -46,7 +46,7 @@ export function useMarketplaceActions({
       });
 
       try {
-        const skill = await installSkill(url, name);
+        const skill = await installSkill(url, name, agentId);
         patchSkill(name, (current) => ({
           ...current,
           installed: true,

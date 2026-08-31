@@ -917,6 +917,7 @@
     "noDescription": "暂无描述",
     "add": "添加",
     "remove": "移除",
+    "installFor": "为 {{agent}} 安装",
     "upstreamRemoved": "上游已移除",
     "upstreamRenamed": "已更名为 {{name}}",
     "resolveRemoved": "处理",

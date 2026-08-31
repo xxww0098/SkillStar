@@ -205,11 +205,29 @@ impl GitSkillFacade {
     }
 
     pub fn install_skill(&self, url: String, name: Option<String>) -> Result<Skill, String> {
-        skill_install::install_skill_in_session(url, name, &self.session)
+        skill_install::install_skill_in_session(url, name, None, &self.session)
+    }
+
+    pub fn install_skill_for_agent(
+        &self,
+        url: String,
+        name: Option<String>,
+        agent_id: &str,
+    ) -> Result<Skill, String> {
+        skill_install::install_skill_in_session(url, name, Some(agent_id), &self.session)
     }
 
     pub fn install_skills_batch(&self, url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
-        skill_install::install_skills_batch_in_session(url, names, &self.session)
+        skill_install::install_skills_batch_in_session(url, names, None, &self.session)
+    }
+
+    pub fn install_skills_batch_for_agent(
+        &self,
+        url: &str,
+        names: &[String],
+        agent_id: &str,
+    ) -> Result<Vec<Skill>, String> {
+        skill_install::install_skills_batch_in_session(url, names, Some(agent_id), &self.session)
     }
 
     pub fn update_skill(&self, name: &str) -> anyhow::Result<UpdateResult> {

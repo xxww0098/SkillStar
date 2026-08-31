@@ -133,9 +133,9 @@
 
 ## 2026-08-14 - 稀疏 checkout 按 Skill 名去重会把仍存在的已安装来源误报为删除
 
-- Symptom: 更新 `impeccable` 时弹出「来源已不再提供」，选择「彻底移除该 Skill」却收到 `Skill 'impeccable' still comes from its source; keep or discard the local changes instead of removing it`。Git reflog 显示每次更新都先 reset 到远端提交、随即回滚；远端提交仍包含 lockfile 记录的 `.agents/skills/impeccable`。
-- Root cause: 远端新增了同名的 `.agent/skills/impeccable` provider 副本。`derive_sparse_skill_dirs` 为节省物化范围按 Skill 目录名去重，`.agent/...` 与 `.agents/...` 优先级相同且前者按字典序先出现，于是更新后的 sparse set 只保留 `.agent/...`。`git sparse-checkout set` 随即移除已安装链接指向的 `.agents/...` 工作树目录；`skills_dropped_by_source` 只看链接目标当下是否存在，便误报来源删除并触发回滚。resolver 随后用 Git tree 正确看见 `.agents/...` 仍存在，因此拒绝“来源删除”专用卸载，形成自相矛盾且没有可用出口的对话框。
-- Fix: repo-cache 更新在重算发现目录之前记录同一 checkout 的全部已安装 `source_folder`；若远端仍有其它同名 provider，新的 sparse set 也必须合并这些已安装来源目录。真正被远端删除的路径即使留在 sparse pattern 中也不会被物化，原有 source-removal 检测继续成立。
+- Symptom: 更新 `impeccable` 时弹出「来源已不再提供」，选择「彻底移除该 Skill」却收到 `Skill 'impeccable' still comes from its source; keep or discard the local changes instead of removing it`。Git reflog 显示每次更新都先 reset 到远端提交、随即回滚；远端提交仍包含 lockfile 记录的 `.agents/skills/impeccable`。`--list` / `--preview` 稀疏检出后只留下 `.agent/skills/impeccable`（Antigravity），Hub 与 `~/.cursor/skills/impeccable` 变悬空。
+- Root cause: 远端新增了同名的 `.agent/skills/impeccable` provider 副本。`derive_sparse_skill_dirs` 曾为节省物化范围按 Skill 目录名（basename）去重，`.agent/...` 与 `.agents/...` 的 `source_priority` 相同且前者按字典序先出现，于是 sparse set 只保留 `.agent/...`。`git sparse-checkout set` 随即移除已安装链接指向的 `.agents/...` 工作树目录。更新路径还会把根 `SKILL.md` 当成“整仓 checkout”信号，进一步丢掉嵌套 harness 目录。
+- Fix: 稀疏检出保留**全部**含 `SKILL.md` 的嵌套目录（不再按 basename 去重）；根 `SKILL.md` 只在没有嵌套技能时才触发全量 checkout。repo-cache 更新仍合并已安装 `source_folder`。真正被远端删除的路径即使留在 sparse pattern 中也不会被物化。
 - Files: `crates/skillstar-skills/src/repo_scanner/ops.rs`、`crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`。
 - Self-check:
   - 通用判据：**发现结果的去重策略不能改写已经安装的 provenance**。同名 provider 路径用于“新安装选哪个”，lockfile 的 `source_folder` 用于“已安装项继续跟哪个”；两者不是同一个问题。

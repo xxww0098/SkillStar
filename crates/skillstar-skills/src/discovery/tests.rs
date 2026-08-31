@@ -287,3 +287,79 @@ fn skill_discovery_candidate_keeps_root_path_and_frontmatter() {
     assert_eq!(candidates[0].frontmatter.name.as_deref(), Some("root-name"));
     assert_eq!(candidates[0].frontmatter.description, "root-desc");
 }
+
+#[test]
+fn resolve_install_skills_picks_cursor_or_dsh_harness_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("rust-skills");
+    write_skill_md(&repo.join("skills/rust/SKILL.md"), "rust", "catalog").unwrap();
+    write_skill_md(
+        &repo.join(".cursor/skills/rust/SKILL.md"),
+        "rust",
+        "cursor copy",
+    )
+    .unwrap();
+    write_skill_md(&repo.join(".dsh/skills/rust/SKILL.md"), "rust", "dsh copy").unwrap();
+
+    let catalog = resolve_install_skills(&repo, Some("rust"), None).unwrap();
+    assert_eq!(catalog[0].folder_path, "skills/rust");
+
+    let cursor = resolve_install_skills(&repo, Some("rust"), Some(".cursor")).unwrap();
+    assert_eq!(cursor[0].folder_path, ".cursor/skills/rust");
+
+    let dsh = resolve_install_skills(&repo, Some("rust"), Some(".dsh")).unwrap();
+    assert_eq!(dsh[0].folder_path, ".dsh/skills/rust");
+}
+
+#[test]
+fn resolve_install_skills_fails_when_the_clicked_harness_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("impeccable");
+    write_skill_md(
+        &repo.join(".cursor/skills/impeccable/SKILL.md"),
+        "impeccable",
+        "cursor copy",
+    )
+    .unwrap();
+    write_skill_md(
+        &repo.join(".agents/skills/impeccable/SKILL.md"),
+        "impeccable",
+        "codex copy",
+    )
+    .unwrap();
+
+    let error = resolve_install_skills(&repo, Some("impeccable"), Some(".dsh")).unwrap_err();
+    assert!(error.contains("'.dsh'"), "{error}");
+    assert!(
+        error.contains("will not install another harness"),
+        "{error}"
+    );
+}
+
+#[test]
+fn select_harness_skill_keeps_agent_and_agents_distinct() {
+    let skills = vec![
+        DiscoveredSkill {
+            id: "impeccable".to_string(),
+            folder_path: ".agent/skills/impeccable".to_string(),
+            description: "antigravity".to_string(),
+            already_installed: false,
+            frontmatter_issues: Vec::new(),
+        },
+        DiscoveredSkill {
+            id: "impeccable".to_string(),
+            folder_path: ".agents/skills/impeccable".to_string(),
+            description: "codex".to_string(),
+            already_installed: false,
+            frontmatter_issues: Vec::new(),
+        },
+    ];
+    assert_eq!(
+        select_harness_skill(&skills, ".agent").map(|skill| skill.folder_path.as_str()),
+        Some(".agent/skills/impeccable")
+    );
+    assert_eq!(
+        select_harness_skill(&skills, ".agents").map(|skill| skill.folder_path.as_str()),
+        Some(".agents/skills/impeccable")
+    );
+}

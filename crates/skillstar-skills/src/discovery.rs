@@ -13,15 +13,17 @@
 //! | Recursive scan | Only if priority dirs are empty | Always performed |
 //!
 //! This matches `npx skills add` behavior, with one pack-layout exception:
-//! a repo-root `SKILL.md` that merely mirrors `skills/<name>/` (same
-//! identity) is a one-level-scanner shim, not the install unit. See
-//! `pack_layout`.
+//! a repo-root `SKILL.md` that merely mirrors a nested catalog **or**
+//! harness copy (same identity) is a one-level-scanner shim, not the
+//! install unit. See `pack_layout`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub use crate::pack_layout::source_priority;
+pub use crate::pack_layout::{
+    folder_matches_harness, missing_harness_folder_error, pack_harness_prefix, source_priority,
+};
 
 // ── Data Types ──────────────────────────────────────────────────────
 
@@ -143,7 +145,8 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     /// Drop a repo-root SKILL.md that only exists so one-level scanners can
-    /// load the pack. The canonical nested skill is the install unit.
+    /// load the pack. A nested catalog **or** harness copy of the same
+    /// identity is the install unit — otherwise the hub links the whole clone.
     fn strip_root_pack_shim(candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
         let Some(root_id) = candidates
             .iter()
@@ -152,12 +155,10 @@ impl<'a> SkillDiscovery<'a> {
         else {
             return candidates;
         };
-        let has_canonical_twin = candidates.iter().any(|candidate| {
-            !candidate.is_repo_root()
-                && candidate.identity().eq_ignore_ascii_case(&root_id)
-                && crate::pack_layout::is_canonical_skill_folder(&candidate.folder_path)
+        let has_nested_twin = candidates.iter().any(|candidate| {
+            !candidate.is_repo_root() && candidate.identity().eq_ignore_ascii_case(&root_id)
         });
-        if has_canonical_twin {
+        if has_nested_twin {
             candidates
                 .into_iter()
                 .filter(|candidate| !candidate.is_repo_root())
@@ -168,15 +169,22 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     fn limit_to_root_candidate(&self, candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
-        if let Some(root_skill) = candidates
+        let Some(root_skill) = candidates
             .iter()
             .find(|candidate| candidate.is_repo_root())
             .cloned()
-        {
-            vec![root_skill]
-        } else {
-            candidates
+        else {
+            return candidates;
+        };
+        if candidates.iter().any(|candidate| {
+            !candidate.is_repo_root()
+                && candidate
+                    .identity()
+                    .eq_ignore_ascii_case(&root_skill.identity())
+        }) {
+            return candidates;
         }
+        vec![root_skill]
     }
 
     fn finalize(&self, discovered: Vec<DiscoveredSkill>) -> Vec<DiscoveredSkill> {
@@ -207,6 +215,8 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".continue/skills",
     ".cortex/skills",
     ".crush/skills",
+    ".cursor/skills",
+    ".dsh/skills",
     ".factory/skills",
     ".github/skills",
     ".goose/skills",
@@ -377,6 +387,60 @@ fn is_safe_repository_directory(base_dir: &Path, directory: &Path) -> bool {
 /// This is a **pure filesystem scan** — it does not consult the lockfile.
 pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill> {
     SkillDiscovery::new(repo_dir, full_depth).discover()
+}
+
+/// Pick the install unit for a clicked harness.
+///
+/// Prefers `.<harness>/skills/<id>` over a `SKILL.md` sitting on the
+/// harness root. Returns `None` when the pack has no folder for that
+/// harness — callers must fail, not fall back to another copy or the
+/// repo root.
+pub fn select_harness_skill<'a>(
+    skills: &'a [DiscoveredSkill],
+    prefix: &str,
+) -> Option<&'a DiscoveredSkill> {
+    skills
+        .iter()
+        .filter(|skill| crate::pack_layout::folder_matches_harness(&skill.folder_path, prefix))
+        .min_by_key(|skill| crate::pack_layout::harness_folder_rank(prefix, &skill.folder_path))
+}
+
+/// Resolve which discovered folders to install from a fetched checkout.
+///
+/// When `harness_prefix` is set, that `.<harness>/` tree wins even if
+/// `skills/` also exists. When it is unset, catalog folders win and a
+/// remaining root `SKILL.md` is dropped if any nested copy exists.
+pub fn resolve_install_skills(
+    repo_dir: &Path,
+    requested_name: Option<&str>,
+    harness_prefix: Option<&str>,
+) -> Result<Vec<DiscoveredSkill>, String> {
+    if let Some(prefix) = harness_prefix {
+        let mut all = discover_skills_without_dedup(repo_dir, true, None);
+        if let Some(name) = requested_name {
+            all.retain(|skill| skill.id.eq_ignore_ascii_case(name));
+        }
+        return match select_harness_skill(&all, prefix) {
+            Some(skill) => Ok(vec![skill.clone()]),
+            None => Err(crate::pack_layout::missing_harness_folder_error(prefix)),
+        };
+    }
+
+    let mut skills = discover_skills(repo_dir, false);
+    if skills.iter().any(|skill| skill.folder_path.is_empty()) {
+        let all = discover_skills_without_dedup(repo_dir, true, None);
+        if all.iter().any(|skill| !skill.folder_path.is_empty()) {
+            skills.retain(|skill| !skill.folder_path.is_empty());
+            if skills.is_empty() {
+                skills = dedupe_discovered_skills(
+                    all.into_iter()
+                        .filter(|skill| !skill.folder_path.is_empty())
+                        .collect(),
+                );
+            }
+        }
+    }
+    Ok(skills)
 }
 
 /// Full discovery without identity deduplication, for integrity-sensitive

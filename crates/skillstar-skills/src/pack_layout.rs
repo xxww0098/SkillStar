@@ -8,7 +8,9 @@
 //! harness copies) as the skill.
 //!
 //! Canonical catalog folders outrank generated per-harness copies when the
-//! same skill identity appears more than once.
+//! same skill identity appears more than once **and** the caller did not
+//! ask for a specific harness. A carousel / `--agent` click selects the
+//! matching `.<harness>/` tree instead.
 
 /// True when `folder_path` is a public or unpublished skill catalog, not a
 /// generated harness copy (`.claude/skills`, `.grok/skills`, …).
@@ -43,6 +45,104 @@ pub fn discovered_folder_priority(folder_path: &str) -> u8 {
     }
 }
 
+/// Known pack-tree prefixes for builtin agents. Codex skills live under
+/// `.agents` (not `.codex/skills`). Antigravity uses `.agent`. DSH uses
+/// `.dsh`. Cursor uses `.cursor`.
+const KNOWN_PACK_HARNESS: &[(&str, &str)] = &[
+    ("antigravity", ".agent"),
+    ("augment", ".augment"),
+    ("claude-code", ".claude"),
+    ("codebuddy", ".codebuddy"),
+    ("codex", ".agents"),
+    ("copilot", ".github"),
+    ("crush", ".crush"),
+    ("cursor", ".cursor"),
+    ("deepseek", ".dsh"),
+    ("factory-droid", ".factory"),
+    ("gemini-cli", ".gemini"),
+    ("goose", ".goose"),
+    ("iflow", ".iflow"),
+    ("kilocode", ".kilocode"),
+    ("kiro", ".kiro"),
+    ("mux", ".mux"),
+    ("neovate", ".neovate"),
+    ("opencode", ".opencode"),
+    ("pochi", ".pochi"),
+    ("qoder", ".qoder"),
+    ("qwen-code", ".qwen"),
+    ("roo", ".roo"),
+    ("trae", ".trae"),
+    ("windsurf", ".windsurf"),
+];
+
+/// Pack-relative prefix for a target agent (`".cursor"`, `".dsh"`, …).
+///
+/// Prefers the hardcoded table (Codex → `.agents`, not the global
+/// `~/.codex/skills` parent). Then the parent of `global_skills_dir`
+/// when it is a hidden directory named `skills`. Project-relative
+/// paths are last — Cursor's project dir is `.agents/skills` and
+/// must not win over `.cursor`.
+pub fn pack_harness_prefix(
+    agent_id: &str,
+    global_skills_dir: Option<&str>,
+    project_skills_rel: Option<&str>,
+) -> Option<String> {
+    if let Some((_, prefix)) = KNOWN_PACK_HARNESS.iter().find(|(id, _)| *id == agent_id) {
+        return Some((*prefix).to_string());
+    }
+    if let Some(dir) = global_skills_dir {
+        if let Some(prefix) = hidden_skills_parent(dir) {
+            return Some(prefix);
+        }
+    }
+    if let Some(rel) = project_skills_rel {
+        if let Some(prefix) = hidden_skills_parent(rel) {
+            return Some(prefix);
+        }
+    }
+    None
+}
+
+fn hidden_skills_parent(path: &str) -> Option<String> {
+    let normalized = path.replace('\\', "/");
+    let mut parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.last().copied() != Some("skills") {
+        return None;
+    }
+    parts.pop();
+    let parent = parts.last()?;
+    if parent.starts_with('.') && *parent != "." {
+        return Some((*parent).to_string());
+    }
+    None
+}
+
+/// `folder_path` is the harness root or a path under it.
+/// `.agent` must not match `.agents` / `.agents/skills/…`.
+pub fn folder_matches_harness(folder_path: &str, prefix: &str) -> bool {
+    folder_path == prefix || folder_path.starts_with(&format!("{prefix}/"))
+}
+
+/// Prefer `.<harness>/skills/<id>` over a `SKILL.md` sitting on the harness root.
+pub fn harness_folder_rank(prefix: &str, folder: &str) -> u8 {
+    let body = format!("{prefix}/skills/");
+    if folder.starts_with(&body) {
+        0
+    } else if folder == prefix {
+        1
+    } else {
+        2
+    }
+}
+
+pub fn missing_harness_folder_error(prefix: &str) -> String {
+    format!(
+        "This pack has no '{prefix}' skill folder. \
+         Looked for '{prefix}/skills/<name>' or '{prefix}'. \
+         It will not install another harness copy or the whole repository."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +174,64 @@ mod tests {
         );
         assert_eq!(discovered_folder_priority(""), 4);
         assert!(discovered_folder_priority("") > source_priority("skills/rust"));
+    }
+
+    #[test]
+    fn agent_prefix_does_not_match_a_longer_sibling() {
+        assert!(folder_matches_harness(".agent/skills/impeccable", ".agent"));
+        assert!(!folder_matches_harness(
+            ".agents/skills/impeccable",
+            ".agent"
+        ));
+        assert!(folder_matches_harness(
+            ".agents/skills/impeccable",
+            ".agents"
+        ));
+        assert!(!folder_matches_harness(
+            ".agent/skills/impeccable",
+            ".agents"
+        ));
+        assert!(folder_matches_harness(".cursor", ".cursor"));
+        assert!(folder_matches_harness(".cursor/skills/rust", ".cursor"));
+        assert!(!folder_matches_harness(
+            ".cursor-extra/skills/rust",
+            ".cursor"
+        ));
+    }
+
+    #[test]
+    fn known_agents_map_to_pack_harness_prefixes() {
+        assert_eq!(
+            pack_harness_prefix("cursor", Some("~/.cursor/skills"), Some(".agents/skills"))
+                .as_deref(),
+            Some(".cursor")
+        );
+        assert_eq!(
+            pack_harness_prefix("deepseek", Some("~/.dsh/skills"), None).as_deref(),
+            Some(".dsh")
+        );
+        assert_eq!(
+            pack_harness_prefix("codex", Some("~/.codex/skills"), Some(".agents/skills"))
+                .as_deref(),
+            Some(".agents")
+        );
+        assert_eq!(
+            pack_harness_prefix("antigravity", None, None).as_deref(),
+            Some(".agent")
+        );
+    }
+
+    #[test]
+    fn unknown_agent_uses_hidden_global_skills_parent() {
+        assert_eq!(
+            pack_harness_prefix(
+                "custom-bot",
+                Some("~/.mybot/skills"),
+                Some(".agents/skills")
+            )
+            .as_deref(),
+            Some(".mybot")
+        );
     }
 }
 
@@ -147,6 +305,56 @@ mod discovery_integration {
 
         let skills = discover_skills(repo, false);
         assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].folder_path, "skills/rust");
+    }
+
+    #[test]
+    fn root_shim_plus_harness_copies_does_not_install_the_repo_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("rust-skills");
+        write_skill_md(&repo.join("SKILL.md"), "rust", "shim at pack root");
+        write_skill_md(
+            &repo.join(".cursor/skills/rust/SKILL.md"),
+            "rust",
+            "cursor copy",
+        );
+        write_skill_md(&repo.join(".dsh/skills/rust/SKILL.md"), "rust", "dsh copy");
+        std::fs::create_dir_all(repo.join("tests")).unwrap();
+        std::fs::write(repo.join("tests/not-a-skill.txt"), "noise").unwrap();
+
+        let skills = discover_skills(&repo, false);
+        assert_eq!(skills.len(), 1, "{skills:?}");
+        assert_eq!(skills[0].id, "rust");
+        assert!(
+            !skills[0].folder_path.is_empty(),
+            "must not install the whole repo: {skills:?}"
+        );
+        assert!(
+            skills[0].folder_path.starts_with(".cursor/")
+                || skills[0].folder_path.starts_with(".dsh/"),
+            "expected a harness folder, got {}",
+            skills[0].folder_path
+        );
+    }
+
+    #[test]
+    fn catalog_wins_over_cursor_and_dsh_when_no_harness_is_requested() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("rust-skills");
+        write_skill_md(
+            &repo.join("skills/rust/SKILL.md"),
+            "rust",
+            "canonical rust skill",
+        );
+        write_skill_md(
+            &repo.join(".cursor/skills/rust/SKILL.md"),
+            "rust",
+            "cursor copy",
+        );
+        write_skill_md(&repo.join(".dsh/skills/rust/SKILL.md"), "rust", "dsh copy");
+
+        let skills = discover_skills(&repo, false);
+        assert_eq!(skills.len(), 1, "{skills:?}");
         assert_eq!(skills[0].folder_path, "skills/rust");
     }
 }

@@ -1,4 +1,3 @@
-use crate::discovery as skill_discover;
 use crate::git::ops as git_ops;
 use anyhow::{Context, Result};
 use skillstar_core::infra::{path_env::command_with_path, paths};
@@ -274,11 +273,12 @@ pub(super) fn discover_skill_dirs_from_tree(repo_dir: &Path) -> Result<Vec<Strin
 }
 
 fn derive_sparse_skill_dirs(all_paths: &[String]) -> Vec<String> {
-    if all_paths.iter().any(|p| p == "SKILL.md") {
-        return Vec::new();
-    }
-
-    let skill_dirs: Vec<String> = all_paths
+    // Keep every nested SKILL.md parent. Deduping by basename dropped
+    // `.agents/skills/impeccable` when `.agent/skills/impeccable` was also
+    // present (equal source_priority, tree order kept `.agent`). A root
+    // SKILL.md used to force a full checkout; if nested copies exist, the
+    // root file is a shim — materialize the nested folders instead.
+    let mut skill_dirs: Vec<String> = all_paths
         .iter()
         .filter(|p| p.ends_with("/SKILL.md") || *p == "SKILL.md")
         .filter_map(|p| {
@@ -292,33 +292,13 @@ fn derive_sparse_skill_dirs(all_paths: &[String]) -> Vec<String> {
         })
         .collect();
 
-    let mut canonical: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-
-    for dir in &skill_dirs {
-        let skill_name = Path::new(dir)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if skill_name.is_empty() {
-            continue;
-        }
-
-        let priority = skill_discover::source_priority(dir);
-        let should_replace = canonical
-            .get(&skill_name)
-            .map(|existing| skill_discover::source_priority(existing) < priority)
-            .unwrap_or(true);
-
-        if should_replace {
-            canonical.insert(skill_name, dir.clone());
-        }
+    if skill_dirs.is_empty() {
+        return Vec::new();
     }
 
-    let mut result: Vec<String> = canonical.into_values().collect();
-    result.sort();
-    result.dedup();
-
-    compact_to_common_parents(&result)
+    skill_dirs.sort();
+    skill_dirs.dedup();
+    compact_to_common_parents(&skill_dirs)
 }
 
 fn compact_to_common_parents(dirs: &[String]) -> Vec<String> {
@@ -546,5 +526,43 @@ mod tests {
         let dirs: Vec<String> = Vec::new();
         let compacted = compact_to_common_parents(&dirs);
         assert!(compacted.is_empty());
+    }
+
+    #[test]
+    fn sparse_keeps_agent_and_agents_copies() {
+        let dirs = super::derive_sparse_skill_dirs(&[
+            ".agent/skills/impeccable/SKILL.md".to_string(),
+            ".agents/skills/impeccable/SKILL.md".to_string(),
+            ".cursor/skills/impeccable/SKILL.md".to_string(),
+        ]);
+        assert!(dirs.iter().any(|d| d.contains(".agent")), "{dirs:?}");
+        assert!(dirs.iter().any(|d| d.contains(".agents")), "{dirs:?}");
+        assert!(dirs.iter().any(|d| d.contains(".cursor")), "{dirs:?}");
+    }
+
+    #[test]
+    fn sparse_ignores_root_shim_and_keeps_nested_harness_folders() {
+        let dirs = super::derive_sparse_skill_dirs(&[
+            "SKILL.md".to_string(),
+            ".cursor/skills/rust/SKILL.md".to_string(),
+            ".dsh/skills/rust/SKILL.md".to_string(),
+            "skills/rust/SKILL.md".to_string(),
+        ]);
+        assert!(
+            !dirs.is_empty(),
+            "root SKILL.md must not force a full checkout when nested copies exist"
+        );
+        assert!(
+            dirs.iter()
+                .any(|d| d.contains("skills") || d.contains(".cursor") || d.contains(".dsh")),
+            "{dirs:?}"
+        );
+    }
+
+    #[test]
+    fn sparse_root_only_skill_still_full_checkouts() {
+        let dirs =
+            super::derive_sparse_skill_dirs(&["SKILL.md".to_string(), "README.md".to_string()]);
+        assert!(dirs.is_empty());
     }
 }

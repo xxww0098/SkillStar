@@ -42,7 +42,7 @@ const SkillTutorialPanel = lazy(() =>
 interface DetailPanelProps {
   skill: Skill | null;
   onClose: () => void;
-  onInstall: (url: string, name: string) => void;
+  onInstall: (url: string, name: string, agentId?: string) => void;
   onUpdate: (name: string) => void;
   onUninstall: (name: string) => void;
   uninstalling?: boolean;

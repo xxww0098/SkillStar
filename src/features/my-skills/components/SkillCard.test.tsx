@@ -65,6 +65,20 @@ describe("SkillCard", () => {
     expect(onInstall).toHaveBeenCalledWith(MOCK_SKILL.git_url, MOCK_SKILL.name);
   });
 
+  it("installs from a harness icon instead of only (url, name)", () => {
+    const onInstall = vi.fn();
+    render(
+      <SkillCard
+        skill={{ ...MOCK_SKILL, installed: false }}
+        onClick={vi.fn()}
+        onInstall={onInstall}
+        profiles={[LIBRARY_PROFILE]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /为 Claude 安装/i }));
+    expect(onInstall).toHaveBeenCalledWith(MOCK_SKILL.git_url, MOCK_SKILL.name, "claude");
+  });
+
   it("renders an update action when an update is available and triggers onUpdate", () => {
     const onUpdate = vi.fn();
     render(<SkillCard skill={{ ...MOCK_SKILL, update_available: true }} onClick={vi.fn()} onUpdate={onUpdate} />);

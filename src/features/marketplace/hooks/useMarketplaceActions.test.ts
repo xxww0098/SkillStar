@@ -66,6 +66,24 @@ describe("useMarketplaceActions", () => {
       expect(params.installSkill).not.toHaveBeenCalled();
     });
 
+    it("forwards a carousel agent id so install uses that harness folder", async () => {
+      const installed = skill({ name: "writing-plans", agent_links: ["Cursor"] });
+      const params = buildParams({
+        installSkill: vi.fn(async () => installed),
+      });
+      const { result } = renderHook(() => useMarketplaceActions(params));
+
+      await act(async () => {
+        await result.current.handleInstall("https://github.com/example/writing-plans", "writing-plans", "cursor");
+      });
+
+      expect(params.installSkill).toHaveBeenCalledWith(
+        "https://github.com/example/writing-plans",
+        "writing-plans",
+        "cursor",
+      );
+    });
+
     it("success path: marks installing, calls installSkill with (url, name), patches skill optimistically, and shows a status toast", async () => {
       const installed = skill({ name: "writing-plans", agent_links: ["claude"] });
       const params = buildParams({
@@ -77,7 +95,11 @@ describe("useMarketplaceActions", () => {
         await result.current.handleInstall("https://github.com/example/writing-plans", "writing-plans");
       });
 
-      expect(params.installSkill).toHaveBeenCalledWith("https://github.com/example/writing-plans", "writing-plans");
+      expect(params.installSkill).toHaveBeenCalledWith(
+        "https://github.com/example/writing-plans",
+        "writing-plans",
+        undefined,
+      );
 
       // installingNames add then remove (start + finally)
       expect(params.setInstallingNames).toHaveBeenCalledTimes(2);
@@ -350,7 +372,11 @@ describe("useMarketplaceActions", () => {
 
       expect(callOrder).toEqual(["uninstall", "install"]);
       expect(params.uninstallSkill).toHaveBeenCalledWith("writing-plans");
-      expect(params.installSkill).toHaveBeenCalledWith("https://github.com/example/writing-plans", "writing-plans");
+      expect(params.installSkill).toHaveBeenCalledWith(
+        "https://github.com/example/writing-plans",
+        "writing-plans",
+        undefined,
+      );
     });
 
     it("failure path (uninstall throws): shows the reinstall-failed toast, never calls installSkill", async () => {

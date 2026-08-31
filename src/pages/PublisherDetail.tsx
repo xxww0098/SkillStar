@@ -16,6 +16,7 @@ import { marketplaceKeys } from "../features/marketplace/api/keys";
 import { PublisherAvatar } from "../components/shared/PublisherAvatar";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
+import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import type { LocalFirstResult } from "../types";
 import { cn, formatInstalls } from "../lib/utils";
 import type { OfficialPublisher, PublisherRepo, Skill } from "../types";
@@ -28,7 +29,16 @@ interface PublisherDetailProps {
 export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { skills: installedSkills, installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
+  const {
+    skills: installedSkills,
+    installSkill,
+    updateSkill,
+    uninstallSkill,
+    pendingUpdateNames,
+    toggleSkillForAgent,
+    pendingAgentToggleKeys,
+  } = useSkills();
+  const { profiles } = useAgentProfiles();
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -185,10 +195,10 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   );
 
   const handleInstall = useCallback(
-    async (url: string, name: string) => {
+    async (url: string, name: string, agentId?: string) => {
       setInstallingNames((prev) => new Set(prev).add(name));
       try {
-        const skill = await installSkill(url, name);
+        const skill = await installSkill(url, name, agentId);
         patchSkill(name, (entry) => ({
           ...entry,
           installed: true,
@@ -529,6 +539,9 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                     installingNames={installingNames}
                     onUpdate={handleUpdate}
                     pendingUpdateNames={pendingUpdateNames}
+                    profiles={profiles}
+                    onToggleAgent={toggleSkillForAgent}
+                    pendingAgentToggleKeys={pendingAgentToggleKeys}
                     emptyMessage={t("publisherDetail.noMatch")}
                   />
                 )}

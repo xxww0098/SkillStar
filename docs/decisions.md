@@ -402,9 +402,18 @@
 - 日期：2026-08-30
 - 状态：accepted
 - 背景：impeccable 风格的技能包（如 `xxww0098/rust-skills`）把正文放在 `skills/<name>/`，同时在仓库根放一份同 identity 的 `SKILL.md`，好让一层扫描器把整仓当作技能目录。SkillStar 的 root-first 发现把根 `SKILL.md` 当成唯一技能，`folder_path` 为空就会把整个仓库（测试、脚本、各 harness 副本）链接进 Hub。全深度扫描也会因根路径优先级 4 赢过 `skills/`。
-- 决策：发现阶段先剥掉「根 SKILL.md 与 `skills/` 或 `source/skills/` 下同 identity 技能」的垫片，再执行 root-first / 去重。`skills/` 与 `source/skills/` 同为规范目录，优先级高于 `.claude/skills` 等 harness 副本。真正的单技能仓库（根 SKILL.md 没有同名 catalog 副本）行为不变。`.claude-plugin/plugin.json` 的 `skills` 同时接受字符串路径和数组。
-- 后果：`skillstar add xxww0098/rust-skills` 安装 `skills/rust`，不再把整仓当技能。一层扫描器仍可继续使用根垫片。
-- 证据：`crates/skillstar-skills/src/{pack_layout.rs,discovery.rs,plugin_manifest.rs}` 及 `pack_root_shim_installs_canonical_skills_folder` 测试。
+- 决策：发现阶段先剥掉「根 SKILL.md 与同 identity 嵌套 catalog **或** harness 副本」的垫片，再执行 root-first / 去重。`skills/` 与 `source/skills/` 同为规范目录，优先级高于 `.cursor/skills`、`.dsh/skills`、`.claude/skills` 等 harness 副本。真正的单技能仓库（根 SKILL.md 没有同名嵌套副本）行为不变。`.claude-plugin/plugin.json` 的 `skills` 同时接受字符串路径和数组。
+- 后果：`skillstar add xxww0098/rust-skills` 安装 `skills/rust`（若 catalog 存在），不再把整仓当技能。只有 harness 副本、没有 catalog 时也安装该副本而不是整仓。一层扫描器仍可继续使用根垫片。
+- 证据：`crates/skillstar-skills/src/{pack_layout.rs,discovery.rs,plugin_manifest.rs}` 及 `pack_root_shim_installs_canonical_skills_folder` / `root_shim_plus_harness_copies_does_not_install_the_repo_root` 测试。
+
+## D-045：多 harness 技能包按 `.<harness>/` 安装
+
+- 日期：2026-08-31
+- 状态：accepted
+- 背景：rust-skills / impeccable 这类包在每个 Agent 目录下各放一份独立技能。卡片 SVG 轮播原先只 `toggle` 已安装链接，Install 按钮走 `install_skill(url, name)` → 发现后 `global_deploy` 到全部已启用 Agent。发现层又漏了 `.cursor/skills` 与 `.dsh/skills`，根垫片会把 `source_folder` 写成空，Hub 链整仓。
+- 决策：安装单元是含 `SKILL.md` 的 harness 技能目录（或 harness 根，若那才是单元）。未指定 harness 时 catalog `skills/<name>/` 优先；点轮播图标或 CLI 显式单个 `--agent` 时该 harness 文件夹赢。没有该文件夹则失败。稀疏检出保留全部嵌套 `SKILL.md` 父目录，不再按 basename 丢掉 `.agent` / `.agents`。
+- 后果：同一 Hub 名仍只有一个 `source_folder`；已安装后再点另一图标只做部署 toggle，不换文件夹重装。Impeccable 没有 `.dsh` 时点 DSH 会报错而不是装 Cursor 副本。
+- 证据：`resolve_install_skills`、`derive_sparse_skill_dirs`、`install_skill(..., agentId)`、`AgentTargetCarousel` 接线测试。
 
 ## 新增记录格式
 

@@ -264,7 +264,8 @@ function useSkillsState() {
   );
 
   const installMutation = useMutation({
-    mutationFn: ({ url, name }: { url: string; name?: string }) => tauriInvoke("install_skill", { url, name }),
+    mutationFn: ({ url, name, agentId }: { url: string; name?: string; agentId?: string }) =>
+      tauriInvoke("install_skill", { url, name, agentId }),
     onSuccess: (skill) => {
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.some((item) => item.name === skill.name)) {
@@ -303,9 +304,9 @@ function useSkillsState() {
   const uninstallSkillMutate = uninstallMutation.mutateAsync;
 
   const installSkill = useCallback(
-    async (url: string, name?: string) => {
+    async (url: string, name?: string, agentId?: string) => {
       try {
-        return await installSkillMutate({ url, name });
+        return await installSkillMutate({ url, name, agentId });
       } catch (e) {
         throw new Error(String(e));
       }

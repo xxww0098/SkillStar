@@ -203,14 +203,26 @@ fn try_install_from_repo_cache(
     name_hint: &str,
     skills_dir: &Path,
     session: &crate::git::transport::GitOperationSession,
+    harness_prefix: Option<&str>,
 ) -> Result<Option<Skill>, String> {
-    let Ok((repo_url, _source, repo_dir, skills_found)) =
+    let Ok((repo_url, _source, repo_dir, scan_found)) =
         fetch_repo_scanned_detailed_in_session(url, false, session)
     else {
         return Ok(None);
     };
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
+    let skills_found = if harness_prefix.is_some()
+        || scan_found.iter().any(|skill| skill.folder_path.is_empty())
+    {
+        match crate::discovery::resolve_install_skills(&repo_dir, requested_name, harness_prefix) {
+            Ok(skills) => skills,
+            Err(error) if harness_prefix.is_some() => return Err(error),
+            Err(_) => return Ok(None),
+        }
+    } else {
+        scan_found
+    };
     let target = find_target_skill(&skills_found, requested_name, name_hint);
 
     // Guard against overwriting a local skill whose name matches the repo skill
@@ -267,10 +279,36 @@ fn try_install_from_repo_cache(
     }
 }
 
+pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, String> {
+    let profiles = skillstar_agents::list_profiles();
+    let profile = profiles.iter().find(|profile| profile.id == agent_id);
+    let global = profile.map(|profile| profile.global_skills_dir.to_string_lossy().into_owned());
+    crate::pack_layout::pack_harness_prefix(
+        agent_id,
+        global.as_deref(),
+        profile.map(|profile| profile.project_skills_rel.as_str()),
+    )
+    .ok_or_else(|| format!("No pack harness folder is known for agent '{agent_id}'"))
+}
+
 pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
     install_skill_in_session(
         url,
         name,
+        None,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn install_skill_for_agent(
+    url: String,
+    name: Option<String>,
+    agent_id: &str,
+) -> Result<Skill, String> {
+    install_skill_in_session(
+        url,
+        name,
+        Some(agent_id),
         &crate::git::transport::GitOperationSession::public(),
     )
 }
@@ -278,17 +316,23 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
 pub fn install_skill_in_session(
     url: String,
     name: Option<String>,
+    agent_id: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Skill, String> {
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
         .map_err(|error| format!("Unable to lock Skill installation: {error}"))?;
-    install_skill_in_session_locked(url, name, session)
+    let harness_prefix = match agent_id {
+        Some(id) => Some(harness_prefix_for_agent(id)?),
+        None => None,
+    };
+    install_skill_in_session_locked(url, name, session, harness_prefix.as_deref())
 }
 
 fn install_skill_in_session_locked(
     url: String,
     name: Option<String>,
     session: &crate::git::transport::GitOperationSession,
+    harness_prefix: Option<&str>,
 ) -> Result<Skill, String> {
     let skills_dir = paths::hub_skills_dir();
     // Safe here because the caller holds the update transaction lock, so no
@@ -313,9 +357,14 @@ fn install_skill_in_session_locked(
         ));
     }
 
-    if let Some(skill) =
-        try_install_from_repo_cache(&url, name.as_deref(), &name_hint, &skills_dir, session)?
-    {
+    if let Some(skill) = try_install_from_repo_cache(
+        &url,
+        name.as_deref(),
+        &name_hint,
+        &skills_dir,
+        session,
+        harness_prefix,
+    )? {
         return Ok(skill);
     }
 
@@ -324,9 +373,27 @@ fn install_skill_in_session_locked(
         return Err(format!("Skill '{}' is already installed", name_hint));
     }
 
+    if harness_prefix.is_some() {
+        return Err(
+            "Repository scan failed; refusing to clone the whole repository for a harness-specific install."
+                .to_string(),
+        );
+    }
+
     if let Err(error) = git_ops::clone_repo_in_session(&url, &dest, session) {
         let _ = fs_ops::remove_dir_all_retry(&dest);
         return Err(error.to_string());
+    }
+
+    if crate::discovery::discover_skills_without_dedup(&dest, true, None)
+        .iter()
+        .any(|skill| !skill.folder_path.is_empty())
+    {
+        let _ = fs_ops::remove_dir_all_retry(&dest);
+        return Err(
+            "Repository scan failed; refusing to install the whole repository because catalog or harness skill folders exist."
+                .to_string(),
+        );
     }
 
     // The direct-clone fallback is the legacy whole-repo install path. It
@@ -388,6 +455,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     install_skills_batch_in_session(
         url,
         names,
+        None,
         &crate::git::transport::GitOperationSession::public(),
     )
 }
@@ -395,6 +463,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
 pub fn install_skills_batch_in_session(
     url: &str,
     names: &[String],
+    agent_id: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<Skill>, String> {
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
@@ -415,9 +484,28 @@ pub fn install_skills_batch_in_session(
         .ensure_repository_mutation_allowed(&parsed.repo_url)
         .map_err(|error| error.to_string())?;
     let skills_dir = paths::hub_skills_dir();
-    let (repo_url, _source, repo_dir, skills_found) =
+    let (repo_url, _source, repo_dir, scan_found) =
         fetch_repo_scanned_detailed_in_session(url, false, session)
             .map_err(|error| format!("{error:#}"))?;
+    let harness_prefix = match agent_id {
+        Some(id) => Some(harness_prefix_for_agent(id)?),
+        None => None,
+    };
+    let skills_found = if harness_prefix.is_some()
+        || scan_found.iter().any(|skill| skill.folder_path.is_empty())
+    {
+        let mut resolved = Vec::new();
+        for name in names {
+            resolved.extend(crate::discovery::resolve_install_skills(
+                &repo_dir,
+                Some(name),
+                harness_prefix.as_deref(),
+            )?);
+        }
+        resolved
+    } else {
+        scan_found
+    };
     let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
         .map_err(|error| format!("Failed to load Skill lockfile: {error}"))?;
 
@@ -493,7 +581,12 @@ pub fn install_skills_batch_in_session(
     // Process fallbacks one by one
     let mut fallback_installed = Vec::new();
     for name in fallback_names {
-        match install_skill_in_session_locked(url.to_string(), Some(name), session) {
+        match install_skill_in_session_locked(
+            url.to_string(),
+            Some(name),
+            session,
+            harness_prefix.as_deref(),
+        ) {
             Ok(skill) => {
                 fallback_installed.push(skill.name.clone());
                 installed_skills.push(skill);
