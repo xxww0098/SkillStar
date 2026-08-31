@@ -1,6 +1,7 @@
 use crate::deployment;
 use crate::git::ops as git_ops;
 use crate::{installed_skill, local_skill, lockfile, projects, repo_scanner};
+use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::{fs_ops, paths};
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
@@ -60,12 +61,12 @@ pub fn fetch_repo_scanned_preferring_local_cache_in_session(
     url: &str,
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
-) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
+) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), AppError> {
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock repository scan: {error}"))?;
-    ensure_generic_repository_input_mutable(url)?;
+        .map_err(|error| AppError::Other(format!("Unable to lock repository scan: {error}")))?;
+    ensure_generic_repository_input_mutable(url).map_err(AppError::from)?;
     scan_repo_preferring_local_cache_in_session(url, full_depth, session)
-        .map_err(|error| format!("{error:#}"))
+        .map_err(|error| AppError::Other(format!("{error:#}")))
 }
 
 pub fn fetch_repo_scanned_detailed_in_session(
@@ -256,21 +257,21 @@ fn existing_same_repo_action(
     repo_url: &str,
     requested_folder: &str,
     harness_prefix: Option<&str>,
-) -> Result<SameRepoAction, String> {
+) -> SameRepoAction {
     let entry = lock_entry_for(skill_id);
     let same_repo = entry
         .as_ref()
         .is_some_and(|entry| crate::source_resolver::same_remote_url(&entry.git_url, repo_url));
     if !same_repo {
-        return Ok(SameRepoAction::Reject);
+        return SameRepoAction::Reject;
     }
     if source_folder_eq(entry.as_ref(), requested_folder) {
-        return Ok(SameRepoAction::Reuse);
+        return SameRepoAction::Reuse;
     }
     if harness_prefix.is_some() {
-        return Ok(SameRepoAction::Retarget);
+        return SameRepoAction::Retarget;
     }
-    Ok(SameRepoAction::Reuse)
+    SameRepoAction::Reuse
 }
 
 fn requested_skill_not_found_error(names: &[String]) -> String {
@@ -348,7 +349,7 @@ fn try_install_from_repo_cache(
 
     let existing_path = skills_dir.join(&skill.id);
     if existing_path.symlink_metadata().is_ok() {
-        match existing_same_repo_action(&skill.id, &repo_url, &skill.folder_path, harness_prefix)? {
+        match existing_same_repo_action(&skill.id, &repo_url, &skill.folder_path, harness_prefix) {
             SameRepoAction::Reuse => {
                 return Ok(Some(new_skill_from_install(
                     skill.id.clone(),
@@ -392,7 +393,7 @@ fn try_install_from_repo_cache(
     }
 }
 
-pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, String> {
+pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, AppError> {
     let profiles = skillstar_agents::list_profiles();
     let profile = profiles.iter().find(|profile| profile.id == agent_id);
     let global = profile.map(|profile| profile.global_skills_dir.to_string_lossy().into_owned());
@@ -401,7 +402,11 @@ pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, String> {
         global.as_deref(),
         profile.map(|profile| profile.project_skills_rel.as_str()),
     )
-    .ok_or_else(|| format!("No pack harness folder is known for agent '{agent_id}'"))
+    .ok_or_else(|| {
+        AppError::Other(format!(
+            "No pack harness folder is known for agent '{agent_id}'"
+        ))
+    })
 }
 
 pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
@@ -417,13 +422,14 @@ pub fn install_skill_for_agent(
     url: String,
     name: Option<String>,
     agent_id: &str,
-) -> Result<Skill, String> {
+) -> Result<Skill, AppError> {
     install_skill_in_session(
         url,
         name,
         Some(agent_id),
         &crate::git::transport::GitOperationSession::public(),
     )
+    .map_err(AppError::from)
 }
 
 pub fn install_skill_in_session(
@@ -435,7 +441,7 @@ pub fn install_skill_in_session(
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
         .map_err(|error| format!("Unable to lock Skill installation: {error}"))?;
     let harness_prefix = match agent_id {
-        Some(id) => Some(harness_prefix_for_agent(id)?),
+        Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
         None => None,
     };
     install_skill_in_session_locked(url, name, session, harness_prefix.as_deref(), agent_id)
@@ -603,7 +609,7 @@ pub fn install_skills_batch_in_session(
         scan_repo_preferring_local_cache_in_session(url, false, session)
             .map_err(|error| format!("{error:#}"))?;
     let harness_prefix = match agent_id {
-        Some(id) => Some(harness_prefix_for_agent(id)?),
+        Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
         None => None,
     };
     let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())

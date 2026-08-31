@@ -11,6 +11,7 @@ use crate::skill_update::{
     LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
 };
 use crate::{Skill, local_skill, skill_install, skill_update};
+use skillstar_core::infra::error::AppError;
 use skillstar_github_auth::{
     FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
@@ -68,7 +69,7 @@ impl GitSkillFacade {
         &self,
         input: &str,
         full_depth: bool,
-    ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
+    ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), AppError> {
         skill_install::fetch_repo_scanned_preferring_local_cache_in_session(
             input,
             full_depth,
@@ -225,8 +226,9 @@ impl GitSkillFacade {
         url: String,
         name: Option<String>,
         agent_id: &str,
-    ) -> Result<Skill, String> {
+    ) -> Result<Skill, AppError> {
         skill_install::install_skill_in_session(url, name, Some(agent_id), &self.session)
+            .map_err(AppError::from)
     }
 
     pub fn install_skills_batch(&self, url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
@@ -238,8 +240,9 @@ impl GitSkillFacade {
         url: &str,
         names: &[String],
         agent_id: &str,
-    ) -> Result<Vec<Skill>, String> {
+    ) -> Result<Vec<Skill>, AppError> {
         skill_install::install_skills_batch_in_session(url, names, Some(agent_id), &self.session)
+            .map_err(AppError::from)
     }
 
     pub fn update_skill(&self, name: &str) -> anyhow::Result<UpdateResult> {

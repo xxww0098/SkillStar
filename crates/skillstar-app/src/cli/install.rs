@@ -403,7 +403,9 @@ fn install_or_reuse_skill(
     }
 
     let git = git_skill_facade()?;
-    let (_, _, _, skills_found) = git.fetch_repo_scanned_preferring_local_cache(url, false)?;
+    let (_, _, _, skills_found) = git
+        .fetch_repo_scanned_preferring_local_cache(url, false)
+        .map_err(|error| error.to_string())?;
     if skills_found.is_empty() {
         return Err("No valid SKILL.md found in the selected source".to_string());
     }
@@ -463,7 +465,9 @@ fn install_or_reuse_skill(
         };
 
     let installed = match agent_id {
-        Some(id) => git.install_skills_batch_for_agent(url, &selected_names, id)?,
+        Some(id) => git
+            .install_skills_batch_for_agent(url, &selected_names, id)
+            .map_err(|error| error.to_string())?,
         None => git.install_skills_batch(url, &selected_names)?,
     };
     Ok((selected_names, !installed.is_empty()))

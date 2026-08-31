@@ -44,7 +44,9 @@ pub async fn install_skill(
     let session_id = facade.session().id().to_string();
     let result = tokio::task::spawn_blocking(move || {
         let mut skill = match agent_id.as_deref() {
-            Some(id) => facade.install_skill_for_agent(url, name, id)?,
+            Some(id) => facade
+                .install_skill_for_agent(url, name, id)
+                .map_err(|error| error.to_string())?,
             None => facade.install_skill(url, name)?,
         };
         let deploy = match agent_id.as_deref() {
