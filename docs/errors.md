@@ -9,6 +9,20 @@
 - Fix: 五个内嵌 python3 的门禁脚本（check_ts_orphan_modules / check_no_orphan_modules / check_dep_graph_doc / check_workspace_deps / check_command_boundaries）统一在调用行加 `PYTHONIOENCODING=utf-8`，让 Python stdio 与平台代码页解耦。
 - Self-check: `for f in $(grep -l python3 scripts/internal/*.sh); do grep -q PYTHONIOENCODING "$f" || echo "missing: $f"; done` 必须无输出；新增内嵌 python3 的门禁若 print 非 ASCII 字符，调用行必须带 `PYTHONIOENCODING=utf-8`。
 
+## 2026-08-31 - 取消测试不能用 worker 启动前的固定时间窗判断 child 已就绪
+
+- Symptom: 全 workspace 并发测试时，`transport_tests::fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel` 偶发整整等待 10 秒后报 marker 未出现，但 worker 返回的是 `Cancelled`。单独运行通常全绿，使它看起来像 credential 配置错误。
+- Root cause: 旧测试把 `execute_remote_command` 放到 worker，并由主线程从 spawn worker 的瞬间开始 marker deadline。繁忙时 worker 可能尚未被调度、或尚未走到 `command.spawn()`，主线程就置 cancel；transport 的 preflight 会直接返回 cancelled，或轮询路径会在 shell 写 marker 前杀 child。加长 timeout 只是扩大竞态窗口。
+- Fix: 主测试线程同步执行 transport；watcher 只在 marker（child 确认收到了 operation-scoped credential）出现后取消。测试私有 `AtomicBool` 在 command 返回后通知 watcher 无 marker 地退出失败，避免 pre-spawn cancel，同时仍覆盖 marker 之后 `sleep 30` 子进程的 kill/reap。
+- Self-check: `for n in 1 2 3 4 5; do cargo test -p skillstar-git transport_tests::fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel --locked -- --exact || exit; done` 必须每次运行 1 个测试且全绿。
+
+## 2026-08-31 - tiny_http responder 的空闲超时不是 mock server 生命周期信号
+
+- Symptom: `cloud_code::tests::supported_quota_summary_does_not_call_model_fallback` 与 `model_fallback_runs_only_for_unsupported_summary` 偶发把对 `127.0.0.1` 的 `retrieveUserQuotaSummary` 请求报为 transient send failure；单独运行时常常消失。
+- Root cause: responder 用 `recv_timeout(250ms)`，并把 `Ok(None)` 当成服务完成而 drop `tiny_http::Server`。Tokio 调度或满载 CI 可以在首次请求（或 404 后的 fallback 请求）前停顿超过 250ms，端口已经被关闭；生产实现正确将这种连接失败映射为 transient，测试却把 fixture 生命周期错误伪装成业务失败。
+- Fix: 主测试持有 `Arc<Server>`，responder 用阻塞 `recv()` 服务请求；先保存 fetch 结果，再调用 `server.unblock()` 唤醒 responder、join，最后再 unwrap/assert。失败路径也会 shutdown/reap，不依赖调度时间窗。
+- Self-check: `for n in 1 2 3 4 5; do cargo test -p skillstar-usage cloud_code::tests:: --locked || exit; done` 必须每次通过全部 cloud_code 测试。
+
 ## 2026-08-27 - clippy 棘轮在热缓存下读到 0，照它的提示锁定基线会让冷构建 CI 挂掉
 
 - Symptom: 本地刚跑过 `cargo clippy` 后立即执行 `scripts/internal/check_clippy_ratchet.sh`，输出 `summary: 0 clippy diagnostics (baseline: 1)` 并主动提示 `note: count dropped below baseline — lower scripts/internal/clippy_baseline.txt to lock in the improvement`。照做把基线改成 0，CI 冷构建时真实计数仍是 1，`1 > 0` 直接失败。

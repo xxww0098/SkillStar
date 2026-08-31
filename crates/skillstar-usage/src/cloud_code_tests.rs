@@ -121,12 +121,13 @@ fn parses_nested_quota_summary_and_keeps_group_and_bucket_labels() {
 
 #[tokio::test]
 async fn supported_quota_summary_does_not_call_model_fallback() {
-    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
     let base = format!("http://{}", server.server_addr());
     let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = std::sync::Arc::clone(&requests);
+    let responder_server = std::sync::Arc::clone(&server);
     let responder = std::thread::spawn(move || {
-        while let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_millis(250)) {
+        while let Ok(request) = responder_server.recv() {
             let url = request.url().to_string();
             seen.lock().unwrap().push(url.clone());
             let response = if url.ends_with(SUMMARY_PATH) {
@@ -141,16 +142,17 @@ async fn supported_quota_summary_does_not_call_model_fallback() {
     });
 
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    let windows = fetch_model_quotas_from_bases(
+    let result = fetch_model_quotas_from_bases(
         &client,
         "access-token",
         "test-agent",
         &json!({}),
         &[base.as_str()],
     )
-    .await
-    .unwrap();
+    .await;
+    server.unblock();
     responder.join().unwrap();
+    let windows = result.unwrap();
 
     let requests = requests.lock().unwrap();
     assert_eq!(
@@ -164,12 +166,13 @@ async fn supported_quota_summary_does_not_call_model_fallback() {
 
 #[tokio::test]
 async fn model_fallback_runs_only_for_unsupported_summary() {
-    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
     let base = format!("http://{}", server.server_addr());
     let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = std::sync::Arc::clone(&requests);
+    let responder_server = std::sync::Arc::clone(&server);
     let responder = std::thread::spawn(move || {
-        while let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_millis(250)) {
+        while let Ok(request) = responder_server.recv() {
             let url = request.url().to_string();
             seen.lock().unwrap().push(url.clone());
             let response = if url.ends_with(SUMMARY_PATH) {
@@ -186,16 +189,17 @@ async fn model_fallback_runs_only_for_unsupported_summary() {
     });
 
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    let windows = fetch_model_quotas_from_bases(
+    let result = fetch_model_quotas_from_bases(
         &client,
         "access-token",
         "test-agent",
         &json!({}),
         &[base.as_str()],
     )
-    .await
-    .unwrap();
+    .await;
+    server.unblock();
     responder.join().unwrap();
+    let windows = result.unwrap();
 
     let requests = requests.lock().unwrap();
     assert_eq!(

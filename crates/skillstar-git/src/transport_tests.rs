@@ -338,7 +338,8 @@ fn internal_askpass_only_answers_marked_child_processes() {
 #[test]
 fn fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel() {
     use std::os::unix::fs::PermissionsExt;
-    use std::time::{Duration, Instant};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     // `configure_remote_command` reads proxy configuration via the global
     // data directory. Serialize with the test that mutates that environment.
@@ -365,43 +366,45 @@ sleep 30
         GitAuthMaterial::available(TOKEN),
         Arc::new(RecordingSink::default()),
     );
-    let worker_session = session.clone();
-    let worker_script = script.clone();
-    let worker_marker = marker.clone();
-    let worker = std::thread::spawn(move || {
-        let mut command = Command::new(worker_script);
-        command.env("SKILLSTAR_FAKE_GIT_MARKER", worker_marker);
-        execute_remote_command(
-            &mut command,
-            None,
-            &["fetch", "origin"],
-            "https://github.com/acme/private-skills.git",
-            &worker_session,
-        )
+    let mut command = Command::new(script);
+    command.env("SKILLSTAR_FAKE_GIT_MARKER", marker.clone());
+
+    // Run the command on this thread. The old worker-plus-poll shape let a
+    // busy full-workspace runner spend the whole deadline before scheduling the
+    // worker. This watcher cancels only after the child proves it received the
+    // operation credential; if the command returns first, it reports failure
+    // without ever pre-cancelling the command before spawn.
+    let command_finished = Arc::new(AtomicBool::new(false));
+    let watcher_finished = command_finished.clone();
+    let canceller_session = session.clone();
+    let canceller_marker = marker.clone();
+    let canceller = std::thread::spawn(move || {
+        loop {
+            if canceller_marker.exists() {
+                canceller_session.cancel();
+                return true;
+            }
+            if watcher_finished.load(Ordering::SeqCst) {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     });
 
-    // The marker is the fake command's observable proof that it received the
-    // operation-scoped askpass credential. Full-workspace tests can delay a
-    // thread/process launch well beyond the old 2s polling window, so wait for
-    // that exact state with a bounded deadline rather than guessing timing.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let observed_credential = loop {
-        if marker.exists() {
-            break true;
-        }
-        if Instant::now() >= deadline {
-            break false;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-
-    // Always stop and reap the 30-second fake child before asserting readiness;
-    // otherwise a scheduling failure leaks a process into subsequent tests.
-    session.cancel();
-    let result = worker.join().expect("fake transport worker must not panic");
+    let result = execute_remote_command(
+        &mut command,
+        None,
+        &["fetch", "origin"],
+        "https://github.com/acme/private-skills.git",
+        &session,
+    );
+    command_finished.store(true, Ordering::SeqCst);
+    let observed_credential = canceller
+        .join()
+        .expect("credential canceller must not panic");
     assert!(
         observed_credential,
-        "fake command never observed the operation credential; worker result: {result:?}"
+        "fake command never observed the operation credential; command result: {result:?}"
     );
     let error = result.expect_err("cancel should stop child");
     assert_eq!(error.code.as_str(), "cancelled");
