@@ -690,6 +690,49 @@ describe("useSkills", () => {
     expect(result.current).toBe(first);
   });
 
+  it("forwards a carousel agentId to install_skill and only that icon is pending", async () => {
+    let release!: (skill: Skill) => void;
+    const gate = new Promise<Skill>((resolve) => {
+      release = resolve;
+    });
+    mockedInvoke.mockImplementation(async (command, args) => {
+      if (command === "install_skill") {
+        expect(args).toEqual({
+          url: INITIAL_SKILLS[0].git_url,
+          name: "opencli-repair",
+          agentId: "cursor",
+        });
+        return gate;
+      }
+      if (command === "list_skills") return INITIAL_SKILLS;
+      if (command === "refresh_skill_updates") return [];
+      if (command === "check_new_repo_skills") return [];
+      if (command === "migrate_local_skills") return 0;
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let finished = false;
+    act(() => {
+      void result.current.installSkill(INITIAL_SKILLS[0].git_url, "opencli-repair", "cursor").then(() => {
+        finished = true;
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingAgentToggleKeys.has("opencli-repair::cursor")).toBe(true);
+    });
+    expect(result.current.pendingAgentToggleKeys.has("opencli-repair::deepseek")).toBe(false);
+
+    await act(async () => {
+      release({ ...INITIAL_SKILLS[0], agent_links: ["Cursor"] });
+    });
+    await waitFor(() => expect(finished).toBe(true));
+    await waitFor(() => expect(result.current.pendingAgentToggleKeys.size).toBe(0));
+  });
+
   it("exposes sidebar badge counts from the skills list", async () => {
     const { result } = renderHook(() => useSkillBadgeCounts(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.pendingUpdatesCount).toBe(3));

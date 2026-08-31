@@ -46,6 +46,23 @@ pub fn deploy_to_enabled_global_agents(skill_names: &[String]) -> Result<Vec<Str
     .map_err(|err| format!("Installed to the hub but deployment is incomplete: {err:#}"))
 }
 
+/// Link `skill_names` into the given Agents only (carousel / `--agent`).
+pub fn deploy_to_selected_global_agents(
+    skill_names: &[String],
+    agent_ids: &[String],
+) -> Result<Vec<String>, String> {
+    if agent_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    skillstar_skills::deployment::batch_deploy_skills_to_agents(
+        skill_names,
+        agent_ids,
+        skillstar_skills::projects::ProjectDeployMode::Symlink,
+    )
+    .map(|_| agent_ids.to_vec())
+    .map_err(|err| format!("Installed to the hub but deployment is incomplete: {err:#}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

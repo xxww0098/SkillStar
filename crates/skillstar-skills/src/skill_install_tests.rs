@@ -190,4 +190,55 @@ mod direct_clone_gate_tests {
         .expect("valid root skill installs via the fallback path");
         assert_eq!(skill.name, "demo");
     }
+
+    #[test]
+    fn direct_clone_fallback_refuses_a_harness_pack_instead_of_the_whole_repo() {
+        let _sandbox = Sandbox::new();
+        let repo = init_repo();
+        std::fs::write(
+            repo.path().join("SKILL.md"),
+            "---\nname: rust\ndescription: shim at pack root\n---\n\n# rust\n",
+        )
+        .unwrap();
+        let cursor = repo.path().join(".cursor/skills/rust");
+        std::fs::create_dir_all(&cursor).unwrap();
+        std::fs::write(
+            cursor.join("SKILL.md"),
+            "---\nname: rust\ndescription: cursor copy\n---\n\n# rust\n",
+        )
+        .unwrap();
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["add", "."])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["commit", "-m", "init"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let error = install_skill(
+            repo.path().to_string_lossy().to_string(),
+            Some("rust".into()),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("whole repository") || error.contains("harness"),
+            "{error}"
+        );
+        let hub = skillstar_core::infra::paths::hub_skills_dir();
+        assert!(
+            !hub.join("rust").symlink_metadata().is_ok(),
+            "must not leave a whole-repo hub entry"
+        );
+        let lock =
+            crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).unwrap_or_default();
+        assert!(
+            !lock.skills.iter().any(|entry| entry.name == "rust"),
+            "must not record source_folder: None for a harness pack"
+        );
+    }
 }

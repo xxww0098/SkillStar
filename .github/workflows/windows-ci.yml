@@ -37,6 +37,41 @@ name: Windows CI
 #    src-tauri unit tests on Windows, fix the DLL loading first (pin/install
 #    a matching WebView2 runtime on the runner) instead of removing the
 #    exclusion blindly.
+#
+# 5. Channel content-hash fixtures must pin `core.autocrlf=false` and
+#    `core.eol=lf` (and treat files as `-text`). Windows runners default
+#    `autocrlf=true`, so `git archive` / clone rewrite LF fixtures and
+#    `sha256:` no longer matches Linux. Do not "fix" this by accepting
+#    whatever hash Windows computed, and do not hardcode a second Windows
+#    digest.
+#
+# 6. After those hash fixtures go green, `configured_proxy_is_operation_local`
+#    can fail next: Windows env names are case-insensitive, so
+#    `env_remove("http_proxy")` plus `env("HTTP_PROXY", …)` does not leave a
+#    distinct `http_proxy=None` in `get_envs()`. Isolate process proxy env
+#    with an inherited canary and probe the child; do not weaken password
+#    redaction, and do not require Unix `Some(None)` from `get_envs()`.
+#
+# 7. A Windows directory `readonly` bit does not stop `fs::copy` from
+#    creating files in that directory. After hash/proxy fixtures go green,
+#    `migration_aborts_when_the_backup_cannot_be_written` can succeed the
+#    v4 write (unix `0o500` never applied). Occupy the permanent backup
+#    path as a directory so copy fails on every OS; do not drop BackupFailed.
+#
+# 8. Git `insteadOf` fixtures must use `local_file_url`. `file://C:\Users\…`
+#    loses every backslash (gitconfig escape) and clone looks for
+#    `C:Users…`. Pin test repos to LF (`core.autocrlf=false`, `* -text`)
+#    before the first commit; do not assert Unix `\n` against an autocrlf
+#    checkout. Compare Windows paths by `Path::components`, not display().
+#
+# 9. A dangling hub junction must still resolve to the shared checkout.
+#    `std::fs::canonicalize` fails when `skills/alpha` is already gone, and
+#    the raw Windows path may be `RUNNER~1` while the cache dir is
+#    `runneradmin`. `is_inside` / `repo_root_of` use
+#    `canonicalize_existing_prefix`. The source_dropped fixture must reset
+#    to the drop commit oid (not `origin/HEAD`), assert the cache lost
+#    `skills/alpha`, and leave a dangling hub link — do not skip
+#    SourceMissing, and do not treat a leftover real hub directory as gone.
 on:
   push:
     branches: [main]

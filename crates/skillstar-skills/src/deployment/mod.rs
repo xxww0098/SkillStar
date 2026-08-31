@@ -86,6 +86,69 @@ fn require_enabled_global_profile<'a>(
     Ok(profile)
 }
 
+/// Pin already-deployed Agent links to the hub's current payload.
+///
+/// A later harness retarget rewrites the single hub symlink + lock
+/// `source_folder`. Agent links that still pointed at the hub would then
+/// silently receive the other copy. Resolve those links onto the current
+/// folder first so carousel / `--agent` clicks stay independent.
+///
+/// `except_agent_id` is the Agent being retargeted: leave its deploy alone
+/// so a later deploy can point it at the new harness instead of pinning it
+/// to the old one.
+pub fn pin_existing_global_links_to_current_source(
+    skill_name: &str,
+    except_agent_id: Option<&str>,
+) -> Result<()> {
+    let hub = skillstar_core::infra::paths::hub_skills_dir().join(skill_name);
+    if !skillstar_core::infra::fs_ops::is_link(&hub) {
+        return Ok(());
+    }
+    let hub_payload = skillstar_core::infra::fs_ops::read_link_resolved(&hub)?;
+    let hub_canon = std::fs::canonicalize(&hub).unwrap_or_else(|_| hub.clone());
+    let payload_canon = std::fs::canonicalize(&hub_payload).unwrap_or(hub_payload);
+
+    invalidate_profile_cache();
+    for profile in cached_profiles() {
+        if !profile.has_global_skills() {
+            continue;
+        }
+        if except_agent_id.is_some_and(|id| id == profile.id) {
+            continue;
+        }
+        let target = profile.global_skills_dir.join(skill_name);
+        if !skillstar_core::infra::fs_ops::is_link(&target) {
+            continue;
+        }
+        let resolved = match skillstar_core::infra::fs_ops::read_link_resolved(&target) {
+            Ok(path) => std::fs::canonicalize(&path).unwrap_or(path),
+            Err(_) => continue,
+        };
+        if resolved != hub_canon && resolved != payload_canon {
+            continue;
+        }
+        skillstar_core::infra::fs_ops::remove_symlink(&target)?;
+        skillstar_core::infra::fs_ops::create_symlink(&payload_canon, &target)?;
+    }
+    Ok(())
+}
+
+fn canonical_path(path: &Path) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// True when `target` is a link that already resolves to the hub skill
+/// (the hub path itself or the folder it currently points at).
+fn link_already_has_hub_payload(target: &Path, hub: &Path) -> bool {
+    if !skillstar_core::infra::fs_ops::is_link(target) {
+        return false;
+    }
+    let Ok(resolved) = skillstar_core::infra::fs_ops::read_link_resolved(target) else {
+        return false;
+    };
+    canonical_path(&resolved) == canonical_path(hub)
+}
+
 /// Whether `path` is a deployment SkillStar owns: a link/junction into the
 /// hub, or a directory copy carrying `SKILL.md`.
 ///
@@ -466,8 +529,20 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
         }
 
         if skillstar_core::infra::fs_ops::is_link(&target) {
-            tracing::debug!(target: "sync", skill = %name, target = %target.display(), "Already linked — skipping");
-            continue;
+            if link_already_has_hub_payload(&target, &skill_path) {
+                tracing::debug!(target: "sync", skill = %name, target = %target.display(), "Already linked — skipping");
+                continue;
+            }
+            match swap_in_fresh_deploy(&skill_path, &target) {
+                Ok(_) => {
+                    linked += 1;
+                    continue;
+                }
+                Err(err) => {
+                    failures.push(format!("{name}: {err:#}"));
+                    continue;
+                }
+            }
         }
         if target.exists() {
             tracing::warn!(
@@ -604,9 +679,41 @@ pub fn batch_deploy_skills_to_agents(
                 continue;
             }
             let target = target_dir.join(skill_name);
-            if skillstar_core::infra::fs_ops::is_link(&target) || target.exists() {
-                // Existing deployments remain intact. This keeps add idempotent
-                // and avoids replacing an unmanaged real directory silently.
+            if skillstar_core::infra::fs_ops::is_link(&target) {
+                if link_already_has_hub_payload(&target, &source) {
+                    continue;
+                }
+                // Stale: points at another harness copy or the old hub path.
+                if !prepared_target_dir {
+                    std::fs::create_dir_all(&target_dir).with_context(|| {
+                        format!(
+                            "Failed to create Agent skills dir '{}'",
+                            target_dir.display()
+                        )
+                    })?;
+                    prepared_target_dir = true;
+                }
+                let result = match mode {
+                    crate::projects::ProjectDeployMode::Symlink => {
+                        swap_in_fresh_deploy(&source, &target).map(|_| ())
+                    }
+                    crate::projects::ProjectDeployMode::Copy => {
+                        skillstar_core::infra::fs_ops::remove_link_or_copy(&target).and_then(|_| {
+                            skillstar_core::infra::fs_ops::create_copy_deploy(&source, &target)
+                        })
+                    }
+                };
+                match result {
+                    Ok(()) => deployed += 1,
+                    Err(err) => failures.push(format!(
+                        "{agent_id}/{skill_name} at {}: {err:#}",
+                        target.display()
+                    )),
+                }
+                continue;
+            }
+            if target.exists() {
+                // Unmanaged real directory — leave it alone.
                 continue;
             }
             if !prepared_target_dir {

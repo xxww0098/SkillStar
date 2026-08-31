@@ -34,6 +34,7 @@ pub async fn refresh_skill_updates(
 pub async fn install_skill(
     url: String,
     name: Option<String>,
+    agent_id: Option<String>,
     app: AppHandle,
     auth_state: State<'_, GitHubAuthState>,
 ) -> Result<Skill, AppError> {
@@ -42,13 +43,25 @@ pub async fn install_skill(
         .map_err(|error| AppError::Git(error.to_string()))?;
     let session_id = facade.session().id().to_string();
     let result = tokio::task::spawn_blocking(move || {
-        let skill = facade.install_skill(url, name)?;
-        // Match the CLI: after a successful hub install, deploy the skill to
-        // every Agent the user has enabled in Settings.
-        skillstar_app::global_deploy::deploy_to_enabled_global_agents(std::slice::from_ref(
-            &skill.name,
-        ))
-        .map_err(|error| {
+        let mut skill = match agent_id.as_deref() {
+            Some(id) => facade
+                .install_skill_for_agent(url, name, id)
+                .map_err(|error| error.to_string())?,
+            None => facade.install_skill(url, name)?,
+        };
+        let deploy = match agent_id.as_deref() {
+            Some(id) => {
+                let ids = vec![id.to_string()];
+                skillstar_app::global_deploy::deploy_to_selected_global_agents(
+                    std::slice::from_ref(&skill.name),
+                    &ids,
+                )
+            }
+            None => skillstar_app::global_deploy::deploy_to_enabled_global_agents(
+                std::slice::from_ref(&skill.name),
+            ),
+        };
+        deploy.map_err(|error| {
             tracing::warn!(
                 target: "cmd",
                 skill = %skill.name,
@@ -57,6 +70,13 @@ pub async fn install_skill(
             );
             error
         })?;
+        if let Some(id) = agent_id.as_deref()
+            && let Some(profile) = skillstar_agents::list_profiles()
+                .into_iter()
+                .find(|profile| profile.id == id)
+        {
+            skill.agent_links = Some(vec![profile.display_name]);
+        }
         Ok(skill)
     })
     .await;

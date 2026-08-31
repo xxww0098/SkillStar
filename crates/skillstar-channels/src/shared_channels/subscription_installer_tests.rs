@@ -246,6 +246,9 @@ async fn production_installer_verifies_the_exact_release_checkout() {
     git(&origin, &["init", "-q"]);
     git(&origin, &["config", "user.email", "tests@skillstar.local"]);
     git(&origin, &["config", "user.name", "SkillStar Tests"]);
+    git(&origin, &["config", "core.autocrlf", "false"]);
+    git(&origin, &["config", "core.eol", "lf"]);
+    std::fs::write(origin.join(".gitattributes"), "* -text\n").unwrap();
     git(&origin, &["add", "."]);
     git(&origin, &["commit", "-m", "verified release"]);
     let commit = git(&origin, &["rev-parse", "HEAD"]);
@@ -262,7 +265,7 @@ async fn production_installer_verifies_the_exact_release_checkout() {
     ));
     std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
     let clone = Command::new("git")
-        .args(["clone", "-q"])
+        .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", "-q"])
         .arg(&origin)
         .arg(&cache)
         .status()

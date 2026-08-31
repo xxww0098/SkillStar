@@ -158,29 +158,13 @@ fn migration_aborts_when_the_backup_cannot_be_written() {
     let path = scratch.store_path();
     write_raw(&path, V3_FIXTURE);
 
-    // Make the directory read-only so the backup copy fails while the source
-    // file is still perfectly readable — the exact split that v3 handled by
-    // warning and migrating anyway.
-    let mut perms = std::fs::metadata(&scratch.0).unwrap().permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        perms.set_mode(0o500);
-    }
-    std::fs::set_permissions(&scratch.0, perms).unwrap();
+    // Occupy the permanent snapshot path as a directory so `fs::copy` fails
+    // while the v3 source stays readable — the split v3 handled by warning
+    // and migrating anyway. A parent-dir readonly bit is not enough: Windows
+    // still creates files inside a "readonly" folder.
+    std::fs::create_dir(v3_backup_path(&path)).expect("block permanent backup path");
 
-    let result = load_or_migrate_store_v4(&path);
-
-    // Restore permissions before asserting so the scratch dir can be removed.
-    let mut perms = std::fs::metadata(&scratch.0).unwrap().permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        perms.set_mode(0o700);
-    }
-    std::fs::set_permissions(&scratch.0, perms).unwrap();
-
-    let err = result.expect_err("no backup means no migration");
+    let err = load_or_migrate_store_v4(&path).expect_err("no backup means no migration");
     assert!(
         matches!(err, StoreError::BackupFailed { .. }),
         "expected BackupFailed, got {err:?}"

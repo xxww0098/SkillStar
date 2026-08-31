@@ -194,10 +194,13 @@ fn take_migration_backups(path: &Path) -> Result<(), StoreError> {
     })?;
 
     let permanent = v3_backup_path(path);
-    // Never overwrite an existing v3 snapshot: on a second migration attempt
-    // the current file may already be partially migrated, and clobbering the
-    // good copy with it would destroy the only route back.
-    if !permanent.exists() {
+    // Never overwrite an existing v3 *file*: on a second migration attempt
+    // the current store may already be partially migrated, and clobbering the
+    // good copy with it would destroy the only route back. A directory (or
+    // any other non-file) at this path is not a snapshot — `exists()` would
+    // skip the copy and migrate with no backup, which is how a Windows
+    // "readonly dir" fixture went green and then wrote v4.
+    if !permanent.is_file() {
         std::fs::copy(path, &permanent).map_err(|e| StoreError::BackupFailed {
             path: path.to_path_buf(),
             detail: format!("permanent v3 copy at {}: {e}", permanent.display()),

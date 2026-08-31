@@ -172,6 +172,97 @@ fn batch_global_deploy_honors_explicit_copy_mode() -> Result<()> {
 }
 
 #[test]
+fn batch_deploy_rewrites_a_stale_link_and_leaves_other_agents_pinned() -> Result<()> {
+    let _guard = crate::lock_test_env();
+    invalidate_profile_cache();
+
+    let tmp = tempfile::tempdir()?;
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home)?;
+
+    let previous_home = std::env::var_os("HOME");
+    let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+    let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
+    let previous_dsh_home = std::env::var_os("DSH_HOME");
+    set_env("HOME", &home);
+    set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
+    set_env("SKILLSTAR_HUB_DIR", tmp.path().join("hub"));
+    remove_env("DSH_HOME");
+    #[cfg(windows)]
+    let previous_userprofile = std::env::var_os("USERPROFILE");
+    #[cfg(windows)]
+    set_env("USERPROFILE", &home);
+
+    let result = (|| -> Result<()> {
+        invalidate_profile_cache();
+        let cursor_payload = make_skill_dir(tmp.path(), "cursor-payload");
+        fs::write(cursor_payload.join("payload.txt"), "cursor rust")?;
+        let dsh_payload = make_skill_dir(tmp.path(), "dsh-payload");
+        fs::write(dsh_payload.join("payload.txt"), "dsh rust")?;
+
+        let hub = skillstar_core::infra::paths::hub_skills_dir();
+        fs::create_dir_all(&hub)?;
+        let hub_skill = hub.join("rust");
+        skillstar_core::infra::fs_ops::create_symlink(&dsh_payload, &hub_skill)?;
+
+        let cursor_target = home.join(".cursor/skills/rust");
+        fs::create_dir_all(cursor_target.parent().unwrap())?;
+        skillstar_core::infra::fs_ops::create_symlink(&cursor_payload, &cursor_target)?;
+        let dsh_target = home.join(".dsh/skills/rust");
+        fs::create_dir_all(dsh_target.parent().unwrap())?;
+        skillstar_core::infra::fs_ops::create_symlink(&cursor_payload, &dsh_target)?;
+
+        let deployed = batch_deploy_skills_to_agents(
+            &["rust".to_string()],
+            &["deepseek".to_string()],
+            crate::projects::ProjectDeployMode::Symlink,
+        )?;
+        assert_eq!(deployed, 1, "stale dsh link must count as a new deploy");
+        assert_eq!(
+            fs::read_to_string(dsh_target.join("payload.txt"))?,
+            "dsh rust"
+        );
+        assert_eq!(
+            fs::read_to_string(cursor_target.join("payload.txt"))?,
+            "cursor rust"
+        );
+
+        let again = batch_deploy_skills_to_agents(
+            &["rust".to_string()],
+            &["deepseek".to_string()],
+            crate::projects::ProjectDeployMode::Symlink,
+        )?;
+        assert_eq!(again, 0, "correct payload must stay idempotent");
+        Ok(())
+    })();
+
+    match previous_home {
+        Some(value) => set_env("HOME", value),
+        None => remove_env("HOME"),
+    }
+    match previous_data_dir {
+        Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+        None => remove_env("SKILLSTAR_DATA_DIR"),
+    }
+    match previous_hub {
+        Some(value) => set_env("SKILLSTAR_HUB_DIR", value),
+        None => remove_env("SKILLSTAR_HUB_DIR"),
+    }
+    match previous_dsh_home {
+        Some(value) => set_env("DSH_HOME", value),
+        None => remove_env("DSH_HOME"),
+    }
+    #[cfg(windows)]
+    match previous_userprofile {
+        Some(value) => set_env("USERPROFILE", value),
+        None => remove_env("USERPROFILE"),
+    }
+    invalidate_profile_cache();
+
+    result
+}
+
+#[test]
 fn swap_refreshes_an_existing_symlink() {
     let tmp = tempfile::tempdir().unwrap();
     let skill = make_skill_dir(tmp.path(), "hub-skill");
@@ -275,7 +366,12 @@ fn toggle_skips_an_unmanaged_real_directory_without_overwriting_it() -> Result<(
         match outcome {
             ToggleSkillOutcome::Skipped { code, path, reason } => {
                 assert_eq!(code, SKIP_UNMANAGED_REAL_DIRECTORY);
-                assert_eq!(path, occupied.display().to_string());
+                assert_eq!(
+                    Path::new(&path).components().collect::<Vec<_>>(),
+                    occupied.components().collect::<Vec<_>>(),
+                    "{path} vs {}",
+                    occupied.display()
+                );
                 assert!(reason.contains("unmanaged real directory"));
             }
             ToggleSkillOutcome::Applied => panic!("must not replace an unmanaged directory"),

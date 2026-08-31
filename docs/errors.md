@@ -2,6 +2,85 @@
 
 状态：active
 
+## 2026-08-31 - Windows dangling junction 对不上 cache，SourceMissing 被吃掉
+
+- Symptom: Windows CI 只红 `source_dropped::a_dropped_skill_whose_content_is_already_gone_can_only_be_removed`：`blocked` 是 `[]`，期望 `[("alpha", SourceMissing)]`。Linux/macOS 绿。harness / CRLF / deny 已过。
+- Root cause: 两件叠加，都不是「放宽 SourceMissing」。① `reset --hard origin/HEAD` 在 path-remote 的 Windows clone 上不一定落到 drop commit；junction 指着 `skills/alpha` 时 reset 也可能删不掉该目录，hub 仍是可读副本，`exists()` 为真就不该报 SourceMissing。② 即便链已 dangling，`repo_root_of` / `is_inside` 对缺尾巴的目标 `canonicalize` 失败后拿生路径去比；Windows temp 常是 `RUNNER~1`，cache 目录是 `runneradmin`，alpha 被踢出共享 checkout。
+- Fix: 夹具钉 drop commit oid，断言 cache tree 已无 `skills/alpha`，再把 hub 建成**不可读的 managed link**（先链后删 target）。产品侧 `canonicalize_existing_prefix` 让 dangling 链仍属于同一 checkout。不要改 SourceMissing 语义，也不要在 Windows 上 skip。
+- Files: `crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-skills/src/repo_link.rs`。
+- Self-check: `cargo test -p skillstar-skills --locked --lib skill_update::tests::source_dropped -- --nocapture`。
+
+## 2026-08-31 - Windows gitconfig `insteadOf` 吃掉反斜杠；checkout 变成 CRLF
+
+- Symptom: Windows CI 在 store-v4 变绿之后，`skillstar-skills` harness / private-facade 报 `fatal: 'C:UsersRUNNER~1…' does not appear to be a git repository`；部分 update 测试左边是 `echo remote-v2\r\n`。macOS/Linux 绿。此前被 fail-fast 挡住。
+- Root cause: `[url "file://C:\Users\…"]` 写进 `GIT_CONFIG_GLOBAL` 时，gitconfig 把 `\` 当转义，路径变成 `C:Users…`。Windows runner 默认 `core.autocrlf=true`，测试夹具未钉 LF，checkout 带 CR。`Path::join(".claude/skills/…")` 的 `display()` 仍留着 `/`，产品返回的是 `\`。
+- Fix: `skillstar_git::ops::local_file_url` 统一成 `file:///C:/…`。测试 `git init` 后钉 `core.autocrlf=false` / `core.eol=lf` / `* -text`。路径断言比 `Path::components`。不要为了绿而改产品正文或接受 CRLF digest。
+- Files: `crates/skillstar-git/src/ops.rs`、`skill_install_harness_tests.rs`、`skill_update/tests.rs`、`deployment/tests.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p skillstar-git --locked --lib local_file_url`；`cargo test -p skillstar-skills --locked --lib harness_retarget_tests skill_update::tests`。Windows 上 insteadOf 必须 clone 到真实 temp 路径，`scripts/run.sh` 必须仍是 LF。
+
+## 2026-08-31 - cargo-deny 因 RUSTSEC-2026-0258 拦 h2
+
+- Symptom: Linux `cargo-deny` `advisories FAILED`：`h2 unbounded empty DATA frames`，ID `RUSTSEC-2026-0258`。Rust 测试已过。
+- Root cause: lockfile 钉着 h2 0.4.13。advisory-db 在 2026-08-18 发布补丁线 `>=0.4.16`。deny.toml 要求修依赖，不要把活漏洞写进 ignore。
+- Fix: `cargo update -p h2 --precise 0.4.16`。
+- Files: `Cargo.lock`。
+- Self-check: `cargo deny check advisories --config src-tauri/deny.toml` 必须还是 ok（忽略项不得增加这条）。
+
+## 2026-08-31 - Windows 目录只读挡不住 store-v4 备份，迁移照样写盘
+
+- Symptom: Windows CI 在频道 hash / proxy 变绿之后，`providers::tests::store_v4::migration_aborts_when_the_backup_cannot_be_written` 期望 `BackupFailed`，实际 `Ok(LoadedStore { version: 4 })`。Linux/macOS 同测试绿。此前被 fail-fast 挡住。
+- Root cause: 夹具用 unix-only `set_mode(0o500)` 把 scratch 目录设成只读。Windows 上目录 readonly 位不阻止在该目录里 `fs::copy` 出新文件。`take_migration_backups` 又用 `exists()` 判断永久快照：若把备份路径占成目录，会当成「已有快照」跳过 copy，照样迁移。
+- Fix: 永久备份只跳过**已存在的文件**（`is_file()`）。测试把 `model_providers.v3.json` 建成目录，让 `fs::copy` 在每个 OS 上都失败。不要靠目录 readonly，也不要放宽 `BackupFailed`。
+- Files: `crates/skillstar-models/src/providers/store_v4.rs`、`crates/skillstar-models/src/providers/tests/store_v4.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p skillstar-models --locked --lib providers::tests::store_v4`；Windows CI 这条必须仍是 `BackupFailed`，且 v3 原文完整。
+
+## 2026-08-31 - Linux CI 在 skillstar-git 被 `The operation was canceled` 砍掉
+
+- Symptom: `test-linux` 前端 lint/tests 全绿，Rust workspace 跑到 `skillstar-git` 后整步 `cancelled`，annotation 是 `The operation was canceled.` 作业大约 7 分钟。macOS 同 suite 绿。`test-linux` **没有** `timeout-minutes`。main 上已经这样，不是 harness 测试把 cap 撑爆。
+- Root cause: `terminate_child_tree` 对 unix 发 `kill -TERM -$pid`（进程组）。取消测试的 fake-git 若没能 `process_group(0)` 隔离，这就是 GitHub Actions step 的进程组；runner 收到 SIGTERM 就记成 operation canceled。看起来像 timeout 或 `cancel-in-progress`。
+- Fix: 仅当 `ps` 确认该 child 是进程组组长（`process_group(0)` 生效）时才 `kill -TERM -- -$pid`；否则只杀该 pid。`child.wait()` 改为 2s 上限再 SIGKILL，避免 kill 失败后挂在 `sleep 30` 上。不要为了这个去加/加大并不存在的 job timeout，也不要删掉取消覆盖。这是 main 上已有的 Linux 红，本 PR 必须让 `cargo test --workspace` 跑完。
+- Files: `crates/skillstar-git/src/transport.rs`、`.github/workflows/ci.yml`。
+- Self-check: `cargo test -p skillstar-git --locked --lib`；Linux CI 必须跑完 workspace Rust tests，不能再停在 skillstar-git 的 cancel annotation。
+
+## 2026-08-31 - Windows `get_envs()` 没有独立的 `http_proxy=None`
+
+- Symptom: Windows CI 在频道 hash 变绿之后，`configured_proxy_is_operation_local_and_its_password_is_redacted` 报 `left: None` / `right: Some(None)`。Linux/macOS 同测试绿。此前被 hash 失败挡住，workspace fail-fast 跑不到。
+- Root cause: Windows 环境变量名大小写不敏感。`env_remove("http_proxy")` 再加上 `HTTP_PROXY=…` 之后，`Command::get_envs()` 不会再列出一条独立的 `http_proxy=None`。Unix 上大小写是不同的键。Runner 上的 `HTTP_PROXY` 会让这个看起来像 flake。
+- Fix: 测试先把进程级 proxy 键换成 `inherited-canary` 并在 Drop 里恢复。Unix 仍断言 Command 覆盖是 `Some(None)`。Windows 复制同一组覆盖到 `cmd /C set`（Unix 用 `env`）证明子进程看不到 canary、只看到 SkillStar proxy。密码 redaction 断言不改。
+- Files: `crates/skillstar-git/src/transport_tests.rs`。
+- Self-check: `cargo test -p skillstar-git --locked --lib configured_proxy_is_operation_local`。
+
+## 2026-08-31 - Windows `autocrlf` 把频道 content-hash 改成第二套 digest
+
+- Symptom: Windows CI 的 `skillstar-channels` 在 `exact_commit_snapshot_uses_the_shared_known_content_hash` / `exact_commit_snapshot_disables_export_ignore_and_export_subst` / `production_installer_verifies_the_exact_release_checkout` 失败；左边是 `sha256:30263545…` 一类 CRLF digest，右边是 Linux 硬编码的 `sha256:6e8b30c2…`。macOS/Linux 全绿。同一组测试在 `main` 上就已经红，不是 harness 安装引入的算法变化。
+- Root cause: GitHub Windows runner 默认 `core.autocrlf=true`。`git archive` 仍会按 commit / 主机的 text/eol 属性改写 tracked 字节；测试里的 `git clone` 也会把 LF fixture checkout 成 CRLF。`snapshot_path` 哈希的是落盘字节，于是发布快照和校验 checkout 对不上 Linux 的精确 commit hash。
+- Fix: 发布归档在 `.git/info/attributes` 同时关掉 `export-ignore` / `export-subst` / `text`，并给 `git archive` 钉 `core.autocrlf=false` + `core.eol=lf`。频道 hash fixture 的 `git init`/`clone` 同样钉 LF，并用 `* -text`（或让 info 层压过 `* text=auto`）。不要接受 Windows 算出来的第二套 digest。
+- Files: `crates/skillstar-channels/src/shared_channels/release_scanner.rs`、`subscription_installer_tests.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p skillstar-channels --locked --lib exact_commit_snapshot production_installer`；Windows CI 这三条必须绿，且仍断言 LF 算法哈希 `sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7`。
+
+## 2026-08-31 - 第二个 harness 复用第一条 lock，把 A 的正文部署给 B
+
+- Symptom: `skillstar install … --agent cursor` 之后再 `install … --agent deepseek` 打印 `Reusing existing hub install(s)`，把 `~/.dsh/skills/rust` 链到 **Cursor** 的 hub 路径；lock `source_folder` 仍是 `.cursor/skills/rust`。clone 里其实有 `.dsh/skills/rust`。卡片轮播点第二个图标同样走这条。Hub 已是 `.agents/skills/impeccable` 时再 `--agent cursor` 也不改指向 `.cursor/skills/impeccable`。对 rust-skills 两份拷贝相同，对 impeccable 式改写过的 `SKILL.md` 会装错 harness。
+- Root cause: 同名一条 lock 把「仓库已在 hub」当成「可以复用」。`install_skills_batch` / `try_install_from_repo_cache` 只比 git URL，不比 `source_folder` 是否已经是本次请求的 `.<harness>/` 文件夹。CLI 的 `install_or_reuse` 因此走 Reuse，随后 `batch_deploy` 把**当前** hub（另一份 harness）链到新 Agent。轮播未链接图标也曾只 `toggle_skill_for_agent`，同样部署当前 hub。
+- Fix: 复用仅当现有 `source_folder` 已是本次解析到的文件夹。否则从同一 clone 改指向（不二次 clone），改之前 `pin_existing_global_links_to_current_source` 把**其他** Agent 钉到当前 payload（跳过正在改指向的 Agent）。`batch_deploy` 对目标 Agent 上指向另一份 harness / 旧 hub 的 symlink 做 link-first 替换，不得把「路径已存在」当成成功。缺少该 harness 时按 D-046 回退，不得 fail-closed。轮播未链接图标走 `install_skill(url, name, agentId)`。
+- Files: `crates/skillstar-skills/src/skill_install.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`src/features/my-skills/components/SkillCard.tsx`、`docs/features/skills/README.md`。
+- Self-check:
+  - `cargo test -p skillstar-skills --locked stale_dsh_link_is_rewritten_to_requested_harness batch_deploy_rewrites_a_stale_link_and_leaves_other_agents_pinned`
+  - 装完 Cursor 再装 DeepSeek：clone 里有 `.dsh` 时 `~/.dsh/skills/<id>` 必须解析到 `.dsh/skills/<id>`，不能是 `.cursor/skills/<id>`；已链的 Cursor 仍是 Cursor 正文。即使 `~/.dsh/skills/<id>` 事先错误地指向 cursor 文件夹，部署也必须改写，CLI 不得报 `0 new deployment(s)`。
+  - Hub 已是 `.agents/skills/<id>` 时 `--agent cursor` 必须把 lock/`source_folder` 改成 `.cursor/skills/<id>`，不得静默 Reuse。
+
+## 2026-08-31 - 已装卡点轮播又 fetch，缺 `.dsh` 还 fail-closed
+
+- Symptom: Library 里 rust-skills / impeccable 已在 hub，点未链接的 DeepSeek 图标要等一整次 Git clone/fetch；impeccable（包内没有 `.dsh`）随后报 `This pack has no '.dsh' skill folder`，`~/.dsh/skills/impeccable` 不会出现。
+- Root cause: `try_install_from_repo_cache` / CLI `fetch_repo_scanned` 一律走 `clone_or_fetch`，cache 有 `.git` 也会 `git fetch --depth 1` + reset。`resolve_install_skills` 在缺请求 harness 时 fail-closed，不回退 catalog / 现有 hub / 另一份副本。
+- Fix: 已有 repo-cache 时只扫描本地 checkout（`cached_repo_dir_if_present`），不 fetch；`source_folder` 没变就不改 lock。缺 harness 时回退 `skills/<name>/` 或 `source/skills/` → 现有 hub `source_folder` → 同 identity 的另一嵌套副本，再部署到被点 Agent。只有没有嵌套 `SKILL.md` 才失败。cache 被删仍 fetch。
+- Files: `crates/skillstar-skills/src/{skill_install.rs,discovery.rs,repo_scanner/cache.rs}`、`crates/skillstar-app/src/cli/install.rs`、`docs/features/skills/README.md`。
+- Self-check:
+  - `cargo test -p skillstar-skills --locked installed_rust_skills_deepseek_retargets_from_cache_without_clone installed_impeccable_deepseek_falls_back_to_a_skill_folder missing_git_cache_still_fetches_for_harness_install`
+  - 已装 rust-skills：掐断 remote 后再 `--agent deepseek` 必须成功，dsh 链到 `.dsh/skills/rust`，cursor 不变。
+  - 已装 impeccable：`--agent deepseek` 必须成功，`~/.dsh/skills/impeccable` 是含 `SKILL.md` 的技能目录，不是整仓。
+  - 删掉 `repos` cache 后再装必须重新 fetch，不能静默 no-op。
+
 ## 2026-08-31 - TS 孤儿门禁在 Windows CI 上打印 ✓/✗ 触发 UnicodeEncodeError，报 0 违规却退出 1
 
 - Symptom: Windows CI 只有 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 失败，且断言 `output 包含 "0 new orphan module(s)"` 通过、`status` 却是 1；日志散落 `UnicodeEncodeError: 'charmap' codec can't encode character '\u2713'/'\u2717'`。macOS/Linux 本地与 CI 全绿。
@@ -147,9 +226,9 @@
 
 ## 2026-08-14 - 稀疏 checkout 按 Skill 名去重会把仍存在的已安装来源误报为删除
 
-- Symptom: 更新 `impeccable` 时弹出「来源已不再提供」，选择「彻底移除该 Skill」却收到 `Skill 'impeccable' still comes from its source; keep or discard the local changes instead of removing it`。Git reflog 显示每次更新都先 reset 到远端提交、随即回滚；远端提交仍包含 lockfile 记录的 `.agents/skills/impeccable`。
-- Root cause: 远端新增了同名的 `.agent/skills/impeccable` provider 副本。`derive_sparse_skill_dirs` 为节省物化范围按 Skill 目录名去重，`.agent/...` 与 `.agents/...` 优先级相同且前者按字典序先出现，于是更新后的 sparse set 只保留 `.agent/...`。`git sparse-checkout set` 随即移除已安装链接指向的 `.agents/...` 工作树目录；`skills_dropped_by_source` 只看链接目标当下是否存在，便误报来源删除并触发回滚。resolver 随后用 Git tree 正确看见 `.agents/...` 仍存在，因此拒绝“来源删除”专用卸载，形成自相矛盾且没有可用出口的对话框。
-- Fix: repo-cache 更新在重算发现目录之前记录同一 checkout 的全部已安装 `source_folder`；若远端仍有其它同名 provider，新的 sparse set 也必须合并这些已安装来源目录。真正被远端删除的路径即使留在 sparse pattern 中也不会被物化，原有 source-removal 检测继续成立。
+- Symptom: 更新 `impeccable` 时弹出「来源已不再提供」，选择「彻底移除该 Skill」却收到 `Skill 'impeccable' still comes from its source; keep or discard the local changes instead of removing it`。Git reflog 显示每次更新都先 reset 到远端提交、随即回滚；远端提交仍包含 lockfile 记录的 `.agents/skills/impeccable`。`--list` / `--preview` 稀疏检出后只留下 `.agent/skills/impeccable`（Antigravity），Hub 与 `~/.cursor/skills/impeccable` 变悬空。
+- Root cause: 远端新增了同名的 `.agent/skills/impeccable` provider 副本。`derive_sparse_skill_dirs` 曾为节省物化范围按 Skill 目录名（basename）去重，`.agent/...` 与 `.agents/...` 的 `source_priority` 相同且前者按字典序先出现，于是 sparse set 只保留 `.agent/...`。`git sparse-checkout set` 随即移除已安装链接指向的 `.agents/...` 工作树目录。更新路径还会把根 `SKILL.md` 当成“整仓 checkout”信号，进一步丢掉嵌套 harness 目录。
+- Fix: 稀疏检出保留**全部**含 `SKILL.md` 的嵌套目录（不再按 basename 去重）；根 `SKILL.md` 只在没有嵌套技能时才触发全量 checkout。repo-cache 更新仍合并已安装 `source_folder`。真正被远端删除的路径即使留在 sparse pattern 中也不会被物化。
 - Files: `crates/skillstar-skills/src/repo_scanner/ops.rs`、`crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`。
 - Self-check:
   - 通用判据：**发现结果的去重策略不能改写已经安装的 provenance**。同名 provider 路径用于“新安装选哪个”，lockfile 的 `source_folder` 用于“已安装项继续跟哪个”；两者不是同一个问题。

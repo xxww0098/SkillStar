@@ -6,6 +6,37 @@
 use anyhow::Context;
 use std::path::{Path, PathBuf};
 
+/// Canonicalize the longest existing prefix, then re-append missing tails.
+///
+/// `std::fs::canonicalize` fails when the last component is gone — the
+/// state of a dangling hub link after the checkout already dropped that
+/// Skill. On Windows the raw path may also be an 8.3 short name
+/// (`RUNNER~1`) while the cache dir canonicalizes to `runneradmin`, so
+/// a prefix compare without this helper misses the shared checkout.
+pub fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
+    let mut existing = path.to_path_buf();
+    let mut tail = Vec::new();
+    loop {
+        match std::fs::canonicalize(&existing) {
+            Ok(mut canonical) => {
+                for component in tail.iter().rev() {
+                    canonical.push(component);
+                }
+                return canonical;
+            }
+            Err(_) => {
+                let Some(name) = existing.file_name().map(|name| name.to_os_string()) else {
+                    return path.to_path_buf();
+                };
+                tail.push(name);
+                if !existing.pop() {
+                    return path.to_path_buf();
+                }
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -444,7 +475,9 @@ pub fn open_in_file_manager(path: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{atomic_write, create_symlink_or_copy, remove_link_or_copy};
+    use super::{
+        atomic_write, canonicalize_existing_prefix, create_symlink_or_copy, remove_link_or_copy,
+    };
     use tempfile::TempDir;
 
     #[test]
@@ -466,6 +499,19 @@ mod tests {
         assert!(
             leftovers.is_empty(),
             "temp files must not survive: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_existing_prefix_keeps_a_missing_tail() {
+        let temp = TempDir::new().unwrap();
+        let existing = temp.path().join("repos").join("acme");
+        std::fs::create_dir_all(&existing).unwrap();
+        let missing = existing.join("skills").join("alpha");
+        let canonical = canonicalize_existing_prefix(&missing);
+        assert_eq!(
+            canonical,
+            std::fs::canonicalize(&existing).unwrap().join("skills").join("alpha")
         );
     }
 

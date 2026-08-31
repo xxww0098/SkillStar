@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::Url;
 
 const ASKPASS_MODE_ENV: &str = "SKILLSTAR_GIT_ASKPASS_MODE";
@@ -466,7 +466,7 @@ pub fn execute_remote_command(
     let status = loop {
         if session.is_cancelled() {
             terminate_child_tree(&mut child);
-            let _ = child.wait();
+            reap_terminated_child(&mut child);
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
             session.emit(GitOperationPhase::Cancelled, remote);
@@ -477,7 +477,7 @@ pub fn execute_remote_command(
             Ok(None) => std::thread::sleep(Duration::from_millis(25)),
             Err(error) => {
                 terminate_child_tree(&mut child);
-                let _ = child.wait();
+                reap_terminated_child(&mut child);
                 let _ = stdout_reader.join();
                 let _ = stderr_reader.join();
                 session.emit(GitOperationPhase::Failed, remote);
@@ -755,6 +755,23 @@ fn read_pipe<R: Read>(pipe: Option<R>) -> Vec<u8> {
     bytes
 }
 
+fn reap_terminated_child(child: &mut std::process::Child) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 pub fn configure_process_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -766,11 +783,39 @@ pub fn configure_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
 pub fn terminate_child_tree(child: &mut std::process::Child) {
-    let process_group = format!("-{}", child.id());
-    let _ = command_with_path("kill")
-        .args(["-TERM", process_group.as_str()])
-        .status();
+    // Kill the isolated process group only when this child is its leader
+    // (`configure_process_group(0)`). `kill -TERM -$pid` otherwise addresses
+    // the GitHub Actions step group and the runner reports
+    // "The operation was canceled". Never pass -1 / -0.
+    let pid = child.id();
+    if pid > 1 && unix_child_is_group_leader(pid) {
+        let _ = command_with_path("kill")
+            .args(["-TERM", "--", &format!("-{pid}")])
+            .status();
+    } else if pid > 1 {
+        let _ = command_with_path("kill")
+            .args(["-TERM", "--", &pid.to_string()])
+            .status();
+    }
     let _ = child.kill();
+}
+
+#[cfg(unix)]
+fn unix_child_is_group_leader(pid: u32) -> bool {
+    let output = command_with_path("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        == Some(pid)
 }
 
 #[cfg(windows)]

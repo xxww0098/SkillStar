@@ -13,6 +13,23 @@ pub use crate::tree::{
     GitTreeEntry, list_tree_entries_at, list_tree_paths, list_tree_paths_at, revision_contains_path,
 };
 
+/// Git `file://` URL for a local path.
+///
+/// `.gitconfig` treats `\` as an escape, so `file://C:\Users\foo` becomes
+/// `file://C:Usersfoo` and clone fails. Drive-letter paths also need the
+/// extra slash (`file:///C:/Users/foo`); `file://C:/Users/foo` treats `C:`
+/// as a host.
+pub fn local_file_url(path: &Path) -> String {
+    let mut normalized = path.to_string_lossy().replace('\\', "/");
+    if let Some(rest) = normalized.strip_prefix("//?/") {
+        normalized = rest.to_string();
+    }
+    if normalized.len() >= 2 && normalized.as_bytes()[1] == b':' && !normalized.starts_with('/') {
+        normalized.insert(0, '/');
+    }
+    format!("file://{normalized}")
+}
+
 /// Maximum number of retries for shallow fetch operations that hit the
 /// `shallow file has changed since we read it` race condition.
 const SHALLOW_FETCH_MAX_RETRIES: u32 = 3;

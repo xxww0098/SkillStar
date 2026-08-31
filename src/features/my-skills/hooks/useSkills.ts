@@ -264,7 +264,8 @@ function useSkillsState() {
   );
 
   const installMutation = useMutation({
-    mutationFn: ({ url, name }: { url: string; name?: string }) => tauriInvoke("install_skill", { url, name }),
+    mutationFn: ({ url, name, agentId }: { url: string; name?: string; agentId?: string }) =>
+      tauriInvoke("install_skill", { url, name, agentId }),
     onSuccess: (skill) => {
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.some((item) => item.name === skill.name)) {
@@ -303,14 +304,30 @@ function useSkillsState() {
   const uninstallSkillMutate = uninstallMutation.mutateAsync;
 
   const installSkill = useCallback(
-    async (url: string, name?: string) => {
+    async (url: string, name?: string, agentId?: string) => {
+      const toggleKey = name && agentId ? `${name}::${agentId}` : null;
+      if (toggleKey) {
+        if (pendingAgentToggleRef.current.has(toggleKey)) {
+          const cached = queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY)?.find((item) => item.name === name);
+          if (cached) return cached;
+        }
+        pendingAgentToggleRef.current.add(toggleKey);
+        setPendingAgentToggleKeys(new Set(pendingAgentToggleRef.current));
+        setIsTogglingAgent(true);
+      }
       try {
-        return await installSkillMutate({ url, name });
+        return await installSkillMutate({ url, name, agentId });
       } catch (e) {
         throw new Error(String(e));
+      } finally {
+        if (toggleKey) {
+          pendingAgentToggleRef.current.delete(toggleKey);
+          setPendingAgentToggleKeys(new Set(pendingAgentToggleRef.current));
+          setIsTogglingAgent(pendingAgentToggleRef.current.size > 0);
+        }
       }
     },
-    [installSkillMutate],
+    [installSkillMutate, queryClient],
   );
 
   /** Re-scan one repository at full depth and reinstall every discovered Skill. */

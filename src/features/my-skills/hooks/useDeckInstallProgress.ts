@@ -31,7 +31,7 @@ if (import.meta.hot) {
 interface UseDeckInstallProgressParams {
   /** Installed-skill lookup (normalized name → skill), from the hub skills list. */
   skillByName: Map<string, Skill>;
-  installSkill: (url: string, name?: string) => Promise<unknown>;
+  installSkill: (url: string, name?: string, agentId?: string) => Promise<unknown>;
   updateGroup: (
     id: string,
     patch: {

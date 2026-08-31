@@ -53,7 +53,7 @@ interface SkillGridProps {
   minColumnWidth?: number;
   onSkillClick: (skill: Skill) => void;
   /** Optional: omitted in read-only scopes (e.g. remote) where SkillCard suppresses install. */
-  onInstall?: (url: string, name: string) => void;
+  onInstall?: (url: string, name: string, agentId?: string) => void;
   /** Optional: omitted in read-only scopes (e.g. remote) where SkillCard suppresses update. */
   onUpdate?: (name: string) => void;
   onResolveRemoved?: (name: string) => void;

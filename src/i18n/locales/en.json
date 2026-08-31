@@ -917,6 +917,7 @@
     "noDescription": "No description",
     "add": "Add",
     "remove": "Remove",
+    "installFor": "Install for {{agent}}",
     "upstreamRemoved": "Removed upstream",
     "upstreamRenamed": "Renamed to {{name}}",
     "resolveRemoved": "Resolve",

@@ -133,9 +133,9 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
   }, []);
 
   const handleDetailInstall = useCallback(
-    async (url: string, name: string) => {
+    async (url: string, name: string, agentId?: string) => {
       try {
-        await installSkill(url, name);
+        await installSkill(url, name, agentId);
       } catch (e) {
         if (import.meta.env.DEV) console.error("Install from detail panel failed:", e);
       }

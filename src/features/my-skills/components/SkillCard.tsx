@@ -34,7 +34,7 @@ export interface SkillCardProps {
   skill: Skill;
   onClick: (skill: Skill) => void;
   /** Optional: remote cards never call these. */
-  onInstall?: (url: string, name: string) => void;
+  onInstall?: (url: string, name: string, agentId?: string) => void;
   onUpdate?: (name: string) => void;
   /** Upstream dropped the Skill with no successor: keep a local copy or remove. */
   onResolveRemoved?: (name: string) => void;
@@ -78,7 +78,7 @@ function SkillCardInner({
   const { t } = useTranslation();
   const isLocalSkill = skill.skill_type === "local";
   const isRemoteCard = Boolean(remoteContext);
-  const isLibrary = isRemoteCard || Boolean(selectable) || Boolean(profiles && onToggleAgent);
+  const isLibrary = isRemoteCard || Boolean(selectable);
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -303,21 +303,32 @@ function SkillCardInner({
         />
       </button>
     );
-  } else if (onToggleAgent && targetableProfiles.length > 0) {
+  } else if (targetableProfiles.length > 0 && (onToggleAgent || onInstall)) {
     agentRail = (
       <AgentTargetCarousel
         items={targetableProfiles.map((profile) => {
-          const linked = skill.agent_links?.includes(profile.display_name) ?? false;
+          const linked = skill.installed && (skill.agent_links?.includes(profile.display_name) ?? false);
+          const title = linked
+            ? `${profile.display_name} (${t("skillCard.remove")})`
+            : t("skillCard.installFor", { agent: profile.display_name });
           return {
             id: profile.id,
             profile,
             selected: linked,
             pending: pendingAgentToggleKeys?.has(`${skill.name}::${profile.id}`) ?? false,
-            title: `${profile.display_name} (${t(linked ? "skillCard.remove" : "skillCard.add")})`,
+            title,
           };
         })}
         onToggle={({ profile, selected }) => {
-          onToggleAgent(skill.name, profile.id, selected !== true, profile.display_name);
+          if (selected === true) {
+            onToggleAgent?.(skill.name, profile.id, false, profile.display_name);
+            return;
+          }
+          if (skill.git_url && onInstall) {
+            onInstall(skill.git_url, skill.name, profile.id);
+            return;
+          }
+          onToggleAgent?.(skill.name, profile.id, true, profile.display_name);
         }}
       />
     );

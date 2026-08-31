@@ -208,6 +208,65 @@ fn a_skill_the_checkout_has_not_materialized_is_not_a_user_decision() {
     );
 }
 
+/// Put the shared checkout and hub into the "already-gone" state this test
+/// names: HEAD no longer ships `skills/alpha`, the working tree has no
+/// readable copy, and the hub entry is a managed link that does not resolve.
+///
+/// `origin/HEAD` after a path-remote fetch is not a reliable reset target on
+/// Windows. A junction pointing at `skills/alpha` can also stop `reset --hard`
+/// from deleting that directory, leaving a real hub folder. Neither case is
+/// SourceMissing — construct the dangling link explicitly.
+fn advance_checkout_past_dropped_alpha(remote: &Path, cache: &Path) {
+    let drop_oid = git_stdout(remote, &["rev-parse", "HEAD"]);
+    run_git(cache, &["fetch", "origin"]);
+    run_git(cache, &["reset", "--hard", &drop_oid]);
+    assert_eq!(
+        git_stdout(cache, &["rev-parse", "HEAD"]),
+        drop_oid,
+        "cache must sit on the drop-alpha commit, not a stale origin/HEAD"
+    );
+    assert!(
+        git_stdout(cache, &["ls-tree", "--name-only", "HEAD", "--", "skills/alpha"]).is_empty(),
+        "the drop commit must not still ship skills/alpha"
+    );
+
+    let cache_alpha = cache.join("skills/alpha");
+    if cache_alpha.exists() {
+        std::fs::remove_dir_all(&cache_alpha)
+            .expect("leftover skills/alpha after reset (junction target) must be removable");
+    }
+    assert!(
+        !cache_alpha.exists(),
+        "working tree still has {}",
+        cache_alpha.display()
+    );
+
+    let hub_alpha = skillstar_core::infra::paths::hub_skills_dir().join("alpha");
+    if hub_alpha.symlink_metadata().is_ok() {
+        skillstar_core::infra::fs_ops::remove_link_or_copy(&hub_alpha)
+            .expect("clear leftover hub alpha so it can be re-linked as dangling");
+    }
+    match skillstar_core::infra::fs_ops::create_symlink(&cache_alpha, &hub_alpha) {
+        Ok(()) => {}
+        Err(_) => {
+            std::fs::create_dir_all(&cache_alpha).unwrap();
+            skillstar_core::infra::fs_ops::create_symlink(&cache_alpha, &hub_alpha)
+                .expect("Windows junction needs a live target");
+            std::fs::remove_dir_all(&cache_alpha).unwrap();
+        }
+    }
+    assert!(
+        !hub_alpha.exists(),
+        "hub alpha still has readable content at {}",
+        hub_alpha.display()
+    );
+    assert!(
+        skillstar_core::infra::fs_ops::is_link(&hub_alpha)
+            || hub_alpha.symlink_metadata().is_ok(),
+        "SourceMissing is a dangling managed link, not a missing hub row"
+    );
+}
+
 #[test]
 fn a_dropped_skill_whose_content_is_already_gone_can_only_be_removed() {
     let _guard = crate::lock_test_env();
@@ -217,10 +276,7 @@ fn a_dropped_skill_whose_content_is_already_gone_can_only_be_removed() {
     std::fs::remove_dir_all(remote.path().join("skills/alpha")).unwrap();
     run_git(remote.path(), &["add", "-A"]);
     run_git(remote.path(), &["commit", "-m", "drop alpha"]);
-    // The damage an older update left behind: the checkout is already past the
-    // removal, so the hub link dangles and no revision can bring it back.
-    run_git(&cache, &["fetch", "origin"]);
-    run_git(&cache, &["reset", "--hard", "origin/HEAD"]);
+    advance_checkout_past_dropped_alpha(remote.path(), &cache);
 
     let report = update_skills(&["beta".to_string()]);
 
@@ -262,6 +318,7 @@ fn adding_a_duplicate_provider_path_does_not_look_like_source_removal() {
     run_git(remote.path(), &["init", "--initial-branch=main"]);
     run_git(remote.path(), &["config", "user.email", "test@example.com"]);
     run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
+    pin_lf_repo(remote.path());
 
     let original = remote.path().join(".agents/skills/impeccable");
     std::fs::create_dir_all(&original).unwrap();

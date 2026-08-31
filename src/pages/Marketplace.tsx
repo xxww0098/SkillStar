@@ -22,6 +22,7 @@ import {
 } from "../features/marketplace/lib/snapshotState";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
+import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { cn } from "../lib/utils";
@@ -78,7 +79,16 @@ export function Marketplace({
     fetchOfficialPublishers,
     patchSkill,
   } = useMarketplace();
-  const { skills: installedSkills, installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
+  const {
+    skills: installedSkills,
+    installSkill,
+    updateSkill,
+    uninstallSkill,
+    pendingUpdateNames,
+    toggleSkillForAgent,
+    pendingAgentToggleKeys,
+  } = useSkills();
+  const { profiles } = useAgentProfiles();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useViewMode("grid");
@@ -571,6 +581,9 @@ export function Marketplace({
               installingNames={installingNames}
               onUpdate={handleUpdate}
               pendingUpdateNames={pendingUpdateNames}
+              profiles={profiles}
+              onToggleAgent={toggleSkillForAgent}
+              pendingAgentToggleKeys={pendingAgentToggleKeys}
               selectedSkills={selectedSkill ? new Set([selectedSkill.name]) : undefined}
               emptyMessage={
                 searchQuery.trim() || aiKeywords ? t("marketplace.noResultsSearch") : t("marketplace.noResults")

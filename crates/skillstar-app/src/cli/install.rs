@@ -396,13 +396,16 @@ fn install_or_reuse_skill(
     skill_filter: &[String],
     all: bool,
     yes: bool,
+    agent_id: Option<&str>,
 ) -> Result<(Vec<String>, bool), String> {
     if explicit_name.is_some() && !skill_filter.is_empty() {
         return Err("--name cannot be combined with --skill".to_string());
     }
 
     let git = git_skill_facade()?;
-    let (_, _, _, skills_found) = git.fetch_repo_scanned(url, false)?;
+    let (_, _, _, skills_found) = git
+        .fetch_repo_scanned_preferring_local_cache(url, false)
+        .map_err(|error| error.to_string())?;
     if skills_found.is_empty() {
         return Err("No valid SKILL.md found in the selected source".to_string());
     }
@@ -461,7 +464,12 @@ fn install_or_reuse_skill(
             prompt_for_skill_selection(&skills_found)?
         };
 
-    let installed = git.install_skills_batch(url, &selected_names)?;
+    let installed = match agent_id {
+        Some(id) => git
+            .install_skills_batch_for_agent(url, &selected_names, id)
+            .map_err(|error| error.to_string())?,
+        None => git.install_skills_batch(url, &selected_names)?,
+    };
     Ok((selected_names, !installed.is_empty()))
 }
 
@@ -718,6 +726,13 @@ pub fn cmd_install(opts: InstallOpts<'_>) {
                 opts.skill,
                 opts.all,
                 opts.yes || opts.all,
+                {
+                    let explicit = normalize_agent_ids(opts.agent);
+                    (explicit.len() == 1 && explicit[0] != "*")
+                        .then(|| explicit[0].as_str())
+                        .map(str::to_string)
+                }
+                .as_deref(),
             ) {
                 Ok(result) => result,
                 Err(err) => {
