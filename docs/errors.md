@@ -2,6 +2,13 @@
 
 状态：active
 
+## 2026-08-31 - TS 孤儿门禁在 Windows CI 上打印 ✓/✗ 触发 UnicodeEncodeError，报 0 违规却退出 1
+
+- Symptom: Windows CI 只有 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 失败，且断言 `output 包含 "0 new orphan module(s)"` 通过、`status` 却是 1；日志散落 `UnicodeEncodeError: 'charmap' codec can't encode character '\u2713'/'\u2717'`。macOS/Linux 本地与 CI 全绿。
+- Root cause: 门禁的 bash 包装内嵌 `python3` heredoc，收尾 print `✓`/`✗`。GitHub Windows runner 上子进程 stdout 按 ANSI 代码页（cp1252）编码，非 ASCII print 直接抛异常；纯 ASCII 的 summary 行先打印成功，所以「0 个孤儿」的断言过了，Python 却以异常退出码 1 结束。stdout 是管道而非控制台时 Python 不用 UTF-8，这是本地终端永远复现不了的原因。
+- Fix: 五个内嵌 python3 的门禁脚本（check_ts_orphan_modules / check_no_orphan_modules / check_dep_graph_doc / check_workspace_deps / check_command_boundaries）统一在调用行加 `PYTHONIOENCODING=utf-8`，让 Python stdio 与平台代码页解耦。
+- Self-check: `for f in $(grep -l python3 scripts/internal/*.sh); do grep -q PYTHONIOENCODING "$f" || echo "missing: $f"; done` 必须无输出；新增内嵌 python3 的门禁若 print 非 ASCII 字符，调用行必须带 `PYTHONIOENCODING=utf-8`。
+
 ## 2026-08-27 - clippy 棘轮在热缓存下读到 0，照它的提示锁定基线会让冷构建 CI 挂掉
 
 - Symptom: 本地刚跑过 `cargo clippy` 后立即执行 `scripts/internal/check_clippy_ratchet.sh`，输出 `summary: 0 clippy diagnostics (baseline: 1)` 并主动提示 `note: count dropped below baseline — lower scripts/internal/clippy_baseline.txt to lock in the improvement`。照做把基线改成 0，CI 冷构建时真实计数仍是 1，`1 > 0` 直接失败。

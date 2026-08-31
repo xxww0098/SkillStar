@@ -60,7 +60,7 @@ fi
 
 SCAN_ROOT="${SCAN_ROOT:-src/features}"
 
-MODE="$MODE" SCAN_ROOT="$SCAN_ROOT" python3 - <<'PY'
+MODE="$MODE" SCAN_ROOT="$SCAN_ROOT" PYTHONIOENCODING=utf-8 python3 - <<'PY'
 from __future__ import annotations
 
 import os

@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-python3 - <<'PY'
+PYTHONIOENCODING=utf-8 python3 - <<'PY'
 from pathlib import Path
 import re
 import sys

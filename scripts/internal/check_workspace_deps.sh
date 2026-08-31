@@ -17,7 +17,7 @@ if [ -n "$nested_locks" ]; then
 fi
 
 META=$(cargo metadata --no-deps --format-version 1 --locked)
-python3 - "$META" <<'PY'
+PYTHONIOENCODING=utf-8 python3 - "$META" <<'PY'
 import json, sys
 
 meta = json.loads(sys.argv[1])
