@@ -43,18 +43,18 @@ fn verify_release_checkout(
 ) -> Result<(), SharedChannelError> {
     verify_checkout_head(repo_dir, &manifest.commit_sha)?;
 
-    let mut discovered = BTreeMap::new();
     let default_skill_id = root_skill_default_id(repository_name, &manifest.skills);
-    for skill in skillstar_skills::discovery::discover_skills_without_dedup(
-        repo_dir,
-        true,
-        Some(default_skill_id),
-    ) {
-        let key = skill.id.to_ascii_lowercase();
-        if discovered.insert(key, skill).is_some() {
-            return Err(content_integrity_error());
-        }
-    }
+    let discovered = skillstar_skills::discovery::collapse_pack_identity_copies(
+        skillstar_skills::discovery::discover_skills_without_dedup(
+            repo_dir,
+            true,
+            Some(default_skill_id),
+        ),
+    )
+    .map_err(|_| content_integrity_error())?
+    .into_iter()
+    .map(|skill| (skill.id.to_ascii_lowercase(), skill))
+    .collect::<BTreeMap<_, _>>();
     let released = manifest
         .skills
         .iter()
@@ -228,6 +228,17 @@ mod tests {
         let manifest = manifest(&commit, &snapshot.content_hash);
 
         verify_release_checkout(repository, "renamed-channel", &manifest).unwrap();
+
+        let harness = repository.join(".cursor/skills/writer");
+        fs::create_dir_all(&harness).unwrap();
+        fs::write(
+            harness.join("SKILL.md"),
+            "---\nname: writer\ndescription: Test writer\n---\n# Writer\n",
+        )
+        .unwrap();
+        verify_release_checkout(repository, "renamed-channel", &manifest)
+            .expect("catalog + harness copy is one Skill, not a second identity");
+        fs::remove_dir_all(repository.join(".cursor")).unwrap();
 
         let extra = repository.join("skills/extra");
         fs::create_dir_all(&extra).unwrap();

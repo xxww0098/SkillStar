@@ -298,21 +298,18 @@ fn snapshot_published_tree(
         return Err(scanner_error(session));
     }
 
-    let discovered = skillstar_skills::discovery::discover_skills_without_dedup(
-        &extraction,
-        true,
-        Some(repository_name),
-    );
+    let discovered = skillstar_skills::discovery::collapse_pack_identity_copies(
+        skillstar_skills::discovery::discover_skills_without_dedup(
+            &extraction,
+            true,
+            Some(repository_name),
+        ),
+    )
+    .map_err(|_| integrity_error("The channel draft contains duplicate Skill identities"))?;
     let mut skills = Vec::with_capacity(discovered.len());
-    let mut identities = std::collections::HashSet::new();
     for skill in discovered {
         if session.is_cancelled() {
             return Err(cancelled_error());
-        }
-        if !identities.insert(skill.id.to_lowercase()) {
-            return Err(integrity_error(
-                "The channel draft contains duplicate Skill identities",
-            ));
         }
         let root = if skill.folder_path.is_empty() {
             extraction.clone()
@@ -396,6 +393,43 @@ mod tests {
             snapshot.skills[0].content_hash,
             "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7"
         );
+    }
+
+    #[test]
+    fn exact_commit_snapshot_collapses_catalog_and_harness_copies() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(repo.join("skills/writer")).unwrap();
+        std::fs::create_dir_all(repo.join(".cursor/skills/writer")).unwrap();
+        std::fs::write(
+            repo.join("skills/writer/SKILL.md"),
+            b"---\nname: writer\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join(".cursor/skills/writer/SKILL.md"),
+            b"---\nname: writer\n---\n",
+        )
+        .unwrap();
+        run_git(&repo, &["init"]);
+        run_git(&repo, &["config", "user.email", "test@example.com"]);
+        run_git(&repo, &["config", "user.name", "SkillStar Test"]);
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "pack"]);
+        let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
+
+        let snapshot = snapshot_published_tree(
+            &repo,
+            "https://github.com/acme/repo.git",
+            "repo",
+            &commit,
+            &skillstar_skills::git::transport::GitOperationSession::public(),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.skills.len(), 1);
+        assert_eq!(snapshot.skills[0].id, "writer");
+        assert_eq!(snapshot.skills[0].content_root, "skills/writer");
     }
 
     #[test]

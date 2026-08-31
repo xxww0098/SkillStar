@@ -144,6 +144,54 @@ fn dedupe_keeps_higher_priority() {
 }
 
 #[test]
+fn collapse_pack_identity_copies_keeps_catalog_over_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    write_skill_md(&repo.join("skills/writer/SKILL.md"), "writer", "catalog").unwrap();
+    write_skill_md(
+        &repo.join(".cursor/skills/writer/SKILL.md"),
+        "writer",
+        "cursor copy",
+    )
+    .unwrap();
+    write_skill_md(
+        &repo.join(".dsh/skills/writer/SKILL.md"),
+        "writer",
+        "dsh copy",
+    )
+    .unwrap();
+
+    let units = collapse_pack_identity_copies(discover_skills_without_dedup(repo, true, None))
+        .expect("catalog + harness copies are one install unit");
+    assert_eq!(units.len(), 1);
+    assert_eq!(units[0].id, "writer");
+    assert_eq!(units[0].folder_path, "skills/writer");
+}
+
+#[test]
+fn collapse_pack_identity_copies_rejects_two_catalog_folders() {
+    let skills = vec![
+        DiscoveredSkill {
+            id: "writer".to_string(),
+            folder_path: "skills/one".to_string(),
+            description: "a".to_string(),
+            already_installed: false,
+            frontmatter_issues: Vec::new(),
+        },
+        DiscoveredSkill {
+            id: "Writer".to_string(),
+            folder_path: "skills/two".to_string(),
+            description: "b".to_string(),
+            already_installed: false,
+            frontmatter_issues: Vec::new(),
+        },
+    ];
+    let error = collapse_pack_identity_copies(skills).unwrap_err();
+    assert!(error.contains("duplicate Skill identities"), "{error}");
+    assert!(error.contains("writer"), "{error}");
+}
+
+#[test]
 fn discover_priority_dir_skips_non_standard() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();

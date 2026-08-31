@@ -14,6 +14,18 @@
 //! catalog, the existing hub folder, or another nested copy — never the
 //! repo root.
 
+/// True when `folder_path` is a generated per-harness copy
+/// (`.cursor/skills/<id>`, `.dsh`, …), not a catalog or repo-root skill.
+pub fn is_harness_skill_folder(folder_path: &str) -> bool {
+    let path = folder_path.replace('\\', "/");
+    let path = path.trim_matches('/');
+    if path.is_empty() || is_canonical_skill_folder(path) {
+        return false;
+    }
+    let first = path.split('/').next().unwrap_or("");
+    first.starts_with('.') && first != "."
+}
+
 /// True when `folder_path` is a public or unpublished skill catalog, not a
 /// generated harness copy (`.claude/skills`, `.grok/skills`, …).
 pub fn is_canonical_skill_folder(folder_path: &str) -> bool {
@@ -165,6 +177,17 @@ mod tests {
         assert!(!is_canonical_skill_folder(".claude/skills/rust"));
         assert!(!is_canonical_skill_folder(".grok/skills/rust"));
         assert!(!is_canonical_skill_folder(".agents/skills/rust"));
+    }
+
+    #[test]
+    fn harness_copies_are_hidden_agent_trees() {
+        assert!(is_harness_skill_folder(".cursor/skills/rust"));
+        assert!(is_harness_skill_folder(".dsh/skills/impeccable"));
+        assert!(is_harness_skill_folder(".dsh"));
+        assert!(!is_harness_skill_folder("skills/rust"));
+        assert!(!is_harness_skill_folder("source/skills/rust"));
+        assert!(!is_harness_skill_folder(""));
+        assert!(!is_harness_skill_folder("examples/writer"));
     }
 
     #[test]

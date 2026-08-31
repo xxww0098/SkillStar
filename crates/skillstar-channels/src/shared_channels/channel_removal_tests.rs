@@ -2,6 +2,56 @@ use super::channel_update_tests::{
     fixtures, manifest, manifest_v1, release_skill, service, target_v2,
 };
 use super::*;
+use std::ffi::OsString;
+
+/// `suggested_local_name` reads the process hub. Parallel tests that create
+/// `writer.local` (conversion / installer sandboxes) must not leak into this
+/// file — otherwise the suggestion becomes `writer.local.2`.
+struct IsolatedHub {
+    _guard: tokio::sync::MutexGuard<'static, ()>,
+    previous: Vec<(&'static str, Option<OsString>)>,
+    _temp: tempfile::TempDir,
+}
+
+impl IsolatedHub {
+    async fn acquire() -> Self {
+        let guard = crate::lock_test_env_async().await;
+        let temp = tempfile::tempdir().unwrap();
+        let overrides = [
+            ("SKILLSTAR_HUB_DIR", temp.path().join("hub")),
+            ("SKILLSTAR_DATA_DIR", temp.path().join("data")),
+            ("HOME", temp.path().join("home")),
+            ("USERPROFILE", temp.path().join("home")),
+        ];
+        let previous = overrides
+            .iter()
+            .map(|(key, _)| (*key, std::env::var_os(key)))
+            .collect();
+        unsafe {
+            for (key, value) in overrides {
+                std::env::set_var(key, value);
+            }
+        }
+        Self {
+            _guard: guard,
+            previous,
+            _temp: temp,
+        }
+    }
+}
+
+impl Drop for IsolatedHub {
+    fn drop(&mut self) {
+        unsafe {
+            for (key, previous) in self.previous.drain(..).rev() {
+                match previous {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+}
 
 fn removed_manifest() -> ChannelReleaseManifest {
     let mut writer = release_skill("writer", 'f');
@@ -32,6 +82,7 @@ async fn prepare_removed_release(
 
 #[tokio::test]
 async fn removed_skill_keeps_content_and_deployments_while_other_skills_continue() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
 
@@ -74,6 +125,7 @@ async fn removed_skill_keeps_content_and_deployments_while_other_skills_continue
 
 #[tokio::test]
 async fn uninstall_uses_existing_cleanup_and_stops_tracking_the_removed_skill() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;
@@ -116,6 +168,7 @@ async fn uninstall_uses_existing_cleanup_and_stops_tracking_the_removed_skill() 
 
 #[tokio::test]
 async fn exact_release_verification_freezes_removal_before_local_content_changes() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;
@@ -140,6 +193,7 @@ async fn exact_release_verification_freezes_removal_before_local_content_changes
 
 #[tokio::test]
 async fn convert_to_local_uses_complete_copy_and_rejects_name_conflicts_without_untracking() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;
@@ -184,6 +238,7 @@ async fn convert_to_local_uses_complete_copy_and_rejects_name_conflicts_without_
 
 #[tokio::test]
 async fn reintroduced_skill_requires_explicit_install_and_does_not_replace_the_local_copy() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;
@@ -240,6 +295,7 @@ async fn reintroduced_skill_requires_explicit_install_and_does_not_replace_the_l
 
 #[tokio::test]
 async fn invalid_reintroduced_install_rolls_back_before_a_frozen_state_save_failure() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;
@@ -266,6 +322,7 @@ async fn invalid_reintroduced_install_rolls_back_before_a_frozen_state_save_fail
 
 #[tokio::test]
 async fn reintroduced_skill_stays_removed_until_the_pending_choice_is_resolved() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;
@@ -307,6 +364,7 @@ async fn reintroduced_skill_stays_removed_until_the_pending_choice_is_resolved()
 
 #[tokio::test]
 async fn removal_rolls_back_before_commit_but_keeps_committed_cleanup_failures_untracked() {
+    let _hub = IsolatedHub::acquire().await;
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
     prepare_removed_release(&gateway, &app).await;

@@ -22,8 +22,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub use crate::pack_layout::{
-    folder_matches_harness, is_canonical_skill_folder, missing_skill_payload_error,
-    pack_harness_prefix, source_priority,
+    folder_matches_harness, is_canonical_skill_folder, is_harness_skill_folder,
+    missing_skill_payload_error, pack_harness_prefix, source_priority,
 };
 
 // ── Data Types ──────────────────────────────────────────────────────
@@ -534,6 +534,48 @@ pub fn discover_skills_without_dedup(
 }
 
 // ── Deduplication ───────────────────────────────────────────────────
+
+/// Collapse catalog + harness copies of the same identity into one install
+/// unit. Two independent (non-harness) folders that share an identity are
+/// still a collision — callers that must not guess should fail closed.
+pub fn collapse_pack_identity_copies(
+    skills: Vec<DiscoveredSkill>,
+) -> Result<Vec<DiscoveredSkill>, String> {
+    let mut groups: HashMap<String, Vec<DiscoveredSkill>> = HashMap::new();
+    for skill in skills {
+        groups
+            .entry(skill.id.to_lowercase())
+            .or_default()
+            .push(skill);
+    }
+    let mut collapsed = Vec::with_capacity(groups.len());
+    let mut collisions = Vec::new();
+    for (identity, group) in groups {
+        let independents = group
+            .iter()
+            .filter(|skill| !crate::pack_layout::is_harness_skill_folder(&skill.folder_path))
+            .count();
+        if independents > 1 {
+            collisions.push(identity);
+            continue;
+        }
+        collapsed.push(
+            group
+                .into_iter()
+                .max_by_key(discovered_skill_priority)
+                .expect("identity group is non-empty"),
+        );
+    }
+    if !collisions.is_empty() {
+        collisions.sort();
+        return Err(format!(
+            "duplicate Skill identities: {}",
+            collisions.join(", ")
+        ));
+    }
+    collapsed.sort_by(|left, right| left.folder_path.cmp(&right.folder_path));
+    Ok(collapsed)
+}
 
 pub fn dedupe_discovered_skills(skills: Vec<DiscoveredSkill>) -> Vec<DiscoveredSkill> {
     let mut seen: HashMap<String, usize> = HashMap::new();
