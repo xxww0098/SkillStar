@@ -2,6 +2,14 @@
 
 状态：active
 
+## 2026-08-31 - Windows `autocrlf` 把频道 content-hash 改成第二套 digest
+
+- Symptom: Windows CI 的 `skillstar-channels` 在 `exact_commit_snapshot_uses_the_shared_known_content_hash` / `exact_commit_snapshot_disables_export_ignore_and_export_subst` / `production_installer_verifies_the_exact_release_checkout` 失败；左边是 `sha256:30263545…` 一类 CRLF digest，右边是 Linux 硬编码的 `sha256:6e8b30c2…`。macOS/Linux 全绿。同一组测试在 `main` 上就已经红，不是 harness 安装引入的算法变化。
+- Root cause: GitHub Windows runner 默认 `core.autocrlf=true`。`git archive` 仍会按 commit / 主机的 text/eol 属性改写 tracked 字节；测试里的 `git clone` 也会把 LF fixture checkout 成 CRLF。`snapshot_path` 哈希的是落盘字节，于是发布快照和校验 checkout 对不上 Linux 的精确 commit hash。
+- Fix: 发布归档在 `.git/info/attributes` 同时关掉 `export-ignore` / `export-subst` / `text`，并给 `git archive` 钉 `core.autocrlf=false` + `core.eol=lf`。频道 hash fixture 的 `git init`/`clone` 同样钉 LF，并用 `* -text`（或让 info 层压过 `* text=auto`）。不要接受 Windows 算出来的第二套 digest。
+- Files: `crates/skillstar-channels/src/shared_channels/release_scanner.rs`、`subscription_installer_tests.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p skillstar-channels --locked --lib exact_commit_snapshot production_installer`；Windows CI 这三条必须绿，且仍断言 LF 算法哈希 `sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7`。
+
 ## 2026-08-31 - 第二个 harness 复用第一条 lock，把 A 的正文部署给 B
 
 - Symptom: `skillstar install … --agent cursor` 之后再 `install … --agent deepseek` 打印 `Reusing existing hub install(s)`，把 `~/.dsh/skills/rust` 链到 **Cursor** 的 hub 路径；lock `source_folder` 仍是 `.cursor/skills/rust`。clone 里其实有 `.dsh/skills/rust`。卡片轮播点第二个图标同样走这条。Hub 已是 `.agents/skills/impeccable` 时再 `--agent cursor` 也不改指向 `.cursor/skills/impeccable`。对 rust-skills 两份拷贝相同，对 impeccable 式改写过的 `SKILL.md` 会装错 harness。

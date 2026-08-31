@@ -37,6 +37,13 @@ name: Windows CI
 #    src-tauri unit tests on Windows, fix the DLL loading first (pin/install
 #    a matching WebView2 runtime on the runner) instead of removing the
 #    exclusion blindly.
+#
+# 5. Channel content-hash fixtures must pin `core.autocrlf=false` and
+#    `core.eol=lf` (and treat files as `-text`). Windows runners default
+#    `autocrlf=true`, so `git archive` / clone rewrite LF fixtures and
+#    `sha256:` no longer matches Linux. Do not "fix" this by accepting
+#    whatever hash Windows computed, and do not hardcode a second Windows
+#    digest.
 on:
   push:
     branches: [main]

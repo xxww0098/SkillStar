@@ -159,15 +159,16 @@ fn snapshot_published_tree(
         ));
     }
 
-    // Git archive normally honors export-ignore/export-subst from the commit,
-    // which would omit or rewrite tracked Skill bytes. This isolated checkout
-    // overrides both attributes at Git's highest-precedence info layer so the
-    // archive is a raw, complete projection of the exact tree.
+    // Git archive normally honors export-ignore/export-subst and text/eol
+    // conversion from the commit or the host (`core.autocrlf=true` on
+    // Windows). This isolated checkout overrides those attributes at Git's
+    // highest-precedence info layer so the archive is a raw, complete
+    // projection of the exact tree.
     let info_dir = repository_dir.join(".git/info");
     std::fs::create_dir_all(&info_dir).map_err(|_| archive_error())?;
     std::fs::write(
         info_dir.join("attributes"),
-        b"** -export-ignore -export-subst\n",
+        b"** -export-ignore -export-subst -text\n",
     )
     .map_err(|_| archive_error())?;
 
@@ -179,6 +180,7 @@ fn snapshot_published_tree(
     skillstar_skills::git::transport::configure_remote_command(&mut command, remote, session)
         .map_err(|_| scanner_error(session))?;
     command
+        .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .arg("archive")
         .arg("--format=tar")
         .arg(commit_sha)
@@ -368,13 +370,15 @@ mod tests {
         )
         .unwrap();
         std::fs::write(repo.join("skills/writer/scripts/run.sh"), b"echo ok\n").unwrap();
-        run_git(&repo, &["init"]);
-        run_git(&repo, &["config", "user.email", "test@example.com"]);
-        run_git(&repo, &["config", "user.name", "SkillStar Test"]);
+        init_lf_git(&repo);
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "fixture"]);
         let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
         std::fs::write(repo.join("skills/writer/untracked.txt"), b"must not hash").unwrap();
+        let expected =
+            skillstar_skills::content::snapshot_path("writer", &repo.join("skills/writer"))
+                .unwrap()
+                .content_hash;
 
         let snapshot = snapshot_published_tree(
             &repo,
@@ -389,9 +393,11 @@ mod tests {
         assert_eq!(snapshot.skills.len(), 1);
         assert_eq!(snapshot.skills[0].id, "writer");
         assert_eq!(snapshot.skills[0].content_root, "skills/writer");
+        assert_eq!(snapshot.skills[0].content_hash, expected);
         assert_eq!(
-            snapshot.skills[0].content_hash,
-            "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7"
+            expected,
+            "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7",
+            "LF-pinned fixture must keep the shared content-hash algorithm"
         );
     }
 
@@ -411,9 +417,7 @@ mod tests {
             b"---\nname: writer\n---\n",
         )
         .unwrap();
-        run_git(&repo, &["init"]);
-        run_git(&repo, &["config", "user.email", "test@example.com"]);
-        run_git(&repo, &["config", "user.name", "SkillStar Test"]);
+        init_lf_git(&repo);
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "pack"]);
         let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
@@ -448,9 +452,7 @@ mod tests {
             b"---\nname: writer\n---\n",
         )
         .unwrap();
-        run_git(&repo, &["init"]);
-        run_git(&repo, &["config", "user.email", "test@example.com"]);
-        run_git(&repo, &["config", "user.name", "SkillStar Test"]);
+        init_lf_git(&repo);
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "duplicates"]);
         let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
@@ -485,12 +487,10 @@ mod tests {
         .unwrap();
         std::fs::write(
             repo.join(".gitattributes"),
-            b"skills/writer/SKILL.md export-ignore\nskills/writer/template.txt export-subst\n",
+            b"* text=auto\nskills/writer/SKILL.md export-ignore\nskills/writer/template.txt export-subst\n",
         )
         .unwrap();
-        run_git(&repo, &["init"]);
-        run_git(&repo, &["config", "user.email", "test@example.com"]);
-        run_git(&repo, &["config", "user.name", "SkillStar Test"]);
+        init_lf_git(&repo);
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "attributes"]);
         let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
@@ -517,9 +517,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
-        run_git(&source, &["init"]);
-        run_git(&source, &["config", "user.email", "test@example.com"]);
-        run_git(&source, &["config", "user.name", "SkillStar Test"]);
+        init_lf_git(&source);
         std::fs::write(source.join("SKILL.md"), b"---\nname: legacy-skill\n---\n").unwrap();
         run_git(&source, &["add", "."]);
         run_git(&source, &["commit", "-m", "legacy"]);
@@ -556,6 +554,20 @@ mod tests {
 
         assert_eq!(snapshot.skills.len(), 1);
         assert_eq!(snapshot.skills[0].id, "legacy-skill");
+    }
+
+    fn init_lf_git(directory: &Path) {
+        if !directory.join(".git").exists() {
+            run_git(directory, &["init"]);
+        }
+        run_git(directory, &["config", "user.email", "test@example.com"]);
+        run_git(directory, &["config", "user.name", "SkillStar Test"]);
+        run_git(directory, &["config", "core.autocrlf", "false"]);
+        run_git(directory, &["config", "core.eol", "lf"]);
+        let attributes = directory.join(".gitattributes");
+        if !attributes.exists() {
+            std::fs::write(&attributes, b"* -text\n").unwrap();
+        }
     }
 
     fn run_git(directory: &Path, args: &[&str]) {
