@@ -3,6 +3,7 @@ use crate::deployment::{self, batch_deploy_skills_to_agents};
 use crate::git::transport::GitOperationSession;
 use crate::lockfile;
 use crate::projects::ProjectDeployMode;
+use crate::repo_scanner;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -122,12 +123,19 @@ fn init_pack(layout: &[(&str, &str, &str)]) -> tempfile::TempDir {
 }
 
 fn lock_source_folder(name: &str) -> Option<String> {
+    lock_entry(name).and_then(|entry| entry.source_folder)
+}
+
+fn lock_entry(name: &str) -> Option<lockfile::LockEntry> {
     lockfile::Lockfile::load(&lockfile::lockfile_path())
         .unwrap()
         .skills
         .into_iter()
         .find(|entry| entry.name == name)
-        .and_then(|entry| entry.source_folder)
+}
+
+fn lock_git_ref(name: &str) -> Option<String> {
+    lock_entry(name).and_then(|entry| entry.git_ref)
 }
 
 fn payload_at(path: &Path) -> String {
@@ -520,4 +528,123 @@ fn repo_scanner_cache_empty() -> bool {
                     .all(|entry| !entry.path().join(".git").exists())
             })
             .unwrap_or(true)
+}
+
+fn delete_remote_branch(remote: &Path, branch: &str) {
+    run_git(remote, &["checkout", "main"]);
+    run_git(remote, &["branch", "-D", branch]);
+}
+
+fn public_session() -> GitOperationSession {
+    GitOperationSession::public()
+}
+
+/// Lock pins a branch the remote has deleted; cache still has SKILL.md.
+/// Fetch of that ref must not fail install/deploy, and the lock must retarget.
+#[test]
+fn deleted_lock_ref_does_not_block_install_and_retargets_to_default_branch() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[
+        (".cursor/skills/rust", "rust", "cursor rust"),
+        (".dsh/skills/rust", "rust", "dsh rust"),
+    ]);
+    run_git(remote.path(), &["checkout", "-b", "cursor/gone-branch"]);
+    run_git(remote.path(), &["checkout", "main"]);
+
+    let url = "https://github.com/acme/rust-skills.git";
+    sandbox.map_github_url(url, remote.path());
+    let pinned = format!("{url}#cursor/gone-branch");
+
+    install_skill_for_agent(pinned.clone(), Some("rust".into()), "cursor")
+        .expect("install from the live pin");
+    assert_eq!(
+        lock_git_ref("rust").as_deref(),
+        Some("cursor/gone-branch"),
+        "precondition: lock must record the pin"
+    );
+    deploy("rust", "cursor");
+
+    delete_remote_branch(remote.path(), "cursor/gone-branch");
+
+    let parsed = crate::source_resolver::Source::parse(&pinned).unwrap();
+    repo_scanner::clone_or_fetch_repo_at_in_session(
+        &parsed.repo_url,
+        &parsed.short,
+        parsed.git_ref.as_deref(),
+        &public_session(),
+    )
+    .expect("missing remote ref must use the existing cache");
+
+    assert_eq!(
+        lock_git_ref("rust").as_deref(),
+        Some("main"),
+        "lock must retarget to the repo default branch"
+    );
+    assert_eq!(
+        crate::update_checker::configured_git_ref(
+            &repo_scanner::existing_hub_checkout(&parsed.repo_url, Some("rust")).unwrap()
+        )
+        .as_deref(),
+        Some("main")
+    );
+
+    let installed = install_skill_for_agent(url.to_string(), Some("rust".into()), "deepseek")
+        .expect("carousel deploy must succeed from cache after the gone-ref fetch");
+    assert_eq!(installed.name, "rust");
+    deploy("rust", "deepseek");
+    assert_eq!(payload_at(&home_skill(".dsh", "rust")), "dsh rust");
+    assert_eq!(
+        lock_git_ref("rust").as_deref(),
+        Some("main"),
+        "harness retarget must not re-pin the deleted branch"
+    );
+}
+
+/// Prefetch of skill A (deleted ref) must not fail an install of skill B.
+#[test]
+fn prefetch_miss_of_one_repo_does_not_fail_another_skill_install() {
+    let sandbox = Sandbox::new();
+    let rust_remote = init_pack(&[(".cursor/skills/rust", "rust", "cursor rust")]);
+    run_git(
+        rust_remote.path(),
+        &["checkout", "-b", "cursor/gone-branch"],
+    );
+    run_git(rust_remote.path(), &["checkout", "main"]);
+
+    let rust_url = "https://github.com/acme/rust-skills.git";
+    sandbox.map_github_url(rust_url, rust_remote.path());
+    install_skill_for_agent(
+        format!("{rust_url}#cursor/gone-branch"),
+        Some("rust".into()),
+        "cursor",
+    )
+    .expect("pin rust");
+    delete_remote_branch(rust_remote.path(), "cursor/gone-branch");
+
+    let rust_hub = skillstar_core::infra::paths::hub_skills_dir().join("rust");
+    let failed =
+        crate::update_checker::prefetch_unique_repos_in_session(&[rust_hub], &public_session());
+    let _ = failed;
+
+    let banner_remote = init_pack(&[(
+        ".claude/skills/banner-design",
+        "banner-design",
+        "claude copy",
+    )]);
+    let banner_url = "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git";
+    sandbox.map_github_url(banner_url, banner_remote.path());
+
+    let installed = install_skill_for_agent(
+        banner_url.to_string(),
+        Some("banner-design".into()),
+        "antigravity",
+    )
+    .expect("prefetch of rust must not fail banner-design install");
+    assert_eq!(installed.name, "banner-design");
+    deploy("banner-design", "antigravity");
+    assert_eq!(
+        payload_at(&home_skill(".gemini/antigravity", "banner-design")),
+        "claude copy",
+        "missing .agent must fall back to the claude harness copy"
+    );
 }

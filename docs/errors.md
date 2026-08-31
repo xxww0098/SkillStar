@@ -2,6 +2,13 @@
 
 状态：active
 
+## 2026-08-31 - 已删除的 git ref 把无关技能的安装/轮播部署打成「无法安装该技能」
+
+- Symptom: Library 点 banner-design 的 Antigravity 轮播，toast「无法安装该技能」。日志混入 `update_checker: prefetch git fetch failed — will preserve existing update state`，`fatal: couldn't find remote ref cursor/harness-install-units-dc3e`。该 ref 来自另一条 lock 记录（`rust` 钉在已合并并删除的 PR 分支）；cache 目录仍叫 `--ref--cursor--harness-install-units-dc3e`，工作区 HEAD 已是 `main`。
+- Root cause: lock / `skillstar.ref` 把已删除分支当成硬 fetch 目标。prefetch 虽写明保留徽标，但 (1) cache-local 只按「URL 无 ref」查 `{source}` 目录，找不到 `{source}--ref--{gone}`，已在 hub 的轮播会再 fetch；(2) `fetch_and_reset_ref` / `fetch_tracked_ref` 对 `couldn't find remote ref` fail-closed，错误被映射成通用安装 toast，即使点击的是另一张卡。cache 里已有 `SKILL.md` 时不该 fail-closed。
+- Fix: cache-local 通过 hub symlink 和 `--ref--*` 变体找到现有 checkout，已在 hub 的轮播不再 fetch。fetch 遇到 missing-ref 且 cache 仍有 `SKILL.md` 时使用现有文件，把 lock `git_ref` 和 `skillstar.ref` 改指仓库默认分支（或省略），不得继续钉死分支。无 `SKILL.md`、也无 cache 仍 fail-closed。prefetch 失败不得让另一技能的 install 返回错误。
+- Self-check: `cargo test -p skillstar-skills --locked --lib skill_install::harness_retarget_tests -- --nocapture`；`cargo test -p skillstar-git --locked --lib ops::tests::missing_remote_ref_is_detected_through_anyhow_context -- --exact`。手工：lock 钉已删分支、cache HEAD 在 main，点另一技能的 harness 轮播必须安装成功，且 rust 的 lock `git_ref` 不再是死分支。
+
 ## 2026-08-31 - Windows dangling junction 对不上 cache，SourceMissing 被吃掉
 
 - Symptom: Windows CI 只红 `source_dropped::a_dropped_skill_whose_content_is_already_gone_can_only_be_removed`：`blocked` 是 `[]`，期望 `[("alpha", SourceMissing)]`。Linux/macOS 绿。harness / CRLF / deny 已过。

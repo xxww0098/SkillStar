@@ -442,7 +442,79 @@ pub(crate) fn fetch_tracked_ref_in_session(
     if let Some(git_ref) = git_ref.as_deref() {
         args.extend(["origin", git_ref]);
     }
-    git_ops::run_git_shallow_fetch_in_session(repo_root, &args, session).map(|_| ())
+    match git_ops::run_git_shallow_fetch_in_session(repo_root, &args, session) {
+        Ok(_) => Ok(()),
+        Err(error)
+            if git_ref.is_some()
+                && git_ops::is_missing_remote_ref(error.as_ref())
+                && crate::repo_scanner::cache::checkout_has_skill_payload(repo_root) =>
+        {
+            warn!(
+                target: "update_checker",
+                path = %repo_root.display(),
+                git_ref = git_ref.as_deref().unwrap_or(""),
+                "recorded git ref is gone — retargeting lock and fetching the default branch"
+            );
+            retarget_deleted_git_ref(repo_root)?;
+            git_ops::run_git_shallow_fetch_in_session(
+                repo_root,
+                &["fetch", "--depth", "1", "--quiet"],
+                session,
+            )
+            .map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Drop a lock / `skillstar.ref` pin that the remote no longer has.
+///
+/// Next update tracks the repository default branch (`origin/HEAD`) when the
+/// name can be resolved, otherwise the pin is omitted.
+pub(crate) fn retarget_deleted_git_ref(repo_root: &Path) -> Result<()> {
+    let _ = command_with_path("git")
+        .current_dir(repo_root)
+        .args(["config", "--unset", "skillstar.ref"])
+        .output();
+
+    let default_branch = crate::update_api::remote_ref_for(repo_root, None);
+    if let Some(branch) = default_branch.as_deref() {
+        let output = command_with_path("git")
+            .current_dir(repo_root)
+            .args(["config", "skillstar.ref", branch])
+            .output();
+        if output.is_ok_and(|output| !output.status.success()) {
+            warn!(
+                target: "update_checker",
+                path = %repo_root.display(),
+                branch,
+                "failed to persist retargeted default-branch pin"
+            );
+        }
+    }
+
+    let canonical = std::fs::canonicalize(repo_root).ok();
+    let _guard = crate::lockfile::get_mutex()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
+    let lock_path = crate::lockfile::lockfile_path();
+    let mut lockfile = crate::lockfile::Lockfile::load(&lock_path)?;
+    let hub = skillstar_core::infra::paths::hub_skills_dir();
+    let mut changed = false;
+    for entry in &mut lockfile.skills {
+        let belongs = repo_link::repo_root_of(&hub.join(&entry.name))
+            .and_then(|root| std::fs::canonicalize(root).ok())
+            .zip(canonical.as_ref())
+            .is_some_and(|(root, expected)| root == *expected);
+        if belongs && entry.git_ref.is_some() {
+            entry.git_ref = default_branch.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        lockfile.save(&lock_path)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
