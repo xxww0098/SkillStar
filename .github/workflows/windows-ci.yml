@@ -68,7 +68,10 @@ name: Windows CI
 #    `std::fs::canonicalize` fails when `skills/alpha` is already gone, and
 #    the raw Windows path may be `RUNNER~1` while the cache dir is
 #    `runneradmin`. `is_inside` / `repo_root_of` use
-#    `canonicalize_existing_prefix`. Do not skip SourceMissing on Windows.
+#    `canonicalize_existing_prefix`. The source_dropped fixture must reset
+#    to the drop commit oid (not `origin/HEAD`), assert the cache lost
+#    `skills/alpha`, and leave a dangling hub link — do not skip
+#    SourceMissing, and do not treat a leftover real hub directory as gone.
 on:
   push:
     branches: [main]

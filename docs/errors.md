@@ -5,10 +5,10 @@
 ## 2026-08-31 - Windows dangling junction 对不上 cache，SourceMissing 被吃掉
 
 - Symptom: Windows CI 只红 `source_dropped::a_dropped_skill_whose_content_is_already_gone_can_only_be_removed`：`blocked` 是 `[]`，期望 `[("alpha", SourceMissing)]`。Linux/macOS 绿。harness / CRLF / deny 已过。
-- Root cause: 测试先 `reset --hard` 掉 cache 里的 `skills/alpha`，hub 链变 dangling。`repo_root_of` / `is_inside` 对目标做 `canonicalize`，缺尾巴就失败，退回生路径。Windows temp 常是 `C:\Users\RUNNER~1\...`，cache 目录 canonicalize 成 `runneradmin`，前缀对不上，alpha 不再算共享 checkout 成员，update 只看 beta。
-- Fix: `fs_ops::canonicalize_existing_prefix` 先 canonicalize 还在的前缀再拼回缺失尾巴。`is_inside` / `repo_root_of` / pathspec 共用它。不要在 Windows 上跳过 SourceMissing。
-- Files: `crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-skills/src/repo_link.rs`、`crates/skillstar-skills/src/skill_update/mod.rs`。
-- Self-check: `cargo test -p skillstar-skills --locked --lib dangling_cache_link source_dropped::a_dropped_skill_whose_content_is_already_gone`。
+- Root cause: 两件叠加，都不是「放宽 SourceMissing」。① `reset --hard origin/HEAD` 在 path-remote 的 Windows clone 上不一定落到 drop commit；junction 指着 `skills/alpha` 时 reset 也可能删不掉该目录，hub 仍是可读副本，`exists()` 为真就不该报 SourceMissing。② 即便链已 dangling，`repo_root_of` / `is_inside` 对缺尾巴的目标 `canonicalize` 失败后拿生路径去比；Windows temp 常是 `RUNNER~1`，cache 目录是 `runneradmin`，alpha 被踢出共享 checkout。
+- Fix: 夹具钉 drop commit oid，断言 cache tree 已无 `skills/alpha`，再把 hub 建成**不可读的 managed link**（先链后删 target）。产品侧 `canonicalize_existing_prefix` 让 dangling 链仍属于同一 checkout。不要改 SourceMissing 语义，也不要在 Windows 上 skip。
+- Files: `crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-skills/src/repo_link.rs`。
+- Self-check: `cargo test -p skillstar-skills --locked --lib skill_update::tests::source_dropped -- --nocapture`。
 
 ## 2026-08-31 - Windows gitconfig `insteadOf` 吃掉反斜杠；checkout 变成 CRLF
 

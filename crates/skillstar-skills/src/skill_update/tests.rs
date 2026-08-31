@@ -74,6 +74,20 @@ fn run_git(repo: &Path, args: &[&str]) {
     );
 }
 
+fn git_stdout(repo: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 fn pin_lf_repo(repo: &Path) {
     run_git(repo, &["config", "core.autocrlf", "false"]);
     run_git(repo, &["config", "core.eol", "lf"]);
