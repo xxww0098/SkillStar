@@ -636,6 +636,24 @@ fn validate_relative_pathspec(pathspec: &str) -> Result<()> {
     Ok(())
 }
 
+/// Git failed because the recorded remote ref no longer exists.
+///
+/// Typical stderr: `fatal: couldn't find remote ref <name>`. Callers with a
+/// usable local checkout must not treat this as a hard install/update failure.
+pub fn is_missing_remote_ref(error: &dyn std::error::Error) -> bool {
+    let mut current = Some(error);
+    while let Some(err) = current {
+        let text = err.to_string();
+        if text.contains("couldn't find remote ref")
+            || text.contains("Could not find remote branch")
+        {
+            return true;
+        }
+        current = err.source();
+    }
+    false
+}
+
 /// Run a git fetch with retry logic for the shallow-file race condition.
 ///
 /// When multiple processes or threads run `git fetch --depth 1` on the same

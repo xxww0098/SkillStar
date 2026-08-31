@@ -40,6 +40,86 @@ pub fn cached_repo_dir_if_present(source: &str, git_ref: Option<&str>) -> Option
     repo_dir.join(".git").exists().then_some(repo_dir)
 }
 
+/// Local checkout for a source, including leftover `--ref--<branch>` caches.
+///
+/// A lock that still names a deleted PR branch keeps the clone under
+/// `{source}--ref--{branch}`. Carousel / cache-local install must find that
+/// directory even when the URL no longer carries a ref.
+pub fn existing_repo_cache_dir(source: &str, git_ref: Option<&str>) -> Option<PathBuf> {
+    if let Some(repo_dir) = cached_repo_dir_if_present(source, git_ref) {
+        return Some(repo_dir);
+    }
+    if git_ref.is_some()
+        && let Some(repo_dir) = cached_repo_dir_if_present(source, None)
+    {
+        return Some(repo_dir);
+    }
+    find_ref_variant_caches(source).into_iter().next()
+}
+
+/// Hub-linked checkout for an already-installed skill from `repo_url`.
+///
+/// The hub symlink is the source of truth: origin may be poisoned or still
+/// pinned to a deleted ref, but the files are already local.
+pub fn existing_hub_checkout(repo_url: &str, skill_name: Option<&str>) -> Option<PathBuf> {
+    let hub = paths::hub_skills_dir();
+    if let Some(name) = skill_name.filter(|name| !name.is_empty())
+        && let Some(root) = crate::repo_link::repo_root_of(&hub.join(name))
+    {
+        return Some(root);
+    }
+    let lock = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).ok()?;
+    for entry in lock.skills {
+        if !crate::source_resolver::same_remote_url(&entry.git_url, repo_url) {
+            continue;
+        }
+        if let Some(root) = crate::repo_link::repo_root_of(&hub.join(&entry.name)) {
+            return Some(root);
+        }
+    }
+    None
+}
+
+fn find_ref_variant_caches(source: &str) -> Vec<PathBuf> {
+    let Ok(prefix) = cache_key_for(source, None) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(paths::repos_cache_dir()) else {
+        return Vec::new();
+    };
+    let pin_prefix = format!("{prefix}--ref--");
+    let mut matches: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                return false;
+            };
+            (name == prefix || name.starts_with(&pin_prefix)) && entry.path().join(".git").exists()
+        })
+        .map(|entry| entry.path())
+        .collect();
+    matches.sort();
+    matches
+}
+
+/// True when the checkout still has at least one `SKILL.md` to install from.
+pub(crate) fn checkout_has_skill_payload(repo_dir: &Path) -> bool {
+    if !repo_dir.join(".git").exists() {
+        return false;
+    }
+    crate::discovery::discover_skills_without_dedup(repo_dir, true, None)
+        .iter()
+        .any(|skill| {
+            let manifest = if skill.folder_path.is_empty() {
+                repo_dir.join("SKILL.md")
+            } else {
+                repo_dir.join(&skill.folder_path).join("SKILL.md")
+            };
+            manifest.is_file()
+        })
+}
+
 pub fn clone_or_fetch_repo_at_in_session(
     repo_url: &str,
     source: &str,
@@ -227,12 +307,32 @@ fn fetch_and_reset_ref(
 ) -> Result<()> {
     validate_git_ref(git_ref)?;
 
-    git_ops::run_git_shallow_fetch_in_session(
+    let fetch = git_ops::run_git_shallow_fetch_in_session(
         repo_dir,
         &["fetch", "--depth", "1", "--quiet", "origin", git_ref],
         session,
-    )
-    .with_context(|| format!("git fetch for ref '{git_ref}' failed"))?;
+    );
+    match fetch {
+        Ok(_) => {}
+        Err(error)
+            if git_ops::is_missing_remote_ref(error.as_ref())
+                && checkout_has_skill_payload(repo_dir) =>
+        {
+            warn!(
+                target: "repo_scanner",
+                path = %repo_dir.display(),
+                git_ref,
+                "recorded git ref is gone — using existing cache and retargeting lock"
+            );
+            crate::update_checker::retarget_deleted_git_ref(repo_dir).with_context(|| {
+                format!("failed to retarget lock after missing remote ref '{git_ref}'")
+            })?;
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("git fetch for ref '{git_ref}' failed"));
+        }
+    }
 
     // Fetch is a network operation (up to seconds) — a user edit landing in
     // that window must not be destroyed by the reset below. Fail closed and

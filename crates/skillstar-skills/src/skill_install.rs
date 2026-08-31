@@ -96,10 +96,19 @@ pub fn scan_repo_preferring_local_cache_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
+    scan_repo_preferring_local_cache_for_skill(url, full_depth, session, None)
+}
+
+fn scan_repo_preferring_local_cache_for_skill(
+    url: &str,
+    full_depth: bool,
+    session: &crate::git::transport::GitOperationSession,
+    skill_name: Option<&str>,
+) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
     let parsed = crate::source_resolver::Source::parse(url)
         .map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
-    if let Some(repo_dir) =
-        repo_scanner::cached_repo_dir_if_present(&parsed.short, parsed.git_ref.as_deref())
+    if let Some(repo_dir) = repo_scanner::existing_hub_checkout(&parsed.repo_url, skill_name)
+        .or_else(|| repo_scanner::existing_repo_cache_dir(&parsed.short, parsed.git_ref.as_deref()))
     {
         return Ok(scan_parsed_checkout(&parsed, repo_dir, full_depth));
     }
@@ -297,13 +306,14 @@ fn try_install_from_repo_cache(
     harness_prefix: Option<&str>,
     except_agent_id: Option<&str>,
 ) -> Result<Option<Skill>, String> {
-    let Ok((repo_url, _source, repo_dir, scan_found)) =
-        scan_repo_preferring_local_cache_in_session(url, false, session)
-    else {
+    let Ok((repo_url, _source, repo_dir, scan_found)) = scan_repo_preferring_local_cache_for_skill(
+        url,
+        false,
+        session,
+        requested_name.or(Some(name_hint)),
+    ) else {
         return Ok(None);
     };
-    let parsed =
-        crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
     let preferred_folder = requested_name
         .or(Some(name_hint))
         .and_then(lock_entry_for)
@@ -376,7 +386,7 @@ fn try_install_from_repo_cache(
     match repo_scanner::install_from_repo_at(
         &repo_dir,
         &repo_url,
-        parsed.git_ref.as_deref(),
+        crate::update_checker::configured_git_ref(&repo_dir).as_deref(),
         &targets,
     ) {
         Ok(installed) if !installed.is_empty() => {
@@ -605,9 +615,13 @@ pub fn install_skills_batch_in_session(
         .ensure_repository_mutation_allowed(&parsed.repo_url)
         .map_err(|error| error.to_string())?;
     let skills_dir = paths::hub_skills_dir();
-    let (repo_url, _source, repo_dir, scan_found) =
-        scan_repo_preferring_local_cache_in_session(url, false, session)
-            .map_err(|error| format!("{error:#}"))?;
+    let (repo_url, _source, repo_dir, scan_found) = scan_repo_preferring_local_cache_for_skill(
+        url,
+        false,
+        session,
+        names.first().map(String::as_str),
+    )
+    .map_err(|error| format!("{error:#}"))?;
     let harness_prefix = match agent_id {
         Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
         None => None,
@@ -695,7 +709,7 @@ pub fn install_skills_batch_in_session(
         match repo_scanner::install_from_repo_at(
             &repo_dir,
             &repo_url,
-            parsed.git_ref.as_deref(),
+            crate::update_checker::configured_git_ref(&repo_dir).as_deref(),
             &targets,
         ) {
             Ok(installed) => {

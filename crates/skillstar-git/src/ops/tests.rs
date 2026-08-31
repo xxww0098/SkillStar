@@ -282,3 +282,13 @@ fn rename_records_are_parsed_from_z_output() {
     );
     assert!(parse_rename_records("").is_empty());
 }
+
+#[test]
+fn missing_remote_ref_is_detected_through_anyhow_context() {
+    let inner = anyhow!("other: fatal: couldn't find remote ref cursor/gone");
+    let wrapped = inner.context("git fetch for ref 'cursor/gone' failed");
+    assert!(is_missing_remote_ref(wrapped.as_ref()));
+    assert!(!is_missing_remote_ref(
+        anyhow!("fatal: could not read from remote repository").as_ref()
+    ));
+}
