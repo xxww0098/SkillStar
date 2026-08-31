@@ -297,110 +297,155 @@ fn requested_skill_not_found_error(names: &[String]) -> String {
     )
 }
 
-fn try_install_from_repo_cache(
-    url: &str,
-    requested_name: Option<&str>,
-    name_hint: &str,
+/// Choose install units. Harness folders are identity aliases of `skills/<name>/`.
+fn choose_install_skills(
+    repo_dir: &Path,
+    requests: &[(Option<&str>, &str)],
+    harness_prefix: Option<&str>,
+) -> Result<Vec<repo_scanner::DiscoveredSkill>, String> {
+    let lock = lockfile::Lockfile::load(&lockfile::lockfile_path()).ok();
+    let mut chosen = Vec::new();
+    let mut missing = Vec::new();
+    for (requested_name, name_hint) in requests {
+        let search = requested_name.unwrap_or(*name_hint);
+        let preferred = lock.as_ref().and_then(|lockfile| {
+            lockfile
+                .skills
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(search))
+                .and_then(|entry| entry.source_folder.as_deref())
+        });
+        let resolved = crate::discovery::resolve_install_skills(
+            repo_dir,
+            *requested_name,
+            harness_prefix,
+            preferred,
+        )?;
+        match find_target_skill(&resolved, *requested_name, name_hint) {
+            Some(skill) => {
+                if !chosen.iter().any(|seen| seen.id == skill.id) {
+                    chosen.push(skill.clone());
+                }
+            }
+            None if requested_name.is_some() => missing.push(search.to_string()),
+            None => {
+                return Err("No valid SKILL.md found in the selected source".to_string());
+            }
+        }
+    }
+    if !missing.is_empty() {
+        return Err(requested_skill_not_found_error(&missing));
+    }
+    Ok(chosen)
+}
+
+#[derive(Clone, Copy)]
+enum ReuseMode {
+    /// Single install / carousel: return the existing hub Skill.
+    Report,
+    /// Batch: skip an already-hubbed same-folder Skill.
+    Skip,
+}
+
+fn materialize_chosen_skills(
     skills_dir: &Path,
+    repo_url: &str,
+    repo_dir: &Path,
+    chosen: &[repo_scanner::DiscoveredSkill],
+    harness_prefix: Option<&str>,
+    except_agent_id: Option<&str>,
+    reuse: ReuseMode,
+) -> Result<Vec<Skill>, String> {
+    let mut reused = Vec::new();
+    let mut targets = Vec::new();
+    for skill in chosen {
+        if local_skill_blocks_repo_install(&skill.id) {
+            warn!(
+                target: "install_skill",
+                skill_id = %skill.id,
+                "repo skill would collide with existing local skill, skipping"
+            );
+            continue;
+        }
+        let existing_path = skills_dir.join(&skill.id);
+        if existing_path.symlink_metadata().is_ok() {
+            match existing_same_repo_action(&skill.id, repo_url, &skill.folder_path, harness_prefix)
+            {
+                SameRepoAction::Reuse => {
+                    if matches!(reuse, ReuseMode::Report) {
+                        reused.push(new_skill_from_install(
+                            skill.id.clone(),
+                            extract_skill_description(&existing_path),
+                            repo_url.to_string(),
+                            compute_tree_hash_for(skills_dir, &skill.id),
+                        ));
+                    }
+                    continue;
+                }
+                SameRepoAction::Retarget => {
+                    deployment::pin_existing_global_links_to_current_source(
+                        &skill.id,
+                        except_agent_id,
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
+                SameRepoAction::Reject => {
+                    return Err(format!("Skill '{}' is already installed", skill.id));
+                }
+            }
+        }
+        targets.push(repo_scanner::SkillInstallTarget {
+            id: skill.id.clone(),
+            folder_path: skill.folder_path.clone(),
+        });
+    }
+
+    if targets.is_empty() {
+        return Ok(reused);
+    }
+
+    let installed = repo_scanner::install_from_repo_at(
+        repo_dir,
+        repo_url,
+        crate::update_checker::configured_git_ref(repo_dir).as_deref(),
+        &targets,
+    )
+    .map_err(|error| format!("{error:#}"))?;
+    if installed.is_empty() && reused.is_empty() {
+        return Err("No valid SKILL.md found in the selected source".to_string());
+    }
+    let mut skills = finalize_repo_cache_installs(skills_dir, repo_url, &installed)?;
+    installed_skill::invalidate_cache();
+    skills.extend(reused);
+    Ok(skills)
+}
+
+/// Vercel-skills 5-step install: resolve → discover → hub link.
+/// Agent deploy / project-vs-global scope stay at the caller.
+fn install_from_source(
+    url: &str,
+    requests: &[(Option<&str>, &str)],
     session: &crate::git::transport::GitOperationSession,
     harness_prefix: Option<&str>,
     except_agent_id: Option<&str>,
-) -> Result<Option<Skill>, String> {
-    let Ok((repo_url, _source, repo_dir, scan_found)) = scan_repo_preferring_local_cache_for_skill(
-        url,
-        false,
-        session,
-        requested_name.or(Some(name_hint)),
-    ) else {
-        return Ok(None);
-    };
-    let preferred_folder = requested_name
-        .or(Some(name_hint))
-        .and_then(lock_entry_for)
-        .and_then(|entry| entry.source_folder);
-    let skills_found = if harness_prefix.is_some()
-        || scan_found.iter().any(|skill| skill.folder_path.is_empty())
-    {
-        match crate::discovery::resolve_install_skills(
-            &repo_dir,
-            requested_name,
-            harness_prefix,
-            preferred_folder.as_deref(),
-        ) {
-            Ok(skills) => skills,
-            Err(error) if harness_prefix.is_some() => return Err(error),
-            Err(_) => return Ok(None),
-        }
-    } else {
-        scan_found
-    };
-    let target = find_target_skill(&skills_found, requested_name, name_hint);
-
-    // Guard against overwriting a local skill whose name matches the repo skill
-    if let Some(skill) = &target
-        && local_skill_blocks_repo_install(&skill.id)
-    {
-        warn!(
-            target: "install_skill",
-            skill_id = %skill.id,
-            "repo-cache skill would collide with existing local skill, skipping"
-        );
-        return Ok(None);
-    }
-
-    let Some(skill) = target else {
-        if let Some(requested_name) = requested_name {
-            return Err(requested_skill_not_found_error(&[
-                requested_name.to_string()
-            ]));
-        }
-        return Ok(None);
-    };
-
-    let existing_path = skills_dir.join(&skill.id);
-    if existing_path.symlink_metadata().is_ok() {
-        match existing_same_repo_action(&skill.id, &repo_url, &skill.folder_path, harness_prefix) {
-            SameRepoAction::Reuse => {
-                return Ok(Some(new_skill_from_install(
-                    skill.id.clone(),
-                    extract_skill_description(&existing_path),
-                    repo_url,
-                    compute_tree_hash_for(skills_dir, &skill.id),
-                )));
-            }
-            SameRepoAction::Retarget => {
-                deployment::pin_existing_global_links_to_current_source(&skill.id, except_agent_id)
-                    .map_err(|error| error.to_string())?;
-            }
-            SameRepoAction::Reject => {
-                return Err(format!("Skill '{}' is already installed", skill.id));
-            }
-        }
-    }
-
-    let targets = vec![repo_scanner::SkillInstallTarget {
-        id: skill.id.clone(),
-        folder_path: skill.folder_path.clone(),
-    }];
-
-    match repo_scanner::install_from_repo_at(
-        &repo_dir,
+    reuse: ReuseMode,
+) -> Result<Vec<Skill>, String> {
+    let lookup = requests
+        .first()
+        .and_then(|(requested, hint)| requested.or(Some(*hint)));
+    let (repo_url, _source, repo_dir, _scan) =
+        scan_repo_preferring_local_cache_for_skill(url, false, session, lookup)
+            .map_err(|error| format!("{error:#}"))?;
+    let chosen = choose_install_skills(&repo_dir, requests, harness_prefix)?;
+    materialize_chosen_skills(
+        &paths::hub_skills_dir(),
         &repo_url,
-        crate::update_checker::configured_git_ref(&repo_dir).as_deref(),
-        &targets,
-    ) {
-        Ok(installed) if !installed.is_empty() => {
-            let mut installed_skills =
-                finalize_repo_cache_installs(skills_dir, &repo_url, &installed)?;
-            installed_skill::invalidate_cache();
-            Ok(installed_skills.pop())
-        }
-        Ok(_) => Ok(None),
-        Err(err) => {
-            warn!(target: "install_skill", error = %err, "repo-cache install failed, falling back");
-            Ok(None)
-        }
-    }
+        &repo_dir,
+        &chosen,
+        harness_prefix,
+        except_agent_id,
+        reuse,
+    )
 }
 
 pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, AppError> {
@@ -487,96 +532,17 @@ fn install_skill_in_session_locked(
         ));
     }
 
-    if let Some(skill) = try_install_from_repo_cache(
+    let mut installed = install_from_source(
         &url,
-        name.as_deref(),
-        &name_hint,
-        &skills_dir,
+        &[(name.as_deref(), name_hint.as_str())],
         session,
         harness_prefix,
         except_agent_id,
-    )? {
-        return Ok(skill);
-    }
-
-    let dest = skills_dir.join(&name_hint);
-    if dest.symlink_metadata().is_ok() {
-        return Err(format!("Skill '{}' is already installed", name_hint));
-    }
-
-    if harness_prefix.is_some() {
-        return Err(
-            "Repository scan failed; refusing to clone the whole repository for a harness-specific install."
-                .to_string(),
-        );
-    }
-
-    if let Err(error) = git_ops::clone_repo_in_session(&url, &dest, session) {
-        let _ = fs_ops::remove_dir_all_retry(&dest);
-        return Err(error.to_string());
-    }
-
-    if crate::discovery::discover_skills_without_dedup(&dest, true, None)
-        .iter()
-        .any(|skill| !skill.folder_path.is_empty())
-    {
-        let _ = fs_ops::remove_dir_all_retry(&dest);
-        return Err(
-            "Repository scan failed; refusing to install the whole repository because catalog or harness skill folders exist."
-                .to_string(),
-        );
-    }
-
-    // The direct-clone fallback is the legacy whole-repo install path. It
-    // must not reopen the door the scan path closed: an invalid SKILL.md is
-    // just as un-installable here. Fail closed with the same actionable
-    // reason and clean up the clone.
-    if let Err(reason) = crate::validation::ensure_installable(&dest) {
-        let _ = fs_ops::remove_dir_all_retry(&dest);
-        return Err(format!(
-            "Repository is not installable as a single Skill: {reason}"
-        ));
-    }
-
-    let result = (|| -> Result<Skill, String> {
-        let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
-        let content_hash = crate::content::snapshot(&name_hint)
-            .map_err(|e| format!("Failed to capture installed Skill baseline: {e}"))?
-            .content_hash;
-
-        let _lock = lockfile::get_mutex()
-            .lock()
-            .map_err(|_| "Lockfile mutex poisoned".to_string())?;
-        let lock_path = lockfile::lockfile_path();
-        let mut lockfile = lockfile::Lockfile::load(&lock_path)
-            .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
-        lockfile.upsert(crate::lockfile::LockEntry {
-            name: name_hint.clone(),
-            git_url: url.clone(),
-            git_ref: None,
-            tree_hash: tree_hash.clone(),
-            content_hash: Some(content_hash),
-            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
-            installed_at: chrono::Utc::now().to_rfc3339(),
-            source_folder: None,
-        });
-        lockfile
-            .save(&lock_path)
-            .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
-        installed_skill::invalidate_cache();
-
-        let description = extract_skill_description(&dest);
-        Ok(new_skill_from_install(
-            name_hint.clone(),
-            description,
-            url.clone(),
-            Some(tree_hash),
-        ))
-    })();
-    if result.is_err() {
-        let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&dest);
-    }
-    result
+        ReuseMode::Report,
+    )?;
+    installed.pop().ok_or_else(|| {
+        format!("Skill '{name_hint}' already exists as a local skill or could not be installed")
+    })
 }
 
 /// Install multiple skills from the same repository URL in a single batch.
@@ -609,159 +575,30 @@ pub fn install_skills_batch_in_session(
             .map_err(|error| error.to_string())?;
     }
 
-    let parsed =
-        crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
     crate::skill_mutation::policy()
-        .ensure_repository_mutation_allowed(&parsed.repo_url)
+        .ensure_repository_mutation_allowed(
+            &crate::source_resolver::Source::parse(url)
+                .map_err(|error| format!("Invalid source: {error}"))?
+                .repo_url,
+        )
         .map_err(|error| error.to_string())?;
-    let skills_dir = paths::hub_skills_dir();
-    let (repo_url, _source, repo_dir, scan_found) = scan_repo_preferring_local_cache_for_skill(
-        url,
-        false,
-        session,
-        names.first().map(String::as_str),
-    )
-    .map_err(|error| format!("{error:#}"))?;
+    crate::hub_entry::sweep_stale_staging(&paths::hub_skills_dir());
     let harness_prefix = match agent_id {
         Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
         None => None,
     };
-    let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .map_err(|error| format!("Failed to load Skill lockfile: {error}"))?;
-    let skills_found = if harness_prefix.is_some()
-        || scan_found.iter().any(|skill| skill.folder_path.is_empty())
-    {
-        let mut resolved = Vec::new();
-        for name in names {
-            let preferred = existing_lock
-                .skills
-                .iter()
-                .find(|entry| entry.name == *name)
-                .and_then(|entry| entry.source_folder.as_deref());
-            resolved.extend(crate::discovery::resolve_install_skills(
-                &repo_dir,
-                Some(name),
-                harness_prefix.as_deref(),
-                preferred,
-            )?);
-        }
-        resolved
-    } else {
-        scan_found
-    };
-
-    let mut targets = Vec::new();
-    let mut fallback_names = Vec::new();
-    let mut missing_names = Vec::new();
-
-    for name in names {
-        // First try to find a match in the scanned repo
-        let target = find_target_skill(&skills_found, Some(name), name);
-        if let Some(skill) = target {
-            if local_skill_blocks_repo_install(&skill.id) {
-                warn!(
-                    target: "install_skills_batch",
-                    skill_id = %skill.id,
-                    "repo-cache skill would collide with existing local skill, skipping"
-                );
-                continue;
-            }
-            if skills_dir.join(&skill.id).symlink_metadata().is_ok() {
-                let entry = existing_lock
-                    .skills
-                    .iter()
-                    .find(|entry| entry.name == skill.id);
-                let same_source = entry.is_some_and(|entry| {
-                    crate::source_resolver::same_remote_url(&entry.git_url, &repo_url)
-                });
-                if same_source {
-                    if harness_prefix.is_some() && !source_folder_eq(entry, &skill.folder_path) {
-                        deployment::pin_existing_global_links_to_current_source(
-                            &skill.id, agent_id,
-                        )
-                        .map_err(|error| error.to_string())?;
-                    } else {
-                        continue;
-                    }
-                } else {
-                    return Err(format!(
-                        "Skill '{}' already exists from a different source; remove it or choose another skill",
-                        skill.id
-                    ));
-                }
-            }
-            targets.push(repo_scanner::SkillInstallTarget {
-                id: skill.id.clone(),
-                folder_path: skill.folder_path.clone(),
-            });
-        } else {
-            missing_names.push(name.clone());
-        }
-    }
-
-    if !missing_names.is_empty() {
-        return Err(requested_skill_not_found_error(&missing_names));
-    }
-
-    let mut installed_skills = Vec::new();
-
-    if !targets.is_empty() {
-        match repo_scanner::install_from_repo_at(
-            &repo_dir,
-            &repo_url,
-            crate::update_checker::configured_git_ref(&repo_dir).as_deref(),
-            &targets,
-        ) {
-            Ok(installed) => {
-                installed_skills.extend(finalize_repo_cache_installs(
-                    &skills_dir,
-                    &repo_url,
-                    &installed,
-                )?);
-                installed_skill::invalidate_cache();
-            }
-            Err(e) => {
-                warn!(target: "install_skills_batch", error = %e, "batch repo install failed");
-                // Fallback: all targets must be installed via direct fallback
-                for t in targets {
-                    fallback_names.push(t.id);
-                }
-            }
-        }
-    }
-
-    // Process fallbacks one by one
-    let mut fallback_installed = Vec::new();
-    for name in fallback_names {
-        match install_skill_in_session_locked(
-            url.to_string(),
-            Some(name),
-            session,
-            harness_prefix.as_deref(),
-            agent_id,
-        ) {
-            Ok(skill) => {
-                fallback_installed.push(skill.name.clone());
-                installed_skills.push(skill);
-            }
-            Err(error) => {
-                let mut rollback_errors = Vec::new();
-                for installed_name in fallback_installed.iter().rev() {
-                    if let Err(rollback_error) = uninstall_skill_locked_unchecked(installed_name) {
-                        rollback_errors.push(format!("{installed_name}: {rollback_error}"));
-                    }
-                }
-                let rollback = if rollback_errors.is_empty() {
-                    String::new()
-                } else {
-                    format!("; rollback also failed: {}", rollback_errors.join(", "))
-                };
-                return Err(format!("Fallback install failed: {error}{rollback}"));
-            }
-        }
-    }
-
-    Ok(installed_skills)
+    let requests: Vec<(Option<&str>, &str)> = names
+        .iter()
+        .map(|name| (Some(name.as_str()), name.as_str()))
+        .collect();
+    install_from_source(
+        url,
+        &requests,
+        session,
+        harness_prefix.as_deref(),
+        agent_id,
+        ReuseMode::Skip,
+    )
 }
 
 pub fn uninstall_skill(name: &str) -> Result<(), String> {

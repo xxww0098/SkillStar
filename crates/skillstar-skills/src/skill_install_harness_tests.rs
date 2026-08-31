@@ -648,3 +648,89 @@ fn prefetch_miss_of_one_repo_does_not_fail_another_skill_install() {
         "missing .agent must fall back to the claude harness copy"
     );
 }
+
+/// First-install chooser: one pipeline, harness folders are identity aliases.
+#[test]
+fn install_pipeline_table_chooses_harness_or_fallback_folder() {
+    struct Case {
+        name: &'static str,
+        url: &'static str,
+        layout: &'static [(&'static str, &'static str, &'static str)],
+        root_shim: Option<(&'static str, &'static str)>,
+        agent: &'static str,
+        skill: &'static str,
+        expect_folder: &'static str,
+        expect_payload: &'static str,
+    }
+    let cases = [
+        Case {
+            name: "rust-skills --agent cursor hubs .cursor/skills/rust",
+            url: "https://github.com/acme/rust-skills.git",
+            layout: &[
+                (".cursor/skills/rust", "rust", "cursor rust"),
+                (".dsh/skills/rust", "rust", "dsh rust"),
+            ],
+            root_shim: Some(("rust", "shim")),
+            agent: "cursor",
+            skill: "rust",
+            expect_folder: ".cursor/skills/rust",
+            expect_payload: "cursor rust",
+        },
+        Case {
+            name: "impeccable has no .dsh — DeepSeek still installs via fallback",
+            url: "https://github.com/acme/impeccable.git",
+            layout: &[(".cursor/skills/impeccable", "impeccable", "cursor copy")],
+            root_shim: Some(("impeccable", "shim")),
+            agent: "deepseek",
+            skill: "impeccable",
+            expect_folder: ".cursor/skills/impeccable",
+            expect_payload: "cursor copy",
+        },
+        Case {
+            name: "ui-ux-pro-max-skill only .claude — Antigravity still deploys that folder",
+            url: "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+            layout: &[(
+                ".claude/skills/banner-design",
+                "banner-design",
+                "claude copy",
+            )],
+            root_shim: None,
+            agent: "antigravity",
+            skill: "banner-design",
+            expect_folder: ".claude/skills/banner-design",
+            expect_payload: "claude copy",
+        },
+    ];
+
+    for case in cases {
+        let sandbox = Sandbox::new();
+        let remote = init_pack(case.layout);
+        if let Some((name, marker)) = case.root_shim {
+            std::fs::write(
+                remote.path().join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {marker}\n---\n\n# {marker}\n"),
+            )
+            .unwrap();
+            run_git(remote.path(), &["add", "."]);
+            run_git(remote.path(), &["commit", "-m", "shim"]);
+        }
+        sandbox.map_github_url(case.url, remote.path());
+        let installed =
+            install_skill_for_agent(case.url.to_string(), Some(case.skill.into()), case.agent)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+        assert_eq!(installed.name, case.skill, "{}", case.name);
+        assert_eq!(
+            lock_source_folder(case.skill).as_deref(),
+            Some(case.expect_folder),
+            "{}",
+            case.name
+        );
+        let hub = skillstar_core::infra::paths::hub_skills_dir().join(case.skill);
+        assert_eq!(payload_at(&hub), case.expect_payload, "{}", case.name);
+        assert!(
+            !hub.join("tests").exists() && !hub.join(".cursor").exists() && !hub.join(".dsh").exists(),
+            "{} must not hub the repo root",
+            case.name
+        );
+    }
+}

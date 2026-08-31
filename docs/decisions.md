@@ -424,6 +424,15 @@
 - 后果：已装卡的常见轮播点击是 cache-local 部署/改指向。Impeccable 点 DeepSeek 会把已有 skill 文件夹链到 `~/.dsh/skills/impeccable`，不再报「没有 `.dsh`」。首次安装和 cache 被删后的重装仍走网络。
 - 证据：`scan_repo_preferring_local_cache_in_session`、`resolve_install_skills` 回退、`installed_rust_skills_deepseek_retargets_from_cache_without_clone`、`installed_impeccable_deepseek_falls_back_to_a_skill_folder`、`missing_git_cache_still_fetches_for_harness_install`。
 
+## D-047：技能安装是 vercel-skills 五步管线，harness 文件夹是 identity 别名
+
+- 日期：2026-08-31
+- 状态：accepted
+- 背景：CLI、Tauri、轮播、batch 和整仓 clone 回退各自选文件夹，shim / catalog / harness 扫描器重复。用户要的是 `npx skills add` 那条管线，不是第六条路径。
+- 决策：所有 git/local 安装走同一入口 `skill_install::install_from_source`：1. `Source::parse` 解析 `owner/repo`、URL、tree URL、本地路径；2. 发现含 `SKILL.md` 的目录；3. Hub 只链所选文件夹；4. Agent 目录 symlink（Windows 必要时 copy）；5. 调用方决定 project vs global。`.<harness>/skills/<name>` 与 `skills/<name>/` 是同一 identity：`--agent X` 优先该 harness，否则 catalog，否则现有 hub，否则另一份 harness 副本。没有 `SKILL.md` 才失败。禁止整仓 clone 回退。
+- 后果：本地路径和 Git URL 产物一致。rust-skills / impeccable / ui-ux-pro-max-skill 都装得上。已删除 git ref 与 prefetch 失败仍按 D-046 / errors.md 处理。share-code 的 embedded 分支不是第六条 git 安装。
+- 证据：`install_from_source`、`resolve_install_skills`、`install_pipeline_table_chooses_harness_or_fallback_folder`。
+
 ## 新增记录格式
 
 ```text
