@@ -305,13 +305,29 @@ function useSkillsState() {
 
   const installSkill = useCallback(
     async (url: string, name?: string, agentId?: string) => {
+      const toggleKey = name && agentId ? `${name}::${agentId}` : null;
+      if (toggleKey) {
+        if (pendingAgentToggleRef.current.has(toggleKey)) {
+          const cached = queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY)?.find((item) => item.name === name);
+          if (cached) return cached;
+        }
+        pendingAgentToggleRef.current.add(toggleKey);
+        setPendingAgentToggleKeys(new Set(pendingAgentToggleRef.current));
+        setIsTogglingAgent(true);
+      }
       try {
         return await installSkillMutate({ url, name, agentId });
       } catch (e) {
         throw new Error(String(e));
+      } finally {
+        if (toggleKey) {
+          pendingAgentToggleRef.current.delete(toggleKey);
+          setPendingAgentToggleKeys(new Set(pendingAgentToggleRef.current));
+          setIsTogglingAgent(pendingAgentToggleRef.current.size > 0);
+        }
       }
     },
-    [installSkillMutate],
+    [installSkillMutate, queryClient],
   );
 
   /** Re-scan one repository at full depth and reinstall every discovered Skill. */

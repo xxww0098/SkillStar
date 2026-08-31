@@ -39,11 +39,15 @@ export function useMarketplaceActions({
     async (url: string, name: string, agentId?: string) => {
       if (!url || !name) return;
 
-      setInstallingNames((prev) => {
-        const next = new Set(prev);
-        next.add(name);
-        return next;
-      });
+      // A carousel / `--agent` click must not lock the whole card; only that
+      // icon goes pending (via installSkill's pendingAgentToggleKeys).
+      if (!agentId) {
+        setInstallingNames((prev) => {
+          const next = new Set(prev);
+          next.add(name);
+          return next;
+        });
+      }
 
       try {
         const skill = await installSkill(url, name, agentId);

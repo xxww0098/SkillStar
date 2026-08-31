@@ -196,7 +196,9 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
 
   const handleInstall = useCallback(
     async (url: string, name: string, agentId?: string) => {
-      setInstallingNames((prev) => new Set(prev).add(name));
+      if (!agentId) {
+        setInstallingNames((prev) => new Set(prev).add(name));
+      }
       try {
         const skill = await installSkill(url, name, agentId);
         patchSkill(name, (entry) => ({

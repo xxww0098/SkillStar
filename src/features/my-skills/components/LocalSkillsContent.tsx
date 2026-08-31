@@ -275,9 +275,9 @@ export function LocalSkillsContent({
   // Stable identities so SkillGrid/SkillCard memoization holds across
   // unrelated re-renders (e.g. every search-input keystroke).
   const handleInstall = useCallback(
-    async (url: string) => {
+    async (url: string, name?: string, agentId?: string) => {
       try {
-        await installSkill(url);
+        await installSkill(url, name, agentId);
       } catch (e) {
         if (import.meta.env.DEV) console.error("[LocalSkills] installSkill failed:", e);
         toast.error(t("mySkills.installFailed"));
