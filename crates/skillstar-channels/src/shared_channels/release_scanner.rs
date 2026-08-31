@@ -374,11 +374,11 @@ mod tests {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "fixture"]);
         let commit = skillstar_skills::git::ops::rev_parse(&repo, "HEAD").unwrap();
-        std::fs::write(repo.join("skills/writer/untracked.txt"), b"must not hash").unwrap();
         let expected =
             skillstar_skills::content::snapshot_path("writer", &repo.join("skills/writer"))
                 .unwrap()
                 .content_hash;
+        std::fs::write(repo.join("skills/writer/untracked.txt"), b"must not hash").unwrap();
 
         let snapshot = snapshot_published_tree(
             &repo,
