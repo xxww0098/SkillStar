@@ -304,7 +304,7 @@ fn choose_install_skills(
     harness_prefix: Option<&str>,
 ) -> Result<Vec<repo_scanner::DiscoveredSkill>, String> {
     let lock = lockfile::Lockfile::load(&lockfile::lockfile_path()).ok();
-    let mut chosen = Vec::new();
+    let mut chosen: Vec<repo_scanner::DiscoveredSkill> = Vec::new();
     let mut missing = Vec::new();
     for (requested_name, name_hint) in requests {
         let search = requested_name.unwrap_or(*name_hint);
