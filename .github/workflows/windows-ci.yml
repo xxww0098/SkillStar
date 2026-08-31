@@ -57,6 +57,12 @@ name: Windows CI
 #    `migration_aborts_when_the_backup_cannot_be_written` can succeed the
 #    v4 write (unix `0o500` never applied). Occupy the permanent backup
 #    path as a directory so copy fails on every OS; do not drop BackupFailed.
+#
+# 8. Git `insteadOf` fixtures must use `local_file_url`. `file://C:\Users\…`
+#    loses every backslash (gitconfig escape) and clone looks for
+#    `C:Users…`. Pin test repos to LF (`core.autocrlf=false`, `* -text`)
+#    before the first commit; do not assert Unix `\n` against an autocrlf
+#    checkout. Compare Windows paths by `Path::components`, not display().
 on:
   push:
     branches: [main]

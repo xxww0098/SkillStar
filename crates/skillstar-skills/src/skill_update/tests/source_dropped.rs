@@ -262,6 +262,7 @@ fn adding_a_duplicate_provider_path_does_not_look_like_source_removal() {
     run_git(remote.path(), &["init", "--initial-branch=main"]);
     run_git(remote.path(), &["config", "user.email", "test@example.com"]);
     run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
+    pin_lf_repo(remote.path());
 
     let original = remote.path().join(".agents/skills/impeccable");
     std::fs::create_dir_all(&original).unwrap();

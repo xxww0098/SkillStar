@@ -366,7 +366,12 @@ fn toggle_skips_an_unmanaged_real_directory_without_overwriting_it() -> Result<(
         match outcome {
             ToggleSkillOutcome::Skipped { code, path, reason } => {
                 assert_eq!(code, SKIP_UNMANAGED_REAL_DIRECTORY);
-                assert_eq!(path, occupied.display().to_string());
+                assert_eq!(
+                    Path::new(&path).components().collect::<Vec<_>>(),
+                    occupied.components().collect::<Vec<_>>(),
+                    "{path} vs {}",
+                    occupied.display()
+                );
                 assert!(reason.contains("unmanaged real directory"));
             }
             ToggleSkillOutcome::Applied => panic!("must not replace an unmanaged directory"),

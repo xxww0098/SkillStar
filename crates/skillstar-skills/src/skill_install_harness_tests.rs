@@ -56,8 +56,8 @@ impl Sandbox {
         std::fs::write(
             config,
             format!(
-                "[url \"file://{}\"]\n\tinsteadOf = {github_url}\n",
-                local_repo.display()
+                "[url \"{}\"]\n\tinsteadOf = {github_url}\n",
+                crate::git::ops::local_file_url(local_repo)
             ),
         )
         .unwrap();
@@ -101,11 +101,18 @@ fn write_skill(dir: &Path, name: &str, marker: &str) {
     std::fs::write(dir.join("payload.txt"), marker).unwrap();
 }
 
+fn pin_lf_repo(repo: &Path) {
+    run_git(repo, &["config", "core.autocrlf", "false"]);
+    run_git(repo, &["config", "core.eol", "lf"]);
+    std::fs::write(repo.join(".gitattributes"), "* -text\n").unwrap();
+}
+
 fn init_pack(layout: &[(&str, &str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     run_git(dir.path(), &["init", "--initial-branch=main"]);
     run_git(dir.path(), &["config", "user.email", "test@example.com"]);
     run_git(dir.path(), &["config", "user.name", "SkillStar Tests"]);
+    pin_lf_repo(dir.path());
     for (folder, name, marker) in layout {
         write_skill(&dir.path().join(folder), name, marker);
     }

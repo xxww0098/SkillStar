@@ -844,7 +844,7 @@ mod tests {
         run_git(&source, &["add", "."]);
         run_git(&source, &["commit", "-m", "fixture"]);
 
-        let source_url = format!("file://{}", source.display());
+        let source_url = skillstar_git::ops::local_file_url(&source);
         run_git(
             temp.path(),
             &[

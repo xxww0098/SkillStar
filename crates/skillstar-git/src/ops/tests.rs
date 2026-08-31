@@ -246,6 +246,19 @@ fn write_and_push_commit(
 }
 
 #[test]
+fn local_file_url_uses_forward_slashes_and_a_drive_slash() {
+    assert_eq!(local_file_url(Path::new("/tmp/repo")), "file:///tmp/repo");
+    assert_eq!(
+        local_file_url(Path::new(r"C:\Users\runner\AppData\Local\Temp\repo")),
+        "file:///C:/Users/runner/AppData/Local/Temp/repo"
+    );
+    assert_eq!(
+        local_file_url(Path::new(r"\\?\C:\Users\repo")),
+        "file:///C:/Users/repo"
+    );
+}
+
+#[test]
 fn rename_records_are_parsed_from_z_output() {
     let output = "R087\0skills/one/SKILL.md\0skills/engineering/one-spec/SKILL.md\0\
                   A\0skills/new/SKILL.md\0\

@@ -2,6 +2,22 @@
 
 状态：active
 
+## 2026-08-31 - Windows gitconfig `insteadOf` 吃掉反斜杠；checkout 变成 CRLF
+
+- Symptom: Windows CI 在 store-v4 变绿之后，`skillstar-skills` harness / private-facade 报 `fatal: 'C:UsersRUNNER~1…' does not appear to be a git repository`；部分 update 测试左边是 `echo remote-v2\r\n`。macOS/Linux 绿。此前被 fail-fast 挡住。
+- Root cause: `[url "file://C:\Users\…"]` 写进 `GIT_CONFIG_GLOBAL` 时，gitconfig 把 `\` 当转义，路径变成 `C:Users…`。Windows runner 默认 `core.autocrlf=true`，测试夹具未钉 LF，checkout 带 CR。`Path::join(".claude/skills/…")` 的 `display()` 仍留着 `/`，产品返回的是 `\`。
+- Fix: `skillstar_git::ops::local_file_url` 统一成 `file:///C:/…`。测试 `git init` 后钉 `core.autocrlf=false` / `core.eol=lf` / `* -text`。路径断言比 `Path::components`。不要为了绿而改产品正文或接受 CRLF digest。
+- Files: `crates/skillstar-git/src/ops.rs`、`skill_install_harness_tests.rs`、`skill_update/tests.rs`、`deployment/tests.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p skillstar-git --locked --lib local_file_url`；`cargo test -p skillstar-skills --locked --lib harness_retarget_tests skill_update::tests`。Windows 上 insteadOf 必须 clone 到真实 temp 路径，`scripts/run.sh` 必须仍是 LF。
+
+## 2026-08-31 - cargo-deny 因 RUSTSEC-2026-0258 拦 h2
+
+- Symptom: Linux `cargo-deny` `advisories FAILED`：`h2 unbounded empty DATA frames`，ID `RUSTSEC-2026-0258`。Rust 测试已过。
+- Root cause: lockfile 钉着 h2 0.4.13。advisory-db 在 2026-08-18 发布补丁线 `>=0.4.16`。deny.toml 要求修依赖，不要把活漏洞写进 ignore。
+- Fix: `cargo update -p h2 --precise 0.4.16`。
+- Files: `Cargo.lock`。
+- Self-check: `cargo deny check advisories --config src-tauri/deny.toml` 必须还是 ok（忽略项不得增加这条）。
+
 ## 2026-08-31 - Windows 目录只读挡不住 store-v4 备份，迁移照样写盘
 
 - Symptom: Windows CI 在频道 hash / proxy 变绿之后，`providers::tests::store_v4::migration_aborts_when_the_backup_cannot_be_written` 期望 `BackupFailed`，实际 `Ok(LoadedStore { version: 4 })`。Linux/macOS 同测试绿。此前被 fail-fast 挡住。

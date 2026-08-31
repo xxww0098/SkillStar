@@ -74,11 +74,18 @@ fn run_git(repo: &Path, args: &[&str]) {
     );
 }
 
+fn pin_lf_repo(repo: &Path) {
+    run_git(repo, &["config", "core.autocrlf", "false"]);
+    run_git(repo, &["config", "core.eol", "lf"]);
+    std::fs::write(repo.join(".gitattributes"), "* -text\n").unwrap();
+}
+
 fn committed_remote() -> tempfile::TempDir {
     let remote = tempfile::tempdir().unwrap();
     run_git(remote.path(), &["init", "--initial-branch=main"]);
     run_git(remote.path(), &["config", "user.email", "test@example.com"]);
     run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
+    pin_lf_repo(remote.path());
     std::fs::create_dir_all(remote.path().join("scripts")).unwrap();
     std::fs::write(
         remote.path().join("SKILL.md"),
@@ -96,6 +103,7 @@ fn committed_multi_skill_remote() -> tempfile::TempDir {
     run_git(remote.path(), &["init", "--initial-branch=main"]);
     run_git(remote.path(), &["config", "user.email", "test@example.com"]);
     run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
+    pin_lf_repo(remote.path());
     for name in ["alpha", "beta"] {
         let directory = remote.path().join("skills").join(name);
         std::fs::create_dir_all(&directory).unwrap();
@@ -133,8 +141,8 @@ fn high_level_facade_scans_installs_and_updates_private_github_without_persistin
     std::fs::write(
         &global_config,
         format!(
-            "[url \"file://{}\"]\n\tinsteadOf = {remote_url}\n",
-            remote.path().display()
+            "[url \"{}\"]\n\tinsteadOf = {remote_url}\n",
+            crate::git::ops::local_file_url(remote.path())
         ),
     )
     .unwrap();
@@ -184,8 +192,8 @@ fn high_level_facade_scans_installs_and_updates_private_github_without_persistin
     std::fs::write(
         &global_config,
         format!(
-            "[url \"file://{}/missing.git\"]\n\tinsteadOf = {remote_url}\n",
-            remote.path().display()
+            "[url \"{}/missing.git\"]\n\tinsteadOf = {remote_url}\n",
+            crate::git::ops::local_file_url(remote.path())
         ),
     )
     .unwrap();
