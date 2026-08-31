@@ -27,11 +27,11 @@ const SCRIPT = path.join(ROOT, "scripts/internal/check_ts_orphan_modules.sh");
 const FIXTURE_DIR = path.join(ROOT, "src/features/models/__orphan_fixture__");
 const PLANTED = path.join(FIXTURE_DIR, "plantedOrphan.ts");
 const PLANTED_REL = path.relative(ROOT, PLANTED);
-// The gate walks every frontend module and synchronously waits for a child
-// process. Bound that child, then give Vitest enough extra time to observe its
-// exit and run afterEach cleanup under a busy full-suite worker.
-const GATE_PROCESS_TIMEOUT_MS = 15_000;
-const GATE_TEST_TIMEOUT_MS = GATE_PROCESS_TIMEOUT_MS + 5_000;
+// The gate is normally sub-second, but its synchronous child can be starved
+// while the full Vitest pool compiles and runs other suites. Keep a finite hang
+// guard without treating full-suite scheduling contention as a gate failure.
+const GATE_PROCESS_TIMEOUT_MS = 60_000;
+const GATE_TEST_TIMEOUT_MS = GATE_PROCESS_TIMEOUT_MS + 10_000;
 // Windows may release the child-scanned fixture handles shortly after bash
 // exits. Keep cleanup bounded rather than leaving an orphan for the next test.
 const FIXTURE_CLEANUP_RETRIES = 3;

@@ -9,6 +9,13 @@
 - Fix: 五个内嵌 python3 的门禁脚本（check_ts_orphan_modules / check_no_orphan_modules / check_dep_graph_doc / check_workspace_deps / check_command_boundaries）统一在调用行加 `PYTHONIOENCODING=utf-8`，让 Python stdio 与平台代码页解耦。
 - Self-check: `for f in $(grep -l python3 scripts/internal/*.sh); do grep -q PYTHONIOENCODING "$f" || echo "missing: $f"; done` 必须无输出；新增内嵌 python3 的门禁若 print 非 ASCII 字符，调用行必须带 `PYTHONIOENCODING=utf-8`。
 
+## 2026-08-31 - process-backed Vitest gate 的过紧 wall-clock timeout 会把满载调度延迟当成失败
+
+- Symptom: pre-push 的完整 `bun run test` 偶发仅在 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 处失败，断言 `run.timedOut` 收到 `true`；同一脚本单独运行约 0.2–0.6 秒且输出 `0 new orphan module(s)`。
+- Root cause: 测试通过 `execFileSync` 执行真实 bash/Python gate，并把 child 的 **wall-clock** timeout 固定为 15 秒。完整 Vitest pool 同时 transform/运行大量文件、或宿主还有编译任务时，OS 可能让这个同步 child 在实际开始前就耗尽 15 秒；它把调度竞争误判为脚本挂死。外层 test 的 20 秒 timeout 不能修复，因为 child 已先被 `execFileSync` 杀掉。
+- Fix: 仍保留有限 hang guard，但将 child 上限设为 60 秒，并给 Vitest 额外 10 秒观察退出与 cleanup。不要因为 gate 独立运行很快就把该上限缩回 15 秒；测试的目标是完整 suite 下的可靠性，不是 microbenchmark。
+- Self-check: `bun run test` 必须通过完整 Vitest suite；单独测量 `/usr/bin/time -p bash scripts/internal/check_ts_orphan_modules.sh >/dev/null` 只用于发现真实算法退化，不能替代全套验证。
+
 ## 2026-08-31 - 取消测试不能用 worker 启动前的固定时间窗判断 child 已就绪
 
 - Symptom: 全 workspace 并发测试时，`transport_tests::fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel` 偶发整整等待 10 秒后报 marker 未出现，但 worker 返回的是 `Cancelled`。单独运行通常全绿，使它看起来像 credential 配置错误。
