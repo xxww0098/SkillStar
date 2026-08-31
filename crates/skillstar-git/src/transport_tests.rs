@@ -217,11 +217,21 @@ fn configured_proxy_is_operation_local_and_its_password_is_redacted() {
     );
     assert_eq!(env.get("NO_PROXY"), Some(&Some("localhost".into())));
     for inherited_key in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
-        assert_eq!(
-            env.get(inherited_key),
-            Some(&None),
-            "operation must block inherited {inherited_key}"
-        );
+        let entry = env.get(inherited_key);
+        if cfg!(windows) {
+            // Windows env names are case-insensitive. After HTTP_PROXY is set,
+            // get_envs() will not list a distinct http_proxy=None override.
+            assert!(
+                matches!(entry, None | Some(None)),
+                "operation must not keep a distinct inherited {inherited_key}: {entry:?}"
+            );
+        } else {
+            assert_eq!(
+                entry,
+                Some(&None),
+                "operation must block inherited {inherited_key}"
+            );
+        }
     }
     let redacted = redact_git_output(
         "fatal: unable to access http://alice:proxy-password-canary@127.0.0.1:7890/",

@@ -73,6 +73,14 @@ name: CI
 #    normal hit rates. That is not a regression: rust-cache hashes `rustc -vV`
 #    for the default toolchain plus every installed toolchain, and the set went
 #    from {stable, 1.97.1} to {1.97.1}, so the key legitimately moved once.
+#
+# 8. test-linux has no timeout-minutes (GitHub default is 360). A ~7 minute
+#    job that dies at `skillstar-git` with "The operation was canceled" is
+#    not a tight cap and is not extra harness tests. The unix cancel test
+#    used to `kill -TERM -$pid`, which signals a process group; when the
+#    child was not isolated that is the Actions step group. Do not "fix"
+#    this by raising a timeout that does not exist, and do not drop the
+#    cancel coverage.
 on:
   push:
     branches: [main]
