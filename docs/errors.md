@@ -6,15 +6,15 @@
 
 - Symptom: `test-linux` 前端 lint/tests 全绿，Rust workspace 跑到 `skillstar-git` 后整步 `cancelled`，annotation 是 `The operation was canceled.` 作业大约 7 分钟。macOS 同 suite 绿。`test-linux` **没有** `timeout-minutes`。main 上已经这样，不是 harness 测试把 cap 撑爆。
 - Root cause: `terminate_child_tree` 对 unix 发 `kill -TERM -$pid`（进程组）。取消测试的 fake-git 若没能 `process_group(0)` 隔离，这就是 GitHub Actions step 的进程组；runner 收到 SIGTERM 就记成 operation canceled。看起来像 timeout 或 `cancel-in-progress`。
-- Fix: 仅当 `ps` 确认该 child 是进程组组长（`process_group(0)` 生效）时才 `kill -TERM -- -$pid`；否则只杀该 pid。不要为了这个去加/加大并不存在的 job timeout，也不要删掉取消覆盖。
+- Fix: 仅当 `ps` 确认该 child 是进程组组长（`process_group(0)` 生效）时才 `kill -TERM -- -$pid`；否则只杀该 pid。`child.wait()` 改为 2s 上限再 SIGKILL，避免 kill 失败后挂在 `sleep 30` 上。不要为了这个去加/加大并不存在的 job timeout，也不要删掉取消覆盖。这是 main 上已有的 Linux 红，本 PR 必须让 `cargo test --workspace` 跑完。
 - Files: `crates/skillstar-git/src/transport.rs`、`.github/workflows/ci.yml`。
 - Self-check: `cargo test -p skillstar-git --locked --lib`；Linux CI 必须跑完 workspace Rust tests，不能再停在 skillstar-git 的 cancel annotation。
 
 ## 2026-08-31 - Windows `get_envs()` 没有独立的 `http_proxy=None`
 
 - Symptom: Windows CI 在频道 hash 变绿之后，`configured_proxy_is_operation_local_and_its_password_is_redacted` 报 `left: None` / `right: Some(None)`。Linux/macOS 同测试绿。此前被 hash 失败挡住，workspace fail-fast 跑不到。
-- Root cause: Windows 环境变量名大小写不敏感。`env_remove("http_proxy")` 再加上 `HTTP_PROXY=…` 之后，`Command::get_envs()` 不会再列出一条独立的 `http_proxy=None`。Unix 上大小写是不同的键，所以能断言 `Some(None)`。
-- Fix: Windows 接受 `None | Some(None)`；Unix 仍要求显式清除。不要为了测试去改生产代理注入。
+- Root cause: Windows 环境变量名大小写不敏感。`env_remove("http_proxy")` 再加上 `HTTP_PROXY=…` 之后，`Command::get_envs()` 不会再列出一条独立的 `http_proxy=None`。Unix 上大小写是不同的键。Runner 上的 `HTTP_PROXY` 会让这个看起来像 flake。
+- Fix: 测试先把进程级 proxy 键换成 `inherited-canary` 并在 Drop 里恢复。Unix 仍断言 Command 覆盖是 `Some(None)`。Windows 复制同一组覆盖到 `cmd /C set`（Unix 用 `env`）证明子进程看不到 canary、只看到 SkillStar proxy。密码 redaction 断言不改。
 - Files: `crates/skillstar-git/src/transport_tests.rs`。
 - Self-check: `cargo test -p skillstar-git --locked --lib configured_proxy_is_operation_local`。
 

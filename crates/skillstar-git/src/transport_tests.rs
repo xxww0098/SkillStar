@@ -2,8 +2,61 @@ use super::transport::{
     GitAuthMaterial, GitOperationPhase, GitOperationSession, GitProgressSink, classify_git_failure,
     configure_remote_command, execute_remote_command, internal_askpass_response, redact_git_output,
 };
+use std::ffi::OsString;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+
+const PROXY_ENV_KEYS: &[&str] = &[
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+];
+
+struct IsolatedProxyEnv {
+    previous_data_dir: Option<OsString>,
+    previous_proxy: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl IsolatedProxyEnv {
+    fn with_inherited_canary() -> Self {
+        let previous_proxy = PROXY_ENV_KEYS
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect();
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe {
+            for key in PROXY_ENV_KEYS {
+                std::env::set_var(key, "http://inherited-canary:1/");
+            }
+        }
+        Self {
+            previous_data_dir,
+            previous_proxy,
+        }
+    }
+}
+
+impl Drop for IsolatedProxyEnv {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.previous_data_dir {
+                Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+            }
+            for (key, previous) in self.previous_proxy.drain(..).rev() {
+                match previous {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+}
 
 const TOKEN: &str = "github_pat_private_transport_canary";
 
@@ -172,8 +225,8 @@ fn credential_bearing_remote_is_rejected_before_git_can_persist_or_log_it() {
 #[test]
 fn configured_proxy_is_operation_local_and_its_password_is_redacted() {
     let _guard = crate::lock_test_env();
+    let _isolated = IsolatedProxyEnv::with_inherited_canary();
     let temp = tempfile::tempdir().unwrap();
-    let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
     unsafe {
         std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
     }
@@ -216,35 +269,53 @@ fn configured_proxy_is_operation_local_and_its_password_is_redacted() {
         ))
     );
     assert_eq!(env.get("NO_PROXY"), Some(&Some("localhost".into())));
-    for inherited_key in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
-        let entry = env.get(inherited_key);
-        if cfg!(windows) {
-            // Windows env names are case-insensitive. After HTTP_PROXY is set,
-            // get_envs() will not list a distinct http_proxy=None override.
-            assert!(
-                matches!(entry, None | Some(None)),
-                "operation must not keep a distinct inherited {inherited_key}: {entry:?}"
-            );
-        } else {
+    if !cfg!(windows) {
+        for inherited_key in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
             assert_eq!(
-                entry,
+                env.get(inherited_key),
                 Some(&None),
                 "operation must block inherited {inherited_key}"
             );
         }
     }
+    let mut probe = if cfg!(windows) {
+        Command::new("cmd")
+    } else {
+        Command::new("env")
+    };
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => {
+                probe.env(key, value);
+            }
+            None => {
+                probe.env_remove(key);
+            }
+        }
+    }
+    if cfg!(windows) {
+        probe.args(["/C", "set"]);
+    }
+    let probe_output = probe.output().unwrap();
+    assert!(
+        probe_output.status.success(),
+        "proxy env probe failed: {}",
+        String::from_utf8_lossy(&probe_output.stderr)
+    );
+    let dumped = String::from_utf8_lossy(&probe_output.stdout);
+    assert!(
+        !dumped.to_ascii_lowercase().contains("inherited-canary"),
+        "child must not inherit process/runner proxy: {dumped}"
+    );
+    assert!(
+        dumped.contains("http://alice:proxy-password-canary@127.0.0.1:7890/"),
+        "child must use the SkillStar proxy: {dumped}"
+    );
     let redacted = redact_git_output(
         "fatal: unable to access http://alice:proxy-password-canary@127.0.0.1:7890/",
         &session,
     );
     assert!(!redacted.contains("proxy-password-canary"));
-
-    unsafe {
-        match previous {
-            Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
-            None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
-        }
-    }
 }
 
 #[test]

@@ -48,8 +48,9 @@ name: Windows CI
 # 6. After those hash fixtures go green, `configured_proxy_is_operation_local`
 #    can fail next: Windows env names are case-insensitive, so
 #    `env_remove("http_proxy")` plus `env("HTTP_PROXY", …)` does not leave a
-#    distinct `http_proxy=None` in `get_envs()`. Assert that the lowercase
-#    alias is absent or cleared; do not require Unix `Some(None)` on Windows.
+#    distinct `http_proxy=None` in `get_envs()`. Isolate process proxy env
+#    with an inherited canary and probe the child; do not weaken password
+#    redaction, and do not require Unix `Some(None)` from `get_envs()`.
 on:
   push:
     branches: [main]

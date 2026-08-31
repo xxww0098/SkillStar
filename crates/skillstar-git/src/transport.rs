@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::Url;
 
 const ASKPASS_MODE_ENV: &str = "SKILLSTAR_GIT_ASKPASS_MODE";
@@ -466,7 +466,7 @@ pub fn execute_remote_command(
     let status = loop {
         if session.is_cancelled() {
             terminate_child_tree(&mut child);
-            let _ = child.wait();
+            reap_terminated_child(&mut child);
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
             session.emit(GitOperationPhase::Cancelled, remote);
@@ -477,7 +477,7 @@ pub fn execute_remote_command(
             Ok(None) => std::thread::sleep(Duration::from_millis(25)),
             Err(error) => {
                 terminate_child_tree(&mut child);
-                let _ = child.wait();
+                reap_terminated_child(&mut child);
                 let _ = stdout_reader.join();
                 let _ = stderr_reader.join();
                 session.emit(GitOperationPhase::Failed, remote);
@@ -753,6 +753,23 @@ fn read_pipe<R: Read>(pipe: Option<R>) -> Vec<u8> {
         let _ = pipe.read_to_end(&mut bytes);
     }
     bytes
+}
+
+fn reap_terminated_child(child: &mut std::process::Child) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
