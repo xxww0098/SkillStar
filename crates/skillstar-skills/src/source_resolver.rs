@@ -579,7 +579,11 @@ mod tests {
     fn source_parse_local_git_directory() {
         let dir = tempfile::tempdir().unwrap();
         let parsed = Source::parse(dir.path().to_str().expect("utf-8 temp path")).unwrap();
-        assert!(parsed.repo_url.starts_with("file://"), "{}", parsed.repo_url);
+        assert!(
+            parsed.repo_url.starts_with("file://"),
+            "{}",
+            parsed.repo_url
+        );
         assert!(parsed.short.starts_with("local/"), "{}", parsed.short);
         assert_eq!(parsed.git_ref, None);
         assert_eq!(parsed.subpath, None);

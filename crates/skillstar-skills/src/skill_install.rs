@@ -323,9 +323,9 @@ fn choose_install_skills(
         )?;
         match find_target_skill(&resolved, *requested_name, name_hint) {
             Some(skill) => push_unique(&mut chosen, skill.clone()),
-            None => match requested_name.and_then(|name| {
-                nameless_root_skill(&resolved).map(|skill| (name, skill.clone()))
-            }) {
+            None => match requested_name
+                .and_then(|name| nameless_root_skill(&resolved).map(|skill| (name, skill.clone())))
+            {
                 Some((name, mut skill)) => {
                     skill.id = name.to_string();
                     push_unique(&mut chosen, skill);
@@ -343,7 +343,10 @@ fn choose_install_skills(
     Ok(chosen)
 }
 
-fn push_unique(chosen: &mut Vec<repo_scanner::DiscoveredSkill>, skill: repo_scanner::DiscoveredSkill) {
+fn push_unique(
+    chosen: &mut Vec<repo_scanner::DiscoveredSkill>,
+    skill: repo_scanner::DiscoveredSkill,
+) {
     if !chosen.iter().any(|seen| seen.id == skill.id) {
         chosen.push(skill);
     }

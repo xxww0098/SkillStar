@@ -728,7 +728,9 @@ fn install_pipeline_table_chooses_harness_or_fallback_folder() {
         let hub = skillstar_core::infra::paths::hub_skills_dir().join(case.skill);
         assert_eq!(payload_at(&hub), case.expect_payload, "{}", case.name);
         assert!(
-            !hub.join("tests").exists() && !hub.join(".cursor").exists() && !hub.join(".dsh").exists(),
+            !hub.join("tests").exists()
+                && !hub.join(".cursor").exists()
+                && !hub.join(".dsh").exists(),
             "{} must not hub the repo root",
             case.name
         );
