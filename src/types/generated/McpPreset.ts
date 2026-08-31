@@ -4,9 +4,12 @@
  * A built-in, recommended-to-install MCP server template.
  *
  * Mirrors the `ProviderPresetFlat` pattern: the registry below is the single
- * source of truth, exposed to the UI via the `get_mcp_presets` command. The
- * UI pre-fills the create form from a preset (leaving any `required_env` keys
- * blank for the user to fill in) and then creates a normal [`McpServerEntry`].
+ * source of truth, exposed to the UI via the `get_mcp_presets` command.
+ *
+ * A preset leads to one of two install paths, decided by [`Self::catalog_id`]:
+ * a curated row opens the install wizard on that row, and a built-in pre-fills
+ * the create form (leaving any `required_env` keys blank for the user to fill
+ * in) which then creates a normal [`McpServerEntry`].
  */
 export type McpPreset = { id: string, 
 /**
@@ -20,4 +23,16 @@ transport: string, command?: string | null, args: Array<string>, env: { [key in 
 /**
  * Env keys the user must fill in (e.g. `["API_KEY"]`) — the UI highlights these.
  */
-requiredEnv: Array<string>, };
+requiredEnv: Array<string>, 
+/**
+ * Catalog row this preset was derived from, when it has one.
+ *
+ * This is the routing marker for the chip: `Some` means the install wizard
+ * can resolve the row (a curated preset's id *is* its catalog row id), so
+ * the chip opens the wizard and the user gets the runtime-shape picker,
+ * masked secret fields and the command confirmation. Built-in presets have
+ * no catalog row, carry `None`, and keep the plain create form. Routing on
+ * an explicit marker rather than on "try to resolve, fall back on miss"
+ * keeps a transient catalog read from silently retiring an entry point.
+ */
+catalogId?: string | null, };

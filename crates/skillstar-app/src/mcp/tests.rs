@@ -8,15 +8,17 @@
 use std::collections::BTreeMap;
 
 use skillstar_marketplace::{
-    McpArgument, McpArgumentKind, McpInput, McpInputFormat, McpKeyValueInput,
+    McpArgument, McpArgumentKind, McpInput, McpInputFormat, McpInputVariable, McpKeyValueInput,
     McpRegistryPackageSummary, McpRegistryRemoteSummary, McpRegistryServer, McpServerKind,
     McpServerStatus, McpTransportSpec,
 };
 
 use super::draft::{registry_to_entry_for, sanitize_key};
 use super::install::{McpInstallInputScope, McpSecretStorage, build_install_plan_with};
-use super::presets::curated_server_to_preset;
+use super::presets::{curated_server_to_preset, load_curated_servers, list_mcp_presets_with};
 use super::runtime::{McpRuntimeShape, select_runtime_with};
+
+mod install_preview_tests;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -283,8 +285,15 @@ fn npm_package_becomes_an_npx_stdio_entry() {
         vec!["-y", "@modelcontextprotocol/server-filesystem@1.2.0"]
     );
     assert_eq!(entry.env.get("ROOT").map(String::as_str), Some("/tmp"));
-    // Secret blanked: the form must ask.
-    assert_eq!(entry.env.get("API_KEY").map(String::as_str), Some(""));
+    // The form must ask for the secret, so the draft carries no value for it —
+    // and carries no *row* for it either: an empty string here would be pinned
+    // into every tool's config, and would make the plan's draft disagree with
+    // the answered preview, which drops blanks.
+    assert!(
+        !entry.env.contains_key("API_KEY"),
+        "a value nobody supplied must be left out, not written blank: {:?}",
+        entry.env
+    );
 }
 
 #[test]
@@ -511,6 +520,223 @@ fn the_install_plan_carries_full_input_semantics_for_the_form() {
     );
 }
 
+/// Two positional arguments the publisher gave neither a name nor a
+/// `valueHint` both fall back to the key `"argument"`. Their ordinal within the
+/// scope is what the form must address them by — without it, filling the first
+/// one also fills the second.
+#[test]
+fn two_positional_arguments_without_a_value_hint_stay_separately_addressable() {
+    let mut s = server("positionals");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.package_arguments = vec![
+        McpArgument {
+            kind: McpArgumentKind::Positional,
+            input: McpInput {
+                is_required: true,
+                description: Some("source".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        McpArgument {
+            kind: McpArgumentKind::Positional,
+            input: McpInput {
+                is_required: true,
+                description: Some("destination".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let positionals: Vec<_> = plan
+        .inputs
+        .iter()
+        .filter(|i| i.scope == McpInstallInputScope::PackageArgument)
+        .collect();
+
+    assert_eq!(positionals.len(), 2);
+    // The key collides — that is exactly the point.
+    assert_eq!(positionals[0].key, "argument");
+    assert_eq!(positionals[1].key, "argument");
+    // The ordinal does not, so `(scope, index)` still names one of the two.
+    assert_eq!(
+        (positionals[0].scope, positionals[0].index),
+        (McpInstallInputScope::PackageArgument, 0)
+    );
+    assert_eq!(
+        (positionals[1].scope, positionals[1].index),
+        (McpInstallInputScope::PackageArgument, 1)
+    );
+    assert_eq!(
+        positionals[1].input.description.as_deref(),
+        Some("destination")
+    );
+}
+
+/// The ordinal counts within a scope, not across the whole plan, so a form that
+/// groups by scope can index straight into its own section.
+#[test]
+fn the_ordinal_restarts_at_zero_for_every_scope() {
+    let mut s = server("ordinals");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env("A", McpInput::default()), env("B", McpInput::default())];
+    pkg.runtime_arguments = vec![McpArgument {
+        kind: McpArgumentKind::Named,
+        name: Some("--verbose".into()),
+        ..Default::default()
+    }];
+    pkg.package_arguments = vec![McpArgument {
+        kind: McpArgumentKind::Named,
+        name: Some("--port".into()),
+        ..Default::default()
+    }];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let numbering: Vec<_> = plan
+        .inputs
+        .iter()
+        .map(|i| (i.scope, i.index, i.key.as_str()))
+        .collect();
+
+    assert_eq!(
+        numbering,
+        vec![
+            (McpInstallInputScope::Environment, 0, "A"),
+            (McpInstallInputScope::Environment, 1, "B"),
+            (McpInstallInputScope::RuntimeArgument, 0, "--verbose"),
+            (McpInstallInputScope::PackageArgument, 0, "--port"),
+        ]
+    );
+}
+
+/// A publisher-pinned `value` is not the user's to edit, but the
+/// `{curly_braces}` inside it are. The plan seeds that sub-form so the frontend
+/// never scans the template itself.
+#[test]
+fn a_pinned_template_ships_its_variables_seeded_with_full_semantics() {
+    let mut s = server("template");
+    let mut rem = remote("http", "https://acme.dev/mcp");
+    rem.headers = vec![McpKeyValueInput {
+        name: "Authorization".into(),
+        input: McpInput {
+            value: Some("{SCHEME} {TOKEN} @{REGION} {TOKEN}".into()),
+            variables: BTreeMap::from([
+                (
+                    "TOKEN".to_string(),
+                    McpInputVariable {
+                        is_required: true,
+                        is_secret: true,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "REGION".to_string(),
+                    McpInputVariable {
+                        default: Some("us".into()),
+                        choices: vec!["us".into(), "eu".into()],
+                        ..Default::default()
+                    },
+                ),
+                ("UNUSED".to_string(), McpInputVariable::default()),
+            ]),
+            ..Default::default()
+        },
+    }];
+    s.remotes = vec![rem];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let header = plan
+        .inputs
+        .iter()
+        .find(|i| i.scope == McpInstallInputScope::Header)
+        .expect("the header is an input");
+
+    // Template order, de-duplicated, and a variable the template never mentions
+    // gets no field.
+    assert_eq!(
+        header
+            .variables
+            .iter()
+            .map(|v| v.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["SCHEME", "TOKEN", "REGION"]
+    );
+
+    // An undeclared token still needs a value, so it is reported as required.
+    let scheme = &header.variables[0];
+    assert!(scheme.variable.is_required && !scheme.variable.is_secret);
+    assert_eq!(scheme.variable.format, McpInputFormat::String);
+    assert_eq!(scheme.prefilled, "");
+
+    // A secret is never seeded — the form has to ask.
+    let token = &header.variables[1];
+    assert!(token.variable.is_secret);
+    assert_eq!(token.prefilled, "");
+
+    // An optional variable keeps the publisher's default and its closed set.
+    let region = &header.variables[2];
+    assert_eq!(region.variable.choices, vec!["us", "eu"]);
+    assert_eq!(region.prefilled, "us");
+}
+
+/// Variables resolve exactly one level: `McpInputVariable` has no `value` of
+/// its own, so nothing recurses even when a seeded value itself looks like a
+/// template.
+#[test]
+fn variables_resolve_only_one_level_deep() {
+    let mut s = server("one-level");
+    let mut rem = remote("http", "https://acme.dev/mcp");
+    rem.headers = vec![McpKeyValueInput {
+        name: "Authorization".into(),
+        input: McpInput {
+            value: Some("Bearer {OUTER}".into()),
+            variables: BTreeMap::from([(
+                "OUTER".to_string(),
+                McpInputVariable {
+                    default: Some("{INNER}".into()),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        },
+    }];
+    s.remotes = vec![rem];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    let header = plan
+        .inputs
+        .iter()
+        .find(|i| i.scope == McpInstallInputScope::Header)
+        .expect("the header is an input");
+
+    assert_eq!(header.variables.len(), 1);
+    assert_eq!(header.variables[0].prefilled, "{INNER}");
+}
+
+/// An input with no pinned `value` has nothing to substitute, so it carries no
+/// variables even when the publisher declared some.
+#[test]
+fn an_input_without_a_template_carries_no_variables() {
+    let mut s = server("no-template");
+    let mut pkg = package("npm", "npx", "@acme/x");
+    pkg.environment_variables = vec![env(
+        "TOKEN",
+        McpInput {
+            is_required: true,
+            variables: BTreeMap::from([("STRAY".to_string(), McpInputVariable::default())]),
+            ..Default::default()
+        },
+    )];
+    s.packages = vec![pkg];
+
+    let plan = build_install_plan_with(&s, None, &mut everything_installed);
+    assert!(plan.inputs[0].variables.is_empty());
+}
+
 /// Pins the claim `McpSecretPolicy`'s docs make: no MCP target keeps its config
 /// inside the project, so no secret can reach a version-controlled file. If a
 /// project-scoped target is ever added, this fails instead of the guarantee
@@ -607,6 +833,7 @@ fn a_structurally_unusable_shape_is_never_prefilled_from() {
     assert_eq!(plan.draft.command.as_deref(), Some("npx"));
 }
 
+
 // ---------------------------------------------------------------------------
 // Preset mapping
 // ---------------------------------------------------------------------------
@@ -627,11 +854,98 @@ fn curated_rows_become_presets_with_required_env_and_publisher_tags() {
     assert_eq!(preset.required_env, vec!["Z_AI_API_KEY".to_string()]);
     assert!(preset.tags.contains(&"recommended".to_string()));
     assert!(preset.tags.contains(&"bigmodel".to_string()));
-    assert_eq!(
-        preset.env.get("Z_AI_API_KEY").map(String::as_str),
-        Some(""),
-        "a preset must not pretend to know a secret"
+    assert!(
+        !preset.env.contains_key("Z_AI_API_KEY"),
+        "a preset must not pretend to know a secret, nor pin it blank: {:?}",
+        preset.env
     );
-    assert_eq!(preset.env.len(), 1);
+    // `required_env` is what tells the UI to ask for it; `env` only carries
+    // values the registry actually supplied.
+    assert!(preset.env.is_empty());
     let _: BTreeMap<String, String> = preset.env;
+}
+
+/// The chip routes on this marker alone. "Try the wizard, fall back to the
+/// form if the row does not resolve" would hand a built-in preset's entry
+/// point to a transient catalog read.
+#[test]
+fn only_curated_presets_carry_a_catalog_row_id() {
+    let mut s = server("curated-one");
+    s.recommended = true;
+
+    assert_eq!(
+        curated_server_to_preset(&s).catalog_id.as_deref(),
+        Some("curated-one-id"),
+        "a curated preset's id is its catalog row id, so the wizard can resolve it"
+    );
+    for preset in skillstar_models::mcp::get_mcp_presets() {
+        assert_eq!(
+            preset.catalog_id, None,
+            "built-in preset '{}' has no catalog row and must keep the form path",
+            preset.id
+        );
+    }
+}
+
+/// Pins the A.3-f regression: presets used to be *either* the curated rows *or*
+/// the built-in catalog, and since only one curated row carries
+/// `recommended: true`, the UI ended up with a single chip.
+#[test]
+fn recommended_curated_rows_join_the_builtin_catalog_instead_of_replacing_it() {
+    let builtin = skillstar_models::mcp::get_mcp_presets();
+    let mut promoted = server("acme-promoted");
+    promoted.recommended = true;
+    let ordinary = server("acme-ordinary");
+
+    let merged = list_mcp_presets_with(|| Ok(vec![promoted, ordinary]));
+
+    assert_eq!(merged.len(), builtin.len() + 1);
+    assert!(merged.iter().any(|p| p.id == "acme-promoted-id"));
+    assert!(
+        !merged.iter().any(|p| p.id == "acme-ordinary-id"),
+        "only promoted curated rows belong in the preset chips"
+    );
+    for preset in &builtin {
+        assert!(
+            merged.iter().any(|p| p.id == preset.id),
+            "built-in preset '{}' must still reach the UI",
+            preset.id
+        );
+    }
+}
+
+/// The host bootstraps the snapshot runtime (db path, data root, skill
+/// loaders); this crate only opens what it configured. Nothing in the read path
+/// fails when that bootstrap never ran — the default runtime points at a temp
+/// dir, so every query succeeds and returns nothing, and the curated chips
+/// simply vanish. Pinned as a refusal instead, which the caller already turns
+/// into a logged warning plus the built-in catalog.
+#[test]
+fn an_unconfigured_snapshot_runtime_is_refused_rather_than_read_as_empty() {
+    assert!(
+        skillstar_marketplace::snapshot::runtime_is_default(),
+        "no test in this crate configures the snapshot runtime; if one now does, \
+         this test needs its own isolation rather than a relaxed assertion"
+    );
+
+    let err = load_curated_servers()
+        .expect_err("an unconfigured host must not read as 'no curated rows'");
+    assert!(
+        err.to_string().contains("never configured"),
+        "the refusal has to name the cause, not just fail: {err}"
+    );
+}
+
+/// A missing or corrupt snapshot DB degrades to "no curated additions", never
+/// to "no presets at all".
+#[test]
+fn a_failed_curated_read_still_serves_the_builtin_catalog() {
+    let builtin = skillstar_models::mcp::get_mcp_presets();
+
+    let merged = list_mcp_presets_with(|| Err(anyhow::anyhow!("snapshot db is unreadable")));
+
+    assert_eq!(
+        merged.iter().map(|p| &p.id).collect::<Vec<_>>(),
+        builtin.iter().map(|p| &p.id).collect::<Vec<_>>()
+    );
 }

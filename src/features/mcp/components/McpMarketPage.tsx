@@ -8,9 +8,9 @@ import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
 import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
-import type { McpServerEntry, McpToolId, ViewMode } from "../../../types";
+import type { McpInstallOutcome, ViewMode } from "../../../types";
 import { useMcpMarketPage } from "../hooks/useMcpMarketPage";
-import { useMcpServers } from "../hooks/useMcpServers";
+import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpSources } from "../hooks/useMcpSources";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
 import { buildInstalledIndex } from "../lib/installState";
@@ -47,26 +47,31 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
   const [viewMode] = useState<ViewMode>("grid");
 
   const market = useMcpMarketPage({ publisherId });
-  const { servers, createServer } = useMcpServers();
+  const { servers, installFromMarket } = useMcpServers();
   const { health } = useMcpSources();
-  const { statuses } = useMcpToolStatuses();
+  const { noteForTool } = useMcpToolStatuses();
 
   const installedIndex = useMemo(() => buildInstalledIndex(servers), [servers]);
-  const noteForTool = useMemo(() => {
-    const byId = new Map(statuses.map((status) => [status.toolId, status]));
-    return (toolId: McpToolId) => (byId.get(toolId)?.installed === false ? t("mcp.notDetectedSuffix") : null);
-  }, [statuses, t]);
 
-  const handleInstall = async (entry: McpServerEntry) => {
+  /**
+   * A refused install is not an error: the wizard keeps the drawer open and
+   * says which of the two refusals it was, so the verdict is handed back rather
+   * than toasted. Only a genuine failure gets a toast.
+   */
+  const handleInstall = async (submission: McpMarketInstallSubmission): Promise<McpInstallOutcome> => {
     setSaving(true);
     try {
-      const result = await createServer(entry);
-      const failed = failedMcpSyncCount(result.syncResults);
-      if (failed > 0) toast.warning(t("mcp.syncPartial", { count: failed }));
-      else toast.success(t("mcp.added"));
-      setInstallId(null);
+      const outcome = await installFromMarket(submission);
+      if (outcome.status === "installed") {
+        const failed = failedMcpSyncCount(outcome.installed.syncResults);
+        if (failed > 0) toast.warning(t("mcp.syncPartial", { count: failed }));
+        else toast.success(t("mcp.added"));
+        setInstallId(null);
+      }
+      return outcome;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
+      throw err;
     } finally {
       setSaving(false);
     }

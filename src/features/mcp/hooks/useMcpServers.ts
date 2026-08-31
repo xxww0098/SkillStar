@@ -3,6 +3,8 @@ import { useCallback, useMemo } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
 import {
   isMcpToolId,
+  type McpInstallAnswer,
+  type McpInstallOutcome,
   type McpServerEntry,
   type McpServerPatch,
   type McpServerWithSync,
@@ -11,6 +13,21 @@ import {
   type McpToolStatus,
 } from "../../../types";
 import { mcpKeys } from "../api/keys";
+
+/** Everything `mcp_market_install` needs to commit one wizard's worth of work. */
+export interface McpMarketInstallSubmission {
+  serverId: string;
+  /** The shape the plan settled on — never the picker's transient state, which
+   * starts null and would let the backend rank a different one. */
+  runtimeId: string | null;
+  answers: readonly McpInstallAnswer[];
+  enabled: Record<string, boolean>;
+  /**
+   * `McpInstallPreview.approvalTarget` verbatim, unmasked — the backend's own
+   * rendering of everything the confirmation step showed. Never rebuilt here.
+   */
+  approvedTarget: string;
+}
 
 const MCP_STALE_TIME_MS = 30_000;
 const STORE_KEY = mcpKeys.servers();
@@ -43,6 +60,27 @@ export function useMcpServers() {
 
   const createMutation = useMutation({
     mutationFn: (entry: Partial<McpServerEntry>) => tauriInvoke("create_mcp_server", { entry }),
+    onSuccess: invalidate,
+  });
+
+  /**
+   * Commit a catalog install. Not `createServer`: the backend re-derives the
+   * entry from these answers and refuses unless it still renders the command
+   * the user approved, so what crosses the wire is the answers, not a draft the
+   * renderer assembled. `createServer` stays the manual form's path.
+   *
+   * The store is invalidated either way — a refusal wrote nothing, and one
+   * extra read is cheaper than a branch.
+   */
+  const installFromMarketMutation = useMutation({
+    mutationFn: (submission: McpMarketInstallSubmission): Promise<McpInstallOutcome> =>
+      tauriInvoke("mcp_market_install", {
+        id: submission.serverId,
+        ...(submission.runtimeId ? { runtimeId: submission.runtimeId } : {}),
+        answers: [...submission.answers],
+        enabled: submission.enabled,
+        approvedTarget: submission.approvedTarget,
+      }),
     onSuccess: invalidate,
   });
 
@@ -126,6 +164,11 @@ export function useMcpServers() {
     (entry: Partial<McpServerEntry>): Promise<McpServerWithSync> => createMutation.mutateAsync(entry),
     [createMutation],
   );
+  const installFromMarket = useCallback(
+    (submission: McpMarketInstallSubmission): Promise<McpInstallOutcome> =>
+      installFromMarketMutation.mutateAsync(submission),
+    [installFromMarketMutation],
+  );
   const updateServer = useCallback(
     (id: string, patch: McpServerPatch): Promise<McpServerWithSync> => updateMutation.mutateAsync({ id, patch }),
     [updateMutation],
@@ -148,6 +191,7 @@ export function useMcpServers() {
     isLoading,
     error: error ?? null,
     createServer,
+    installFromMarket,
     updateServer,
     deleteServer,
     toggleTool,

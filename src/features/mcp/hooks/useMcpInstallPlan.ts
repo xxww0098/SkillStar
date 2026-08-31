@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { McpInstallPlan, McpRuntimeSelection } from "../../../types";
+import type { McpInstallPlan } from "../../../types";
 import { mcpKeys } from "../api/keys";
 
 const PLAN_STALE_TIME_MS = 60_000;
@@ -31,27 +31,6 @@ export function useMcpInstallPlan(serverId: string | null, runtimeId: string | n
     plan: query.data ?? null,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
-    error: query.error ?? null,
-  };
-}
-
-/**
- * Every runtime shape a server publishes, ranked, with the recommended pick.
- *
- * The plan already embeds this, so the standalone read is only for surfaces
- * that offer the picker before a plan exists.
- */
-export function useMcpRuntimeCandidates(serverId: string | null, enabled = true) {
-  const query = useQuery<McpRuntimeSelection>({
-    queryKey: mcpKeys.runtimeCandidates(serverId),
-    queryFn: () => tauriInvoke("mcp_market_runtime_candidates", { id: serverId as string }),
-    enabled: enabled && serverId != null,
-    staleTime: PLAN_STALE_TIME_MS,
-  });
-
-  return {
-    selection: query.data ?? null,
-    isLoading: query.isLoading,
     error: query.error ?? null,
   };
 }

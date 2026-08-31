@@ -160,8 +160,12 @@ export const MCP_PRESETS = [
     tags: ["files"],
     requiredEnv: [],
   },
+  // Curated-derived: id *is* the catalog row id, and `catalogId` routes the
+  // chip to the install wizard instead of the create form. The other two are
+  // built-ins, which have no catalog row and keep the form path.
   {
-    id: "preset-gh",
+    id: "mkt-github",
+    catalogId: "mkt-github",
     name: "github",
     description: "GitHub repos, issues and PRs.",
     homepage: "https://github.com/github/github-mcp-server",
@@ -557,6 +561,28 @@ export function mcpRuntimeSelection(id: string): MockRecord {
   };
 }
 
+const TEMPLATE_TOKEN = /\{([A-Za-z0-9_.-]+)\}/g;
+
+/**
+ * Seed the `{curly_brace}` sub-form the real backend ships with each templated
+ * input, so the browser dev path renders the same variable fields the app does.
+ */
+function templateVariables(declared: MockRecord): MockRecord[] {
+  const value = typeof declared.value === "string" ? declared.value : "";
+  const map = (declared.variables as Record<string, MockRecord> | undefined) ?? {};
+  const out: MockRecord[] = [];
+  for (const [, name] of value.matchAll(TEMPLATE_TOKEN)) {
+    if (out.some((seen) => seen.name === name)) continue;
+    const variable = map[name] ?? { isRequired: true, isSecret: false, format: "string" };
+    out.push({
+      name,
+      variable,
+      prefilled: variable.isRequired || variable.isSecret ? "" : String(variable.default ?? ""),
+    });
+  }
+  return out;
+}
+
 /** `McpInstallPlan` — the pre-install confirmation payload. */
 export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
   const selection = mcpRuntimeSelection(id);
@@ -571,22 +597,26 @@ export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
   const pkg = isPackage ? packagesOf(id)[packageIndex] : undefined;
 
   const inputs: MockRecord[] = [];
-  for (const env of (pkg?.environmentVariables as MockRecord[] | undefined) ?? []) {
+  for (const [index, env] of ((pkg?.environmentVariables as MockRecord[] | undefined) ?? []).entries()) {
     inputs.push({
       key: env.name,
       scope: "environment",
+      index,
       input: env,
       prefilled: env.isSecret || env.isRequired ? "" : String(env.default ?? ""),
       mustAsk: Boolean(env.isSecret || env.isRequired),
+      variables: templateVariables(env),
     });
   }
-  for (const header of (remote?.headers as MockRecord[] | undefined) ?? []) {
+  for (const [index, header] of ((remote?.headers as MockRecord[] | undefined) ?? []).entries()) {
     inputs.push({
       key: header.name,
       scope: "header",
+      index,
       input: header,
       prefilled: String(header.value ?? ""),
       mustAsk: Boolean((header.isSecret || header.isRequired) && header.value === undefined),
+      variables: templateVariables(header),
     });
   }
 
@@ -622,6 +652,106 @@ export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
       ...(entry && entry.isLatest === false ? ["The registry knows of a newer version of this server."] : []),
     ],
     draft,
+  };
+}
+
+/**
+ * `McpInstallPreview` — the entry one set of answers produces.
+ *
+ * The real derivation lives in Rust (`preview_install`), which substitutes into
+ * the structured argument list. The mock has no structured arguments to work
+ * from, so it folds answers into `env` / `headers` only and reuses the plan's
+ * command line: enough to exercise the wizard in a browser, never the authority
+ * on what gets installed.
+ */
+export function mcpInstallPreview(id: string, runtimeId: string | undefined, answers: MockRecord[]): MockRecord {
+  const plan = mcpInstallPlan(id, runtimeId);
+  const inputs = (plan.inputs as MockRecord[]) ?? [];
+  const draft = plan.draft as MockRecord;
+  const answerFor = (scope: unknown, index: unknown) =>
+    answers.find((a) => a.scope === scope && a.index === index && a.variable == null);
+
+  const env: Record<string, string> = {};
+  const headers: Record<string, string> = {};
+  const missing: MockRecord[] = [];
+  for (const input of inputs) {
+    const value = String(answerFor(input.scope, input.index)?.value ?? input.prefilled ?? "");
+    if (value) {
+      if (input.scope === "environment") env[String(input.key)] = value;
+      if (input.scope === "header") headers[String(input.key)] = value;
+    } else if (input.mustAsk) {
+      missing.push({ key: input.key, scope: input.scope, index: input.index, variable: null });
+    }
+  }
+
+  const entry = { ...draft, env, headers };
+  return {
+    entry,
+    commandPreview: plan.commandPreview,
+    approvalTarget: mockApprovalTarget(entry, plan.commandPreview as string | null),
+    missing,
+  };
+}
+
+/**
+ * `McpInstallPreview.approvalTarget` — everything the confirmation step showed,
+ * in one comparable string. Mirrors `approval_target` in
+ * `skillstar_app::mcp::install`: command line (or url) plus env, headers and the
+ * config key, JSON-encoded so a value carrying a newline cannot forge a row.
+ */
+function mockApprovalTarget(entry: MockRecord, commandPreview: string | null): string {
+  const sorted = (values: unknown) =>
+    Object.fromEntries(Object.entries((values as Record<string, string>) ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+  return JSON.stringify({
+    env: sorted(entry.env),
+    headers: sorted(entry.headers),
+    name: String(entry.name ?? ""),
+    target: String(commandPreview ?? entry.url ?? "").trim(),
+  });
+}
+
+/**
+ * `McpInstallOutcome` — what committing one install produces.
+ *
+ * The two refusals are the point of the mock: it re-derives the preview and
+ * refuses unless it still renders the approved string, so the browser dev path
+ * exercises the same two branches the Rust seam does. What it *cannot* fake is
+ * the reason those branches exist — a catalog row rewritten mid-wizard.
+ */
+export function mcpInstallOutcome(
+  id: string,
+  runtimeId: string | undefined,
+  answers: MockRecord[],
+  enabled: Record<string, boolean>,
+  approvedTarget: string,
+): MockRecord {
+  const preview = mcpInstallPreview(id, runtimeId, answers);
+  const entry = preview.entry as MockRecord;
+  if (String(preview.approvalTarget) !== approvedTarget.trim()) {
+    return { status: "rejected", rejection: { reason: "commandChanged" } };
+  }
+  const missing = (preview.missing as MockRecord[]) ?? [];
+  if (missing.length > 0) {
+    return { status: "rejected", rejection: { reason: "missingInputs", missing } };
+  }
+  return {
+    status: "installed",
+    installed: {
+      server: { ...entry, id: `mcp-installed-${id}`, enabled },
+      syncResults: Object.entries(enabled)
+        .filter(([, on]) => on)
+        .map(([toolId]) => ({
+          toolId,
+          serverId: `mcp-installed-${id}`,
+          success: true,
+          skipped: false,
+          configPath: `/Users/dev/.config/${toolId}/mcp.json`,
+          backupPath: null,
+          error: null,
+          rolledBack: false,
+          rollbackError: null,
+        })),
+    },
   };
 }
 

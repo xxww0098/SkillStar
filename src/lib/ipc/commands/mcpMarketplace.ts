@@ -1,10 +1,12 @@
 import type {
   LocalFirstResult,
   McpCustomSource,
+  McpInstallAnswer,
+  McpInstallOutcome,
   McpInstallPlan,
+  McpInstallPreview,
   McpMarketServerDetail,
   McpPublisherSummary,
-  McpRuntimeSelection,
   McpServerPage,
   McpServerQuery,
   McpSourceDescriptor,
@@ -12,9 +14,12 @@ import type {
 } from "../../../types";
 
 /**
- * MCP marketplace — browse the merged MCP catalog local-first, then install via
- * `mcp_market_install_plan`, whose plan carries the prefilled `McpServerEntry`
- * draft the form submits through the existing `create_mcp_server` command.
+ * MCP marketplace — browse the merged MCP catalog local-first, then install
+ * via `mcp_market_install_plan` for the confirmation payload,
+ * `mcp_market_install_preview` for the entry the collected answers produce,
+ * and `mcp_market_install` to commit it. The manual "add server" form keeps
+ * submitting through `create_mcp_server`: it carries a user-authored entry, so
+ * a publisher's required inputs have nothing to be enforced against.
  *
  * The catalog is the merge of every enabled source (the official MCP Registry
  * as primary, GitHub's registry as an enrichment mirror, plus any user-added
@@ -59,12 +64,6 @@ export interface McpMarketplaceCommands {
   set_mcp_source_enabled: { args: { id: string; enabled: boolean }; result: McpSourceDescriptor[] };
 
   /**
-   * Every runtime shape the server publishes, ranked against this machine
-   * (remote streamable-http → sse → oci → mcpb → npm/pypi/nuget/cargo, with
-   * unavailable toolchains demoted), plus the recommended pick.
-   */
-  mcp_market_runtime_candidates: { args: { id: string }; result: McpRuntimeSelection };
-  /**
    * Pre-install confirmation payload: the complete untruncated command that
    * will run, the binary it resolves to, the runtime alternatives, and every
    * input the form must collect with full `server.json` semantics.
@@ -72,5 +71,45 @@ export interface McpMarketplaceCommands {
   mcp_market_install_plan: {
     args: { id: string; runtimeId?: string };
     result: McpInstallPlan;
+  };
+
+  /**
+   * The same derivation with the user's answers folded in: the entry that
+   * would be written and the command line that would run, plus the required
+   * inputs still blank.
+   *
+   * Cheap by construction (no `PATH` walk, no filesystem), so the wizard calls
+   * it as the form is filled. **Never cache the result**: the answers carry the
+   * user's secrets, and a cache key holding a secret is a secret at rest.
+   */
+  mcp_market_install_preview: {
+    args: { id: string; runtimeId?: string; answers: McpInstallAnswer[] };
+    result: McpInstallPreview;
+  };
+
+  /**
+   * Commit the install. The backend re-derives the entry from these answers
+   * against the catalog row *as it stands now*, and refuses unless that still
+   * produces `approvedTarget` — `McpInstallPreview.approvalTarget` exactly as
+   * the preview handed it over, **unmasked**. It covers everything the
+   * confirmation step showed: the command line (or the resolved url for a
+   * remote shape), the environment, the headers and the config key. Never
+   * rebuild it here — deriving it a second time at the edge is what let a
+   * registry sync slip an unseen `HTTP_PROXY` past the check.
+   *
+   * A refusal comes back as `{ status: "rejected" }` rather than a thrown
+   * error, because its two reasons — a required input still blank, and a row
+   * that changed under the user — have to be told apart, and an error is only
+   * a string on this wire.
+   */
+  mcp_market_install: {
+    args: {
+      id: string;
+      runtimeId?: string;
+      answers: McpInstallAnswer[];
+      enabled: Record<string, boolean>;
+      approvedTarget: string;
+    };
+    result: McpInstallOutcome;
   };
 }

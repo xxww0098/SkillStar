@@ -124,19 +124,24 @@ function ValueControl({ id, value, onChange, format, choices, isSecret, placehol
   );
 }
 
+/**
+ * A field is addressed by `(scope, index)`, never by its key: two positional
+ * arguments with no name and no `valueHint` are both labelled `argument`, and
+ * keying on that label made editing the first one edit the second.
+ */
 interface McpInstallInputsFormProps {
   fields: readonly McpInstallField[];
   errors: readonly McpFieldError[];
-  onFieldChange: (key: string, scope: McpInstallInputScope, value: string) => void;
-  onVariableChange: (key: string, scope: McpInstallInputScope, variable: string, value: string) => void;
+  onFieldChange: (scope: McpInstallInputScope, index: number, value: string) => void;
+  onVariableChange: (scope: McpInstallInputScope, index: number, variable: string, value: string) => void;
 }
 
 export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariableChange }: McpInstallInputsFormProps) {
   const { t } = useTranslation();
   if (fields.length === 0) return null;
 
-  const errorFor = (key: string, scope: McpInstallInputScope, variable?: string) =>
-    errors.find((error) => error.key === key && error.scope === scope && error.variable === variable) ?? null;
+  const errorFor = (scope: McpInstallInputScope, index: number, variable?: string) =>
+    errors.find((error) => error.scope === scope && error.index === index && error.variable === variable) ?? null;
 
   return (
     <div className="space-y-4">
@@ -147,10 +152,10 @@ export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariable
           </p>
 
           {group.map((field) => {
-            const id = `mcp-input-${scope}-${field.key}`;
-            const fieldError = errorFor(field.key, scope);
+            const id = `mcp-input-${scope}-${field.index}`;
+            const fieldError = errorFor(scope, field.index);
             return (
-              <div key={`${scope}:${field.key}`} className="space-y-1.5">
+              <div key={`${scope}:${field.index}`} className="space-y-1.5">
                 <label htmlFor={id} className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-foreground">
                   <span className="font-mono">{field.key}</span>
                   {field.mustAsk ? <span className="text-destructive">*</span> : null}
@@ -182,7 +187,7 @@ export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariable
                     ) : null}
                     {field.variables.map((variable) => {
                       const variableId = `${id}-${variable.name}`;
-                      const variableError = errorFor(field.key, scope, variable.name);
+                      const variableError = errorFor(scope, field.index, variable.name);
                       return (
                         <div key={variable.name} className="ml-3 space-y-1.5 border-l border-border/60 pl-3">
                           <label
@@ -208,7 +213,7 @@ export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariable
                           <ValueControl
                             id={variableId}
                             value={variable.value}
-                            onChange={(next) => onVariableChange(field.key, scope, variable.name, next)}
+                            onChange={(next) => onVariableChange(scope, field.index, variable.name, next)}
                             format={variable.variable.format}
                             choices={variable.variable.choices}
                             isSecret={variable.variable.isSecret}
@@ -226,7 +231,7 @@ export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariable
                     <ValueControl
                       id={id}
                       value={field.value}
-                      onChange={(next) => onFieldChange(field.key, scope, next)}
+                      onChange={(next) => onFieldChange(scope, field.index, next)}
                       format={field.input.format}
                       choices={field.input.choices}
                       isSecret={field.input.isSecret}

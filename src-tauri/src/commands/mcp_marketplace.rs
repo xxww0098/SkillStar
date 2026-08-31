@@ -1,23 +1,31 @@
 //! Tauri commands for the **MCP marketplace**.
 //!
 //! Reads and syncs delegate to `skillstar_marketplace::mcp_snapshot`
-//! (local-first, multi-source); everything that turns a catalog row into
-//! something installable — the runtime-shape picker, the prefilled draft, the
-//! pre-install confirmation payload — delegates to `skillstar_app::mcp`, which
-//! is where the marketplace→models mapping belongs (AGENTS.md; audit §C.1).
+//! (local-first, multi-source); turning a catalog row into something
+//! installable — the pre-install confirmation payload — delegates to
+//! `skillstar_app::mcp`, which is where the marketplace→models mapping belongs
+//! (AGENTS.md; audit §C.1).
 //!
 //! This module owns command registration, argument/DTO shapes and error
 //! mapping. It holds no domain logic.
 
+use std::collections::BTreeMap;
+
+use serde::Serialize;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::{
     LocalFirstResult, McpCustomSource, McpMarketServerDetail, McpPublisherSummary,
     McpRegistryServer, McpServerPage, McpServerQuery, McpSourceDescriptor, SyncStateEntry,
     mcp_snapshot,
 };
+use skillstar_models::mcp;
+use tauri::State;
 use tracing::{debug, error};
+use ts_rs::TS;
 
-use skillstar_app::mcp::{McpInstallPlan, McpRuntimeSelection};
+use skillstar_app::mcp::{McpInstallAnswer, McpInstallPlan, McpInstallPreview, McpInstallRejection};
+
+use super::mcp_commands::{McpServerWithSync, McpWriteLock};
 
 const MCP_REGISTRY_SCOPE: &str = "mcp_registry";
 
@@ -137,16 +145,6 @@ fn load_registry_server(id: &str) -> Result<McpRegistryServer, AppError> {
         .ok_or_else(|| AppError::Other(format!("MCP server '{id}' not found in local snapshot")))
 }
 
-/// Every runtime shape this server publishes, ranked against the local
-/// machine, with the recommended pick. The user may install any of them.
-#[tauri::command]
-pub async fn mcp_market_runtime_candidates(id: String) -> Result<McpRuntimeSelection, AppError> {
-    debug!(target: "mcp_marketplace", id = %id, "mcp_market_runtime_candidates called");
-    Ok(skillstar_app::mcp::select_runtime(&load_registry_server(
-        &id,
-    )?))
-}
-
 /// The pre-install confirmation payload: the complete resolved command, the
 /// runtime alternatives, and every input the form must collect with its full
 /// `server.json` semantics.
@@ -164,4 +162,107 @@ pub async fn mcp_market_install_plan(
         &load_registry_server(&id)?,
         runtime_id.as_deref(),
     ))
+}
+
+/// The same payload recomputed with the user's answers folded in: the entry as
+/// it would be written, and the command line as it would run.
+///
+/// Separate from [`mcp_market_install_plan`] because it is cheap — no `PATH`
+/// walk, no filesystem — so the wizard can call it as the form is filled. The
+/// answers carry the user's secrets, which is why **only the row id and the
+/// runtime shape are logged**, never a value, and why the result must not be
+/// cached (a cache key holding a secret is a secret at rest).
+#[tauri::command]
+pub async fn mcp_market_install_preview(
+    id: String,
+    runtime_id: Option<String>,
+    answers: Vec<McpInstallAnswer>,
+) -> Result<McpInstallPreview, AppError> {
+    debug!(
+        target: "mcp_marketplace",
+        id = %id, runtime = ?runtime_id, answers = answers.len(),
+        "mcp_market_install_preview called"
+    );
+    Ok(skillstar_app::mcp::preview_install(
+        &load_registry_server(&id)?,
+        runtime_id.as_deref(),
+        &answers,
+    ))
+}
+
+/// What one install attempt produced: an entry that was written and projected,
+/// or a refusal that wrote nothing.
+///
+/// A sum type rather than an `Err`, because [`AppError`] serializes to a bare
+/// string — a refusal the UI has to tell apart from another refusal cannot
+/// survive that. The `installed` arm is verbatim what `create_mcp_server`
+/// returns, so the per-target success/skip/failure display is unchanged.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[ts(export, export_to = "McpInstallOutcome.ts")]
+pub enum McpInstallOutcome {
+    /// Boxed only to keep the two arms a similar size (`clippy::large_enum_variant`);
+    /// `Box` is transparent to serde and to ts-rs, so the wire shape is unchanged.
+    #[serde(rename_all = "camelCase")]
+    Installed { installed: Box<McpServerWithSync> },
+    #[serde(rename_all = "camelCase")]
+    Rejected { rejection: McpInstallRejection },
+}
+
+/// Install a catalog row from the answers the user gave.
+///
+/// The entry is derived here, from the catalog row as it stands *now* — the
+/// renderer no longer assembles one. `approved_target` is
+/// `McpInstallPreview::approval_target` as the wizard received it — the command
+/// line (or resolved url) *plus* the environment, the headers and the config key
+/// the confirmation step showed beside it — and
+/// `skillstar_app::mcp::prepare_install` refuses unless the fresh derivation
+/// still produces it: the row is re-read at this moment, and a registry sync can
+/// rewrite it while the preview sits on screen.
+///
+/// The answers and the approved target may both contain secrets, so **only the
+/// row id and the runtime shape are logged** — never a value, never the command
+/// line.
+///
+/// Deliberately not `create_mcp_server`, which stays as-is for the manual "add
+/// server" form: that form submits an entry the user authored themselves, and
+/// enforcing a publisher's required inputs against it would be enforcing them
+/// against nothing.
+#[tauri::command]
+pub async fn mcp_market_install(
+    lock: State<'_, McpWriteLock>,
+    id: String,
+    runtime_id: Option<String>,
+    answers: Vec<McpInstallAnswer>,
+    enabled: BTreeMap<String, bool>,
+    approved_target: String,
+) -> Result<McpInstallOutcome, AppError> {
+    debug!(
+        target: "mcp_marketplace",
+        id = %id, runtime = ?runtime_id, answers = answers.len(),
+        "mcp_market_install called"
+    );
+    let entry = match skillstar_app::mcp::prepare_install(
+        &load_registry_server(&id)?,
+        runtime_id.as_deref(),
+        &answers,
+        enabled,
+        &approved_target,
+    ) {
+        Ok(entry) => entry,
+        Err(rejection) => return Ok(McpInstallOutcome::Rejected { rejection }),
+    };
+
+    let _guard = lock.0.lock().await;
+    let path = mcp::mcp_store_path();
+    let mut store = mcp::read_mcp_store(&path)?;
+    // Writes the store itself, before projecting — the order is that
+    // function's contract, not this adapter's choice.
+    let (server, sync_results) = mcp::create_server_and_sync(&mut store, &path, entry)?;
+    Ok(McpInstallOutcome::Installed {
+        installed: Box::new(McpServerWithSync {
+            server,
+            sync_results,
+        }),
+    })
 }

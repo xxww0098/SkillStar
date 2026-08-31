@@ -26,8 +26,7 @@ export const mcpKeys = {
   /** Latest catalog row for one installed server's registry name. */
   marketLatest: (registryName: string) => [...mcpKeys.market(), "latest", registryName] as const,
 
-  // Runtime selection + install confirmation (`useMcpInstallPlan`).
-  runtimeCandidates: (id: string | null) => [...mcpKeys.market(), "runtimes", id] as const,
+  // Install confirmation payload (`useMcpInstallPlan`).
   installPlan: (id: string | null, runtimeId: string | null) =>
     [...mcpKeys.market(), "install-plan", id, runtimeId] as const,
 

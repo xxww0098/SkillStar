@@ -13,7 +13,6 @@ use serde::Serialize;
 use skillstar_core::infra::error::AppError;
 use tauri::State;
 use tokio::sync::Mutex;
-use tracing::warn;
 use ts_rs::TS;
 
 use skillstar_models::mcp::{
@@ -107,12 +106,9 @@ pub async fn create_mcp_server(
     let path = mcp::mcp_store_path();
     let mut store = mcp::read_mcp_store(&path)?;
 
-    let created = mcp::create_server(&mut store, entry)?;
-    mcp::write_mcp_store(&store, &path)?;
-
-    let sync_results = mcp::sync_server_public_tools(&created, false);
+    let (server, sync_results) = mcp::create_server_and_sync(&mut store, &path, entry)?;
     Ok(McpServerWithSync {
-        server: created,
+        server,
         sync_results,
     })
 }
@@ -240,102 +236,11 @@ pub async fn reorder_mcp_servers(
     Ok(())
 }
 
-/// Returns the built-in / recommended MCP presets (read-only, no lock needed).
+/// Returns the preset chips the UI offers (read-only, no lock needed).
 ///
-/// The curated marketplace rows and the built-in catalog are merged, not chosen
-/// between. Treating them as alternatives is what made this command return a
-/// single chip: the curated list is never empty, so it always won the branch,
-/// and only one curated row is flagged `recommended` — which silently retired
-/// the whole built-in catalog.
+/// Which rows qualify, how they map and how they merge with the built-in
+/// catalog is [`skillstar_app::mcp::list_mcp_presets`]; this is the adapter.
 #[tauri::command]
 pub async fn get_mcp_presets() -> Result<Vec<McpPreset>, AppError> {
-    Ok(mcp::merge_mcp_presets(
-        curated_recommended_presets(),
-        mcp::get_mcp_presets(),
-    ))
-}
-
-/// Curated marketplace rows explicitly flagged `recommended`.
-///
-/// Best-effort by design: a missing or unreadable snapshot DB must degrade to
-/// "no curated additions", never to "no presets at all". The full curated
-/// catalog stays behind the marketplace browser; only promoted rows join the
-/// preset chips.
-fn curated_recommended_presets() -> Vec<McpPreset> {
-    if let Err(err) = crate::core::marketplace_snapshot::initialize() {
-        warn!(target: "mcp", error = %err, "failed to initialize marketplace snapshot for MCP presets");
-        return Vec::new();
-    }
-    match skillstar_marketplace::mcp_snapshot::list_curated_mcp_servers() {
-        Ok(servers) => servers
-            .iter()
-            .filter(|server| server.recommended)
-            .map(skillstar_app::mcp::curated_server_to_preset)
-            .collect(),
-        Err(err) => {
-            warn!(target: "mcp", error = %err, "failed to load curated MCP presets from marketplace DB");
-            Vec::new()
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use skillstar_app::mcp::curated_server_to_preset;
-    use skillstar_marketplace::{McpRegistryPackageSummary, McpRegistryServer, McpServerKind};
-
-    fn curated(id: &str, name: &str, recommended: bool) -> McpRegistryServer {
-        McpRegistryServer {
-            id: id.into(),
-            name: name.into(),
-            namespace: format!("acme/{name}"),
-            description: "curated row".into(),
-            repo_url: "https://github.com/acme/x".into(),
-            kind: McpServerKind::Stdio,
-            runtimes: vec!["npx".into()],
-            packages: vec![McpRegistryPackageSummary {
-                runtime: "npx".into(),
-                identifier: "@acme/x".into(),
-                registry_type: Some("npm".into()),
-                ..Default::default()
-            }],
-            recommended,
-            source: Some("acme".into()),
-            ..Default::default()
-        }
-    }
-
-    /// Pins the A.3-f regression: the command used to return *either* the
-    /// curated rows *or* the built-in catalog, and since only one curated row
-    /// carries `recommended: true`, the UI ended up with a single preset chip.
-    #[test]
-    fn recommended_curated_rows_join_the_builtin_catalog_instead_of_replacing_it() {
-        let builtin = mcp::get_mcp_presets();
-        let rows = [
-            curated("acme-promoted", "acme-promoted", true),
-            curated("acme-ordinary", "acme-ordinary", false),
-        ];
-
-        let promoted: Vec<McpPreset> = rows
-            .iter()
-            .filter(|server| server.recommended)
-            .map(curated_server_to_preset)
-            .collect();
-        let merged = mcp::merge_mcp_presets(promoted, builtin.clone());
-
-        assert_eq!(merged.len(), builtin.len() + 1);
-        assert!(merged.iter().any(|p| p.id == "acme-promoted"));
-        assert!(
-            !merged.iter().any(|p| p.id == "acme-ordinary"),
-            "only promoted curated rows belong in the preset chips"
-        );
-        for preset in &builtin {
-            assert!(
-                merged.iter().any(|p| p.id == preset.id),
-                "built-in preset '{}' must still reach the UI",
-                preset.id
-            );
-        }
-    }
+    Ok(skillstar_app::mcp::list_mcp_presets())
 }

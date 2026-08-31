@@ -12,10 +12,11 @@ import {
   MCP_SOURCES,
   MCP_STORE,
   MCP_TOOL_STATUSES,
+  mcpInstallOutcome,
   mcpInstallPlan,
+  mcpInstallPreview,
   mcpMarketPage,
   mcpProbeReport,
-  mcpRuntimeSelection,
 } from "./mcpData";
 import { type DevMockHandlers, iso } from "./shared";
 
@@ -80,6 +81,19 @@ export const MCP_HANDLERS: DevMockHandlers = {
   },
 
   // Install path
-  mcp_market_runtime_candidates: (args) => mcpRuntimeSelection(arg(args, "id")),
   mcp_market_install_plan: (args) => mcpInstallPlan(arg(args, "id"), args?.runtimeId as string | undefined),
+  mcp_market_install_preview: (args) =>
+    mcpInstallPreview(
+      arg(args, "id"),
+      args?.runtimeId as string | undefined,
+      (args?.answers as Record<string, unknown>[] | undefined) ?? [],
+    ),
+  mcp_market_install: (args) =>
+    mcpInstallOutcome(
+      arg(args, "id"),
+      args?.runtimeId as string | undefined,
+      (args?.answers as Record<string, unknown>[] | undefined) ?? [],
+      (args?.enabled as Record<string, boolean> | undefined) ?? {},
+      String(args?.approvedTarget ?? ""),
+    ),
 };

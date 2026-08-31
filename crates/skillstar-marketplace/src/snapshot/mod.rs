@@ -240,6 +240,16 @@ pub fn configure_runtime(config: SnapshotRuntimeConfig) {
     }
 }
 
+/// True while no host has called [`configure_runtime`].
+///
+/// The default runtime points at the process temp dir, and every read against
+/// it succeeds and returns nothing — so a host that forgets to configure gets a
+/// silently empty catalog rather than an error. Callers that would rather fail
+/// loudly than serve an empty list check this first.
+pub fn runtime_is_default() -> bool {
+    snapshot_runtime().db_path == default_runtime().db_path
+}
+
 fn snapshot_runtime() -> SnapshotRuntimeConfig {
     SNAPSHOT_RUNTIME
         .read()
