@@ -183,6 +183,52 @@ fn finalize_repo_cache_installs(
     result
 }
 
+enum SameRepoAction {
+    Reuse,
+    Retarget,
+    Reject,
+}
+
+fn lock_entry_for(name: &str) -> Option<lockfile::LockEntry> {
+    lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .ok()?
+        .skills
+        .into_iter()
+        .find(|entry| entry.name == name)
+}
+
+fn source_folder_eq(entry: Option<&lockfile::LockEntry>, folder: &str) -> bool {
+    entry
+        .and_then(|entry| entry.source_folder.as_deref())
+        .unwrap_or("")
+        == folder
+}
+
+/// Reuse only when the hub already points at the requested harness folder.
+/// A different folder from the same clone must retarget; another git URL
+/// is still a hard collision.
+fn existing_same_repo_action(
+    skill_id: &str,
+    repo_url: &str,
+    requested_folder: &str,
+    harness_prefix: Option<&str>,
+) -> Result<SameRepoAction, String> {
+    let entry = lock_entry_for(skill_id);
+    let same_repo = entry
+        .as_ref()
+        .is_some_and(|entry| crate::source_resolver::same_remote_url(&entry.git_url, repo_url));
+    if !same_repo {
+        return Ok(SameRepoAction::Reject);
+    }
+    if source_folder_eq(entry.as_ref(), requested_folder) {
+        return Ok(SameRepoAction::Reuse);
+    }
+    if harness_prefix.is_some() {
+        return Ok(SameRepoAction::Retarget);
+    }
+    Ok(SameRepoAction::Reuse)
+}
+
 fn requested_skill_not_found_error(names: &[String]) -> String {
     format!(
         "Requested Skill{} '{}' not found in the scanned repository; the source may no longer provide {} or {} may have been deleted or renamed",
@@ -246,12 +292,25 @@ fn try_install_from_repo_cache(
         return Ok(None);
     };
 
-    // This install path owns only new hub entries. In particular, do not let
-    // the scanner replace a same-source link: finalization rollback is allowed
-    // to remove the entries it just created, never a pre-existing install.
     let existing_path = skills_dir.join(&skill.id);
     if existing_path.symlink_metadata().is_ok() {
-        return Err(format!("Skill '{}' is already installed", skill.id));
+        match existing_same_repo_action(&skill.id, &repo_url, &skill.folder_path, harness_prefix)? {
+            SameRepoAction::Reuse => {
+                return Ok(Some(new_skill_from_install(
+                    skill.id.clone(),
+                    extract_skill_description(&existing_path),
+                    repo_url,
+                    compute_tree_hash_for(skills_dir, &skill.id),
+                )));
+            }
+            SameRepoAction::Retarget => {
+                deployment::pin_existing_global_links_to_current_source(&skill.id)
+                    .map_err(|error| error.to_string())?;
+            }
+            SameRepoAction::Reject => {
+                return Err(format!("Skill '{}' is already installed", skill.id));
+            }
+        }
     }
 
     let targets = vec![repo_scanner::SkillInstallTarget {
@@ -347,7 +406,7 @@ fn install_skill_in_session_locked(
         .map_err(|error| error.to_string())?;
     ensure_generic_repository_input_mutable(&url)?;
 
-    if skills_dir.join(&name_hint).symlink_metadata().is_ok() {
+    if harness_prefix.is_none() && skills_dir.join(&name_hint).symlink_metadata().is_ok() {
         return Err(format!("Skill '{}' is already installed", name_hint));
     }
     if local_skill_blocks_repo_install(&name_hint) {
@@ -526,17 +585,26 @@ pub fn install_skills_batch_in_session(
                 continue;
             }
             if skills_dir.join(&skill.id).symlink_metadata().is_ok() {
-                let same_source = existing_lock.skills.iter().any(|entry| {
-                    entry.name == skill.id
-                        && crate::source_resolver::same_remote_url(&entry.git_url, &repo_url)
+                let entry = existing_lock
+                    .skills
+                    .iter()
+                    .find(|entry| entry.name == skill.id);
+                let same_source = entry.is_some_and(|entry| {
+                    crate::source_resolver::same_remote_url(&entry.git_url, &repo_url)
                 });
                 if same_source {
-                    continue;
+                    if harness_prefix.is_some() && !source_folder_eq(entry, &skill.folder_path) {
+                        deployment::pin_existing_global_links_to_current_source(&skill.id)
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    return Err(format!(
+                        "Skill '{}' already exists from a different source; remove it or choose another skill",
+                        skill.id
+                    ));
                 }
-                return Err(format!(
-                    "Skill '{}' already exists from a different source; remove it or choose another skill",
-                    skill.id
-                ));
             }
             targets.push(repo_scanner::SkillInstallTarget {
                 id: skill.id.clone(),
@@ -830,3 +898,7 @@ where
 #[cfg(test)]
 #[path = "skill_install_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "skill_install_harness_tests.rs"]
+mod harness_retarget_tests;

@@ -2,6 +2,18 @@
 
 状态：active
 
+## 2026-08-31 - 第二个 harness 复用第一条 lock，把 A 的正文部署给 B
+
+- Symptom: `skillstar install … --agent cursor` 之后再 `install … --agent deepseek` 打印 `Reusing existing hub install(s)`，把 `~/.dsh/skills/rust` 链到 **Cursor** 的 hub 路径；lock `source_folder` 仍是 `.cursor/skills/rust`。clone 里其实有 `.dsh/skills/rust`。卡片轮播点第二个图标同样走这条。Hub 已是 `.agents/skills/impeccable` 时再 `--agent cursor` 也不改指向 `.cursor/skills/impeccable`。对 rust-skills 两份拷贝相同，对 impeccable 式改写过的 `SKILL.md` 会装错 harness。
+- Root cause: 同名一条 lock 把「仓库已在 hub」当成「可以复用」。`install_skills_batch` / `try_install_from_repo_cache` 只比 git URL，不比 `source_folder` 是否已经是本次请求的 `.<harness>/` 文件夹。CLI 的 `install_or_reuse` 因此走 Reuse，随后 `batch_deploy` 把**当前** hub（另一份 harness）链到新 Agent。轮播未链接图标也曾只 `toggle_skill_for_agent`，同样部署当前 hub。
+- Fix: 复用仅当现有 `source_folder` 已是请求的 harness 文件夹。否则从同一 clone 改指向（不二次 clone），改之前 `pin_existing_global_links_to_current_source` 把已链 Agent 钉到当前 payload。缺少该 harness 仍明确失败。轮播未链接图标走 `install_skill(url, name, agentId)`。
+- Files: `crates/skillstar-skills/src/skill_install.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`src/features/my-skills/components/SkillCard.tsx`、`docs/features/skills/README.md`。
+- Self-check:
+  - `cargo test -p skillstar-skills --locked second_harness_install_deploys_that_harness_folder agents_hub_retargets_to_cursor_harness_folder`
+  - 装完 Cursor 再装 DeepSeek：`~/.dsh/skills/<id>` 必须解析到 `.dsh/skills/<id>`，不能是 `.cursor/skills/<id>`；已链的 Cursor 仍是 Cursor 正文。
+  - Hub 已是 `.agents/skills/<id>` 时 `--agent cursor` 必须把 lock/`source_folder` 改成 `.cursor/skills/<id>`，不得静默 Reuse。
+  - 包里没有该 harness 时仍报错，不得回退另一份。
+
 ## 2026-08-31 - TS 孤儿门禁在 Windows CI 上打印 ✓/✗ 触发 UnicodeEncodeError，报 0 违规却退出 1
 
 - Symptom: Windows CI 只有 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 失败，且断言 `output 包含 "0 new orphan module(s)"` 通过、`status` 却是 1；日志散落 `UnicodeEncodeError: 'charmap' codec can't encode character '\u2713'/'\u2717'`。macOS/Linux 本地与 CI 全绿。

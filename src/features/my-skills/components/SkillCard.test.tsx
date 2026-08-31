@@ -79,6 +79,23 @@ describe("SkillCard", () => {
     expect(onInstall).toHaveBeenCalledWith(MOCK_SKILL.git_url, MOCK_SKILL.name, "claude");
   });
 
+  it("retargets an already-installed skill when a second harness icon is clicked", () => {
+    const onInstall = vi.fn();
+    const onToggleAgent = vi.fn();
+    render(
+      <SkillCard
+        skill={{ ...MOCK_SKILL, installed: true, agent_links: [] }}
+        onClick={vi.fn()}
+        onInstall={onInstall}
+        onToggleAgent={onToggleAgent}
+        profiles={[LIBRARY_PROFILE]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /为 Claude 安装/i }));
+    expect(onInstall).toHaveBeenCalledWith(MOCK_SKILL.git_url, MOCK_SKILL.name, "claude");
+    expect(onToggleAgent).not.toHaveBeenCalled();
+  });
+
   it("renders an update action when an update is available and triggers onUpdate", () => {
     const onUpdate = vi.fn();
     render(<SkillCard skill={{ ...MOCK_SKILL, update_available: true }} onClick={vi.fn()} onUpdate={onUpdate} />);

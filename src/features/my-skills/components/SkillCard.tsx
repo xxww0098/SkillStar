@@ -308,8 +308,8 @@ function SkillCardInner({
       <AgentTargetCarousel
         items={targetableProfiles.map((profile) => {
           const linked = skill.installed && (skill.agent_links?.includes(profile.display_name) ?? false);
-          const title = skill.installed
-            ? `${profile.display_name} (${t(linked ? "skillCard.remove" : "skillCard.add")})`
+          const title = linked
+            ? `${profile.display_name} (${t("skillCard.remove")})`
             : t("skillCard.installFor", { agent: profile.display_name });
           return {
             id: profile.id,
@@ -320,11 +320,15 @@ function SkillCardInner({
           };
         })}
         onToggle={({ profile, selected }) => {
-          if (skill.installed) {
-            onToggleAgent?.(skill.name, profile.id, selected !== true, profile.display_name);
+          if (selected === true) {
+            onToggleAgent?.(skill.name, profile.id, false, profile.display_name);
             return;
           }
-          onInstall?.(skill.git_url, skill.name, profile.id);
+          if (skill.git_url && onInstall) {
+            onInstall(skill.git_url, skill.name, profile.id);
+            return;
+          }
+          onToggleAgent?.(skill.name, profile.id, true, profile.display_name);
         }}
       />
     );
