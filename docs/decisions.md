@@ -411,9 +411,18 @@
 - 日期：2026-08-31
 - 状态：accepted
 - 背景：rust-skills / impeccable 这类包在每个 Agent 目录下各放一份独立技能。卡片 SVG 轮播原先只 `toggle` 已安装链接，Install 按钮走 `install_skill(url, name)` → 发现后 `global_deploy` 到全部已启用 Agent。发现层又漏了 `.cursor/skills` 与 `.dsh/skills`，根垫片会把 `source_folder` 写成空，Hub 链整仓。
-- 决策：安装单元是含 `SKILL.md` 的 harness 技能目录（或 harness 根，若那才是单元）。未指定 harness 时 catalog `skills/<name>/` 优先；点轮播图标或 CLI 显式单个 `--agent` 时该 harness 文件夹赢。没有该文件夹则失败。稀疏检出保留全部嵌套 `SKILL.md` 父目录，不再按 basename 丢掉 `.agent` / `.agents`。
-- 后果：同一 Hub 名仍只有一条 lock，`source_folder` 跟随最近一次明确请求的 harness。复用仅当现有 `source_folder` 已经是该 harness 文件夹；否则从同一 clone 改指向（不二次 clone），并先把已链到其他 Agent 的链接钉到当前 payload。Impeccable 没有 `.dsh` 时点 DSH 会报错而不是装 Cursor 副本。轮播未链接图标走 `install_skill(url, name, agentId)`，不得只 `toggle` 当前 Hub。
+- 决策：安装单元是含 `SKILL.md` 的 harness 技能目录（或 harness 根，若那才是单元）。未指定 harness 时 catalog `skills/<name>/` 优先；点轮播图标或 CLI 显式单个 `--agent` 时该 harness 文件夹赢。没有该文件夹时的回退见 [D-046](#d-046已安装轮播从-repo-cache-部署且缺-harness-时回退)。稀疏检出保留全部嵌套 `SKILL.md` 父目录，不再按 basename 丢掉 `.agent` / `.agents`。
+- 后果：同一 Hub 名仍只有一条 lock，`source_folder` 跟随最近一次明确请求的 harness。复用仅当现有 `source_folder` 已经是该次解析到的文件夹；否则从同一 clone 改指向（不二次 clone），并先把已链到其他 Agent 的链接钉到当前 payload。轮播未链接图标走 `install_skill(url, name, agentId)`，不得只 `toggle` 当前 Hub。缺 harness 文件夹的行为已由 D-046 修正，不再 fail-closed。
 - 证据：`resolve_install_skills`、`existing_same_repo_action`、`pin_existing_global_links_to_current_source`、`install_skill(..., agentId)`、`AgentTargetCarousel` 接线测试、`stale_dsh_link_is_rewritten_to_requested_harness`。
+
+## D-046：已安装轮播从 repo-cache 部署且缺 harness 时回退
+
+- 日期：2026-08-31
+- 状态：accepted
+- 背景：D-045 让未链接轮播图标走完整 `install_skill`。`clone_or_fetch` 在 cache 已有 `.git` 时仍 `git fetch --depth 1` + reset，已装 rust-skills / impeccable 点第二个图标像重装。同时 D-045 对缺 `.<harness>/` fail-closed，impeccable 没有 `.dsh` 时点 DeepSeek 报错，用户无法把技能落到 `~/.dsh/skills/<id>`。
+- 决策：hub 已装且 repo-cache 已有 clone 时，轮播 / 显式单个 `--agent` 只扫描现有 checkout（`cached_repo_dir_if_present`），不 clone、不 fetch；`source_folder` 没变就不改 lock。cache 缺失才 fetch。请求的 harness 文件夹不存在时按顺序回退：规范 `skills/<name>/` 或 `source/skills/` → 已装则用现有 hub `source_folder` → 同 identity 的另一份嵌套 harness 副本。把该 payload 部署到被点 Agent。禁止 `source_folder: None` 整仓，禁止静默 no-op。只有完全没有嵌套 `SKILL.md` 才失败。
+- 后果：已装卡的常见轮播点击是 cache-local 部署/改指向。Impeccable 点 DeepSeek 会把已有 skill 文件夹链到 `~/.dsh/skills/impeccable`，不再报「没有 `.dsh`」。首次安装和 cache 被删后的重装仍走网络。
+- 证据：`scan_repo_preferring_local_cache_in_session`、`resolve_install_skills` 回退、`installed_rust_skills_deepseek_retargets_from_cache_without_clone`、`installed_impeccable_deepseek_falls_back_to_a_skill_folder`、`missing_git_cache_still_fetches_for_harness_install`。
 
 ## 新增记录格式
 

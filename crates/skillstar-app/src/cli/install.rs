@@ -403,7 +403,7 @@ fn install_or_reuse_skill(
     }
 
     let git = git_skill_facade()?;
-    let (_, _, _, skills_found) = git.fetch_repo_scanned(url, false)?;
+    let (_, _, _, skills_found) = git.fetch_repo_scanned_preferring_local_cache(url, false)?;
     if skills_found.is_empty() {
         return Err("No valid SKILL.md found in the selected source".to_string());
     }

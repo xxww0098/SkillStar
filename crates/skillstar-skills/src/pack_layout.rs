@@ -10,7 +10,9 @@
 //! Canonical catalog folders outrank generated per-harness copies when the
 //! same skill identity appears more than once **and** the caller did not
 //! ask for a specific harness. A carousel / `--agent` click selects the
-//! matching `.<harness>/` tree instead.
+//! matching `.<harness>/` tree when it exists; otherwise it falls back to
+//! catalog, the existing hub folder, or another nested copy — never the
+//! repo root.
 
 /// True when `folder_path` is a public or unpublished skill catalog, not a
 /// generated harness copy (`.claude/skills`, `.grok/skills`, …).
@@ -135,12 +137,19 @@ pub fn harness_folder_rank(prefix: &str, folder: &str) -> u8 {
     }
 }
 
-pub fn missing_harness_folder_error(prefix: &str) -> String {
-    format!(
-        "This pack has no '{prefix}' skill folder. \
-         Looked for '{prefix}/skills/<name>' or '{prefix}'. \
-         It will not install another harness copy or the whole repository."
-    )
+pub fn missing_skill_payload_error(prefix: &str, requested_name: Option<&str>) -> String {
+    match requested_name {
+        Some(name) => format!(
+            "This pack has no installable SKILL.md for '{name}'. \
+             Looked for '{prefix}/skills/{name}', catalog skills/, source/skills/, \
+             and other harness copies. The repository root is not an install unit."
+        ),
+        None => format!(
+            "This pack has no installable SKILL.md. \
+             Looked for '{prefix}/skills/<name>', catalog skills/, source/skills/, \
+             and other harness copies. The repository root is not an install unit."
+        ),
+    }
 }
 
 #[cfg(test)]

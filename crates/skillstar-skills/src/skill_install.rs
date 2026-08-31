@@ -56,6 +56,18 @@ pub fn fetch_repo_scanned_in_session(
         .map_err(|error| format!("{error:#}"))
 }
 
+pub fn fetch_repo_scanned_preferring_local_cache_in_session(
+    url: &str,
+    full_depth: bool,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock repository scan: {error}"))?;
+    ensure_generic_repository_input_mutable(url)?;
+    scan_repo_preferring_local_cache_in_session(url, full_depth, session)
+        .map_err(|error| format!("{error:#}"))
+}
+
 pub fn fetch_repo_scanned_detailed_in_session(
     url: &str,
     full_depth: bool,
@@ -71,6 +83,33 @@ pub fn fetch_repo_scanned_detailed_in_session(
         session,
     )
     .context("Failed to fetch repo")?;
+    Ok(scan_parsed_checkout(&parsed, repo_dir, full_depth))
+}
+
+/// Scan a checkout that is already in the repo cache, or fetch if it is missing.
+///
+/// Hub-installed carousel / `--agent` clicks must not `git fetch` when the
+/// clone is already local. First-time install (empty cache) still fetches.
+pub fn scan_repo_preferring_local_cache_in_session(
+    url: &str,
+    full_depth: bool,
+    session: &crate::git::transport::GitOperationSession,
+) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
+    let parsed = crate::source_resolver::Source::parse(url)
+        .map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
+    if let Some(repo_dir) =
+        repo_scanner::cached_repo_dir_if_present(&parsed.short, parsed.git_ref.as_deref())
+    {
+        return Ok(scan_parsed_checkout(&parsed, repo_dir, full_depth));
+    }
+    fetch_repo_scanned_detailed_in_session(url, full_depth, session)
+}
+
+fn scan_parsed_checkout(
+    parsed: &crate::source_resolver::Source,
+    repo_dir: PathBuf,
+    full_depth: bool,
+) -> (String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>) {
     let mut skills_found = match parsed.subpath.as_deref() {
         Some(subpath) => {
             repo_scanner::scan_skills_in_repo_at(&repo_dir, &parsed.repo_url, subpath, full_depth)
@@ -80,7 +119,12 @@ pub fn fetch_repo_scanned_detailed_in_session(
     if let Some(skill_filter) = parsed.skill_filter.as_deref() {
         skills_found.retain(|skill| skill.id.eq_ignore_ascii_case(skill_filter));
     }
-    Ok((parsed.repo_url, parsed.short, repo_dir, skills_found))
+    (
+        parsed.repo_url.clone(),
+        parsed.short.clone(),
+        repo_dir,
+        skills_found,
+    )
 }
 
 #[inline]
@@ -253,16 +297,25 @@ fn try_install_from_repo_cache(
     except_agent_id: Option<&str>,
 ) -> Result<Option<Skill>, String> {
     let Ok((repo_url, _source, repo_dir, scan_found)) =
-        fetch_repo_scanned_detailed_in_session(url, false, session)
+        scan_repo_preferring_local_cache_in_session(url, false, session)
     else {
         return Ok(None);
     };
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
+    let preferred_folder = requested_name
+        .or(Some(name_hint))
+        .and_then(lock_entry_for)
+        .and_then(|entry| entry.source_folder);
     let skills_found = if harness_prefix.is_some()
         || scan_found.iter().any(|skill| skill.folder_path.is_empty())
     {
-        match crate::discovery::resolve_install_skills(&repo_dir, requested_name, harness_prefix) {
+        match crate::discovery::resolve_install_skills(
+            &repo_dir,
+            requested_name,
+            harness_prefix,
+            preferred_folder.as_deref(),
+        ) {
             Ok(skills) => skills,
             Err(error) if harness_prefix.is_some() => return Err(error),
             Err(_) => return Ok(None),
@@ -547,29 +600,35 @@ pub fn install_skills_batch_in_session(
         .map_err(|error| error.to_string())?;
     let skills_dir = paths::hub_skills_dir();
     let (repo_url, _source, repo_dir, scan_found) =
-        fetch_repo_scanned_detailed_in_session(url, false, session)
+        scan_repo_preferring_local_cache_in_session(url, false, session)
             .map_err(|error| format!("{error:#}"))?;
     let harness_prefix = match agent_id {
         Some(id) => Some(harness_prefix_for_agent(id)?),
         None => None,
     };
+    let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .map_err(|error| format!("Failed to load Skill lockfile: {error}"))?;
     let skills_found = if harness_prefix.is_some()
         || scan_found.iter().any(|skill| skill.folder_path.is_empty())
     {
         let mut resolved = Vec::new();
         for name in names {
+            let preferred = existing_lock
+                .skills
+                .iter()
+                .find(|entry| entry.name == *name)
+                .and_then(|entry| entry.source_folder.as_deref());
             resolved.extend(crate::discovery::resolve_install_skills(
                 &repo_dir,
                 Some(name),
                 harness_prefix.as_deref(),
+                preferred,
             )?);
         }
         resolved
     } else {
         scan_found
     };
-    let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .map_err(|error| format!("Failed to load Skill lockfile: {error}"))?;
 
     let mut targets = Vec::new();
     let mut fallback_names = Vec::new();

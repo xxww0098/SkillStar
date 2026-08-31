@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 pub use crate::discovery::DiscoveredSkill;
 
 pub use cache::{
-    cache_dir_name, clone_or_fetch_repo_at_in_session, clone_or_fetch_repo_in_session,
+    cache_dir_name, cache_key_for, cached_repo_dir_if_present, clone_or_fetch_repo_at_in_session,
+    clone_or_fetch_repo_in_session,
 };
 pub use detect::detect_new_skills_in_cached_repos;
 pub(crate) use detect::{skill_at_revision, upstream_added_dirs};

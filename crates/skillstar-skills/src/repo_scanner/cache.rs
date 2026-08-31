@@ -14,6 +14,32 @@ pub fn clone_or_fetch_repo_in_session(
     clone_or_fetch_repo_at_in_session(repo_url, source, None, session)
 }
 
+/// Cache directory key used by [`clone_or_fetch_repo_at_in_session`].
+pub fn cache_key_for(source: &str, git_ref: Option<&str>) -> Result<String> {
+    match git_ref {
+        Some(git_ref) => {
+            validate_git_ref(git_ref)?;
+            Ok(format!(
+                "{}--ref--{}",
+                cache_dir_name(source),
+                cache_dir_name(git_ref)
+            ))
+        }
+        None => Ok(cache_dir_name(source)),
+    }
+}
+
+/// Existing repo-cache checkout, if a previous install already cloned it.
+///
+/// Does not fetch, reset, or create directories. Callers that only need to
+/// retarget or deploy from a hub-installed pack should use this instead of
+/// [`clone_or_fetch_repo_at_in_session`].
+pub fn cached_repo_dir_if_present(source: &str, git_ref: Option<&str>) -> Option<PathBuf> {
+    let cache_key = cache_key_for(source, git_ref).ok()?;
+    let repo_dir = paths::repos_cache_dir().join(cache_key);
+    repo_dir.join(".git").exists().then_some(repo_dir)
+}
+
 pub fn clone_or_fetch_repo_at_in_session(
     repo_url: &str,
     source: &str,
@@ -23,17 +49,7 @@ pub fn clone_or_fetch_repo_at_in_session(
     let cache_dir = paths::repos_cache_dir();
     std::fs::create_dir_all(&cache_dir).context("Failed to create repo cache directory")?;
 
-    let cache_key = match git_ref {
-        Some(git_ref) => {
-            validate_git_ref(git_ref)?;
-            format!(
-                "{}--ref--{}",
-                cache_dir_name(source),
-                cache_dir_name(git_ref)
-            )
-        }
-        None => cache_dir_name(source),
-    };
+    let cache_key = cache_key_for(source, git_ref)?;
     let repo_dir = cache_dir.join(cache_key);
 
     if repo_dir.join(".git").exists() {

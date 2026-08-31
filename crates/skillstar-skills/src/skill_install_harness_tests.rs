@@ -327,24 +327,190 @@ fn agents_hub_retargets_to_cursor_harness_folder() {
     assert_eq!(payload_at(&hub), "cursor copy");
 }
 
+fn poison_cached_remotes() {
+    let cache = skillstar_core::infra::paths::repos_cache_dir();
+    let Ok(entries) = std::fs::read_dir(&cache) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.path().join(".git").exists() {
+            continue;
+        }
+        let output = Command::new("git")
+            .current_dir(entry.path())
+            .args([
+                "remote",
+                "set-url",
+                "origin",
+                "file:///nonexistent/skillstar-disconnected-remote",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "failed to poison origin: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn wipe_repo_cache() {
+    let cache = skillstar_core::infra::paths::repos_cache_dir();
+    if cache.exists() {
+        std::fs::remove_dir_all(&cache).unwrap();
+    }
+}
+
+fn assert_skill_folder(path: &Path) {
+    assert!(
+        path.join("SKILL.md").is_file(),
+        "expected a skill folder with SKILL.md at {}",
+        path.display()
+    );
+    assert!(
+        !path.join(".cursor").exists()
+            && !path.join(".dsh").exists()
+            && !path.join("tests").exists(),
+        "deployed the monorepo root instead of a skill folder: {}",
+        path.display()
+    );
+}
+
+/// Already-installed rust-skills: DeepSeek must retarget from the existing
+/// clone (no git fetch/clone) and leave the Cursor link on `.cursor`.
 #[test]
-fn missing_harness_folder_does_not_reuse_another_copy() {
+fn installed_rust_skills_deepseek_retargets_from_cache_without_clone() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[
+        (".cursor/skills/rust", "rust", "cursor rust"),
+        (".dsh/skills/rust", "rust", "dsh rust"),
+    ]);
+    let url = "https://github.com/acme/rust-skills.git";
+    sandbox.map_github_url(url, remote.path());
+
+    install_skill_for_agent(url.to_string(), Some("rust".into()), "cursor").expect("cursor hub");
+    assert_eq!(
+        lock_source_folder("rust").as_deref(),
+        Some(".cursor/skills/rust")
+    );
+    deploy("rust", "cursor");
+    assert_eq!(payload_at(&home_skill(".cursor", "rust")), "cursor rust");
+
+    sandbox.map_github_url(url, Path::new("/nonexistent/skillstar-disconnected-remote"));
+    poison_cached_remotes();
+
+    let retargeted = install_skill_for_agent(url.to_string(), Some("rust".into()), "deepseek")
+        .expect("deepseek must use the existing clone, not fetch");
+    assert_eq!(retargeted.name, "rust");
+    assert_eq!(
+        lock_source_folder("rust").as_deref(),
+        Some(".dsh/skills/rust")
+    );
+    deploy("rust", "deepseek");
+
+    assert_eq!(payload_at(&home_skill(".dsh", "rust")), "dsh rust");
+    assert_eq!(
+        payload_at(&home_skill(".cursor", "rust")),
+        "cursor rust",
+        "already-linked cursor must stay on the cursor payload"
+    );
+}
+
+/// impeccable has no `.dsh`. Clicking DeepSeek must still land a skill
+/// folder in `~/.dsh/skills/impeccable`, never the monorepo and never error.
+#[test]
+fn installed_impeccable_deepseek_falls_back_to_a_skill_folder() {
     let sandbox = Sandbox::new();
     let remote = init_pack(&[(".cursor/skills/impeccable", "impeccable", "cursor copy")]);
+    std::fs::write(
+        remote.path().join("SKILL.md"),
+        "---\nname: impeccable\ndescription: root shim\n---\n\n# shim\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(remote.path().join("tests")).unwrap();
+    std::fs::write(
+        remote.path().join("tests/should_not_install.rs"),
+        "fn x() {}\n",
+    )
+    .unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "shim"]);
+
     let url = "https://github.com/acme/impeccable.git";
     sandbox.map_github_url(url, remote.path());
 
     install_skill_for_agent(url.to_string(), Some("impeccable".into()), "cursor")
         .expect("cursor install");
-    let error = install_skill_for_agent(url.to_string(), Some("impeccable".into()), "deepseek")
-        .expect_err("missing .dsh must fail");
-    assert!(
-        error.contains(".dsh") || error.contains("harness"),
-        "{error}"
-    );
     assert_eq!(
         lock_source_folder("impeccable").as_deref(),
         Some(".cursor/skills/impeccable")
     );
-    assert!(!home_skill(".dsh", "impeccable").exists());
+
+    sandbox.map_github_url(url, Path::new("/nonexistent/skillstar-disconnected-remote"));
+    poison_cached_remotes();
+
+    let second = install_skill_for_agent(url.to_string(), Some("impeccable".into()), "deepseek")
+        .expect("missing .dsh must fall back to a skill folder");
+    assert_eq!(second.name, "impeccable");
+    assert_eq!(
+        lock_source_folder("impeccable").as_deref(),
+        Some(".cursor/skills/impeccable"),
+        "fallback to the existing hub folder must not rewrite the lock"
+    );
+
+    deploy("impeccable", "deepseek");
+    let dsh = home_skill(".dsh", "impeccable");
+    assert!(
+        dsh.exists(),
+        "DeepSeek skill path must exist: {}",
+        dsh.display()
+    );
+    assert_skill_folder(&dsh);
+    assert_eq!(payload_at(&dsh), "cursor copy");
+}
+
+/// Wiping the repo cache after a hub install must still fetch on the next
+/// harness click. First-time install keeps the slow path.
+#[test]
+fn missing_git_cache_still_fetches_for_harness_install() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[
+        (".cursor/skills/rust", "rust", "cursor rust"),
+        (".dsh/skills/rust", "rust", "dsh rust"),
+    ]);
+    let url = "https://github.com/acme/rust-skills.git";
+    sandbox.map_github_url(url, remote.path());
+
+    install_skill_for_agent(url.to_string(), Some("rust".into()), "cursor").expect("cursor hub");
+    assert_eq!(
+        lock_source_folder("rust").as_deref(),
+        Some(".cursor/skills/rust")
+    );
+    wipe_repo_cache();
+    assert!(
+        repo_scanner_cache_empty(),
+        "precondition: repo cache must be gone"
+    );
+
+    let fetched = install_skill_for_agent(url.to_string(), Some("rust".into()), "deepseek")
+        .expect("missing cache must clone/fetch again");
+    assert_eq!(fetched.name, "rust");
+    assert_eq!(
+        lock_source_folder("rust").as_deref(),
+        Some(".dsh/skills/rust")
+    );
+    deploy("rust", "deepseek");
+    assert_eq!(payload_at(&home_skill(".dsh", "rust")), "dsh rust");
+}
+
+fn repo_scanner_cache_empty() -> bool {
+    let cache = skillstar_core::infra::paths::repos_cache_dir();
+    !cache.exists()
+        || std::fs::read_dir(&cache)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .all(|entry| !entry.path().join(".git").exists())
+            })
+            .unwrap_or(true)
 }

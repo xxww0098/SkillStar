@@ -301,20 +301,38 @@ fn resolve_install_skills_picks_cursor_or_dsh_harness_folder() {
     .unwrap();
     write_skill_md(&repo.join(".dsh/skills/rust/SKILL.md"), "rust", "dsh copy").unwrap();
 
-    let catalog = resolve_install_skills(&repo, Some("rust"), None).unwrap();
+    let catalog = resolve_install_skills(&repo, Some("rust"), None, None).unwrap();
     assert_eq!(catalog[0].folder_path, "skills/rust");
 
-    let cursor = resolve_install_skills(&repo, Some("rust"), Some(".cursor")).unwrap();
+    let cursor = resolve_install_skills(&repo, Some("rust"), Some(".cursor"), None).unwrap();
     assert_eq!(cursor[0].folder_path, ".cursor/skills/rust");
 
-    let dsh = resolve_install_skills(&repo, Some("rust"), Some(".dsh")).unwrap();
+    let dsh = resolve_install_skills(&repo, Some("rust"), Some(".dsh"), None).unwrap();
     assert_eq!(dsh[0].folder_path, ".dsh/skills/rust");
 }
 
 #[test]
-fn resolve_install_skills_fails_when_the_clicked_harness_is_missing() {
+fn resolve_install_skills_falls_back_when_the_clicked_harness_is_missing() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("impeccable");
+    write_skill_md(
+        &repo.join("skills/impeccable/SKILL.md"),
+        "impeccable",
+        "catalog",
+    )
+    .unwrap();
+    write_skill_md(
+        &repo.join(".cursor/skills/impeccable/SKILL.md"),
+        "impeccable",
+        "cursor copy",
+    )
+    .unwrap();
+
+    let catalog = resolve_install_skills(&repo, Some("impeccable"), Some(".dsh"), None).unwrap();
+    assert_eq!(catalog[0].folder_path, "skills/impeccable");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("impeccable-no-catalog");
     write_skill_md(
         &repo.join(".cursor/skills/impeccable/SKILL.md"),
         "impeccable",
@@ -328,10 +346,30 @@ fn resolve_install_skills_fails_when_the_clicked_harness_is_missing() {
     )
     .unwrap();
 
-    let error = resolve_install_skills(&repo, Some("impeccable"), Some(".dsh")).unwrap_err();
-    assert!(error.contains("'.dsh'"), "{error}");
+    let preferred = resolve_install_skills(
+        &repo,
+        Some("impeccable"),
+        Some(".dsh"),
+        Some(".cursor/skills/impeccable"),
+    )
+    .unwrap();
+    assert_eq!(preferred[0].folder_path, ".cursor/skills/impeccable");
+
+    let other = resolve_install_skills(&repo, Some("impeccable"), Some(".dsh"), None).unwrap();
+    assert_eq!(other[0].folder_path, ".agents/skills/impeccable");
+    assert!(!other[0].folder_path.is_empty());
+}
+
+#[test]
+fn resolve_install_skills_fails_only_without_a_nested_skill_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("root-only");
+    write_skill_md(&repo.join("SKILL.md"), "solo", "root only").unwrap();
+
+    let error = resolve_install_skills(&repo, Some("solo"), Some(".dsh"), None).unwrap_err();
+    assert!(error.contains("no installable SKILL.md"), "{error}");
     assert!(
-        error.contains("will not install another harness"),
+        error.contains("repository root is not an install unit"),
         "{error}"
     );
 }

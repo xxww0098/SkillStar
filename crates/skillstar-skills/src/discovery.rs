@@ -22,7 +22,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub use crate::pack_layout::{
-    folder_matches_harness, missing_harness_folder_error, pack_harness_prefix, source_priority,
+    folder_matches_harness, is_canonical_skill_folder, missing_skill_payload_error,
+    pack_harness_prefix, source_priority,
 };
 
 // ── Data Types ──────────────────────────────────────────────────────
@@ -393,8 +394,7 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
 ///
 /// Prefers `.<harness>/skills/<id>` over a `SKILL.md` sitting on the
 /// harness root. Returns `None` when the pack has no folder for that
-/// harness — callers must fail, not fall back to another copy or the
-/// repo root.
+/// harness — callers then try catalog / hub / another copy.
 pub fn select_harness_skill<'a>(
     skills: &'a [DiscoveredSkill],
     prefix: &str,
@@ -405,25 +405,88 @@ pub fn select_harness_skill<'a>(
         .min_by_key(|skill| crate::pack_layout::harness_folder_rank(prefix, &skill.folder_path))
 }
 
+fn better_nested_copy<'a>(
+    left: &'a DiscoveredSkill,
+    right: &'a DiscoveredSkill,
+) -> &'a DiscoveredSkill {
+    let left_rank = crate::pack_layout::source_priority(&left.folder_path);
+    let right_rank = crate::pack_layout::source_priority(&right.folder_path);
+    match left_rank.cmp(&right_rank) {
+        std::cmp::Ordering::Greater => left,
+        std::cmp::Ordering::Less => right,
+        std::cmp::Ordering::Equal => {
+            if right.folder_path < left.folder_path {
+                right
+            } else {
+                left
+            }
+        }
+    }
+}
+
+fn select_canonical_skill(skills: &[DiscoveredSkill]) -> Option<&DiscoveredSkill> {
+    skills
+        .iter()
+        .filter(|skill| crate::pack_layout::is_canonical_skill_folder(&skill.folder_path))
+        .reduce(better_nested_copy)
+}
+
+fn select_nested_skill_copy(skills: &[DiscoveredSkill]) -> Option<&DiscoveredSkill> {
+    skills
+        .iter()
+        .filter(|skill| !skill.folder_path.is_empty())
+        .reduce(better_nested_copy)
+}
+
+fn select_preferred_nested_skill<'a>(
+    skills: &'a [DiscoveredSkill],
+    preferred_folder: Option<&str>,
+) -> Option<&'a DiscoveredSkill> {
+    let folder = preferred_folder.filter(|folder| !folder.is_empty())?;
+    skills
+        .iter()
+        .find(|skill| skill.folder_path == folder && !skill.folder_path.is_empty())
+}
+
 /// Resolve which discovered folders to install from a fetched checkout.
 ///
+/// When `harness_prefix` is unset, catalog folders win and a remaining
+/// root `SKILL.md` is dropped if any nested copy exists.
+///
 /// When `harness_prefix` is set, that `.<harness>/` tree wins even if
-/// `skills/` also exists. When it is unset, catalog folders win and a
-/// remaining root `SKILL.md` is dropped if any nested copy exists.
+/// `skills/` also exists. If the pack has no folder for that harness:
+/// 1. canonical `skills/<name>/` or `source/skills/`
+/// 2. `preferred_folder` (existing hub `source_folder`) when it is a nested skill
+/// 3. another nested harness copy of the same identity
+///
+/// Never selects the repo root. Fails only when no nested SKILL.md exists.
 pub fn resolve_install_skills(
     repo_dir: &Path,
     requested_name: Option<&str>,
     harness_prefix: Option<&str>,
+    preferred_folder: Option<&str>,
 ) -> Result<Vec<DiscoveredSkill>, String> {
     if let Some(prefix) = harness_prefix {
         let mut all = discover_skills_without_dedup(repo_dir, true, None);
         if let Some(name) = requested_name {
             all.retain(|skill| skill.id.eq_ignore_ascii_case(name));
         }
-        return match select_harness_skill(&all, prefix) {
-            Some(skill) => Ok(vec![skill.clone()]),
-            None => Err(crate::pack_layout::missing_harness_folder_error(prefix)),
-        };
+        if let Some(skill) = select_harness_skill(&all, prefix) {
+            return Ok(vec![skill.clone()]);
+        }
+        if let Some(skill) = select_canonical_skill(&all) {
+            return Ok(vec![skill.clone()]);
+        }
+        if let Some(skill) = select_preferred_nested_skill(&all, preferred_folder) {
+            return Ok(vec![skill.clone()]);
+        }
+        if let Some(skill) = select_nested_skill_copy(&all) {
+            return Ok(vec![skill.clone()]);
+        }
+        return Err(crate::pack_layout::missing_skill_payload_error(
+            prefix,
+            requested_name,
+        ));
     }
 
     let mut skills = discover_skills(repo_dir, false);

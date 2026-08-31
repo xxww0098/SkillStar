@@ -6,13 +6,24 @@
 
 - Symptom: `skillstar install … --agent cursor` 之后再 `install … --agent deepseek` 打印 `Reusing existing hub install(s)`，把 `~/.dsh/skills/rust` 链到 **Cursor** 的 hub 路径；lock `source_folder` 仍是 `.cursor/skills/rust`。clone 里其实有 `.dsh/skills/rust`。卡片轮播点第二个图标同样走这条。Hub 已是 `.agents/skills/impeccable` 时再 `--agent cursor` 也不改指向 `.cursor/skills/impeccable`。对 rust-skills 两份拷贝相同，对 impeccable 式改写过的 `SKILL.md` 会装错 harness。
 - Root cause: 同名一条 lock 把「仓库已在 hub」当成「可以复用」。`install_skills_batch` / `try_install_from_repo_cache` 只比 git URL，不比 `source_folder` 是否已经是本次请求的 `.<harness>/` 文件夹。CLI 的 `install_or_reuse` 因此走 Reuse，随后 `batch_deploy` 把**当前** hub（另一份 harness）链到新 Agent。轮播未链接图标也曾只 `toggle_skill_for_agent`，同样部署当前 hub。
-- Fix: 复用仅当现有 `source_folder` 已是请求的 harness 文件夹。否则从同一 clone 改指向（不二次 clone），改之前 `pin_existing_global_links_to_current_source` 把**其他** Agent 钉到当前 payload（跳过正在改指向的 Agent）。`batch_deploy` 对目标 Agent 上指向另一份 harness / 旧 hub 的 symlink 做 link-first 替换，不得把「路径已存在」当成成功。缺少该 harness 仍明确失败。轮播未链接图标走 `install_skill(url, name, agentId)`。
+- Fix: 复用仅当现有 `source_folder` 已是本次解析到的文件夹。否则从同一 clone 改指向（不二次 clone），改之前 `pin_existing_global_links_to_current_source` 把**其他** Agent 钉到当前 payload（跳过正在改指向的 Agent）。`batch_deploy` 对目标 Agent 上指向另一份 harness / 旧 hub 的 symlink 做 link-first 替换，不得把「路径已存在」当成成功。缺少该 harness 时按 D-046 回退，不得 fail-closed。轮播未链接图标走 `install_skill(url, name, agentId)`。
 - Files: `crates/skillstar-skills/src/skill_install.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`src/features/my-skills/components/SkillCard.tsx`、`docs/features/skills/README.md`。
 - Self-check:
   - `cargo test -p skillstar-skills --locked stale_dsh_link_is_rewritten_to_requested_harness batch_deploy_rewrites_a_stale_link_and_leaves_other_agents_pinned`
-  - 装完 Cursor 再装 DeepSeek：`~/.dsh/skills/<id>` 必须解析到 `.dsh/skills/<id>`，不能是 `.cursor/skills/<id>`；已链的 Cursor 仍是 Cursor 正文。即使 `~/.dsh/skills/<id>` 事先错误地指向 cursor 文件夹，部署也必须改写，CLI 不得报 `0 new deployment(s)`。
+  - 装完 Cursor 再装 DeepSeek：clone 里有 `.dsh` 时 `~/.dsh/skills/<id>` 必须解析到 `.dsh/skills/<id>`，不能是 `.cursor/skills/<id>`；已链的 Cursor 仍是 Cursor 正文。即使 `~/.dsh/skills/<id>` 事先错误地指向 cursor 文件夹，部署也必须改写，CLI 不得报 `0 new deployment(s)`。
   - Hub 已是 `.agents/skills/<id>` 时 `--agent cursor` 必须把 lock/`source_folder` 改成 `.cursor/skills/<id>`，不得静默 Reuse。
-  - 包里没有该 harness 时仍报错，不得回退另一份。
+
+## 2026-08-31 - 已装卡点轮播又 fetch，缺 `.dsh` 还 fail-closed
+
+- Symptom: Library 里 rust-skills / impeccable 已在 hub，点未链接的 DeepSeek 图标要等一整次 Git clone/fetch；impeccable（包内没有 `.dsh`）随后报 `This pack has no '.dsh' skill folder`，`~/.dsh/skills/impeccable` 不会出现。
+- Root cause: `try_install_from_repo_cache` / CLI `fetch_repo_scanned` 一律走 `clone_or_fetch`，cache 有 `.git` 也会 `git fetch --depth 1` + reset。`resolve_install_skills` 在缺请求 harness 时 fail-closed，不回退 catalog / 现有 hub / 另一份副本。
+- Fix: 已有 repo-cache 时只扫描本地 checkout（`cached_repo_dir_if_present`），不 fetch；`source_folder` 没变就不改 lock。缺 harness 时回退 `skills/<name>/` 或 `source/skills/` → 现有 hub `source_folder` → 同 identity 的另一嵌套副本，再部署到被点 Agent。只有没有嵌套 `SKILL.md` 才失败。cache 被删仍 fetch。
+- Files: `crates/skillstar-skills/src/{skill_install.rs,discovery.rs,repo_scanner/cache.rs}`、`crates/skillstar-app/src/cli/install.rs`、`docs/features/skills/README.md`。
+- Self-check:
+  - `cargo test -p skillstar-skills --locked installed_rust_skills_deepseek_retargets_from_cache_without_clone installed_impeccable_deepseek_falls_back_to_a_skill_folder missing_git_cache_still_fetches_for_harness_install`
+  - 已装 rust-skills：掐断 remote 后再 `--agent deepseek` 必须成功，dsh 链到 `.dsh/skills/rust`，cursor 不变。
+  - 已装 impeccable：`--agent deepseek` 必须成功，`~/.dsh/skills/impeccable` 是含 `SKILL.md` 的技能目录，不是整仓。
+  - 删掉 `repos` cache 后再装必须重新 fetch，不能静默 no-op。
 
 ## 2026-08-31 - TS 孤儿门禁在 Windows CI 上打印 ✓/✗ 触发 UnicodeEncodeError，报 0 违规却退出 1
 
