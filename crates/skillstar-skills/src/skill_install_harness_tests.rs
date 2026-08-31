@@ -233,6 +233,68 @@ fn second_harness_install_deploys_that_harness_folder() {
     );
 }
 
+/// Live leftover from the first harness bug: dsh is already linked to the
+/// cursor folder. Retarget + deploy must rewrite that stale link, not skip it.
+#[test]
+fn stale_dsh_link_is_rewritten_to_requested_harness() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[
+        (".cursor/skills/rust", "rust", "cursor rust"),
+        (".dsh/skills/rust", "rust", "dsh rust"),
+    ]);
+    let url = "https://github.com/acme/rust-skills.git";
+    sandbox.map_github_url(url, remote.path());
+
+    install_skills_batch_in_session(
+        url,
+        &["rust".to_string()],
+        Some("cursor"),
+        &GitOperationSession::public(),
+    )
+    .expect("cursor hub");
+    assert_eq!(
+        lock_source_folder("rust").as_deref(),
+        Some(".cursor/skills/rust")
+    );
+    deploy("rust", "cursor");
+    assert_eq!(payload_at(&home_skill(".cursor", "rust")), "cursor rust");
+
+    let cursor_payload = std::fs::canonicalize(home_skill(".cursor", "rust")).unwrap();
+    let dsh = home_skill(".dsh", "rust");
+    std::fs::create_dir_all(dsh.parent().unwrap()).unwrap();
+    skillstar_core::infra::fs_ops::create_symlink(&cursor_payload, &dsh).unwrap();
+    assert_eq!(
+        payload_at(&dsh),
+        "cursor rust",
+        "precondition: stale dsh link points at the cursor folder"
+    );
+
+    let retargeted = install_skills_batch_in_session(
+        url,
+        &["rust".to_string()],
+        Some("deepseek"),
+        &GitOperationSession::public(),
+    )
+    .expect("deepseek retarget");
+    assert_eq!(retargeted.len(), 1);
+    assert_eq!(
+        lock_source_folder("rust").as_deref(),
+        Some(".dsh/skills/rust")
+    );
+
+    deploy("rust", "deepseek");
+    assert_eq!(
+        payload_at(&home_skill(".dsh", "rust")),
+        "dsh rust",
+        "stale dsh symlink must be rewritten to the dsh harness folder"
+    );
+    assert_eq!(
+        payload_at(&home_skill(".cursor", "rust")),
+        "cursor rust",
+        "pinned cursor deploy must stay on the cursor payload"
+    );
+}
+
 /// In-place hub at `.agents/skills/impeccable` plus `--agent cursor` must
 /// retarget to `.cursor/skills/impeccable`, not silently reuse.
 #[test]

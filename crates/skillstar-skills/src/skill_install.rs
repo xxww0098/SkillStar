@@ -250,6 +250,7 @@ fn try_install_from_repo_cache(
     skills_dir: &Path,
     session: &crate::git::transport::GitOperationSession,
     harness_prefix: Option<&str>,
+    except_agent_id: Option<&str>,
 ) -> Result<Option<Skill>, String> {
     let Ok((repo_url, _source, repo_dir, scan_found)) =
         fetch_repo_scanned_detailed_in_session(url, false, session)
@@ -304,7 +305,7 @@ fn try_install_from_repo_cache(
                 )));
             }
             SameRepoAction::Retarget => {
-                deployment::pin_existing_global_links_to_current_source(&skill.id)
+                deployment::pin_existing_global_links_to_current_source(&skill.id, except_agent_id)
                     .map_err(|error| error.to_string())?;
             }
             SameRepoAction::Reject => {
@@ -384,7 +385,7 @@ pub fn install_skill_in_session(
         Some(id) => Some(harness_prefix_for_agent(id)?),
         None => None,
     };
-    install_skill_in_session_locked(url, name, session, harness_prefix.as_deref())
+    install_skill_in_session_locked(url, name, session, harness_prefix.as_deref(), agent_id)
 }
 
 fn install_skill_in_session_locked(
@@ -392,6 +393,7 @@ fn install_skill_in_session_locked(
     name: Option<String>,
     session: &crate::git::transport::GitOperationSession,
     harness_prefix: Option<&str>,
+    except_agent_id: Option<&str>,
 ) -> Result<Skill, String> {
     let skills_dir = paths::hub_skills_dir();
     // Safe here because the caller holds the update transaction lock, so no
@@ -423,6 +425,7 @@ fn install_skill_in_session_locked(
         &skills_dir,
         session,
         harness_prefix,
+        except_agent_id,
     )? {
         return Ok(skill);
     }
@@ -594,8 +597,10 @@ pub fn install_skills_batch_in_session(
                 });
                 if same_source {
                     if harness_prefix.is_some() && !source_folder_eq(entry, &skill.folder_path) {
-                        deployment::pin_existing_global_links_to_current_source(&skill.id)
-                            .map_err(|error| error.to_string())?;
+                        deployment::pin_existing_global_links_to_current_source(
+                            &skill.id, agent_id,
+                        )
+                        .map_err(|error| error.to_string())?;
                     } else {
                         continue;
                     }
@@ -654,6 +659,7 @@ pub fn install_skills_batch_in_session(
             Some(name),
             session,
             harness_prefix.as_deref(),
+            agent_id,
         ) {
             Ok(skill) => {
                 fallback_installed.push(skill.name.clone());

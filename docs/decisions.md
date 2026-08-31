@@ -413,7 +413,7 @@
 - 背景：rust-skills / impeccable 这类包在每个 Agent 目录下各放一份独立技能。卡片 SVG 轮播原先只 `toggle` 已安装链接，Install 按钮走 `install_skill(url, name)` → 发现后 `global_deploy` 到全部已启用 Agent。发现层又漏了 `.cursor/skills` 与 `.dsh/skills`，根垫片会把 `source_folder` 写成空，Hub 链整仓。
 - 决策：安装单元是含 `SKILL.md` 的 harness 技能目录（或 harness 根，若那才是单元）。未指定 harness 时 catalog `skills/<name>/` 优先；点轮播图标或 CLI 显式单个 `--agent` 时该 harness 文件夹赢。没有该文件夹则失败。稀疏检出保留全部嵌套 `SKILL.md` 父目录，不再按 basename 丢掉 `.agent` / `.agents`。
 - 后果：同一 Hub 名仍只有一条 lock，`source_folder` 跟随最近一次明确请求的 harness。复用仅当现有 `source_folder` 已经是该 harness 文件夹；否则从同一 clone 改指向（不二次 clone），并先把已链到其他 Agent 的链接钉到当前 payload。Impeccable 没有 `.dsh` 时点 DSH 会报错而不是装 Cursor 副本。轮播未链接图标走 `install_skill(url, name, agentId)`，不得只 `toggle` 当前 Hub。
-- 证据：`resolve_install_skills`、`existing_same_repo_action`、`pin_existing_global_links_to_current_source`、`install_skill(..., agentId)`、`AgentTargetCarousel` 接线测试、`second_harness_install_deploys_that_harness_folder`。
+- 证据：`resolve_install_skills`、`existing_same_repo_action`、`pin_existing_global_links_to_current_source`、`install_skill(..., agentId)`、`AgentTargetCarousel` 接线测试、`stale_dsh_link_is_rewritten_to_requested_harness`。
 
 ## 新增记录格式
 
