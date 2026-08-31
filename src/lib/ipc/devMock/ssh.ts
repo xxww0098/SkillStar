@@ -175,31 +175,4 @@ export const SSH_HANDLERS: DevMockHandlers = {
     remote_path: `~/.claude/skills/${args?.skillName ?? "skill"}`,
   }),
   delete_remote_skill: () => undefined,
-  push_skills_to_remote: (args) => {
-    const names = (args?.skillNames ?? []) as string[];
-    const pushed = names.map((skillName) => ({
-      files_uploaded: 3,
-      bytes: 8192,
-      remote_path: `~/.claude/skills/${skillName}`,
-    }));
-    return {
-      pushed,
-      failed: [],
-      total: names.length,
-      succeeded: names.length,
-    };
-  },
-  read_remote_skill_content: (args) => ({
-    name: args?.skillName ?? "skill",
-    content: "---\nname: skill\ndescription: Mocked remote SKILL.md\n---\n\n# Mocked remote skill body.\n",
-    modified: "2025-01-01",
-  }),
-  write_remote_skill_content: () => undefined,
-  pull_remote_skill: () => undefined,
-  toggle_remote_agent_link: () => undefined,
-  install_remote_skill: () => undefined,
-  check_remote_skill_updates: () => [
-    { name: "code-review", update_available: false },
-    { name: "brandkit", update_available: true },
-  ],
 };

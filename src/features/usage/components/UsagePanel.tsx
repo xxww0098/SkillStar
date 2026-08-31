@@ -1,10 +1,12 @@
 import { motion } from "framer-motion";
-import { Wallet } from "lucide-react";
+import { Eye, EyeOff, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { useUsageDataContext } from "../context/UsageDataContext";
 import { isDegradedCopyBinding } from "../lib/cliCustody";
+import { readHideAccountEmails, writeHideAccountEmails } from "../lib/accountPrivacy";
 import { FILTER_ALL, type CatalogFilter, type Subscription } from "../types";
 import { SubscriptionEditDialog } from "./SubscriptionEditDialog";
 import { UsageActionBar } from "./UsageActionBar";
@@ -24,6 +26,7 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
   const [preselectId, setPreselectId] = useState<string | null>(null);
+  const [hideAccountEmails, setHideAccountEmails] = useState(() => readHideAccountEmails());
   const filtered = useMemo(() => {
     if (filter === FILTER_ALL) return data.subscriptions;
     return data.subscriptions.filter((s) => s.catalog_id === filter);
@@ -87,6 +90,11 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
         intervalMs={data.autoRefresh.intervalMs}
         setAutoRefreshEnabled={data.autoRefresh.setAutoRefreshEnabled}
         setIntervalMs={data.autoRefresh.setIntervalMs}
+        hideAccountEmails={hideAccountEmails}
+        onToggleAccountEmails={(hidden) => {
+          setHideAccountEmails(hidden);
+          writeHideAccountEmails(hidden);
+        }}
       />
       <UsageActionBar
         subscriptions={data.subscriptions}
@@ -111,10 +119,12 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
             allSubscriptions={data.subscriptions}
             catalog={data.catalog}
             cliAccounts={data.cliAccounts}
+            hideAccountEmails={hideAccountEmails}
             filter={filter}
             onReorder={(ids) => settled(data.reorder(ids))}
             onBrowseProviders={() => toast.info(t("usage.pickProviderFromSidebar"))}
             onRefresh={data.refreshOneWithUi}
+            onResetQuota={data.resetQuotaWithUi}
             refreshDisabled={data.refreshBusy}
             onEdit={openEdit}
             onDelete={(id) => settled(data.remove(id))}
@@ -125,15 +135,40 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
               try {
                 const updated = await data.setActive(id);
                 const outcome = updated.switch_result ?? null;
+                const isAntigravity = updated.catalog_id === "antigravity";
+                const isCursor = updated.catalog_id === "cursor";
                 if (outcome && !outcome.success && outcome.error) {
-                  const message = updated.is_active ? t("usage.switchCliFailed") : t("usage.switchNotApplied");
+                  const message = updated.is_active
+                    ? t(
+                        isAntigravity
+                          ? "usage.switchAntigravityFailed"
+                          : isCursor
+                            ? "usage.switchCursorFailed"
+                            : "usage.switchCliFailed",
+                      )
+                    : t("usage.switchNotApplied");
                   toast.error(message, {
                     description: outcome.error,
                   });
                 } else if (outcome && outcome.success) {
-                  toast.success(t("usage.switchCliSuccess"), {
-                    description: `${updated.display_name} → ${outcome.toolId} · ${t("usage.switchCliRestartHint")}`,
-                  });
+                  toast.success(
+                    t(
+                      isAntigravity
+                        ? "usage.switchAntigravitySuccess"
+                        : isCursor
+                          ? "usage.switchCursorSuccess"
+                          : "usage.switchCliSuccess",
+                    ),
+                    {
+                      description: `${updated.display_name} → ${outcome.toolId} · ${t(
+                        isAntigravity
+                          ? "usage.switchAntigravityRestartHint"
+                          : isCursor
+                            ? "usage.switchCursorRestartHint"
+                            : "usage.switchCliRestartHint",
+                      )}`,
+                    },
+                  );
                   // A copy is a different deal from a link, and the user is the
                   // one who has to live with it.
                   if (isDegradedCopyBinding(outcome)) {
@@ -155,9 +190,26 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
               try {
                 const outcome = await data.switchActiveToCli(catalogId);
                 if (outcome.success) {
-                  toast.success(t("usage.switchCliSynced"), {
-                    description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint")}`,
-                  });
+                  const isAntigravity = catalogId === "antigravity";
+                  const isCursor = catalogId === "cursor";
+                  toast.success(
+                    t(
+                      isAntigravity
+                        ? "usage.switchAntigravitySynced"
+                        : isCursor
+                          ? "usage.switchCursorSynced"
+                          : "usage.switchCliSynced",
+                    ),
+                    {
+                      description: `${outcome.toolId}: ${outcome.configPath} · ${t(
+                        isAntigravity
+                          ? "usage.switchAntigravityRestartHint"
+                          : isCursor
+                            ? "usage.switchCursorRestartHint"
+                            : "usage.switchCliRestartHint",
+                      )}`,
+                    },
+                  );
                   if (isDegradedCopyBinding(outcome)) {
                     toast.warning(t("usage.switchCliCopyMode"), {
                       description: t("usage.switchCliCopyModeHint"),
@@ -165,9 +217,18 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
                     });
                   }
                 } else if (outcome.error) {
-                  toast.error(t("usage.switchCliSyncFailed"), {
-                    description: outcome.error,
-                  });
+                  toast.error(
+                    t(
+                      catalogId === "antigravity"
+                        ? "usage.switchAntigravitySyncFailed"
+                        : catalogId === "cursor"
+                          ? "usage.switchCursorSyncFailed"
+                          : "usage.switchCliSyncFailed",
+                    ),
+                    {
+                      description: outcome.error,
+                    },
+                  );
                 }
               } catch (err) {
                 toast.error(err instanceof Error ? err.message : String(err));
@@ -212,6 +273,8 @@ function Header({
   intervalMs,
   setAutoRefreshEnabled,
   setIntervalMs,
+  hideAccountEmails,
+  onToggleAccountEmails,
 }: {
   onRefresh: () => Promise<void>;
   refreshing: boolean;
@@ -221,6 +284,8 @@ function Header({
   intervalMs: number;
   setAutoRefreshEnabled: (enabled: boolean) => void;
   setIntervalMs: (intervalMs: number) => void;
+  hideAccountEmails: boolean;
+  onToggleAccountEmails: (hidden: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -229,30 +294,48 @@ function Header({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       data-tauri-drag-region
-      className="flex h-14 shrink-0 items-center gap-3 border-b border-border/40 px-4"
+      className="flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-sidebar px-6"
     >
       <div className="flex shrink-0 items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 text-primary border border-primary/35 shadow-xs">
           <Wallet className="w-4 h-4" />
         </div>
         <div>
-          <h1 className="text-base font-semibold leading-tight">{t("sidebar.usage")}</h1>
-          <p className="text-[11px] text-muted-foreground">{t("usage.panelSubtitle")}</p>
+          <h1 className="text-sm font-bold text-foreground leading-tight tracking-tight">{t("sidebar.usage")}</h1>
+          <p className="text-[11px] text-muted-foreground/80 font-medium">{t("usage.panelSubtitle")}</p>
         </div>
       </div>
 
       <div data-tauri-drag-region className="h-full min-w-[48px] flex-1" aria-hidden />
 
-      <UsageRefreshControl
-        onRefresh={onRefresh}
-        refreshing={refreshing}
-        refreshDisabled={refreshDisabled}
-        refreshLabel={refreshLabel}
-        autoRefreshEnabled={autoRefreshEnabled}
-        intervalMs={intervalMs}
-        setAutoRefreshEnabled={setAutoRefreshEnabled}
-        setIntervalMs={setIntervalMs}
-      />
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          aria-pressed={hideAccountEmails}
+          aria-label={t(hideAccountEmails ? "usage.showAccountEmails" : "usage.hideAccountEmails")}
+          title={t(hideAccountEmails ? "usage.showAccountEmails" : "usage.hideAccountEmails")}
+          onClick={() => onToggleAccountEmails(!hideAccountEmails)}
+          className={cn(
+            "inline-flex size-8 items-center justify-center rounded-md border transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+            hideAccountEmails
+              ? "border-primary/40 bg-primary/10 text-primary"
+              : "border-border/80 bg-background/50 text-muted-foreground hover:bg-accent/10 hover:text-foreground",
+          )}
+        >
+          {hideAccountEmails ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+        </button>
+        <UsageRefreshControl
+          onRefresh={onRefresh}
+          refreshing={refreshing}
+          refreshDisabled={refreshDisabled}
+          refreshLabel={refreshLabel}
+          autoRefreshEnabled={autoRefreshEnabled}
+          intervalMs={intervalMs}
+          setAutoRefreshEnabled={setAutoRefreshEnabled}
+          setIntervalMs={setIntervalMs}
+        />
+      </div>
     </motion.header>
   );
 }

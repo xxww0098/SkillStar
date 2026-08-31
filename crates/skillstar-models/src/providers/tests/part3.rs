@@ -236,8 +236,14 @@ fn binding_claude_code_records_the_provider_and_model() {
     let mut store = ProvidersStoreV4::default();
     let created = create_provider(&mut store, make_provider("DeepSeek")).unwrap();
 
-    let entry =
-        bind_provider(&mut store, "claude-code", &created.id, Some("deepseek-chat"), None).unwrap();
+    let entry = bind_provider(
+        &mut store,
+        "claude-code",
+        &created.id,
+        Some("deepseek-chat"),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(entry.provider_id, created.id);
     assert_eq!(entry.model, "deepseek-chat");
@@ -251,8 +257,7 @@ fn binding_codex_requires_a_responses_endpoint() {
     let mut store = ProvidersStoreV4::default();
     let created = create_provider(&mut store, make_responses_provider("OpenAI")).unwrap();
 
-    let entry =
-        bind_provider(&mut store, "codex", &created.id, Some("gpt-5.4"), None).unwrap();
+    let entry = bind_provider(&mut store, "codex", &created.id, Some("gpt-5.4"), None).unwrap();
 
     assert_eq!(entry.provider_id, created.id);
     assert_eq!(entry.model, "gpt-5.4");
@@ -319,7 +324,16 @@ fn an_unknown_agent_id_is_gated_on_chat() {
     let mut store = ProvidersStoreV4::default();
     let created = create_provider(&mut store, make_provider("Relay")).unwrap();
 
-    assert!(bind_provider(&mut store, "some-future-agent", &created.id, Some("m"), None).is_ok());
+    assert!(
+        bind_provider(
+            &mut store,
+            "some-future-agent",
+            &created.id,
+            Some("m"),
+            None
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -358,7 +372,14 @@ fn rebinding_a_multi_provider_agent_appends_and_points_at_the_new_row() {
 fn unbinding_an_agent_returns_what_was_active() {
     let mut store = ProvidersStoreV4::default();
     let created = create_provider(&mut store, make_provider("DeepSeek")).unwrap();
-    bind_provider(&mut store, "claude-code", &created.id, Some("model-a"), None).unwrap();
+    bind_provider(
+        &mut store,
+        "claude-code",
+        &created.id,
+        Some("model-a"),
+        None,
+    )
+    .unwrap();
 
     let previous = unbind_agent(&mut store, "claude-code").unwrap().unwrap();
 
@@ -378,12 +399,29 @@ fn bind_then_unbind_then_bind_again_round_trips() {
     let mut store = ProvidersStoreV4::default();
     let created = create_provider(&mut store, make_provider("DeepSeek")).unwrap();
 
-    bind_provider(&mut store, "claude-code", &created.id, Some("model-a"), None).unwrap();
+    bind_provider(
+        &mut store,
+        "claude-code",
+        &created.id,
+        Some("model-a"),
+        None,
+    )
+    .unwrap();
     unbind_agent(&mut store, "claude-code").unwrap();
     assert!(store.bindings["claude-code"].is_empty());
 
-    bind_provider(&mut store, "claude-code", &created.id, Some("model-b"), None).unwrap();
-    assert_eq!(store.bindings["claude-code"].active().unwrap().model, "model-b");
+    bind_provider(
+        &mut store,
+        "claude-code",
+        &created.id,
+        Some("model-b"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        store.bindings["claude-code"].active().unwrap().model,
+        "model-b"
+    );
 }
 
 #[test]
@@ -391,10 +429,20 @@ fn one_provider_can_serve_several_agents_with_different_models() {
     let mut store = ProvidersStoreV4::default();
     let created = create_provider(&mut store, make_responses_provider("DeepSeek")).unwrap();
 
-    bind_provider(&mut store, "claude-code", &created.id, Some("model-a"), None).unwrap();
+    bind_provider(
+        &mut store,
+        "claude-code",
+        &created.id,
+        Some("model-a"),
+        None,
+    )
+    .unwrap();
     bind_provider(&mut store, "codex", &created.id, Some("model-b"), None).unwrap();
 
-    assert_eq!(store.bindings["claude-code"].active().unwrap().model, "model-a");
+    assert_eq!(
+        store.bindings["claude-code"].active().unwrap().model,
+        "model-a"
+    );
     assert_eq!(store.bindings["codex"].active().unwrap().model, "model-b");
 }
 

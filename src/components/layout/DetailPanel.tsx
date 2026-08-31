@@ -1,7 +1,8 @@
 import { tauriInvoke } from "../../lib/ipc";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   BookMarked,
   BookOpen,
   Calendar,
@@ -29,7 +30,6 @@ import { Github as GitHub } from "../ui/icons/Github";
 import { InfoTip } from "../ui/InfoTip";
 import { LoadingLogo } from "../ui/LoadingLogo";
 import { Markdown } from "../ui/Markdown";
-import { Skeleton } from "../ui/Skeleton";
 
 const SkillEditor = lazy(() => import("../shared/SkillEditor").then((mod) => ({ default: mod.SkillEditor })));
 
@@ -46,6 +46,11 @@ interface DetailPanelProps {
   onUpdate: (name: string) => void;
   onUninstall: (name: string) => void;
   uninstalling?: boolean;
+  /** Upstream dropped the Skill with no successor: keep a local copy or remove. */
+  onResolveRemoved?: (name: string) => void;
+  /** Upstream renamed the Skill: install the successor, carry deployments over, remove this one. */
+  onMigrate?: (name: string) => void;
+  migrating?: boolean;
   onReinstall?: (url: string, name: string) => void;
   onReadContent?: (name: string) => Promise<SkillContent>;
   onSaveContent?: (name: string, content: string) => Promise<void>;
@@ -59,12 +64,18 @@ export function DetailPanel({
   onUpdate,
   onUninstall,
   uninstalling,
+  onResolveRemoved,
+  onMigrate,
+  migrating,
   onReinstall,
   onReadContent,
   onSaveContent,
   onPublish,
 }: DetailPanelProps) {
   const { t } = useTranslation();
+  const upstreamChange = skill?.installed && skill.skill_type !== "local" ? (skill.upstream_change ?? null) : null;
+  const upstreamSuccessor = upstreamChange?.kind === "removed" ? upstreamChange.successor : null;
+  const prefersReducedMotion = useReducedMotion();
   const [editing, setEditing] = useState(false);
   const [reading, setReading] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -94,7 +105,6 @@ export function DetailPanel({
 
   // Marketplace detail fetching
   const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
   const quickReadCacheRef = useRef<Map<string, string>>(new Map());
 
   // Guard async setState after component unmount
@@ -108,7 +118,6 @@ export function DetailPanel({
 
   // Fetch marketplace details for remote skills
   const fetchDetails = useCallback(async (source: string, name: string) => {
-    setDetailsLoading(true);
     try {
       const readLocal = () =>
         tauriInvoke("get_skill_detail_local", {
@@ -136,8 +145,6 @@ export function DetailPanel({
       if (import.meta.env.DEV) console.warn("[DetailPanel] Failed to fetch skill details:", e);
       if (!mountedRef.current) return;
       setSkillDetails(null);
-    } finally {
-      if (mountedRef.current) setDetailsLoading(false);
     }
   }, []);
 
@@ -296,17 +303,21 @@ export function DetailPanel({
       {skill && !editing && !reading && !tutorialOpen && (
         <motion.aside
           key="skill-detail"
-          initial={{ x: "100%", opacity: 0 }}
+          initial={{ x: prefersReducedMotion ? 0 : "100%", opacity: prefersReducedMotion ? 0 : 1 }}
           animate={{ x: 0, opacity: 1 }}
-          exit={{ x: "100%", opacity: 0 }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute right-0 top-0 bottom-0 z-50 flex h-full w-full max-w-md flex-col overflow-hidden border-l border-border/45 bg-background/30 shadow-[0_24px_80px_-52px_var(--color-shadow)] backdrop-blur-xl will-change-transform"
+          exit={{ x: prefersReducedMotion ? 0 : "100%", opacity: prefersReducedMotion ? 0 : 1 }}
+          transition={{ duration: prefersReducedMotion ? 0.01 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+          // Opaque card: backdrop-filter + this slide transform paints a blank
+          // compositor layer in WKWebView, especially on the paper theme.
+          className="absolute right-0 top-0 bottom-0 z-50 flex h-full w-full max-w-md flex-col overflow-hidden rounded-l-xl border-l border-border bg-card shadow-[0_24px_80px_-48px_var(--color-shadow)]"
         >
           {/* Header — pinned */}
-          <div className="flex shrink-0 items-center justify-between border-b border-border/55 p-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-border p-4">
             <h2 className="text-heading-sm truncate">{skill.name}</h2>
             <button
+              type="button"
               onClick={onClose}
+              aria-label={t("common.close")}
               className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors cursor-pointer focus-ring"
             >
               <X className="w-4 h-4" />
@@ -384,16 +395,6 @@ export function DetailPanel({
                       )}
                     </div>
                   ))}
-                </div>
-              )}
-
-              {/* Detail loading skeleton */}
-              {detailsLoading && (
-                <div className="space-y-2">
-                  <Skeleton className="h-3 w-full" />
-                  <Skeleton className="h-3 w-5/6" />
-                  <Skeleton className="h-3 w-4/6" />
-                  <Skeleton className="h-20 w-full mt-3" />
                 </div>
               )}
 
@@ -566,9 +567,72 @@ export function DetailPanel({
           </div>
 
           {/* Sticky action bar */}
-          <div className="shrink-0 space-y-2 border-t border-border/55 bg-background/35 p-4 backdrop-blur-sm">
+          <div className="shrink-0 space-y-2 border-t border-border bg-card p-4">
             {skill.installed ? (
               <>
+                {upstreamChange?.kind === "removed" && (
+                  <div
+                    className={
+                      upstreamSuccessor
+                        ? "rounded-xl border border-violet-500/30 bg-violet-500/[0.06] px-3 py-2.5 space-y-2"
+                        : "rounded-xl border border-rose-500/30 bg-rose-500/[0.06] px-3 py-2.5 space-y-2"
+                    }
+                  >
+                    <div className="flex items-start gap-2">
+                      {upstreamSuccessor ? (
+                        <ArrowRightLeft className="w-4 h-4 mt-0.5 shrink-0 text-violet-500 dark:text-violet-300" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500 dark:text-rose-300" />
+                      )}
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-semibold text-foreground">
+                          {t(
+                            upstreamSuccessor ? "detailPanel.upstreamRenamedTitle" : "detailPanel.upstreamRemovedTitle",
+                          )}
+                        </p>
+                        {upstreamSuccessor ? (
+                          <p className="text-xs text-muted-foreground leading-5 break-words">
+                            {t("detailPanel.upstreamRenamedDesc", {
+                              name: upstreamSuccessor.skill_id,
+                              folder: upstreamSuccessor.folder_path,
+                            })}{" "}
+                            {upstreamSuccessor.similarity === null
+                              ? t("detailPanel.upstreamSameName")
+                              : t("detailPanel.upstreamSimilarity", { similarity: upstreamSuccessor.similarity })}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground leading-5 break-words">
+                            {t("detailPanel.upstreamRemovedDesc", {
+                              source: skill.source ?? skill.git_url,
+                              folder: skill.name,
+                            })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {upstreamSuccessor && onMigrate ? (
+                      <>
+                        <Button className="w-full" disabled={migrating} onClick={() => onMigrate(skill.name)}>
+                          <ArrowRightLeft className="w-4 h-4 mr-2" />
+                          {migrating
+                            ? t("skillCard.migrating")
+                            : t("detailPanel.migrateToSuccessor", { name: upstreamSuccessor.skill_id })}
+                        </Button>
+                        <p className="text-[11px] leading-4 text-muted-foreground">{t("detailPanel.migrateHint")}</p>
+                      </>
+                    ) : null}
+                    {onResolveRemoved && (
+                      <Button
+                        variant={upstreamSuccessor ? "outline" : "default"}
+                        className="w-full"
+                        onClick={() => onResolveRemoved(skill.name)}
+                      >
+                        {t("detailPanel.resolveRemoved")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 {skill.update_available && skill.skill_type !== "local" && (
                   <Button className="w-full" onClick={() => onUpdate(skill.name)}>
                     <RefreshCw className="w-4 h-4 mr-2" />
@@ -577,7 +641,7 @@ export function DetailPanel({
                 )}
 
                 <div className="flex gap-2">
-                  {onReinstall && skill.skill_type !== "local" && (
+                  {onReinstall && skill.skill_type !== "local" && !upstreamChange && (
                     <Button
                       variant="secondary"
                       className="flex-1"

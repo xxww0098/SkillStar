@@ -1,14 +1,9 @@
-import { lazy, Suspense } from "react";
-import { LoadingLogo } from "../../../components/ui/LoadingLogo";
+import { DetailPanel } from "../../../components/layout/DetailPanel";
 import type { RemoteSkill } from "../../../lib/ipc/commands/ssh";
 import type { AgentProfile, Skill, SkillContent } from "../../../types";
 import { RemoteSkillDrawer } from "../remote/RemoteSkillDrawer";
 
-const DetailPanel = lazy(() =>
-  import("../../../components/layout/DetailPanel").then((m) => ({ default: m.DetailPanel })),
-);
-
-/** Local skill detail — the full lazy {@link DetailPanel} (install/update/edit/publish). */
+/** Local skill detail — the full {@link DetailPanel} (install/update/edit/publish). */
 type LocalDetailProps = {
   kind: "local";
   skill: Skill | null;
@@ -17,6 +12,9 @@ type LocalDetailProps = {
   onUpdate: (name: string) => void;
   onUninstall: (name: string) => void;
   uninstalling?: boolean;
+  onResolveRemoved?: (name: string) => void;
+  onMigrate?: (name: string) => void;
+  migrating?: boolean;
   onReadContent?: (name: string) => Promise<SkillContent>;
   onSaveContent?: (name: string, content: string) => Promise<void>;
   onPublish?: (name: string) => void;
@@ -53,27 +51,22 @@ export function ScopeDetailDrawer(props: ScopeDetailProps) {
     );
   }
 
-  // Local arm: mount the lazy panel only once a skill is selected.
+  // Local arm: mount the panel only once a skill is selected.
   if (!props.skill) return null;
   return (
-    <Suspense
-      fallback={
-        <div className="absolute right-0 top-0 bottom-0 z-50 flex h-full w-full max-w-md items-center justify-center overflow-y-auto border-l border-border/45 bg-background/30 shadow-[0_24px_80px_-52px_var(--color-shadow)] backdrop-blur-xl">
-          <LoadingLogo size="sm" />
-        </div>
-      }
-    >
-      <DetailPanel
-        skill={props.skill}
-        onClose={props.onClose}
-        onInstall={props.onInstall}
-        onUpdate={props.onUpdate}
-        onUninstall={props.onUninstall}
-        uninstalling={props.uninstalling}
-        onReadContent={props.onReadContent}
-        onSaveContent={props.onSaveContent}
-        onPublish={props.onPublish}
-      />
-    </Suspense>
+    <DetailPanel
+      skill={props.skill}
+      onClose={props.onClose}
+      onInstall={props.onInstall}
+      onUpdate={props.onUpdate}
+      onUninstall={props.onUninstall}
+      uninstalling={props.uninstalling}
+      onResolveRemoved={props.onResolveRemoved}
+      onMigrate={props.onMigrate}
+      migrating={props.migrating}
+      onReadContent={props.onReadContent}
+      onSaveContent={props.onSaveContent}
+      onPublish={props.onPublish}
+    />
   );
 }

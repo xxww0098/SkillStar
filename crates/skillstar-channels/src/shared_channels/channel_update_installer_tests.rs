@@ -1,8 +1,10 @@
 use super::*;
-use skillstar_skills::git::transport::{GitOperationSession, GitTransportError, GitTransportErrorCode};
 use crate::shared_channels::{
     CHANNEL_RELEASE_MANIFEST_VERSION, ChannelPublisherIdentity, ChannelReleaseManifest,
     ChannelReleaseSkill, ChannelSkillReleaseStatus, RemoteRepository, RepositoryPermissions,
+};
+use skillstar_skills::git::transport::{
+    GitOperationSession, GitTransportError, GitTransportErrorCode,
 };
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -76,7 +78,8 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         git(&repository, &["add", "."])?;
         git(&repository, &["commit", "-qm", "release one"])?;
         let commit_one = git_output(&repository, &["rev-parse", "HEAD"])?;
-        let hash_one = skillstar_skills::content::snapshot_path("writer", &skill_root)?.content_hash;
+        let hash_one =
+            skillstar_skills::content::snapshot_path("writer", &skill_root)?.content_hash;
 
         fs::write(
             skill_root.join("SKILL.md"),
@@ -85,7 +88,8 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         git(&repository, &["add", "."])?;
         git(&repository, &["commit", "-qm", "release two"])?;
         let commit_two = git_output(&repository, &["rev-parse", "HEAD"])?;
-        let hash_two = skillstar_skills::content::snapshot_path("writer", &skill_root)?.content_hash;
+        let hash_two =
+            skillstar_skills::content::snapshot_path("writer", &skill_root)?.content_hash;
 
         let cache_one = exact_cache(&commit_one);
         let cache_two = exact_cache(&commit_two);
@@ -130,7 +134,8 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         fs::create_dir_all(&agent_copy)?;
         fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;
 
-        let project_entry = skillstar_skills::projects::register_project(project.to_str().unwrap())?;
+        let project_entry =
+            skillstar_skills::projects::register_project(project.to_str().unwrap())?;
         let mut agents = HashMap::new();
         agents.insert("codex".to_string(), vec!["writer".to_string()]);
         let mut deploy_modes = HashMap::new();
@@ -156,11 +161,14 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
             manifest: manifest(&commit_two, &hash_two),
             released: released_skill(&hash_two),
             installed: previous.clone(),
-            resolution: Some(skillstar_skills::skill_update::LocalDivergenceResolution::Preserve {
-                local_name: "writer.local".into(),
-            }),
+            resolution: Some(
+                skillstar_skills::skill_update::LocalDivergenceResolution::Preserve {
+                    local_name: "writer.local".into(),
+                },
+            ),
         };
-        let git_facade = skillstar_skills::git_skill::GitSkillFacade::new(GitOperationSession::public());
+        let git_facade =
+            skillstar_skills::git_skill::GitSkillFacade::new(GitOperationSession::public());
         let receipt = apply_blocking(&git_facade, request)?;
 
         assert_eq!(receipt.installed.baseline_hash, hash_two);
@@ -255,7 +263,9 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
                 manifest: manifest(&commit_two, &invalid_hash),
                 released: released_skill(&invalid_hash),
                 installed: previous,
-                resolution: Some(skillstar_skills::skill_update::LocalDivergenceResolution::Discard),
+                resolution: Some(
+                    skillstar_skills::skill_update::LocalDivergenceResolution::Discard,
+                ),
             },
         )
         .unwrap_err();
@@ -355,9 +365,15 @@ fn lock_entry(name: &str) -> anyhow::Result<skillstar_skills::lockfile::LockEntr
 }
 
 fn persisted_update_state(name: &str) -> anyhow::Result<Option<bool>> {
+    // On disk each name maps to `{ update_available, upstream_change? }`
+    // (see `skillstar_skills::update_state`); only the badge matters here.
     let path = skillstar_core::infra::paths::state_dir().join("skill_update_states.json");
-    let states = serde_json::from_str::<HashMap<String, bool>>(&fs::read_to_string(path)?)?;
-    Ok(states.get(name).copied())
+    let states =
+        serde_json::from_str::<HashMap<String, serde_json::Value>>(&fs::read_to_string(path)?)?;
+    Ok(states
+        .get(name)
+        .and_then(|state| state.get("update_available"))
+        .and_then(serde_json::Value::as_bool))
 }
 
 fn assert_content(path: &Path, expected: &str) -> anyhow::Result<()> {

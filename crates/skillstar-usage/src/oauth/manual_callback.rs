@@ -20,7 +20,11 @@ pub async fn submit(pending_id: &str, callback_input: &str) -> UsageResult<()> {
     let auth_url = pending_state::auth_url(pending_id)
         .ok_or_else(|| UsageError::NotFound(pending_id.to_string()))?;
     let callback_url = build_callback_url(&auth_url, callback_input)?;
+    // `normalize_local_url` guarantees a loopback destination, and the URL
+    // carries the OAuth authorization code in its query string — never hand it
+    // to an env/system proxy (reqwest proxies 127.0.0.1 by default).
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(CALLBACK_TIMEOUT)
         .build()
         .map_err(|e| UsageError::Other(format!("OAuth 回调客户端创建失败: {}", e)))?;

@@ -13,14 +13,15 @@ impl ChannelRemovedSkillHandler for GitChannelSubscriptionInstaller {
     ) -> Result<(), SharedChannelError> {
         let skill = skill.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     removal_error(format!("Unable to lock removed Skill uninstall: {error}"))
                 })?;
             let mut metadata_error = None;
-            match skillstar_skills::skill_install::uninstall_hub_skill_with_commit(&skill.id, || {
-                commit().inspect_err(|error| metadata_error = Some(error.clone()))
-            }) {
+            match skillstar_skills::skill_install::uninstall_hub_skill_with_commit(
+                &skill.id,
+                || commit().inspect_err(|error| metadata_error = Some(error.clone())),
+            ) {
                 Ok(()) => Ok(()),
                 Err(failure) => Err(transaction_failure(failure, metadata_error)),
             }

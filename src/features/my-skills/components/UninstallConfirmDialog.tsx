@@ -81,7 +81,7 @@ export function UninstallConfirmDialog({
             ))}
             {extraCount > 0 && (
               <span className="rounded-full border border-dashed border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
-                {t("common.more", { count: extraCount })}
+                {t("common.moreCount", { count: extraCount })}
               </span>
             )}
           </div>

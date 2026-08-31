@@ -87,11 +87,15 @@ describe("selectMcpAgentTargets", () => {
     expect(selectMcpAgentTargets([profile("github-copilot")]).map(({ toolId }) => toolId)).toEqual(["vscode"]);
   });
 
+  it("routes the maka target through its own profile", () => {
+    expect(selectMcpAgentTargets([profile("maka")]).map(({ toolId }) => toolId)).toEqual(["maka"]);
+  });
+
   it("routes the gemini-cli target through its own profile, never Antigravity's", () => {
     // Both are rooted at ~/.gemini, but Antigravity is a different product and
     // must not stand in for Gemini CLI. The `gemini-cli` Agent profile
     // (crates/skillstar-agents/src/builtin.rs) is what owns this target.
-    expect(selectMcpAgentTargets([profile("antigravity"), profile("antigravity-cli")])).toEqual([]);
+    expect(selectMcpAgentTargets([profile("antigravity")])).toEqual([]);
     expect(selectMcpAgentTargets([profile("gemini-cli")]).map(({ toolId }) => toolId)).toEqual(["gemini-cli"]);
   });
 

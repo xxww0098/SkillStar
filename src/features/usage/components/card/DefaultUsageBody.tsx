@@ -3,7 +3,7 @@ import { UsageWindowBar } from "../UsageWindowBar";
 import type { UsageBodyProps } from "./bodyRegistry";
 
 /** Fallback body: every available window (hourly → weekly → monthly), densest first. */
-export function DefaultUsageBody({ usage, density }: UsageBodyProps) {
+export function DefaultUsageBody({ usage, catalogId, density }: UsageBodyProps) {
   const { t } = useTranslation();
   const compact = density === "compact";
   const hasAny = Boolean(usage.hourly || usage.weekly || usage.monthly);
@@ -20,10 +20,10 @@ export function DefaultUsageBody({ usage, density }: UsageBodyProps) {
   }
 
   return (
-    <div className={compact ? "space-y-2" : "space-y-3"}>
-      {usage.hourly && <UsageWindowBar window={usage.hourly} compact={compact} />}
-      {usage.weekly && <UsageWindowBar window={usage.weekly} compact={compact} />}
-      {usage.monthly && <UsageWindowBar window={usage.monthly} compact={compact} />}
+    <div className={compact ? "space-y-1.5" : "space-y-2"}>
+      {usage.hourly && <UsageWindowBar window={usage.hourly} compact={compact} catalogId={catalogId} />}
+      {usage.weekly && <UsageWindowBar window={usage.weekly} compact={compact} catalogId={catalogId} />}
+      {usage.monthly && <UsageWindowBar window={usage.monthly} compact={compact} catalogId={catalogId} />}
     </div>
   );
 }

@@ -44,16 +44,30 @@ interface SidebarProps {
   onSkip?: () => void;
   onDismiss?: () => void;
   onRetry?: () => void;
-  ghostSkillCount?: number;
-  pendingUpdatesCount?: number;
 }
 
 const footerIconBtn = (collapsed?: boolean, active?: boolean) =>
   cn(
-    "flex items-center justify-center rounded-lg text-muted-foreground transition duration-150 cursor-pointer focus-ring",
+    "group flex items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 cursor-pointer focus-ring",
+    "hover:text-foreground hover:bg-sidebar-hover hover:shadow-2xs active:scale-95",
     collapsed ? "w-8 h-8" : "w-7 h-7",
-    active && "bg-primary/10 text-primary",
+    active && "bg-primary/10 text-primary hover:text-primary",
   );
+
+/**
+ * Two icons stacked in place, crossfading on toggle — the same swap the skill
+ * selection bar uses for its select-all / deselect-all pill. A hard `A : B`
+ * ternary pops; this rotates one out while the other rotates in.
+ */
+function IconSwap({ on, On, Off }: { on: boolean; On: React.ElementType; Off: React.ElementType }) {
+  const face = "absolute w-[15px] h-[15px] transition-all duration-300 ease-out";
+  return (
+    <div className="relative w-[15px] h-[15px] flex items-center justify-center">
+      <Off className={cn(face, on ? "opacity-0 scale-50 rotate-90" : "opacity-100 scale-100 rotate-0")} />
+      <On className={cn(face, on ? "opacity-100 scale-100 rotate-0" : "opacity-0 scale-50 -rotate-90")} />
+    </div>
+  );
+}
 
 /* ---------- Theme Switcher (bottom toolbar) ---------- */
 
@@ -69,8 +83,6 @@ function ThemeSwitcher({ collapsed, className }: { collapsed?: boolean; classNam
     });
   }, []);
 
-  const ThemeIcon = currentStyle === "current" ? Moon : Sun;
-
   return (
     <button
       type="button"
@@ -79,7 +91,7 @@ function ThemeSwitcher({ collapsed, className }: { collapsed?: boolean; classNam
       aria-pressed={currentStyle === "current"}
       className={cn(footerIconBtn(collapsed), className)}
     >
-      <ThemeIcon className="w-[15px] h-[15px]" />
+      <IconSwap on={currentStyle === "current"} On={Moon} Off={Sun} />
     </button>
   );
 }
@@ -306,8 +318,6 @@ export function Sidebar({
   onSkip,
   onDismiss,
   onRetry,
-  ghostSkillCount,
-  pendingUpdatesCount,
 }: SidebarProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
@@ -422,7 +432,10 @@ export function Sidebar({
       transition={{ duration: prefersReducedMotion ? 0.01 : 0.2 }}
       className={cn(
         "fixed top-0 left-2 bottom-2 flex flex-col z-50",
-        "transition-[width] duration-200 ease-out will-change-[width]",
+        // Bisection (2026-08-20): the collapse is instant. Animating `width`
+        // here dragged a translucent `z-50` overlay across `.ss-main-chrome`'s
+        // 80px blur shadow every frame, and that repaint — not layout, not
+        // React — is what the dropped frames looked like.
         collapsed ? "w-14" : "w-[180px]",
         collapsed ? "overflow-hidden" : "",
       )}
@@ -438,10 +451,12 @@ export function Sidebar({
           <div data-tauri-drag-region className="flex items-center justify-center gap-2.5 px-3 pb-2.5">
             {logoMark}
             <div className="flex min-w-0 flex-col items-center text-center">
-              <span className="text-[15px] font-semibold text-foreground leading-tight tracking-tight truncate">
+              <span className="text-[15px] font-bold text-foreground leading-tight tracking-tight truncate">
                 SkillStar
               </span>
-              <span className="text-[11px] text-muted-foreground/75 leading-snug">{t("sidebar.tagline")}</span>
+              <span className="text-[11px] text-muted-foreground/80 font-medium leading-snug">
+                {t("sidebar.tagline")}
+              </span>
             </div>
           </div>
         ) : (
@@ -466,14 +481,7 @@ export function Sidebar({
         ) : appMode === "usage" ? (
           <UsageNav selected={usageCatalogFilter} onSelect={setUsageCatalogFilter} collapsed={collapsed} />
         ) : (
-          <SkillsNav
-            activePage={activePage}
-            onNavigate={onNavigate}
-            onPrefetch={onPrefetch}
-            collapsed={collapsed}
-            ghostSkillCount={ghostSkillCount}
-            pendingUpdatesCount={pendingUpdatesCount}
-          />
+          <SkillsNav activePage={activePage} onNavigate={onNavigate} onPrefetch={onPrefetch} collapsed={collapsed} />
         )}
       </nav>
 
@@ -497,14 +505,14 @@ export function Sidebar({
       </AnimatePresence>
 
       {/* ── Bottom: GitHub account, then settings + theme + collapse (shared) ── */}
-      <div className={cn("py-2 border-t border-border/40 space-y-1.5", collapsed ? "px-2" : "px-3")}>
+      <div className={cn("py-2 border-t border-border/60 space-y-1.5", collapsed ? "px-2" : "px-3")}>
         <GitHubAccountMenu collapsed={collapsed} />
         <div
           className={cn(
             "flex items-center",
             collapsed
               ? "flex-col gap-0.5"
-              : "justify-between gap-1 rounded-lg bg-muted/30 p-0.5 ring-1 ring-inset ring-border/20 dark:bg-muted/15",
+              : "justify-between gap-1 rounded-lg bg-muted/40 p-0.5 ring-1 ring-inset ring-border/30 dark:bg-muted/25 shadow-2xs",
           )}
         >
           {onToggleCollapse && (
@@ -514,11 +522,7 @@ export function Sidebar({
               title={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
               className={cn(footerIconBtn(collapsed), collapsed && "order-last")}
             >
-              {collapsed ? (
-                <PanelLeftOpen className="w-[15px] h-[15px]" />
-              ) : (
-                <PanelLeftClose className="w-[15px] h-[15px]" />
-              )}
+              <IconSwap on={collapsed} On={PanelLeftOpen} Off={PanelLeftClose} />
             </button>
           )}
           <ThemeSwitcher collapsed={collapsed} className={cn(collapsed && "order-2")} />
@@ -529,7 +533,10 @@ export function Sidebar({
             aria-current={isSettingsActive ? "page" : undefined}
             className={cn(footerIconBtn(collapsed, isSettingsActive), collapsed && "order-first")}
           >
-            <Settings className="w-[15px] h-[15px]" strokeWidth={isSettingsActive ? 2.25 : 2} />
+            <Settings
+              className="w-[15px] h-[15px] transition-transform duration-300 ease-out group-hover:rotate-90"
+              strokeWidth={isSettingsActive ? 2.25 : 2}
+            />
           </button>
         </div>
       </div>

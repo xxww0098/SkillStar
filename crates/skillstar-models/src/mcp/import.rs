@@ -28,6 +28,10 @@ pub(crate) enum JsonReadDialect {
     GeminiUrlKeys,
     /// No `type`; a `url` means remote, otherwise stdio. Zed.
     PlainNoType,
+    /// No `type`; `command` means stdio, `url` means remote. Maka records the
+    /// remote transport in its own `transport` field (`streamable-http` /
+    /// `sse` / `auto`).
+    Maka,
 }
 
 impl JsonReadDialect {
@@ -80,6 +84,24 @@ impl JsonReadDialect {
                 Some(url) => ("http".to_string(), Some(url)),
                 None => ("stdio".to_string(), None),
             },
+            Self::Maka => {
+                // Maka prefers `command` when both keys exist (its own
+                // normalizer treats that as stdio and rejects `protocol`).
+                if at("command").is_some() {
+                    ("stdio".to_string(), None)
+                } else {
+                    match at("url") {
+                        Some(url) => {
+                            let transport = match obj.get("transport").and_then(Value::as_str) {
+                                Some("sse") => "sse",
+                                _ => "http",
+                            };
+                            (transport.to_string(), Some(url))
+                        }
+                        None => ("stdio".to_string(), None),
+                    }
+                }
+            }
         }
     }
 }
@@ -326,6 +348,11 @@ pub(crate) fn read_gemini_cli_entries(content: &str) -> Result<Vec<McpServerEntr
 /// Zed's top-level `context_servers` map.
 pub(crate) fn read_zed_entries(content: &str) -> Result<Vec<McpServerEntry>> {
     read_json_named_map_entries(content, ZED_SERVERS_KEY, JsonReadDialect::PlainNoType)
+}
+
+/// Maka's `mcpServers` map (`version: 2`, no `type`, remote `transport`).
+pub(crate) fn read_maka_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::Maka)
 }
 
 fn entry_from_codex_table(name: &str, tbl: &toml::Table) -> Option<McpServerEntry> {

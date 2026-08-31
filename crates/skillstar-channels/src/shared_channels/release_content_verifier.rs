@@ -11,12 +11,13 @@ pub(super) fn verify_release_content_blocking(
     repository: &RemoteRepository,
     manifest: &ChannelReleaseManifest,
 ) -> Result<(), SharedChannelError> {
-    let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
-        SharedChannelError::new(
-            SharedChannelErrorCode::SubscriptionUpdateFailed,
-            format!("Unable to lock channel verification: {error}"),
-        )
-    })?;
+    let _guard =
+        skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                format!("Unable to lock channel verification: {error}"),
+            )
+        })?;
     // Verification must never reuse the installed ref cache: Hub Skills may
     // point into that checkout, and fetching it would reset user edits before
     // divergence handling can offer preserve/discard choices.
@@ -44,9 +45,11 @@ fn verify_release_checkout(
 
     let mut discovered = BTreeMap::new();
     let default_skill_id = root_skill_default_id(repository_name, &manifest.skills);
-    for skill in
-        skillstar_skills::discovery::discover_skills_without_dedup(repo_dir, true, Some(default_skill_id))
-    {
+    for skill in skillstar_skills::discovery::discover_skills_without_dedup(
+        repo_dir,
+        true,
+        Some(default_skill_id),
+    ) {
         let key = skill.id.to_ascii_lowercase();
         if discovered.insert(key, skill).is_some() {
             return Err(content_integrity_error());
@@ -107,7 +110,9 @@ fn release_content_git_error(error: anyhow::Error) -> SharedChannelError {
 
     let missing_exact_object = error
         .chain()
-        .find_map(|cause| cause.downcast_ref::<skillstar_skills::git::transport::GitTransportError>())
+        .find_map(|cause| {
+            cause.downcast_ref::<skillstar_skills::git::transport::GitTransportError>()
+        })
         .is_some_and(|transport| {
             transport.code == GitTransportErrorCode::Other
                 && [
@@ -132,8 +137,8 @@ fn release_content_git_error(error: anyhow::Error) -> SharedChannelError {
 }
 
 fn verify_checkout_head(repo_dir: &Path, expected: &str) -> Result<(), SharedChannelError> {
-    let head =
-        skillstar_skills::git::ops::rev_parse(repo_dir, "HEAD").map_err(|_| content_integrity_error())?;
+    let head = skillstar_skills::git::ops::rev_parse(repo_dir, "HEAD")
+        .map_err(|_| content_integrity_error())?;
     if head.eq_ignore_ascii_case(expected) {
         Ok(())
     } else {

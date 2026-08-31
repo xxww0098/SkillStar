@@ -248,7 +248,9 @@ pub async fn review_shared_channel_subscription(
     state: State<'_, GitHubAuthState>,
 ) -> Result<ChannelSubscriptionReview, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .review(repository_id)
         .await
 }
@@ -290,7 +292,9 @@ pub async fn check_shared_channel_update(
     state: State<'_, GitHubAuthState>,
 ) -> Result<ChannelUpdateSnapshot, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .check_update(repository_id)
         .await
 }
@@ -321,7 +325,9 @@ pub async fn list_shared_channel_skill_rollback_targets(
     state: State<'_, GitHubAuthState>,
 ) -> Result<Vec<ChannelSkillRollbackTarget>, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .list_skill_rollback_targets(repository_id, &skill_id)
         .await
 }
@@ -352,7 +358,9 @@ pub async fn resume_shared_channel_skill_following(
     state: State<'_, GitHubAuthState>,
 ) -> Result<ChannelUpdateSnapshot, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .resume_following_skill(repository_id, &skill_id)
         .await
 }
@@ -364,7 +372,9 @@ pub async fn uninstall_removed_shared_channel_skill(
     state: State<'_, GitHubAuthState>,
 ) -> Result<HandleRemovedChannelSkillResult, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .uninstall_removed_skill(repository_id, &skill_id)
         .await
 }
@@ -375,7 +385,9 @@ pub async fn convert_removed_shared_channel_skill_to_local(
     state: State<'_, GitHubAuthState>,
 ) -> Result<HandleRemovedChannelSkillResult, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .convert_removed_skill_to_local(request)
         .await
 }
@@ -387,7 +399,9 @@ pub async fn uninstall_revoked_shared_channel_skill(
     state: State<'_, GitHubAuthState>,
 ) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .uninstall_revoked_skill(repository_id, &skill_id)
         .await
 }
@@ -398,7 +412,9 @@ pub async fn convert_revoked_shared_channel_skill_to_local(
     state: State<'_, GitHubAuthState>,
 ) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
     state
-        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .channel_subscription_facade(
+            skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+        )?
         .convert_revoked_skill_to_local(request)
         .await
 }

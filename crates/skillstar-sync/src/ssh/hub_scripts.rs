@@ -24,13 +24,6 @@ pub const REMOTE_HUB_REL: &str = ".skillstar/hub/content";
 /// them into place.
 pub const LEGACY_HUB_PREFIX: &str = "~/.skillstar/hub/content";
 
-/// Environment prefix for every remote git invocation. Remote `git
-/// fetch/pull/clone` must never sit waiting on an interactive prompt (https
-/// credentials, ssh passphrase/host-key): that stalls the whole operation
-/// until `EXEC_TIMEOUT` — per skill, in the update-check loop. Fail fast
-/// instead.
-pub const GIT_NO_PROMPT_ENV: &str = "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -oBatchMode=yes'";
-
 /// Shell-safe single-quoted string.
 pub fn shell_quote(s: &str) -> String {
     let mut out = String::from("'");
@@ -115,13 +108,6 @@ pub fn link_skill_script(agent_skills_dir: &str, skill_name: &str) -> String {
     format!("set -e\nmkdir -p {dir}\nln -sfn {target} {link}\necho LINKED\n")
 }
 
-/// Remove the agent symlink (idempotent).
-pub fn unlink_skill_script(agent_skills_dir: &str, skill_name: &str) -> String {
-    let dir = shell_path_expr(agent_skills_dir.trim_end_matches('/'));
-    let link = format!("{dir}/{}", shell_quote(skill_name));
-    format!("set -e\nrm -f {link}\necho UNLINKED\n")
-}
-
 /// Move a standalone skill tree into the hub and replace it with a symlink.
 pub fn migrate_script(skill_name: &str, agent_skills_dir: &str, standalone_path: &str) -> String {
     let hub_root = hub_root_expr();
@@ -149,78 +135,6 @@ ln -sfn {content} {link}
 echo OK
 "#
     )
-}
-
-/// `git pull --ff-only` a hub-managed skill clone.
-pub fn pull_script(skill_name: &str) -> String {
-    let content = hub_skill_expr(skill_name);
-    format!(
-        r#"set -e
-if [ ! -d {content}/.git ]; then
-  echo "NOT_A_GIT_REPO"
-  exit 1
-fi
-{GIT_NO_PROMPT_ENV} git -C {content} pull --ff-only
-echo OK
-"#
-    )
-}
-
-/// Clone a git URL into the hub (if absent) and link it into the agent dir.
-/// `set -e` makes a failed clone abort **before** the symlink is created, so a
-/// clone error can never leave a dangling agent link.
-pub fn install_script(url: &str, skill_name: &str, agent_skills_dir: &str) -> String {
-    let hub_root = hub_root_expr();
-    let content = hub_skill_expr(skill_name);
-    let url_q = shell_quote(url);
-    let dir = shell_path_expr(agent_skills_dir.trim_end_matches('/'));
-    let link = format!("{dir}/{}", shell_quote(skill_name));
-    format!(
-        r#"set -e
-mkdir -p {hub_root}
-if [ ! -e {content} ]; then
-  {GIT_NO_PROMPT_ENV} git clone --depth 1 {url_q} {content}
-fi
-mkdir -p {dir}
-ln -sfn {content} {link}
-echo OK
-"#
-    )
-}
-
-/// List hub-managed skill names (dirs under the hub root with a SKILL.md).
-pub fn list_hub_skills_script() -> String {
-    let hub_root = hub_root_expr();
-    format!(
-        r#"for d in {hub_root}/*/; do
-  [ -d "$d" ] || continue
-  if [ -f "$d/SKILL.md" ]; then
-    basename "$d"
-  fi
-done
-"#
-    )
-}
-
-/// Count upstream commits for one hub skill (`0` for non-git dirs).
-pub fn update_check_script(skill_name: &str) -> String {
-    let content = hub_skill_expr(skill_name);
-    format!(
-        r#"if [ ! -d {content}/.git ]; then
-  echo "0"
-  exit 0
-fi
-{GIT_NO_PROMPT_ENV} git -C {content} fetch -q --no-recurse-submodules 2>/dev/null || true
-cnt=$(git -C {content} rev-list --count 'HEAD..@{{u}}' 2>/dev/null || echo 0)
-echo "$cnt"
-"#
-    )
-}
-
-/// `stat` mtime (epoch seconds) of a hub skill's SKILL.md; best-effort.
-pub fn stat_skill_md_mtime_script(skill_name: &str) -> String {
-    let content = hub_skill_expr(skill_name);
-    format!("stat -c %Y {content}/SKILL.md 2>/dev/null || true\n")
 }
 
 /// One-shot, idempotent repair of layouts produced by the old literal-`~` bug:
@@ -354,40 +268,6 @@ mod tests {
         let mv_pos = s.find("mv ").unwrap();
         let ln_pos = s.find("ln -sfn").unwrap();
         assert!(mv_pos < ln_pos);
-    }
-
-    #[test]
-    fn git_scripts_disable_prompts() {
-        for s in [
-            pull_script("sk"),
-            install_script("https://github.com/x/y.git", "sk", "~/.claude/skills"),
-            update_check_script("sk"),
-        ] {
-            assert_no_quoted_tilde(&s);
-            assert!(
-                s.contains("GIT_TERMINAL_PROMPT=0"),
-                "remote git must never prompt:\n{s}"
-            );
-            assert!(s.contains("BatchMode=yes"));
-        }
-    }
-
-    #[test]
-    fn install_script_links_only_after_successful_clone() {
-        let s = install_script("https://github.com/x/y.git", "sk", "~/.claude/skills");
-        assert!(s.starts_with("set -e"));
-        let clone_pos = s.find("git clone").unwrap();
-        let ln_pos = s.find("ln -sfn").unwrap();
-        assert!(
-            clone_pos < ln_pos,
-            "symlink must not be created when clone fails"
-        );
-    }
-
-    #[test]
-    fn update_check_script_escapes_upstream_ref() {
-        let s = update_check_script("sk");
-        assert!(s.contains("HEAD..@{u}"));
     }
 
     #[test]

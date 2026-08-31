@@ -164,7 +164,9 @@ fn repository_listing_requests_organization_affiliation_and_pages_up_to_the_limi
 
     assert_eq!(repos.len(), 150, "limit truncates the last page");
     assert!(
-        repos.iter().any(|repo| repo.full_name.starts_with("acme-org/")),
+        repos
+            .iter()
+            .any(|repo| repo.full_name.starts_with("acme-org/")),
         "organization repositories must reach the publish picker"
     );
 }
@@ -303,11 +305,31 @@ fn repository_creation_posts_a_non_initialized_repository_and_returns_its_clone_
 #[test]
 fn github_rejections_and_throttling_stay_distinguishable_and_actionable() {
     let cases: Vec<(u16, &str, GhRestErrorCode)> = vec![
-        (401, r#"{"message":"Bad credentials"}"#, GhRestErrorCode::NotAuthenticated),
-        (403, r#"{"message":"Resource not accessible"}"#, GhRestErrorCode::Unauthorized),
-        (403, r#"{"message":"API rate limit exceeded"}"#, GhRestErrorCode::RateLimited),
-        (429, r#"{"message":"Too many requests"}"#, GhRestErrorCode::RateLimited),
-        (404, r#"{"message":"Not Found"}"#, GhRestErrorCode::Unauthorized),
+        (
+            401,
+            r#"{"message":"Bad credentials"}"#,
+            GhRestErrorCode::NotAuthenticated,
+        ),
+        (
+            403,
+            r#"{"message":"Resource not accessible"}"#,
+            GhRestErrorCode::Unauthorized,
+        ),
+        (
+            403,
+            r#"{"message":"API rate limit exceeded"}"#,
+            GhRestErrorCode::RateLimited,
+        ),
+        (
+            429,
+            r#"{"message":"Too many requests"}"#,
+            GhRestErrorCode::RateLimited,
+        ),
+        (
+            404,
+            r#"{"message":"Not Found"}"#,
+            GhRestErrorCode::Unauthorized,
+        ),
         (500, r#"{"message":"boom"}"#, GhRestErrorCode::Protocol),
     ];
 
@@ -332,7 +354,9 @@ fn github_rejections_and_throttling_stay_distinguishable_and_actionable() {
         .expect_err("422 must fail");
     assert_eq!(error.code, GhRestErrorCode::Rejected);
     assert!(
-        error.message.contains("name already exists on this account"),
+        error
+            .message
+            .contains("name already exists on this account"),
         "the actionable detail must survive: {}",
         error.message
     );
@@ -386,7 +410,10 @@ fn rest_requests_run_from_a_blocking_task_inside_a_tokio_runtime() {
             .unwrap()
     });
 
-    assert_eq!(answer.expect("runtime bridge works on a blocking thread"), 7);
+    assert_eq!(
+        answer.expect("runtime bridge works on a blocking thread"),
+        7
+    );
 }
 
 /// The Git half of publishing: clone/pull/push now run through the operation
@@ -434,7 +461,10 @@ printf 'remote: echoed %s\n' "$SKILLSTAR_GIT_ASKPASS_TOKEN"
     .expect("stub push succeeds");
 
     let argv = std::fs::read_to_string(&argv_log).expect("stub recorded its argv");
-    assert!(argv.contains("push"), "the command still runs the push: {argv}");
+    assert!(
+        argv.contains("push"),
+        "the command still runs the push: {argv}"
+    );
     assert!(!argv.contains(TOKEN), "token must never enter argv: {argv}");
     assert!(
         !stdout.contains(TOKEN),

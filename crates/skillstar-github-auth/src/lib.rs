@@ -10,16 +10,16 @@ mod store;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use skillstar_git::transport::GitAuthMaterial;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use skillstar_git::transport::GitAuthMaterial;
 
 pub use gateway::{
     GitHubHttpGateway, GitHubHttpResponse, GitHubHttpTransport, ProductionGitHubGateway,
     github_app_client_id,
 };
-pub use store::KeyringCredentialStore;
+pub use store::FileCredentialStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

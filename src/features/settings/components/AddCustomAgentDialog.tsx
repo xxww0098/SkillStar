@@ -80,7 +80,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
       }
     };
     reader.onerror = () => {
-      toast.error(t("settings.failedToReadIcon", { defaultValue: "Failed to read icon file." }));
+      toast.error(t("settings.failedToReadIcon", { defaultValue: "Couldn't read that image. Try another file." }));
     };
     reader.readAsDataURL(file);
   };

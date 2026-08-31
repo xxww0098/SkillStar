@@ -91,12 +91,6 @@ export function resolveSkillstarDataPath(home: string, platform: Platform = dete
   return null;
 }
 
-// Re-export frontmatter utilities so existing importers don't break.
-export {
-  normalizeSkillMarkdownForPreview,
-  unwrapOuterMarkdownFence,
-} from "./frontmatter";
-
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

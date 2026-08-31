@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { isBreakdownQuotaWindow, isMonetaryQuota, remainingBarPercent, subscriptionCardTitle } from "./usageLabels";
+import type { TFunction } from "i18next";
+import {
+  formatAntigravityQuotaLabel,
+  isAbsoluteQuotaWindow,
+  isBreakdownQuotaWindow,
+  isMonetaryQuota,
+  remainingBarPercent,
+  subscriptionCardTitle,
+} from "./usageLabels";
+
+const testT = ((key: string) =>
+  ({
+    "usage.antigravityGeminiModels": "Gemini 模型",
+    "usage.antigravityClaudeGptModels": "Claude / GPT 模型",
+    "usage.antigravityWeeklyLimit": "周额度",
+    "usage.antigravityFiveHourLimit": "5 小时额度",
+  })[key] ?? key) as TFunction;
 
 describe("subscriptionCardTitle", () => {
   it("strips catalog · prefix and legacy Grok · names", () => {
@@ -21,6 +37,22 @@ describe("remainingBarPercent", () => {
   it("clamps out-of-range values", () => {
     expect(remainingBarPercent(-5)).toBe(100);
     expect(remainingBarPercent(140)).toBe(0);
+  });
+});
+
+describe("formatAntigravityQuotaLabel", () => {
+  it("shortens known quota labels and preserves the full tooltip", () => {
+    expect(formatAntigravityQuotaLabel("Gemini Models · Weekly Limit", testT)).toEqual({
+      display: "Gemini 模型 · 周额度",
+      title: "Gemini Models · Weekly Limit",
+    });
+  });
+
+  it("also cleans labels from snapshots written before suffix normalization", () => {
+    expect(formatAntigravityQuotaLabel("Claude and GPT models · Five Hour Limit Remaining", testT)).toEqual({
+      display: "Claude / GPT 模型 · 5 小时额度",
+      title: "Claude and GPT models · Five Hour Limit",
+    });
   });
 });
 
@@ -66,6 +98,31 @@ describe("isBreakdownQuotaWindow", () => {
         label: "Weekly credits",
         total: null,
         breakdown: [],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("isAbsoluteQuotaWindow", () => {
+  it("treats total === 100 as percent-based quota, never absolute", () => {
+    expect(isAbsoluteQuotaWindow({ label: "Auto + Composer", used: 47, total: 100 })).toBe(false);
+    expect(isAbsoluteQuotaWindow({ label: "Gemini", used: 0, total: 100 })).toBe(false);
+    expect(isAbsoluteQuotaWindow({ label: "OverQuota", used: 120, total: 100 })).toBe(false);
+  });
+
+  it("detects real absolute token/request quotas", () => {
+    expect(isAbsoluteQuotaWindow({ label: "Tokens", used: 500, total: 2000 })).toBe(true);
+  });
+
+  it("rejects 5h / 7d rate limit windows and monetary windows", () => {
+    expect(isAbsoluteQuotaWindow({ label: "5h", used: 20, total: 1000 })).toBe(false);
+    expect(isAbsoluteQuotaWindow({ label: "7d", used: 20, total: 1000 })).toBe(false);
+    expect(
+      isAbsoluteQuotaWindow({
+        label: "Total",
+        used: 5000,
+        total: 20_000,
+        breakdown: [{ label: "API", used: 100, total: 100 }],
       }),
     ).toBe(false);
   });

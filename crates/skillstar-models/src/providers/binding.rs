@@ -20,7 +20,6 @@
 //! three-place edit to add a role and drifts the moment one place is missed;
 //! an open map costs nothing and cannot drift.
 
-use super::provider::Tri;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use ts_rs::TS;
@@ -82,9 +81,7 @@ impl ModelRef {
 /// Note that "reasoning off" and "reasoning tier = none" are different
 /// requests: the former omits the reasoning block entirely (`effort: None`),
 /// the latter sends an explicit `none` (`effort: Some(Effort::None)`).
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, TS,
-)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "Effort.ts")]
 pub enum Effort {
@@ -246,19 +243,5 @@ impl Default for ProvidersStoreV4 {
 impl ProvidersStoreV4 {
     pub fn provider(&self, id: &str) -> Option<&super::provider::Provider> {
         self.providers.iter().find(|p| p.id == id)
-    }
-
-    /// Whether any binding can still reach the given provider through an
-    /// endpoint the agent's wire protocol requires.
-    pub fn provider_caps_deny(&self, provider_id: &str, wire: super::provider::RequiredWire) -> bool {
-        let Some(provider) = self.provider(provider_id) else {
-            return false;
-        };
-        let cap = match wire {
-            super::provider::RequiredWire::OpenaiResponses => provider.caps.responses_api,
-            super::provider::RequiredWire::AnthropicMessages => provider.caps.anthropic_messages,
-            super::provider::RequiredWire::OpenaiChat => Tri::Yes,
-        };
-        cap.is_denied()
     }
 }

@@ -46,8 +46,16 @@ async fn auto_update_is_opt_in_and_the_preference_survives_restart() {
     // skill only pauses for review.
     let checked = app.run_due_auto_updates().await.unwrap();
     assert_eq!(checked.len(), 1);
-    assert_eq!(checked[0].run.status, ChannelAutoUpdateRunStatus::PartiallyApplied);
-    assert!(checked[0].run.applied_skill_ids.contains(&"reader".to_string()));
+    assert_eq!(
+        checked[0].run.status,
+        ChannelAutoUpdateRunStatus::PartiallyApplied
+    );
+    assert!(
+        checked[0]
+            .run
+            .applied_skill_ids
+            .contains(&"reader".to_string())
+    );
     assert!(checked[0].run.pauses.iter().any(|pause| {
         pause.skill_id.as_deref() == Some("newcomer")
             && pause.reason == ChannelAutoUpdatePauseReason::NewSkillRequiresReview

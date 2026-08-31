@@ -133,17 +133,6 @@ pub fn close_usage_card_window(app: AppHandle, subscription_id: String) -> Resul
     Ok(())
 }
 
-/// Close every open usage card window (e.g. on app quit).
-#[tauri::command]
-pub fn close_all_usage_card_windows(app: AppHandle) -> Result<(), AppError> {
-    for (label, window) in app.webview_windows() {
-        if label.starts_with(USAGE_CARD_LABEL_PREFIX) {
-            let _ = window.close();
-        }
-    }
-    Ok(())
-}
-
 /// Broadcast that the active account for `catalog_id` changed (called by
 /// `set_active_subscription` after a successful pin). Open card windows
 /// subscribe to refresh their own `is_active` badge.

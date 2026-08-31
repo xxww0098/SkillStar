@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SkillStar · Learn P0 prototype</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --fg: #f4f4f5;
+    --muted: #a1a1aa;
+    --line: rgba(255,255,255,.08);
+    --panel: rgba(24,24,32,.72);
+    --primary: #3b82f6;
+    --ok: #34d399;
+    --warn: #f59e0b;
+    --bad: #f87171;
+    --radius: 14px;
+    font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  button { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-columns: 232px 1fr; height: 100%; }
+  .rail {
+    border-right: 1px solid var(--line);
+    padding: 14px 10px;
+    background: linear-gradient(180deg, rgba(20,20,28,.9), rgba(10,10,15,.96));
+  }
+  .brand { font-weight: 700; letter-spacing: .04em; padding: 6px 10px 14px; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; background: rgba(255,255,255,.04); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+  .modes button, .nav button, .ghost, .primary, .warn, .danger {
+    border: 0; background: transparent; cursor: pointer; border-radius: 10px;
+  }
+  .modes button { padding: 8px 0; font-size: 12px; color: var(--muted); }
+  .modes button.on { background: rgba(59,130,246,.22); color: #93c5fd; }
+  .nav button { width: 100%; text-align: left; padding: 9px 10px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .nav button.on { background: rgba(59,130,246,.16); color: #dbeafe; }
+  .hint { color: var(--muted); font-size: 11px; padding: 18px 10px 6px; text-transform: uppercase; letter-spacing: .08em; }
+  .main { display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+  .top { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  .scene-jump { display: flex; gap: 6px; flex-wrap: wrap; }
+  .scene-jump button { font-size: 11px; padding: 5px 8px; background: rgba(255,255,255,.05); color: var(--muted); }
+  .scene-jump button.on { background: rgba(59,130,246,.2); color: #bfdbfe; }
+  .stage { padding: 22px 24px 40px; overflow: auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  p { color: var(--muted); line-height: 1.55; }
+  .search { width: 100%; max-width: 640px; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: var(--fg); }
+  .grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 16px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+  .chip { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.06); color: var(--muted); }
+  .chip.ok { color: var(--ok); background: rgba(52,211,153,.12); }
+  .chip.warn { color: #fbbf24; background: rgba(245,158,11,.12); }
+  .chip.bad { color: var(--bad); background: rgba(248,113,113,.12); }
+  .primary { background: var(--primary); color: white; padding: 8px 12px; }
+  .ghost { background: rgba(255,255,255,.06); padding: 8px 12px; }
+  .warn { background: rgba(245,158,11,.16); color: #fde68a; padding: 8px 12px; }
+  .danger { background: rgba(248,113,113,.16); color: #fecaca; padding: 8px 12px; }
+  .steps { display: grid; gap: 8px; margin-top: 12px; }
+  .step { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; padding: 10px; border-radius: 10px; border: 1px solid transparent; }
+  .step.on { border-color: rgba(59,130,246,.45); background: rgba(59,130,246,.08); }
+  .dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; background: rgba(255,255,255,.08); }
+  .step.done .dot { background: rgba(52,211,153,.2); color: var(--ok); }
+  .meta { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #93c5fd; word-break: break-all; }
+  .banner { border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
+  .banner.warn { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.28); }
+  .banner.bad { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.28); }
+  .empty { text-align: center; padding: 64px 20px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand">SKILLSTAR</div>
+    <div class="modes">
+      <button class="on">Skills</button>
+      <button>Usage</button>
+      <button>Models</button>
+    </div>
+    <div class="nav" id="nav">
+      <button data-go="home" class="on">✦ Learn</button>
+      <button data-go="library">我的 Skills</button>
+      <button>市场</button>
+      <button>卡组</button>
+      <button>项目</button>
+      <button>MCP</button>
+    </div>
+    <div class="hint">P0 不重做 Library / Toolbox</div>
+  </aside>
+  <section class="main">
+    <div class="top">
+      <div class="scene-jump" id="jumps"></div>
+      <span class="chip">prototype · 非生产代码</span>
+    </div>
+    <div class="stage" id="stage"></div>
+  </section>
+</div>
+<script>
+const GUIDE = {
+  title: "第一次用 frontend-design 做出可用界面",
+  skill: "frontend-design",
+  identity: "ski:v1:7f3a…c21  Git  github.com/vercel-labs/agent-skills  ref=main  root=skills/frontend-design",
+  revision: "skr:v1:b91c…e04  commit=9e4c2b4  content_hash=sha256:8c1f…aa  v2",
+  staleRevision: "skr:v1:11ab…90  commit=0fab682  content_hash=sha256:old…99  v2",
+};
+const SCENES = [
+  ["home","Learn 首页"],
+  ["resume","退出后继续"],
+  ["guide","未安装 Guide"],
+  ["progress","步骤进度"],
+  ["stale","revision 过期"],
+  ["practice","需安装实践"],
+  ["empty","无 Guide"],
+  ["error","加载失败"],
+  ["decisions","决定说明"],
+];
+const state = { scene: "home", step: 1, done: [true,false,false,false] };
+
+function el(html){ const d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstElementChild; }
+function go(scene){ state.scene=scene; render(); }
+function setNav(){
+  for (const b of document.querySelectorAll("#nav [data-go]")) b.classList.toggle("on", b.dataset.go===(state.scene==="library"?"library":"home") && !(["home","resume","empty","error","decisions"].includes(state.scene) ? b.dataset.go!=="home" && state.scene!=="library" : false));
+  // Learn stays active for all learn scenes except library
+  for (const b of document.querySelectorAll("#nav [data-go]")) {
+    if (b.dataset.go==="home") b.classList.toggle("on", state.scene!=="library");
+    if (b.dataset.go==="library") b.classList.toggle("on", state.scene==="library");
+  }
+}
+
+function actions(primary, extra=""){
+  return `<div class="row" style="margin-top:14px"><div>${extra}</div><div style="display:flex;gap:8px">${primary}</div></div>`;
+}
+
+function scenes(){
+  const s = {
+home: `
+  <h1>今天想完成什么？</h1>
+  <p>搜索任务，而不是 Skill 名字。安装不是主动作。</p>
+  <input class="search" value="把设计稿做成可运行的前端界面" readonly />
+  <div class="grid">
+    <div class="card">
+      <div class="chips"><span class="chip">推荐 · 首发 Guide</span><span class="chip">未安装</span><span class="chip">revision 绑定</span></div>
+      <h2>${GUIDE.title}</h2>
+      <p>用 frontend-design 走完一次界面实践。阅读不需要安装；只有动手改文件时才安装精确 revision。</p>
+      <div class="meta">${GUIDE.identity}<br>${GUIDE.revision}</div>
+      ${actions(`<button class="ghost" data-go="guide">阅读指南</button><button class="primary" data-go="guide">开始</button>`)}
+    </div>
+    <div class="card">
+      <h2>继续上次</h2>
+      <p>进度绑定 Guide revision，不会把旧完成态套到新内容上。</p>
+      <p>上次停在步骤 2 / 4 · 8 分钟前</p>
+      ${actions(`<button class="primary" data-go="resume">继续</button>`)}
+    </div>
+  </div>`,
+resume: `
+  <div class="chips"><span class="chip ok">已恢复进度</span><span class="chip">Guide revision 未变</span></div>
+  <h1>继续：步骤 2 阅读设计约束</h1>
+  <p>冷启动后直接回到同一 ${GUIDE.revision.slice(0,18)}… 不询问安装。</p>
+  <div class="card">
+    <p>你上次勾过「理解适用场景」。步骤 2 仍待完成。</p>
+    ${actions(`<button class="ghost" data-go="home">回 Learn</button><button class="primary" data-go="progress">打开步骤</button>`)}
+  </div>`,
+guide: `
+  <div class="chips"><span class="chip">Guide</span><span class="chip">Skill 未安装</span><span class="chip ok">可阅读</span></div>
+  <h1>${GUIDE.title}</h1>
+  <p>主动作是阅读与勾选理解。没有「立即安装」。分享不会上传私人 HTML。</p>
+  <div class="meta">${GUIDE.identity}<br>${GUIDE.revision}</div>
+  <div class="card" style="margin-top:14px">
+    <h2>这份 Guide 能帮你完成什么</h2>
+    <p>把一个界面想法落成可运行的前端，并知道怎样判断结果对不对。</p>
+    <div class="steps">
+      <div class="step done"><div class="dot">✓</div><div>适用场景与边界</div><span class="chip">阅读</span></div>
+      <div class="step on"><div class="dot">2</div><div>逐步说明怎么做</div><span class="chip">阅读</span></div>
+      <div class="step"><div class="dot">3</div><div>在真实项目里改一处界面</div><span class="chip warn">实践 · 需安装</span></div>
+      <div class="step"><div class="dot">4</div><div>对照验收清单</div><span class="chip">验证</span></div>
+    </div>
+    ${actions(`<button class="ghost">导出 Guide Draft</button><button class="primary" data-go="progress">继续阅读</button>`)}
+  </div>`,
+progress: `
+  <div class="chips"><span class="chip">步骤进度</span><span class="chip">2 / 4</span></div>
+  <h1>步骤 2 · 怎么做</h1>
+  <p>阅读层不触发安装。进度写入本地 LearningProgress，key = GuideRevision + step。</p>
+  <div class="card">
+    <p>1. 先描述目标界面与约束。<br>2. 让 Agent 按 frontend-design 生成。<br>3. 只接受可运行的结果，不要停留在口头描述。</p>
+    ${actions(`<button class="ghost" data-go="guide">上一步</button><button class="primary" data-go="practice">下一步：实践</button>`)}
+  </div>`,
+stale: `
+  <div class="banner warn">Guide 已过期。Skill 内容 hash 变了，旧完成状态不会自动继承。</div>
+  <h1>frontend-design 的 Guide 需要更新</h1>
+  <p>当前阅读的是旧 revision。你可以继续看旧版，或用新 revision 重新开始。</p>
+  <div class="card">
+    <table>
+      <tr><th></th><th>旧</th><th>新</th></tr>
+      <tr><td>revision</td><td class="meta">${GUIDE.staleRevision}</td><td class="meta">${GUIDE.revision}</td></tr>
+      <tr><td>进度</td><td>2 / 4 完成</td><td>尚未开始</td></tr>
+    </table>
+    ${actions(`<button class="ghost">继续看旧版</button><button class="warn" data-go="guide">用新 revision 开始</button>`)}
+  </div>`,
+practice: `
+  <div class="banner warn">下一步会改本地文件，需要精确安装 frontend-design@skr:v1:b91c…e04</div>
+  <h1>实践预览 · 不会自动执行</h1>
+  <p>阅读已结束。安装墙只出现在这里。命令完整展示，默认不运行。</p>
+  <div class="card">
+    <div class="chips"><span class="chip warn">未安装</span><span class="chip">精确 revision</span><span class="chip">可取消</span></div>
+    <table>
+      <tr><th>将安装</th><td class="meta">${GUIDE.identity}</td></tr>
+      <tr><th>revision</th><td class="meta">${GUIDE.revision}</td></tr>
+      <tr><th>工作目录</th><td class="meta">~/Projects/demo-ui</td></tr>
+      <tr><th>动作</th><td>把 Skill 链接到已启用 Agent（不跑任意脚本）</td></tr>
+    </table>
+    ${actions(`<button class="ghost" data-go="progress">返回阅读</button><button class="primary">查看变更并安装</button>`)}
+  </div>`,
+empty: `
+  <div class="empty">
+    <h1>还没有可跟随的 Guide</h1>
+    <p>P0 不出现论坛空列表。可以从任务搜索发现 Skill，或把私人教程转成 Guide Draft。</p>
+    ${actions(`<button class="ghost" data-go="home">去搜索任务</button><button class="primary">从私人教程转换</button>`, ``)}
+  </div>`,
+error: `
+  <div class="banner bad">无法加载 Guide revision skr:v1:b91c…e04。上次进度仍保留在本机。</div>
+  <h1>加载失败</h1>
+  <p>不丢掉 LearningProgress。用户可重试或阅读上次成功缓存的 HTML（若仍 fresh）。</p>
+  ${actions(`<button class="ghost" data-go="home">回 Learn</button><button class="danger">重试</button><button class="primary">打开上次缓存</button>`)}`,
+library: `
+  <h1>我的 Skills</h1>
+  <p>Library 仍在，但冷启动默认不进这里。frontend-design 可以稍后从 Learn 的实践步骤安装进来。</p>
+  <div class="card">空的安装列表 · 这是成功路径，不是失败。</div>`,
+decisions: `
+  <h1>P0 路径决定说明</h1>
+  <p>供后续实现票直接使用。点过左侧各状态后再看本页。</p>
+  <div class="card">
+    <table>
+      <tr><th>项</th><th>决定</th></tr>
+      <tr><td>默认入口</td><td>启动进入 Learn，不是「我的 Skills」。Mode 仍是 Skills / Usage / Models；Learn 是 Skills 面的第一项。</td></tr>
+      <tr><td>首发 Guide</td><td>P0 内置一份真实、版本绑定的 seed，不靠云、不用 lorem。建议 skill = frontend-design，identity/revision 按 #49 从 catalog + 当前 snapshot 构造；仓库与 content root 以落地时 marketplace 记录为准，禁止 name-only 关联。</td></tr>
+      <tr><td>主动作</td><td>首页与详情的主按钮是「开始 / 阅读指南 / 继续」。安装、分享、导出都不是主按钮。阅读 / 实践 / 验证 / 分享四个动词分开放。</td></tr>
+      <tr><td>安装时机</td><td>未安装也可读完全部阅读步骤。只有 step.kind = practice 且需要本地 Skill 文件时，才弹出精确 revision 预览；默认不执行，不拼接 shell。</td></tr>
+      <tr><td>进度</td><td>LearningProgress 的 key = GuideRevisionKey + stepId。内容 hash 变化视为新 revision；旧完成态可查看，不可静默继承。</td></tr>
+      <tr><td>空 / 失败</td><td>无 Guide：引导任务搜索或「从私人教程转换」。加载失败：保留进度，提供重试和上次缓存。没有论坛入口。</td></tr>
+      <tr><td>分享</td><td>P0 只允许本地「导出 Guide Draft / 转换为 Block JSON」。不上传私人 HTML，不出现社区 feed。</td></tr>
+      <tr><td>最小埋点</td><td>learn_open, guide_open(identity,revision), step_complete, resume, stale_shown, install_prompted, install_confirmed, guide_complete。禁止只报 skill.name。</td></tr>
+      <tr><td>组件边界</td><td>LearnHome · GuideReader · StepList · ResumeCard · StaleRevisionBanner · PracticeInstallPreview · LearningEmpty · LearningError。生产实现走 invoke，不在前端算 hash。</td></tr>
+    </table>
+  </div>`
+  };
+  return s[state.scene] || s.home;
+}
+
+function render(){
+  document.getElementById("stage").innerHTML = scenes();
+  const jumps = document.getElementById("jumps");
+  jumps.innerHTML = SCENES.map(([id,label]) => `<button data-go="${id}" class="${state.scene===id?"on":""}">${label}</button>`).join("");
+  setNav();
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+}
+render();
+</script>
+</body>
+</html>

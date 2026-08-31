@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { toast } from "../../../lib/toast";
 import type { ImportDone, ScannedSkill } from "../../../types";
 
 interface UseProjectSkillsParams {
@@ -97,6 +98,10 @@ export function useProjectSkills({
         setTimeout(() => setImportDone(null), 4000);
       } catch (e) {
         if (import.meta.env.DEV) console.error("Import failed:", e);
+        toast.error(String(e) || "Import failed");
+        // The rescan above can throw after setImportDone landed; without this the
+        // green "Imported N" banner would stick forever next to the error toast.
+        setImportDone(null);
       } finally {
         setImporting(false);
       }

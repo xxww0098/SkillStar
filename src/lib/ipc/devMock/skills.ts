@@ -8,7 +8,25 @@ import type { LocalDivergenceResolution } from "../../../types";
 import { AGENTS } from "./appShell";
 import { type DevMockHandlers, getAcpConfigState, iso } from "./shared";
 import { DECKS, DEMO_TUTORIAL_HTML, PROJECTS } from "./skillsData";
-import { devListSkills, devResolveSkillUpdate, devSkillUpdateStates, devUpdateSkills } from "./skillsUpdateStore";
+import {
+  devGhostSkills,
+  devListSkills,
+  devMigrateRenamedSkill,
+  devResolveSkillUpdate,
+  devSkillUpdateStates,
+  devUpdateSkills,
+} from "./skillsUpdateStore";
+
+const DEMO_MANAGED_SKILL_NAMES = ["pdf-tools", "xlsx"];
+const suspendedManagedSkillsByAgent = new Map<string, string[]>();
+
+function managedSkillsState(agentId: string) {
+  const suspended = suspendedManagedSkillsByAgent.get(agentId) ?? [];
+  return {
+    active_skill_names: suspended.length > 0 ? [] : DEMO_MANAGED_SKILL_NAMES.slice(),
+    suspended_skill_names: suspended.slice(),
+  };
+}
 
 function demoSkillTutorial(args: Record<string, unknown>) {
   const skillName = String(args.name ?? "pdf-tools");
@@ -37,7 +55,9 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
   resolve_skill_update: (args) =>
     devResolveSkillUpdate(String(args?.name ?? ""), args?.resolution as LocalDivergenceResolution),
   refresh_skill_updates: () => devSkillUpdateStates(),
-  check_new_repo_skills: () => [],
+  migrate_renamed_skill: (args) => devMigrateRenamedSkill(String(args?.name ?? "")),
+  open_skill_folder: () => undefined,
+  check_new_repo_skills: () => devGhostSkills(),
   get_dismissed_new_skills: () => [],
   read_skill_content: (args) => ({
     name: String((args?.name as string) ?? "pdf-tools"),
@@ -80,6 +100,26 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
         link_alive: false,
       },
     ];
+  },
+  batch_toggle_skills_for_agent: (args) => ({
+    succeeded: ((args?.skillNames as string[]) ?? []).slice(),
+    skipped: [],
+    failed: [],
+  }),
+  get_agent_managed_skills_state: (args) => managedSkillsState(String(args?.agentId ?? "claude")),
+  toggle_agent_managed_skills: (args) => {
+    const agentId = String(args?.agentId ?? "claude");
+    const before = managedSkillsState(agentId);
+    const isRestoring = before.suspended_skill_names.length > 0;
+    const names = isRestoring ? before.suspended_skill_names : before.active_skill_names;
+    suspendedManagedSkillsByAgent.set(agentId, isRestoring ? [] : names);
+    return {
+      action: isRestoring ? "restored" : "paused",
+      state: managedSkillsState(agentId),
+      succeeded: names,
+      skipped: [],
+      failed: [],
+    };
   },
   list_skill_groups: () => DECKS,
   list_projects: () => PROJECTS,

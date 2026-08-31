@@ -283,11 +283,13 @@ pub(crate) fn row_to_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<McpMarket
 
 /// Every card, in the historical order. Thin wrapper so the default listing
 /// behaviour has one definition.
+#[cfg(test)]
 pub(crate) fn load_cards(conn: &Connection) -> Result<Vec<McpMarketEntry>> {
     Ok(query_cards(conn, &McpServerQuery::default())?.items)
 }
 
 /// Cards filtered to a single publisher.
+#[cfg(test)]
 pub(crate) fn load_cards_by_publisher(
     conn: &Connection,
     publisher_id: &str,
@@ -297,6 +299,7 @@ pub(crate) fn load_cards_by_publisher(
     Ok(query_cards(conn, &McpServerQuery::for_publisher(publisher_id))?.items)
 }
 
+#[cfg(test)]
 pub(crate) fn search_cards(
     conn: &Connection,
     query: &str,

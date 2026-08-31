@@ -112,13 +112,13 @@
 - 后果：JSON 型 multi Agent 的写盘语义修一处即全修，新 JSON 型 Agent 只写 build_block + 指针落点；Codex 的写盘语义变化仍需单独维护；未来若出现第二个 TOML 型 multi Agent，再评估 TOML 骨架（届时有两个 adapter 证明 seam）。
 - 证据：`crates/skillstar-models/src/tool_sync/multi_provider.rs`（`sync_json_blocks_inner` 及两个调用方），`tool_sync/tests/part4.rs` 的逐字节断言测试在重构前后原样通过。
 
-## D-013：私有共享身份采用 GitHub App 设备流与系统凭据存储
+## D-013：私有共享身份采用 GitHub App 设备流与应用私有文件存储
 
 - 日期：2026-08-05
 - 状态：accepted
 - 背景：私有共享频道需要用户身份和可撤销的 GitHub 权限，但要求用户粘贴 PAT、共享仓库凭据或依赖机器上预先配置的 `gh` 都会扩大秘密暴露面，并让 GUI、CLI 与 Git 传输使用不同身份来源。
-- 决策：第一版只支持 `github.com`，使用注册的 SkillStar GitHub App 设备授权流获取用户 access/refresh token。公开的 App client ID 由构建配置提供；桌面应用不携带 client secret、App private key 或 PAT。token 与 GitHub 返回的到期元数据只写入 OS 系统凭据存储，设备码和解析后的用户身份只存在进程内。认证 facade 以 GitHub gateway、credential store 和 clock 为测试接缝；生产 HTTP 每次通过 `probe_http_client` 获取当前代理配置。
-- 后果：发布构建必须配置已启用 Device Flow 的 GitHub App client ID；缺失时登录动作明确不可用，但已有凭据仍可登出。GitHub App 安装范围与仓库权限继续由 GitHub 控制，SkillStar 不建立第二套身份或 ACL。GitHub Enterprise Server、PAT 和全局 `gh` credential 不进入第一版认证路径。
+- 决策：第一版只支持 `github.com`，使用注册的 SkillStar GitHub App 设备授权流获取用户 access/refresh token。公开的 App client ID 由构建配置提供；桌面应用不携带 client secret、App private key 或 PAT。token 与 GitHub 返回的到期元数据写入 `SKILLSTAR_DATA_DIR/state/github_auth.json`，首次创建和每次更新保持 Unix `0600`；设备码和解析后的用户身份只存在进程内。认证 facade 以 GitHub gateway、credential store 和 clock 为测试接缝；生产 HTTP 每次通过 `probe_http_client` 获取当前代理配置。GitHub 认证不访问 OS 系统钥匙串，避免应用启动触发系统密码授权。
+- 后果：发布构建必须配置已启用 Device Flow 的 GitHub App client ID；缺失时登录动作明确不可用，但已有凭据仍可登出。现有钥匙串凭据不自动迁移，切换后需要重新登录一次；之后启动只读取本地私有文件。GitHub App 安装范围与仓库权限继续由 GitHub 控制，SkillStar 不建立第二套身份或 ACL。GitHub Enterprise Server、PAT 和全局 `gh` credential 不进入第一版认证路径。
 
 ## D-014：私有 Git 认证采用操作级 askpass session
 
@@ -186,8 +186,8 @@
 - 日期：2026-08-10
 - 状态：accepted
 - 背景：patrol/批量刷新每小时对每个唯一 repo 执行 `git fetch`，只为判断是否有技能内容变化（fetch 后还需本地 rev-parse 对比 subtree hash）。`npx skills` 用 GitHub Trees API 的目录 tree SHA 直接做远程对比，避免包传输。SkillStar 的 Git 认证纪律（D-014）要求 token 只在 askpass 子进程环境内存在。
-- 决策：新增 `skillstar-skills::update_api`：对 `github.com` 来源且能本地解析远端 ref（pinned ref 或 `origin/HEAD` symbolic ref）的 repo，每个 cycle 至多 40 个 repo、并发 4、超时 10s，以**匿名** `GET /repos/{o}/{r}/git/trees/{ref}?recursive=1` 获取递归树；目录条目 sha 即本地对比所需的 subtree hash。成功 → 该 repo 跳过 prefetch fetch，`check_update_local_with_api` 对比本地 HEAD subtree hash 与 API hash（缺失目录 → None 保留徽标）。任何失败（私有仓库 404、限流 403、网络、truncated）→ 回退既有 git fetch 路径；匿名 API 不携带凭据，凭据纪律不变。`prefetch_unique_repos_in_session_skipping` 与 `check_update_local_with_api_entry` 保持既有 None/Some 契约与 revision 裁决。
-- 后果：github.com 公共来源的更新检测从网络 fetch 降为一个轻量 API 调用；私有/非 github 来源继续走 git fetch。API 故障只影响速度不影响正确性。匿名限流（60/h/IP）由每 cycle 40 repo 上限与 403 回退共同兜底。
+- 决策：新增 `skillstar-skills::update_api`：对 `github.com` 来源且能本地解析远端 ref（pinned ref 或 `origin/HEAD` symbolic ref）的 repo，每个 cycle 至多 40 个 repo、并发 8、超时 10s，以 `GET /repos/{o}/{r}/git/trees/{ref}`（非递归）获取顶层树；目录条目 sha 即本地对比所需的 subtree hash。成功 → 该 repo 跳过 prefetch fetch，`check_update_local_with_api` 对比本地 HEAD subtree hash 与 API hash（缺失目录 → None 保留徽标）。任何失败（私有仓库 404、限流 403、网络、truncated）→ 回退既有 git fetch 路径。HTTP Bearer 只在用户**已经**持有 SkillStar GitHub App session 时附带，把额度从匿名 60/h/IP 提到认证 5000/h；未登录保持匿名。凭据不出 Git session（D-014）。`X-RateLimit-Remaining: 0` / HTTP 429 写入进程内冷却至 `X-RateLimit-Reset`，本 cycle 未发出的 API 调用直接跳过；401/403/404/限流是设计内回退，记 debug 不记 warn。`prefetch_unique_repos_in_session_skipping` 与 `check_update_local_with_api_entry` 保持既有 None/Some 契约与 revision 裁决。
+- 后果：github.com 公共来源的更新检测从网络 fetch 降为一个轻量 API 调用；已登录用户不再把同 IP 的匿名额度打爆；私有/非 github 来源继续走 git fetch。API 故障只影响速度不影响正确性。匿名限流（60/h/IP）由每 cycle 40 repo 上限、认证回退与冷却窗口共同兜底。
 - 证据：`crates/skillstar-skills/src/{update_api.rs,update_checker.rs,installed_skill.rs}` 及 `api_remote_hashes_drive_update_detection_without_fetching` 等测试。
 
 ## D-021：仓库发现对齐生态容器目录深度与 Claude Code 插件清单
@@ -205,7 +205,7 @@
 - 状态：accepted
 - 背景：三名只读审查 agent（安装路径/死代码/解耦）确认 D-019 门禁在 scan_install/bundle/pack/adopt_folder/频道安装处生效，但发现三个可绕过入口：`install_skill` 的直接 clone 回退把门禁失败当 Ok(None) 后整库克隆且不校验；share_install embedded 走未门禁的 `local_skill::create`；projects/import 直接调 `adopt_existing_dir_locked` 不校验。同时：CLI 的 `find_target_skill_preview` 与域版存在已证实的语义漂移（显式 name 不匹配时预览误报 would-be-installed），`derive_name_hint` 双实现，`src-tauri/Cargo.toml` 把 4 个无条件 import 的内部 crate 声明成 macOS-only 目标依赖（Linux/Windows CI 提交后必红）。
 - 决策：① 三个绕过入口全部接入 `validation::ensure_installable`：直接 clone 后校验、失败删克隆并返回可行动错误；embedded 创建后校验、失败回滚删除；项目导入逐技能校验、失败跳过并告警。② 删除经全仓 grep 证实的死代码：`adopt_existing_dir`/`validate_agent_ids`/`card_window_labels`/patrol 两个 sessionless wrapper/`normalize_repo_url` shim/S3 路径 helper/`TutorialLoadResult` 别名/`SkillCandidate.skill_md_path` 死字段/`shared.rs` 与 `src-tauri/src/core/path_env.rs` 两个一行垫片/根 re-export 裁剪（仅留 `Skill`/`SkillContent`/`discover_skills`）。③ 名称解析单一化：`source_resolver::derive_skill_name_hint`（Source-aware）成为唯一实现，域安装与 CLI 共用；`find_target_skill` 提升为 pub，CLI 删除内联副本。④ 4 个内部 crate 依赖移入通用 `[dependencies]`。
-- 后果：门禁对任何安装入口都 fail-closed；预览与实装不再出现结论分歧；非 macOS 平台构建不再缺 crate；`skillstar-skills` 对外根路径只剩 3 个 re-export。死代码删除均为全仓零调用验证，不影响行为；`AgentProfile.installed`、`skillstar-git` sessionless wrappers、repo_history 写路径、ACP full-access 分支按审查结论保留待后续确认。
+- 后果：门禁对任何安装入口都 fail-closed；预览与实装不再出现结论分歧；非 macOS 平台构建不再缺 crate；`skillstar-skills` 对外根路径只剩 3 个 re-export。死代码删除均为全仓零调用验证，不影响行为；`AgentProfile.installed`、`skillstar-git` sessionless wrappers、repo_history 写路径、ACP full-access 分支按审查结论保留待后续确认(2026-08-27 对抗审查轮已处理其中两项:sessionless wrappers 经全仓零调用复核后删除;repo_history 写路径在 `scan_github_repo` 成功分支接线,历史不再只读不写)。
 - 证据：`crates/skillstar-skills/src/{skill_install,share_install,validation,source_resolver,discovery,local_skill}.rs`、`crates/skillstar-skills/src/projects/import.rs`、`crates/skillstar-app/src/cli/`、`crates/skillstar-channels/src/patrol/`、`src-tauri/Cargo.toml`、`direct_clone_gate_tests` 等测试；编排 run `run_3c969aa725f6`（REVIEW-A2/B/C2）。
 
 ## D-023：拉取多源化：Git mirror 候选链 + Marketplace host 链 + 内容寻址增量
@@ -303,9 +303,9 @@
 - 日期：2026-08-14
 - 状态：accepted
 - 背景：原实现把订阅行的凭证**拷贝**进 CLI 的 live 凭证文件。CLI 自己也会轮换 token 并写回同一个文件，于是两份拷贝必然发散；Grok 那条链路里的 lease / sha256 乐观并发 / 临时 pin / 回读逐字段比对 / 提交回滚，全部是在管理这个发散 —— 而发散是这个抽象自己造出来的。同一时期 codex 与 opencode 只是裸写：codex 无任何锁与回滚（后台刷新会踢掉 Codex CLI 的登录），opencode 硬要 `api_key_encrypted` 而它的 catalog auth mode 是 Cookie|Manual，那条切号链路 100% 走 fail 分支，UI 却常驻一个永远点不通的入口。
-- 决策：live 路径不再持有凭证，**它是指向快照的软链**；快照 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json` 是唯一真相。一份快照是**整个** CLI 凭证文件（软链只能整文件替身），不是其中一个账号的片段。三家 catalog 共用一套 custody 引擎（capture → prepare → 换软链 → 回读 → 副作用 → 落 pin），各自只实现 `CliCredentialTarget`：路径、锁、access_token 提取、身份、materialize、absorb。对账比**内容**不比文件类型，三态 `LinkedTo / Diverged / Missing`，只比 access_token 字符串。`supports_cli_switch` 由 target 注册表推导而不是手抄白名单。Cursor / Antigravity 保持不支持：凭证在 `state.vscdb`，是另一套机制。
+- 决策：live 路径不再持有凭证，**它是指向快照的软链**；快照 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json` 是唯一真相。一份快照是**整个** CLI 凭证文件（软链只能整文件替身），不是其中一个账号的片段。三家 CLI catalog 共用一套 custody 引擎（capture → prepare → 换软链 → 回读 → 副作用 → 落 pin），各自只实现 `CliCredentialTarget`：路径、锁、access_token 提取、身份、materialize、absorb。对账比**内容**不比文件类型，三态 `LinkedTo / Diverged / Missing`，只比 access_token 字符串。`supports_cli_switch` 由 target 注册表推导而不是手抄白名单。Cursor / Antigravity 不强行塞进软链引擎：它们通过独立 IDE adapter 事务性写入并回读验证各自的 `state.vscdb`/系统凭证。
 - 后果：获得——CLI 轮换 token 时写穿到快照，快照永远新鲜，「检测轮换再回抄」这类代码整体消失；`auth_mode` 与「能否切号」解耦（opencode 只要 CLI 里登录过就能切，不再需要 SkillStar 持有 API Key），那条死链路自然消失；pin 降级为可由 `reconcile` 重建的缓存，不再是第二个真相源；codex 第一次获得与 grok 同级的锁、备份、回读与回滚，「切换被拒时保留旧 badge」从只对 xai 成立变成全域成立。承担——(1) **整文件快照意味着同一个文件里其它 provider 的登录会跟着账号一起切**：opencode 的 `auth.json` 是 `providerID → 凭证` 的扁平表，在账号 A 期间登录的 anthropic 会留在 A 的快照里，切到 B 后不可见（切回 A 即恢复，不会丢失）。做成「只换本 provider 那一段」就必须回到拷贝语义，也就把发散请回来了，因此不做。(2) 软链盖不住三个洞，必须显式处理：macOS Codex 以 keychain 为准（activate 写、reconcile 吸收、写入改成 read-modify-write）；CLI 用 `rename()` 会把软链冲成实体文件（内容一致即判 `LinkedTo` 并静默重建）；Windows 无软链权限时降级为拷贝并在日志显式标注 `LinkMode::Copy`。(3) refresh token 单次使用的双花竞态**不会**因软链消失 —— 软链消灭的是陈旧拷贝，不是「谁先刷谁让对方失效」—— 所以 CLI 自己的文件锁（Grok 官方 `auth.json.lock` 及其 `PID:秒` holder 行）、刷新前 adopt、刷新后回投这三件事全部保留，只是从 xai 专属变成全域通用。
-- 证据：`crates/skillstar-app/src/usage_switch/{custody.rs,target.rs,keychain.rs,target/*}` 与 `custody_tests.rs`（实体文件内容一致判 LinkedTo、CLI 轮换后快照自动新鲜、activate 失败时旧 pin 与旧 live 完好、forget 掉当前 active 后 live 仍是可用实体文件、opencode 无 API Key 也能切）；行为契约见 [features/usage/README.md](./features/usage/README.md)。
+- 证据：`crates/skillstar-app/src/usage_switch/{custody.rs,cursor.rs,target.rs,keychain.rs,target/*}`、`crates/skillstar-usage/src/vscdb.rs` 与 `custody_tests.rs`（实体文件内容一致判 LinkedTo、CLI 轮换后快照自动新鲜、Cursor 两账号切换真实写入并回读 state.vscdb、IDE 切换失败时不移动 pin、opencode 无 API Key 也能切）；行为契约见 [features/usage/README.md](./features/usage/README.md)。
 
 ## D-034：DTO 投影拥有前端契约，有重构节奏的域类型不直接暴露给 ts-rs
 
@@ -361,7 +361,43 @@
 - 后果：获得——三个真实回归当场暴露：OMP 角色名 `smol` 被规范化成 `fast` 后会写进 OMP 不认识的键、角色写入顺序随内部改名而重排、模型目录移出 store 后 OpenCode 块丢失 `limit`/`cost`。这三个都不会被任何手写断言发现。承担——fixture 与其构造函数必须逐字保持一致，否则比对失去意义；构造函数因此在测试里完整写出而不是复用 helper。
 - 证据：`crates/skillstar-models/src/tool_sync/tests/golden.rs`、`crates/skillstar-models/src/tool_sync/tests/golden_v3/`。
 
-## D-040：pack 根目录 SKILL.md 垫片不是安装单元
+## D-040：frontmatter 门禁以公开 Agent Skills 规范为准
+
+- 日期：2026-08-19
+- 状态：accepted
+- 背景：D-019 把 Anthropic `quick_validate.py` 的尖括号限制当成通用生态规则，导致 Vercel 官方技能因 description 中合法的 `` `<ViewTransition>` `` 文本被拒绝；公开 Agent Skills 规范只要求 description 非空且不超过 1024 字符。扫描 UI 又把任何 issue code 固定解释成“缺少 name/description”，掩盖了真实原因。
+- 决策：尖括号不再产生 frontmatter issue，也不阻断安装；其余门禁保持不变。扫描预览直接把后端 issue code 映射为具体本地化原因，不再重建或概括后端规则。此决策仅取代 D-019 的“description 含尖括号”条款。
+- 后果：符合公开规范且描述中含 JSX、HTML 或占位符的技能可以安装；具体元数据问题仍 fail-closed，并在 UI 中准确显示。
+- 证据：`crates/skillstar-skills/src/validation.rs`、`src/features/my-skills/components/import-modal/SelectSkillsPhase.tsx` 及对应回归测试。
+
+## D-041：上游移除/更名在检查期可见，处理复用移除流程，迁移是一等操作
+
+- 日期：2026-08-21
+- 状态：accepted
+- 背景：作者会删除、改名或把 Skill 移到别的桶（mattpocock/skills 的 in-progress 明说"可能随时变动或消失"）。此前这只在用户恰好更新同仓库别的 Skill、pull 之后才以阻塞对话框出现；改名则表现为"一个被删 + 一个新技能"，用户得自己卸旧装新并重配 Agent。
+- 决策：更新检查把 tracked ref 上的路径消失记为 `upstream_change: removed`，并用 `git diff -M` / frontmatter `name` 判定后继；`update_state` 仍是唯一所有者，`update_available` 语义不变。移除的处理入口直接复用既有「来源已不再提供」对话框与 `resolve_skill_update`；改名由 `skillstar-app::skill_migration` 作为跨域 use case 一步完成（安装后继、沿用 Agent/项目部署、卸载旧条目）。不新增第二套"待处理"对话框，也不把不可更新项混进「更新 N 项」。
+- 后果：用户在卡片上就能看到并处理上游变动；后继判定是启发式（`-M` 相似度或同名），判错时用户仍可走"移除 + 从 ghost 安装"的手动路径。迁移不是单事务：install 与 uninstall 各自持更新锁，中间失败按步骤报告，下一次检查会把残留旧条目标为 `removed` 供用户收尾。
+- 证据：`crates/skillstar-skills/src/update_checker.rs`（`UpstreamStatus`）、`crates/skillstar-skills/src/update_state.rs`、`crates/skillstar-app/src/skill_migration.rs`、`src/features/my-skills/`。
+
+## D-042：移除 skill-pack 功能残骸（CLI、store、读侧），而不是补全安装链
+
+- 日期：2026-08-28
+- 状态：accepted
+- 背景：2026-08-27 对抗审查证实 pack 安装链(`install_pack`/`detect_pack`)全仓不可达且 `git log -S "PackAction::Install"` 为空——没有任何已发布版本写过 `packs.json`。删除安装链后,README 记录的 `skillstar doctor` / `pack list` / `pack remove` 只能对一个永远为空的 store 打印 "No packs installed."。二选一:补全安装链让功能成立,或整体移除。
+- 决策：整体移除。删 CLI 三命令(`Doctor`/`Pack` clap 变体、`cmd_doctor`/`cmd_pack_list`/`cmd_pack_remove`)、`skill_pack` 模块读侧(`list_packs`/`remove_pack`/`doctor_*` + store 类型)、`paths::packs_path` 与 legacy `packs.json` 迁移行、README 条目。理由:功能从未对用户成立(store 从未被写入),不存在破坏;真正的技能打包分发已由 bundle(.agd)与 share code 覆盖。
+- 后果：`skillstar` CLI 少三个从未产生过效果的子命令;`.claude-plugin` 式 pack 若将来要做,从 git 历史(本决策前一提交)取回并重新设计,而不是在空 store 上续写。`marketplace_pack*` 表的 DDL 按迁移不可删原则保留为惰性 schema。
+- 证据：`crates/skillstar-app/src/cli/{mod,manage}.rs`、已删除的 `crates/skillstar-skills/src/skill_pack*`、`README.md`、2026-08-27/28 对抗审查记录(errors.md 同日条目)。
+
+## D-043：Agent 技能主开关持久化恢复意图，而不持久化 Agent 归属
+
+- 日期：2026-08-30
+- 状态：accepted
+- 背景：Settings 的旧「所有已安装技能」主开关用当前 Hub inventory 推导动作：部分状态会补齐 Hub 缺口，全量关闭会清空当前链接。它既不能表达「只暂时停用本目录原有集合」，也在刷新或重启后不知道该恢复哪些名字。把集合按 Agent id 保存同样是错误模型：多个 profile 可以合法解析到同一个物理 Global skills 目录，磁盘没有 entry 的 per-Agent ownership 事实（D-024）。
+- 决策：`profiles.toml` 增加 recovery-only journal，键是暂停当刻解析到的物理 Global skills 目录，值是**仍待恢复**的排序去重 Skill 名称。`skillstar-app::agent_managed_skills` 在首次停用前原子落盘精确活动集合，再逐项临时移除；完成后只保留实际已消失的名字。若 journal 存在，恢复只尝试其中目前仍缺失的名字；成功或用户手动放回的名字删除，Hub 源缺失、受保护冲突或失败则保留。当前活动集合永远从磁盘重读，journal 不作为链接真相，也不把目录 entry 归给任一 profile。路径后来解析到其他地方时不得按 id 迁移或重新部署旧 journal。
+- 后果：获得——暂停/恢复跨刷新与重启保持精确集合，且恢复路径没有枚举 Hub inventory 的入口；共享目录天然共用状态和 pending 范围。承担——恢复源已从 Hub 删除时会保留可重试项而非“看似完成”；journal 是 D-024「磁盘即真相」的狭窄例外，只表达用户主动发起的恢复意图，因此必须在每个动作后以磁盘状态收敛，不能扩张为 ownership/provenance store。
+- 证据：`crates/skillstar-agents/src/profile_storage.rs`、`crates/skillstar-app/src/agent_managed_skills.rs`、`src-tauri/src/commands/agents.rs`、`src/features/settings/lib/agentSkillSync.ts`。
+
+## D-044：pack 根目录 SKILL.md 垫片不是安装单元
 
 - 日期：2026-08-30
 - 状态：accepted

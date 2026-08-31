@@ -7,11 +7,19 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       if (key === "settings.toggleAgent") return `Toggle ${String(options?.name)}`;
+      if (key === "settings.toggleManagedSkills") return `Managed skills ${String(options?.name)}`;
       if (key === "settings.activeCount") {
         return `${String(options?.enabled)} / ${String(options?.total)} active`;
       }
       if (key === "settings.showRemainingAgents") return `Show ${String(options?.count)} more Agents`;
       if (key === "settings.collapseAgentList") return "Show fewer Agents";
+      if (key === "settings.managedSkillsActiveCount") return `${String(options?.count)} managed active`;
+      if (key === "settings.managedSkillsPausedCount") return `${String(options?.count)} paused skills`;
+      if (key === "settings.managedSkillsPartialCount") {
+        return `${String(options?.paused)} paused / ${String(options?.active)} active`;
+      }
+      if (key === "settings.noManagedSkills") return "No managed skills";
+      if (key === "settings.sharedSkillsTarget") return `Shared with ${String(options?.names)}`;
       return key;
     },
   }),
@@ -30,6 +38,10 @@ function profile(id: string, installed: boolean, enabled: boolean): AgentProfile
     enabled,
     synced_count: 0,
   };
+}
+
+function activationSwitches() {
+  return screen.getAllByRole("switch").filter((toggle) => toggle.getAttribute("aria-label")?.startsWith("Toggle "));
 }
 
 describe("AgentConnectionsSection", () => {
@@ -78,7 +90,7 @@ describe("AgentConnectionsSection", () => {
       />,
     );
 
-    expect(screen.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-label"))).toEqual([
+    expect(activationSwitches().map((toggle) => toggle.getAttribute("aria-label"))).toEqual([
       "Toggle enabled-first",
       "Toggle enabled-second",
       "Toggle disabled-first",
@@ -101,15 +113,15 @@ describe("AgentConnectionsSection", () => {
       />,
     );
 
-    expect(screen.getAllByRole("switch")).toHaveLength(10);
+    expect(activationSwitches()).toHaveLength(10);
     expect(screen.queryByRole("switch", { name: "Toggle agent-11" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show 2 more Agents" }));
-    expect(screen.getAllByRole("switch")).toHaveLength(12);
+    expect(activationSwitches()).toHaveLength(12);
     expect(screen.getByRole("switch", { name: "Toggle agent-11" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show fewer Agents" }));
-    expect(screen.getAllByRole("switch")).toHaveLength(10);
+    expect(activationSwitches()).toHaveLength(10);
   });
 
   it("keeps linked-card expansion and unlink actions available", () => {
@@ -199,16 +211,16 @@ describe("AgentConnectionsSection", () => {
     );
 
     fireEvent.change(screen.getByLabelText("settings.searchAgents"), { target: { value: "C" } });
-    expect(screen.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-label"))).toEqual([
+    expect(activationSwitches().map((toggle) => toggle.getAttribute("aria-label"))).toEqual([
       "Toggle claude",
       "Toggle codex",
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: /settings\.filterAgentsDisabled/ }));
-    expect(screen.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-label"))).toEqual(["Toggle codex"]);
+    expect(activationSwitches().map((toggle) => toggle.getAttribute("aria-label"))).toEqual(["Toggle codex"]);
 
     fireEvent.click(screen.getByRole("button", { name: "settings.clearAgentSearch" }));
-    expect(screen.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-label"))).toEqual([
+    expect(activationSwitches().map((toggle) => toggle.getAttribute("aria-label"))).toEqual([
       "Toggle codex",
       "Toggle kiro",
     ]);
@@ -229,10 +241,10 @@ describe("AgentConnectionsSection", () => {
       />,
     );
 
-    expect(screen.getAllByRole("switch")).toHaveLength(10);
+    expect(activationSwitches()).toHaveLength(10);
 
     fireEvent.click(screen.getByRole("button", { name: /settings\.filterAgentsDisabled/ }));
-    expect(screen.getAllByRole("switch")).toHaveLength(12);
+    expect(activationSwitches()).toHaveLength(12);
     expect(screen.queryByRole("button", { name: /more Agents/ })).not.toBeInTheDocument();
   });
 
@@ -255,6 +267,114 @@ describe("AgentConnectionsSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.clearAgentFilters" }));
     expect(screen.getByRole("switch", { name: "Toggle claude" })).toBeInTheDocument();
+  });
+
+  it("pauses only the active managed names and delegates the compact control", () => {
+    const onToggleAllSkills = vi.fn();
+    const claude = profile("claude", false, true);
+
+    render(
+      <AgentConnectionsSection
+        profiles={[claude]}
+        profilesLoading={false}
+        expandedAgentId={null}
+        linkedSkills={{ claude: ["alpha"] }}
+        managedSkillStates={{
+          [claude.global_skills_dir]: { active_skill_names: ["alpha"], suspended_skill_names: [] },
+        }}
+        pendingSkillTargetKeys={{}}
+        onToggleProfile={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onUnlinkSkill={vi.fn()}
+        onToggleAllSkills={onToggleAllSkills}
+      />,
+    );
+
+    expect(screen.getByText("1 managed active")).toBeInTheDocument();
+    const managedSkillsSwitch = screen.getByRole("switch", { name: "Managed skills claude" });
+    expect(managedSkillsSwitch).toBeChecked();
+    fireEvent.click(managedSkillsSwitch);
+    expect(onToggleAllSkills).toHaveBeenCalledWith(claude);
+  });
+
+  it("keeps a paused snapshot restorable even when the folder is empty", () => {
+    const onToggleAllSkills = vi.fn();
+    const claude = profile("claude", false, true);
+
+    render(
+      <AgentConnectionsSection
+        profiles={[claude]}
+        profilesLoading={false}
+        expandedAgentId={null}
+        linkedSkills={{ claude: [] }}
+        managedSkillStates={{
+          [claude.global_skills_dir]: { active_skill_names: [], suspended_skill_names: ["alpha", "beta"] },
+        }}
+        onToggleProfile={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onUnlinkSkill={vi.fn()}
+        onToggleAllSkills={onToggleAllSkills}
+      />,
+    );
+
+    expect(screen.getByText("2 paused skills")).toBeInTheDocument();
+    const managedSkillsSwitch = screen.getByRole("switch", { name: "Managed skills claude" });
+    expect(managedSkillsSwitch).not.toBeChecked();
+    expect(managedSkillsSwitch).toBeEnabled();
+    fireEvent.click(managedSkillsSwitch);
+    expect(onToggleAllSkills).toHaveBeenCalledWith(claude);
+  });
+
+  it("disables an empty managed-skills folder instead of proposing a Hub sync", () => {
+    const onToggleAllSkills = vi.fn();
+    const claude = profile("claude", false, true);
+
+    render(
+      <AgentConnectionsSection
+        profiles={[claude]}
+        profilesLoading={false}
+        expandedAgentId={null}
+        linkedSkills={{ claude: [] }}
+        managedSkillStates={{
+          [claude.global_skills_dir]: { active_skill_names: [], suspended_skill_names: [] },
+        }}
+        onToggleProfile={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onUnlinkSkill={vi.fn()}
+        onToggleAllSkills={onToggleAllSkills}
+      />,
+    );
+
+    expect(screen.getByText("No managed skills")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Managed skills claude" })).toBeDisabled();
+    expect(onToggleAllSkills).not.toHaveBeenCalled();
+  });
+
+  it("shares the same suspended state and pending lock across a shared directory", () => {
+    const claude = profile("claude", false, true);
+    const codex = { ...profile("codex", false, true), global_skills_dir: claude.global_skills_dir };
+
+    render(
+      <AgentConnectionsSection
+        profiles={[claude, codex]}
+        profilesLoading={false}
+        expandedAgentId="claude"
+        linkedSkills={{ claude: ["alpha"], codex: ["alpha"] }}
+        managedSkillStates={{
+          [claude.global_skills_dir]: { active_skill_names: [], suspended_skill_names: ["alpha"] },
+        }}
+        pendingSkillTargetKeys={{ [claude.global_skills_dir]: true }}
+        onToggleProfile={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onUnlinkSkill={vi.fn()}
+        onToggleAllSkills={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Shared with codex")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Managed skills claude" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Managed skills codex" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "settings.unlink" })).toBeDisabled();
   });
 
   it("renders a matching skeleton while the Agent registry is loading", () => {

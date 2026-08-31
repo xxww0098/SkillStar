@@ -28,6 +28,8 @@ export function useGitHubAuth() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastFailure, setLastFailure] = useState<"load" | "start" | "poll" | "refresh" | "logout" | null>(null);
+  /** Bumped by a transient poll failure so the scheduler effect re-arms its timer. */
+  const [pollTick, setPollTick] = useState(0);
   const attemptRef = useRef(0);
 
   const loadStatus = useCallback(async (): Promise<GitHubConnectionStatus | null> => {
@@ -86,8 +88,15 @@ export function useGitHubAuth() {
       }
     } catch (cause) {
       if (attemptRef.current === attempt) {
-        setError(normalizeError(cause));
+        const failure = normalizeError(cause);
+        setError(failure);
         setLastFailure("poll");
+        // A transient blip must not end the device flow; keep polling until the
+        // backend reports the code expired. Permanent codes (protocol,
+        // no_pending_authorization, …) stop so a broken backend can't spin forever.
+        if (failure.code === "network" || failure.code === "proxy" || failure.code === "unavailable") {
+          setPollTick((n) => n + 1);
+        }
       }
     }
   }, [authorization]);
@@ -101,7 +110,7 @@ export function useGitHubAuth() {
         : authorization.interval_seconds;
     const timer = window.setTimeout(() => void pollNow(), delaySeconds * 1_000);
     return () => window.clearTimeout(timer);
-  }, [authorization, flow, pollNow]);
+  }, [authorization, flow, pollNow, pollTick]);
 
   const cancel = useCallback(async () => {
     attemptRef.current += 1;

@@ -4,9 +4,9 @@ use super::{
     GitHubOrganization, RemoteChannelRelease, RemoteRepository, RepositoryPermissions,
     SharedChannelError, SharedChannelErrorCode, SharedChannelGateway, validate_manifest,
 };
-use skillstar_github_auth::GitHubApiCredential;
 use async_trait::async_trait;
 use serde::Deserialize;
+use skillstar_github_auth::GitHubApiCredential;
 use std::time::Duration;
 
 pub(super) const API_ROOT: &str = "https://api.github.com";

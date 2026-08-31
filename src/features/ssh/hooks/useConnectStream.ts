@@ -1,6 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
+import { useTauriEvent } from "../../../hooks/useTauriEvent";
 
 /** A single line in the connection console (mirrors the Rust SshProgressEvent). */
 export interface SshProgressLine {
@@ -42,26 +41,18 @@ export function useConnectStream(hostKey: string | null) {
       setLines([]);
       setPendingHostKey(null);
     }
-    if (!hostKey || !isTauri()) return;
-
-    let unlisten: (() => void) | undefined;
-    listen<SshProgressLine>("ssh://connect-stream", (event) => {
-      const line = event.payload;
-      setLines((prev) => [...prev.slice(-200), line]); // keep last 200 lines
-      if (line.phase === "host_key" && line.status === "pending") {
-        const detail = (line.detail ?? {}) as { fingerprint?: string };
-        setPendingHostKey({ fingerprint: detail.fingerprint ?? "" });
-      } else if (line.phase === "host_key") {
-        setPendingHostKey(null);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      unlisten?.();
-    };
   }, [hostKey]);
+
+  useTauriEvent<SshProgressLine>("ssh://connect-stream", (line) => {
+    if (!hostKey) return;
+    setLines((prev) => [...prev.slice(-200), line]); // keep last 200 lines
+    if (line.phase === "host_key" && line.status === "pending") {
+      const detail = (line.detail ?? {}) as { fingerprint?: string };
+      setPendingHostKey({ fingerprint: detail.fingerprint ?? "" });
+    } else if (line.phase === "host_key") {
+      setPendingHostKey(null);
+    }
+  });
 
   return { lines, pendingHostKey };
 }

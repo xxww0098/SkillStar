@@ -52,20 +52,20 @@ export function EmptyState({ icon, title, description, action, size = "md", clas
           className={cn(
             // Give the icon real visual weight so it reads as part of the card
             // language rather than a flat tinted square.
-            "flex items-center justify-center mb-4 text-muted-foreground",
-            "border border-border/60 bg-gradient-to-br from-muted/70 to-muted/25",
-            "shadow-[0_4px_16px_-8px_var(--color-shadow)] ring-1 ring-inset ring-white/[0.04]",
+            "flex items-center justify-center mb-4 text-foreground/80",
+            "border border-border/80 bg-gradient-to-br from-card to-muted/40",
+            "shadow-[0_8px_24px_-8px_var(--color-shadow)] ring-1 ring-inset ring-white/[0.08] dark:ring-white/[0.06]",
             iconSizeMap[size],
           )}
         >
           {icon}
         </motion.div>
       )}
-      <motion.h3 {...rise(8, 0.08)} className="text-heading-sm mb-1">
+      <motion.h3 {...rise(8, 0.08)} className="text-heading-sm font-bold text-foreground mb-1.5">
         {title}
       </motion.h3>
       {description && (
-        <motion.p {...rise(6, 0.14)} className="text-caption max-w-sm mb-4">
+        <motion.p {...rise(6, 0.14)} className="text-caption text-muted-foreground/90 max-w-sm mb-4 leading-relaxed">
           {description}
         </motion.p>
       )}

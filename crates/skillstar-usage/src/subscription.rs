@@ -201,7 +201,9 @@ impl SubscriptionUsage {
         message: String,
         transient: bool,
     ) -> Self {
-        let carried = previous.filter(|_| transient).filter(|p| p.has_quota_data());
+        let carried = previous
+            .filter(|_| transient)
+            .filter(|p| p.has_quota_data());
         match carried {
             Some(previous) => SubscriptionUsage {
                 subscription_id: subscription_id.to_string(),

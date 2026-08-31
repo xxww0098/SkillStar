@@ -171,7 +171,9 @@ pub(crate) fn sync_to_claude_code_inner(
 /// the row (in which case the writer degrades to base URL + token rather than
 /// panicking on a lookup that should never fail).
 fn claude_role_defs() -> &'static [crate::providers::RoleDef] {
-    agent_spec("claude-code").map(|spec| spec.roles).unwrap_or(&[])
+    agent_spec("claude-code")
+        .map(|spec| spec.roles)
+        .unwrap_or(&[])
 }
 
 /// Remove SkillStar-managed Claude env keys (Official / unsync shared path).
@@ -200,7 +202,7 @@ fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
 
     let output =
         serde_json::to_string_pretty(&json).context("Failed to serialize Claude Code config")?;
-    std::fs::write(config_path, output)
+    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok(backup_path)
@@ -226,9 +228,7 @@ fn role_model_field(
 ) -> Value {
     roles
         .get(role)
-        .filter(|target| {
-            target.provider_id.trim().is_empty() || target.provider_id == provider.id
-        })
+        .filter(|target| target.provider_id.trim().is_empty() || target.provider_id == provider.id)
         .map(|target| target.model.trim())
         .filter(|model| !model.is_empty())
         .map(|model| Value::String(model.to_string()))
@@ -389,8 +389,11 @@ fn sync_claude_desktop_binding_inner(
         "model": model,
         "note": "SkillStar binding marker; Claude Desktop native write-path TBD",
     });
-    std::fs::write(path, serde_json::to_string_pretty(&body)?)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    skillstar_core::infra::fs_ops::atomic_write(
+        path,
+        serde_json::to_string_pretty(&body)?.as_bytes(),
+    )
+    .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(first_backup)
 }
 

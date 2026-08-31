@@ -24,8 +24,10 @@
 import type {
   LocalDivergenceReason,
   LocalDivergenceResolution,
+  RepoNewSkill,
   ResolveSkillUpdateResult,
   Skill,
+  SkillMigrationReport,
   SkillUpdateBlocked,
   SkillUpdateReport,
   SkillUpdateState,
@@ -115,7 +117,57 @@ export function devListSkills(): Skill[] {
 export function devSkillUpdateStates(): SkillUpdateState[] {
   return skills
     .filter((skill) => skill.skill_type !== "local")
-    .map((skill) => ({ name: skill.name, update_available: skill.update_available }));
+    .map((skill) => ({
+      name: skill.name,
+      update_available: skill.update_available,
+      upstream_change: skill.upstream_change ?? null,
+    }));
+}
+
+/** New Skills the cached repositories offer. A Skill an installed one was
+ *  renamed into says so, exactly as the backend annotates it. */
+export function devGhostSkills(): RepoNewSkill[] {
+  const ghosts: RepoNewSkill[] = [];
+  for (const skill of skills) {
+    const successor = skill.upstream_change?.kind === "removed" ? skill.upstream_change.successor : null;
+    if (!successor) continue;
+    ghosts.push({
+      repo_source: skill.source ?? "acme/skills",
+      repo_url: skill.git_url,
+      skill_id: successor.skill_id,
+      folder_path: successor.folder_path,
+      description: successor.description,
+      renamed_from: skill.name,
+    });
+  }
+  return ghosts;
+}
+
+/** Install the recorded successor under its own name and drop the old entry. */
+export function devMigrateRenamedSkill(name: string): SkillMigrationReport {
+  const old = requireSkill(name);
+  const successor = old.upstream_change?.kind === "removed" ? old.upstream_change.successor : null;
+  if (!successor) throw new Error(`No upstream successor is recorded for '${name}'; run an update check first`);
+  skills = skills
+    .filter((skill) => skill.name !== name)
+    .concat({
+      ...old,
+      name: successor.skill_id,
+      description: successor.description,
+      update_available: false,
+      upstream_change: null,
+      last_updated: iso(0),
+    });
+  divergences.delete(name);
+  return {
+    installed: successor.skill_id,
+    removed: name,
+    agents_relinked: old.agent_links ?? [],
+    agent_failures: [],
+    projects_relinked: [],
+    project_failures: [],
+    removal_failure: null,
+  };
 }
 
 export function devUpdateSkills(names: string[]): SkillUpdateReport {

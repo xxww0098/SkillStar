@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::profile_storage::PrefsStore;
 use super::spec::AgentSpec;
-use super::validation::validate_project_skills_rel;
+use super::validation::{validate_global_skills_dir, validate_project_skills_rel};
 
 /// A user-defined agent template, persisted in `ProfilePrefs::custom_profiles`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -58,6 +58,9 @@ pub(crate) fn add(def: CustomProfileDef, store: &dyn PrefsStore) -> Result<()> {
 
     let mut new_def = def;
     new_def.project_skills_rel = normalized_project_rel;
+    new_def.global_skills_dir = new_def.global_skills_dir.trim().to_string();
+    let home = skillstar_core::infra::paths::home_dir();
+    validate_global_skills_dir(&CustomSpec(&new_def).resolve_global_dir(&home), &home)?;
     if new_def.id.is_empty() {
         new_def.id = format!(
             "custom_{}",

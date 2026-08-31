@@ -14,6 +14,7 @@ use std::path::Path;
 
 use crate::git::ops as git_ops;
 use crate::lockfile::LockEntry;
+use crate::update_checker::tracked_update_ref;
 use crate::{content, lockfile, repo_link};
 
 use super::plan;
@@ -136,15 +137,6 @@ fn tracked_source_ships(hub_path: &Path) -> Option<bool> {
         // A checkout that has never fetched cannot disprove anything, so fall
         // back to what is committed locally rather than calling it deleted.
         .or_else(|| git_ops::revision_contains_path(&repo_root, "HEAD", &pathspec))
-}
-
-/// The revision an ordinary update resets a managed checkout to.
-fn tracked_update_ref(repo_root: &Path) -> &'static str {
-    if crate::update_checker::configured_git_ref(repo_root).is_some() {
-        "FETCH_HEAD"
-    } else {
-        "origin/HEAD"
-    }
 }
 
 /// Installed Skills of a checkout that have no content once the pull is done.

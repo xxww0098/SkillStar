@@ -29,7 +29,6 @@ dirs = { workspace = true }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }
-toml = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
 base64.workspace = true
 scraper = "0.27.0"

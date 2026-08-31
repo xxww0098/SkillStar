@@ -50,12 +50,12 @@ export function CursorUsagePanel({
   }
 
   return (
-    <div className={cn("space-y-3", compact && "space-y-2")}>
-      {monthly && <UsageWindowBar window={monthly} compact={compact} />}
-      {weekly && <UsageWindowBar window={weekly} compact={compact} />}
-      {usage.hourly && <UsageWindowBar window={usage.hourly} compact={compact} />}
+    <div className={cn("space-y-2", compact && "space-y-1.5")}>
+      {monthly && <UsageWindowBar window={monthly} compact={compact} showCategoryReset={false} />}
+      {weekly && <UsageWindowBar window={weekly} compact={compact} showCategoryReset={false} />}
+      {usage.hourly && <UsageWindowBar window={usage.hourly} compact={compact} showCategoryReset={false} />}
       {hasSecondary && (
-        <SecondaryPanel accent={accent} className={compact ? "p-2" : undefined}>
+        <SecondaryPanel accent={accent}>
           {bonus?.credit_amount && (
             <MetaRow label={t("usage.cursorBonus")} value={bonus.credit_amount} accent={accent} />
           )}

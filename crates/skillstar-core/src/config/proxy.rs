@@ -81,11 +81,8 @@ pub fn load_config() -> Result<ProxyConfig> {
 
 pub fn save_config(config: &ProxyConfig) -> Result<()> {
     let path = config_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let content = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, content)?;
+    crate::infra::fs_ops::atomic_write(&path, content.as_bytes())?;
     Ok(())
 }
 

@@ -94,15 +94,15 @@ pub struct SubscriptionDto {
     #[ts(type = "number")]
     pub updated_at: i64,
     pub usage: Option<SubscriptionUsage>,
-    /// Outcome of the last CLI account-switch attempt (set by
-    /// `set_active_subscription` when it also pushes credentials to the CLI).
+    /// Outcome of the last local-tool account-switch attempt (set by
+    /// `set_active_subscription` when it also writes the target credential).
     /// Absent when no switch was attempted.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub switch_result: Option<SwitchOutcomeDto>,
-    /// Whether this catalog maps to a CLI whose credentials SkillStar can
-    /// switch (codex / opencode / grok). IDE-only catalogs (cursor, …)
-    /// are `false` — the UI hides the "sync to CLI" affordance for them.
+    /// Whether SkillStar can switch the real local tool credential for this
+    /// catalog (CLI JSON custody or an IDE-specific adapter). The wire name is
+    /// retained for compatibility with existing frontend types.
     #[serde(default)]
     pub supports_cli_switch: bool,
 }
@@ -329,7 +329,11 @@ impl From<crate::usage_switch::CliAccountState> for CliAccountStateDto {
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
-#[ts(export, export_to = "SubscriptionAlert.ts", rename = "SubscriptionAlert")]
+#[ts(
+    export,
+    export_to = "SubscriptionAlert.ts",
+    rename = "SubscriptionAlert"
+)]
 pub struct SubscriptionAlertDto {
     pub id: String,
     pub subscription_id: String,
@@ -374,10 +378,6 @@ pub struct MonthlySpendEntry {
 pub struct OAuthStartDto {
     pub pending_id: String,
     pub auth_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verification_uri: Option<String>,
 }
 
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`

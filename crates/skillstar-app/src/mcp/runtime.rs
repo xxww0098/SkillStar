@@ -29,7 +29,9 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use skillstar_marketplace::{McpRegistryPackageSummary, McpRegistryRemoteSummary, McpRegistryServer};
+use skillstar_marketplace::{
+    McpRegistryPackageSummary, McpRegistryRemoteSummary, McpRegistryServer,
+};
 use skillstar_models::mcp::{McpRuntimeKind, resolve_runtime};
 use ts_rs::TS;
 

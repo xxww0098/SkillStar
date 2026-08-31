@@ -67,6 +67,17 @@ pub async fn refresh_subscription_usage(
     Ok(dto)
 }
 
+/// Consume one provider-side Grok reset credit for a single subscription card.
+#[tauri::command]
+pub async fn reset_subscription_quota(
+    app: AppHandle,
+    id: String,
+) -> Result<SubscriptionDto, AppError> {
+    let dto = usage::reset_subscription_quota(id).await?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
+}
+
 /// `catalogId` scopes the sweep to one provider (the Grok page refreshes only
 /// `xai`); omitted / null refreshes everything.
 #[tauri::command]

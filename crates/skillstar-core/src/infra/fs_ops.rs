@@ -369,7 +369,7 @@ where
 /// Atomically replace `path` with `content`.
 ///
 /// The single workspace-wide tmp+rename implementation: writes to a
-/// pid-suffixed sibling temp file (same directory, so the final `rename`
+/// pid+sequence-suffixed sibling temp file (same directory, so the final `rename`
 /// cannot cross filesystems), fsyncs it, then renames over the target — a
 /// crash mid-write can never leave a truncated target file. Creates the
 /// parent directory when missing and cleans the temp file up on failure.
@@ -386,7 +386,14 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".to_string());
-    let tmp = parent.join(format!("{file_name}.skillstar-{}.tmp", std::process::id()));
+    // Per-process counter: two threads writing the same target must not share
+    // a temp path, or one thread's rename ships the other's half-written file.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = parent.join(format!(
+        "{file_name}.skillstar-{}-{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
 
     let result = (|| {
         #[cfg(unix)]
@@ -410,6 +417,31 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Reveal or open a directory in the operating system's default file manager.
+pub fn open_in_file_manager(path: &Path) -> anyhow::Result<()> {
+    let path_str = path.to_string_lossy().to_string();
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("/usr/bin/open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to open folder: {e}"))?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to open folder: {e}"))?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to open folder: {e}"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{atomic_write, create_symlink_or_copy, remove_link_or_copy};
@@ -427,7 +459,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"v\":2}");
 
         let leftovers: Vec<_> = std::fs::read_dir(target.parent().unwrap())
-            .unwrap()            .filter_map(|e| e.ok())
+            .unwrap()
+            .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(

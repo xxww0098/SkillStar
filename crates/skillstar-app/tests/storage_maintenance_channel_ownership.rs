@@ -207,7 +207,10 @@ async fn force_delete_installed_skills_prunes_the_subscription() {
     );
     assert!(!is_channel_managed("writer"));
     assert!(lock_entry_names().is_empty());
-    assert_eq!(std::fs::read_dir(paths::hub_skills_dir()).unwrap().count(), 0);
+    assert_eq!(
+        std::fs::read_dir(paths::hub_skills_dir()).unwrap().count(),
+        0
+    );
 }
 
 /// The cache reset drops hub symlinks that point into the repo cache — which
@@ -296,7 +299,10 @@ async fn force_delete_app_config_preserves_channel_provenance() {
         .await
         .unwrap();
 
-    assert_eq!(removed, 1, "only the preference file is a config reset target");
+    assert_eq!(
+        removed, 1,
+        "only the preference file is a config reset target"
+    );
     assert!(!preference.exists());
     assert!(DiskChannelSubscriptionRegistry::path().exists());
     assert_eq!(tracked_skill_ids(), vec!["writer".to_string()]);

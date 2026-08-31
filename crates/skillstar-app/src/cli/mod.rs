@@ -8,7 +8,7 @@ mod manage;
 
 pub use commands::*;
 pub use install::cmd_install;
-pub use manage::{cmd_doctor, cmd_pack_list, cmd_pack_remove, cmd_publish, cmd_remove, cmd_update};
+pub use manage::{cmd_publish, cmd_remove, cmd_update};
 
 mod helpers;
 pub use helpers::*;
@@ -111,30 +111,8 @@ pub enum Commands {
     },
     /// Publish current directory as a skill to GitHub
     Publish,
-    /// Run health checks on installed packs or all packs
-    Doctor {
-        /// Pack name to check (checks all packs if omitted)
-        name: Option<String>,
-    },
-    /// Manage installed skill packs
-    Pack {
-        #[command(subcommand)]
-        action: PackAction,
-    },
     /// Force launch GUI mode
     Gui,
-}
-
-/// Pack sub-commands.
-#[derive(Subcommand)]
-pub enum PackAction {
-    /// List installed skill packs
-    List,
-    /// Remove an installed skill pack by name
-    Remove {
-        /// Pack name to remove
-        name: String,
-    },
 }
 
 /// Options passed to the install handler.
@@ -159,24 +137,15 @@ pub struct RemoveOpts<'a> {
     pub yes: bool,
 }
 
-pub struct CliHandlers {
-    pub migrate_and_run: fn(),
-    pub install: fn(InstallOpts<'_>),
-    pub update: fn(name: Option<&str>),
-    pub remove: fn(RemoveOpts<'_>),
-    pub publish: fn(),
-    pub doctor: fn(name: Option<&str>),
-    pub pack_list: fn(),
-    pub pack_remove: fn(name: &str),
-    pub gui: fn(),
-}
-
-pub fn run(args: Vec<String>, handlers: CliHandlers) {
+/// Dispatch the CLI. `migrate_and_run` is the only caller-specific seam: the
+/// Tauri package prefers its own marketplace snapshot init, everyone else
+/// passes [`default_migrate_and_run`].
+pub fn run(args: Vec<String>, migrate_and_run: fn()) {
     // Channel-aware mutation gate must be active before any skill mutation path runs
     skillstar_channels::policy::install_global_policy();
 
     // Migration (only runs once at startup)
-    (handlers.migrate_and_run)();
+    migrate_and_run();
 
     let cli = Cli::parse_from(args);
 
@@ -195,7 +164,7 @@ pub fn run(args: Vec<String>, handlers: CliHandlers) {
             yes,
             copy,
             preview,
-        } => (handlers.install)(InstallOpts {
+        } => cmd_install(InstallOpts {
             url: &url,
             name: name.as_deref(),
             skill: &skill,
@@ -208,20 +177,15 @@ pub fn run(args: Vec<String>, handlers: CliHandlers) {
             copy,
             preview,
         }),
-        Commands::Update { name } => (handlers.update)(name.as_deref()),
-        Commands::Remove { names, all, yes } => (handlers.remove)(RemoveOpts {
+        Commands::Update { name } => cmd_update(name.as_deref()),
+        Commands::Remove { names, all, yes } => cmd_remove(RemoveOpts {
             names: &names,
             all,
             yes,
         }),
         Commands::Init { name } => cmd_init(name.as_deref()),
-        Commands::Publish => (handlers.publish)(),
-        Commands::Doctor { name } => (handlers.doctor)(name.as_deref()),
-        Commands::Pack { action } => match action {
-            PackAction::List => (handlers.pack_list)(),
-            PackAction::Remove { name } => (handlers.pack_remove)(&name),
-        },
-        Commands::Gui => (handlers.gui)(),
+        Commands::Publish => cmd_publish(),
+        Commands::Gui => println!("Launching SkillStar GUI..."),
     }
 }
 
@@ -243,8 +207,6 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "init"
             | "create"
             | "publish"
-            | "doctor"
-            | "pack"
             | "help"
             | "-h"
             | "--help"
@@ -319,24 +281,8 @@ fn is_bundle_file(path: &std::path::Path) -> bool {
     )
 }
 
-/// Build CLI handlers that run entirely in skillstar-app (no Tauri).
-pub fn default_handlers() -> CliHandlers {
-    CliHandlers {
-        migrate_and_run: default_migrate_and_run,
-        install: cmd_install,
-        update: cmd_update,
-        remove: cmd_remove,
-        publish: cmd_publish,
-        doctor: cmd_doctor,
-        pack_list: cmd_pack_list,
-        pack_remove: cmd_pack_remove,
-        gui: || {
-            println!("Launching SkillStar GUI...");
-        },
-    }
-}
-
-fn default_migrate_and_run() {
+/// Migration + snapshot init that runs entirely in skillstar-app (no Tauri).
+pub fn default_migrate_and_run() {
     skillstar_core::infra::migration::migrate_legacy_paths();
     // Configure marketplace snapshot paths so `find` hits the real DB.
     skillstar_marketplace::snapshot::configure_runtime(
@@ -345,7 +291,7 @@ fn default_migrate_and_run() {
             skillstar_core::infra::paths::data_root(),
             skillstar_skills::installed_skill::installed_snapshot_markers,
             || -> skillstar_marketplace::snapshot::InstalledSkillsFuture {
-                Box::pin(skillstar_skills::installed_skill::list_installed_skills_fast())
+                Box::pin(skillstar_skills::installed_skill::list_installed_skills())
             },
         ),
     );
@@ -373,8 +319,6 @@ mod mode_tests {
             "init",
             "create",
             "publish",
-            "doctor",
-            "pack",
             "help",
             "-h",
             "--help",

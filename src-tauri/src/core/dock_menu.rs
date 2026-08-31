@@ -61,8 +61,16 @@ mod platform {
 
         let lang = crate::core::app_shell::detect_system_lang();
         let is_zh = lang.starts_with("zh");
-        let header_title = if is_zh { "用量额度" } else { "Usage Quotas" };
-        let empty_title = if is_zh { "  暂无用量数据" } else { "  No usage data" };
+        let header_title = if is_zh {
+            "用量额度"
+        } else {
+            "Usage Quotas"
+        };
+        let empty_title = if is_zh {
+            "  暂无用量数据"
+        } else {
+            "  No usage data"
+        };
 
         menu.addItem(&info_item(mtm, header_title));
 

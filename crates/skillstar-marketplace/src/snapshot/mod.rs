@@ -438,7 +438,7 @@ pub(crate) use migrations::*;
 pub use local_first::*;
 pub use registries::*;
 pub use resolve::*;
-pub use skills::*;
+pub(crate) use skills::*;
 pub use sync::*;
 pub use sync_state::*;
 pub use taxonomy::*;

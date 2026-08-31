@@ -10,15 +10,17 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::discovery::DiscoveredSkill;
 
-
 pub use cache::{
     cache_dir_name, clone_or_fetch_repo_at_in_session, clone_or_fetch_repo_in_session,
 };
 pub use detect::detect_new_skills_in_cached_repos;
+pub(crate) use detect::{skill_at_revision, upstream_added_dirs};
 pub use maintenance::{RepoCacheInfo, clean_unused_cache, get_cache_info};
 pub use ops::pull_repo_skill_update_in_session;
 pub use scan::{scan_skills_in_repo, scan_skills_in_repo_at};
-pub use scan_install::{install_from_repo_at, install_from_repo_in_session, install_from_repo_at_with_source_migrations};
+pub use scan_install::{
+    install_from_repo_at, install_from_repo_at_with_source_migrations, install_from_repo_in_session,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanResult {
@@ -40,6 +42,10 @@ pub struct RepoNewSkill {
     pub skill_id: String,
     pub folder_path: String,
     pub description: String,
+    /// Installed Skill the last update check identified this one as the
+    /// successor of — the source renamed or moved it here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
 }
 
 pub(crate) fn scan_repo_with_mode_in_session(
@@ -47,8 +53,7 @@ pub(crate) fn scan_repo_with_mode_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> anyhow::Result<ScanResult> {
-    let parsed = crate::source_resolver::Source::parse(input)
-        .context("Invalid repository URL")?;
+    let parsed = crate::source_resolver::Source::parse(input).context("Invalid repository URL")?;
     let repo_url = parsed.repo_url;
     let source = parsed.short;
     crate::skill_mutation::policy().ensure_repository_mutation_allowed(&repo_url)?;

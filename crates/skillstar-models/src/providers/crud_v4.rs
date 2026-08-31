@@ -35,7 +35,11 @@ use url::Url;
 /// Validate an optional endpoint URL. `None` and empty are both fine — "this
 /// host does not offer that protocol" is a normal state, not an error.
 fn validate_endpoint(url: Option<&String>) -> Result<()> {
-    let Some(url) = url.map(String::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+    let Some(url) = url
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
         return Ok(());
     };
     let parsed = Url::parse(url).with_context(|| format!("Invalid URL format: '{url}'"))?;
@@ -75,7 +79,13 @@ pub fn create_provider(store: &mut ProvidersStoreV4, mut provider: Provider) -> 
     provider.sort_index = if store.providers.is_empty() {
         0
     } else {
-        store.providers.iter().map(|p| p.sort_index).max().unwrap_or(0) + 1
+        store
+            .providers
+            .iter()
+            .map(|p| p.sort_index)
+            .max()
+            .unwrap_or(0)
+            + 1
     };
 
     store.providers.push(provider.clone());
@@ -212,7 +222,10 @@ pub fn check_bindable(provider: &Provider, wire: RequiredWire) -> Result<(), Bin
             provider_name: provider.name.clone(),
         });
     }
-    if provider.endpoint_for(wire).is_none_or(|u| u.trim().is_empty()) {
+    if provider
+        .endpoint_for(wire)
+        .is_none_or(|u| u.trim().is_empty())
+    {
         return Err(BindRefusal::NoEndpoint {
             wire,
             provider_name: provider.name.clone(),
@@ -271,7 +284,11 @@ pub fn bind_provider(
 
     let binding = store.bindings.entry(agent_id.to_string()).or_default();
     if multi {
-        match binding.entries.iter().position(|e| e.provider_id == provider_id) {
+        match binding
+            .entries
+            .iter()
+            .position(|e| e.provider_id == provider_id)
+        {
             Some(pos) => {
                 binding.entries[pos] = entry.clone();
                 binding.active_index = pos;
@@ -351,7 +368,11 @@ pub fn update_binding_entry(
         entry.model = model.to_string();
     }
     if let Some(settings) = settings {
-        entry.settings = if settings.is_null() { None } else { Some(settings) };
+        entry.settings = if settings.is_null() {
+            None
+        } else {
+            Some(settings)
+        };
     }
     Ok(entry.clone())
 }
@@ -374,7 +395,11 @@ pub fn update_binding_entry_settings(
     let active = binding
         .active_mut()
         .with_context(|| format!("Agent '{agent_id}' has no active entry"))?;
-    active.settings = if settings.is_null() { None } else { Some(settings) };
+    active.settings = if settings.is_null() {
+        None
+    } else {
+        Some(settings)
+    };
     Ok(active.clone())
 }
 
@@ -389,7 +414,11 @@ pub fn update_agent_settings(
         .get_mut(agent_id)
         .filter(|b| !b.is_empty())
         .with_context(|| format!("Agent '{agent_id}' is not currently bound"))?;
-    binding.settings = if settings.is_null() { None } else { Some(settings) };
+    binding.settings = if settings.is_null() {
+        None
+    } else {
+        Some(settings)
+    };
     Ok(binding.clone())
 }
 
@@ -425,7 +454,9 @@ pub fn unbind_provider(
         bail!("Provider '{provider_id}' is not bound to agent '{agent_id}'");
     }
     drop_entry(binding, provider_id);
-    binding.roles.retain(|_, target| target.provider_id != provider_id);
+    binding
+        .roles
+        .retain(|_, target| target.provider_id != provider_id);
     Ok(binding.active().cloned())
 }
 
@@ -444,7 +475,11 @@ pub fn unbind_agent(store: &mut ProvidersStoreV4, agent_id: &str) -> Result<Opti
 /// Drop one entry and re-clamp the active pointer so it still points at
 /// something real.
 fn drop_entry(binding: &mut AgentBinding, provider_id: &str) {
-    let Some(pos) = binding.entries.iter().position(|e| e.provider_id == provider_id) else {
+    let Some(pos) = binding
+        .entries
+        .iter()
+        .position(|e| e.provider_id == provider_id)
+    else {
         return;
     };
     binding.entries.remove(pos);

@@ -142,6 +142,35 @@ pub fn resolve_zed_config_path() -> Result<PathBuf> {
     Ok(home.join(".config").join("zed").join("settings.json"))
 }
 
+/// Released Maka Desktop / CLI MCP config:
+/// - macOS `~/Library/Application Support/Maka/workspaces/default/mcp.json`
+/// - Windows `%APPDATA%\Maka\workspaces\default\mcp.json`
+/// - Linux `~/.config/Maka/workspaces/default/mcp.json`
+///
+/// Anchored on [`sync_config_dir`] rather than [`sync_home_dir`] because those
+/// three paths are exactly what an OS config dir resolves to. The development
+/// isolation profile `Maka Dev` is intentionally not written.
+pub fn resolve_maka_config_path() -> Result<PathBuf> {
+    Ok(sync_config_dir()?
+        .join("Maka")
+        .join("workspaces")
+        .join("default")
+        .join("mcp.json"))
+}
+
+/// Maka install probe (registry `installed` column).
+///
+/// Skills live under `~/.maka`; MCP lives under the OS config dir's `Maka`
+/// profile. Either, plus the CLI binary or the Desktop app, is enough.
+pub(crate) fn installed_maka(home: &Path) -> bool {
+    home.join(".maka").exists()
+        || sync_config_dir()
+            .map(|dir| dir.join("Maka").exists())
+            .unwrap_or(false)
+        || skillstar_core::infra::path_env::binary_on_enriched_path("maka")
+        || skillstar_core::infra::path_env::desktop_app_installed("Maka")
+}
+
 /// Resolve the live MCP config file for a tool.
 ///
 /// Registry-driven; hidden legacy ids (`claude-desktop`, `gemini`) resolve
@@ -479,6 +508,53 @@ pub(crate) fn json_named_map_remove(path: &Path, root_key: &str, name: &str) -> 
 /// Upsert `mcpServers.<name>` in a JSON config file.
 pub(crate) fn json_mcpservers_upsert(path: &Path, name: &str, spec: Value) -> Result<()> {
     json_named_map_upsert(path, MCP_SERVERS_KEY, name, spec)
+}
+
+/// Maka's current on-disk schema. v1 (missing `version`) is still readable
+/// and is upgraded on write, matching Maka's own store.
+const MAKA_MCP_CONFIG_VERSION: u64 = 2;
+
+fn maka_version_is_supported(path: &Path, root: &Map<String, Value>) -> Result<()> {
+    match root.get("version") {
+        None => Ok(()),
+        Some(Value::Number(n))
+            if n.as_u64() == Some(1) || n.as_u64() == Some(MAKA_MCP_CONFIG_VERSION) =>
+        {
+            Ok(())
+        }
+        Some(other) => bail!(
+            "Unsupported MCP config version {other} in {}. Refusing to overwrite it — this file uses a newer Maka schema than SkillStar can write.",
+            path.display()
+        ),
+    }
+}
+
+/// Upsert `mcpServers.<name>` in Maka's `mcp.json`, keeping `version: 2`.
+pub(crate) fn maka_upsert(path: &Path, name: &str, spec: Value) -> Result<()> {
+    let mut root = read_json_object_strict(path)?;
+    maka_version_is_supported(path, &root)?;
+    root.insert("version".into(), json!(MAKA_MCP_CONFIG_VERSION));
+    let servers = root
+        .entry(MCP_SERVERS_KEY.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let map = servers.as_object_mut().with_context(|| {
+        format!(
+            "Expected `{MCP_SERVERS_KEY}` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    map.insert(name.to_string(), spec);
+    write_json_pretty(path, &Value::Object(root))
+}
+
+/// Remove `mcpServers.<name>` from Maka's `mcp.json` without touching `version`.
+pub(crate) fn maka_remove(path: &Path, name: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let root = read_json_object_strict(path)?;
+    maka_version_is_supported(path, &root)?;
+    json_named_map_remove(path, MCP_SERVERS_KEY, name)
 }
 
 /// Remove `mcpServers.<name>` from a JSON config file.

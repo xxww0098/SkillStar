@@ -21,14 +21,28 @@ vi.mock("react-i18next", () => ({
       if (key === "usage.addProviderSubscription") return `新增 ${opts?.provider} 订阅`;
       if (key === "usage.collapseAllProviderGroups") return "全部折叠";
       if (key === "usage.expandAllProviderGroups") return "全部展开";
+      if (key === "usage.resetQuota") return "重置额度";
       return key;
     },
   }),
 }));
 
 vi.mock("./SubscriptionCard", () => ({
-  SubscriptionCard: ({ subscription }: { subscription: Subscription }) => (
-    <article aria-label={subscription.display_name}>{subscription.display_name}</article>
+  SubscriptionCard: ({
+    subscription,
+    onResetQuota,
+  }: {
+    subscription: Subscription;
+    onResetQuota?: (id: string) => Promise<void>;
+  }) => (
+    <article aria-label={subscription.display_name}>
+      {subscription.display_name}
+      {onResetQuota && (
+        <button type="button" aria-label="重置额度" onClick={() => void onResetQuota(subscription.id)}>
+          重置额度
+        </button>
+      )}
+    </article>
   ),
 }));
 
@@ -154,6 +168,29 @@ describe("UsageGrid", () => {
     fireEvent.click(screen.getByRole("button", { name: "新增 Grok 订阅" }));
 
     expect(onAddNew).toHaveBeenCalledWith("xai");
+  });
+
+  it("shows a Grok quota reset action on the provider card", () => {
+    const onResetQuota = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <UsageGrid
+        subscriptions={[subscription]}
+        allSubscriptions={[subscription]}
+        catalog={[catalogEntry]}
+        filter={FILTER_ALL}
+        onRefresh={vi.fn()}
+        onResetQuota={onResetQuota}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onReorder={vi.fn()}
+        onAddNew={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重置额度" }));
+
+    expect(onResetQuota).toHaveBeenCalledWith("sub-1");
   });
 
   it("collapses and expands all provider groups from the batch control", () => {

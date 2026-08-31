@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Download, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowRightLeft, Download, Loader2, Sparkles, X } from "lucide-react";
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
@@ -13,17 +13,25 @@ interface GhostSkillCardProps {
   onInstall: (skill: RepoNewSkill) => void;
   onDismiss: (repoSource: string, skillId: string) => void;
   onClick?: (skill: RepoNewSkill) => void;
+  /** Offered instead of install when an installed Skill was renamed into this one. */
+  onMigrate?: (skill: RepoNewSkill) => void;
 }
 
-function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick }: GhostSkillCardProps) {
+function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick, onMigrate }: GhostSkillCardProps) {
   const { t } = useTranslation();
   const [installing, setInstalling] = useState(false);
+  const renamedFrom = skill.renamed_from ?? null;
+  const migrates = Boolean(renamedFrom && onMigrate);
 
   const handleInstall = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setInstalling(true);
     try {
-      await onInstall(skill);
+      if (migrates) {
+        await onMigrate?.(skill);
+      } else {
+        await onInstall(skill);
+      }
     } catch {
       // Error handled by parent
     } finally {
@@ -59,11 +67,20 @@ function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick }: GhostSkil
         onClick={handleClick}
         topRightSlot={
           <div className="flex items-center gap-1">
-            {/* "新技能" badge */}
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/12 text-primary text-[10px] font-semibold tracking-wide uppercase">
-              <Sparkles className="w-3 h-3" />
-              {t("ghostCard.newSkill")}
-            </span>
+            {renamedFrom ? (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-300 text-[10px] font-semibold tracking-wide truncate max-w-[12rem]"
+                title={t("ghostCard.renamedFrom", { name: renamedFrom })}
+              >
+                <ArrowRightLeft className="w-3 h-3 shrink-0" />
+                <span className="truncate">{t("ghostCard.renamedFrom", { name: renamedFrom })}</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/12 text-primary text-[10px] font-semibold tracking-wide uppercase">
+                <Sparkles className="w-3 h-3" />
+                {t("ghostCard.newSkill")}
+              </span>
+            )}
             {/* Dismiss button */}
             <button
               onClick={handleDismiss}
@@ -100,6 +117,11 @@ function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick }: GhostSkil
             >
               {installing ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : migrates ? (
+                <>
+                  <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
+                  {t("ghostCard.migrate")}
+                </>
               ) : (
                 <>
                   <Download className="w-3.5 h-3.5 mr-1" />

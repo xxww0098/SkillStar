@@ -500,4 +500,3 @@ fn test_migrate_store_if_needed_v1_deduplication() {
         .unwrap();
     assert_eq!(claude_act.provider_id, codex_act.provider_id);
 }
-

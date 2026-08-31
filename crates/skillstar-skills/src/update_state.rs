@@ -24,15 +24,40 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+pub use skillstar_core::types::{UpstreamChange, UpstreamSuccessor};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillUpdateState {
     pub name: String,
     pub update_available: bool,
+    /// Upstream removal (with the successor it was renamed into, if one was
+    /// found). Independent of `update_available`, which keeps meaning
+    /// "a content update is available".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_change: Option<UpstreamChange>,
 }
 
-#[derive(Debug, Clone, Copy)]
+impl SkillUpdateState {
+    pub fn new(name: impl Into<String>, update_available: bool) -> Self {
+        Self {
+            name: name.into(),
+            update_available,
+            upstream_change: None,
+        }
+    }
+}
+
+/// What is remembered per Skill — also the on-disk value shape.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Stored {
+    update_available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    upstream_change: Option<UpstreamChange>,
+}
+
+#[derive(Debug, Clone)]
 struct Stamped {
-    available: bool,
+    stored: Stored,
     revision: u64,
 }
 
@@ -58,7 +83,8 @@ pub fn stamp() -> u64 {
 /// Record a definitive result, overriding anything a scan may report later.
 ///
 /// Used when an update has actually been applied — that answer is authoritative
-/// by construction, not a measurement that can go stale.
+/// by construction, not a measurement that can go stale. It also clears any
+/// recorded upstream change: the Skill was just pulled from its source.
 pub fn set(name: &str, available: bool) {
     set_stamped(name, available);
 }
@@ -70,7 +96,10 @@ pub fn set_stamped(name: &str, available: bool) -> u64 {
         store.states.insert(
             name.to_string(),
             Stamped {
-                available,
+                stored: Stored {
+                    update_available: available,
+                    upstream_change: None,
+                },
                 revision,
             },
         );
@@ -81,7 +110,48 @@ pub fn set_stamped(name: &str, available: bool) -> u64 {
 }
 
 pub fn get(name: &str) -> Option<bool> {
-    with_store(|store| store.states.get(name).map(|stored| stored.available))
+    with_store(|store| {
+        store
+            .states
+            .get(name)
+            .map(|stored| stored.stored.update_available)
+    })
+}
+
+/// The upstream removal recorded for `name`, if the last check found one.
+pub fn upstream_change(name: &str) -> Option<UpstreamChange> {
+    with_store(|store| {
+        store
+            .states
+            .get(name)
+            .and_then(|stored| stored.stored.upstream_change.clone())
+    })
+}
+
+/// Every `(installed name, successor)` pair on record — what new-skill
+/// detection uses to mark a freshly appeared Skill as a rename target.
+pub fn successors() -> Vec<(String, UpstreamSuccessor)> {
+    with_store(|store| {
+        store
+            .states
+            .iter()
+            .filter_map(|(name, stored)| match &stored.stored.upstream_change {
+                Some(UpstreamChange::Removed {
+                    successor: Some(successor),
+                    ..
+                }) => Some((name.clone(), successor.clone())),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+/// Drop a name that no longer exists in the library.
+pub fn forget(name: &str) {
+    let snapshot = with_store_mut(|store| store.states.remove(name).is_some().then(|| flat(store)));
+    if let Some(snapshot) = snapshot {
+        persist(&snapshot);
+    }
 }
 
 pub fn restore_if_revision(name: &str, expected_revision: u64, available: Option<bool>) {
@@ -96,7 +166,10 @@ pub fn restore_if_revision(name: &str, expected_revision: u64, available: Option
                 store.states.insert(
                     name.to_string(),
                     Stamped {
-                        available,
+                        stored: Stored {
+                            update_available: available,
+                            upstream_change: None,
+                        },
                         revision,
                     },
                 );
@@ -134,19 +207,22 @@ pub fn commit_scan(since: u64, states: &[SkillUpdateState]) -> Vec<SkillUpdateSt
                     store.states.insert(
                         state.name.clone(),
                         Stamped {
-                            available: state.update_available,
+                            stored: Stored {
+                                update_available: state.update_available,
+                                upstream_change: state.upstream_change.clone(),
+                            },
                             revision,
                         },
                     );
                 }
 
-                SkillUpdateState {
-                    name: state.name.clone(),
-                    update_available: store
-                        .states
-                        .get(&state.name)
-                        .map(|stored| stored.available)
-                        .unwrap_or(state.update_available),
+                match store.states.get(&state.name) {
+                    Some(stored) => SkillUpdateState {
+                        name: state.name.clone(),
+                        update_available: stored.stored.update_available,
+                        upstream_change: stored.stored.upstream_change.clone(),
+                    },
+                    None => state.clone(),
                 }
             })
             .collect::<Vec<_>>();
@@ -163,7 +239,8 @@ pub fn apply_to(skills: &mut [Skill]) {
     with_store(|store| {
         for skill in skills.iter_mut() {
             if let Some(stored) = store.states.get(&skill.name) {
-                skill.update_available = stored.available;
+                skill.update_available = stored.stored.update_available;
+                skill.upstream_change = stored.stored.upstream_change.clone();
             }
         }
     });
@@ -175,29 +252,53 @@ fn snapshot_path() -> PathBuf {
     skillstar_core::infra::paths::state_dir().join("skill_update_states.json")
 }
 
-/// The on-disk shape stays a plain `name -> bool` map: revisions are
-/// process-local, so persisting them would be meaningless on next launch.
-fn flat(store: &Store) -> HashMap<String, bool> {
+/// On disk this is `name -> { update_available, upstream_change? }`; revisions
+/// are process-local, so persisting them would be meaningless on next launch.
+/// Snapshots written before upstream changes existed were `name -> bool` and
+/// still load.
+fn flat(store: &Store) -> HashMap<String, Stored> {
     store
         .states
         .iter()
-        .map(|(name, stored)| (name.clone(), stored.available))
+        .map(|(name, stored)| (name.clone(), stored.stored.clone()))
         .collect()
 }
 
-fn load_snapshot() -> HashMap<String, bool> {
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Persisted {
+    Legacy(bool),
+    Full(Stored),
+}
+
+fn load_snapshot() -> HashMap<String, Stored> {
     let path = snapshot_path();
     let Ok(content) = std::fs::read_to_string(&path) else {
         return HashMap::new();
     };
 
-    serde_json::from_str::<HashMap<String, bool>>(&content).unwrap_or_else(|err| {
-        tracing::warn!(target: "skill_update_state", path = %path.display(), error = %err, "failed to read skill update snapshot");
-        HashMap::new()
-    })
+    match serde_json::from_str::<HashMap<String, Persisted>>(&content) {
+        Ok(states) => states
+            .into_iter()
+            .map(|(name, persisted)| {
+                let stored = match persisted {
+                    Persisted::Legacy(update_available) => Stored {
+                        update_available,
+                        upstream_change: None,
+                    },
+                    Persisted::Full(stored) => stored,
+                };
+                (name, stored)
+            })
+            .collect(),
+        Err(err) => {
+            tracing::warn!(target: "skill_update_state", path = %path.display(), error = %err, "failed to read skill update snapshot");
+            HashMap::new()
+        }
+    }
 }
 
-fn persist(states: &HashMap<String, bool>) {
+fn persist(states: &HashMap<String, Stored>) {
     let path = snapshot_path();
     let Ok(content) = serde_json::to_string(states) else {
         return;
@@ -215,9 +316,9 @@ fn hydrate(store: &mut Store) {
         return;
     }
     store.hydrated = true;
-    for (name, available) in load_snapshot() {
+    for (name, stored) in load_snapshot() {
         store.states.entry(name).or_insert(Stamped {
-            available,
+            stored,
             revision: 0,
         });
     }
@@ -246,16 +347,22 @@ pub fn reset_for_test() {
     };
 }
 
+/// Forget the in-memory store so the next access hydrates from disk again.
+#[cfg(test)]
+fn reload_for_test() {
+    let mut store = STORE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *store = Store::default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use skillstar_core::types::{SkillCategory, SkillType};
 
     fn state(name: &str, available: bool) -> SkillUpdateState {
-        SkillUpdateState {
-            name: name.to_string(),
-            update_available: available,
-        }
+        SkillUpdateState::new(name, available)
     }
 
     fn skill(name: &str) -> Skill {
@@ -267,6 +374,7 @@ mod tests {
             stars: 0,
             installed: true,
             update_available: false,
+            upstream_change: None,
             last_updated: String::new(),
             git_url: String::new(),
             tree_hash: None,
@@ -388,5 +496,67 @@ mod tests {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *store = Store::default();
+    }
+
+    fn successor() -> UpstreamSuccessor {
+        UpstreamSuccessor {
+            skill_id: "gamma-spec".into(),
+            folder_path: "skills/engineering/gamma-spec".into(),
+            description: "Gamma, renamed".into(),
+            similarity: Some(92),
+        }
+    }
+
+    fn removed(successor: Option<UpstreamSuccessor>) -> UpstreamChange {
+        UpstreamChange::Removed {
+            suggested_local_name: "gamma.local".into(),
+            successor,
+        }
+    }
+
+    #[test]
+    fn upstream_changes_persist_and_legacy_snapshots_still_load() {
+        let (_guard, _temp) = sandbox();
+
+        // A snapshot written before upstream changes existed is a bare bool map.
+        let path = snapshot_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"alpha":true,"beta":false}"#).unwrap();
+        reload_for_test();
+        assert_eq!(get("alpha"), Some(true));
+        assert_eq!(get("beta"), Some(false));
+        assert_eq!(upstream_change("alpha"), None);
+
+        // A removal with its successor survives a restart.
+        commit_scan(
+            stamp(),
+            &[SkillUpdateState {
+                name: "gamma".into(),
+                update_available: false,
+                upstream_change: Some(removed(Some(successor()))),
+            }],
+        );
+        reload_for_test();
+        assert_eq!(upstream_change("gamma"), Some(removed(Some(successor()))));
+        assert_eq!(successors(), vec![("gamma".to_string(), successor())]);
+        assert_eq!(
+            get("alpha"),
+            Some(true),
+            "legacy entries are kept alongside"
+        );
+
+        let mut skills = [skill("gamma")];
+        apply_to(&mut skills);
+        assert!(!skills[0].update_available);
+        assert_eq!(skills[0].upstream_change, Some(removed(Some(successor()))));
+
+        // An applied update is authoritative and clears the change; a removed
+        // library entry is forgotten outright.
+        set("gamma", false);
+        assert_eq!(upstream_change("gamma"), None);
+        forget("gamma");
+        reload_for_test();
+        assert_eq!(get("gamma"), None);
+        assert!(successors().is_empty());
     }
 }

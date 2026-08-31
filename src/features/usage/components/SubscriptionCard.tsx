@@ -1,10 +1,12 @@
 import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
 import { getBrandTheme } from "../lib/brandThemes";
 import { cliAccountBadgeFor } from "../lib/cliCustody";
 import { monthlyEquivalentPrice } from "../lib/pricing";
 import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
+import { displayAccountIdentity } from "../lib/accountPrivacy";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
-import type { CatalogEntry, CliAccountState, Subscription } from "../types";
+import type { CatalogEntry, CliAccountState, CreditInfo, Subscription } from "../types";
 import { priorityCardClass } from "./ResetCountdown";
 import {
   UsageCardBody,
@@ -14,6 +16,7 @@ import {
   brandThemeToCssVars,
   resolveUsageBodyRegistration,
   usageCardShellClassName,
+  usageCardSlotClassName,
 } from "./card";
 
 interface SubscriptionCardProps {
@@ -23,16 +26,18 @@ interface SubscriptionCardProps {
    *  badge is drawn from this, not from the `is_active` pin, which is only a
    *  cache of it. Absent entries fall back to the pin. */
   cliAccounts?: Record<string, CliAccountState>;
+  hideAccountEmails?: boolean;
   onRefresh: (id: string) => Promise<void>;
+  onResetQuota?: (id: string) => Promise<void>;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onReauth?: (id: string) => void;
   /** Switch this subscription to be the active account for its catalog
    *  (Phase 7 multi-account). When omitted, the switch button is hidden. */
   onSetActive?: (id: string) => Promise<void>;
-  /** Re-push the active account's credentials to its CLI config (retry path
-   *  shown when the previous CLI switch failed). Catalog must support CLI
-   *  switching (`supports_cli_switch`). */
+  /** Re-push the active account's credentials to its local tool (retry path
+   *  shown when the previous switch failed). Catalog must support local-tool
+   *  switching (`supports_cli_switch`, retained as the wire field name). */
   onSwitchToCli?: (catalogId: string) => Promise<void>;
   refreshDisabled?: boolean;
   /** Drag handle pointer-down; passed through to dnd lib. */
@@ -47,7 +52,9 @@ export function SubscriptionCard({
   subscription: sub,
   catalog,
   cliAccounts,
+  hideAccountEmails = false,
   onRefresh,
+  onResetQuota,
   onEdit,
   onDelete,
   onReauth,
@@ -67,7 +74,9 @@ export function SubscriptionCard({
   const brandColorHex = catalog?.brand_color ?? "6B7280";
   const theme = getBrandTheme(sub.catalog_id, brandColorHex);
   const cardTitle = subscriptionCardTitle(sub.display_name, catalog?.display_name);
+  const cardDisplayName = displayAccountIdentity(cardTitle, hideAccountEmails);
   const cliBadge = cliAccountBadgeFor(sub, cliAccounts ?? {});
+  const resetCreditsRemaining = readGrokResetCredits(sub.catalog_id, usage?.credits);
 
   return (
     <motion.article
@@ -77,39 +86,38 @@ export function SubscriptionCard({
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       style={brandThemeToCssVars(theme)}
-      className={usageCardShellClassName({
-        // The ring means "the CLI is on this account", so it follows the
-        // reconciled state and not the pin that only records the request.
-        isActive: cliBadge === "current",
-        requiresReauth: sub.requires_reauth,
-        priorityClass: resetInfo && priorityCardClass(resetInfo.resetAt, resetInfo.usedPercent, resetInfo.mode),
-      })}
-      aria-label={cardTitle}
+      className={cn(
+        usageCardShellClassName({
+          // The ring means "the CLI is on this account", so it follows the
+          // reconciled state and not the pin that only records the request.
+          isActive: cliBadge === "current",
+          requiresReauth: sub.requires_reauth,
+          priorityClass: resetInfo && priorityCardClass(resetInfo.resetAt, resetInfo.usedPercent, resetInfo.mode),
+        }),
+        "h-full",
+      )}
+      aria-label={cardDisplayName}
     >
       <header className="relative z-10">
         <UsageCardHeader
           catalogId={sub.catalog_id}
-          displayName={cardTitle}
+          displayName={cardDisplayName}
           brandColorHex={brandColorHex}
           theme={theme}
           planName={planName}
-          billingCycle={sub.billing_cycle}
           cliBadge={cliBadge}
           onDragHandlePointerDown={onDragHandlePointerDown}
         />
         <UsageCardMetaStrip
-          authMode={sub.auth_mode}
           requiresReauth={sub.requires_reauth}
-          supportsCliSwitch={sub.supports_cli_switch}
           hasCredential={sub.has_credential}
           note={sub.note}
-          fetchedAt={usage?.fetched_at ?? 0}
           resetInfo={resetInfo}
           bodyOwnsPrimaryReset={bodyOwnsPrimaryReset}
         />
       </header>
 
-      <div className="relative z-10 flex-1 space-y-3.5 overflow-hidden px-4 pt-3 pb-2">
+      <div className={usageCardSlotClassName.body}>
         <UsageCardBody subscription={sub} brandColorHex={brandColorHex} density="comfortable" surface="grid" />
       </div>
 
@@ -118,8 +126,11 @@ export function SubscriptionCard({
         monthlyCost={monthlyCost}
         showRenewFooter={showRenewFooter}
         renewDays={renewDays}
+        fetchedAt={usage?.fetched_at ?? 0}
         subscriptionUrl={catalog?.subscription_url}
         onRefresh={() => onRefresh(sub.id)}
+        onResetQuota={sub.catalog_id === "xai" && onResetQuota ? () => onResetQuota(sub.id) : undefined}
+        resetCreditsRemaining={resetCreditsRemaining}
         onEdit={() => onEdit(sub.id)}
         onDelete={() => onDelete(sub.id)}
         onReauth={onReauth ? () => onReauth(sub.id) : undefined}
@@ -129,6 +140,16 @@ export function SubscriptionCard({
       />
     </motion.article>
   );
+}
+
+const GROK_RESET_CREDITS = "grok-reset-credits";
+
+function readGrokResetCredits(catalogId: string, credits?: CreditInfo[]): number | null {
+  if (catalogId !== "xai") return null;
+  const raw = credits?.find((credit) => credit.credit_type === GROK_RESET_CREDITS)?.credit_amount;
+  if (raw == null || !/^\d+$/.test(raw.trim())) return null;
+  const count = Number(raw);
+  return Number.isSafeInteger(count) ? count : null;
 }
 
 function daysUntil(epoch: number): number | null {

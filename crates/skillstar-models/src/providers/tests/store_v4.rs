@@ -201,7 +201,10 @@ fn a_second_migration_does_not_clobber_the_permanent_v3_copy() {
     load_or_migrate_store_v4(&path).expect("first migration");
     // Simulate a later run that finds a non-v4 file again (a partial write, a
     // hand edit): the good v3 snapshot must not be replaced by it.
-    write_raw(&path, "{\"version\": 3, \"providers\": [], \"tool_activations\": {}}");
+    write_raw(
+        &path,
+        "{\"version\": 3, \"providers\": [], \"tool_activations\": {}}",
+    );
     load_or_migrate_store_v4(&path).expect("second migration");
 
     assert_eq!(
@@ -246,7 +249,10 @@ fn migration_round_trips_through_disk() {
         store.bindings["codex"].entries[0].last_sync_at_ms,
         Some(1_700_000_000_000)
     );
-    assert!(!report.needs_user_attention(), "nothing contestable happened");
+    assert!(
+        !report.needs_user_attention(),
+        "nothing contestable happened"
+    );
 }
 
 #[test]
@@ -274,7 +280,10 @@ fn write_then_read_preserves_every_v4_only_field() {
     write_store_v4(&store, &path).expect("write");
     let read = read_store_v4(&path).expect("read").expect("is v4");
 
-    assert_eq!(read, store, "roles, caps and credential variants all survive");
+    assert_eq!(
+        read, store,
+        "roles, caps and credential variants all survive"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +344,10 @@ fn a_migrated_store_survives_a_restart_with_every_field_intact() {
 
     let second = load_or_migrate_store_v4(&path).expect("second launch");
 
-    assert!(second.report.is_none(), "the second launch must not migrate");
+    assert!(
+        second.report.is_none(),
+        "the second launch must not migrate"
+    );
     assert_eq!(second.store, first.store);
     assert!(
         second.catalogs.is_empty(),
@@ -352,7 +364,10 @@ fn a_migrated_store_survives_a_restart_with_every_field_intact() {
 fn a_store_from_an_unknown_future_version_is_refused_rather_than_migrated() {
     let scratch = Scratch::new("v99");
     let path = scratch.store_path();
-    write_raw(&path, r#"{ "version": 99, "providers": [], "bindings": {} }"#);
+    write_raw(
+        &path,
+        r#"{ "version": 99, "providers": [], "bindings": {} }"#,
+    );
 
     // Not v4, so `read_store_v4` declines it; it must then be refused rather
     // than fed to the v1 parser, and the file must be left alone.

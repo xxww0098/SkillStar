@@ -1,3 +1,4 @@
+mod mirror;
 mod status;
 
 pub use status::{
@@ -85,11 +86,20 @@ fn require_enabled_global_profile<'a>(
     Ok(profile)
 }
 
-fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
-    let is_link = skillstar_core::infra::fs_ops::is_link(path);
-    let is_copy = path.is_dir() && path.join("SKILL.md").exists();
+/// Whether `path` is a deployment SkillStar owns: a link/junction into the
+/// hub, or a directory copy carrying `SKILL.md`.
+///
+/// Anything else in an Agent's skills directory belongs to the user or to the
+/// Agent itself. `fs_ops::remove_link_or_copy` enforces the same rule before it
+/// deletes a directory, so this is the read-side twin of that guard — use it
+/// wherever a caller needs to *classify* an entry rather than remove one.
+fn is_managed_deployment(path: &Path) -> bool {
+    skillstar_core::infra::fs_ops::is_link(path)
+        || (path.is_dir() && path.join("SKILL.md").exists())
+}
 
-    if !is_link && !is_copy {
+fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
+    if !is_managed_deployment(path) {
         return Ok(false);
     }
 
@@ -110,8 +120,42 @@ fn remove_entry_for_unlink(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Stable skip code for an unmanaged real directory occupying the skill name.
+pub const SKIP_UNMANAGED_REAL_DIRECTORY: &str = "unmanaged_real_directory";
+
+/// Result of a single skill ↔ agent toggle.
+///
+/// `Skipped` is reserved for name collisions with an unmanaged path that
+/// SkillStar refuses to overwrite (e.g. Hermes' own `research/` category
+/// folder). Batch callers surface these separately from hard failures;
+/// single-skill IPC still maps them back to an error so the user notices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToggleSkillOutcome {
+    Applied,
+    Skipped {
+        code: String,
+        path: String,
+        reason: String,
+    },
+}
+
+fn skip_unmanaged_real_directory(path: &Path) -> ToggleSkillOutcome {
+    let path = path.display().to_string();
+    ToggleSkillOutcome::Skipped {
+        code: SKIP_UNMANAGED_REAL_DIRECTORY.to_string(),
+        reason: format!(
+            "name collision: target '{path}' is an unmanaged real directory (left in place)"
+        ),
+        path,
+    }
+}
+
 /// Sync or unsync a single skill to a specific agent profile.
-pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) -> Result<()> {
+pub fn toggle_skill_for_agent(
+    skill_name: &str,
+    agent_id: &str,
+    enable: bool,
+) -> Result<ToggleSkillOutcome> {
     tracing::info!(
         target: "sync",
         skill_name,
@@ -150,14 +194,25 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         let created_skills_dir = !profile.global_skills_dir.exists();
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
-        // Remove existing symlink/junction/copy if present
+        // Remove existing symlink/junction/copy if present. An unmanaged real
+        // directory (no SkillStar-managed SKILL.md copy, not a link) is a name
+        // collision — leave it alone and report Skipped so batch "link all"
+        // stays green for every skill that *can* link.
         if (target.symlink_metadata().is_ok()
             || skillstar_core::infra::fs_ops::is_link(&target)
             || target.exists())
             && !remove_managed_entry_for_overwrite(&target)?
         {
-            tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
-            anyhow::bail!("Target cannot be overwritten because it is a real directory");
+            tracing::warn!(
+                target: "sync",
+                operation = "toggle_skill_for_agent",
+                phase = "skipped_name_collision",
+                skill_name,
+                agent_id,
+                target = %target.display(),
+                "skipping link — unmanaged real directory occupies the skill name"
+            );
+            return Ok(skip_unmanaged_real_directory(&target));
         }
         // Symlink → junction → directory-copy ladder, same semantics as
         // project-level deploys (Windows without Developer Mode must not fail).
@@ -181,18 +236,41 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         }
         tracing::info!(target: "sync", skill_name, agent_id, "Skill linked successfully");
     } else {
-        // Remove symlink, junction, or directory copy
-        if !remove_entry_for_unlink(&target)? {
-            tracing::warn!(
-                target: "sync",
-                target = %target.display(),
-                "Toggle off requested but target is not a link or directory — nothing to remove"
-            );
+        // Only remove SkillStar-managed entries. An unmanaged real directory
+        // (e.g. Hermes category folder) is left alone and reported as skipped
+        // so bulk unlink does not look like a hard failure.
+        match remove_entry_for_unlink(&target) {
+            Ok(true) => {
+                tracing::info!(target: "sync", skill_name, agent_id, "Skill unlinked successfully");
+            }
+            Ok(false) => {
+                tracing::info!(
+                    target: "sync",
+                    target = %target.display(),
+                    "Toggle off requested but nothing at target — already unlinked"
+                );
+            }
+            Err(err) => {
+                let message = format!("{err:#}");
+                if message.contains("does not appear to be a managed skill copy") {
+                    tracing::warn!(
+                        target: "sync",
+                        operation = "toggle_skill_for_agent",
+                        phase = "skipped_name_collision",
+                        skill_name,
+                        agent_id,
+                        target = %target.display(),
+                        "skipping unlink — unmanaged real directory occupies the skill name"
+                    );
+                    return Ok(skip_unmanaged_real_directory(&target));
+                }
+                return Err(err);
+            }
         }
-        tracing::info!(target: "sync", skill_name, agent_id, "Skill unlinked successfully");
     }
 
-    Ok(())
+    mirror::sync(&profile.id, &profile.global_skills_dir);
+    Ok(ToggleSkillOutcome::Applied)
 }
 
 /// Remove symlinks for a skill from all agent profiles.
@@ -206,7 +284,9 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
             continue;
         }
         let target = profile.global_skills_dir.join(skill_name);
-        match remove_entry_for_unlink(&target) {
+        let outcome = remove_entry_for_unlink(&target);
+        mirror::sync(&profile.id, &profile.global_skills_dir);
+        match outcome {
             Ok(true) => {
                 removed_from.push(profile.display_name.clone());
             }
@@ -272,6 +352,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
         }
     }
 
+    mirror::sync(&profile.id, skills_dir);
     tracing::info!(target: "sync", agent_id, removed, "unlink_all_skills_from_agent completed");
     Ok(removed)
 }
@@ -291,9 +372,9 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
         let entry = entry?;
         let path = entry.path();
         // Include symlinks/junctions AND copy-based deployments
-        let is_managed = skillstar_core::infra::fs_ops::is_link(&path)
-            || (path.is_dir() && path.join("SKILL.md").exists());
-        if is_managed && let Some(name) = entry.file_name().to_str() {
+        if is_managed_deployment(&path)
+            && let Some(name) = entry.file_name().to_str()
+        {
             names.push(name.to_string());
         }
     }
@@ -331,6 +412,7 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
         );
     }
 
+    mirror::sync(&profile.id, &profile.global_skills_dir);
     tracing::info!(target: "sync", skill_name, agent_id, "unlink_skill_from_agent completed");
     Ok(())
 }
@@ -435,6 +517,8 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             }
         }
     }
+
+    mirror::sync(&profile.id, target_dir);
 
     // `agent_links` is part of the cached installed-skill snapshot, so every
     // exit that may have changed a link must drop the cache — including the
@@ -552,6 +636,7 @@ pub fn batch_deploy_skills_to_agents(
                 )),
             }
         }
+        mirror::sync(&agent_id, &target_dir);
     }
 
     // Same contract as `batch_link_skills_to_agent`: deployments made before a
@@ -725,245 +810,4 @@ pub fn resync_existing_links(skill_name: &str) -> Result<ResyncReport> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ffi::OsStr;
-    use std::fs;
-
-    fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
-        unsafe { std::env::set_var(key, value) }
-    }
-
-    fn remove_env<K: AsRef<OsStr>>(key: K) {
-        unsafe { std::env::remove_var(key) }
-    }
-
-    fn make_skill_dir(root: &Path, name: &str) -> std::path::PathBuf {
-        let dir = root.join(name);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("SKILL.md"), "# test skill\n").unwrap();
-        dir
-    }
-
-    #[test]
-    fn project_only_agent_is_rejected_by_global_deployment_guard() {
-        let profiles = vec![agent_profile::AgentProfile {
-            id: "eve".to_string(),
-            display_name: "Eve".to_string(),
-            icon: "lobe:eve".to_string(),
-            global_skills_dir: std::path::PathBuf::new(),
-            project_skills_rel: "agent/skills".to_string(),
-            installed: true,
-            enabled: true,
-            synced_count: 0,
-        }];
-
-        let error = require_global_profile(&profiles, "eve").unwrap_err();
-        assert!(error.to_string().contains("does not support global skills"));
-    }
-
-    #[test]
-    fn batch_link_requires_enabled_agent_and_skips_missing_skills_without_creating_agent_dir()
-    -> Result<()> {
-        let _guard = crate::lock_test_env();
-        invalidate_profile_cache();
-
-        let tmp = tempfile::tempdir()?;
-        let home = tmp.path().join("home");
-        fs::create_dir_all(&home)?;
-
-        let previous_home = std::env::var_os("HOME");
-        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
-        let previous_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
-        set_env("HOME", &home);
-        set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
-        remove_env("CLAUDE_CONFIG_DIR");
-        #[cfg(windows)]
-        let previous_userprofile = std::env::var_os("USERPROFILE");
-        #[cfg(windows)]
-        set_env("USERPROFILE", &home);
-
-        let result = (|| -> Result<()> {
-            let missing = vec!["missing-skill".to_string()];
-
-            let error = batch_link_skills_to_agent(&missing, "claude").unwrap_err();
-            assert!(error.to_string().contains("is not enabled"));
-
-            let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("demo-skill");
-            fs::create_dir_all(&hub_skill)?;
-            fs::write(hub_skill.join("SKILL.md"), "# demo\n")?;
-            let error = toggle_skill_for_agent("demo-skill", "claude", true).unwrap_err();
-            assert!(error.to_string().contains("is not enabled"));
-            assert!(
-                !home.join(".claude").exists(),
-                "inactive single or batch requests must not provision the Agent config root"
-            );
-
-            assert!(skillstar_agents::toggle_profile("claude")?);
-            invalidate_profile_cache();
-            let linked = batch_link_skills_to_agent(&missing, "claude")?;
-            assert_eq!(linked, 0);
-            assert!(
-                !home.join(".claude").exists(),
-                "skipping missing skills must not create the agent config root"
-            );
-            Ok(())
-        })();
-
-        match previous_home {
-            Some(value) => set_env("HOME", value),
-            None => remove_env("HOME"),
-        }
-        match previous_data_dir {
-            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
-            None => remove_env("SKILLSTAR_DATA_DIR"),
-        }
-        match previous_claude_config_dir {
-            Some(value) => set_env("CLAUDE_CONFIG_DIR", value),
-            None => remove_env("CLAUDE_CONFIG_DIR"),
-        }
-        #[cfg(windows)]
-        match previous_userprofile {
-            Some(value) => set_env("USERPROFILE", value),
-            None => remove_env("USERPROFILE"),
-        }
-        invalidate_profile_cache();
-
-        result
-    }
-
-    #[test]
-    fn batch_global_deploy_honors_explicit_copy_mode() -> Result<()> {
-        let _guard = crate::lock_test_env();
-        invalidate_profile_cache();
-
-        let tmp = tempfile::tempdir()?;
-        let home = tmp.path().join("home");
-        fs::create_dir_all(&home)?;
-
-        let previous_home = std::env::var_os("HOME");
-        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
-        // The codex profile resolves its skills dir from CODEX_HOME first, so a
-        // CODEX_HOME leaking in from the ambient environment would redirect the
-        // deploy away from `home/.codex`. Sandbox it like HOME.
-        let previous_codex_home = std::env::var_os("CODEX_HOME");
-        set_env("HOME", &home);
-        set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
-        remove_env("CODEX_HOME");
-        #[cfg(windows)]
-        let previous_userprofile = std::env::var_os("USERPROFILE");
-        #[cfg(windows)]
-        set_env("USERPROFILE", &home);
-
-        let result = (|| -> Result<()> {
-            invalidate_profile_cache();
-            let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("demo-skill");
-            fs::create_dir_all(&hub_skill)?;
-            fs::write(hub_skill.join("SKILL.md"), "# original\n")?;
-
-            let deployed = batch_deploy_skills_to_agents(
-                &["demo-skill".to_string()],
-                &["codex".to_string()],
-                crate::projects::ProjectDeployMode::Copy,
-            )?;
-            assert_eq!(deployed, 1);
-
-            let target = home.join(".codex/skills/demo-skill");
-            assert!(target.join("SKILL.md").is_file());
-            assert!(!skillstar_core::infra::fs_ops::is_link(&target));
-
-            fs::write(hub_skill.join("SKILL.md"), "# changed\n")?;
-            assert_eq!(fs::read_to_string(target.join("SKILL.md"))?, "# original\n");
-            Ok(())
-        })();
-
-        match previous_home {
-            Some(value) => set_env("HOME", value),
-            None => remove_env("HOME"),
-        }
-        match previous_data_dir {
-            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
-            None => remove_env("SKILLSTAR_DATA_DIR"),
-        }
-        match previous_codex_home {
-            Some(value) => set_env("CODEX_HOME", value),
-            None => remove_env("CODEX_HOME"),
-        }
-        #[cfg(windows)]
-        match previous_userprofile {
-            Some(value) => set_env("USERPROFILE", value),
-            None => remove_env("USERPROFILE"),
-        }
-        invalidate_profile_cache();
-
-        result
-    }
-
-    #[test]
-    fn swap_refreshes_an_existing_symlink() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill = make_skill_dir(tmp.path(), "hub-skill");
-        let agent_dir = tmp.path().join("agent");
-        fs::create_dir_all(&agent_dir).unwrap();
-        let target = agent_dir.join("hub-skill");
-        skillstar_core::infra::fs_ops::create_symlink(&skill, &target).unwrap();
-
-        let was_copy = swap_in_fresh_deploy(&skill, &target).unwrap();
-
-        assert!(!was_copy);
-        assert!(skillstar_core::infra::fs_ops::is_link(&target));
-        assert!(target.join("SKILL.md").exists());
-        assert!(
-            resync_staging_path(&target).symlink_metadata().is_err(),
-            "staging entry must not be left behind"
-        );
-    }
-
-    #[test]
-    fn swap_refreshes_a_stale_copy_deployment() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill = make_skill_dir(tmp.path(), "hub-skill");
-        fs::write(skill.join("SKILL.md"), "# fresh content\n").unwrap();
-
-        let agent_dir = tmp.path().join("agent");
-        fs::create_dir_all(&agent_dir).unwrap();
-        let target = agent_dir.join("hub-skill");
-        // Simulate an old copy deployment with stale content.
-        fs::create_dir_all(&target).unwrap();
-        fs::write(target.join("SKILL.md"), "# stale content\n").unwrap();
-
-        swap_in_fresh_deploy(&skill, &target).unwrap();
-
-        let refreshed = fs::read_to_string(
-            skillstar_core::infra::fs_ops::read_link_resolved(&target)
-                .map(|p| p.join("SKILL.md"))
-                .unwrap_or_else(|_| target.join("SKILL.md")),
-        )
-        .unwrap();
-        assert!(refreshed.contains("fresh content"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn swap_keeps_old_link_when_staging_fails() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let skill = make_skill_dir(tmp.path(), "hub-skill");
-        let agent_dir = tmp.path().join("agent");
-        fs::create_dir_all(&agent_dir).unwrap();
-        let target = agent_dir.join("hub-skill");
-        skillstar_core::infra::fs_ops::create_symlink(&skill, &target).unwrap();
-
-        // Make the agent dir read-only so staging creation fails.
-        fs::set_permissions(&agent_dir, fs::Permissions::from_mode(0o555)).unwrap();
-        let result = swap_in_fresh_deploy(&skill, &target);
-        fs::set_permissions(&agent_dir, fs::Permissions::from_mode(0o755)).unwrap();
-
-        assert!(result.is_err());
-        assert!(
-            skillstar_core::infra::fs_ops::is_link(&target),
-            "the pre-existing link must survive a failed resync"
-        );
-    }
-}
+mod tests;

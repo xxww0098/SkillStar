@@ -7,10 +7,9 @@
  * role list — comes from here, so a role added to `tool_sync/agents.rs` shows up
  * in the panel without a second edit on this side.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { DroppedRole, ToolSyncResult } from "../../../types";
+import type { DroppedRole } from "../../../types";
 import type { AgentDescriptorDto } from "../../../types/generated/AgentDescriptorDto";
 import type { RoleDefDto } from "../../../types/generated/RoleDefDto";
 import { modelsKeys } from "./keys";
@@ -33,15 +32,6 @@ export function useAgentDescriptor(toolId: string): AgentDescriptorDto | null {
   return data?.find((agent) => agent.id === toolId) ?? null;
 }
 
-/** Roles laid out above the fold, and the ones behind the disclosure. */
-export function splitRoles(agent: AgentDescriptorDto | null): { primary: RoleDefDto[]; secondary: RoleDefDto[] } {
-  const roles = agent?.roles ?? [];
-  return {
-    primary: roles.filter((role) => role.primary),
-    secondary: roles.filter((role) => !role.primary),
-  };
-}
-
 /**
  * Park the roles a write skipped so the panel can mark the rows.
  *
@@ -58,15 +48,4 @@ export function useRoleDrops(toolId: string): DroppedRole[] {
     enabled: Boolean(toolId),
   });
   return data ?? [];
-}
-
-/** Record (or clear) the drops reported by one sync result. */
-export function useRecordRoleDrops() {
-  const queryClient = useQueryClient();
-  return useCallback(
-    (toolId: string, result: ToolSyncResult | null | undefined) => {
-      queryClient.setQueryData<DroppedRole[]>(modelsKeys.roleDrops(toolId), result?.dropped_roles ?? []);
-    },
-    [queryClient],
-  );
 }

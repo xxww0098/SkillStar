@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock react-i18next — return the key so we can assert on known keys
 vi.mock("react-i18next", () => ({
@@ -18,6 +18,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+const badgeCounts = { ghostSkillCount: 0, pendingUpdatesCount: 0 };
+vi.mock("../../../features/my-skills/hooks/useSkills", () => ({
+  useSkillBadgeCounts: () => badgeCounts,
+}));
+
 import { SkillsNav } from "../SkillsNav";
 
 describe("SkillsNav", () => {
@@ -26,6 +31,11 @@ describe("SkillsNav", () => {
     onNavigate: vi.fn(),
     collapsed: false,
   };
+
+  beforeEach(() => {
+    badgeCounts.ghostSkillCount = 0;
+    badgeCounts.pendingUpdatesCount = 0;
+  });
 
   it("renders all navigation items", () => {
     render(<SkillsNav {...defaultProps} />);
@@ -78,5 +88,14 @@ describe("SkillsNav", () => {
     // Each nav item button should have a title in collapsed mode
     const titledButtons = buttons.filter((btn) => btn.hasAttribute("title"));
     expect(titledButtons.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("shows pending-update and ghost counts on the skills item", () => {
+    badgeCounts.pendingUpdatesCount = 3;
+    badgeCounts.ghostSkillCount = 2;
+    render(<SkillsNav {...defaultProps} />);
+
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("+2")).toBeInTheDocument();
   });
 });

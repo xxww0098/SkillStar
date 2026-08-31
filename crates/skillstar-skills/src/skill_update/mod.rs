@@ -489,6 +489,7 @@ fn update_skill_unchecked_locked(
             stars: 0,
             installed: true,
             update_available: false,
+            upstream_change: None,
             last_updated: chrono::Utc::now().to_rfc3339(),
             git_url: outcome.git_url,
             tree_hash: Some(outcome.tree_hash),

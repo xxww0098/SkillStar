@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUp, Boxes, Loader2, Sparkles, X } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DetailPanel } from "../components/layout/DetailPanel";
 import { Toolbar } from "../components/layout/Toolbar";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -25,12 +26,6 @@ import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { cn } from "../lib/utils";
 import type { McpPublisherSummary, OfficialPublisher, Skill, SortOption } from "../types";
-
-const DetailPanel = lazy(() =>
-  import("../components/layout/DetailPanel").then((mod) => ({
-    default: mod.DetailPanel,
-  })),
-);
 
 export type TabId = "all" | "trending" | "hot" | "official" | "mcp-official";
 
@@ -198,7 +193,7 @@ export function Marketplace({
     if (!searchQuery.trim()) {
       toast.error(
         t("marketplace.aiSearchEmptyQuery", {
-          defaultValue: "Please enter a search query first",
+          defaultValue: "Enter a search query first",
         }),
       );
       return;
@@ -299,11 +294,11 @@ export function Marketplace({
           document.getElementById(`tab-${nextId}`)?.focus();
         }}
         className={cn(
-          "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors duration-150 cursor-pointer focus-ring",
+          "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs transition-all duration-150 cursor-pointer focus-ring select-none",
           isActive
-            ? "bg-primary/15 text-primary shadow-[0_1px_2px_rgba(15,23,42,0.08),0_1px_1px_rgba(15,23,42,0.04)] ring-1 ring-inset ring-primary/25 dark:bg-primary/18 dark:shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
-            : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover/60",
-          isMcp && !isActive && "ring-1 ring-inset ring-border/50 hover:ring-primary/25",
+            ? "bg-primary text-primary-foreground font-semibold shadow-xs ring-1 ring-inset ring-primary/40 dark:bg-primary dark:text-primary-foreground"
+            : "text-muted-foreground font-medium hover:text-foreground hover:bg-sidebar-hover/80",
+          isMcp && !isActive && "ring-1 ring-inset ring-border/60 hover:ring-primary/40",
         )}
       >
         {id === "mcp-official" ? (
@@ -322,7 +317,7 @@ export function Marketplace({
     <div className="flex-1 min-w-0 flex overflow-hidden relative">
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <Toolbar
-          titleNode={<h1>{t("sidebar.market")}</h1>}
+          titleNode={<h1 className="text-sm font-bold tracking-tight text-foreground">{t("sidebar.market")}</h1>}
           searchQuery={toolbarSearchQuery}
           onSearchChange={handleToolbarSearchChange}
           searchItems={spotlightItems}
@@ -337,20 +332,20 @@ export function Marketplace({
           filtersLead={
             <div className="flex min-w-0 items-center gap-2 shrink-0" role="tablist" aria-label={t("sidebar.market")}>
               <div
-                className="flex min-w-max items-center gap-1 rounded-full border border-border/60 bg-background/20 p-0.5 h-8"
+                className="flex min-w-max items-center gap-1 rounded-full border border-border/80 bg-background/50 p-0.5 h-8 shadow-2xs"
                 role="presentation"
               >
-                <span className="shrink-0 px-2 text-[11px] font-medium text-foreground/65">
+                <span className="shrink-0 px-2 text-[11px] font-semibold text-foreground/80">
                   {t("marketplace.skillGroup")}
                 </span>
                 <div className="flex items-center gap-0.5">{skillTabIds.map((id) => renderTabButton(id))}</div>
               </div>
 
               <div
-                className="flex min-w-max items-center gap-1 rounded-full border border-border/60 bg-background/35 p-0.5 h-8"
+                className="flex min-w-max items-center gap-1 rounded-full border border-border/80 bg-background/60 p-0.5 h-8 shadow-2xs"
                 role="presentation"
               >
-                <span className="shrink-0 px-2 text-[11px] font-medium text-foreground/65">
+                <span className="shrink-0 px-2 text-[11px] font-semibold text-foreground/80">
                   {t("marketplace.mcpSourceGithub")}
                 </span>
                 <div className="flex items-center gap-0.5">{mcpTabIds.map((id) => renderTabButton(id))}</div>
@@ -576,6 +571,7 @@ export function Marketplace({
               installingNames={installingNames}
               onUpdate={handleUpdate}
               pendingUpdateNames={pendingUpdateNames}
+              selectedSkills={selectedSkill ? new Set([selectedSkill.name]) : undefined}
               emptyMessage={
                 searchQuery.trim() || aiKeywords ? t("marketplace.noResultsSearch") : t("marketplace.noResults")
               }
@@ -602,22 +598,14 @@ export function Marketplace({
       </div>
 
       {selectedSkill && (
-        <Suspense
-          fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-full max-w-md h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
-              <LoadingLogo size="sm" />
-            </div>
-          }
-        >
-          <DetailPanel
-            skill={selectedSkill}
-            onClose={() => setSelectedSkill(null)}
-            onInstall={handleInstall}
-            onUpdate={handleUpdate}
-            onUninstall={handleUninstall}
-            onReinstall={handleReinstall}
-          />
-        </Suspense>
+        <DetailPanel
+          skill={selectedSkill}
+          onClose={() => setSelectedSkill(null)}
+          onInstall={handleInstall}
+          onUpdate={handleUpdate}
+          onUninstall={handleUninstall}
+          onReinstall={handleReinstall}
+        />
       )}
     </div>
   );

@@ -19,12 +19,11 @@ interface OAuthLoginPanelProps {
   onStartOAuth: () => void;
   onCopyAuthLink: () => void;
   onOpenOAuthLink: () => void;
-  onCopyDeviceCode: () => void;
   onSubmitCallback: () => void;
   onCancelOAuth: () => void;
 }
 
-/** OAuth login panel: start button, auth link, device code, callback input, status. */
+/** OAuth login panel: start button, auth link, callback input, status. */
 export function OAuthLoginPanel({
   selectedEntry,
   submitting,
@@ -39,7 +38,6 @@ export function OAuthLoginPanel({
   onStartOAuth,
   onCopyAuthLink,
   onOpenOAuthLink,
-  onCopyDeviceCode,
   onSubmitCallback,
   onCancelOAuth,
 }: OAuthLoginPanelProps) {
@@ -91,22 +89,6 @@ export function OAuthLoginPanel({
         <p className="rounded-xl border border-dashed border-border/80 bg-muted/50 px-3 py-2.5 text-[11px] leading-relaxed text-foreground/60">
           {t("usage.oauthLinkPlaceholder")}
         </p>
-      )}
-
-      {oauthStart?.user_code && (
-        <div className="space-y-1.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
-          <p className="text-[11px] font-semibold text-foreground">{t("usage.oauthDeviceCodeTitle")}</p>
-          <p className="text-[10px] text-foreground/65">{t("usage.oauthDeviceCodeHint")}</p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-center text-base font-bold tracking-[0.18em] text-foreground tabular-nums">
-              {oauthStart.user_code}
-            </code>
-            <Button type="button" size="xs" variant="outline" onClick={onCopyDeviceCode}>
-              <Copy className="h-3 w-3" />
-              {t("usage.oauthCopyCode")}
-            </Button>
-          </div>
-        </div>
       )}
 
       <div className="space-y-1.5">

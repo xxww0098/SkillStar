@@ -21,7 +21,9 @@
 use super::report::{
     BackfilledEndpoint, DropReason, DroppedBinding, ExternalizedCatalog, MigrationReport,
 };
-use crate::providers::binding::{AgentBinding, BindingEntry, ModelRef, ProvidersStoreV4, STORE_VERSION_V4};
+use crate::providers::binding::{
+    AgentBinding, BindingEntry, ModelRef, ProvidersStoreV4, STORE_VERSION_V4,
+};
 use crate::providers::credential::{Credential, NoCredentialReason};
 use crate::providers::presets::{CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID, ProviderPresetFlat};
 use crate::providers::provider::{Endpoints, Provider, ProviderCaps, Tri};
@@ -35,9 +37,7 @@ pub const PLANNED_AGENT_CLAUDE_DESKTOP: &str = "claude-desktop";
 /// concept, not a migration detail, and the agent registry declares against the
 /// same constants. Re-exported here so the migration's existing callers keep
 /// their import path.
-pub use crate::providers::roles::{
-    ROLE_DEFAULT, ROLE_FAST, ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION,
-};
+pub use crate::providers::roles::{ROLE_DEFAULT, ROLE_FAST, ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION};
 
 /// Claude's tiered-model meta keys, in v3's spelling.
 const META_CLAUDE_MAIN: &str = "claude_main_model";
@@ -74,7 +74,10 @@ pub struct MigrationOutcome {
 ///
 /// `presets` is passed in rather than read from the registry so the function
 /// stays pure and so tests can drive the backfill rule with a fixture.
-pub fn migrate_v3_to_v4(v3: FlatProvidersStore, presets: &[ProviderPresetFlat]) -> MigrationOutcome {
+pub fn migrate_v3_to_v4(
+    v3: FlatProvidersStore,
+    presets: &[ProviderPresetFlat],
+) -> MigrationOutcome {
     let mut report = MigrationReport::default();
     let mut catalogs = Vec::new();
     let mut providers = Vec::with_capacity(v3.providers.len());
@@ -180,7 +183,12 @@ fn migrate_provider(
     // one place instead of requiring a second pass over the store.
     let mut anthropic = non_empty(&base_url_anthropic);
     if let Some(preset) = preset
-        && should_backfill(&base_url_anthropic, &preset.base_url_anthropic, &base_url_openai, &preset.base_url_openai)
+        && should_backfill(
+            &base_url_anthropic,
+            &preset.base_url_anthropic,
+            &base_url_openai,
+            &preset.base_url_openai,
+        )
     {
         anthropic = Some(preset.base_url_anthropic.clone());
         report.backfilled_anthropic.push(BackfilledEndpoint {
@@ -193,7 +201,12 @@ fn migrate_provider(
 
     let mut models_list = non_empty(&models_url);
     if let Some(preset) = preset
-        && should_backfill(&models_url, &preset.models_url, &base_url_openai, &preset.base_url_openai)
+        && should_backfill(
+            &models_url,
+            &preset.models_url,
+            &base_url_openai,
+            &preset.base_url_openai,
+        )
     {
         models_list = Some(preset.models_url.clone());
         report.backfilled_models_list.push(BackfilledEndpoint {
@@ -255,10 +268,13 @@ fn migrate_provider(
 /// edited this row, so it is theirs and filling it in overrides a decision).
 /// Without ③ the migration would overwrite deliberate configuration; without
 /// the backfill at all, those rows can never bind to Claude.
-fn should_backfill(current: &str, preset_value: &str, current_openai: &str, preset_openai: &str) -> bool {
-    current.trim().is_empty()
-        && !preset_value.trim().is_empty()
-        && current_openai == preset_openai
+fn should_backfill(
+    current: &str,
+    preset_value: &str,
+    current_openai: &str,
+    preset_openai: &str,
+) -> bool {
+    current.trim().is_empty() && !preset_value.trim().is_empty() && current_openai == preset_openai
 }
 
 /// `openai_responses` and the matching capability bit.
@@ -289,7 +305,8 @@ fn derive_credential(
         };
     }
     if api_key.trim().is_empty() {
-        let no_endpoints = base_url_openai.trim().is_empty() && base_url_anthropic.trim().is_empty();
+        let no_endpoints =
+            base_url_openai.trim().is_empty() && base_url_anthropic.trim().is_empty();
         return Credential::None {
             reason: if no_endpoints {
                 NoCredentialReason::NativeLogin

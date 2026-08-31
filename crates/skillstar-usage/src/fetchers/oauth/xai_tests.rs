@@ -35,6 +35,73 @@ fn oauth_scopes_include_conversations_for_grok_cli() {
 }
 
 #[test]
+fn reset_token_selection_ignores_expired_and_empty_tokens() {
+    let tokens = vec![
+        GrokResetToken {
+            token_id: "expired".into(),
+            validity_end: 99,
+        },
+        GrokResetToken {
+            token_id: "later".into(),
+            validity_end: 300,
+        },
+        GrokResetToken {
+            token_id: "earlier".into(),
+            validity_end: 200,
+        },
+        GrokResetToken {
+            token_id: String::new(),
+            validity_end: 150,
+        },
+    ];
+
+    assert_eq!(
+        select_reset_token(tokens, 100),
+        Some(GrokResetToken {
+            token_id: "earlier".into(),
+            validity_end: 200,
+        })
+    );
+}
+
+#[test]
+fn grok_reset_wire_format_round_trips_token_response() {
+    let token_id = "reset-token-1";
+    let mut timestamp = Vec::new();
+    timestamp.push(0x08); // Timestamp.seconds
+    encode_varint(1_800_000_000, &mut timestamp);
+
+    let mut token = Vec::new();
+    token.push(0x0a); // ConsumerResetToken.token_id
+    encode_varint(token_id.len() as u64, &mut token);
+    token.extend_from_slice(token_id.as_bytes());
+    token.extend_from_slice(&[0xa2, 0x01]); // ConsumerResetToken.validity_end
+    encode_varint(timestamp.len() as u64, &mut token);
+    token.extend_from_slice(&timestamp);
+
+    let mut response = Vec::new();
+    response.push(0x0a); // response.tokens
+    encode_varint(token.len() as u64, &mut response);
+    response.extend_from_slice(&token);
+
+    let messages = decode_grpc_web_frames(&encode_grpc_web_frame(&response)).unwrap();
+    let decoded = decode_remaining_resets_response(&messages).unwrap();
+
+    assert_eq!(
+        decoded,
+        vec![GrokResetToken {
+            token_id: token_id.into(),
+            validity_end: 1_800_000_000,
+        }]
+    );
+    assert_eq!(encode_redeem_reset_request(token_id), {
+        let mut expected = vec![0x0a, token_id.len() as u8];
+        expected.extend_from_slice(token_id.as_bytes());
+        expected
+    });
+}
+
+#[test]
 fn grok_pending_login_keeps_the_target_subscription_id() {
     let pending_id = register_pending_login(
         "https://auth.example.test".to_string(),
@@ -87,9 +154,7 @@ async fn grok_server_errors_stay_retryable() {
     let responder = std::thread::spawn(move || {
         let request = server.recv().unwrap();
         request
-            .respond(
-                tiny_http::Response::from_string("upstream unavailable").with_status_code(503),
-            )
+            .respond(tiny_http::Response::from_string("upstream unavailable").with_status_code(503))
             .unwrap();
     });
 

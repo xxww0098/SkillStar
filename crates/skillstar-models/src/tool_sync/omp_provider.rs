@@ -37,12 +37,14 @@ pub(crate) fn sync_yaml_blocks_inner(
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    let mut root: serde_yaml::Value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        serde_yaml::from_str(&content).unwrap_or_else(|_| init_root())
-    } else {
-        init_root()
+    let mut root: serde_yaml::Value = match read_existing_config(config_path)? {
+        Some(content) => serde_yaml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse {} — fix or remove it before syncing",
+                config_path.display()
+            )
+        })?,
+        None => init_root(),
     };
 
     let file_label = config_path
@@ -86,7 +88,7 @@ pub(crate) fn sync_yaml_blocks_inner(
 
     let output = serde_yaml::to_string(&root)
         .with_context(|| format!("Failed to serialize {file_label}"))?;
-    std::fs::write(config_path, output)
+    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok((backup_path, active_pointer))
@@ -350,13 +352,14 @@ fn set_omp_model_roles(config_path: &Path, roles: &[(String, String)]) -> Result
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    let mut root: serde_yaml::Value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        serde_yaml::from_str(&content)
-            .unwrap_or_else(|_| serde_yaml::Value::Mapping(Default::default()))
-    } else {
-        serde_yaml::Value::Mapping(Default::default())
+    let mut root: serde_yaml::Value = match read_existing_config(config_path)? {
+        Some(content) => serde_yaml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse {} — fix or remove it before syncing",
+                config_path.display()
+            )
+        })?,
+        None => serde_yaml::Value::Mapping(Default::default()),
     };
     let root_obj = root
         .as_mapping_mut()
@@ -376,8 +379,11 @@ fn set_omp_model_roles(config_path: &Path, roles: &[(String, String)]) -> Result
         );
     }
 
-    std::fs::write(config_path, serde_yaml::to_string(&root)?)
-        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    skillstar_core::infra::fs_ops::atomic_write(
+        config_path,
+        serde_yaml::to_string(&root)?.as_bytes(),
+    )
+    .with_context(|| format!("Failed to write {}", config_path.display()))?;
     Ok(())
 }
 
@@ -415,7 +421,10 @@ pub(crate) fn unsync_omp_all_at(models_path: &Path, config_path: &Path) -> Resul
         {
             providers.retain(|k, _| !k.as_str().is_some_and(is_skillstar_managed_key));
         }
-        std::fs::write(models_path, serde_yaml::to_string(&root)?)?;
+        skillstar_core::infra::fs_ops::atomic_write(
+            models_path,
+            serde_yaml::to_string(&root)?.as_bytes(),
+        )?;
     }
 
     if config_path.exists() {
@@ -436,7 +445,10 @@ pub(crate) fn unsync_omp_all_at(models_path: &Path, config_path: &Path) -> Resul
             // Every managed role goes, not just `default` — a `smol`/`slow`
             // pointer left behind would dangle once its provider block is gone.
             roles.retain(|_, v| !role_value_points_at_managed(v));
-            std::fs::write(config_path, serde_yaml::to_string(&root)?)?;
+            skillstar_core::infra::fs_ops::atomic_write(
+                config_path,
+                serde_yaml::to_string(&root)?.as_bytes(),
+            )?;
         }
     }
     Ok(())

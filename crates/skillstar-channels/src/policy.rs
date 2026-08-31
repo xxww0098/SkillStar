@@ -33,8 +33,7 @@ impl SkillMutationPolicy for ChannelAwarePolicy {
     }
 
     fn managed_repository_for_skill(&self, skill_id: &str) -> anyhow::Result<Option<u64>> {
-        crate::shared_channels::managed_repository_for_skill(skill_id)
-            .map_err(anyhow::Error::from)
+        crate::shared_channels::managed_repository_for_skill(skill_id).map_err(anyhow::Error::from)
     }
 
     fn managed_repository_for_url(&self, repository_url: &str) -> anyhow::Result<Option<u64>> {
@@ -59,7 +58,5 @@ impl SkillMutationPolicy for ChannelAwarePolicy {
 /// can never downgrade the gate. Must be called before any generic skill
 /// mutation path runs (GUI setup, CLI entry).
 pub fn install_global_policy() {
-    skillstar_skills::skill_mutation::set_skill_mutation_policy(Arc::new(
-        ChannelAwarePolicy,
-    ));
+    skillstar_skills::skill_mutation::set_skill_mutation_policy(Arc::new(ChannelAwarePolicy));
 }

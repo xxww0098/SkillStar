@@ -244,6 +244,4 @@ pub use search::*;
 pub use skill_details::*;
 
 #[cfg(test)]
-mod ai_search_tests;
-#[cfg(test)]
 mod tests;

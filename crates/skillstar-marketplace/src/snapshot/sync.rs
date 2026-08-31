@@ -480,45 +480,7 @@ pub async fn sync_scope_publisher_repos(publisher_name: &str) -> Result<()> {
             )
             .context("Failed to upsert publisher repo snapshot row")?;
 
-            if !repo.skills.is_empty() {
-                tx.execute(
-                    "DELETE FROM marketplace_repo_skill WHERE source = ?1",
-                    [repo.source.to_ascii_lowercase()],
-                )
-                .context("Failed to clear embedded repo-skill snapshot rows")?;
-
-                for (index, skill) in repo.skills.iter().enumerate() {
-                    if let Some(skill_key) = upsert_skill_identity_in_tx(
-                        &tx,
-                        &repo.source,
-                        &skill.name,
-                        skill.installs,
-                        &synced_at,
-                    )? {
-                        tx.execute(
-                            "INSERT INTO marketplace_repo_skill (
-                                source,
-                                skill_key,
-                                installs,
-                                rank,
-                                updated_at
-                            ) VALUES (?1, ?2, ?3, ?4, ?5)
-                            ON CONFLICT(source, skill_key) DO UPDATE SET
-                                installs = excluded.installs,
-                                rank = excluded.rank,
-                                updated_at = excluded.updated_at",
-                            params![
-                                repo.source.to_ascii_lowercase(),
-                                skill_key,
-                                skill.installs as i64,
-                                (index + 1) as i64,
-                                synced_at
-                            ],
-                        )
-                        .context("Failed to upsert embedded repo-skill snapshot row")?;
-                    }
-                }
-            }
+            seed_repo_skills_from_official_in_tx(&tx, repo, &synced_at)?;
         }
 
         mark_scope_success_with_meta_in_tx(&tx, &scope, &meta, false)?;
@@ -532,6 +494,63 @@ pub async fn sync_scope_publisher_repos(publisher_name: &str) -> Result<()> {
         return Err(err);
     }
 
+    Ok(())
+}
+
+/// Seed `marketplace_repo_skill` from the skills embedded in the `/official`
+/// aggregate — only for a repo whose own `repo_skills:<source>` scope has never
+/// succeeded. Once the repo page has been scraped it is the authority for that
+/// repo: the aggregate lags behind it (it keeps skills the repo no longer
+/// ships), so letting every aggregate rewrite clobber the scraped rows made a
+/// repo flip between "11 skills" and "3 skills" from one refresh to the next.
+pub(crate) fn seed_repo_skills_from_official_in_tx(
+    tx: &Transaction<'_>,
+    repo: &PublisherRepo,
+    synced_at: &str,
+) -> Result<()> {
+    let source = repo.source.to_ascii_lowercase();
+    if repo.skills.is_empty()
+        || matches!(
+            sync_seed_state(tx, &format!("repo_skills:{source}"))?,
+            ScopeSeedState::Synced
+        )
+    {
+        return Ok(());
+    }
+
+    tx.execute(
+        "DELETE FROM marketplace_repo_skill WHERE source = ?1",
+        [source.as_str()],
+    )
+    .context("Failed to clear embedded repo-skill snapshot rows")?;
+
+    for (index, skill) in repo.skills.iter().enumerate() {
+        if let Some(skill_key) =
+            upsert_skill_identity_in_tx(tx, &repo.source, &skill.name, skill.installs, synced_at)?
+        {
+            tx.execute(
+                "INSERT INTO marketplace_repo_skill (
+                    source,
+                    skill_key,
+                    installs,
+                    rank,
+                    updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5)
+                ON CONFLICT(source, skill_key) DO UPDATE SET
+                    installs = excluded.installs,
+                    rank = excluded.rank,
+                    updated_at = excluded.updated_at",
+                params![
+                    source,
+                    skill_key,
+                    skill.installs as i64,
+                    (index + 1) as i64,
+                    synced_at
+                ],
+            )
+            .context("Failed to upsert embedded repo-skill snapshot row")?;
+        }
+    }
     Ok(())
 }
 

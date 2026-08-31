@@ -69,7 +69,11 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
                     var_name
                 ),
                 file_path: None,
-                details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
+                details: Some(format!(
+                    "{}={}***",
+                    var_name,
+                    value.chars().take(4).collect::<String>()
+                )),
                 tool_id: None,
             });
         }
@@ -87,7 +91,11 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
                     var_name
                 ),
                 file_path: None,
-                details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
+                details: Some(format!(
+                    "{}={}***",
+                    var_name,
+                    value.chars().take(4).collect::<String>()
+                )),
                 tool_id: None,
             });
         }

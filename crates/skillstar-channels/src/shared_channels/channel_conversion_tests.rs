@@ -93,7 +93,7 @@ async fn channel_conversion_removes_its_safety_copy_when_metadata_commit_rolls_b
     let skill = sandbox.hub().join("writer");
     let hash = write_installed_skill(&skill);
     let installer = GitChannelSubscriptionInstaller::new(
-        skillstar_skills::git_skill::GitSkillFacade::from_keyring(),
+        skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
     );
     let subscribed = ChannelSubscribedSkill {
         id: "writer".into(),

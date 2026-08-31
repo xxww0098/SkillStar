@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -8,6 +9,7 @@ use super::{
     GitHubGateway, GitHubIdentity, TokenGrant,
 };
 
+const CLIENT_ID_ENV: &str = "SKILLSTAR_GITHUB_APP_CLIENT_ID";
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const CURRENT_USER_URL: &str = "https://api.github.com/user";
@@ -103,19 +105,15 @@ pub struct GitHubHttpGateway<T = ReqwestGitHubTransport> {
     transport: T,
 }
 
-pub struct ProductionGitHubGateway {
-    inner: Result<GitHubHttpGateway, GitHubAuthError>,
-}
+pub struct ProductionGitHubGateway;
 
 impl ProductionGitHubGateway {
     pub fn from_environment() -> Self {
-        Self {
-            inner: github_app_client_id().map(GitHubHttpGateway::new),
-        }
+        Self
     }
 
-    fn ready(&self) -> Result<&GitHubHttpGateway, GitHubAuthError> {
-        self.inner.as_ref().map_err(Clone::clone)
+    fn ready(&self) -> Result<GitHubHttpGateway, GitHubAuthError> {
+        github_app_client_id().map(GitHubHttpGateway::new)
     }
 }
 
@@ -352,18 +350,123 @@ fn ensure_success(response: &GitHubHttpResponse) -> Result<(), GitHubAuthError> 
 }
 
 pub fn github_app_client_id() -> Result<String, GitHubAuthError> {
-    std::env::var("SKILLSTAR_GITHUB_APP_CLIENT_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    nonempty_env(CLIENT_ID_ENV)
+        .or_else(compile_time_client_id)
         .or_else(|| {
-            option_env!("SKILLSTAR_GITHUB_APP_CLIENT_ID")
-                .filter(|value| !value.trim().is_empty())
-                .map(ToOwned::to_owned)
+            std::env::current_dir()
+                .ok()
+                .and_then(|dir| dotenv_client_id_from(&dir))
         })
+        .or_else(|| dotenv_client_id_from(Path::new(env!("CARGO_MANIFEST_DIR"))))
         .ok_or_else(|| {
             GitHubAuthError::new(
                 GitHubAuthErrorCode::Unavailable,
                 "This build does not include a GitHub App client ID",
             )
         })
+}
+
+fn nonempty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn compile_time_client_id() -> Option<String> {
+    option_env!("SKILLSTAR_GITHUB_APP_CLIENT_ID")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn dotenv_client_id_from(start: &Path) -> Option<String> {
+    let mut dir = start.to_path_buf();
+    for _ in 0..6 {
+        if let Some(id) = client_id_from_env_file(&dir.join(".env")) {
+            return Some(id);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn client_id_from_env_file(path: &Path) -> Option<String> {
+    parse_dotenv_client_id(&std::fs::read_to_string(path).ok()?)
+}
+
+fn parse_dotenv_client_id(contents: &str) -> Option<String> {
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(raw) = line
+            .strip_prefix(CLIENT_ID_ENV)
+            .map(str::trim_start)
+            .and_then(|rest| rest.strip_prefix('='))
+        else {
+            continue;
+        };
+        let value = unquote_dotenv(raw.trim());
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn unquote_dotenv(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 {
+        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
+}
+
+#[cfg(test)]
+mod client_id_tests {
+    use super::{dotenv_client_id_from, parse_dotenv_client_id};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn parse_dotenv_client_id_skips_comments_and_blank_values() {
+        assert_eq!(
+            parse_dotenv_client_id(
+                "# comment\nSKILLSTAR_GITHUB_APP_CLIENT_ID=\nSKILLSTAR_GITHUB_APP_CLIENT_ID=Iv23local\n"
+            )
+            .as_deref(),
+            Some("Iv23local")
+        );
+        assert_eq!(
+            parse_dotenv_client_id("SKILLSTAR_GITHUB_APP_CLIENT_ID=\"Iv23quoted\"\n").as_deref(),
+            Some("Iv23quoted")
+        );
+        assert_eq!(parse_dotenv_client_id("OTHER=1\n"), None);
+    }
+
+    #[test]
+    fn dotenv_client_id_walks_to_an_ancestor_env_file() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("skillstar-github-auth-dotenv-{stamp}"));
+        let nested = root.join("crates").join("skillstar-github-auth");
+        fs::create_dir_all(&nested).expect("temp dirs");
+        fs::write(
+            root.join(".env"),
+            "SKILLSTAR_GITHUB_APP_CLIENT_ID=Iv23fromfile\n",
+        )
+        .expect("write .env");
+        let found = dotenv_client_id_from(&nested);
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(found.as_deref(), Some("Iv23fromfile"));
+    }
 }

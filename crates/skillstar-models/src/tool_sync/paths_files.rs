@@ -235,7 +235,7 @@ fn write_tool_config_file_inner(
         _ => content.to_string(),
     };
 
-    std::fs::write(&path, normalized)
+    skillstar_core::infra::fs_ops::atomic_write(&path, normalized.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(backup)
 }

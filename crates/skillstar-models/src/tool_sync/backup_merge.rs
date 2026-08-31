@@ -28,14 +28,12 @@ pub fn create_rolling_backup(path: &Path) -> Result<PathBuf> {
 
 /// Remove old backup files, keeping only the `keep` most recent.
 pub(crate) fn cleanup_old_backups(path: &Path, keep: usize) -> Result<()> {
-    let parent = match path.parent() {
-        Some(p) => p,
-        None => return Ok(()),
+    let Some(parent) = path.parent() else {
+        return Ok(());
     };
 
-    let file_name = match path.file_name().and_then(|n| n.to_str()) {
-        Some(n) => n,
-        None => return Ok(()),
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
     };
 
     // Pattern: {filename}.bak.{digits}
@@ -66,21 +64,43 @@ pub(crate) fn cleanup_old_backups(path: &Path, keep: usize) -> Result<()> {
     Ok(())
 }
 
+/// Read an existing config file for a merge write, failing closed on garbage.
+///
+/// Missing or blank files yield `None` (callers start fresh); a file that
+/// exists but does not parse must be a hard error — answering it with a fresh
+/// root would make the next write replace the user's config with a
+/// managed-only skeleton, the exact v3 defect `store_v4` exists to end.
+pub(crate) fn read_existing_config(path: &Path) -> Result<Option<String>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(content))
+}
+
 /// Merge write: read existing JSON, update managed fields at top level, write back.
 ///
 /// If the file doesn't exist, creates a new JSON object with just the managed fields.
 /// Preserves all existing fields that are not in the managed_fields list.
 pub fn merge_json_write(path: &Path, managed_fields: &[(&str, Value)]) -> Result<()> {
-    // Read existing JSON or start with empty object
-    let mut json: serde_json::Map<String, Value> = if path.exists() {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
-        match serde_json::from_str::<Value>(&content) {
-            Ok(Value::Object(map)) => map,
-            _ => serde_json::Map::new(),
-        }
-    } else {
-        serde_json::Map::new()
+    let mut json: serde_json::Map<String, Value> = match read_existing_config(path)? {
+        Some(content) => match serde_json::from_str::<Value>(&content).with_context(|| {
+            format!(
+                "Failed to parse {} — fix or remove it before syncing",
+                path.display()
+            )
+        })? {
+            Value::Object(map) => map,
+            _ => bail!(
+                "{} root must be a JSON object — fix or remove it before syncing",
+                path.display()
+            ),
+        },
+        None => serde_json::Map::new(),
     };
 
     // Update managed fields
@@ -88,16 +108,12 @@ pub fn merge_json_write(path: &Path, managed_fields: &[(&str, Value)]) -> Result
         json.insert(key.to_string(), value.clone());
     }
 
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    // Write back as pretty JSON
+    // Write back as pretty JSON (atomic: a crash mid-write must not truncate
+    // the user's config file)
     let output =
         serde_json::to_string_pretty(&Value::Object(json)).context("Failed to serialize JSON")?;
-    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
+    skillstar_core::infra::fs_ops::atomic_write(path, output.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -108,16 +124,20 @@ pub fn merge_json_write(path: &Path, managed_fields: &[(&str, Value)]) -> Result
 /// with the managed fields, preserving all other top-level fields and non-managed
 /// env fields.
 pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Result<()> {
-    // Read existing JSON or start with empty object
-    let mut json: serde_json::Map<String, Value> = if path.exists() {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
-        match serde_json::from_str::<Value>(&content) {
-            Ok(Value::Object(map)) => map,
-            _ => serde_json::Map::new(),
-        }
-    } else {
-        serde_json::Map::new()
+    let mut json: serde_json::Map<String, Value> = match read_existing_config(path)? {
+        Some(content) => match serde_json::from_str::<Value>(&content).with_context(|| {
+            format!(
+                "Failed to parse {} — fix or remove it before syncing",
+                path.display()
+            )
+        })? {
+            Value::Object(map) => map,
+            _ => bail!(
+                "{} root must be a JSON object — fix or remove it before syncing",
+                path.display()
+            ),
+        },
+        None => serde_json::Map::new(),
     };
 
     // Get or create the env sub-object
@@ -147,16 +167,12 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
         json.insert("env".to_string(), Value::Object(new_env));
     }
 
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    // Write back as pretty JSON
+    // Write back as pretty JSON (atomic: a crash mid-write must not truncate
+    // the user's config file)
     let output =
         serde_json::to_string_pretty(&Value::Object(json)).context("Failed to serialize JSON")?;
-    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
+    skillstar_core::infra::fs_ops::atomic_write(path, output.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -182,10 +198,7 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
 /// their whole binding when *any* entry references the provider (every managed
 /// table must stay consistent), single-provider agents only when the *active*
 /// entry does. Retired / unknown tool ids (e.g. removed `gemini`) are skipped.
-pub fn resync_active_tools(
-    store: &ProvidersStoreV4,
-    provider_id: &str,
-) -> Vec<ToolSyncResultFlat> {
+pub fn resync_active_tools(store: &ProvidersStoreV4, provider_id: &str) -> Vec<ToolSyncResultFlat> {
     if !store.providers.iter().any(|p| p.id == provider_id) {
         // Provider not found — return a single error result
         return vec![ToolSyncResultFlat {

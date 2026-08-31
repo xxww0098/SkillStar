@@ -167,8 +167,8 @@ fn arb_flat_providers_store() -> impl Strategy<Value = FlatProvidersStore> {
 /// through the real migration means each one also asserts that the migration
 /// produces a store those operations can work on.
 #[allow(dead_code)]
-fn arb_providers_store_v4()
--> impl Strategy<Value = skillstar_models::providers::ProvidersStoreV4> {
+fn arb_providers_store_v4() -> impl Strategy<Value = skillstar_models::providers::ProvidersStoreV4>
+{
     arb_flat_providers_store().prop_map(|v3| {
         skillstar_models::providers::migrate::migrate_v3_to_v4(
             v3,

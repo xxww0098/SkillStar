@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
+import { copyToClipboard } from "../../../../../lib/utils";
 import type { ProviderForm } from "../../../hooks/useProviderForm";
 import { ModelFormField, ModelFormSection, modelInputClass } from "../../providerForm/ProviderConfigPrimitives";
 
@@ -14,12 +15,8 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
   const [showAnthropicUrl, setShowAnthropicUrl] = useState(Boolean(values.baseUrlAnthropic.trim()));
 
   const handleCopyApiKey = useCallback(async () => {
-    if (!values.apiKey || typeof navigator === "undefined" || !navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(values.apiKey);
-    } catch {
-      /* clipboard unavailable in some shells */
-    }
+    if (!values.apiKey) return;
+    await copyToClipboard(values.apiKey);
   }, [values.apiKey]);
 
   const fieldError = (code: typeof validationErrorCode) =>

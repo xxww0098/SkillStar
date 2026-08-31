@@ -205,7 +205,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "open_folder",
   "preview_multi_skill_bundle",
   "preview_skill_bundle",
-  "read_codex_env_from_zshrc",
   "refresh_stale_project_copies",
   "register_project",
   "remove_custom_agent_profile",
@@ -237,7 +236,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "update_skill_content",
   "update_skill_group",
   "update_tray_language",
-  "write_codex_env_to_zshrc",
 ]);
 
 describe("devMock coverage", () => {

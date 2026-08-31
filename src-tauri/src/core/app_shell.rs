@@ -142,11 +142,7 @@ fn build_tray_menu(
         builder = builder.separator();
     }
 
-    let menu = builder
-        .item(&toggle_i)
-        .separator()
-        .item(&quit_i)
-        .build()?;
+    let menu = builder.item(&toggle_i).separator().item(&quit_i).build()?;
 
     Ok(menu)
 }

@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { CreditInfo, DeepSeekAnalytics, DeepSeekDailyUsage, SubscriptionUsage } from "../../types";
-import { MetricCard } from "../card/primitives";
 
 interface DeepSeekUsagePanelProps {
   usage: SubscriptionUsage;
@@ -42,41 +41,28 @@ export function DeepSeekUsagePanel({
 
   return (
     <div className={cn("space-y-3", compact && "space-y-2")}>
-      <div
-        className={cn(
-          "flex items-center justify-between gap-2 rounded-xl border px-3 py-2",
-          available ? "border-emerald-200/70 bg-emerald-50/70" : "border-amber-200/70 bg-amber-50/70",
-        )}
-      >
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
-          {t("usage.deepseekAccountStatus")}
-        </span>
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-            available ? "text-emerald-700" : "text-amber-700",
-          )}
-        >
-          {available ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-          {available ? t("usage.deepseekAvailable") : t("usage.deepseekUnavailable")}
-        </span>
-      </div>
-
-      <div
-        className="rounded-2xl border p-3.5 flex flex-col relative overflow-hidden"
-        style={{ backgroundColor: `${accent}08`, borderColor: `${accent}1A` }}
-      >
-        <div
-          className="pointer-events-none absolute top-0 right-0 h-16 w-16 rounded-full blur-xl"
-          style={{ backgroundColor: `${accent}12` }}
-        />
-        <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: accent }}>
-          {t("usage.deepseekTotalBalance")}
-        </p>
-        <p className="mt-1 text-2xl font-bold font-mono tabular-nums leading-none" style={{ color: accent }}>
-          {formatCurrencyAmount(balance.total, balance.currency, t("usage.numberUnit10k"))}
-        </p>
-        <p className="mt-1 text-[9px] text-zinc-400">{t("usage.deepseekPaygHint")}</p>
+      <div className="flex items-start justify-between gap-3 border-b border-zinc-200/60 pb-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
+            {t("usage.deepseekTotalBalance")}
+          </p>
+          <p className="mt-1 font-mono text-2xl leading-none font-bold tabular-nums" style={{ color: accent }}>
+            {formatCurrencyAmount(balance.total, balance.currency, t("usage.numberUnit10k"))}
+          </p>
+          <p className="mt-1 text-[9px] text-zinc-400">{t("usage.deepseekPaygHint")}</p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-0.5">
+          <span className="text-[9px] text-zinc-400">{t("usage.deepseekAccountStatus")}</span>
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 text-[10px] font-semibold",
+              available ? "text-emerald-700" : "text-amber-700",
+            )}
+          >
+            {available ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+            {available ? t("usage.deepseekAvailable") : t("usage.deepseekUnavailable")}
+          </span>
+        </div>
       </div>
 
       {analytics ? (
@@ -107,11 +93,8 @@ export function DeepSeekUsagePanel({
       )}
 
       {showBreakdown && (
-        <div
-          className="rounded-2xl border p-3 space-y-2"
-          style={{ backgroundColor: `${accent}04`, borderColor: `${accent}14` }}
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        <div className="space-y-2 border-t border-zinc-200/60 pt-3">
+          <p className="text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
             {t("usage.deepseekBalanceBreakdown")}
           </p>
           {balance.granted > 0 && (
@@ -136,8 +119,8 @@ export function DeepSeekUsagePanel({
       )}
 
       {extraBalances.length > 0 && (
-        <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/50 p-3 space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        <div className="space-y-2 border-t border-zinc-200/60 pt-3">
+          <p className="text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
             {t("usage.deepseekOtherCurrencies")}
           </p>
           {extraBalances.map((credit) => (
@@ -158,8 +141,8 @@ function DeepSeekAnalyticsHint({ hasPlatformToken, accent }: { hasPlatformToken:
   const { t } = useTranslation();
   return (
     <div
-      className="rounded-2xl border border-dashed p-3 text-[10px] leading-relaxed text-zinc-500"
-      style={{ borderColor: `${accent}30`, backgroundColor: `${accent}04` }}
+      className="border-t border-dashed pt-3 text-[10px] leading-relaxed text-zinc-500"
+      style={{ borderColor: `${accent}40` }}
     >
       {hasPlatformToken ? t("usage.deepseekAnalyticsPending") : t("usage.deepseekAnalyticsHint")}
     </div>
@@ -173,10 +156,18 @@ function DeepSeekAnalyticsSection({ analytics, accent }: { analytics: DeepSeekAn
   const maxTokens = Math.max(flash?.total_tokens ?? 0, pro?.total_tokens ?? 0, 1);
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        <MetricCard label={t("usage.deepseekTodayCost")} value={formatMoney(analytics.today_cost)} accent={accent} />
-        <MetricCard label={t("usage.deepseekMonthCost")} value={formatMoney(analytics.month_cost)} accent={accent} />
+    <div className="space-y-3 border-t border-zinc-200/60 pt-3">
+      <div className="grid grid-cols-2 gap-3 border-b border-zinc-200/60 pb-3">
+        <AnalyticsMetric
+          label={t("usage.deepseekTodayCost")}
+          value={formatMoney(analytics.today_cost)}
+          accent={accent}
+        />
+        <AnalyticsMetric
+          label={t("usage.deepseekMonthCost")}
+          value={formatMoney(analytics.month_cost)}
+          accent={accent}
+        />
       </div>
 
       {(flash || pro) && (
@@ -187,6 +178,19 @@ function DeepSeekAnalyticsSection({ analytics, accent }: { analytics: DeepSeekAn
       )}
 
       <UsageTrendChart daily={analytics.daily} accent={accent} />
+    </div>
+  );
+}
+
+function AnalyticsMetric({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-[9px] font-semibold tracking-wider text-zinc-500 uppercase" title={label}>
+        {label}
+      </p>
+      <p className="mt-1 font-mono text-sm font-bold tabular-nums" style={{ color: accent }}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -209,10 +213,7 @@ function ModelUsageRow({
   const hitRate = inputTotal > 0 ? Math.round((model.cache_hit_tokens / inputTotal) * 100) : null;
 
   return (
-    <div
-      className="rounded-xl border px-3 py-2.5"
-      style={{ borderColor: `${accent}18`, backgroundColor: `${accent}05` }}
-    >
+    <div className="flex items-start gap-2.5 border-b border-zinc-200/50 pb-2.5 last:border-0 last:pb-0">
       <div className="flex items-start gap-2.5">
         <div
           className={cn(
@@ -368,7 +369,7 @@ function BalanceBreakdownRow({
   unit10k: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-lg bg-white/60 px-2.5 py-1.5">
+    <div className="flex items-center justify-between gap-2 px-0.5 py-0.5">
       <span className="text-[10px] text-zinc-600">{label}</span>
       <span className="font-mono text-[11px] font-semibold tabular-nums" style={{ color: accent }}>
         {formatCurrencyAmount(amount, currency, unit10k)}
@@ -385,7 +386,7 @@ function ExtraBalanceRow({ credit, accent, unit10k }: { credit: CreditInfo; acce
     : (credit.credit_amount ?? "—");
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-lg bg-white/60 px-2.5 py-1.5">
+    <div className="flex items-center justify-between gap-2 px-0.5 py-0.5">
       <span className="text-[10px] text-zinc-600">{currency}</span>
       <span className="font-mono text-[11px] font-semibold tabular-nums" style={{ color: accent }}>
         {display}

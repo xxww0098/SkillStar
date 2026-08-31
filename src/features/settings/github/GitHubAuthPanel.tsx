@@ -12,12 +12,12 @@ import {
   TriangleAlert,
   UserRoundCog,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Github } from "../../../components/ui/icons/Github";
 import { openExternalUrl } from "../../../lib/externalOpen";
-import { cn } from "../../../lib/utils";
+import { cn, copyToClipboard } from "../../../lib/utils";
 import type { useGitHubAuth } from "./useGitHubAuth";
 
 export type GitHubAuthController = ReturnType<typeof useGitHubAuth>;
@@ -56,13 +56,9 @@ function useCopy(): { copied: boolean; copy: (value: string) => Promise<boolean>
   }, [copied]);
 
   const copy = useCallback(async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      return true;
-    } catch {
-      return false;
-    }
+    const ok = await copyToClipboard(value);
+    if (ok) setCopied(true);
+    return ok;
   }, []);
 
   return { copied, copy };
@@ -239,19 +235,11 @@ function DeviceCodeState({ auth }: { auth: GitHubAuthController }) {
 function ConnectedState({
   auth,
   identity,
-  expiresAt,
 }: {
   auth: GitHubAuthController;
   identity: { login: string; avatar_url: string | null };
-  expiresAt: string | null;
 }) {
-  const { t, i18n } = useTranslation();
-  const validUntil = useMemo(() => {
-    if (!expiresAt) return null;
-    const date = new Date(expiresAt);
-    if (Number.isNaN(date.getTime())) return null;
-    return date.toLocaleString(i18n.language, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  }, [expiresAt, i18n.language]);
+  const { t } = useTranslation();
 
   return (
     <div className="space-y-5">
@@ -272,10 +260,7 @@ function ConnectedState({
         </span>
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold tracking-tight text-foreground">@{identity.login}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {t("settings.githubAuthConnected")}
-            {validUntil ? ` · ${t("settings.githubAuthValidUntil", { date: validUntil })}` : ""}
-          </p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{t("settings.githubAuthConnected")}</p>
         </div>
       </div>
 
@@ -358,11 +343,7 @@ export function GitHubAuthPanel({ auth }: { auth: GitHubAuthController }) {
         </StateFrame>
       ) : auth.status?.state === "connected" ? (
         <StateFrame id="connected">
-          <ConnectedState
-            auth={auth}
-            identity={auth.status.identity}
-            expiresAt={auth.status.access_expires_at ?? null}
-          />
+          <ConnectedState auth={auth} identity={auth.status.identity} />
         </StateFrame>
       ) : auth.status?.state === "expired" ? (
         <StateFrame id="expired">

@@ -9,12 +9,13 @@
 //! For efficiency, update checks follow a two-phase pattern:
 //!
 //! 1. **Prefetch**: [`prefetch_unique_repos`] deduplicates skills by repo
-//!    root and issues one `git fetch` per unique repo. When a GitHub API fast
+//!    root and issues one bounded-concurrent `git fetch` per unique repo
+//!    (worker threads, one git child process each). When a GitHub API fast
 //!    path answered for a repo ([`crate::update_api`]), that repo is skipped —
 //!    the authoritative remote hashes come from the API instead.
-//! 2. **Compare**: [`check_update_local`] compares `HEAD` vs `origin/HEAD`
-//!    without network access; [`check_update_local_with_api`] compares
-//!    against API-provided subtree hashes when available.
+//! 2. **Compare**: [`check_update_local_with_api_entry`] compares `HEAD` vs
+//!    `origin/HEAD` without network access, or against API-provided subtree
+//!    hashes when available.
 //!
 //! This avoids N redundant fetches when N skills share the same repo.
 
@@ -24,10 +25,165 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::git::ops as git_ops;
+use crate::git::transport::GitOperationSession;
 use crate::lockfile::LockEntry;
 use crate::update_api::ApiRemoteTree;
+use crate::update_state::SkillUpdateState;
 use crate::{lockfile, repo_link};
 use skillstar_core::infra::path_env::command_with_path;
+use skillstar_core::types::{UpstreamChange, UpstreamSuccessor};
+
+// ── Upstream Verdict ────────────────────────────────────────────────
+
+/// Everything one update check can conclude about a repo-cached Skill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpstreamStatus {
+    Current,
+    UpdateAvailable,
+    /// The tracked revision no longer ships the Skill's folder.
+    Removed(UpstreamChange),
+}
+
+impl UpstreamStatus {
+    pub fn from_available(available: bool) -> Self {
+        if available {
+            Self::UpdateAvailable
+        } else {
+            Self::Current
+        }
+    }
+
+    pub fn into_state(self, name: String) -> SkillUpdateState {
+        match self {
+            Self::Current => SkillUpdateState::new(name, false),
+            Self::UpdateAvailable => SkillUpdateState::new(name, true),
+            Self::Removed(change) => SkillUpdateState {
+                name,
+                update_available: false,
+                upstream_change: Some(change),
+            },
+        }
+    }
+}
+
+/// The revision an ordinary update resets a managed checkout to.
+pub(crate) fn tracked_update_ref(repo_root: &Path) -> &'static str {
+    if configured_git_ref(repo_root).is_some() {
+        "FETCH_HEAD"
+    } else {
+        "origin/HEAD"
+    }
+}
+
+/// Full verdict for one repo-cached Skill after the batch prefetch (or the
+/// GitHub API pre-pass).
+///
+/// Extends [`check_update_local_with_api_entry`]: where that answers `None`
+/// because the folder cannot be resolved at the tracked revision, this tells
+/// a fetch that never happened (still `None` — keep the previous state) apart
+/// from a folder the source really dropped (`Removed`, carrying the successor
+/// it was renamed into when one can be found).
+pub fn check_upstream_status(
+    skill_path: &Path,
+    failed_fetch_roots: &HashSet<PathBuf>,
+    api_remote: Option<&ApiRemoteTree>,
+    session: &GitOperationSession,
+) -> Option<UpstreamStatus> {
+    match check_update_local_with_api_entry(skill_path, failed_fetch_roots, api_remote) {
+        Some(available) => Some(UpstreamStatus::from_available(available)),
+        None => removal_status(skill_path, failed_fetch_roots, session),
+    }
+}
+
+fn removal_status(
+    skill_path: &Path,
+    failed_fetch_roots: &HashSet<PathBuf>,
+    session: &GitOperationSession,
+) -> Option<UpstreamStatus> {
+    let repo_root = repo_link::repo_root_of(skill_path)?;
+    if failed_fetch_roots.contains(&repo_root) {
+        return None;
+    }
+    // Root Skills are the checkout itself; "removed" has no meaning for them.
+    let folder = lock_entry_for_path(skill_path)?
+        .source_folder
+        .filter(|folder| !folder.is_empty())?;
+    let tracked = tracked_update_ref(&repo_root);
+    // Never fetched: nothing can be concluded.
+    git_ops::rev_parse(&repo_root, &format!("{tracked}^{{commit}}")).ok()?;
+    // Still shipped locally but gone at the tracked revision — that, and only
+    // that, is a removal.
+    subtree_hash_at(&repo_root, "HEAD", Some(&folder))?;
+    if git_ops::revision_contains_path(&repo_root, tracked, &folder) != Some(false) {
+        return None;
+    }
+    let name = skill_path.file_name()?.to_str()?;
+    Some(UpstreamStatus::Removed(UpstreamChange::Removed {
+        suggested_local_name: crate::skill_update::suggested_local_name(name),
+        successor: find_successor(&repo_root, &folder, tracked, skill_path, session),
+    }))
+}
+
+/// The folder the source renamed or moved `old_folder` into, if any.
+///
+/// Candidates are the container-style Skill folders present at the tracked
+/// revision but absent from the local `HEAD` tree. Git's own rename detection
+/// on the two `SKILL.md` files decides first and scores the match; when it
+/// finds nothing, a candidate whose frontmatter `name` equals the old one is
+/// accepted instead.
+fn find_successor(
+    repo_root: &Path,
+    old_folder: &str,
+    tracked: &str,
+    skill_path: &Path,
+    session: &GitOperationSession,
+) -> Option<UpstreamSuccessor> {
+    let added = crate::repo_scanner::upstream_added_dirs(repo_root, tracked)?;
+    if added.is_empty() {
+        return None;
+    }
+    let old_manifest = format!("{old_folder}/SKILL.md");
+    let mut pathspecs: Vec<&str> = vec![old_folder];
+    pathspecs.extend(added.iter().map(String::as_str));
+    let by_content =
+        git_ops::diff_renames_in_session(repo_root, "HEAD", tracked, &pathspecs, session)
+            .map_err(|error| {
+                warn!(
+                    target: "update_checker",
+                    path = %repo_root.display(),
+                    error = %error,
+                    "rename detection failed; falling back to frontmatter names"
+                );
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .find(|rename| rename.from == old_manifest)
+            .and_then(|rename| {
+                let folder = rename.to.strip_suffix("/SKILL.md")?;
+                added
+                    .iter()
+                    .any(|candidate| candidate == folder)
+                    .then(|| (folder.to_string(), Some(rename.similarity)))
+            });
+    let (folder, similarity) = match by_content {
+        Some(hit) => hit,
+        None => {
+            let old_name = crate::validation::inspect_skill_frontmatter(skill_path).name?;
+            let hit = added.iter().find(|candidate| {
+                crate::repo_scanner::skill_at_revision(repo_root, tracked, candidate, session)
+                    .is_some_and(|skill| skill.id == old_name)
+            })?;
+            (hit.clone(), None)
+        }
+    };
+    let skill = crate::repo_scanner::skill_at_revision(repo_root, tracked, &folder, session)?;
+    Some(UpstreamSuccessor {
+        skill_id: skill.id,
+        folder_path: folder,
+        description: skill.description,
+        similarity,
+    })
+}
 
 // ── Batch Prefetch ──────────────────────────────────────────────────
 
@@ -80,44 +236,41 @@ pub(crate) fn prefetch_unique_repos_with<F, G>(
 ) -> HashSet<PathBuf>
 where
     F: Fn(&Path) -> Option<PathBuf>,
-    G: Fn(&Path) -> Result<()>,
+    G: Fn(&Path) -> Result<()> + Sync,
 {
-    let mut fetched = HashSet::new();
-    let mut failed = HashSet::new();
-
+    let mut unique = Vec::new();
+    let mut seen = HashSet::new();
     for path in skill_paths {
         if let Some(root) = repo_root_of(path)
-            && fetched.insert(root.clone())
-            && fetch_repo(&root).is_err()
+            && seen.insert(root.clone())
         {
-            failed.insert(root);
+            unique.push(root);
         }
     }
 
-    failed
+    skillstar_core::infra::parallel::map_bounded(
+        unique,
+        skillstar_core::infra::parallel::git_fetch_concurrency_limit(),
+        |root| {
+            if fetch_repo(&root).is_err() {
+                Some(root)
+            } else {
+                None
+            }
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 // ── Update Detection ────────────────────────────────────────────────
 
-/// Check if a repo-backed skill has updates available **without fetching**.
+/// Check a repo-cached skill against GitHub API-provided remote hashes,
+/// loading the lockfile entry internally.
 ///
 /// `None` means "the prefetch failed for this skill's repo, status unknown" —
 /// callers must preserve the previous state rather than clearing the badge.
-pub fn check_update_local(
-    skill_path: &Path,
-    failed_fetch_roots: &HashSet<PathBuf>,
-) -> Option<bool> {
-    let entry = lock_entry_for_path(skill_path);
-    check_update_local_with(
-        skill_path,
-        failed_fetch_roots,
-        repo_link::repo_root_of,
-        entry.as_ref(),
-    )
-}
-
-/// Check a repo-cached skill against GitHub API-provided remote hashes,
-/// loading the lockfile entry internally like [`check_update_local`].
 pub fn check_update_local_with_api_entry(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
@@ -187,13 +340,38 @@ where
 
     if let Some(api) = api_remote {
         let source_folder = entry.and_then(|entry| entry.source_folder.clone());
-        // The API tree is the remote truth. If the folder no longer exists
-        // remotely, preserve the previous badge rather than clearing it.
-        let remote = api.subtree_hash(source_folder.as_deref())?;
+        // The API listing is shallow: commit SHA plus top-level dirs. Deeper
+        // folders resolve from the local tracked ref instead — identical by
+        // construction, since the tip gate in `api_prefetch_remote_trees`
+        // only admits trees whose commit IS the local tracked commit. A
+        // folder in neither place no longer exists remotely; return `None`
+        // so the previous badge is preserved rather than cleared.
+        let remote = match api.subtree_hash(source_folder.as_deref()) {
+            Some(sha) => sha.to_string(),
+            None => subtree_hash_at(
+                &repo_root,
+                tracked_update_ref(&repo_root),
+                source_folder.as_deref(),
+            )?,
+        };
         // No fetch happened for API-covered repos, so HEAD is still the
         // installed commit — exactly the local baseline to compare against.
         let local = subtree_hash_at(&repo_root, "HEAD", source_folder.as_deref())?;
-        return Some(local != remote);
+        if local == remote {
+            return Some(false);
+        }
+        // Root skills only. `GET /git/trees/{branch}` puts the *commit* SHA
+        // in `sha`, not the peeled tree SHA that `HEAD^{tree}` returns. A
+        // root skill already on that commit would otherwise keep lighting
+        // the badge after every successful update.
+        if source_folder
+            .as_deref()
+            .is_none_or(|folder| folder.is_empty())
+        {
+            let local_commit = git_ops::rev_parse(&repo_root, "HEAD").ok()?;
+            return Some(!local_commit.is_empty() && local_commit != remote);
+        }
+        return Some(true);
     }
 
     // Precise per-skill comparison. The lockfile knows the skill's source
@@ -202,11 +380,7 @@ where
     // HEAD change alone no longer lights every badge of a shared checkout;
     // only Skills whose content actually moved report an update.
     if let Some(folder) = entry.and_then(|entry| entry.source_folder.clone()) {
-        let remote_ref = if configured_git_ref(&repo_root).is_some() {
-            "FETCH_HEAD"
-        } else {
-            "origin/HEAD"
-        };
+        let remote_ref = tracked_update_ref(&repo_root);
         let local = subtree_hash_at(&repo_root, "HEAD", Some(&folder));
         let remote = subtree_hash_at(&repo_root, remote_ref, Some(&folder));
         if let (Some(local), Some(remote)) = (local, remote) {
@@ -222,11 +396,7 @@ where
 
 /// Tree hash of `source_folder` at `git_ref` in `repo_root`, or the whole
 /// tree when the skill is the checkout root.
-fn subtree_hash_at(
-    repo_root: &Path,
-    git_ref: &str,
-    source_folder: Option<&str>,
-) -> Option<String> {
+fn subtree_hash_at(repo_root: &Path, git_ref: &str, source_folder: Option<&str>) -> Option<String> {
     let spec = match source_folder.filter(|folder| !folder.is_empty()) {
         Some(folder) => format!("{git_ref}:{folder}"),
         None => format!("{git_ref}^{{tree}}"),
@@ -245,11 +415,7 @@ fn subtree_hash_at(
 
 fn compare_heads(repo_root: &Path) -> Option<bool> {
     let local_head = git_ops::rev_parse(repo_root, "HEAD").ok()?;
-    let remote_ref = if configured_git_ref(repo_root).is_some() {
-        "FETCH_HEAD"
-    } else {
-        "origin/HEAD"
-    };
+    let remote_ref = tracked_update_ref(repo_root);
     let remote_head = git_ops::rev_parse(repo_root, remote_ref).ok()?;
     Some(!local_head.is_empty() && !remote_head.is_empty() && local_head != remote_head)
 }
@@ -280,335 +446,6 @@ pub(crate) fn fetch_tracked_ref_in_session(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use anyhow::anyhow;
-    use std::fs;
-    use std::process::Command;
-
-    fn run_git(repo: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn init_repo() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        run_git(dir.path(), &["init", "--initial-branch=main"]);
-        run_git(dir.path(), &["config", "user.email", "test@example.com"]);
-        run_git(dir.path(), &["config", "user.name", "SkillStar Tests"]);
-        dir
-    }
-
-    // Unix-only: fixtures use std::os::unix::fs::symlink.
-    #[cfg(unix)]
-    #[test]
-    fn subtree_hash_and_local_update_detection_work() {
-        let remote = init_repo();
-        fs::create_dir_all(remote.path().join("skills/demo")).unwrap();
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v1").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "initial"]);
-
-        let clone_parent = tempfile::tempdir().unwrap();
-        let clone_path = clone_parent.path().join("clone");
-        run_git(
-            clone_parent.path(),
-            &[
-                "clone",
-                remote.path().to_str().unwrap(),
-                clone_path.to_str().unwrap(),
-            ],
-        );
-
-        let initial_hash = git_ops::compute_subtree_hash(&clone_path, "skills/demo").unwrap();
-        assert!(!initial_hash.is_empty());
-
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v2").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "update"]);
-
-        run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
-
-        let skill_link_parent = tempfile::tempdir().unwrap();
-        let skill_link = skill_link_parent.path().join("demo");
-        std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
-
-        let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
-            let real = std::fs::read_link(path).ok()?;
-            Some(real.parent()?.parent()?.to_path_buf())
-        }, None);
-        assert_eq!(result, Some(true));
-    }
-
-    // Unix-only: fixtures use std::os::unix::fs::symlink.
-    #[cfg(unix)]
-    #[test]
-    fn api_remote_hashes_drive_update_detection_without_fetching() {
-        let remote = init_repo();
-        fs::create_dir_all(remote.path().join("skills/demo")).unwrap();
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v1").unwrap();
-        fs::write(remote.path().join("README.md"), "readme v1").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "initial"]);
-
-        let clone_parent = tempfile::tempdir().unwrap();
-        let clone_path = clone_parent.path().join("clone");
-        run_git(
-            clone_parent.path(),
-            &[
-                "clone",
-                remote.path().to_str().unwrap(),
-                clone_path.to_str().unwrap(),
-            ],
-        );
-
-        let skill_link_parent = tempfile::tempdir().unwrap();
-        let skill_link = skill_link_parent.path().join("demo");
-        std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
-        let repo_root_of = |path: &Path| {
-            let real = std::fs::read_link(path).ok()?;
-            Some(real.parent()?.parent()?.to_path_buf())
-        };
-
-        let entry = LockEntry {
-            name: "demo".into(),
-            git_url: "https://github.com/example/demo".into(),
-            git_ref: None,
-            tree_hash: "tree".into(),
-            content_hash: None,
-            content_hash_version: None,
-            installed_at: String::new(),
-            source_folder: Some("skills/demo".into()),
-        };
-
-        // API says "same as local HEAD" → no update, and no fetch happened.
-        let v1_hash = git_ops::compute_subtree_hash(&clone_path, "skills/demo").unwrap();
-        let mut folders = std::collections::HashMap::new();
-        folders.insert("skills/demo".to_string(), v1_hash.clone());
-        let api = crate::update_api::ApiRemoteTree { folders };
-        assert_eq!(
-            check_update_local_with_api(&skill_link, &HashSet::new(), Some(&api), repo_root_of, Some(&entry)),
-            Some(false)
-        );
-
-        // Remote advances without the local clone fetching anything.
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v2").unwrap();
-        fs::create_dir_all(remote.path().join("skills/other")).unwrap();
-        fs::write(remote.path().join("skills/other/SKILL.md"), "other").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "update"]);
-
-        let v2_hash = git_ops::compute_subtree_hash(remote.path(), "skills/demo").unwrap();
-        assert_ne!(v1_hash, v2_hash);
-        let mut folders = std::collections::HashMap::new();
-        folders.insert("skills/demo".to_string(), v2_hash.clone());
-        let api = crate::update_api::ApiRemoteTree { folders };
-        assert_eq!(
-            check_update_local_with_api(&skill_link, &HashSet::new(), Some(&api), repo_root_of, Some(&entry)),
-            Some(true)
-        );
-
-        // An unrelated repo change must NOT light the badge: same folder hash.
-        let mut folders = std::collections::HashMap::new();
-        folders.insert("skills/demo".to_string(), v1_hash.clone());
-        let api = crate::update_api::ApiRemoteTree { folders };
-        assert_eq!(
-            check_update_local_with_api(&skill_link, &HashSet::new(), Some(&api), repo_root_of, Some(&entry)),
-            Some(false)
-        );
-
-        // The skill's folder vanished from the remote tree → unknown, not "no
-        // update" (the previous badge must survive).
-        let api = crate::update_api::ApiRemoteTree::default();
-        assert_eq!(
-            check_update_local_with_api(&skill_link, &HashSet::new(), Some(&api), repo_root_of, Some(&entry)),
-            None
-        );
-
-        // A failed fetch for this repo overrides the API answer.
-        let failed: HashSet<PathBuf> = [clone_path.clone()].into_iter().collect();
-        let mut folders = std::collections::HashMap::new();
-        folders.insert("skills/demo".to_string(), v2_hash);
-        let api = crate::update_api::ApiRemoteTree { folders };
-        assert_eq!(
-            check_update_local_with_api(&skill_link, &failed, Some(&api), repo_root_of, Some(&entry)),
-            None
-        );
-    }
-
-    #[test]
-    fn subtree_comparison_ignores_unrelated_repo_changes() {
-        let remote = init_repo();
-        fs::create_dir_all(remote.path().join("skills/demo")).unwrap();
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v1").unwrap();
-        fs::write(remote.path().join("README.md"), "readme v1").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "initial"]);
-
-        let clone_parent = tempfile::tempdir().unwrap();
-        let clone_path = clone_parent.path().join("clone");
-        run_git(
-            clone_parent.path(),
-            &[
-                "clone",
-                remote.path().to_str().unwrap(),
-                clone_path.to_str().unwrap(),
-            ],
-        );
-
-        // The remote moves forward, but only outside the skill's folder.
-        fs::write(remote.path().join("README.md"), "readme v2").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "docs only"]);
-
-        run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
-
-        let skill_link_parent = tempfile::tempdir().unwrap();
-        let skill_link = skill_link_parent.path().join("demo");
-        std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
-
-        let entry = crate::lockfile::LockEntry {
-            name: "demo".to_string(),
-            git_url: String::new(),
-            git_ref: None,
-            tree_hash: String::new(),
-            content_hash: None,
-            content_hash_version: None,
-            installed_at: String::new(),
-            source_folder: Some("skills/demo".to_string()),
-        };
-        let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
-            let real = std::fs::read_link(path).ok()?;
-            Some(real.parent()?.parent()?.to_path_buf())
-        }, Some(&entry));
-        assert_eq!(
-            result,
-            Some(false),
-            "a repo-wide HEAD change must not badge a Skill whose folder did not move"
-        );
-    }
-
-    #[test]
-    fn subtree_comparison_badges_skills_whose_folder_moved() {
-        let remote = init_repo();
-        fs::create_dir_all(remote.path().join("skills/demo")).unwrap();
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v1").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "initial"]);
-
-        let clone_parent = tempfile::tempdir().unwrap();
-        let clone_path = clone_parent.path().join("clone");
-        run_git(
-            clone_parent.path(),
-            &[
-                "clone",
-                remote.path().to_str().unwrap(),
-                clone_path.to_str().unwrap(),
-            ],
-        );
-
-        fs::write(remote.path().join("skills/demo/SKILL.md"), "v2").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "skill changed"]);
-
-        run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
-
-        let skill_link_parent = tempfile::tempdir().unwrap();
-        let skill_link = skill_link_parent.path().join("demo");
-        std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
-
-        let entry = crate::lockfile::LockEntry {
-            name: "demo".to_string(),
-            git_url: String::new(),
-            git_ref: None,
-            tree_hash: String::new(),
-            content_hash: None,
-            content_hash_version: None,
-            installed_at: String::new(),
-            source_folder: Some("skills/demo".to_string()),
-        };
-        let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
-            let real = std::fs::read_link(path).ok()?;
-            Some(real.parent()?.parent()?.to_path_buf())
-        }, Some(&entry));
-        assert_eq!(result, Some(true));
-    }
-
-    #[test]
-    fn unresolvable_repo_root_reports_no_update() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = check_update_local_with(&dir.path().join("nope"), &HashSet::new(), |_| None, None);
-        assert_eq!(
-            result,
-            Some(false),
-            "None is reserved for failed fetches, not for missing repo roots"
-        );
-    }
-
-    #[test]
-    fn failed_prefetch_root_preserves_previous_state() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo = dir.path().join("repo");
-        let failed = HashSet::from([repo.clone()]);
-        let result = check_update_local_with(
-            &dir.path().join("skill"),
-            &failed,
-            |_| Some(repo.clone()),
-            None,
-        );
-        assert_eq!(result, None, "failed fetch must not clear the badge");
-    }
-
-    #[test]
-    fn prefetch_unique_repos_deduplicates_and_tracks_failures() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo_a = dir.path().join("repo_a");
-        let repo_b = dir.path().join("repo_b");
-        let skill_a1 = dir.path().join("skill_a1");
-        let skill_a2 = dir.path().join("skill_a2");
-        let skill_b = dir.path().join("skill_b");
-
-        let repo_a_for_lookup = repo_a.clone();
-        let repo_b_for_lookup = repo_b.clone();
-        let skill_b_for_lookup = skill_b.clone();
-        let repo_root_of = move |path: &Path| -> Option<PathBuf> {
-            if path == skill_b_for_lookup {
-                Some(repo_b_for_lookup.clone())
-            } else {
-                Some(repo_a_for_lookup.clone())
-            }
-        };
-
-        let fetch_calls = std::cell::RefCell::new(Vec::new());
-        let fetch_repo = |root: &Path| -> Result<()> {
-            fetch_calls.borrow_mut().push(root.to_path_buf());
-            if root == repo_b {
-                Err(anyhow!("fetch failed"))
-            } else {
-                Ok(())
-            }
-        };
-
-        let failed =
-            prefetch_unique_repos_with(&[skill_a1, skill_a2, skill_b], repo_root_of, fetch_repo);
-
-        assert_eq!(
-            fetch_calls.borrow().len(),
-            2,
-            "should fetch only unique repos"
-        );
-        assert!(fetch_calls.borrow().contains(&repo_a));
-        assert!(fetch_calls.borrow().contains(&repo_b));
-        assert!(failed.contains(&repo_b));
-        assert!(!failed.contains(&repo_a));
-    }
-}
+mod tests;
+#[cfg(test)]
+mod upstream_tests;

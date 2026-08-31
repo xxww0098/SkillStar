@@ -259,9 +259,8 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
     }
 
     // Frontmatter quality gate: only valid skills may be imported.
-    crate::validation::ensure_installable(&temp_dir).map_err(|reason| {
-        anyhow::anyhow!("Bundle contains an invalid skill: {reason}")
-    })?;
+    crate::validation::ensure_installable(&temp_dir)
+        .map_err(|reason| anyhow::anyhow!("Bundle contains an invalid skill: {reason}"))?;
 
     // Replace existing if needed
     if target_dir.exists() {

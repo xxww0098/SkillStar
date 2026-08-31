@@ -3,4 +3,4 @@
 /**
  * Returned by `start_oauth_login`.
  */
-export type OAuthStart = { pending_id: string, auth_url: string, user_code: string | null, verification_uri: string | null, };
+export type OAuthStart = { pending_id: string, auth_url: string, };

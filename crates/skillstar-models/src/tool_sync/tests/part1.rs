@@ -124,7 +124,8 @@ fn test_sync_to_claude_code_inner_new_file() {
     let config_path = tmp.path().join(".claude").join("settings.json");
     let provider = make_test_provider_flat();
 
-    let result = sync_to_claude_code_inner(&provider, "model-a", &no_roles(), &config_path).unwrap();
+    let result =
+        sync_to_claude_code_inner(&provider, "model-a", &no_roles(), &config_path).unwrap();
 
     // No backup since file didn't exist
     assert!(result.is_none());
@@ -169,7 +170,8 @@ fn test_sync_to_claude_code_inner_merges_existing() {
     .unwrap();
 
     let provider = make_test_provider_flat();
-    let backup = sync_to_claude_code_inner(&provider, "model-b", &no_roles(), &config_path).unwrap();
+    let backup =
+        sync_to_claude_code_inner(&provider, "model-b", &no_roles(), &config_path).unwrap();
 
     // Backup should exist
     assert!(backup.is_some());
@@ -391,7 +393,7 @@ fn test_codex_oauth_and_third_party_preserve_existing_auth_json() {
         let binding = AgentBinding {
             entries: vec![make_codex_activation(&provider, settings)],
             roles: Default::default(),
-        active_index: 0,
+            active_index: 0,
             settings: None,
         };
 
@@ -498,7 +500,8 @@ requires_openai_auth = false
     .unwrap();
 
     let official =
-        crate::providers::create_provider_from_preset(crate::providers::CODEX_OFFICIAL_ID, "").unwrap();
+        crate::providers::create_provider_from_preset(crate::providers::CODEX_OFFICIAL_ID, "")
+            .unwrap();
     let settings = CodexSettings {
         auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
     };

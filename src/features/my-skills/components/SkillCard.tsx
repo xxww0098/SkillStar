@@ -1,35 +1,25 @@
-import { motion } from "framer-motion";
-import { ArrowUpCircle, Check, Download, ExternalLink, GitBranch, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  ArrowUpCircle,
+  Check,
+  Download,
+  GitBranch,
+  HardDrive,
+  Loader2,
+  Star,
+} from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
-import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
-import { CardDescription, CardTitle } from "../../../components/ui/card";
-import { CardTemplate } from "../../../components/ui/card-template";
+import { selectTargetableAgentProfiles } from "../../../lib/agentProfiles";
+import { handleExternalAnchorClick } from "../../../lib/externalOpen";
+import { tauriInvoke } from "../../../lib/ipc";
 import { agentIconCls, cn, formatInstalls } from "../../../lib/utils";
 import type { AgentProfile, Skill } from "../../../types";
-
-interface SkillCardProps {
-  skill: Skill;
-  onClick: (skill: Skill) => void;
-  /** Optional: remote cards render an "installed" badge and never call these. */
-  onInstall?: (url: string, name: string) => void;
-  onUpdate?: (name: string) => void;
-  compact?: boolean;
-  selectable?: boolean;
-  selected?: boolean;
-  onSelect?: (name: string) => void;
-  profiles?: AgentProfile[];
-  onToggleAgent?: (skillName: string, agentId: string, enable: boolean, agentName?: string) => void;
-  pendingAgentToggleKeys?: Set<string>;
-  installing?: boolean;
-  updating?: boolean;
-  noAnimate?: boolean;
-  /** SSH remote page: same chrome as library cards, delete + single agent footer. */
-  remoteContext?: SkillCardRemoteContext;
-}
+import { SkillAvatar } from "./SkillAvatar";
 
 export type SkillCardRemoteContext = {
   agentProfile: AgentProfile;
@@ -40,35 +30,40 @@ export type SkillCardRemoteContext = {
   agentActive?: boolean;
 };
 
-function rankStyle(rank: number): string {
-  if (rank === 1) {
-    return "bg-amber-400/20 text-amber-600 border-amber-400/40 font-bold";
-  }
-  if (rank === 2) {
-    return "bg-amber-500/20 text-amber-600 border-amber-500/40 font-bold dark:text-amber-400";
-  }
-  if (rank === 3) {
-    return "bg-orange-400/15 text-orange-500 border-orange-400/30 font-bold";
-  }
-  if (rank <= 10) return "bg-primary/8 text-primary/80 border-primary/20 font-semibold";
-  return "bg-muted text-muted-foreground border-transparent font-medium";
+export interface SkillCardProps {
+  skill: Skill;
+  onClick: (skill: Skill) => void;
+  /** Optional: remote cards never call these. */
+  onInstall?: (url: string, name: string) => void;
+  onUpdate?: (name: string) => void;
+  /** Upstream dropped the Skill with no successor: keep a local copy or remove. */
+  onResolveRemoved?: (name: string) => void;
+  /** Upstream renamed the Skill: install the successor, carry deployments over, remove this one. */
+  onMigrate?: (name: string) => void;
+  migrating?: boolean;
+  compact?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: (name: string) => void;
+  profiles?: AgentProfile[];
+  onToggleAgent?: (skillName: string, agentId: string, enable: boolean, agentName?: string) => void;
+  pendingAgentToggleKeys?: Set<string>;
+  installing?: boolean;
+  updating?: boolean;
+  /** Accepted for callers; enter/exit is owned by SkillGrid. */
+  noAnimate?: boolean;
+  /** SSH remote page: same chrome as library cards, delete + single agent footer. */
+  remoteContext?: SkillCardRemoteContext;
 }
-
-const categoryBadge = (category: string, t: (key: string) => string) => {
-  const map: Record<string, { label: string; variant: "hot" | "popular" | "rising" | "new" }> = {
-    Hot: { label: t("skillCard.hot"), variant: "hot" },
-    Popular: { label: t("skillCard.popular"), variant: "popular" },
-    Rising: { label: t("skillCard.rising"), variant: "rising" },
-    New: { label: t("skillCard.new"), variant: "new" },
-  };
-  return map[category];
-};
 
 function SkillCardInner({
   skill,
   onClick,
   onInstall,
   onUpdate,
+  onResolveRemoved,
+  onMigrate,
+  migrating,
   compact,
   selectable,
   selected,
@@ -78,248 +73,354 @@ function SkillCardInner({
   pendingAgentToggleKeys,
   installing,
   updating,
-  noAnimate,
   remoteContext,
 }: SkillCardProps) {
   const { t } = useTranslation();
-  const cat = skill.category !== "None" ? categoryBadge(skill.category, t) : undefined;
   const isLocalSkill = skill.skill_type === "local";
   const isRemoteCard = Boolean(remoteContext);
+  const isLibrary = isRemoteCard || Boolean(selectable) || Boolean(profiles && onToggleAgent);
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onSelect?.(skill.name);
   };
 
-  const Wrapper = noAnimate ? "div" : motion.div;
-  const wrapperProps = noAnimate
-    ? {}
-    : {
-        initial: { opacity: 0 },
-        animate: { opacity: 1 },
-        transition: { duration: 0.15 },
-      };
+  const stopCard = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  };
 
-  const rankBadge =
-    skill.rank && skill.rank <= 100 ? (
-      <div
-        className={cn(
-          "w-7 h-7 rounded-lg border flex items-center justify-center leading-none tabular-nums",
-          skill.rank >= 100 ? "text-[10px] tracking-tight" : "text-micro",
-          rankStyle(skill.rank),
-        )}
-      >
-        {skill.rank}
-      </div>
-    ) : null;
+  const upstreamChange = !isRemoteCard && !isLocalSkill ? (skill.upstream_change ?? null) : null;
 
-  const installedBadge = (
-    <motion.div
-      initial={{ scale: 0.85, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-      className="h-7 px-2.5 rounded-lg text-xs font-medium inline-flex items-center border bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25 shadow-xs select-none backdrop-blur-xs"
-    >
-      <Check className="w-3.5 h-3.5 mr-1 stroke-[2.2] text-emerald-600 dark:text-emerald-400 shrink-0" />
-      {t("skillCard.installed")}
-    </motion.div>
-  );
-
-  let statusAction: React.ReactNode;
-  if (remoteContext) {
-    statusAction = installedBadge;
-  } else if (skill.installed) {
-    if (skill.update_available && !isLocalSkill) {
-      statusAction = (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 px-2.5 text-xs font-medium bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/35 hover:bg-amber-500/22 hover:border-amber-500/50 hover:text-amber-800 dark:hover:text-amber-200 shadow-xs cursor-pointer transition-all active:scale-[0.98]"
-          disabled={updating}
-          onClick={(e) => {
-            e.stopPropagation();
-            void onUpdate?.(skill.name);
-          }}
-          onMouseDown={(e) => {
-            e.stopPropagation();
-          }}
-        >
-          {updating ? (
-            <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin shrink-0" />
-          ) : (
-            <ArrowUpCircle className="w-3.5 h-3.5 mr-1 shrink-0 text-amber-600 dark:text-amber-400" />
-          )}
-          {updating ? t("common.updating", { defaultValue: "Updating..." }) : t("common.update")}
-        </Button>
-      );
-    } else {
-      statusAction = installedBadge;
-    }
-  } else if (installing) {
+  let statusAction: React.ReactNode = null;
+  if (upstreamChange?.kind === "removed" && upstreamChange.successor) {
+    const successor = upstreamChange.successor;
     statusAction = (
-      <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs font-medium pointer-events-none" disabled>
-        <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+      <Button
+        size="xs"
+        variant="ghost"
+        className={cn(
+          "group/migrate relative h-6 max-w-[11rem] px-2.5 rounded-full text-xs font-semibold tracking-tight transition-all duration-200 cursor-pointer shadow-2xs select-none",
+          "bg-violet-500/15 text-violet-300 border border-violet-500/35",
+          "paper:bg-violet-500/10 paper:text-violet-800 paper:border-violet-500/30",
+          "hover:bg-violet-500/25 hover:text-violet-100 hover:border-violet-500/60 hover:-translate-y-0.5",
+          "paper:hover:bg-violet-500/20 paper:hover:text-violet-950 paper:hover:border-violet-500/50",
+          "active:translate-y-0 active:scale-95 focus-visible:ring-2 focus-visible:ring-violet-500/40",
+          migrating && "opacity-75 cursor-not-allowed pointer-events-none",
+        )}
+        disabled={migrating}
+        title={t("skillCard.upstreamRenamed", { name: successor.skill_id })}
+        onClick={(e) => {
+          stopCard(e);
+          onMigrate?.(skill.name);
+        }}
+        onMouseDown={stopCard}
+      >
+        {migrating ? (
+          <Loader2 className="w-3 h-3 mr-1 animate-spin shrink-0" />
+        ) : (
+          <ArrowRightLeft className="w-3 h-3 mr-1 shrink-0 transition-transform duration-200 group-hover/migrate:translate-x-0.5" />
+        )}
+        <span className="truncate">
+          {migrating ? t("skillCard.migrating") : t("skillCard.migrate", { name: successor.skill_id })}
+        </span>
+      </Button>
+    );
+  } else if (upstreamChange?.kind === "removed") {
+    statusAction = (
+      <Button
+        size="xs"
+        variant="ghost"
+        className={cn(
+          "relative h-6 px-2.5 rounded-full text-xs font-semibold tracking-tight transition-all duration-200 cursor-pointer shadow-2xs select-none",
+          "bg-rose-500/15 text-rose-300 border border-rose-500/35",
+          "paper:bg-rose-500/10 paper:text-rose-800 paper:border-rose-500/30",
+          "hover:bg-rose-500/25 hover:text-rose-100 hover:border-rose-500/60 hover:-translate-y-0.5",
+          "paper:hover:bg-rose-500/20 paper:hover:text-rose-950 paper:hover:border-rose-500/50",
+          "active:translate-y-0 active:scale-95 focus-visible:ring-2 focus-visible:ring-rose-500/40",
+        )}
+        title={t("skillCard.resolveRemoved")}
+        onClick={(e) => {
+          stopCard(e);
+          onResolveRemoved?.(skill.name);
+        }}
+        onMouseDown={stopCard}
+      >
+        <AlertTriangle className="w-3 h-3 mr-1 shrink-0" />
+        <span>{t("skillCard.upstreamRemoved")}</span>
+      </Button>
+    );
+  } else if (!isRemoteCard && skill.update_available && !isLocalSkill) {
+    statusAction = (
+      <Button
+        size="xs"
+        variant="ghost"
+        className={cn(
+          "group/update relative h-6 px-2.5 rounded-full text-xs font-semibold tracking-tight transition-all duration-200 cursor-pointer shadow-2xs select-none",
+          "bg-amber-500/15 text-amber-300 border border-amber-500/35",
+          "paper:bg-amber-500/10 paper:text-amber-800 paper:border-amber-500/30",
+          "hover:bg-amber-500/25 hover:text-amber-100 hover:border-amber-500/60 hover:shadow-[0_2px_10px_-2px_rgba(245,158,11,0.4)] hover:-translate-y-0.5",
+          "paper:hover:bg-amber-500/20 paper:hover:text-amber-950 paper:hover:border-amber-500/50 paper:hover:shadow-[0_2px_8px_-2px_rgba(217,119,6,0.25)]",
+          "active:translate-y-0 active:scale-95",
+          "focus-visible:ring-2 focus-visible:ring-amber-500/40",
+          updating && "opacity-75 cursor-not-allowed pointer-events-none",
+        )}
+        disabled={updating}
+        onClick={(e) => {
+          stopCard(e);
+          void onUpdate?.(skill.name);
+        }}
+        onMouseDown={stopCard}
+      >
+        {updating ? (
+          <Loader2 className="w-3 h-3 mr-1 animate-spin shrink-0 text-amber-400 paper:text-amber-700" />
+        ) : (
+          <span className="relative flex items-center justify-center mr-1">
+            <ArrowUpCircle className="w-3 h-3 shrink-0 text-amber-400 paper:text-amber-600 transition-transform duration-200 group-hover/update:-translate-y-0.5" />
+            <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+            </span>
+          </span>
+        )}
+        <span>{updating ? t("common.updating", { defaultValue: "Updating..." }) : t("common.update")}</span>
+      </Button>
+    );
+  } else if (!isRemoteCard && !skill.installed && installing) {
+    statusAction = (
+      <Button size="sm" variant="outline" className="h-6 px-2 text-xs font-medium pointer-events-none" disabled>
+        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
         {t("common.installing")}
       </Button>
     );
-  } else {
+  } else if (!isRemoteCard && !skill.installed) {
     statusAction = (
       <Button
         size="sm"
         variant="default"
-        className="h-7 px-2.5 text-xs font-medium"
+        className="h-6 px-2.5 text-xs font-medium"
         onClick={(e) => {
-          e.stopPropagation();
+          stopCard(e);
           onInstall?.(skill.git_url, skill.name);
         }}
       >
-        <Download className="w-3 h-3 mr-1.5" />
+        <Download className="w-3 h-3 mr-1" />
         {t("common.install")}
       </Button>
     );
+  } else if (!isLibrary && skill.installed) {
+    statusAction = <span className="text-xs text-foreground/60 select-none">{t("skillCard.installed")}</span>;
   }
 
+  const sourceBadge = (() => {
+    if (isRemoteCard) return null;
+    if (isLocalSkill) {
+      return (
+        <button
+          type="button"
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              await tauriInvoke("open_skill_folder", { name: skill.name });
+            } catch (err) {
+              if (import.meta.env.DEV) console.error("Failed to open local skill folder:", err);
+            }
+          }}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 hover:border-emerald-500/50 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors cursor-pointer group/local shadow-2xs"
+          title={t("skillCard.openLocalDir", { label: t("toolbar.local") })}
+        >
+          <HardDrive className="w-2.5 h-2.5 group-hover/local:scale-110 transition-transform" />
+          <span className="group-hover/local:underline">{t("toolbar.local")}</span>
+        </button>
+      );
+    }
+    if (skill.source && skill.source !== "remote") {
+      const repoUrl =
+        skill.git_url && skill.git_url.startsWith("http") ? skill.git_url : `https://github.com/${skill.source}`;
+
+      return (
+        <a
+          href={repoUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleExternalAnchorClick(e, repoUrl);
+          }}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-muted/80 text-foreground/80 border border-border/70 truncate max-w-[180px] hover:bg-muted hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer group/repo shadow-2xs"
+          title={t("skillCard.openRepo", { source: skill.source })}
+        >
+          <GitBranch className="w-2.5 h-2.5 shrink-0 opacity-70 group-hover/repo:text-primary transition-colors" />
+          <span className="truncate group-hover/repo:underline">{skill.source}</span>
+        </a>
+      );
+    }
+    if (skill.author) {
+      const authorUrl = `https://github.com/${skill.author.replace(/^@/, "")}`;
+      return (
+        <a
+          href={authorUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleExternalAnchorClick(e, authorUrl);
+          }}
+          className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-muted/70 text-foreground/75 border border-border/60 hover:bg-muted hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer group/author shadow-2xs"
+          title={t("skillCard.openAuthor", { author: skill.author })}
+        >
+          <span className="group-hover/author:underline">@{skill.author}</span>
+        </a>
+      );
+    }
+    return null;
+  })();
+
+  const targetableProfiles = profiles ? selectTargetableAgentProfiles(profiles) : [];
+
+  let agentRail: React.ReactNode = null;
+  if (remoteContext) {
+    agentRail = (
+      <button
+        type="button"
+        onClick={(e) => {
+          stopCard(e);
+          remoteContext.onAgentClick?.();
+        }}
+        disabled={!remoteContext.onAgentClick}
+        aria-pressed={remoteContext.agentActive}
+        title={remoteContext.agentProfile.display_name}
+        className={cn(
+          "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+          remoteContext.onAgentClick && "cursor-pointer",
+          remoteContext.agentActive
+            ? "border-primary/60 bg-primary/25 shadow-sm"
+            : "border-primary/40 bg-primary/10 hover:bg-primary/20",
+        )}
+      >
+        <AgentIcon
+          profile={remoteContext.agentProfile}
+          className={cn(agentIconCls(remoteContext.agentProfile.icon, "w-4 h-4"), "drop-shadow-sm")}
+        />
+      </button>
+    );
+  } else if (onToggleAgent && targetableProfiles.length > 0) {
+    agentRail = (
+      <AgentTargetCarousel
+        items={targetableProfiles.map((profile) => {
+          const linked = skill.agent_links?.includes(profile.display_name) ?? false;
+          return {
+            id: profile.id,
+            profile,
+            selected: linked,
+            pending: pendingAgentToggleKeys?.has(`${skill.name}::${profile.id}`) ?? false,
+            title: `${profile.display_name} (${t(linked ? "skillCard.remove" : "skillCard.add")})`,
+          };
+        })}
+        onToggle={({ profile, selected }) => {
+          onToggleAgent(skill.name, profile.id, selected !== true, profile.display_name);
+        }}
+      />
+    );
+  }
+
+  const stars =
+    !isLibrary && skill.stars > 0 ? (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-500 dark:text-amber-400 tabular-nums">
+        <Star className="w-3 h-3 fill-amber-500/30" />
+        {formatInstalls(skill.stars)}
+      </span>
+    ) : null;
+
+  const remoteSize = remoteContext?.sizeLabel ? (
+    <span className="text-[11px] font-semibold text-muted-foreground tabular-nums">{remoteContext.sizeLabel}</span>
+  ) : null;
+
+  const descText = skill.localized_description || skill.description || t("skillCard.noDescription");
+
   return (
-    <Wrapper {...wrapperProps} className="h-full">
-      <CardTemplate
-        className={cn("cursor-pointer group", compact && "p-2")}
-        selected={selected}
-        onClick={() => onClick(skill)}
-        topLeftSlot={rankBadge}
-        bottomLeftSlot={null}
-        topRightSlot={statusAction}
-        headerClassName={cn(skill.rank ? "pl-12" : undefined, "pr-24")}
-        header={
-          <div className="flex items-center gap-2.5">
+    <div
+      onClick={() => onClick(skill)}
+      className={cn(
+        "group relative h-full flex flex-col justify-between rounded-[20px] border border-border/80 bg-card/70 backdrop-blur-md cursor-pointer transition-all duration-200 overflow-hidden",
+        "hover:bg-card-hover hover:border-primary/50 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_var(--color-shadow)]",
+        "border-t border-t-white/20 paper:border-t-black/10",
+        selected &&
+          "ring-2 ring-primary border-primary bg-primary/10 shadow-[0_0_24px_-4px_rgba(var(--color-primary-rgb),0.4)]",
+        compact && "p-2",
+      )}
+    >
+      {/* Top Card Body */}
+      <div className="p-3.5 pb-2 flex-1 flex flex-col gap-2">
+        {/* Header Row: Checkbox + Avatar + Title + Status */}
+        <div className="flex items-start gap-2.5 min-w-0">
+          {/* Avatar with integrated selection checkbox */}
+          <div className="relative shrink-0 group/avatar">
+            <SkillAvatar
+              skill={skill}
+              size="md"
+              className={cn(
+                selectable && "cursor-pointer",
+                selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+              )}
+            />
             {selectable ? (
               <button
+                type="button"
                 onClick={handleCheckboxClick}
+                aria-pressed={selected}
+                aria-label={skill.name}
                 className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors cursor-pointer",
+                  "absolute inset-0 flex items-center justify-center rounded-xl transition-all duration-150 cursor-pointer",
                   selected
-                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                    : "bg-primary/10 text-primary hover:bg-primary/20",
+                    ? "bg-primary text-primary-foreground opacity-100 shadow-xs"
+                    : "bg-background/60 backdrop-blur-xs text-foreground/80 opacity-0 group-hover:opacity-100 hover:bg-background/80 hover:text-primary",
                 )}
               >
-                {selected ? <Check className="w-4 h-4" /> : <GitBranch className="w-4 h-4" />}
+                {selected ? (
+                  <Check className="h-4 w-4 stroke-[3]" />
+                ) : (
+                  <div className="w-4 h-4 rounded-md border border-foreground/40 hover:border-primary flex items-center justify-center bg-background/50">
+                    <Check className="h-3 w-3 opacity-0 hover:opacity-70 stroke-[2.5]" />
+                  </div>
+                )}
               </button>
-            ) : (
-              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                <GitBranch className="w-4 h-4 text-primary" />
-              </div>
-            )}
-            <div className="min-w-0">
-              <CardTitle className="truncate ss-card-title">{skill.name}</CardTitle>
-
-              {!isRemoteCard && isLocalSkill && <span className="ss-card-meta">{t("toolbar.local")}</span>}
-              {!isRemoteCard && !isLocalSkill && skill.source && skill.source !== "remote" && (
-                <span className="ss-card-meta" title={skill.source}>
-                  {skill.source}
-                </span>
-              )}
-              {!isRemoteCard && !isLocalSkill && skill.source !== "remote" && !skill.source && skill.author && (
-                <span className="ss-card-meta">{skill.author}</span>
-              )}
-            </div>
+            ) : null}
           </div>
-        }
-        bodyClassName="flex-1"
-        body={
-          <CardDescription className="ss-card-desc">
-            {skill.localized_description || skill.description || t("skillCard.noDescription")}
-          </CardDescription>
-        }
-        footerClassName="ss-card-footer flex items-center justify-between mt-auto rounded-b-xl"
-        footer={
-          <>
-            <div className="flex items-center gap-2">
-              {remoteContext?.sizeLabel ? (
-                <span className="text-xs font-medium text-muted-foreground tabular-nums">
-                  {remoteContext.sizeLabel}
+
+          {/* Title & Badge */}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {!isLibrary && skill.rank && skill.rank <= 100 ? (
+                <span className="text-[10px] font-bold text-amber-500 px-1 py-0.2 rounded bg-amber-500/15 border border-amber-500/30 tabular-nums shrink-0">
+                  #{skill.rank}
                 </span>
               ) : null}
-              {!isRemoteCard && skill.stars > 0 && (
-                <div className="flex items-center gap-1">
-                  <Download className="w-3.5 h-3.5 text-primary/60" />
-                  <span className="text-xs font-medium text-muted-foreground tabular-nums">
-                    {formatInstalls(skill.stars)}
-                  </span>
-                </div>
-              )}
-
-              {!isRemoteCard && cat && (
-                <Badge variant={cat.variant} className="text-micro px-1.5 py-0 h-4 font-medium opacity-90">
-                  {cat.label}
-                </Badge>
-              )}
+              <h3 className="text-sm font-bold tracking-tight text-foreground truncate group-hover:text-primary transition-colors">
+                {skill.name}
+              </h3>
             </div>
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">{sourceBadge}</div>
+          </div>
 
-            <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">
-              {remoteContext ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    remoteContext.onAgentClick?.();
-                  }}
-                  disabled={!remoteContext.onAgentClick}
-                  aria-pressed={remoteContext.agentActive}
-                  title={remoteContext.agentProfile.display_name}
-                  className={cn(
-                    "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-                    remoteContext.onAgentClick && "cursor-pointer",
-                    remoteContext.agentActive
-                      ? "border-primary/60 bg-primary/25 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)]"
-                      : "border-primary/40 bg-primary/10 hover:bg-primary/20",
-                  )}
-                >
-                  <AgentIcon
-                    profile={remoteContext.agentProfile}
-                    className={cn(agentIconCls(remoteContext.agentProfile.icon, "w-4 h-4"), "drop-shadow-sm")}
-                  />
-                </button>
-              ) : profiles && onToggleAgent ? (
-                <AgentTargetCarousel
-                  items={profiles.map((profile) => {
-                    const selected = skill.agent_links?.includes(profile.display_name) ?? false;
-                    return {
-                      id: profile.id,
-                      profile,
-                      selected,
-                      pending: pendingAgentToggleKeys?.has(`${skill.name}::${profile.id}`) ?? false,
-                      title: `${profile.display_name} (${t(selected ? "skillCard.remove" : "skillCard.add")})`,
-                    };
-                  })}
-                  onToggle={({ profile, selected }) => {
-                    onToggleAgent(skill.name, profile.id, selected !== true, profile.display_name);
-                  }}
-                />
-              ) : skill.source ? (
-                <span
-                  className="text-micro text-muted-foreground/60 font-mono flex min-w-0 items-center gap-1"
-                  title="skills.sh"
-                >
-                  <ExternalLink className="w-3 h-3 shrink-0" />
-                  <span className="truncate">skills.sh</span>
-                </span>
-              ) : (
-                skill.agent_links &&
-                skill.agent_links.length > 0 &&
-                skill.agent_links.map((agent) => (
-                  <Badge
-                    key={agent}
-                    variant="outline"
-                    className="text-micro px-1.5 py-0 h-4 leading-none font-normal text-muted-foreground shadow-sm"
-                  >
-                    {agent}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </>
-        }
-      />
-    </Wrapper>
+          {/* Action / Install / Update Slot */}
+          {statusAction && <div className="shrink-0">{statusAction}</div>}
+        </div>
+
+        {/* Description */}
+        <p className="text-xs text-muted-foreground/90 line-clamp-2 leading-relaxed mt-0.5">{descText}</p>
+      </div>
+
+      {/* Footer / Agent Target Rail */}
+      {(stars || remoteSize || agentRail) && (
+        <div className="px-3.5 py-2 border-t border-border/40 bg-muted/30 flex items-center justify-between min-h-[42px] gap-2 rounded-b-[20px]">
+          <div className="flex items-center gap-2 shrink-0">
+            {remoteSize}
+            {stars}
+          </div>
+          <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">{agentRail}</div>
+        </div>
+      )}
+    </div>
   );
 }
 

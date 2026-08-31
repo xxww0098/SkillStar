@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Download,
   GitFork,
+  ListFilter,
   Loader2,
   RefreshCw,
   Search,
@@ -93,6 +94,10 @@ interface ToolbarProps {
   onReinstallRepoSource?: (source: string) => void;
   /** Source currently being reinstalled, if any. */
   reinstallingRepoSource?: string | null;
+  /** Updatable skills inside the current search/source filters — the number on
+   *  the filter chip, so it can never promise more than the filter will show.
+   *  Falls back to `pendingUpdateCount` when the caller has no filters. */
+  filteredUpdateCount?: number;
   /** Whether "only updates" filter is active */
   onlyUpdatesFilter?: boolean;
   /** Callback when "only updates" filter changes */
@@ -137,6 +142,7 @@ export function Toolbar({
   onRemoveRepoSource,
   onReinstallRepoSource,
   reinstallingRepoSource,
+  filteredUpdateCount,
   onlyUpdatesFilter,
   onOnlyUpdatesFilterChange,
 }: ToolbarProps) {
@@ -146,6 +152,7 @@ export function Toolbar({
 
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
   const hasPendingUpdates = (pendingUpdateCount ?? 0) > 0;
+  const chipUpdateCount = filteredUpdateCount ?? pendingUpdateCount ?? 0;
 
   const [cooldown, setCooldown] = useState(false);
   const [refreshState, setRefreshState] = useState<"idle" | "requested" | "refreshing">("idle");
@@ -235,11 +242,11 @@ export function Toolbar({
           type="button"
           onClick={() => setSpotlightOpen(true)}
           className={cn(
-            "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap transition-all duration-200 focus-ring shadow-sm",
+            "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap transition-all duration-150 focus-ring select-none",
             hasActiveSearch ? "pl-2.5 pr-1.5 max-w-[11rem]" : "px-2.5",
             hasActiveSearch
-              ? "border-primary/50 bg-primary/12 text-primary hover:bg-primary/16"
-              : "border-border bg-background text-foreground/75 hover:text-foreground hover:bg-muted/60 hover:border-border",
+              ? "border-primary bg-primary/20 text-primary shadow-xs ring-1 ring-primary/30"
+              : "border-border/80 bg-background/60 text-foreground/80 hover:text-foreground hover:bg-muted/70 hover:border-primary/40 shadow-2xs",
           )}
           title={`${searchPlaceholder ?? t("toolbar.searchPlaceholder")} (⌘F)`}
           aria-label={searchPlaceholder ?? t("toolbar.searchPlaceholder")}
@@ -249,7 +256,7 @@ export function Toolbar({
           <Search className="w-3.5 h-3.5 shrink-0" />
           {hasActiveSearch ? (
             <>
-              <span className="min-w-0 truncate max-w-[5.5rem]">{searchQuery}</span>
+              <span className="min-w-0 truncate max-w-[5.5rem] font-semibold">{searchQuery}</span>
               <span
                 role="button"
                 tabIndex={0}
@@ -271,7 +278,7 @@ export function Toolbar({
               </span>
             </>
           ) : (
-            <kbd className="hidden sm:inline-flex items-center rounded-md border border-border bg-muted px-1.5 py-px font-mono text-[10px] font-semibold text-foreground/70">
+            <kbd className="hidden sm:inline-flex items-center rounded-md border border-border/80 bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] font-bold text-foreground">
               ⌘F
             </kbd>
           )}
@@ -302,9 +309,9 @@ export function Toolbar({
       {onAiPick && (
         <button
           onClick={onAiPick}
-          className="flex items-center h-8 px-3 rounded-lg border border-ai-border bg-transparent text-xs font-medium text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover hover:border-ai-border-hover transition duration-300 cursor-pointer shadow-[0_0_8px_var(--color-ai-shadow)] gap-1.5 whitespace-nowrap shrink-0 focus-ring"
+          className="flex items-center h-8 px-3 rounded-lg border border-ai-border/60 bg-ai-bg-hover/40 text-xs font-semibold text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover/80 hover:border-ai-border transition duration-200 cursor-pointer shadow-[0_0_10px_var(--color-ai-shadow)] gap-1.5 whitespace-nowrap shrink-0 focus-ring"
         >
-          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+          <Sparkles className="w-3.5 h-3.5 shrink-0 text-ai-text" />
           {t("toolbar.aiPick")}
         </button>
       )}
@@ -320,11 +327,11 @@ export function Toolbar({
           <Popover.Trigger asChild>
             <button
               className={cn(
-                "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring pl-2.5",
+                "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-150 focus-ring pl-2.5",
                 originActive ? "pr-1.5" : "pr-2",
                 originActive
-                  ? "border-primary/40 bg-primary/8 text-primary hover:bg-primary/12 max-w-[240px]"
-                  : "border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-muted-foreground hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
+                  ? "border-primary/60 bg-primary/15 text-primary font-semibold hover:bg-primary/20 max-w-[240px] shadow-2xs ring-1 ring-primary/25"
+                  : "border-border/80 bg-background/60 shadow-2xs backdrop-blur-md text-foreground/80 hover:text-foreground hover:bg-accent/15 hover:border-primary/40",
               )}
               title={t("toolbar.source")}
               aria-label={t("toolbar.source")}
@@ -336,8 +343,8 @@ export function Toolbar({
                   <span className="w-px h-3.5 shrink-0 bg-border/80" aria-hidden />
                   <span
                     className={cn(
-                      "flex items-center gap-1 tabular-nums shrink-0",
-                      originActive ? "text-primary/85" : "text-foreground/80",
+                      "flex items-center gap-1 tabular-nums shrink-0 font-bold",
+                      originActive ? "text-primary" : "text-foreground",
                     )}
                   >
                     {countText}
@@ -561,7 +568,7 @@ export function Toolbar({
 
       {/* Sort options (Marketplace only) */}
       {sortOptions.length > 0 && (
-        <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm shrink-0">
+        <div className="flex items-center gap-0.5 border border-border/80 rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/50 shadow-2xs shrink-0">
           {sortOptions.map((opt) => {
             const isActive = sortBy === opt.value;
             return (
@@ -572,9 +579,9 @@ export function Toolbar({
                 }}
                 aria-pressed={isActive}
                 className={cn(
-                  "relative h-full px-3 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring",
+                  "relative h-full px-3 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring select-none",
                   isActive
-                    ? "text-accent-foreground"
+                    ? "text-accent-foreground font-semibold"
                     : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
                 )}
               >
@@ -593,32 +600,33 @@ export function Toolbar({
 
       {/* Updates filter & action group */}
       {(hasPendingUpdates || onlyUpdatesFilter) && (
-        <div className="flex items-center h-8 rounded-lg border border-amber-500/35 bg-background/50 backdrop-blur-md shadow-xs overflow-hidden shrink-0">
+        <div className="flex items-center h-8 rounded-lg border border-amber-500/45 bg-background/70 backdrop-blur-md shadow-xs overflow-hidden shrink-0">
           {/* Filter toggle */}
           {onOnlyUpdatesFilterChange ? (
             <button
               type="button"
               onClick={() => onOnlyUpdatesFilterChange(!onlyUpdatesFilter)}
               aria-pressed={onlyUpdatesFilter}
+              aria-label={t("toolbar.updateFilterLabel", { count: chipUpdateCount })}
               title={
                 onlyUpdatesFilter
                   ? t("toolbar.showAllSkills", { defaultValue: "Show all skills" })
                   : t("toolbar.filterUpdatesHint", { defaultValue: "Filter skills with updates" })
               }
               className={cn(
-                "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium cursor-pointer transition-colors focus-ring whitespace-nowrap",
+                "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium cursor-pointer transition-colors focus-ring whitespace-nowrap select-none",
                 onlyUpdatesFilter
-                  ? "bg-amber-500 text-white font-semibold shadow-xs"
-                  : "bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20",
+                  ? "bg-amber-500 text-amber-950 font-bold shadow-xs"
+                  : "bg-amber-500/15 text-amber-700 dark:text-amber-300 font-semibold hover:bg-amber-500/25",
               )}
             >
-              <ArrowUpCircle
+              <ListFilter
                 className={cn(
                   "w-3.5 h-3.5 shrink-0",
-                  onlyUpdatesFilter ? "text-white" : "text-amber-600 dark:text-amber-400",
+                  onlyUpdatesFilter ? "text-amber-950" : "text-amber-600 dark:text-amber-400",
                 )}
               />
-              <span>{t("toolbar.updateFilterLabel", { count: pendingUpdateCount ?? 0 })}</span>
+              <span className="tabular-nums font-bold">{chipUpdateCount}</span>
               {onlyUpdatesFilter && <X className="w-3 h-3 ml-0.5 opacity-85 hover:opacity-100" />}
             </button>
           ) : null}
@@ -626,21 +634,21 @@ export function Toolbar({
           {/* Update all action */}
           {onUpdateAll && hasPendingUpdates && (
             <>
-              {onOnlyUpdatesFilterChange && <div className="w-px h-4 bg-amber-500/30 shrink-0" />}
+              {onOnlyUpdatesFilterChange && <div className="w-px h-4 bg-amber-500/40 shrink-0" />}
               <button
                 type="button"
                 onClick={onUpdateAll}
                 disabled={isUpdatingAll}
                 title={t("toolbar.updateAllAction", { defaultValue: "Update all" })}
                 className={cn(
-                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium bg-amber-500/15 text-amber-800 dark:text-amber-200 hover:bg-amber-500/25 transition-colors cursor-pointer focus-ring whitespace-nowrap",
+                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-semibold bg-amber-500/20 text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors cursor-pointer focus-ring whitespace-nowrap select-none",
                   isUpdatingAll && "opacity-60 cursor-not-allowed",
                 )}
               >
                 {isUpdatingAll ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
                 ) : (
-                  <RefreshCw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <ArrowUpCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 )}
                 <span>{isUpdatingAll ? t("common.updating") : t("toolbar.updateAllAction")}</span>
               </button>

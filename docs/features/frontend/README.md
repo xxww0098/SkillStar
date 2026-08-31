@@ -49,6 +49,9 @@
 - 外链元素使用 `ExternalAnchor`；按钮/程序化跳转使用 `openExternalUrl`，避免业务页面直接写 `<a target="_blank">`。
 - Marketplace 与 MCP 共用的 Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；两个 feature 都只能依赖该 shared interface。
 - 动态颜色无法用 utility 表达时才使用 inline style。
+- 侧边栏导航的选中态由带 `layoutId` 的 motion 元素承载，切换时弹簧滑动；收起态改为静态高亮，不做滑动。新增导航区沿用这条约定，不要再写第三种选中态实现。
+- Skill / MCP 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。
+- 卡片列表（`.ss-cards-grid` / `.ss-cards-list`）第 13 项起由 CSS `content-visibility: auto` 跳过屏幕外的样式、布局和绘制；卡片高度由内容决定，`SkillGrid` 量出首张卡片写入 `--ss-card-h` 供 `contain-intrinsic-size` 占位。新增卡片列表沿用这两个类，不要自己写 JS 虚拟滚动。
 
 ## Agent 手动激活投影
 
@@ -94,5 +97,27 @@ bash scripts/internal/check_ts_orphan_modules.sh
 ```
 
 新增或修改文案时同步 `src/i18n/locales/en.json` 与 `zh-CN.json`。
+
+## 文案术语
+
+同一概念只用一个名词和动词。界面不靠文学同义替换换词。
+
+| 概念 | EN | ZH |
+| --- | --- | --- |
+| 已安装或可安装的技能单元 | Card | 技能 |
+| 技能分组 | Deck | 卡组 |
+| 技能目录 | Marketplace | 市场 |
+| MCP 目录 | Catalog | 目录 |
+| Agent CLI / 桌面端 | Agent | 智能体 |
+| 模型供应商 | Provider | 供应商 |
+| 用量账号 | Subscription | 订阅 |
+| GitHub 共享频道 | Channel | 频道 |
+| 本机技能库 | Hub | Hub |
+| 从库中移除技能 | Uninstall | 卸载 |
+| 销毁卡组 / 订阅 / 供应商 / 项目登记 | Delete | 删除 |
+| 写入项目 | Deploy | 部署 |
+| 对某个 Agent 启用 | Link | 链接 |
+
+文件格式、协议和仓库路径仍用 `SKILL.md`、`skills/`。破坏性按钮写出对象和后果，不用 Yes / OK / Confirm。错误先说发生了什么，再说怎么恢复。
 
 `check_ts_orphan_modules.sh` 从 `src/main.tsx` 与 `src/pages/` 出发做可达性分析，`src/features/` 下的孤儿文件直接失败。注意 `check_i18n_hardcoded.sh` 只判定 CJK 字面量，裸英文文案不在它的覆盖范围内，需要人工走查。

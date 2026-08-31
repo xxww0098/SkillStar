@@ -41,7 +41,6 @@ pub fn migrate_legacy_paths() {
     );
     migrate_dir(&root.join("projects"), &paths::state_dir().join("projects"));
     migrate_file(&root.join("groups.json"), &paths::groups_path());
-    migrate_file(&root.join("packs.json"), &paths::packs_path());
     migrate_file(&root.join("repo_history.json"), &paths::repo_history_path());
     let legacy_hub = root.join(".agents");
     if legacy_hub.is_dir() {

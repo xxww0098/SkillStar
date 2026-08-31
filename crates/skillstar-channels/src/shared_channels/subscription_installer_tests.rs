@@ -86,7 +86,9 @@ fn install_fixture() -> (InstallSandbox, ChannelInstallReceipt, PathBuf, PathBuf
     let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("writer");
     std::fs::create_dir_all(hub_skill.parent().unwrap()).unwrap();
     skillstar_core::infra::fs_ops::create_symlink(&source, &hub_skill).unwrap();
-    let hash = skillstar_skills::content::snapshot("writer").unwrap().content_hash;
+    let hash = skillstar_skills::content::snapshot("writer")
+        .unwrap()
+        .content_hash;
     let mut lockfile = skillstar_skills::lockfile::Lockfile::default();
     lockfile.upsert(skillstar_skills::lockfile::LockEntry {
         name: "writer".into(),
@@ -98,7 +100,9 @@ fn install_fixture() -> (InstallSandbox, ChannelInstallReceipt, PathBuf, PathBuf
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: Some("skills/writer".into()),
     });
-    lockfile.save(&skillstar_skills::lockfile::lockfile_path()).unwrap();
+    lockfile
+        .save(&skillstar_skills::lockfile::lockfile_path())
+        .unwrap();
 
     let receipt = ChannelInstallReceipt {
         skills: vec![ChannelSubscribedSkill {
@@ -124,8 +128,9 @@ fn install_fixture() -> (InstallSandbox, ChannelInstallReceipt, PathBuf, PathBuf
 async fn metadata_failure_preserves_content_edited_during_commit() {
     let _guard = crate::lock_test_env_async().await;
     let (_sandbox, receipt, _repo, hub_skill) = install_fixture();
-    let installer =
-        GitChannelSubscriptionInstaller::new(skillstar_skills::git_skill::GitSkillFacade::from_keyring());
+    let installer = GitChannelSubscriptionInstaller::new(
+        skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+    );
     let edit_path = hub_skill.join("SKILL.md");
 
     let error = installer
@@ -166,8 +171,9 @@ async fn metadata_failure_preserves_content_edited_during_commit() {
 async fn metadata_failure_rolls_back_unchanged_install_without_relocking() {
     let _guard = crate::lock_test_env_async().await;
     let (_sandbox, receipt, _repo, hub_skill) = install_fixture();
-    let installer =
-        GitChannelSubscriptionInstaller::new(skillstar_skills::git_skill::GitSkillFacade::from_keyring());
+    let installer = GitChannelSubscriptionInstaller::new(
+        skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+    );
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
@@ -205,8 +211,9 @@ async fn final_verification_rejects_a_checkout_that_moved_to_another_commit() {
     git(&repo, &["commit", "-m", "move head"]);
     let committed = Arc::new(AtomicBool::new(false));
     let commit_called = committed.clone();
-    let installer =
-        GitChannelSubscriptionInstaller::new(skillstar_skills::git_skill::GitSkillFacade::from_keyring());
+    let installer = GitChannelSubscriptionInstaller::new(
+        skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+    );
 
     let error = installer
         .verify_and_commit_install(
@@ -301,8 +308,9 @@ async fn production_installer_verifies_the_exact_release_checkout() {
             status: super::ChannelSkillReleaseStatus::Added,
         }],
     };
-    let installer =
-        GitChannelSubscriptionInstaller::new(skillstar_skills::git_skill::GitSkillFacade::from_keyring());
+    let installer = GitChannelSubscriptionInstaller::new(
+        skillstar_skills::git_skill::GitSkillFacade::from_file_store(),
+    );
 
     installer
         .verify_release_content(&repository, &manifest)

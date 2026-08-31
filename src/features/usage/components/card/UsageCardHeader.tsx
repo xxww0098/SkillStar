@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { BrandTheme } from "../../lib/brandThemes";
 import type { CliAccountBadge } from "../../lib/cliCustody";
-import type { BillingCycle } from "../../types";
 import { PlanBadge } from "../PlanBadge";
 import { hasBrandIcon, ProviderLogo } from "../ProviderLogo";
+import { usageCardSlotClassName } from "./usageCardShell";
 
 export interface UsageCardHeaderProps {
   catalogId: string;
@@ -13,14 +13,11 @@ export interface UsageCardHeaderProps {
   brandColorHex: string;
   theme: BrandTheme;
   planName: string | null;
-  /** Billing type chip: 月付 / 年付 / API Key / 一次性 */
-  billingCycle?: BillingCycle;
   /**
-   * What the CLI is actually doing with this account — shown here so MetaStrip
-   * height stays stable.
+   * What the local tool is actually doing with this account.
    *
-   * Three states, not a boolean: "the CLI is on this account", "the CLI is on
-   * something else", and "the CLI has nobody" are different things to tell a
+   * Three states, not a boolean: "the tool is on this account", "the tool is on
+   * something else", and "the tool has nobody" are different things to tell a
    * user, and the last two used to render identically to "not current".
    */
   cliBadge?: CliAccountBadge;
@@ -28,7 +25,7 @@ export interface UsageCardHeaderProps {
 }
 
 /**
- * Colour is the honest part of the signal: a card the CLI has moved off must
+ * Colour is the honest part of the signal: a card the local tool has moved off must
  * not keep wearing the same green chip a serving card wears.
  */
 const BADGE_STYLES: Record<Exclude<CliAccountBadge, "none">, string> = {
@@ -43,29 +40,33 @@ const BADGE_COPY: Record<Exclude<CliAccountBadge, "none">, { label: string; titl
   missing: { label: "usage.cardCliMissing", title: "usage.cardCliMissingTitle" },
 };
 
-/** Signature brand band — logo chip + title + billing type + CLI state + plan badge + drag handle. */
+/** Brand band — identity, local-tool state, plan, drag. */
 export function UsageCardHeader({
   catalogId,
   displayName,
   brandColorHex,
   theme,
   planName,
-  billingCycle,
   cliBadge = "none",
   onDragHandlePointerDown,
 }: UsageCardHeaderProps) {
   const { t } = useTranslation();
   const brandIcon = hasBrandIcon(catalogId);
-  const billingLabel = billingCycle ? t(`usage.billingCycle_${billingCycle}`) : null;
+  const badgeCopy =
+    catalogId === "antigravity" || catalogId === "cursor"
+      ? {
+          ...BADGE_COPY,
+          diverged: { label: "usage.cardIdeDiverged", title: "usage.cardIdeDivergedTitle" },
+          missing: { label: "usage.cardIdeMissing", title: "usage.cardIdeMissingTitle" },
+        }
+      : BADGE_COPY;
+  const isEmailIdentity = displayName.includes("@");
 
   return (
     <div
-      className="relative overflow-hidden px-4 pt-4 pb-3.5"
+      className={usageCardSlotClassName.headerBand}
       style={{ background: `linear-gradient(135deg, ${theme.header[0]}, ${theme.header[1]})`, color: theme.fg }}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/30" />
-      <div className="pointer-events-none absolute -top-10 -right-8 h-28 w-28 rounded-full bg-white/15 blur-2xl transition-transform duration-500 group-hover:scale-125" />
-
       <div className="relative flex items-start gap-3" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.18)" }}>
         {brandIcon ? (
           // text-zinc-900 fixes mono logos that inherit band white fg on the white chip.
@@ -82,37 +83,33 @@ export function UsageCardHeader({
           />
         )}
         <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 pr-1 text-sm leading-snug font-bold" title={displayName}>
+          <h3
+            className={cn(
+              "min-h-[2.25rem] min-w-0 pr-1 whitespace-normal text-sm leading-snug font-bold",
+              isEmailIdentity && "break-all text-[13px]",
+            )}
+            title={displayName}
+          >
             {displayName}
           </h3>
-          {/* Fixed-height chip row (nowrap). Active badge lives here — not MetaStrip —
-              so becoming "当前" never wraps meta or grows card height. */}
           <div className="mt-1 flex h-[18px] items-center gap-1.5 overflow-hidden">
-            {billingLabel && (
-              <span
-                className="shrink-0 rounded-md bg-black/25 px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide ring-1 ring-white/25 backdrop-blur-[2px]"
-                title={billingLabel}
-              >
-                {billingLabel}
-              </span>
-            )}
             {cliBadge !== "none" && (
               <span
                 className={cn(
-                  "inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide ring-1 backdrop-blur-[2px]",
+                  "inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide ring-1 backdrop-blur-[2px]",
                   BADGE_STYLES[cliBadge],
                 )}
-                title={t(BADGE_COPY[cliBadge].title)}
+                title={t(badgeCopy[cliBadge].title)}
                 data-cli-badge={cliBadge}
               >
                 {cliBadge === "current" ? (
-                  <BadgeCheck className="h-2.5 w-2.5" />
+                  <BadgeCheck className="h-2.5 w-2.5 shrink-0" />
                 ) : cliBadge === "diverged" ? (
-                  <TriangleAlert className="h-2.5 w-2.5" />
+                  <TriangleAlert className="h-2.5 w-2.5 shrink-0" />
                 ) : (
-                  <Unplug className="h-2.5 w-2.5" />
+                  <Unplug className="h-2.5 w-2.5 shrink-0" />
                 )}
-                {t(BADGE_COPY[cliBadge].label)}
+                <span className="truncate">{t(badgeCopy[cliBadge].label)}</span>
               </span>
             )}
           </div>

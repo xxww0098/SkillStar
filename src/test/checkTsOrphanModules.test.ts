@@ -27,17 +27,51 @@ const SCRIPT = path.join(ROOT, "scripts/internal/check_ts_orphan_modules.sh");
 const FIXTURE_DIR = path.join(ROOT, "src/features/models/__orphan_fixture__");
 const PLANTED = path.join(FIXTURE_DIR, "plantedOrphan.ts");
 const PLANTED_REL = path.relative(ROOT, PLANTED);
+// The gate walks every frontend module and synchronously waits for a child
+// process. Bound that child, then give Vitest enough extra time to observe its
+// exit and run afterEach cleanup under a busy full-suite worker.
+const GATE_PROCESS_TIMEOUT_MS = 15_000;
+const GATE_TEST_TIMEOUT_MS = GATE_PROCESS_TIMEOUT_MS + 5_000;
+// Windows may release the child-scanned fixture handles shortly after bash
+// exits. Keep cleanup bounded rather than leaving an orphan for the next test.
+const FIXTURE_CLEANUP_RETRIES = 3;
+const FIXTURE_CLEANUP_RETRY_DELAY_MS = 100;
 
-type Run = { status: number; output: string };
+type Run = {
+  status: number;
+  output: string;
+  timedOut: boolean;
+  signal: string | null;
+};
 
 function runGate(): Run {
   try {
-    const output = execFileSync("bash", [SCRIPT], { cwd: ROOT, encoding: "utf8" });
-    return { status: 0, output };
+    const output = execFileSync("bash", [SCRIPT], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: GATE_PROCESS_TIMEOUT_MS,
+    });
+    return { status: 0, output, timedOut: false, signal: null };
   } catch (err) {
-    const e = err as { status?: number; stdout?: string; stderr?: string };
-    return { status: e.status ?? 1, output: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+    const e = err as {
+      status?: number;
+      stdout?: string;
+      stderr?: string;
+      code?: string;
+      signal?: string | null;
+    };
+    return {
+      status: e.status ?? 1,
+      output: `${e.stdout ?? ""}${e.stderr ?? ""}`,
+      timedOut: e.code === "ETIMEDOUT",
+      signal: e.signal ?? null,
+    };
   }
+}
+
+function expectGateFinished(run: Run) {
+  expect(run.timedOut).toBe(false);
+  expect(run.signal).toBeNull();
 }
 
 function plant(relPath: string, contents: string): string {
@@ -48,47 +82,67 @@ function plant(relPath: string, contents: string): string {
 }
 
 afterEach(() => {
-  rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  rmSync(FIXTURE_DIR, {
+    recursive: true,
+    force: true,
+    maxRetries: FIXTURE_CLEANUP_RETRIES,
+    retryDelay: FIXTURE_CLEANUP_RETRY_DELAY_MS,
+  });
 });
 
 describe("check_ts_orphan_modules.sh", () => {
-  it("passes on the repository as it stands", () => {
-    expect(existsSync(FIXTURE_DIR)).toBe(false);
-    const { status, output } = runGate();
-    expect(output).toContain("0 new orphan module(s)");
-    expect(status).toBe(0);
-  });
+  it(
+    "passes on the repository as it stands",
+    () => {
+      expect(existsSync(FIXTURE_DIR)).toBe(false);
+      const result = runGate();
+      expectGateFinished(result);
+      expect(result.output).toContain("0 new orphan module(s)");
+      expect(result.status).toBe(0);
+    },
+    GATE_TEST_TIMEOUT_MS,
+  );
 
-  it("fails, and names the file, once an unreachable module is planted", () => {
-    plant("plantedOrphan.ts", "export const plantedOrphan = 'nothing imports this';\n");
+  it(
+    "fails, and names the file, once an unreachable module is planted",
+    () => {
+      plant("plantedOrphan.ts", "export const plantedOrphan = 'nothing imports this';\n");
 
-    const { status, output } = runGate();
-    expect(status).toBe(1);
-    expect(output).toContain(`FAIL  ${PLANTED_REL}`);
-    expect(output).toContain("1 new orphan module(s)");
-  });
+      const result = runGate();
+      expectGateFinished(result);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(`FAIL  ${PLANTED_REL}`);
+      expect(result.output).toContain("1 new orphan module(s)");
+    },
+    GATE_TEST_TIMEOUT_MS,
+  );
 
-  it("still fails when the only importer is itself dead, or is a test", () => {
-    plant("plantedOrphan.ts", "export const plantedOrphan = 'imported, but only by the dead';\n");
-    // Transitive death: `CodexSettingsForm` survived review for exactly this
-    // reason — it had an importer, and the importer was dead too.
-    const deadImporter = plant(
-      "deadImporter.ts",
-      "import { plantedOrphan } from './plantedOrphan';\nexport const echo = plantedOrphan;\n",
-    );
-    // Test-only reachability: `ProviderGalleryCard` looked used because its
-    // co-located test imported it. A test is not an entry point.
-    plant(
-      "__tests__/consumer.ts",
-      "import { plantedOrphan } from '../plantedOrphan';\nexport default plantedOrphan;\n",
-    );
+  it(
+    "still fails when the only importer is itself dead, or is a test",
+    () => {
+      plant("plantedOrphan.ts", "export const plantedOrphan = 'imported, but only by the dead';\n");
+      // Transitive death: `CodexSettingsForm` survived review for exactly this
+      // reason — it had an importer, and the importer was dead too.
+      const deadImporter = plant(
+        "deadImporter.ts",
+        "import { plantedOrphan } from './plantedOrphan';\nexport const echo = plantedOrphan;\n",
+      );
+      // Test-only reachability: `ProviderGalleryCard` looked used because its
+      // co-located test imported it. A test is not an entry point.
+      plant(
+        "__tests__/consumer.ts",
+        "import { plantedOrphan } from '../plantedOrphan';\nexport default plantedOrphan;\n",
+      );
 
-    const { status, output } = runGate();
-    expect(status).toBe(1);
-    expect(output).toContain(`FAIL  ${PLANTED_REL}`);
-    expect(output).toContain(`FAIL  ${deadImporter}`);
-    // The test-side file is neither a root nor a reportable orphan.
-    expect(output).not.toContain("__tests__/consumer.ts");
-    expect(output).toContain("2 new orphan module(s)");
-  });
+      const result = runGate();
+      expectGateFinished(result);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(`FAIL  ${PLANTED_REL}`);
+      expect(result.output).toContain(`FAIL  ${deadImporter}`);
+      // The test-side file is neither a root nor a reportable orphan.
+      expect(result.output).not.toContain("__tests__/consumer.ts");
+      expect(result.output).toContain("2 new orphan module(s)");
+    },
+    GATE_TEST_TIMEOUT_MS,
+  );
 });

@@ -33,6 +33,7 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "cline",
     "gemini-cli",
     "zed",
+    "maka",
 ];
 
 /// Legacy Desktop Chat projection retained only so existing SkillStar-managed

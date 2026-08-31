@@ -21,7 +21,10 @@ fn codex_binding_writes_one_table_per_provider_plus_pointer() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.toml");
 
-    let providers = vec![responses_capable("aaaa1111", "alpha"), responses_capable("bbbb2222", "beta")];
+    let providers = vec![
+        responses_capable("aaaa1111", "alpha"),
+        responses_capable("bbbb2222", "beta"),
+    ];
     let binding = AgentBinding {
         entries: vec![entry("aaaa1111", "model-a"), entry("bbbb2222", "model-b")],
         roles: Default::default(),
@@ -247,7 +250,10 @@ fn unsync_removes_all_managed_keys_only() {
     let codex_path = tmp.path().join("config.toml");
     let auth_path = tmp.path().join("auth.json");
 
-    let providers = vec![responses_capable("aaaa1111", "alpha"), responses_capable("bbbb2222", "beta")];
+    let providers = vec![
+        responses_capable("aaaa1111", "alpha"),
+        responses_capable("bbbb2222", "beta"),
+    ];
     let binding = AgentBinding {
         entries: vec![entry("aaaa1111", "model-a"), entry("bbbb2222", "model-b")],
         roles: Default::default(),

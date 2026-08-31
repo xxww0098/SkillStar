@@ -36,7 +36,9 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         // sentence. Legacy rows saved before the catalog narrowed still land
         // here, so they get the instruction rather than a generic
         // "unsupported".
-        "opencode" => Err(crate::UsageError::Fetcher(OPENCODE_OAUTH_UNAVAILABLE.into())),
+        "opencode" => Err(crate::UsageError::Fetcher(
+            OPENCODE_OAUTH_UNAVAILABLE.into(),
+        )),
         other => Err(super::unsupported(other)),
     }
 }

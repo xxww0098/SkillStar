@@ -17,6 +17,7 @@ use skillstar_core::infra::error::AppError;
 use tauri::State;
 use tokio::sync::Mutex;
 
+use skillstar_app::models::agents::AgentDescriptorDto;
 use skillstar_models::AiProviderRef;
 use skillstar_models::ai_provider;
 use skillstar_models::diagnostics::ConnectionTestResult;
@@ -26,7 +27,6 @@ use skillstar_models::providers::{
     self, ModelCatalogFetchResult, ProviderEntryFlat, ProviderPatchFlat, ProvidersStoreV4,
     ToolBinding,
 };
-use skillstar_app::models::agents::AgentDescriptorDto;
 use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 
 // ---------------------------------------------------------------------------

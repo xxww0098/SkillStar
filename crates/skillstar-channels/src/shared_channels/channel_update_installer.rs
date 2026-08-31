@@ -34,8 +34,8 @@ impl ChannelSubscriptionUpdater for GitChannelSubscriptionInstaller {
     async fn verify(&self, receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChannelError> {
         let receipt = receipt.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     update_error(format!("Unable to lock channel verification: {error}"))
                 })?;
             verify_exact_current(&receipt)
@@ -51,8 +51,8 @@ impl ChannelSubscriptionUpdater for GitChannelSubscriptionInstaller {
     ) -> Result<(), SharedChannelError> {
         let receipt = receipt.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     update_error(format!("Unable to lock channel metadata commit: {error}"))
                 })?;
             verify_exact_current(&receipt)?;
@@ -68,8 +68,8 @@ impl ChannelSubscriptionUpdater for GitChannelSubscriptionInstaller {
     ) -> Result<(), SharedChannelError> {
         let receipt = receipt.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard =
-                skillstar_skills::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            let _guard = skillstar_skills::skill_update::acquire_update_transaction_lock()
+                .map_err(|error| {
                     update_error(format!("Unable to lock channel rollback: {error}"))
                 })?;
             rollback_preserving_current(&receipt)
@@ -96,12 +96,13 @@ fn verify_exact_current(receipt: &ChannelSkillUpdateReceipt) -> Result<(), Share
             "The updated Skill checkout moved unexpectedly",
         ));
     }
-    let entry = skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-        .map_err(|error| update_error(format!("Unable to verify updated provenance: {error}")))?
-        .skills
-        .into_iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(&receipt.installed.id))
-        .ok_or_else(|| update_error("The updated Skill provenance is missing"))?;
+    let entry =
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
+            .map_err(|error| update_error(format!("Unable to verify updated provenance: {error}")))?
+            .skills
+            .into_iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case(&receipt.installed.id))
+            .ok_or_else(|| update_error("The updated Skill provenance is missing"))?;
     validate_previous(&receipt.installed, &entry, false)
 }
 
@@ -183,12 +184,13 @@ fn apply_blocking(
         )));
     }
     let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(&request.installed.id);
-    let previous_checkout = skillstar_skills::repo_link::repo_root_of(&hub_path).ok_or_else(|| {
-        update_error(format!(
-            "Skill '{}' is not linked to its managed repository cache",
-            request.installed.id
-        ))
-    })?;
+    let previous_checkout =
+        skillstar_skills::repo_link::repo_root_of(&hub_path).ok_or_else(|| {
+            update_error(format!(
+                "Skill '{}' is not linked to its managed repository cache",
+                request.installed.id
+            ))
+        })?;
     let mut previous_lock_entry =
         skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
             .map_err(|error| update_error(format!("Unable to read Skill provenance: {error}")))?
@@ -198,13 +200,12 @@ fn apply_blocking(
             .map(Ok)
             .unwrap_or_else(|| {
                 if inspection != ChannelUpdateInspection::Clean && request.resolution.is_some() {
-                    skillstar_skills::skill_update::reconstruct_lock_entry(&request.installed.id).map_err(
-                        |error| {
+                    skillstar_skills::skill_update::reconstruct_lock_entry(&request.installed.id)
+                        .map_err(|error| {
                             update_error(format!(
                                 "Unable to reconstruct Skill provenance: {error:#}"
                             ))
-                        },
-                    )
+                        })
                 } else {
                     Err(update_error("The installed Skill provenance is missing"))
                 }
@@ -240,15 +241,19 @@ fn apply_blocking(
             .resolution
             .clone()
             .expect("resolution checked above");
-        if let skillstar_skills::skill_update::LocalDivergenceResolution::Preserve { local_name } = &resolution
+        if let skillstar_skills::skill_update::LocalDivergenceResolution::Preserve { local_name } =
+            &resolution
         {
-            skillstar_skills::local_skill::preserve_installed_copy(&request.installed.id, local_name)
-                .map_err(|error| {
-                    update_error(format!(
-                        "Unable to preserve local changes for '{}': {error:#}",
-                        request.installed.id
-                    ))
-                })?;
+            skillstar_skills::local_skill::preserve_installed_copy(
+                &request.installed.id,
+                local_name,
+            )
+            .map_err(|error| {
+                update_error(format!(
+                    "Unable to preserve local changes for '{}': {error:#}",
+                    request.installed.id
+                ))
+            })?;
         }
         let resolved = skillstar_skills::skill_update::resolve_skill_local_divergence_locked(
             &request.installed.id,
@@ -325,10 +330,10 @@ fn apply_blocking(
     } else {
         repo_dir.join(&request.released.content_root)
     };
-    let target_snapshot = skillstar_skills::content::snapshot_path(&request.released.id, &target_root)
-        .map_err(|_| {
-            rollback_if_resolved(&receipt, resolved_divergence, content_integrity_error())
-        })?;
+    let target_snapshot =
+        skillstar_skills::content::snapshot_path(&request.released.id, &target_root).map_err(
+            |_| rollback_if_resolved(&receipt, resolved_divergence, content_integrity_error()),
+        )?;
     if target_snapshot.content_hash != request.released.content_hash {
         return Err(rollback_if_resolved(
             &receipt,
@@ -383,9 +388,10 @@ fn subscribed_skill_from_lock(
     request: &ChannelSkillUpdateRequest,
 ) -> Result<ChannelSubscribedSkill, SharedChannelError> {
     let lockfile =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path()).map_err(|error| {
-            update_error(format!("Unable to read updated Skill provenance: {error}"))
-        })?;
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
+            .map_err(|error| {
+                update_error(format!("Unable to read updated Skill provenance: {error}"))
+            })?;
     let entry = lockfile
         .skills
         .iter()
@@ -401,8 +407,10 @@ fn subscribed_skill_from_lock(
     let current = skillstar_skills::content::snapshot(&entry.name)
         .map_err(|_| content_integrity_error())?
         .content_hash;
-    if !skillstar_skills::source_resolver::same_remote_url(&entry.git_url, &request.repository.clone_url)
-        || entry.git_ref.as_deref() != Some(request.manifest.commit_sha.as_str())
+    if !skillstar_skills::source_resolver::same_remote_url(
+        &entry.git_url,
+        &request.repository.clone_url,
+    ) || entry.git_ref.as_deref() != Some(request.manifest.commit_sha.as_str())
         || entry.source_folder.as_deref().unwrap_or_default() != request.released.content_root
         || baseline_hash_version != CHANNEL_CONTENT_HASH_VERSION
         || baseline_hash != request.released.content_hash
@@ -431,8 +439,10 @@ fn validate_previous(
     entry: &skillstar_skills::lockfile::LockEntry,
     allow_baseline_repair: bool,
 ) -> Result<(), SharedChannelError> {
-    if !skillstar_skills::source_resolver::same_remote_url(&entry.git_url, &skill.provenance.repository_url)
-        || entry.git_ref.as_deref() != Some(skill.provenance.git_ref.as_str())
+    if !skillstar_skills::source_resolver::same_remote_url(
+        &entry.git_url,
+        &skill.provenance.repository_url,
+    ) || entry.git_ref.as_deref() != Some(skill.provenance.git_ref.as_str())
         || entry.source_folder.as_deref().unwrap_or_default() != skill.content_root
         || (!allow_baseline_repair
             && (entry.content_hash.as_deref() != Some(skill.baseline_hash.as_str())
@@ -505,16 +515,17 @@ fn rollback_exact(receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChann
             receipt.previous.provenance.git_ref
         )));
     }
-    let current_repository_url = skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-        .ok()
-        .and_then(|lockfile| {
-            lockfile
-                .skills
-                .into_iter()
-                .find(|entry| entry.name.eq_ignore_ascii_case(&receipt.previous.id))
-        })
-        .map(|entry| entry.git_url)
-        .unwrap_or_else(|| receipt.installed.provenance.repository_url.clone());
+    let current_repository_url =
+        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
+            .ok()
+            .and_then(|lockfile| {
+                lockfile
+                    .skills
+                    .into_iter()
+                    .find(|entry| entry.name.eq_ignore_ascii_case(&receipt.previous.id))
+            })
+            .map(|entry| entry.git_url)
+            .unwrap_or_else(|| receipt.installed.provenance.repository_url.clone());
     skillstar_skills::repo_scanner::scan_install::install_from_repo_at_with_source_migrations(
         checkout,
         &receipt.previous.provenance.repository_url,
@@ -564,7 +575,8 @@ fn reconcile(skill_id: &str) -> Result<(), SharedChannelError> {
         Ok(report) => failures.extend(report.failures),
         Err(error) => failures.push(format!("Agent reconciliation: {error:#}")),
     }
-    let project = skillstar_skills::projects::cascade_skill_update_to_projects(&[skill_id.to_string()]);
+    let project =
+        skillstar_skills::projects::cascade_skill_update_to_projects(&[skill_id.to_string()]);
     failures.extend(
         project
             .failures

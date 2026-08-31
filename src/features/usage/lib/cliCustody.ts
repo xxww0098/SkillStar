@@ -1,11 +1,11 @@
 import type { CliAccountState, Subscription, SwitchOutcome } from "../types";
 
 /**
- * What a card may honestly say about the CLI behind it.
+ * What a card may honestly say about the local tool behind it (CLI or IDE).
  *
- * - `current` — the CLI is serving *this* account right now.
- * - `diverged` — this card is pinned, but the CLI is on something else.
- * - `missing` — this card is pinned, but the CLI has no credential at all.
+ * - `current` — the local tool is serving *this* account right now.
+ * - `diverged` — this card is pinned, but the local tool is on something else.
+ * - `missing` — this card is pinned, but the local tool has no credential at all.
  * - `none` — nothing to say.
  */
 export type CliAccountBadge = "current" | "diverged" | "missing" | "none";

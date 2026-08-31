@@ -28,6 +28,10 @@ export interface UsageMeterProps {
   usedPercent: number;
   /** Show the `已用 N%` badge in the header (default true). */
   showUsedBadge?: boolean;
+  /** Override the header badge value when the surface's primary message is not consumed share. */
+  badgePercent?: number;
+  /** Accessible explanation for an overridden header badge. */
+  badgeTitle?: string;
   /** Big mono headline — the number that leads (e.g. `$84.34 / $200`, `100% 剩余`). */
   figure?: ReactNode;
   /** Muted note trailing the figure (e.g. 包含额度 / 软限流额度). */
@@ -72,6 +76,8 @@ export function UsageMeter({
   tag,
   usedPercent,
   showUsedBadge = true,
+  badgePercent,
+  badgeTitle,
   figure,
   caption,
   hint,
@@ -89,13 +95,7 @@ export function UsageMeter({
 }: UsageMeterProps) {
   const resetChip = showReset && resetAt ? resetAt : null;
   return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-50/40 transition-colors hover:bg-zinc-50/80",
-        compact ? "space-y-2 p-2.5" : "space-y-2.5 p-3",
-      )}
-      data-testid={testId}
-    >
+    <div className={cn("relative", compact ? "space-y-1.5" : "space-y-2")} data-testid={testId}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {dot ? (
@@ -108,11 +108,7 @@ export function UsageMeter({
           <p className="truncate text-[11px] leading-none font-bold text-zinc-700" title={label}>
             {label}
           </p>
-          {tag ? (
-            <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[8px] font-bold tracking-wider text-zinc-500 uppercase">
-              {tag}
-            </span>
-          ) : null}
+          {tag ? <span className="shrink-0 text-[10px] font-medium text-zinc-400">{tag}</span> : null}
         </div>
         {showUsedBadge ? (
           <span
@@ -120,8 +116,9 @@ export function UsageMeter({
               "shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
               usedBadgeTone(usedPercent),
             )}
+            title={badgeTitle}
           >
-            {usedPercent}%
+            {badgePercent ?? usedPercent}%
           </span>
         ) : null}
       </div>

@@ -1,10 +1,10 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { Layers, Plus } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DetailPanel } from "../components/layout/DetailPanel";
 import { PageToolbar } from "../components/layout/PageToolbar";
 import { Button } from "../components/ui/button";
-import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { SearchInput } from "../components/ui/SearchInput";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { AgentDisambiguationDialog } from "../features/projects/components/AgentDisambiguationDialog";
@@ -26,12 +26,6 @@ interface ProjectsProps {
   preSelectedSkills?: string[] | null;
   onClearPreSelected?: () => void;
 }
-
-const DetailPanel = lazy(() =>
-  import("../components/layout/DetailPanel").then((mod) => ({
-    default: mod.DetailPanel,
-  })),
-);
 
 export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProps) {
   const { t } = useTranslation();
@@ -635,8 +629,8 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
           />
         }
         filters={
-          <div className="h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-background/50 shadow-sm text-xs font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
-            <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+          <div className="h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-background/60 shadow-2xs text-xs font-bold text-foreground tabular-nums whitespace-nowrap shrink-0">
+            <Layers className="w-3.5 h-3.5 text-primary" />
             {filteredProjects.length}
           </div>
         }
@@ -723,23 +717,15 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       />
 
       {selectedDetailSkill && (
-        <Suspense
-          fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-full max-w-md h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
-              <LoadingLogo size="sm" />
-            </div>
-          }
-        >
-          <DetailPanel
-            skill={selectedDetailSkill}
-            onClose={handleCloseSkillDetail}
-            onInstall={handleDetailInstall}
-            onUpdate={handleDetailUpdate}
-            onUninstall={handleDetailUninstall}
-            onReadContent={readSkillContent}
-            onSaveContent={updateSkillContent}
-          />
-        </Suspense>
+        <DetailPanel
+          skill={selectedDetailSkill}
+          onClose={handleCloseSkillDetail}
+          onInstall={handleDetailInstall}
+          onUpdate={handleDetailUpdate}
+          onUninstall={handleDetailUninstall}
+          onReadContent={readSkillContent}
+          onSaveContent={updateSkillContent}
+        />
       )}
     </div>
   );

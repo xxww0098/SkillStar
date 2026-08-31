@@ -13,6 +13,37 @@ export interface AgentDeployStatus {
   link_alive: boolean;
 }
 
+export interface BatchSkillToggleFailure {
+  skill_name: string;
+  error: string;
+}
+
+export interface BatchSkillToggleSkip {
+  skill_name: string;
+  code: string;
+  path: string;
+  reason: string;
+}
+
+export interface BatchSkillToggleReport {
+  succeeded: string[];
+  skipped: BatchSkillToggleSkip[];
+  failed: BatchSkillToggleFailure[];
+}
+
+/** Current directory links plus the exact temporary recovery set. */
+export interface AgentManagedSkillsState {
+  active_skill_names: string[];
+  suspended_skill_names: string[];
+}
+
+export type AgentManagedSkillsAction = "paused" | "restored";
+
+export interface AgentManagedSkillsToggleReport extends BatchSkillToggleReport {
+  action: AgentManagedSkillsAction;
+  state: AgentManagedSkillsState;
+}
+
 /** Global agent profile configuration + per-agent skill links. */
 export interface AgentCommands {
   list_agent_profiles: { args: Record<string, never>; result: AgentProfile[] };
@@ -22,6 +53,18 @@ export interface AgentCommands {
 
   unlink_all_skills_from_agent: { args: { agentId: string }; result: number };
   batch_link_skills_to_agent: { args: { skillNames: string[]; agentId: string }; result: number };
+  batch_toggle_skills_for_agent: {
+    args: { skillNames: string[]; agentId: string; enable: boolean; operationId: string };
+    result: BatchSkillToggleReport;
+  };
+  get_agent_managed_skills_state: {
+    args: { agentId: string };
+    result: AgentManagedSkillsState;
+  };
+  toggle_agent_managed_skills: {
+    args: { agentId: string; operationId: string };
+    result: AgentManagedSkillsToggleReport;
+  };
   list_linked_skills: { args: { agentId: string }; result: string[] };
   unlink_skill_from_agent: { args: { skillName: string; agentId: string }; result: void };
   batch_remove_skills_from_all_agents: { args: { skillNames: string[] }; result: void };

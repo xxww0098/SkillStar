@@ -2,6 +2,94 @@
 
 状态：active
 
+## 2026-08-27 - clippy 棘轮在热缓存下读到 0，照它的提示锁定基线会让冷构建 CI 挂掉
+
+- Symptom: 本地刚跑过 `cargo clippy` 后立即执行 `scripts/internal/check_clippy_ratchet.sh`，输出 `summary: 0 clippy diagnostics (baseline: 1)` 并主动提示 `note: count dropped below baseline — lower scripts/internal/clippy_baseline.txt to lock in the improvement`。照做把基线改成 0，CI 冷构建时真实计数仍是 1，`1 > 0` 直接失败。
+- Root cause: 脚本靠 `grep -c '^warning:'` 数 `cargo clippy` 的 stdout，而 cargo 对**未变更且已缓存**的 crate 不会重新发出诊断。热缓存下 `skillstar-usage` 不重编译，那条 `needless_lifetimes`（在冻结的 `fetchers/oauth/cursor.rs`，按项目规则不得修改）就不出现在输出里，计数虚假归零。脚本本身不区分"真的修好了"和"这次没编译它"。
+- Fix: 采信该脚本的计数前，先强制目标 crate 重编译（`touch` 相关源文件，或 `cargo clean -p <crate>`）再跑。基线维持 1；那一条属于冻结文件，不可清零。
+- Self-check: `touch crates/skillstar-usage/src/fetchers/oauth/cursor.rs && bash scripts/internal/check_clippy_ratchet.sh` 必须报 `1 clippy diagnostics`。同一陷阱适用于任何以编译器输出为计数源的门禁。
+
+## 2026-08-27 - 更新检查在普通目录里让 git 向上逃逸到用户的其他仓库
+
+- Symptom: 无明显症状,这正是危险处。hub 里的普通目录技能(bundle 导入、pack 安装、手工放入)每次巡检都会在自己目录里跑 `git fetch --depth 1`;当任何祖先目录是真仓库(`$HOME` 的 dotfiles 仓库、被版本管理的 `~/.skillstar`),git 解析到的是**那个**仓库,于是 SkillStar 定期对用户无关的仓库做浅取,并拿它的 HEAD 与 FETCH_HEAD 算出技能的更新徽章。
+- Root cause: 所有 git 调用只设 `current_dir`,不设 `-C` / `--git-dir` / `GIT_CEILING_DIRECTORIES`,所以 git 会向上走查找 `.git`。`ensure_worktree_checked_out_in_session` 自带 `if !repo_path.join(".git").exists() { return Ok(false) }` 守卫,但紧挨着它的 `check_update_in_session` 没有 —— 同一对调用里一个 fail-closed 一个不设防。
+- Fix: 守卫放进共享的 `check_update_in_session`(`crates/skillstar-git/src/ops.rs`),不是放进某一个调用方 —— patrol 与前台刷新是两个调用方,只修一个会漏。返回 `Err` 而非 `Ok(false)`:两个调用方都刻意把失败映射为"未知"以免用假的 `false` 覆盖真实徽章。
+- Self-check: `cargo test -p skillstar-git --locked check_update_refuses_a_directory_without_its_own_git`。凡是靠 cwd 定位仓库的 git 包装函数,都要问一句"目标不是仓库时会发生什么"。
+
+## 2026-08-27 - 删 UI 不删后端,留下一串永远走不到的代码
+
+- Symptom: 一批功能"看起来实现了"但用户永远触发不到:Codex 写 `~/.zshrc` 的 385 行后端 + Tauri 命令 + 前端 IPC 声明齐全,却没有任何按钮;`OAuthStartInfo` 的 `user_code`/`verification_uri` 恒为 `None`,前端却有整块设备码 UI 等着渲染;skill-pack 的 `list`/`remove`/`doctor` CLI 操作一个没有写入方的 store。
+- Root cause: 提交 `8e53552 chore(models): remove dead code and promote prototype to production paths` 只删了前端调用点,后端命令、域实现、IPC 声明、文档承诺原样留下。死代码不会自己报错:内部 workspace crate 里的 `pub` 项不触发 dead_code lint,Tauri 命令注册了就"被使用",`#![allow(dead_code)]` 还会主动压掉信号。文档因此长期描述着不存在的行为。
+- Fix: 按"入口 → 域实现 → 命令 → IPC 声明 → devMock → locale key → 文档"整条链一次性删净,并摘掉掩盖信号的 `#![allow(dead_code)]`。
+- Self-check: 删除任何 UI 调用点后,反向追一遍它独占的后端链路。判断"是废弃还是没接线"用 `git log -S '<命令名>' -- src/`:前端历史上出现过则是被删的功能(继续删干净),从未出现过则是没接线的脚手架(同样删,但要在功能文档里写清缺口)。
+
+## 2026-08-27 - tool-sync 把解析失败的用户配置静默重建成仅含托管块的骨架
+
+- Symptom: 用户的 `~/.codex/config.toml`（或 OpenCode/Pi/OMP/Claude 的 JSON/YAML 配置）里有一个语法错误后,下一次 provider 同步"成功",但文件里只剩 SkillStar 托管块——用户自己的 MCP servers、profiles、OAuth token 全部消失。滚动备份只保留 5 份,后续自动 resync 会把最后一份好备份也轮换掉。
+- Root cause: 同步写入路径在读现有文件时用 `unwrap_or_default()` / `unwrap_or_else(|_| init_root())` 把解析失败当成"文件不存在",随后整文件重写。这正是 store_v4 模块文档点名要终结的 v3 缺陷,且同文件的 unsync 路径早已 fail-closed(`with_context(...)?`),形成双标。
+- Fix: 所有 sync 写入方统一走 `backup_merge::read_existing_config`:文件缺失或空白 → 从头初始化;存在但解析失败 → 硬错误 `Failed to parse … — fix or remove it before syncing`。同时全部写入点从裸 `fs::write` 换成 `skillstar_core::infra::fs_ops::atomic_write`,崩溃不再截断配置。
+- Self-check: 往沙箱 `~/.codex/config.toml` 写一行非法 TOML 后触发同步,必须报错且文件字节不变;`cargo test -p skillstar-models --locked tool_sync`。
+
+## 2026-08-27 - 非 GitHub 仓库的上游新增技能检测永远静默跳过
+
+- Symptom: 从 GitLab/SSH 源安装的技能一切正常,但上游新增技能的 ghost 检测从不出现;无日志、无报错。
+- Root cause: `detect_new_skills_in_cached_repos` 自己用 `strip_prefix("https://github.com/")` 推导 cache 目录 key,而安装路径用 `Source::parse(url).short`。两套推导只在 GitHub https URL 上碰巧一致;GitLab/SSH 源算出的目录名对不上,`.git` 存在性检查失败后 `continue` 静默丢弃。同一份 key 出现两套推导逻辑时,不一致就是这种"只对主流路径生效"的静默缺陷。
+- Fix: detect 侧改用与安装完全相同的 `Source::parse(&git_url).map(|s| s.short)`,失败回退原始 URL。
+- Self-check: `cargo test -p skillstar-skills --locked repo_scanner`;手工:GitLab 源安装后上游加技能,fetch 后 ghost 卡必须出现。
+
+## 2026-08-21 - 上游新增的 Skill 永远检测不到，刷新按钮也无效
+
+- Symptom: `mattpocock/skills` 新增 `skills/in-progress/implement-spec` 一小时后，My Skills 既没有 ghost 卡也没有推送；点右上角刷新毫无变化。本地 cache 的 `HEAD` 与 `origin/HEAD` 都停在前一天的 commit。
+- Root cause: ghost 检测扫描的是 repo cache 的**工作树**，而工作树只在安装/更新/扫描时 `reset --hard origin/HEAD`。两条更新检查路径都不移动它：UI 的 `refresh_skill_updates` 走 GitHub Trees API（完全不碰 git，连 `origin/HEAD` 都不前进），patrol 只 `git fetch`（动 `origin/main`，不动工作树）。"上游只新增了一个目录"这种变化因此在结构上不可见，直到用户碰巧更新了同仓库的别的 Skill。另外工具栏刷新只重取 `list_skills` 与 `refresh_skill_updates`，从不重取 `check_new_repo_skills`。
+- Fix: 检测改为本地 `HEAD` tree 与 tracked ref tree 的差集，manifest 直接从 Git 对象经 session 读取（见 skills README「Patrol 与页面职责」）；API 快路径只在远端 commit 仍等于本地 tracked ref 时替代 fetch，否则回退 `git fetch` 让 ref 跟上；前端在每次更新检查完成后（按 `dataUpdatedAt`，不按 data 身份）重取 ghost。
+- Self-check: `cargo test -p skillstar-skills --locked upstream_additions_surface_after_a_fetch_without_touching_the_checkout`。手工：上游新增一个 Skill 后点刷新，cache 里 `git rev-parse origin/HEAD` 应前进到上游 tip 而 `HEAD` 不动，ghost 卡出现且带描述。
+
+## 2026-08-20 - 仓库根技能更新后徽标立刻回来
+
+- Symptom: 像 `ip-as-logo` 这种 SKILL.md 在仓库根的技能，点「更新」成功后徽标马上又亮；再点一次还是一样，看起来像一直在更新。
+- Root cause: GitHub Trees 快路径把响应顶层 `sha` 当成根目录 tree SHA，再和本地 `HEAD^{tree}` 比较。`GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1` 在用 branch/commit 查询时，GitHub 把 **commit SHA** 放进 `sha`，真正的 tree SHA 在 commit 对象里（例如 `ip-as-logo-skill@main` 的 `sha` 是 `2cb23157…`，tree 是 `819c89fe…`）。根技能的这两个值永远不相等，所以已经在远端 tip 也会被判成有更新。子目录技能不受影响，它们用的是 `tree[]` 里的真实 tree SHA。
+- Fix: 根技能在 API 快路径上同时接受「本地 HEAD == 远程 sha」和「本地 HEAD^{tree} == 远程 sha」；子目录比较不变。
+- Self-check: `cargo test -p skillstar-skills --locked github_trees_api_commit_ish_sha_does_not_badge_an_up_to_date_root_skill`。造一个根技能，把 API `folders[""]` 设成该 checkout 的 commit SHA（刻意不等于 tree SHA）时必须报无更新；换成另一个 SHA 时仍报有更新。
+
+## 2026-08-17 - Antigravity 摘要额度被模型目录的全量剩余值遮蔽
+
+- Symptom: SkillStar 桌面 App 中 Antigravity 卡片显示 `0%` / `剩余 100%`，所有模型行都是 `0 / 100`，但 Antigravity 官方可见的 5h/weekly 使用窗口已有消耗；刷新没有报错，只是继续展示模型目录的全量剩余值。
+- Root cause: `fetchAvailableModels` 是模型可用性目录，不一定反映用户可见的计费/限流窗口；部分账号会为模型目录返回 `remainingFraction = 1`。旧逻辑只在模型窗口为空时才请求 `retrieveUserQuotaSummary`，因此一组“看起来完整、实际没有用量”的模型窗口会遮蔽真正的摘要额度；同时汇总窗口使用平均值，不能代表最紧张的限制。
+- Fix: 每个 Cloud Code endpoint 都优先读取 `retrieveUserQuotaSummary`，并兼容直接 `groups` 与 `response.groups` 两种响应形状；只有摘要为空时才保留模型窗口作为 fallback。汇总窗口按最高已消耗百分比展示，且 `used` / `percent` 语义统一；上游标签中的 `Remaining` 后缀会被去掉，避免与卡片的已消耗百分比混淆。
+- Self-check: 在桌面 App 的 Usage → Antigravity 点“刷新 Antigravity”，卡片应优先显示 Gemini / Claude + GPT 的 5h/weekly 窗口；只有摘要接口无窗口时才显示模型目录明细。测试覆盖摘要响应形状、分组标签、最紧张窗口选择和 `used` / `percent` 一致性。
+
+## 2026-08-17 - Antigravity 额度请求丢失项目或被解析器静默过滤
+
+- Symptom: Antigravity 的 plan/credits 能刷新，但模型额度为空、显示不全，或接口失败后卡片像是“成功刷新”却没有任何解释。
+- Root cause: `loadCodeAssist` 的 `cloudaicompanionProject` 可能是 `{ "id": "projects/..." }`，旧解析只接受字符串，后续 `fetchAvailableModels` 因缺少 `project` 得到错误/不完整结果；额度解析还只接受固定模型 ID，且 fetcher 用 `unwrap_or_default()` 吞掉了额度请求错误。
+- Fix: 兼容字符串与对象项目字段；Cloud Code 的 `loadCodeAssist` 按 daily、sandbox、production 回退并发送 Antigravity 完整 metadata；模型额度保留已知分组，同时显示新增的 Gemini/Claude/GPT/Image 模型；模型接口为空时 best-effort 读取 `retrieveUserQuotaSummary`；额度请求失败保留 plan/credits 并写入可见错误，401 仍触发重新授权。
+- Files: `crates/skillstar-usage/src/cloud_code.rs`、`crates/skillstar-usage/src/fetchers/oauth/antigravity.rs`、`docs/features/usage/README.md`。
+- Self-check: `cargo test -p skillstar-usage cloud_code::tests --locked`、`cargo test -p skillstar-usage fetchers::oauth::antigravity::tests --locked`；重点覆盖对象项目 ID、新模型 ID、summary bucket、额度请求错误可见性。
+
+## 2026-08-17 - Cursor 切换账号只改 active pin，没有改 IDE 登录态
+
+- Symptom: Usage 页面有多张 Cursor OAuth 卡，点“切为当前账号”后卡片 pin 变化，但 Cursor 仍使用原账号；此前 Cursor 卡甚至没有真实的 IDE 同步适配器。
+- Root cause: `usage_switch` 只把 Cursor 当作无本地凭证的 catalog；Cursor 实际把 OAuth token 分散存于 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken`、`cursorAuth/cachedEmail` 和镜像 key。
+- Fix: 新增 Cursor IDE adapter，在 catalog 锁内事务写入并回读验证真实 state.vscdb，验证成功后才更新 active pin；对账读取 IDE 当前账号，刷新前采纳本地轮换，刷新后投影新 token；本地导入复用同一读取路径。
+- Files: `crates/skillstar-app/src/usage_switch/cursor.rs`、`crates/skillstar-usage/src/{tool_paths.rs,vscdb.rs,local_import.rs}`、`crates/skillstar-app/src/usage_switch/custody_tests.rs`。
+- Self-check: 两张 Cursor 订阅连续切换后，`cursorAuth/accessToken` / `cursorAuth/refreshToken` 必须分别等于目标卡凭证；删除或损坏 state.vscdb 时不得只更新 active pin；`reconcile_cli_account("cursor")` 必须返回 `LinkedTo`、`Diverged` 或 `Missing` 的真实状态。
+
+## 2026-08-17 - Antigravity OAuth 因缺少外部 client 配置而无法登录
+
+- Symptom: Antigravity 登录直接失败并提示设置 `SKILLSTAR_ANTIGRAVITY_CLIENT_ID` / `SKILLSTAR_ANTIGRAVITY_CLIENT_SECRET` 或 `~/.skillstar/config/antigravity_oauth.json`。
+- Root cause: 本地桌面 OAuth 的公开 client 标识被错误地当成了每台机器都必须自行提供的配置；同时切号只更新 Usage active pin，没有写回 Antigravity IDE 的真实凭证存储。
+- Fix: 使用参考桌面客户端同源的内置 OAuth fallback，保留 env / config file override；切换时写入并回读验证 macOS Keychain 或 legacy `state.vscdb`，验证成功后才更新 active pin。刷新前先采纳 IDE 已轮换的 access/refresh token，刷新后再把新凭证投影回 IDE；切换失败时明确返回“切换未生效”。
+- Files: `crates/skillstar-usage/src/antigravity_oauth_config.rs`、`crates/skillstar-app/src/usage_switch.rs`、`crates/skillstar-app/src/usage_switch/antigravity.rs`、`crates/skillstar-usage/src/{protobuf_oauth.rs,vscdb.rs,tool_paths.rs}`、`docs/features/usage/README.md`。
+- Self-check: Antigravity OAuth 无 env / 配置文件时仍能得到内置 client；切换后 `reconcile_cli_accounts` 必须从 IDE 真实存储读回目标 refresh token，而不是只依据 `active_per_catalog.json`；IDE 自行轮换 token 后，下一次 Usage refresh 必须先更新订阅再刷新。
+
+## 2026-08-16 - 本地 GitHub 登录报 This build does not include a GitHub App client ID
+
+- Symptom: 从源码跑 `tauri dev`，侧边栏 GitHub 账户点「开始登录」或「重试」后固定英文错误 `This build does not include a GitHub App client ID`。仓库根已有 `.env` 且填了 `SKILLSTAR_GITHUB_APP_CLIENT_ID` 仍然失败。
+- Root cause: Client ID 只看进程环境变量和编译期 `option_env!`。Vite 会读 `.env`，Rust 后端不会；`ProductionGitHubGateway` 还在进程启动时把缺失结果缓存下来，所以 UI「重试」不会重新解析。官方 Release 靠 CI 仓库变量编进二进制，本地构建两者都空。
+- Fix: 解析顺序改为环境变量 → 编译期嵌入 → 从 cwd / `CARGO_MANIFEST_DIR` 向上查找 `.env`；gateway 改为每次登录动作即时解析，不再缓存 Unavailable。
+- Files: `crates/skillstar-github-auth/src/gateway.rs`、`.env.example`、`docs/features/skills/README.md`。
+- Self-check: 不 `export`、只在仓库根 `.env` 写 Client ID，重启 `tauri dev` 后「开始登录」必须进入设备码界面而不是这条 Unavailable；解析测试覆盖注释行、空值、引号，以及从 `crates/skillstar-github-auth` 子目录向上找到祖先 `.env`。
+
 ## 2026-08-15 - 声明了却没人写：角色面板收下用户输入然后丢掉，UI 与磁盘长期不一致
 
 - Symptom: 三种表现，同一个根因。① Claude Code 的模型映射面板可以填 Sonnet/Opus/Haiku，保存后 `~/.claude/settings.json` 里没有任何 `ANTHROPIC_DEFAULT_*_MODEL`；重开面板值还在，因为它从来只活在渲染进程。② OMP 角色面板里一个角色显示 `某 provider/某模型`，`~/.omp/agent/config.yml` 的 `modelRoles` 里却没有该条目，且同步结果是绿色成功。③ 面板给每个模型都列出 9 个 thinking 等级，选了对没有推理档的模型无效的等级，也不会有任何提示。
@@ -533,3 +621,17 @@
 - Root cause: repo-cache 路径的契约是"检查失败返回 `None` → 调用方跳过 → 保留上一次结果"，`installed_skill.rs` 与 `patrol.rs` 的跳过逻辑也都实现好了；但非 repo-cache 的回退路径写成 `Some(check_update_in_session(..).unwrap_or(false))`，patrol 侧写成 `Err => Some(false)`，任务 join 失败也写成 `Some(false)`。三处都把"不知道"断言成"没有更新"，而这个 `false` 会被 `commit_scan` 持久化。
 - Fix: 三处统一改成返回 `None`（`.ok()`），交给既有的跳过逻辑。判定语义与 `docs/features/skills/README.md` 已经声明的"失败保留徽标"对齐。
 - Self-check: 让检查返回 `Err`，`update_state` 中该技能的既有 `true` 必须原样保留而不是被写成 `false`；这条同样适用于 patrol 的任务 panic/取消路径。
+
+## 2026-08-20 - 侧边栏收起卡顿：先修错了层，真正的成本在每帧重绘而不是重排
+
+- Symptom: 点击侧边栏收起/展开，200ms 全程掉帧（不是点击那一下顿住，是整个滑动过程不连贯）。直觉指向 `Sidebar`，改侧边栏本身没有效果。
+- Root cause: 第一轮按"动画布局属性 → 每帧重排"定的性，删掉 `#main-content` 的 `transition-[padding-left]` 改成 FLIP 之后，用户反馈毫无改善。实测 React 同步渲染开销只有 0.2–19ms（5 技能 / 403 节点的 Chrome repro），说明 JS 和重排都不是主导项。真正的成本是 WKWebView 的**每帧重绘**：`<aside>` 是 `z-50` 的半透明浮层，200ms 内持续改变 width，而它正压在 `.ss-main-chrome` 上——那张卡片有 `bg-card/80` 半透明底、`ring-1`、`rounded-l-[26px]`，以及一道 `shadow-[0_24px_80px_-40px_...]`。`index.css` 里那段注释早就写明这类模糊重绘的代价（"a 95px blur repaint across the whole column"），只是没人把它和侧边栏动画联系起来。全仓另有 66 处 `backdrop-blur`。
+- Fix: 分两步。① 删掉 `#main-content` 的 `transition-[padding-left]`——即使不是主因，12 次全树重排也是纯浪费，这一步保留。② 二分：删掉 `<aside>` 的 `transition-[width]` 和临时加过的 FLIP，伸缩改为完全瞬时，零动画帧。
+- Self-check: `src/App.test.ts` 断言 `#main-content` 的 className 不含任何 `transition-[`，并先断言取到的确实是那个元素（否则正则失配会让守卫静默通过）。更一般的教训有两条：包裹页面树的容器不允许 CSS 过渡布局属性，需要位移就走 transform；以及**动画卡顿不要只查重排**——半透明层、大模糊阴影、backdrop-filter 之上的任何几何动画，成本在合成器而不是布局，用测量而不是推理来定位（先问"是点击那一下顿，还是整个过程掉帧"，两者指向完全不同的层）。
+
+## 2026-08-21 - 发布者仓库卡片显示 11 个技能，点进去只有 3 个，刷新也不收敛
+
+- Symptom: `vercel/ai` 的仓库卡片写着 11 个技能，点进去列表只有 3 个；`publisher_repos` 与 `repo_skills` 两个 scope 都刷新过，数字照旧。skills.sh 自己的发布者页和仓库页都是 3。
+- Root cause: 同一个仓库有两个写入方，互不校正。`publisher_repos:<publisher>` 读 `/official` 聚合载荷，把 `skill_count=11` 写进 `marketplace_repo`，并把内嵌的 11 条技能写进 `marketplace_repo_skill`；`repo_skills:<source>` 抓仓库页，把同一张技能表 delete+reinsert 成 3 条。卡片读的是 `marketplace_repo.skill_count` 这个缓存列，列表读的是技能行，于是 11 对 3 永久并存。更糟的是聚合页的 `totalInstalls` 几乎每次都变，指纹不同就整表重写，把过期的 11 条再灌回来，列表本身也在 11 和 3 之间来回翻。
+- Fix: 两处。① `load_publisher_repos_snapshot` 的技能数改为从 `marketplace_repo_skill` 行数推导，没有行才回退到存储列——卡片与列表共用一个事实。② 聚合内嵌技能抽成 `seed_repo_skills_from_official_in_tx`，只给 `repo_skills:<source>` 从未成功过的仓库做种子；仓库页一旦抓过就是该仓库的权威，聚合不再覆盖。前端在 `repo_skills` 同步成功后同时失效 `publisherRepos` 查询，否则卡片缓存仍是旧值。
+- Self-check: `snapshot/tests/part8.rs`——先种 3 条，模拟仓库页抓到 1 条并记成功，再跑一次种子必须仍是 1 条，且 `load_publisher_repos_snapshot` 对该仓库返回 1、对没有行的仓库返回存储列。更一般的教训：**一张表不能有两个不分先后的写入方**；任何"聚合页内嵌明细"都只配做种子，明细页一旦有自己的 scope 就要让位。

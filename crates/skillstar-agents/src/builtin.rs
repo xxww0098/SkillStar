@@ -64,8 +64,8 @@ const fn unsupported() -> GlobalDirDef {
 // The three legacy SkillStar ids (`claude`, `kiro`, `hermes`) retain
 // their persisted identity. CLI/API normalization accepts the corresponding
 // upstream ids. Every other row uses the upstream id verbatim. `grok`,
-// `omp` and `gemini-cli` are SkillStar extensions kept after the synchronized
-// upstream block.
+// `omp`, `gemini-cli`, `deepseek` and `maka` are SkillStar extensions kept
+// after the synchronized upstream block.
 const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "aider-desk",
@@ -79,16 +79,13 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         config(&["agents", "skills"]),
         ".agents/skills",
     ),
+    // One row for all of Antigravity: the app, the CLI and the IDE are three
+    // installed states of the same product, so they share a single profile and
+    // fan out through `GLOBAL_MIRROR_DEFS` below.
     (
         "antigravity",
         "Antigravity",
         home(&[".gemini", "antigravity", "skills"]),
-        ".agents/skills",
-    ),
-    (
-        "antigravity-cli",
-        "Antigravity CLI",
-        home(&[".gemini", "antigravity-cli", "skills"]),
         ".agents/skills",
     ),
     (
@@ -442,10 +439,9 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         ".omp/skills",
     ),
     // Google's Gemini CLI — `~/.gemini`, the same root its MCP target writes
-    // (`~/.gemini/settings.json`). Deliberately *not* the `antigravity` /
-    // `antigravity-cli` rows above: those are Google Antigravity, a different
-    // product that merely shares the `~/.gemini` prefix, so neither can stand
-    // in for this profile. Without this row the `gemini-cli` MCP target has no
+    // (`~/.gemini/settings.json`). Deliberately *not* the `antigravity` row
+    // above: that one is Google Antigravity, a different product that merely
+    // shares the `~/.gemini` prefix, so it cannot stand in for this profile. Without this row the `gemini-cli` MCP target has no
     // Agent profile to hang its per-server toggle and Agent filter on
     // (`src/features/mcp/lib/agentTargets.ts`).
     (
@@ -464,7 +460,48 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         env_or_home("DSH_HOME", &[".dsh"], &["skills"]),
         ".dsh/skills",
     ),
+    // Apache Maka (Incubating). Global and project skills live under
+    // `.maka/skills`; Maka also reads the shared `.agents/skills` dir as a
+    // lower-precedence compatibility path, so this target is the exclusive
+    // SkillStar deploy surface. MCP writes the released `Maka` profile
+    // (`<config>/Maka/workspaces/default/mcp.json`), not `Maka Dev`.
+    ("maka", "Maka", home(&[".maka", "skills"]), ".maka/skills"),
 ];
+
+/// Home-relative directories that must receive the same global deployments as
+/// an Agent's own `global_skills_dir`.
+///
+/// Antigravity installs as three independent states — the app (`antigravity`),
+/// the CLI (`antigravity-cli`) and the IDE (`antigravity-ide`) — and each state
+/// reads skills only from its own `builtin/skills`. One SkillStar profile
+/// therefore has to land in all three, which is what the deployment layer
+/// replays after every link/unlink.
+const GLOBAL_MIRROR_DEFS: &[(&str, &[&[&str]])] = &[(
+    "antigravity",
+    &[
+        &[".gemini", "antigravity", "builtin", "skills"],
+        &[".gemini", "antigravity-cli", "builtin", "skills"],
+        &[".gemini", "antigravity-ide", "builtin", "skills"],
+    ],
+)];
+
+/// Resolve the mirror directories for `agent_id`; empty for every Agent that
+/// has a single skills directory (all of them but Antigravity today).
+pub(crate) fn mirror_dirs(agent_id: &str, home: &Path) -> Vec<PathBuf> {
+    GLOBAL_MIRROR_DEFS
+        .iter()
+        .find(|(id, _)| *id == agent_id)
+        .map(|(_, dirs)| {
+            dirs.iter()
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .fold(home.to_path_buf(), |p, part| p.join(part))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 pub(crate) struct BuiltinAgentData {
     pub id: String,
@@ -633,13 +670,10 @@ mod tests {
         "universal",
     ];
 
+    /// Upstream ids fold onto persisted SkillStar ids through the same alias
+    /// table the CLI and IPC use, so this test cannot drift from it.
     fn skillstar_id(upstream: &str) -> &str {
-        match upstream {
-            "claude-code" => "claude",
-            "kiro-cli" => "kiro",
-            "hermes-agent" => "hermes",
-            id => id,
-        }
+        crate::compatible_profile_id(upstream)
     }
 
     #[test]
@@ -673,6 +707,24 @@ mod tests {
             assert!(!name.is_empty(), "blank display_name for {id}");
             assert!(!rel.is_empty(), "blank project skills path for {id}");
         }
+    }
+
+    #[test]
+    fn antigravity_mirrors_every_installed_state() {
+        let home = Path::new("/tmp/skillstar-test-home");
+        let dirs = mirror_dirs("antigravity", home);
+        assert_eq!(
+            dirs,
+            [
+                home.join(".gemini/antigravity/builtin/skills"),
+                home.join(".gemini/antigravity-cli/builtin/skills"),
+                home.join(".gemini/antigravity-ide/builtin/skills"),
+            ]
+        );
+        assert!(mirror_dirs("claude", home).is_empty());
+        // The dropped `antigravity-cli` profile id still resolves, so persisted
+        // prefs and `--agent antigravity-cli` keep reaching the single row.
+        assert!(!mirror_dirs(crate::compatible_profile_id("antigravity-cli"), home).is_empty());
     }
 
     #[test]

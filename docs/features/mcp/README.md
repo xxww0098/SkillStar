@@ -155,6 +155,8 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 - Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。
 - 商店浏览必须走分页查询命令并展示 `total`；不得再拉全量后在内存里过滤。筛选、排序、分页全部编译进一次 `query_mcp_market_servers_local`，渲染进程不做二次过滤。
 - 弃用条目默认不出现在浏览结果里（前端默认 `statuses: ["active"]`），需要显式打开开关才列出，且始终带弃用标记。后端默认「列出但警告」不变——这是 UI 的取舍，不是契约变化。
+- 市场卡片展示名称、描述、安装/更新动作、弃用/被取代例外和 stars；kind 用图标表达，推荐用标题旁的标记。runtime、版本、仓库和详情留在抽屉与安装向导，不在卡片页脚重复。
+- 已安装卡片用运输图标区分 stdio / http，不重复运输文字徽标；描述与命令行/URL 相同时不画第二行。YOLO 与待更新仍作为例外保留。
 - 三态标记（已安装 / 有更新 / 已弃用）以来源指纹判定：`McpServerEntry.registryName` 对 `McpMarketEntry.namespace`。按 `name` 的字符串比对只作为老条目（无指纹）的兜底，且**永远不判定"有更新"**——那份版本号不一定来自这一行。
 - 安装向导必须展示完整命令预览与运行时候选；secret 字段必须掩码，且不得回显进日志或预览字符串。用户填写的参数会改变命令行，因此确认步骤按**最终值**重新渲染命令（`lib/commandPreview.ts` 是 `install.rs::render_command` 的逐字移植，引号规则由测试钉住），而不是直接显示计划里那份预览。本地（stdio）安装必须勾选确认框才能提交。
 - 同步结果必须逐 target 展示成功/跳过/失败/已回滚/回滚失败，并给出错误原文、配置路径与备份路径；失败项可单条重试（`set_mcp_tool_enabled`）或整条重投（`sync_mcp_server`，`force`）。批次一致性（applied / rolledBack / drifted）由前端按同一语义从结果数组重算。

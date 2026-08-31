@@ -10,19 +10,25 @@ const DAILY_CLOUD_CODE_BASE: &str = "https://daily-cloudcode-pa.googleapis.com";
 const DAILY_SANDBOX_CLOUD_CODE_BASE: &str = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 const LOAD_PATH: &str = "v1internal:loadCodeAssist";
 const MODELS_PATH: &str = "v1internal:fetchAvailableModels";
+const SUMMARY_PATH: &str = "v1internal:retrieveUserQuotaSummary";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DEFAULT_IDE_VERSION: &str = "1.21.9";
+const X_GOOG_API_CLIENT: &str = "gl-node/22.21.1";
 
 /// Try to detect the installed Antigravity IDE version for more authentic UA.
 fn detect_ide_version() -> String {
     #[cfg(target_os = "macos")]
     {
         // Parse Info.plist for CFBundleShortVersionString
-        if let Ok(content) =
-            std::fs::read_to_string("/Applications/Antigravity.app/Contents/Info.plist")
-            && let Some(ver) = extract_plist_version(&content)
-        {
-            return ver;
+        for path in [
+            "/Applications/Antigravity IDE.app/Contents/Info.plist",
+            "/Applications/Antigravity.app/Contents/Info.plist",
+        ] {
+            if let Ok(content) = std::fs::read_to_string(path)
+                && let Some(ver) = extract_plist_version(&content)
+            {
+                return ver;
+            }
         }
     }
     #[cfg(target_os = "windows")]
@@ -31,7 +37,11 @@ fn detect_ide_version() -> String {
             .args([
                 "-NoProfile",
                 "-Command",
-                r#"(Get-Item "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe").VersionInfo.FileVersion"#,
+            r#"$paths = @(
+                "$env:LOCALAPPDATA\Programs\Antigravity IDE\Antigravity.exe",
+                "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe"
+            );
+            ($paths | Where-Object { Test-Path $_ } | Select-Object -First 1 | Get-Item).VersionInfo.FileVersion"#,
             ])
             .output()
         {
@@ -100,12 +110,7 @@ pub struct LoadCodeAssistResult {
 
 /// Build Antigravity-style User-Agent for Cloud Code endpoints.
 pub fn cloud_code_user_agent() -> String {
-    let (os, arch) = match std::env::consts::OS {
-        "macos" => ("darwin", "arm64"),
-        "windows" => ("windows", "amd64"),
-        "linux" => ("linux", "amd64"),
-        _ => ("darwin", "arm64"),
-    };
+    let (os, arch) = cloud_code_platform();
     let version = detect_ide_version();
     format!("antigravity/{} {}/{}", version, os, arch)
 }
@@ -155,11 +160,34 @@ pub async fn load_code_assist(
 }
 
 fn antigravity_code_assist_metadata_payload() -> Value {
+    let (os, arch) = cloud_code_platform();
     serde_json::json!({
         "metadata": {
-            "ideType": "ANTIGRAVITY"
-        }
+            "ideName": "antigravity",
+            "ideType": "ANTIGRAVITY",
+            "ideVersion": detect_ide_version(),
+            "platform": format!("{}_{}", os.to_ascii_uppercase(), arch.to_ascii_uppercase()),
+            "pluginVersion": env!("CARGO_PKG_VERSION"),
+            "updateChannel": "stable",
+            "pluginType": "GEMINI"
+        },
+        "mode": "FULL_ELIGIBILITY_CHECK"
     })
+}
+
+fn cloud_code_platform() -> (&'static str, &'static str) {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "windows",
+        "linux" => "linux",
+        _ => "unknown",
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        _ => "unknown",
+    };
+    (os, arch)
 }
 
 fn attach_code_assist_project(payload: &mut Value, project_id: Option<&str>) {
@@ -172,6 +200,21 @@ fn attach_code_assist_project(payload: &mut Value, project_id: Option<&str>) {
     }
 }
 
+fn extract_project_id(value: &Value) -> Option<String> {
+    if let Some(text) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(text.to_string());
+    }
+
+    let object = value.as_object()?;
+    ["id", "projectId", "project_id", "name"]
+        .into_iter()
+        .find_map(|key| object.get(key).and_then(extract_project_id))
+}
+
 async fn load_code_assist_with_body(
     access_token: &str,
     project_id: Option<&str>,
@@ -180,60 +223,83 @@ async fn load_code_assist_with_body(
     let client = crate::http_client::usage_http_client()?;
     let ua = cloud_code_user_agent();
     attach_code_assist_project(&mut payload, project_id);
+    let mut last_error = None;
 
-    let resp = client
-        .post(format!("{}/{}", CLOUD_CODE_BASE, LOAD_PATH))
-        .bearer_auth(access_token)
-        .header(reqwest::header::USER_AGENT, &ua)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::ACCEPT, "*/*")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| UsageError::transport("loadCodeAssist", e))?;
+    for base in [
+        DAILY_CLOUD_CODE_BASE,
+        DAILY_SANDBOX_CLOUD_CODE_BASE,
+        CLOUD_CODE_BASE,
+    ] {
+        let resp = match client
+            .post(format!("{base}/{LOAD_PATH}"))
+            .bearer_auth(access_token)
+            .header(reqwest::header::USER_AGENT, &ua)
+            .header("x-goog-api-client", X_GOOG_API_CLIENT)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::ACCEPT, "*/*")
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(error) => {
+                last_error = Some(UsageError::transport("loadCodeAssist", error));
+                continue;
+            }
+        };
 
-    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(UsageError::AuthRequired);
-    }
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::http_status("loadCodeAssist", status, &body));
-    }
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(UsageError::AuthRequired);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            last_error = Some(UsageError::http_status("loadCodeAssist", status, &body));
+            continue;
+        }
 
-    let raw: Value = resp
-        .json()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("loadCodeAssist 解析：{}", e)))?;
+        let raw: Value = match resp.json().await {
+            Ok(raw) => raw,
+            Err(error) => {
+                last_error = Some(UsageError::Fetcher(format!(
+                    "loadCodeAssist 解析：{}",
+                    error
+                )));
+                continue;
+            }
+        };
 
-    let plan_name = pick_plan_name(&raw).unwrap_or_else(|| "FREE".to_string());
-    let project_id = raw
-        .get("cloudaicompanionProject")
-        .or_else(|| raw.get("project"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| {
-            raw.get("cloudaicompanionProjectId")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
+        let plan_name = pick_plan_name(&raw).unwrap_or_else(|| "FREE".to_string());
+        let project_id = raw
+            .get("cloudaicompanionProject")
+            .or_else(|| raw.get("project"))
+            .and_then(extract_project_id)
+            .or_else(|| {
+                raw.get("cloudaicompanionProjectId")
+                    .and_then(extract_project_id)
+            });
+
+        let tier_id = raw
+            .get("paidTier")
+            .or_else(|| raw.get("currentTier"))
+            .and_then(|t| t.get("id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let credits = parse_paid_credits(&raw);
+
+        return Ok(LoadCodeAssistResult {
+            raw,
+            plan_name,
+            project_id,
+            tier_id,
+            credits,
         });
+    }
 
-    let tier_id = raw
-        .get("paidTier")
-        .or_else(|| raw.get("currentTier"))
-        .and_then(|t| t.get("id"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-
-    let credits = parse_paid_credits(&raw);
-
-    Ok(LoadCodeAssistResult {
-        raw,
-        plan_name,
-        project_id,
-        tier_id,
-        credits,
-    })
+    Err(last_error.unwrap_or_else(|| {
+        UsageError::Fetcher("loadCodeAssist 没有可用的 Cloud Code endpoint".to_string())
+    }))
 }
 
 pub async fn fetch_model_quotas(
@@ -246,24 +312,79 @@ pub async fn fetch_model_quotas(
         .filter(|s| !s.is_empty())
         .map(|id| json!({ "project": id }))
         .unwrap_or_else(|| json!({}));
-    let bases = [
-        DAILY_CLOUD_CODE_BASE,
-        DAILY_SANDBOX_CLOUD_CODE_BASE,
-        CLOUD_CODE_BASE,
-    ];
-    let mut saw_success = false;
+    fetch_model_quotas_from_bases(
+        &client,
+        access_token,
+        &ua,
+        &payload,
+        &[
+            DAILY_CLOUD_CODE_BASE,
+            DAILY_SANDBOX_CLOUD_CODE_BASE,
+            CLOUD_CODE_BASE,
+        ],
+    )
+    .await
+}
+
+#[derive(Debug)]
+enum QuotaSummaryResult {
+    Success(Vec<UsageWindow>),
+    Unsupported,
+    Failed(UsageError),
+}
+
+async fn fetch_model_quotas_from_bases(
+    client: &reqwest::Client,
+    access_token: &str,
+    user_agent: &str,
+    payload: &Value,
+    bases: &[&str],
+) -> UsageResult<Vec<UsageWindow>> {
+    let mut saw_summary_empty = false;
+    let mut saw_model_success = false;
     let mut last_status: Option<u16> = None;
+    let mut last_error: Option<UsageError> = None;
+    let mut model_windows_fallback = None;
 
     for base in bases {
-        let resp = client
-            .post(format!("{}/{}", base, MODELS_PATH))
+        match fetch_quota_summary(client, access_token, user_agent, base, payload).await {
+            QuotaSummaryResult::Success(summary_windows) => {
+                if !summary_windows.is_empty() {
+                    return Ok(summary_windows);
+                }
+                // A valid 2xx summary with no buckets is a supported empty
+                // response. Do not immediately issue a second endpoint call.
+                saw_summary_empty = true;
+                continue;
+            }
+            QuotaSummaryResult::Unsupported => {}
+            QuotaSummaryResult::Failed(error) => {
+                if matches!(error, UsageError::AuthRequired) {
+                    return Err(error);
+                }
+                last_error = Some(error);
+                continue;
+            }
+        }
+
+        // The model catalog is a compatibility fallback only when the summary
+        // endpoint explicitly does not exist on this base (404/405).
+        let resp = match client
+            .post(format!("{base}/{MODELS_PATH}"))
             .bearer_auth(access_token)
-            .header(reqwest::header::USER_AGENT, &ua)
+            .header(reqwest::header::USER_AGENT, user_agent)
+            .header("x-goog-api-client", X_GOOG_API_CLIENT)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .json(&payload)
+            .json(payload)
             .send()
             .await
-            .map_err(|e| UsageError::transport("fetchAvailableModels", e))?;
+        {
+            Ok(resp) => resp,
+            Err(error) => {
+                last_error = Some(UsageError::transport("fetchAvailableModels", error));
+                continue;
+            }
+        };
 
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             return Err(UsageError::AuthRequired);
@@ -273,25 +394,192 @@ pub async fn fetch_model_quotas(
             continue;
         }
 
-        saw_success = true;
-        let body: Value = resp
-            .json()
-            .await
-            .map_err(|e| UsageError::Fetcher(format!("fetchAvailableModels 解析：{}", e)))?;
-        let windows = parse_model_windows(&body);
-        if !windows.is_empty() {
-            return Ok(windows);
+        saw_model_success = true;
+        let body: Value = match resp.json().await {
+            Ok(body) => body,
+            Err(error) => {
+                last_error = Some(UsageError::Fetcher(format!(
+                    "fetchAvailableModels 解析：{}",
+                    error
+                )));
+                continue;
+            }
+        };
+
+        if model_windows_fallback.is_none() {
+            let windows = parse_model_windows(&body);
+            if !windows.is_empty() {
+                model_windows_fallback = Some(windows);
+            }
         }
     }
 
-    if saw_success {
-        Ok(Vec::new())
-    } else {
-        Err(match last_status {
-            Some(status) => UsageError::http_status("fetchAvailableModels", status, ""),
-            None => UsageError::Fetcher("fetchAvailableModels 状态 unknown".to_string()),
-        })
+    if let Some(windows) = model_windows_fallback {
+        return Ok(windows);
     }
+    if saw_model_success || saw_summary_empty {
+        return Ok(Vec::new());
+    }
+
+    Err(last_error.unwrap_or_else(|| match last_status {
+        Some(status) => UsageError::http_status("fetchAvailableModels", status, ""),
+        None => UsageError::Fetcher("没有可用的 Cloud Code quota endpoint".to_string()),
+    }))
+}
+
+async fn fetch_quota_summary(
+    client: &reqwest::Client,
+    access_token: &str,
+    user_agent: &str,
+    base: &str,
+    payload: &Value,
+) -> QuotaSummaryResult {
+    let response = match client
+        .post(format!("{base}/{SUMMARY_PATH}"))
+        .bearer_auth(access_token)
+        .header(reqwest::header::USER_AGENT, user_agent)
+        .header("x-goog-api-client", X_GOOG_API_CLIENT)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(payload)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return QuotaSummaryResult::Failed(UsageError::transport(
+                "retrieveUserQuotaSummary",
+                error,
+            ));
+        }
+    };
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return QuotaSummaryResult::Failed(UsageError::AuthRequired);
+    }
+    if matches!(
+        status,
+        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::METHOD_NOT_ALLOWED
+    ) {
+        return QuotaSummaryResult::Unsupported;
+    }
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return QuotaSummaryResult::Failed(UsageError::http_status(
+            "retrieveUserQuotaSummary",
+            status.as_u16(),
+            &body,
+        ));
+    }
+
+    let body = match response.json::<Value>().await {
+        Ok(body) => body,
+        Err(error) => {
+            return QuotaSummaryResult::Failed(UsageError::Fetcher(format!(
+                "retrieveUserQuotaSummary 解析：{}",
+                error
+            )));
+        }
+    };
+    match parse_quota_summary_windows(&body) {
+        Some(windows) => QuotaSummaryResult::Success(windows),
+        None => QuotaSummaryResult::Failed(UsageError::Fetcher(
+            "retrieveUserQuotaSummary 响应缺少有效 groups".to_string(),
+        )),
+    }
+}
+
+fn parse_quota_summary_windows(value: &Value) -> Option<Vec<UsageWindow>> {
+    let groups = value
+        .get("groups")
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("groups"))
+        })?
+        .as_array()?;
+    let mut windows = Vec::new();
+
+    for group in groups {
+        let group_label = group
+            .get("displayName")
+            .or_else(|| group.get("display_name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or("Antigravity");
+        let Some(buckets) = group.get("buckets").and_then(Value::as_array) else {
+            continue;
+        };
+
+        for bucket in buckets {
+            let remaining = bucket
+                .get("remainingFraction")
+                .or_else(|| bucket.get("remaining_fraction"))
+                .or_else(|| {
+                    bucket
+                        .get("remaining")
+                        .and_then(|remaining| remaining.get("remainingFraction"))
+                })
+                .or_else(|| {
+                    bucket
+                        .get("remaining")
+                        .and_then(|remaining| remaining.get("remaining_fraction"))
+                })
+                .and_then(normalize_quota_fraction);
+            let Some(remaining) = remaining else {
+                continue;
+            };
+            let window = bucket
+                .get("window")
+                .or_else(|| bucket.get("windowName"))
+                .or_else(|| bucket.get("window_name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|label| !label.is_empty());
+            let bucket_name = bucket
+                .get("displayName")
+                .or_else(|| bucket.get("display_name"))
+                .and_then(Value::as_str)
+                .and_then(normalize_quota_bucket_name);
+            let bucket_label = bucket_name
+                .map(|name| format!("{group_label} · {name}"))
+                .or_else(|| window.map(|window| format!("{group_label} · {window}")))
+                .unwrap_or_else(|| group_label.to_string());
+            let remaining_pct = (remaining * 100.0).round().clamp(0.0, 100.0) as i32;
+            let used_pct = (100 - remaining_pct).clamp(0, 100);
+            windows.push(UsageWindow {
+                label: bucket_label,
+                used: used_pct as i64,
+                total: Some(100),
+                percent: Some(used_pct),
+                reset_at: bucket
+                    .get("resetTime")
+                    .or_else(|| bucket.get("reset_time"))
+                    .and_then(parse_reset_at),
+                breakdown: Vec::new(),
+            });
+        }
+    }
+
+    Some(windows)
+}
+
+fn normalize_quota_bucket_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let name = [" remaining", " left", " available"]
+        .into_iter()
+        .find_map(|suffix| {
+            lower
+                .ends_with(suffix)
+                .then(|| trimmed[..trimmed.len() - suffix.len()].trim())
+        })
+        .unwrap_or(trimmed);
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn parse_model_windows(value: &Value) -> Vec<UsageWindow> {
@@ -304,10 +592,30 @@ fn parse_model_windows(value: &Value) -> Vec<UsageWindow> {
         return Vec::new();
     };
 
-    antigravity_quota_groups()
-        .into_iter()
-        .filter_map(|definition| build_antigravity_quota_window(models, definition))
-        .collect()
+    let mut matched_model_ids = Vec::new();
+    let mut windows = Vec::new();
+
+    for definition in antigravity_quota_groups() {
+        if let Some(window) = build_antigravity_quota_window(models, definition) {
+            for identifier in definition.identifiers {
+                if let Some((id, _)) = find_antigravity_model(models, identifier) {
+                    matched_model_ids.push(id.to_string());
+                }
+            }
+            windows.push(window);
+        }
+    }
+
+    // The model catalog changes independently from SkillStar. Keep showing
+    // valid Gemini/Claude/GPT quota entries even when Google adds or renames a
+    // model before the fixed grouping table is updated.
+    windows.extend(
+        models
+            .iter()
+            .filter(|(id, _)| !matched_model_ids.iter().any(|matched| matched == *id))
+            .filter_map(|(id, entry)| build_dynamic_model_quota_window(id, entry)),
+    );
+    windows
 }
 
 #[derive(Clone, Copy)]
@@ -377,18 +685,7 @@ fn build_antigravity_quota_window(
         let Some((_, entry)) = find_antigravity_model(models, identifier) else {
             continue;
         };
-        let quota_info = entry.get("quotaInfo").or_else(|| entry.get("quota_info"));
-        let remaining = quota_info
-            .and_then(|qi| {
-                qi.get("remainingFraction")
-                    .or_else(|| qi.get("remaining_fraction"))
-                    .or_else(|| qi.get("remaining"))
-            })
-            .and_then(normalize_quota_fraction);
-        let has_reset = quota_info
-            .and_then(|qi| qi.get("resetTime").or_else(|| qi.get("reset_time")))
-            .is_some();
-        let remaining = remaining.or(if has_reset { Some(0.0) } else { None })?;
+        let remaining = model_remaining_fraction(entry)?;
         fractions.push(remaining);
         if display_name.is_none() {
             display_name = entry
@@ -417,6 +714,77 @@ fn build_antigravity_quota_window(
     })
 }
 
+fn build_dynamic_model_quota_window(id: &str, entry: &Value) -> Option<UsageWindow> {
+    if !is_displayable_model(id, entry) {
+        return None;
+    }
+    let remaining = model_remaining_fraction(entry)?;
+    let remaining_pct = (remaining * 100.0).round().clamp(0.0, 100.0) as i32;
+    let used_pct = (100 - remaining_pct).clamp(0, 100);
+    let label = entry
+        .get("displayName")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(id)
+        .to_string();
+
+    Some(UsageWindow {
+        label,
+        used: used_pct as i64,
+        total: Some(100),
+        percent: Some(used_pct),
+        reset_at: model_reset_at(entry),
+        breakdown: Vec::new(),
+    })
+}
+
+fn model_remaining_fraction(entry: &Value) -> Option<f64> {
+    let quota_info = entry.get("quotaInfo").or_else(|| entry.get("quota_info"));
+    let remaining = quota_info.and_then(|qi| {
+        qi.get("remainingFraction")
+            .or_else(|| qi.get("remaining_fraction"))
+            .or_else(|| qi.get("remaining"))
+    });
+    // A reset timestamp without a remaining fraction is only reset context;
+    // it does not mean the quota is exhausted. Never turn an unknown window
+    // into a fake 100% used bar.
+    remaining.and_then(normalize_quota_fraction)
+}
+
+fn model_reset_at(entry: &Value) -> Option<i64> {
+    let reset = entry
+        .get("quotaInfo")
+        .or_else(|| entry.get("quota_info"))
+        .and_then(|qi| qi.get("resetTime").or_else(|| qi.get("reset_time")))
+        .and_then(Value::as_str)?;
+    parse_reset_at(&Value::String(reset.to_string()))
+}
+
+fn parse_reset_at(value: &Value) -> Option<i64> {
+    let reset = value.as_str()?.trim();
+    chrono::DateTime::parse_from_rfc3339(reset)
+        .ok()
+        .map(|value| value.timestamp())
+}
+
+fn is_displayable_model(id: &str, entry: &Value) -> bool {
+    let candidates = [
+        Some(id),
+        entry.get("model").and_then(Value::as_str),
+        entry.get("modelId").and_then(Value::as_str),
+        entry.get("model_id").and_then(Value::as_str),
+        entry.get("name").and_then(Value::as_str),
+        entry.get("displayName").and_then(Value::as_str),
+    ];
+    candidates.into_iter().flatten().any(|candidate| {
+        let normalized = candidate.to_ascii_lowercase();
+        ["gemini", "claude", "gpt", "image", "imagen"]
+            .iter()
+            .any(|prefix| normalized.contains(prefix))
+    })
+}
+
 fn find_antigravity_model<'a>(
     models: &'a serde_json::Map<String, Value>,
     identifier: &str,
@@ -424,14 +792,44 @@ fn find_antigravity_model<'a>(
     if let Some((id, entry)) = models.get_key_value(identifier) {
         return Some((id.as_str(), entry));
     }
+    let normalized_identifier = normalize_model_id(identifier);
     models.iter().find_map(|(id, entry)| {
-        let display = entry.get("displayName").and_then(|v| v.as_str())?;
-        if display.eq_ignore_ascii_case(identifier) {
+        let candidates = [
+            Some(id.as_str()),
+            entry.get("model").and_then(Value::as_str),
+            entry.get("modelId").and_then(Value::as_str),
+            entry.get("model_id").and_then(Value::as_str),
+            entry.get("name").and_then(Value::as_str),
+            entry.get("displayName").and_then(Value::as_str),
+        ];
+        if candidates
+            .into_iter()
+            .flatten()
+            .any(|candidate| normalize_model_id(candidate) == normalized_identifier)
+        {
             Some((id.as_str(), entry))
         } else {
             None
         }
     })
+}
+
+fn normalize_model_id(value: &str) -> String {
+    let value = value.rsplit('/').next().unwrap_or(value);
+    let mut normalized = String::new();
+    let mut pending_separator = false;
+    for ch in value.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            if pending_separator && !normalized.is_empty() {
+                normalized.push('-');
+            }
+            normalized.push(ch);
+            pending_separator = false;
+        } else {
+            pending_separator = true;
+        }
+    }
+    normalized
 }
 
 fn normalize_quota_fraction(value: &Value) -> Option<f64> {
@@ -544,40 +942,5 @@ fn pick_plan_name(v: &Value) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_antigravity_model_quota_groups() {
-        let payload = json!({
-            "models": {
-                "claude-sonnet-4-6": {
-                    "displayName": "Claude Sonnet 4.6",
-                    "quotaInfo": { "remainingFraction": 0.25 }
-                },
-                "gemini-3.1-pro-high": {
-                    "quotaInfo": { "remainingFraction": "75%" }
-                },
-                "gemini-2.5-flash": {
-                    "quota_info": { "remaining_fraction": 1.0 }
-                },
-                "gemini-3.1-flash-image": {
-                    "displayName": "Gemini 3.1 Flash Image",
-                    "quotaInfo": { "remainingFraction": 0.5 }
-                }
-            }
-        });
-
-        let windows = parse_model_windows(&payload);
-
-        assert_eq!(windows.len(), 4);
-        assert_eq!(windows[0].label, "Claude/GPT");
-        assert_eq!(windows[0].used, 75);
-        assert_eq!(windows[1].label, "Gemini 3.1 Pro Series");
-        assert_eq!(windows[1].used, 25);
-        assert_eq!(windows[2].label, "Gemini 2.5 Flash");
-        assert_eq!(windows[2].used, 0);
-        assert_eq!(windows[3].label, "Gemini 3.1 Flash Image");
-        assert_eq!(windows[3].used, 50);
-    }
-}
+#[path = "cloud_code_tests.rs"]
+mod tests;

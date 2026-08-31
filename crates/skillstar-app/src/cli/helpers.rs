@@ -7,8 +7,8 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
 use skillstar_agents::list_profiles;
+use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
 use skillstar_skills::lockfile::Lockfile;
 use skillstar_skills::source_resolver::same_remote_url;
 
@@ -91,6 +91,8 @@ pub fn normalize_agent_ids(agent_ids: &[String]) -> Vec<String> {
             "claude-code" => "claude".to_string(),
             "kiro-cli" => "kiro".to_string(),
             "hermes-agent" => "hermes".to_string(),
+            // Antigravity's three installed states share one profile.
+            "antigravity-cli" | "antigravity-ide" => "antigravity".to_string(),
             normalized => normalized.to_string(),
         })
         .filter(|id| !id.is_empty())
@@ -345,10 +347,11 @@ mod tests {
             "kiro-cli".to_string(),
             "hermes-agent".to_string(),
             "antigravity-cli".to_string(),
+            "antigravity-ide".to_string(),
         ];
         assert_eq!(
             normalize_agent_ids(&ids),
-            vec!["antigravity-cli", "claude", "hermes", "kiro"]
+            vec!["antigravity", "claude", "hermes", "kiro"]
         );
     }
 }

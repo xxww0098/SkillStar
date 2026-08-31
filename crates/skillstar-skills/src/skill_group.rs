@@ -192,15 +192,9 @@ pub fn duplicate_group(id: &str) -> Result<SkillGroup> {
     )?;
 
     match source_links {
-        Some(links) if !links.is_empty() => update_group(
-            copy.id.clone(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(links),
-        ),
+        Some(links) if !links.is_empty() => {
+            update_group(copy.id.clone(), None, None, None, None, None, Some(links))
+        }
         // `None` means the source is still awaiting backfill; leaving the copy
         // empty would freeze it as "on no Agent". Inherit the unresolved state
         // so the next backfill pass resolves both from the same disk truth.

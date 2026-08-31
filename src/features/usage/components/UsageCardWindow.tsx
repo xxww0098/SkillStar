@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { BadgeCheck, Pin, PinOff, RefreshCw, TriangleAlert, Unplug, X } from "lucide-react";
+import { BadgeCheck, Pin, PinOff, RefreshCw, RotateCcw, TriangleAlert, Unplug, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import { LightBodySurface, UsageCardBody, resolveUsageBodyRegistration } from ".
 import { getBrandTheme } from "../lib/brandThemes";
 import { cliAccountBadgeFor, isDegradedCopyBinding } from "../lib/cliCustody";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
-import { authModeLabel, getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
+import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
 import { usageApi } from "../api";
 import {
   USAGE_ACTIVE_CHANGED_EVENT,
@@ -51,11 +51,13 @@ export function UsageCardWindow() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry | null>(null);
   const [allCatalog, setAllCatalog] = useState<CatalogEntry[]>([]);
-  /** What the CLIs are actually serving. This window shows the same badge as
-   *  the grid, so it has to read the same truth — the pin alone would let it
-   *  claim "current" for an account the CLI had already been moved off. */
+  /** What the local tools are actually serving. This window shows the same
+   *  badge as the grid, so it has to read the same truth — the pin alone
+   *  would let it claim "current" for an account the tool had moved off. */
   const [cliAccounts, setCliAccounts] = useState<Record<string, CliAccountState>>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetPending, setResetPending] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
@@ -139,8 +141,25 @@ export function UsageCardWindow() {
     }
   }, [loadData, refreshing, subscriptionId]);
 
+  const handleResetQuota = useCallback(async () => {
+    if (!subscriptionId || !subscription || subscription.catalog_id !== "xai" || resetting) return;
+    setResetting(true);
+    try {
+      await usageApi.resetSubscriptionQuota(subscriptionId);
+      await loadData(subscriptionId);
+      toast.success(t("usage.resetQuotaDone", { name: subscription.display_name }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(t("usage.resetQuotaFailed", { name: subscription.display_name, error: message }));
+    } finally {
+      setResetting(false);
+    }
+  }, [loadData, resetting, subscription, subscriptionId, t]);
+
   const reportSwitchOutcome = useCallback(
     (outcome: SwitchOutcome | null | undefined, displayName: string, isActive: boolean) => {
+      const isAntigravity = subscription?.catalog_id === "antigravity";
+      const isCursor = subscription?.catalog_id === "cursor";
       if (!outcome) {
         toast.success(t("usage.activeAccountSet"), {
           description: displayName,
@@ -148,9 +167,24 @@ export function UsageCardWindow() {
         return;
       }
       if (outcome.success) {
-        toast.success(t("usage.switchCliSuccess"), {
-          description: `${displayName} → ${outcome.toolId} · ${t("usage.switchCliRestartHint")}`,
-        });
+        toast.success(
+          t(
+            isAntigravity
+              ? "usage.switchAntigravitySuccess"
+              : isCursor
+                ? "usage.switchCursorSuccess"
+                : "usage.switchCliSuccess",
+          ),
+          {
+            description: `${displayName} → ${outcome.toolId} · ${t(
+              isAntigravity
+                ? "usage.switchAntigravityRestartHint"
+                : isCursor
+                  ? "usage.switchCursorRestartHint"
+                  : "usage.switchCliRestartHint",
+            )}`,
+          },
+        );
         if (isDegradedCopyBinding(outcome)) {
           toast.warning(t("usage.switchCliCopyMode"), {
             description: t("usage.switchCliCopyModeHint"),
@@ -160,13 +194,21 @@ export function UsageCardWindow() {
         return;
       }
       if (outcome.error) {
-        const message = isActive ? t("usage.switchCliFailed") : t("usage.switchNotApplied");
+        const message = isActive
+          ? t(
+              isAntigravity
+                ? "usage.switchAntigravityFailed"
+                : isCursor
+                  ? "usage.switchCursorFailed"
+                  : "usage.switchCliFailed",
+            )
+          : t("usage.switchNotApplied");
         toast.error(message, {
           description: outcome.error,
         });
       }
     },
-    [t],
+    [subscription?.catalog_id, t],
   );
 
   const handleSwitch = useCallback(async () => {
@@ -193,9 +235,26 @@ export function UsageCardWindow() {
     try {
       const outcome = await usageApi.switchActiveSubscriptionToCli(subscription.catalog_id);
       if (outcome.success) {
-        toast.success(t("usage.switchCliSynced"), {
-          description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint")}`,
-        });
+        const isAntigravity = subscription.catalog_id === "antigravity";
+        const isCursor = subscription.catalog_id === "cursor";
+        toast.success(
+          t(
+            isAntigravity
+              ? "usage.switchAntigravitySynced"
+              : isCursor
+                ? "usage.switchCursorSynced"
+                : "usage.switchCliSynced",
+          ),
+          {
+            description: `${outcome.toolId}: ${outcome.configPath} · ${t(
+              isAntigravity
+                ? "usage.switchAntigravityRestartHint"
+                : isCursor
+                  ? "usage.switchCursorRestartHint"
+                  : "usage.switchCliRestartHint",
+            )}`,
+          },
+        );
         if (isDegradedCopyBinding(outcome)) {
           toast.warning(t("usage.switchCliCopyMode"), {
             description: t("usage.switchCliCopyModeHint"),
@@ -203,16 +262,34 @@ export function UsageCardWindow() {
           });
         }
       } else if (outcome.error) {
-        toast.error(t("usage.switchCliSyncFailed"), {
-          description: outcome.error,
-        });
+        toast.error(
+          t(
+            subscription.catalog_id === "antigravity"
+              ? "usage.switchAntigravitySyncFailed"
+              : subscription.catalog_id === "cursor"
+                ? "usage.switchCursorSyncFailed"
+                : "usage.switchCliSyncFailed",
+          ),
+          {
+            description: outcome.error,
+          },
+        );
       }
       // Stash outcome on the local card so the failure banner updates without a full reload.
       setSubscription((prev) => (prev ? { ...prev, switch_result: outcome } : prev));
       await loadData(subscriptionId ?? "");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      toast.error(t("usage.switchCliSyncFailed"), { description: msg });
+      toast.error(
+        t(
+          subscription?.catalog_id === "antigravity"
+            ? "usage.switchAntigravitySyncFailed"
+            : subscription?.catalog_id === "cursor"
+              ? "usage.switchCursorSyncFailed"
+              : "usage.switchCliSyncFailed",
+        ),
+        { description: msg },
+      );
     } finally {
       setSyncing(false);
     }
@@ -273,6 +350,7 @@ export function UsageCardWindow() {
   const cliFailed =
     subscription.supports_cli_switch && subscription.switch_result && !subscription.switch_result.success;
   const cliBadge = cliAccountBadgeFor(subscription, cliAccounts);
+  const isIde = subscription.catalog_id === "antigravity" || subscription.catalog_id === "cursor";
   const copyBound = isDegradedCopyBinding(subscription.switch_result);
 
   return (
@@ -317,19 +395,19 @@ export function UsageCardWindow() {
         {cliBadge === "diverged" && (
           <span
             className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
-            title={t("usage.cardCliDivergedTitle")}
+            title={t(isIde ? "usage.cardIdeDivergedTitle" : "usage.cardCliDivergedTitle")}
           >
             <TriangleAlert size={10} />
-            {t("usage.cardCliDiverged")}
+            {t(isIde ? "usage.cardIdeDiverged" : "usage.cardCliDiverged")}
           </span>
         )}
         {cliBadge === "missing" && (
           <span
             className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-            title={t("usage.cardCliMissingTitle")}
+            title={t(isIde ? "usage.cardIdeMissingTitle" : "usage.cardCliMissingTitle")}
           >
             <Unplug size={10} />
-            {t("usage.cardCliMissing")}
+            {t(isIde ? "usage.cardIdeMissing" : "usage.cardCliMissing")}
           </span>
         )}
         <button
@@ -351,11 +429,9 @@ export function UsageCardWindow() {
       </div>
 
       {/* Body: dark chrome hosts light island with shared UsageCardBody (compact). */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2.5 py-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
           <span className="truncate">{catalog?.display_name ?? subscription.catalog_id}</span>
-          <span>·</span>
-          <span>{authModeLabel(subscription.auth_mode, t)}</span>
           {subscription.requires_reauth && (
             <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-600">
               {t("usage.reauthRequired")}
@@ -368,9 +444,9 @@ export function UsageCardWindow() {
           ) : null}
         </div>
 
-        <LightBodySurface theme={theme} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto">
+        <LightBodySurface theme={theme} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
           {/* Island-top Meta: PlanBadge + primary Reset when body does not own it (K13b). */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
             <div className="min-w-0">{planName ? <PlanBadge plan={planName} /> : null}</div>
             {resetInfo && !bodyOwnsPrimaryReset && (
               <ResetCountdown
@@ -387,7 +463,7 @@ export function UsageCardWindow() {
 
         {cliBadge === "diverged" && (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-600">
-            {t("usage.cardCliDivergedHint")}
+            {t(isIde ? "usage.cardIdeDivergedHint" : "usage.cardCliDivergedHint")}
           </div>
         )}
         {copyBound && (
@@ -404,6 +480,33 @@ export function UsageCardWindow() {
       </div>
 
       {/* Footer: actions */}
+      {resetPending && subscription.catalog_id === "xai" && (
+        <div className="flex items-center justify-between gap-2 border-t border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700">
+          <span className="min-w-0 truncate">
+            {t("usage.resetQuotaConfirmMsg", { name: subscription.display_name })}
+          </span>
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setResetPending(false)}
+              className="rounded px-1.5 py-1 text-muted-foreground hover:bg-foreground/10"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              disabled={resetting}
+              onClick={() => {
+                setResetPending(false);
+                void handleResetQuota();
+              }}
+              className="rounded bg-amber-600 px-1.5 py-1 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {t("usage.resetQuota")}
+            </button>
+          </span>
+        </div>
+      )}
       <div className="flex items-center gap-1.5 border-t border-border/40 p-2" data-no-drag>
         {!subscription.is_active && (
           <button
@@ -416,7 +519,7 @@ export function UsageCardWindow() {
             {t("usage.setActive")}
           </button>
         )}
-        {/* Always offer CLI re-sync for active CLI-backed accounts (not only after a
+        {/* Always offer re-sync for active local-tool accounts (not only after a
             failed switch). Grok especially: a live `grok` process can overwrite
             auth.json, so users need a reliable re-push path. */}
         {subscription.is_active && subscription.supports_cli_switch && (
@@ -432,7 +535,13 @@ export function UsageCardWindow() {
             )}
           >
             {syncing ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {t("usage.resyncCli")}
+            {t(
+              subscription.catalog_id === "antigravity"
+                ? "usage.resyncAntigravity"
+                : subscription.catalog_id === "cursor"
+                  ? "usage.resyncCursor"
+                  : "usage.resyncCli",
+            )}
           </button>
         )}
         <button
@@ -444,6 +553,18 @@ export function UsageCardWindow() {
         >
           <RefreshCw size={13} className={refreshing ? "animate-spin" : undefined} />
         </button>
+        {subscription.catalog_id === "xai" && (
+          <button
+            type="button"
+            onClick={() => setResetPending(true)}
+            disabled={resetting || refreshing}
+            className="rounded-md border border-amber-500/40 p-1.5 text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
+            title={t("usage.resetQuota")}
+            aria-label={t("usage.resetQuota")}
+          >
+            <RotateCcw size={13} className={resetting ? "animate-spin" : undefined} />
+          </button>
+        )}
       </div>
     </div>
   );

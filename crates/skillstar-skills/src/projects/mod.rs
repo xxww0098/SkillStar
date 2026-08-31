@@ -24,7 +24,7 @@ pub use types::{
     ProjectAgentDetection, ProjectDeployMode, ProjectEntry, ProjectScanResult, ScannedSkill,
     SkillsList,
 };
-pub use types::{deploy_skill_auto, ensure_project_root_exists, prune_deploy_modes_for_agents};
+pub use types::{ensure_project_root_exists, prune_deploy_modes_for_agents};
 
 pub use import::import_scanned_skills;
 pub use index::{list_projects, register_project, remove_project, update_project_path};
@@ -270,6 +270,72 @@ mod tests {
             assert!(
                 !project_path.join(".codex").exists(),
                 "expected unused codex folder to never be created"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    /// A stale copy must be refreshed *as a copy*. Re-deploying it through a
+    /// symlink-first path would silently discard the deploy mode the user
+    /// picked, while `deploy_modes` still records `copy`.
+    #[test]
+    fn refresh_stale_copies_keeps_the_deployment_a_copy() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-refresh-copy")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: v1")?;
+
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+            let project_path_str = project_path.to_string_lossy().to_string();
+
+            let agents = HashMap::from([("claude".to_string(), vec!["demo-skill".to_string()])]);
+            let deploy_modes =
+                HashMap::from([(".claude/skills".to_string(), types::ProjectDeployMode::Copy)]);
+            save_and_sync(&project_path_str, agents, deploy_modes)?;
+
+            let deployed = project_path.join(".claude/skills/demo-skill");
+            assert!(
+                !deployed.is_symlink(),
+                "expected the initial deployment to be a copy"
+            );
+
+            // Drift the hub so the refresh has something to do.
+            std::fs::write(hub_skill.join("SKILL.md"), "description: v2")?;
+            assert_eq!(refresh_stale_copies(&project_path_str)?, 1);
+
+            assert!(
+                !deployed.is_symlink(),
+                "refreshing a stale copy must not downgrade it to a symlink"
+            );
+            assert_eq!(
+                std::fs::read_to_string(deployed.join("SKILL.md"))?,
+                "description: v2",
+                "expected the copy to carry the new hub content"
             );
 
             Ok(())

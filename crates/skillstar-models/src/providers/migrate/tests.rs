@@ -11,7 +11,9 @@
 use super::*;
 use crate::providers::binding::{Effort, ModelRef};
 use crate::providers::credential::{Credential, NoCredentialReason};
-use crate::providers::presets::{CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID, ProviderPresetFlat, get_all_presets_flat};
+use crate::providers::presets::{
+    CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID, ProviderPresetFlat, get_all_presets_flat,
+};
 use crate::providers::provider::Tri;
 use crate::providers::types::{FlatProvidersStore, ProviderEntryFlat, ToolActivation, ToolBinding};
 use std::collections::HashMap;
@@ -112,7 +114,10 @@ fn migrate_does_not_backfill_when_the_row_already_has_a_value() {
     let out = migrate_v3_to_v4(store_of(vec![row]), &[preset]);
 
     assert_eq!(
-        out.store.providers[0].endpoints.anthropic_messages.as_deref(),
+        out.store.providers[0]
+            .endpoints
+            .anthropic_messages
+            .as_deref(),
         Some("https://custom.example.com/anthropic")
     );
     assert!(out.report.backfilled_anthropic.is_empty());
@@ -349,7 +354,10 @@ fn migrate_v3_to_v4_maps_omp_role_keys() {
 
     // Non-role settings stay in the bag.
     let settings = out.store.bindings["omp"].settings.as_ref().unwrap();
-    assert_eq!(settings.get("somethingElse"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        settings.get("somethingElse"),
+        Some(&serde_json::json!(true))
+    );
     assert!(settings.get("roles").is_none());
 }
 
@@ -443,7 +451,11 @@ fn migrate_uses_claude_main_model_only_when_the_entry_names_none() {
         }),
     );
     let out = migrate_v3_to_v4(with_model, &[]);
-    assert!(!out.store.bindings["claude-code"].roles.contains_key("default"));
+    assert!(
+        !out.store.bindings["claude-code"]
+            .roles
+            .contains_key("default")
+    );
 
     // (b) the entry names nothing → meta becomes the default role.
     let mut without_model = store_of(vec![row]);
@@ -531,7 +543,11 @@ fn migrate_drops_the_claude_desktop_binding_and_names_it_in_the_report() {
 
     let out = migrate_v3_to_v4(store, &[]);
 
-    assert!(!out.store.bindings.contains_key(PLANNED_AGENT_CLAUDE_DESKTOP));
+    assert!(
+        !out.store
+            .bindings
+            .contains_key(PLANNED_AGENT_CLAUDE_DESKTOP)
+    );
     assert_eq!(out.report.dropped_bindings.len(), 1);
     let dropped = &out.report.dropped_bindings[0];
     assert_eq!(dropped.provider_id, "p1");
@@ -602,7 +618,10 @@ fn migrate_parks_unrecognised_meta_keys_in_ext_and_names_them() {
     let out = migrate_v3_to_v4(store_of(vec![row]), &[]);
 
     let ext = out.store.providers[0].ext.as_ref().unwrap();
-    assert_eq!(ext.get("someFutureThing"), Some(&serde_json::json!({"nested": 1})));
+    assert_eq!(
+        ext.get("someFutureThing"),
+        Some(&serde_json::json!({"nested": 1}))
+    );
     assert!(
         ext.get("baseURL").is_none(),
         "the v1 leftover retired with the v1 store"
@@ -634,7 +653,18 @@ mod prop {
             prop::option::of(any::<u64>()),
         )
             .prop_map(
-                |(id, name, openai, anthropic, models_url, key, models, default_model, sort, created)| {
+                |(
+                    id,
+                    name,
+                    openai,
+                    anthropic,
+                    models_url,
+                    key,
+                    models,
+                    default_model,
+                    sort,
+                    created,
+                )| {
                     ProviderEntryFlat {
                         id,
                         name,

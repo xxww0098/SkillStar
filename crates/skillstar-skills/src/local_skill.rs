@@ -140,17 +140,18 @@ fn copy_adopted_skill(name: &str, source_dir: &Path) -> Result<Skill> {
     }
     if let Some(parent) = hub_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
-            format!("Failed to create hub skills directory: {}", parent.display())
+            format!(
+                "Failed to create hub skills directory: {}",
+                parent.display()
+            )
         })?;
     }
 
-    skillstar_core::infra::fs_ops::create_copy_deploy(source_dir, &local_path).with_context(
-        || format!("Failed to copy adopted skill '{name}' into skills-local"),
-    )?;
+    skillstar_core::infra::fs_ops::create_copy_deploy(source_dir, &local_path)
+        .with_context(|| format!("Failed to copy adopted skill '{name}' into skills-local"))?;
     if let Err(error) = skillstar_core::infra::fs_ops::create_symlink(&local_path, &hub_path) {
         let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&local_path);
-        return Err(error)
-            .with_context(|| format!("Failed to create hub symlink for '{name}'"));
+        return Err(error).with_context(|| format!("Failed to create hub symlink for '{name}'"));
     }
 
     let description = skillstar_core::types::extract_skill_description(&local_path);
@@ -251,6 +252,7 @@ fn create_locked(name: &str, content: Option<&str>) -> Result<Skill> {
         stars: 0,
         installed: true,
         update_available: false,
+        upstream_change: None,
         last_updated: chrono::Utc::now().to_rfc3339(),
         git_url: String::new(),
         tree_hash: None,
@@ -305,6 +307,7 @@ fn installed_local_skill(name: &str, description: String) -> Result<Skill> {
         stars: 0,
         installed: true,
         update_available: false,
+        upstream_change: None,
         last_updated: chrono::Utc::now().to_rfc3339(),
         git_url: String::new(),
         tree_hash: None,
@@ -752,7 +755,11 @@ mod adopt_folder_tests {
         assert_eq!(result.adopted[0].name, "good");
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.skipped[0].name, "bare");
-        assert!(result.skipped[0].reason.contains("description"), "{}", result.skipped[0].reason);
+        assert!(
+            result.skipped[0].reason.contains("description"),
+            "{}",
+            result.skipped[0].reason
+        );
         assert!(!is_local_skill("bare"));
     }
 }

@@ -340,6 +340,9 @@ fn fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel() {
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
+    // `configure_remote_command` reads proxy configuration via the global
+    // data directory. Serialize with the test that mutates that environment.
+    let _guard = crate::lock_test_env();
     let temp = tempfile::tempdir().unwrap();
     let script = temp.path().join("fake-git");
     let marker = temp.path().join("credential-visible-without-argv-leak");
@@ -377,19 +380,30 @@ sleep 30
         )
     });
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !marker.exists() && Instant::now() < deadline {
+    // The marker is the fake command's observable proof that it received the
+    // operation-scoped askpass credential. Full-workspace tests can delay a
+    // thread/process launch well beyond the old 2s polling window, so wait for
+    // that exact state with a bounded deadline rather than guessing timing.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let observed_credential = loop {
+        if marker.exists() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
         std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(
-        marker.exists(),
-        "fake command never observed the operation credential"
-    );
+    };
+
+    // Always stop and reap the 30-second fake child before asserting readiness;
+    // otherwise a scheduling failure leaks a process into subsequent tests.
     session.cancel();
-    let error = worker
-        .join()
-        .unwrap()
-        .expect_err("cancel should stop child");
+    let result = worker.join().expect("fake transport worker must not panic");
+    assert!(
+        observed_credential,
+        "fake command never observed the operation credential; worker result: {result:?}"
+    );
+    let error = result.expect_err("cancel should stop child");
     assert_eq!(error.code.as_str(), "cancelled");
     assert!(!format!("{error:?}").contains(TOKEN));
 }

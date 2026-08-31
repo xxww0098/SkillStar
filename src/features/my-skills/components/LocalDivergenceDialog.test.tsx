@@ -155,7 +155,7 @@ describe("LocalDivergenceDialog", () => {
     expect(onPreserve).not.toHaveBeenCalled();
 
     fireEvent.change(inputs[1], { target: { value: "deep-research" } });
-    expect(screen.getByText("已存在同名 Skill")).toBeInTheDocument();
+    expect(screen.getByText("已存在同名技能")).toBeInTheDocument();
 
     fireEvent.change(inputs[1], { target: { value: "wizard-copy" } });
     expect(screen.getByRole("button", { name: "全部保留副本并更新" })).toBeEnabled();
@@ -182,7 +182,7 @@ describe("LocalDivergenceDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "转为本地副本" }));
     expect(onPreserve).toHaveBeenCalledWith({ "code-review": "code-review.local" });
 
-    fireEvent.click(screen.getByText("彻底移除该 Skill"));
+    fireEvent.click(screen.getByText("彻底移除该技能"));
     fireEvent.click(screen.getByRole("button", { name: "移除该技能" }));
     expect(onUninstall).toHaveBeenCalledOnce();
   });

@@ -133,7 +133,7 @@ pub async fn fetch(
         .json(&json!({ "biz_type": 0 }))
         .send()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("阶跃余额请求失败：{e}")))?;
+        .map_err(|e| UsageError::transport("阶跃余额", e))?;
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
@@ -170,7 +170,14 @@ fn map_error_body(http_status: u16, body: &str) -> UsageError {
         .message
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| body.chars().take(200).collect());
-    UsageError::Fetcher(format!("阶跃余额返回 {http_status}：{msg}"))
+    // Classify like `UsageError::http_status` but keep the parsed Connect-RPC
+    // message, which that helper would replace with the raw body.
+    let summary = format!("阶跃余额返回 {http_status}：{msg}");
+    if http_status == 429 || (500..600).contains(&http_status) {
+        UsageError::Transient(summary)
+    } else {
+        UsageError::Fetcher(summary)
+    }
 }
 
 fn to_yuan(minor: i64) -> f64 {
@@ -301,11 +308,16 @@ mod tests {
     }
 
     #[test]
-    fn non_auth_error_body_maps_to_fetcher() {
+    fn non_auth_client_error_stays_fetcher_but_5xx_is_transient() {
         let body = r#"{"code":"internal","message":"boom"}"#;
-        match map_error_body(500, body) {
+        match map_error_body(400, body) {
             UsageError::Fetcher(m) => assert!(m.contains("boom")),
             other => panic!("expected Fetcher, got {other:?}"),
+        }
+        // A server-side hiccup must keep the last good snapshot.
+        match map_error_body(500, body) {
+            UsageError::Transient(m) => assert!(m.contains("boom")),
+            other => panic!("expected Transient, got {other:?}"),
         }
     }
 }

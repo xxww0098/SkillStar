@@ -9,7 +9,12 @@ describe("AgentToolIcon", () => {
       const { container, unmount } = render(<AgentToolIcon toolId={agent.iconId} />);
       const root = container.firstElementChild;
       expect(root).toHaveAttribute("aria-hidden");
-      expect(container.querySelector("svg")).toBeTruthy();
+      const svg = container.querySelector("svg");
+      expect(svg).toBeTruthy();
+      // The brand glyph carries a `<title>`, which is metadata rather than
+      // painted text. Drop the SVG before checking, so this keeps asserting
+      // "no letter fallback next to the glyph" instead of the brand name.
+      svg?.remove();
       expect(container.textContent?.trim()).toBe("");
       unmount();
     }

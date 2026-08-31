@@ -147,7 +147,6 @@ async fn patrol_loop(
     generation: u64,
 ) {
     let interval = std::time::Duration::from_secs(interval_secs);
-    let per_skill_delay = std::time::Duration::from_millis(10);
 
     loop {
         let skills = match tokio::task::spawn_blocking(patrol::collect_hub_skills).await {
@@ -220,108 +219,124 @@ async fn patrol_loop(
             .await
             {
                 Ok(failed) => Arc::new(failed),
+                // An empty set would mean "every repo fetched cleanly", so the
+                // check step below would compare against stale refs and persist
+                // `update_available = false` over real badges. A failed prefetch
+                // is "unknown": abandon the cycle (releasing the git session the
+                // same way every other mid-loop exit does) and retry next tick.
                 Err(err) => {
                     warn!(target: "patrol", error = %err, "failed to prefetch repos");
-                    Arc::new(std::collections::HashSet::new())
+                    git_session.cancel();
+                    if let Some(session_id) = registered_session_id.as_deref() {
+                        auth_state.finish_git_operation(session_id);
+                    }
+                    clear_git_session(&state, git_session.id());
+                    tokio::select! {
+                        _ = tokio::time::sleep(interval) => continue,
+                        _ = cancel_rx.changed() => break,
+                    }
                 }
             };
 
-        for entry in &skills {
-            if *cancel_rx.borrow() {
-                break;
+        if *cancel_rx.borrow() {
+            git_session.cancel();
+            if let Some(session_id) = registered_session_id.as_deref() {
+                auth_state.finish_git_operation(session_id);
             }
+            clear_git_session(&state, git_session.id());
+            break;
+        }
 
-            let owns_generation = {
-                let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
-                if inner.generation == generation {
-                    inner.current_skill = entry.name.clone();
-                    true
-                } else {
-                    false
-                }
-            };
-            if !owns_generation {
-                break;
+        let owns_generation = {
+            let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
+            if inner.generation == generation {
+                inner.current_skill = skills
+                    .first()
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_default();
+                true
+            } else {
+                false
             }
+        };
+        if !owns_generation {
+            git_session.cancel();
+            if let Some(session_id) = registered_session_id.as_deref() {
+                auth_state.finish_git_operation(session_id);
+            }
+            clear_git_session(&state, git_session.id());
+            break;
+        }
 
-            let skill_name = entry.name.clone();
-            let skill_path = entry.path.clone();
-            let failed_roots = Arc::clone(&failed_fetch_roots);
-            let check_session = git_session.clone();
-            // Stamped before the check so a finding overtaken by an update
-            // applied mid-check is dropped rather than re-asserting the badge.
-            let checked_from = update_state::stamp();
-            let update_result = tokio::task::spawn_blocking(move || {
-                patrol::check_skill_update_local_in_session(
-                    &skill_name,
-                    &skill_path,
-                    &failed_roots,
-                    &check_session,
-                )
-            })
-            .await
-            .unwrap_or_else(|err| {
+        let checked_from = update_state::stamp();
+        let skills_for_check = skills;
+        let failed_roots = Arc::clone(&failed_fetch_roots);
+        let check_session = git_session.clone();
+        let results = match tokio::task::spawn_blocking(move || {
+            patrol::check_hub_skills_local_in_session(
+                &skills_for_check,
+                &failed_roots,
+                &check_session,
+            )
+        })
+        .await
+        {
+            Ok(results) => results,
+            Err(err) => {
                 warn!(
                     target: "patrol",
-                    skill = %entry.name,
                     error = %err,
-                    "update check task failed"
+                    "update check batch failed"
                 );
-                // A panicked or cancelled check knows nothing about the skill.
-                // `None` preserves the previous badge instead of asserting
-                // "up to date" on the strength of a crashed task.
-                None
-            });
+                Vec::new()
+            }
+        };
 
-            let Some(update_available) = update_result else {
-                tokio::select! {
-                    _ = tokio::time::sleep(per_skill_delay) => {},
-                    _ = cancel_rx.changed() => break,
-                }
-                continue;
-            };
+        if *cancel_rx.borrow() {
+            git_session.cancel();
+            if let Some(session_id) = registered_session_id.as_deref() {
+                auth_state.finish_git_operation(session_id);
+            }
+            clear_git_session(&state, git_session.id());
+            break;
+        }
 
-            // Write through before emitting: the event is a notification, not
-            // the record. Patrol findings used to live only in the event, so
-            // they vanished on restart and drifted from the persisted snapshot.
-            let update_available = update_state::commit_scan(
-                checked_from,
-                &[update_state::SkillUpdateState {
-                    name: entry.name.clone(),
-                    update_available,
-                }],
-            )
-            .first()
-            .map(|state| state.update_available)
-            .unwrap_or(update_available);
+        let known: Vec<update_state::SkillUpdateState> = results
+            .into_iter()
+            .filter_map(|(name, status)| Some(status?.into_state(name)))
+            .collect();
+        let committed = update_state::commit_scan(checked_from, &known);
 
+        for state_item in committed {
             let event = {
                 let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
                 if inner.generation != generation {
                     None
                 } else {
+                    inner.current_skill = state_item.name.clone();
                     inner.skills_checked += 1;
-                    if update_available {
+                    if state_item.update_available {
                         inner.updates_found += 1;
                     }
                     Some(PatrolCheckEvent {
-                        name: entry.name.clone(),
-                        update_available,
+                        name: state_item.name.clone(),
+                        update_available: state_item.update_available,
+                        upstream_change: state_item.upstream_change.clone(),
                         skills_checked: inner.skills_checked,
                         updates_found: inner.updates_found,
                     })
                 }
             };
             let Some(event) = event else {
+                git_session.cancel();
+                if let Some(session_id) = registered_session_id.as_deref() {
+                    auth_state.finish_git_operation(session_id);
+                }
+                clear_git_session(&state, git_session.id());
                 break;
             };
 
             let _ = app.emit("patrol://skill-checked", &event);
-
-            tokio::select! {
-                _ = tokio::time::sleep(per_skill_delay) => {},
-                _ = cancel_rx.changed() => break,
-            }
         }
 
         if *cancel_rx.borrow() {
@@ -333,8 +348,11 @@ async fn patrol_loop(
             break;
         }
 
-        let new_skills_result =
-            tokio::task::spawn_blocking(patrol::detect_new_skills_in_cached_repos).await;
+        let detect_session = git_session.clone();
+        let new_skills_result = tokio::task::spawn_blocking(move || {
+            skillstar_skills::repo_scanner::detect_new_skills_in_cached_repos(&detect_session)
+        })
+        .await;
 
         if let Ok(new_skills) = new_skills_result
             && !new_skills.is_empty()

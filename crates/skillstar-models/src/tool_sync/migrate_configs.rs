@@ -191,7 +191,9 @@ fn drop_unwritable_codex_entries(
             .unwrap_or(0);
     }
 
-    report
-        .codex_dropped
-        .extend(doomed.into_iter().filter(|d| removed.contains(d.provider_id.as_str())));
+    report.codex_dropped.extend(
+        doomed
+            .into_iter()
+            .filter(|d| removed.contains(d.provider_id.as_str())),
+    );
 }

@@ -88,7 +88,7 @@ export function DeckCard({
     >
       <CardTemplate
         className={cn(
-          "hover:bg-card-hover flex relative group shadow-sm hover:shadow-xl transition p-0 border border-border bg-card",
+          "hover:bg-card-hover flex relative group shadow-sm hover:shadow-[0_12px_32px_-8px_var(--color-shadow)] transition-all duration-200 p-0 border border-border/80 bg-card/70 hover:border-primary/50 hover:-translate-y-0.5",
           viewMode === "list" ? "flex-row items-center min-h-[96px]" : "flex-col h-full",
         )}
       >
@@ -100,11 +100,11 @@ export function DeckCard({
         >
           {/* Header section */}
           <div className={cn("flex items-start gap-4 pr-4 shrink-0", viewMode === "grid" ? "mb-5" : "w-[220px]")}>
-            <div className="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center text-2xl shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center text-2xl shrink-0 shadow-2xs">
               {group.icon}
             </div>
             <div className="min-w-0 pt-1">
-              <h3 className="ss-card-title truncate text-foreground transition-colors">
+              <h3 className="ss-card-title truncate text-foreground transition-colors font-bold">
                 <button
                   type="button"
                   onClick={() => onEdit(group)}
@@ -114,7 +114,7 @@ export function DeckCard({
                 </button>
               </h3>
               {group.description ? (
-                <p className="ss-card-desc mt-1">{group.description}</p>
+                <p className="ss-card-desc mt-1 leading-relaxed text-muted-foreground/90">{group.description}</p>
               ) : (
                 <p className="ss-card-meta italic mt-1 opacity-60">{t("skillCards.noDescription")}</p>
               )}
@@ -135,10 +135,10 @@ export function DeckCard({
                   key={skillName}
                   variant="outline"
                   className={cn(
-                    "text-micro font-medium px-2 py-0.5 h-5",
+                    "text-micro font-semibold px-2 py-0.5 h-5",
                     skill
-                      ? "bg-muted text-muted-foreground border-transparent"
-                      : "text-warning bg-warning/5 border-warning/20 font-normal",
+                      ? "bg-muted/80 text-foreground/80 border-border/70 shadow-2xs"
+                      : "text-amber-500 bg-amber-500/12 border-amber-500/30 font-medium shadow-2xs",
                   )}
                 >
                   {skillName}
@@ -148,7 +148,7 @@ export function DeckCard({
             {groupSkillNames.length > maxSkillsToShow && (
               <Badge
                 variant="outline"
-                className="text-micro font-medium px-2 py-0.5 h-5 bg-muted text-muted-foreground border-transparent"
+                className="text-micro font-semibold px-2 py-0.5 h-5 bg-muted/80 text-muted-foreground border-border/70"
               >
                 +{groupSkillNames.length - maxSkillsToShow}
               </Badge>
@@ -180,7 +180,7 @@ export function DeckCard({
                   onMenuOpenChange(menuOpenId === group.id ? null : group.id);
                 }}
                 className="p-2.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary mt-0.5"
-                aria-label={t("common.more")}
+                aria-label={t("common.moreActions")}
               >
                 <MoreHorizontal className="w-4 h-4" />
               </button>
@@ -234,7 +234,7 @@ export function DeckCard({
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
               <span className="text-xs text-muted-foreground truncate">
-                {t("skillCards.noSkillsInstalled", { defaultValue: "No skills installed" })}
+                {t("skillCards.noSkillsInstalled", { defaultValue: "No cards installed" })}
                 <span className="ml-1.5 opacity-60 tabular-nums">
                   ({installedCount}/{totalCount})
                 </span>

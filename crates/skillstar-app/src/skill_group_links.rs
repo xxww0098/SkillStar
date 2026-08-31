@@ -46,7 +46,10 @@ pub fn list_groups_with_agent_links() -> Vec<SkillGroup> {
     let resolved: std::collections::HashMap<_, _> = resolved.into_iter().collect();
     for group in &mut groups {
         if group.agent_links.is_none() {
-            group.agent_links = resolved.get(&group.id).cloned().or_else(|| Some(Vec::new()));
+            group.agent_links = resolved
+                .get(&group.id)
+                .cloned()
+                .or_else(|| Some(Vec::new()));
         }
     }
     groups
@@ -58,8 +61,8 @@ fn linked_skills_per_agent() -> Vec<(String, HashSet<String>)> {
     skillstar_agents::list_profiles()
         .into_iter()
         .filter(|profile| profile.enabled && profile.has_global_skills())
-        .filter_map(|profile| {
-            match skillstar_skills::deployment::list_linked_skills(&profile.id) {
+        .filter_map(
+            |profile| match skillstar_skills::deployment::list_linked_skills(&profile.id) {
                 Ok(names) => Some((profile.id, names.iter().map(|n| key(n)).collect())),
                 Err(err) => {
                     tracing::warn!(
@@ -70,8 +73,8 @@ fn linked_skills_per_agent() -> Vec<(String, HashSet<String>)> {
                     );
                     None
                 }
-            }
-        })
+            },
+        )
         .collect()
 }
 

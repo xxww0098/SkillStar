@@ -1,7 +1,7 @@
 //! Provider / preset / ref CRUD commands, on the v4 store.
 
-use super::*;
 use super::compat;
+use super::*;
 
 // ---------------------------------------------------------------------------
 // Read commands (no lock needed)
@@ -20,10 +20,7 @@ pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, AppE
 /// registry's without matching it. The legacy spelling is still accepted and
 /// mapped forward so a UI build in flight does not break.
 #[tauri::command]
-pub async fn set_app_ai_provider_ref(
-    app_id: String,
-    provider_id: String,
-) -> Result<(), AppError> {
+pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Result<(), AppError> {
     let agent_id = skillstar_models::normalize_agent_id(&app_id).to_string();
     let provider_id = provider_id.trim();
     if !matches!(agent_id.as_str(), "claude-code" | "codex") {
@@ -84,8 +81,8 @@ pub async fn get_providers_flat(
 ) -> Result<FlatProvidersResponse, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let loaded = providers::load_store_and_repair(&path)
-        .map_err(|e| AppError::Other(e.to_string()))?;
+    let loaded =
+        providers::load_store_and_repair(&path).map_err(|e| AppError::Other(e.to_string()))?;
     let mut store = loaded.store;
     if providers::ensure_official_providers(&mut store) {
         providers::write_store_v4(&store, &path)?;

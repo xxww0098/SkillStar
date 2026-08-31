@@ -35,7 +35,7 @@
 - 每个命令只打开一次 SFTP channel；批量 push 复用该 channel，并逐项收集错误。
 - discovery 扫描 `$HOME/.*` 下的 skills 目录并识别普通目录和 hub symlink；固定路径表只作为新服务器无发现时的 seed。
 - 旧的字面 `$HOME/~/.skillstar` 布局由幂等 heal script 搬回真实 hub 并重指 link；修复数量通过 progress event 报告。
-- standalone 技能可以迁移进 hub；hub-managed 技能支持 pull、link toggle 和 update check。
+- standalone 技能可以迁移进 hub。远端技能的 pull、link toggle 和 update check 没有实装：命令层曾有包装但前端从未接线，已于 2026-08-27 删除，需要时从 git 历史取回并补 UI。
 
 ## SSH 事件与 UI
 

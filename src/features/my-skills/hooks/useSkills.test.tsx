@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill, SkillUpdateReport } from "../../../types";
 import { toast } from "../../../lib/toast";
-import { SkillsProvider, useSkills } from "./useSkills";
+import { SkillsProvider, useSkillBadgeCounts, useSkills } from "./useSkills";
 
 vi.mock("../../../lib/toast", () => ({
   toast: {
@@ -349,7 +349,7 @@ describe("useSkills", () => {
     expect(screen.getByText("opencli-usage")).toBeInTheDocument();
     expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
 
-    fireEvent.click(screen.getByText("丢弃以下 2 个 Skill 的本地修改"));
+    fireEvent.click(screen.getByText("丢弃以下 2 个技能的本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "全部丢弃修改并更新" }));
     await act(async () => {
       await updatePromise;
@@ -659,9 +659,9 @@ describe("useSkills", () => {
     fireEvent.click(screen.getByText("丢弃本地修改"));
     fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
 
-    await screen.findByText("彻底移除该 Skill");
+    await screen.findByText("彻底移除该技能");
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("来源已不再提供");
-    fireEvent.click(screen.getByText("彻底移除该 Skill"));
+    fireEvent.click(screen.getByText("彻底移除该技能"));
     fireEvent.click(screen.getByRole("button", { name: "移除该技能" }));
 
     let report!: { uninstalled: string[] };
@@ -675,5 +675,24 @@ describe("useSkills", () => {
       resolution: { kind: "uninstall" },
     });
     await waitFor(() => expect(result.current.skills.some((skill) => skill.name === "opencli-usage")).toBe(false));
+  });
+
+  it("keeps the skills context identity across a no-op list refetch", async () => {
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const first = result.current;
+
+    await act(async () => {
+      await result.current.refresh(true, false);
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current).toBe(first);
+  });
+
+  it("exposes sidebar badge counts from the skills list", async () => {
+    const { result } = renderHook(() => useSkillBadgeCounts(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.pendingUpdatesCount).toBe(3));
+    expect(result.current.ghostSkillCount).toBe(0);
   });
 });

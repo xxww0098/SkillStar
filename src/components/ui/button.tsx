@@ -5,18 +5,20 @@ import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:pointer-events-none disabled:opacity-50 cursor-pointer [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:pointer-events-none disabled:opacity-50 cursor-pointer [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 select-none",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+        default:
+          "bg-primary text-primary-foreground font-semibold hover:bg-primary-hover shadow-sm hover:shadow-md active:scale-[0.98]",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:ring-destructive/20",
+          "bg-destructive text-destructive-foreground font-semibold hover:bg-destructive/90 shadow-sm hover:shadow-md active:scale-[0.98] focus-visible:ring-destructive/30",
         outline:
-          "border border-border/80 bg-background/50 text-foreground/80 hover:bg-accent/10 hover:border-accent/50 hover:text-foreground shadow-sm",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-sm",
-        ghost: "hover:bg-accent/10 hover:text-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+          "border border-border/90 bg-background/60 text-foreground font-medium hover:bg-accent/15 hover:border-primary/50 hover:text-foreground shadow-2xs active:scale-[0.98]",
+        secondary:
+          "bg-secondary/90 text-secondary-foreground font-semibold hover:bg-secondary shadow-2xs active:scale-[0.98]",
+        ghost: "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover font-medium active:scale-[0.98]",
+        link: "text-primary underline-offset-4 hover:underline font-medium",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

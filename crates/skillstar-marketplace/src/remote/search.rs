@@ -47,6 +47,7 @@ impl From<SkillsShSkill> for Skill {
             stars: skill_entry.installs,
             installed: false,
             update_available: false,
+            upstream_change: None,
             last_updated: chrono::Utc::now().to_rfc3339(),
             git_url,
             tree_hash: None,

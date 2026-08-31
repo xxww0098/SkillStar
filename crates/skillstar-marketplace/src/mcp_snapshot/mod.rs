@@ -27,9 +27,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use tracing::{debug, warn};
 
-use crate::mcp_models::{
-    McpMarketEntry, McpMarketServerDetail, McpPublisherSummary, McpRegistryServer,
-};
+use crate::mcp_models::{McpMarketServerDetail, McpPublisherSummary, McpRegistryServer};
 use crate::mcp_remote::{self, McpSourceOutcome, fetch_mcp_catalog};
 use crate::remote::FetchMeta;
 use crate::snapshot::{LocalFirstResult, SnapshotStatus, SyncStateEntry, with_conn};
@@ -54,8 +52,6 @@ use seeding::seed_default_curated_mcp_servers;
 const MCP_REGISTRY_SCOPE: &str = "mcp_registry";
 /// How long a synced catalog stays "fresh" before a background refresh.
 const MCP_REGISTRY_TTL_HOURS: i64 = 12;
-const DEFAULT_SEARCH_LIMIT: u32 = 60;
-const MAX_SEARCH_LIMIT: u32 = 200;
 
 // ---------------------------------------------------------------------------
 // Shared helpers (used by this module + `query` + `seeding`)
@@ -308,147 +304,6 @@ pub async fn query_mcp_servers_local(
     }
 }
 
-/// Local-first list of all registry servers (seeds on first use).
-pub async fn list_mcp_servers_local() -> Result<LocalFirstResult<Vec<McpMarketEntry>>> {
-    let local = with_conn(|conn| {
-        seed_default_curated_mcp_servers(conn)?;
-        let cards = load_cards(conn)?;
-        let state = read_sync_state(conn)?;
-        Ok((
-            cards,
-            state.is_some(),
-            is_fresh(&state),
-            state.and_then(|s| s.last_success_at),
-        ))
-    });
-
-    match local {
-        Ok((cards, false, _, _)) => {
-            // Never synced — seed once, then return what we have.
-            if let Err(sync_err) = sync_mcp_registry_scope().await {
-                return Ok(LocalFirstResult {
-                    data: cards,
-                    snapshot_status: SnapshotStatus::RemoteError,
-                    snapshot_updated_at: None,
-                    error: Some(format!("{sync_err:#}")),
-                });
-            }
-            let reseeded = with_conn(|conn| {
-                seed_default_curated_mcp_servers(conn)?;
-                let cards = load_cards(conn)?;
-                let updated_at = read_sync_state(conn)?.and_then(|s| s.last_success_at);
-                Ok((cards, updated_at))
-            })?;
-            Ok(LocalFirstResult {
-                data: reseeded.0,
-                snapshot_status: SnapshotStatus::Seeding,
-                snapshot_updated_at: reseeded.1,
-                error: None,
-            })
-        }
-        Ok((cards, _, fresh, updated_at)) if !cards.is_empty() => Ok(LocalFirstResult {
-            data: cards,
-            snapshot_status: if fresh {
-                SnapshotStatus::Fresh
-            } else {
-                SnapshotStatus::Stale
-            },
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Ok((_, true, _, updated_at)) => Ok(LocalFirstResult {
-            data: Vec::new(),
-            snapshot_status: SnapshotStatus::Miss,
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Err(err) => {
-            warn!(target: "mcp_marketplace", error = %err, "MCP registry local list failed");
-            Ok(LocalFirstResult {
-                data: Vec::new(),
-                snapshot_status: SnapshotStatus::RemoteError,
-                snapshot_updated_at: None,
-                error: Some(format!("{err:#}")),
-            })
-        }
-    }
-}
-
-/// Local-first FTS search (seeds on first use if the catalog is empty).
-pub async fn search_mcp_servers_local(
-    query: &str,
-    limit: Option<u32>,
-) -> Result<LocalFirstResult<Vec<McpMarketEntry>>> {
-    let limit = limit
-        .unwrap_or(DEFAULT_SEARCH_LIMIT)
-        .clamp(1, MAX_SEARCH_LIMIT);
-    let local = with_conn(|conn| {
-        seed_default_curated_mcp_servers(conn)?;
-        let cards = search_cards(conn, query, limit)?;
-        let total = count_servers(conn)?;
-        let state = read_sync_state(conn)?;
-        Ok((
-            cards,
-            total,
-            state.is_some(),
-            is_fresh(&state),
-            state.and_then(|s| s.last_success_at),
-        ))
-    });
-
-    match local {
-        Ok((cards, _, false, _, _)) => {
-            // Never synced — seed then re-search. Curated hits can still be
-            // returned if the remote registry is unavailable.
-            if let Err(sync_err) = sync_mcp_registry_scope().await {
-                return Ok(LocalFirstResult {
-                    data: cards,
-                    snapshot_status: SnapshotStatus::RemoteError,
-                    snapshot_updated_at: None,
-                    error: Some(format!("{sync_err:#}")),
-                });
-            }
-            let reseeded = with_conn(|conn| {
-                seed_default_curated_mcp_servers(conn)?;
-                let cards = search_cards(conn, query, limit)?;
-                let updated_at = read_sync_state(conn)?.and_then(|s| s.last_success_at);
-                Ok((cards, updated_at))
-            })?;
-            Ok(LocalFirstResult {
-                data: reseeded.0,
-                snapshot_status: SnapshotStatus::Seeding,
-                snapshot_updated_at: reseeded.1,
-                error: None,
-            })
-        }
-        Ok((cards, _, _, fresh, updated_at)) if !cards.is_empty() => Ok(LocalFirstResult {
-            data: cards,
-            snapshot_status: if fresh {
-                SnapshotStatus::Fresh
-            } else {
-                SnapshotStatus::Stale
-            },
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Ok((_, _, _, _, updated_at)) => Ok(LocalFirstResult {
-            data: Vec::new(),
-            snapshot_status: SnapshotStatus::Miss,
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Err(err) => {
-            warn!(target: "mcp_marketplace", error = %err, "MCP registry search failed");
-            Ok(LocalFirstResult {
-                data: Vec::new(),
-                snapshot_status: SnapshotStatus::RemoteError,
-                snapshot_updated_at: None,
-                error: Some(format!("{err:#}")),
-            })
-        }
-    }
-}
-
 /// Local-first detail (readme + package/remote specs) for one server.
 pub async fn get_mcp_server_detail_local(
     id: &str,
@@ -510,95 +365,6 @@ pub fn list_mcp_publishers() -> Result<Vec<McpPublisherSummary>> {
         seed_default_curated_mcp_servers(conn)?;
         load_publishers(conn)
     })
-}
-
-/// Local-first list of MCP cards scoped to one official publisher. Curated
-/// publishers (`adspower` / `bigmodel`) read instantly from the curated table;
-/// `github` follows the same stale-refresh path as the full marketplace list.
-pub async fn list_mcp_servers_by_publisher(
-    publisher_id: &str,
-) -> Result<LocalFirstResult<Vec<McpMarketEntry>>> {
-    // Curated publishers are static — no remote sync, always fresh.
-    if publisher_id != "github" {
-        let cards = with_conn(|conn| {
-            seed_default_curated_mcp_servers(conn)?;
-            load_cards_by_publisher(conn, publisher_id)
-        })?;
-        return Ok(LocalFirstResult {
-            data: cards,
-            snapshot_status: SnapshotStatus::Fresh,
-            snapshot_updated_at: None,
-            error: None,
-        });
-    }
-
-    // GitHub publisher — same local-first dance as `list_mcp_servers_local`.
-    let local = with_conn(|conn| {
-        seed_default_curated_mcp_servers(conn)?;
-        let cards = load_cards_by_publisher(conn, "github")?;
-        let state = read_sync_state(conn)?;
-        Ok((
-            cards,
-            state.is_some(),
-            is_fresh(&state),
-            state.and_then(|s| s.last_success_at),
-        ))
-    });
-
-    match local {
-        Ok((cards, false, _, _)) => {
-            if let Err(sync_err) = sync_mcp_registry_scope().await {
-                return Ok(LocalFirstResult {
-                    data: cards,
-                    snapshot_status: SnapshotStatus::RemoteError,
-                    snapshot_updated_at: None,
-                    error: Some(format!("{sync_err:#}")),
-                });
-            }
-            let reseeded = with_conn(|conn| {
-                seed_default_curated_mcp_servers(conn)?;
-                let cards = load_cards_by_publisher(conn, "github")?;
-                let updated_at = read_sync_state(conn)?.and_then(|s| s.last_success_at);
-                Ok((cards, updated_at))
-            })?;
-            Ok(LocalFirstResult {
-                data: reseeded.0,
-                snapshot_status: SnapshotStatus::Seeding,
-                snapshot_updated_at: reseeded.1,
-                error: None,
-            })
-        }
-        Ok((cards, _, fresh, updated_at)) if !cards.is_empty() => Ok(LocalFirstResult {
-            data: cards,
-            snapshot_status: if fresh {
-                SnapshotStatus::Fresh
-            } else {
-                SnapshotStatus::Stale
-            },
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Ok((_, true, _, updated_at)) => Ok(LocalFirstResult {
-            data: Vec::new(),
-            snapshot_status: SnapshotStatus::Miss,
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Err(err) => {
-            warn!(target: "mcp_marketplace", error = %err, "MCP publisher list failed");
-            Ok(LocalFirstResult {
-                data: Vec::new(),
-                snapshot_status: SnapshotStatus::RemoteError,
-                snapshot_updated_at: None,
-                error: Some(format!("{err:#}")),
-            })
-        }
-    }
-}
-
-/// Sync-state entry for the aggregate MCP registry scope (status strip).
-pub fn mcp_market_sync_states() -> Result<Vec<SyncStateEntry>> {
-    with_conn(|conn| Ok(read_sync_state(conn)?.into_iter().collect()))
 }
 
 /// Per-source sync state — which source is stale, degraded or failing.

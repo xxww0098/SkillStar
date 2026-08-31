@@ -231,9 +231,3 @@ fn aggregate_meta(outcomes: &[McpSourceOutcome], unchanged: bool) -> FetchMeta {
                 .any(|o| !o.succeeded() || o.degraded_reason.is_some()),
     }
 }
-
-/// Back-compatible single-call fetch: merged catalog + aggregate metadata.
-pub async fn fetch_mcp_registry() -> Result<(Vec<McpRegistryServer>, FetchMeta)> {
-    let fetched = fetch_mcp_catalog(&HashMap::new()).await?;
-    Ok((fetched.servers, fetched.meta))
-}

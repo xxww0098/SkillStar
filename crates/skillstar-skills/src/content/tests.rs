@@ -199,10 +199,26 @@ fn content_facades_reject_traversal_before_read_write_or_delete() {
         Err(AppError::Other(_))
     ));
     assert!(matches!(delete_local("../victim"), Err(AppError::Other(_))));
+    assert!(resolve_skill_folder("../victim").is_none());
     assert_eq!(
         std::fs::read_to_string(outside.join("SKILL.md")).unwrap(),
         "# Must stay\n"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn skill_folder_rejects_a_link_outside_the_managed_hub() {
+    use std::os::unix::fs::symlink;
+
+    let _guard = crate::lock_test_env();
+    let hub = TestHub::new();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("SKILL.md"), b"# Outside").unwrap();
+    std::fs::create_dir_all(hub.temp.path().join("skills")).unwrap();
+    symlink(outside.path(), hub.skill_dir("escape")).unwrap();
+
+    assert!(resolve_skill_folder("escape").is_none());
 }
 
 #[cfg(unix)]

@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use skillstar_git::transport::{GitOperationSession, NoopGitProgressSink, classify_git_failure};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use skillstar_git::transport::{GitOperationSession, NoopGitProgressSink, classify_git_failure};
 use tokio::sync::Notify;
 
 use super::{
@@ -261,7 +261,7 @@ async fn provider_expiry_drives_status_refresh_and_logout() {
 }
 
 #[tokio::test]
-async fn git_auth_material_tracks_keyring_presence_and_provider_expiry_without_a_dto() {
+async fn git_auth_material_tracks_file_store_presence_and_provider_expiry_without_a_dto() {
     let gateway = FakeGateway::authorized();
     let credentials = MemoryCredentials::default();
     let clock = TestClock::at("2026-08-05T10:00:00Z");

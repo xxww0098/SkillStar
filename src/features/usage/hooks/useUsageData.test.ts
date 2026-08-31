@@ -129,6 +129,54 @@ describe("useUsageData mutations", () => {
     expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining("alert already gone"));
   });
 
+  it("starts reconcile and summary before list_subscriptions resolves", async () => {
+    let releaseList: (rows: Subscription[]) => void = () => undefined;
+    api.listSubscriptions.mockReturnValue(
+      new Promise<Subscription[]>((resolve) => {
+        releaseList = resolve;
+      }),
+    );
+
+    const hook = renderHook(() => useUsageData());
+    await waitFor(() => {
+      expect(api.reconcileCliAccounts).toHaveBeenCalled();
+      expect(api.getUsageSummary).toHaveBeenCalled();
+      expect(api.getSubscriptionAlerts).toHaveBeenCalled();
+    });
+    expect(hook.result.current.loading).toBe(true);
+
+    await act(async () => {
+      releaseList([subscription("a", true)]);
+    });
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(hook.result.current.subscriptions.map((row) => row.id)).toEqual(["a"]);
+  });
+
+  it("does not paint cli or alerts when list_subscriptions fails", async () => {
+    api.listSubscriptions.mockRejectedValue(new Error("storage locked"));
+    api.reconcileCliAccounts.mockResolvedValue({ xai: { kind: "linkedTo", subscriptionId: "a" } });
+    api.getSubscriptionAlerts.mockResolvedValue([{ id: "alert-1", subscription_id: "a" }]);
+
+    const hook = renderHook(() => useUsageData());
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+
+    expect(hook.result.current.error).toContain("storage locked");
+    expect(hook.result.current.cliAccounts).toEqual({});
+    expect(hook.result.current.alerts).toEqual([]);
+  });
+
+  it("keeps catalog after a failed CLI reconcile", async () => {
+    api.listSubscriptions.mockResolvedValue([subscription("a", true)]);
+    api.reconcileCliAccounts.mockRejectedValue(new Error("keychain"));
+
+    const hook = renderHook(() => useUsageData());
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+
+    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.subscriptions).toHaveLength(1);
+    expect(hook.result.current.cliAccounts).toEqual({});
+  });
+
   it("reads which account each CLI is actually serving on load", async () => {
     api.reconcileCliAccounts.mockResolvedValue({ xai: { kind: "linkedTo", subscriptionId: "b" } });
 

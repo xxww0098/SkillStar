@@ -91,6 +91,7 @@ pub(crate) fn replace_servers(conn: &Connection, servers: &[McpRegistryServer]) 
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn count_servers(conn: &Connection) -> Result<i64> {
     conn.query_row("SELECT COUNT(*) FROM mcp_registry_server", [], |row| {
         row.get(0)

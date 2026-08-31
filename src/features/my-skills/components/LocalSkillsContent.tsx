@@ -1,7 +1,8 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { AlertTriangle, Globe, Layers } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MOTION_TRANSITION } from "../../../comm/motion";
 import { Toolbar } from "../../../components/layout/Toolbar";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
@@ -15,6 +16,7 @@ import { navigateToSettingsSection } from "../../../lib/utils";
 import type { RepoNewSkill, Skill, SkillUpdateRunReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
+import { hasPendingUpdate } from "../lib/pendingUpdates";
 import { AiPickSkillsModal } from "./AiPickSkillsModal";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
@@ -61,6 +63,9 @@ export function LocalSkillsContent({
     reinstallRepoSkills,
     uninstallSkill,
     runSkillUpdate,
+    resolveRemovedSkill,
+    migrateRenamedSkill,
+    pendingMigrationNames,
     pendingUpdateNames,
     toggleSkillForAgent,
     pendingAgentToggleKeys,
@@ -112,7 +117,6 @@ export function LocalSkillsContent({
   }, [skills]);
 
   const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
-  const pendingUpdateCount = useMemo(() => skills.filter((skill) => skill.update_available).length, [skills]);
 
   /** Sorted unique repo source strings for the repo filter popover */
   const repoSources = useMemo(() => {
@@ -196,7 +200,8 @@ export function LocalSkillsContent({
     }
   }, [initialShareCode]);
 
-  const filteredSkills = useMemo(() => {
+  /** Everything the toolbar filters narrow to, before the updates toggle. */
+  const scopedSkills = useMemo(() => {
     let visibleSkills = [...skills];
 
     if (searchQuery) {
@@ -228,9 +233,18 @@ export function LocalSkillsContent({
       visibleSkills = visibleSkills.filter((skill) => skill.source === repoFilter);
     }
 
-    if (onlyUpdatesFilter) {
-      visibleSkills = visibleSkills.filter((skill) => Boolean(skill.update_available) && skill.skill_type !== "local");
-    }
+    return visibleSkills;
+  }, [skills, searchQuery, agentFilter, profiles, sourceFilter, repoFilter]);
+
+  /** The chip counts what the updates filter would actually show, so it can
+   *  never claim updates the active search has already filtered away. The
+   *  "update all" CTA stays deliberately filter-independent (see
+   *  docs/features/skills/README.md), so it reads the unfiltered list. */
+  const pendingUpdateSkills = useMemo(() => scopedSkills.filter(hasPendingUpdate), [scopedSkills]);
+  const allPendingUpdates = useMemo(() => skills.filter(hasPendingUpdate), [skills]);
+
+  const filteredSkills = useMemo(() => {
+    const visibleSkills = [...(onlyUpdatesFilter ? pendingUpdateSkills : scopedSkills)];
 
     visibleSkills.sort((a, b) => {
       switch (sortBy) {
@@ -246,7 +260,7 @@ export function LocalSkillsContent({
     });
 
     return visibleSkills;
-  }, [skills, searchQuery, sortBy, agentFilter, profiles, sourceFilter, repoFilter, onlyUpdatesFilter]);
+  }, [scopedSkills, pendingUpdateSkills, onlyUpdatesFilter, sortBy]);
 
   // Stable Settings-backed target list for filters, cards, selection actions,
   // and project deployment. Persisted `enabled` alone is insufficient because
@@ -301,6 +315,61 @@ export function LocalSkillsContent({
       }
     },
     [runSkillUpdate, t],
+  );
+
+  /** Upstream dropped the Skill: same dialog and exits as a blocked update. */
+  const handleResolveRemoved = useCallback(
+    async (name: string) => {
+      const outcome = await resolveRemovedSkill(name);
+      if (!outcome) return;
+      if (outcome.uninstalled.includes(name)) {
+        toast.success(t("mySkills.droppedSkillRemoved", { name }));
+        setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+      }
+      for (const copy of outcome.localCopies) {
+        toast.success(t("mySkills.keptAsLocalCopy", { from: name, to: copy.name }));
+        setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+      }
+      const failure = outcome.failed[0];
+      if (failure) {
+        toast.error(failure.error ? `${t("mySkills.updateFailed")}: ${failure.error}` : t("mySkills.updateFailed"));
+      }
+    },
+    [resolveRemovedSkill, t],
+  );
+
+  /** Upstream renamed the Skill: one step installs the successor, keeps the
+   *  deployments and removes the old entry. Partial outcomes are spelled out. */
+  const handleMigrate = useCallback(
+    async (name: string) => {
+      try {
+        const report = await migrateRenamedSkill(name);
+        const details = [
+          ...report.agent_failures,
+          ...report.project_failures,
+          ...(report.removal_failure ? [report.removal_failure] : []),
+        ];
+        if (details.length > 0) {
+          toast.warning(t("mySkills.migratePartial", { to: report.installed, details: details.join("; ") }));
+        } else {
+          toast.success(t("mySkills.migrateSuccess", { from: name, to: report.installed }));
+        }
+        setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        toast.error(
+          reason ? `${t("mySkills.migrateFailed", { name })}: ${reason}` : t("mySkills.migrateFailed", { name }),
+        );
+      }
+    },
+    [migrateRenamedSkill, t],
+  );
+
+  const handleMigrateGhost = useCallback(
+    (ghost: RepoNewSkill) => {
+      if (ghost.renamed_from) void handleMigrate(ghost.renamed_from);
+    },
+    [handleMigrate],
   );
 
   const handleSkillClick = useCallback(
@@ -503,7 +572,7 @@ export function LocalSkillsContent({
     (candidates: Iterable<string>) =>
       Array.from(candidates).filter((name) => {
         const skill = skills.find((item) => item.name === name);
-        return Boolean(skill?.update_available) && skill?.skill_type !== "local";
+        return Boolean(skill && hasPendingUpdate(skill));
       }),
     [skills],
   );
@@ -542,8 +611,12 @@ export function LocalSkillsContent({
   }, [clearSelection, runBatchUpdate, selectedSkillNames, updatableNamesAmong]);
 
   const handleUpdateAll = useCallback(
-    () => runBatchUpdate(updatableNamesAmong(skills.map((skill) => skill.name)), setIsUpdatingAll),
-    [runBatchUpdate, skills, updatableNamesAmong],
+    () =>
+      runBatchUpdate(
+        allPendingUpdates.map((skill) => skill.name),
+        setIsUpdatingAll,
+      ),
+    [runBatchUpdate, allPendingUpdates],
   );
 
   const handleBatchLink = useCallback(
@@ -587,7 +660,7 @@ export function LocalSkillsContent({
       clearSelection();
       toast.success(t("mySkills.batchUnlinkedAll", { defaultValue: "Unlinked from all agents" }));
     } catch (e) {
-      toast.error(t("mySkills.batchUnlinkFailed", { defaultValue: "Failed to unlink skills" }));
+      toast.error(t("mySkills.batchUnlinkFailed", { defaultValue: "Couldn't unlink those cards. Try again." }));
     } finally {
       setBatchLoading(false);
     }
@@ -689,34 +762,34 @@ export function LocalSkillsContent({
           onReinstallRepoSource={handleReinstallRepoSource}
           reinstallingRepoSource={reinstallingRepoSource}
           onRemoveRepoSource={handleRemoveRepoSource}
-          pendingUpdateCount={pendingUpdateCount}
+          pendingUpdateCount={allPendingUpdates.length}
+          filteredUpdateCount={pendingUpdateSkills.length}
           onlyUpdatesFilter={onlyUpdatesFilter}
           onOnlyUpdatesFilterChange={setOnlyUpdatesFilter}
         />
 
-        {/* Selection bar */}
-        <AnimatePresence>
-          {hasSelection && (
-            <SkillSelectionBar
-              selectedCount={selectedSkillNames.size}
-              totalCount={filteredSkills.length}
-              disabled={batchLoading || uninstalling}
-              onDeploy={() => setDeployModalOpen(true)}
-              onSaveGroup={onPackSkills ? undefined : () => setGroupModalOpen(true)}
-              onPackSkills={onPackSkills ? () => onPackSkills(Array.from(selectedSkillNames)) : undefined}
-              onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
-              onUpdate={handleBatchUpdate}
-              onUninstall={handleBatchUninstall}
-              onSelectAll={handleSelectAll}
-              onClear={clearSelection}
-              linkMenuOpen={linkMenuOpen}
-              onLinkMenuOpenChange={setLinkMenuOpen}
-              agentProfiles={compatibleSelectionProfiles}
-              onBatchLink={handleBatchLink}
-              onBatchUnlinkAll={handleBatchUnlinkAll}
-            />
-          )}
-        </AnimatePresence>
+        {/* Selection bar — mounts and unmounts outright; it no longer animates
+            its own height, so there is nothing left to play out on exit. */}
+        {hasSelection && (
+          <SkillSelectionBar
+            selectedCount={selectedSkillNames.size}
+            totalCount={filteredSkills.length}
+            disabled={batchLoading || uninstalling}
+            onDeploy={() => setDeployModalOpen(true)}
+            onSaveGroup={onPackSkills ? undefined : () => setGroupModalOpen(true)}
+            onPackSkills={onPackSkills ? () => onPackSkills(Array.from(selectedSkillNames)) : undefined}
+            onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
+            onUpdate={handleBatchUpdate}
+            onUninstall={handleBatchUninstall}
+            onSelectAll={handleSelectAll}
+            onClear={clearSelection}
+            linkMenuOpen={linkMenuOpen}
+            onLinkMenuOpenChange={setLinkMenuOpen}
+            agentProfiles={compatibleSelectionProfiles}
+            onBatchLink={handleBatchLink}
+            onBatchUnlinkAll={handleBatchUnlinkAll}
+          />
+        )}
 
         <ExportShareCodeModal
           open={!!shareCardSkills && shareCardSkills.length > 0}
@@ -726,34 +799,32 @@ export function LocalSkillsContent({
           onPublishSkill={(name) => setPublishTarget(name)}
         />
 
-        {/* Broken skills banner */}
-        <AnimatePresence>
-          {brokenCount > 0 && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <div className="flex items-center gap-2.5 px-6 py-2 bg-amber-500/8 border-b border-amber-500/20">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-caption text-amber-300/90">
-                  {t("mySkills.brokenBanner", { count: brokenCount })}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigateToSettingsSection("storage");
-                  }}
-                  className="text-caption text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
-                >
-                  {t("mySkills.brokenBannerAction")} →
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Broken skills banner — same column, same rule as the selection bar:
+            fade in place instead of animating height, so the grid below relayouts
+            once rather than on every frame. */}
+        {brokenCount > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={MOTION_TRANSITION.fadeFast}
+          >
+            <div className="flex items-center gap-2.5 px-6 py-2 bg-amber-500/8 border-b border-amber-500/20">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-caption text-amber-300/90">
+                {t("mySkills.brokenBanner", { count: brokenCount })}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigateToSettingsSection("storage");
+                }}
+                className="text-caption text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
+              >
+                {t("mySkills.brokenBannerAction")} →
+              </button>
+            </div>
+          </motion.div>
+        )}
 
         <motion.main
           initial={{ opacity: 0 }}
@@ -774,6 +845,9 @@ export function LocalSkillsContent({
               onSkillClick={handleSkillClick}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
+              onResolveRemoved={handleResolveRemoved}
+              onMigrate={handleMigrate}
+              migratingNames={pendingMigrationNames}
               emptyMessage={getEmptyMessage()}
               emptyAction={getEmptyAction()}
               selectable
@@ -792,6 +866,7 @@ export function LocalSkillsContent({
               onDismissGhost={dismissGhostSkill}
               onDismissGhostRepo={dismissGhostRepo}
               onGhostClick={handleGhostClick}
+              onMigrateGhost={handleMigrateGhost}
             />
           )}
         </motion.main>
@@ -805,6 +880,9 @@ export function LocalSkillsContent({
         onUpdate={handleUpdate}
         onUninstall={handleUninstall}
         uninstalling={uninstalling && selectedSkill != null && pendingUninstallNames.includes(selectedSkill.name)}
+        onResolveRemoved={handleResolveRemoved}
+        onMigrate={handleMigrate}
+        migrating={selectedSkill != null && pendingMigrationNames.has(selectedSkill.name)}
         onReadContent={readSkillContent}
         onSaveContent={updateSkillContent}
         onPublish={(name) => setPublishTarget(name)}
