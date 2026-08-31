@@ -397,6 +397,15 @@
 - 后果：获得——暂停/恢复跨刷新与重启保持精确集合，且恢复路径没有枚举 Hub inventory 的入口；共享目录天然共用状态和 pending 范围。承担——恢复源已从 Hub 删除时会保留可重试项而非“看似完成”；journal 是 D-024「磁盘即真相」的狭窄例外，只表达用户主动发起的恢复意图，因此必须在每个动作后以磁盘状态收敛，不能扩张为 ownership/provenance store。
 - 证据：`crates/skillstar-agents/src/profile_storage.rs`、`crates/skillstar-app/src/agent_managed_skills.rs`、`src-tauri/src/commands/agents.rs`、`src/features/settings/lib/agentSkillSync.ts`。
 
+## D-044：pack 根目录 SKILL.md 垫片不是安装单元
+
+- 日期：2026-08-30
+- 状态：accepted
+- 背景：impeccable 风格的技能包（如 `xxww0098/rust-skills`）把正文放在 `skills/<name>/`，同时在仓库根放一份同 identity 的 `SKILL.md`，好让一层扫描器把整仓当作技能目录。SkillStar 的 root-first 发现把根 `SKILL.md` 当成唯一技能，`folder_path` 为空就会把整个仓库（测试、脚本、各 harness 副本）链接进 Hub。全深度扫描也会因根路径优先级 4 赢过 `skills/`。
+- 决策：发现阶段先剥掉「根 SKILL.md 与 `skills/` 或 `source/skills/` 下同 identity 技能」的垫片，再执行 root-first / 去重。`skills/` 与 `source/skills/` 同为规范目录，优先级高于 `.claude/skills` 等 harness 副本。真正的单技能仓库（根 SKILL.md 没有同名 catalog 副本）行为不变。`.claude-plugin/plugin.json` 的 `skills` 同时接受字符串路径和数组。
+- 后果：`skillstar add xxww0098/rust-skills` 安装 `skills/rust`，不再把整仓当技能。一层扫描器仍可继续使用根垫片。
+- 证据：`crates/skillstar-skills/src/{pack_layout.rs,discovery.rs,plugin_manifest.rs}` 及 `pack_root_shim_installs_canonical_skills_folder` 测试。
+
 ## 新增记录格式
 
 ```text

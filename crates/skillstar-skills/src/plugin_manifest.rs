@@ -62,8 +62,25 @@ struct PluginEntry {
 
 #[derive(Debug, Deserialize, Default)]
 struct PluginManifest {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_path_list")]
     skills: Vec<String>,
+}
+
+/// Claude plugin manifests use either `"./skills/"` or `["./skills/rust"]`.
+fn deserialize_path_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PathList {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match PathList::deserialize(deserializer)? {
+        PathList::One(path) => vec![path],
+        PathList::Many(paths) => paths,
+    })
 }
 
 /// Collect the skill container directories declared by plugin manifests.
@@ -205,6 +222,21 @@ mod tests {
         // Only the conventional skills/ dir survives (no SKILL.md inside).
         assert_eq!(dirs.len(), 1);
         assert!(dirs[0].ends_with("skills"));
+    }
+
+    #[test]
+    fn plugin_json_skills_string_is_accepted() {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            &repo.path().join(".claude-plugin/plugin.json"),
+            r#"{ "skills": "./skills/" }"#,
+        );
+        write(&repo.path().join("skills/rust/SKILL.md"), "# rust\n");
+
+        let dirs = declared_skill_dirs(repo.path());
+        assert!(dirs.iter().any(|dir| dir.ends_with("skills")), "{dirs:?}");
+        let skills_dir = dirs.iter().find(|dir| dir.ends_with("skills")).unwrap();
+        assert!(skills_dir.join("rust/SKILL.md").exists());
     }
 
     #[test]

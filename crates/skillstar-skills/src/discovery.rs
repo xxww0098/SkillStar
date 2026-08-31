@@ -12,11 +12,16 @@
 //! | Priority dirs | Checked first; falls back to full scan if empty | Skipped |
 //! | Recursive scan | Only if priority dirs are empty | Always performed |
 //!
-//! This matches `npx skills add` behavior.
+//! This matches `npx skills add` behavior, with one pack-layout exception:
+//! a repo-root `SKILL.md` that merely mirrors `skills/<name>/` (same
+//! identity) is a one-level-scanner shim, not the install unit. See
+//! `pack_layout`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+pub use crate::pack_layout::source_priority;
 
 // ── Data Types ──────────────────────────────────────────────────────
 
@@ -44,19 +49,23 @@ struct SkillCandidate {
 
 impl SkillCandidate {
     fn discovered_skill(self) -> DiscoveredSkill {
-        let id = self
-            .frontmatter
-            .name
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(self.default_name);
-
         DiscoveredSkill {
-            id,
+            id: self.identity(),
             folder_path: self.folder_path,
             description: self.frontmatter.description,
             already_installed: false,
             frontmatter_issues: self.frontmatter.issues,
         }
+    }
+
+    fn identity(&self) -> String {
+        self.frontmatter
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.default_name.clone())
     }
 
     fn is_repo_root(&self) -> bool {
@@ -120,6 +129,7 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     fn normalize_candidates(&self, candidates: Vec<SkillCandidate>) -> Vec<DiscoveredSkill> {
+        let candidates = Self::strip_root_pack_shim(candidates);
         let candidates = if self.full_depth {
             candidates
         } else {
@@ -130,6 +140,31 @@ impl<'a> SkillDiscovery<'a> {
             .into_iter()
             .map(SkillCandidate::discovered_skill)
             .collect()
+    }
+
+    /// Drop a repo-root SKILL.md that only exists so one-level scanners can
+    /// load the pack. The canonical nested skill is the install unit.
+    fn strip_root_pack_shim(candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
+        let Some(root_id) = candidates
+            .iter()
+            .find(|candidate| candidate.is_repo_root())
+            .map(SkillCandidate::identity)
+        else {
+            return candidates;
+        };
+        let has_canonical_twin = candidates.iter().any(|candidate| {
+            !candidate.is_repo_root()
+                && candidate.identity().eq_ignore_ascii_case(&root_id)
+                && crate::pack_layout::is_canonical_skill_folder(&candidate.folder_path)
+        });
+        if has_canonical_twin {
+            candidates
+                .into_iter()
+                .filter(|candidate| !candidate.is_repo_root())
+                .collect()
+        } else {
+            candidates
+        }
     }
 
     fn limit_to_root_candidate(&self, candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
@@ -424,25 +459,7 @@ fn default_root_skill_name(repo_dir: &Path) -> String {
 }
 
 fn discovered_skill_priority(skill: &DiscoveredSkill) -> u8 {
-    if skill.folder_path.is_empty() {
-        4
-    } else {
-        source_priority(&skill.folder_path)
-    }
-}
-
-pub fn source_priority(folder_path: &str) -> u8 {
-    if folder_path.starts_with("source/skills") || folder_path.starts_with("source\\skills") {
-        3
-    } else if folder_path.starts_with(".agent/skills")
-        || folder_path.starts_with(".agent\\skills")
-        || folder_path.starts_with(".agents/skills")
-        || folder_path.starts_with(".agents\\skills")
-    {
-        2
-    } else {
-        1
-    }
+    crate::pack_layout::discovered_folder_priority(&skill.folder_path)
 }
 
 // ── Filesystem Scanning ───────────────────────────────────────────────
