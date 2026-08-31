@@ -2,6 +2,14 @@
 
 状态：active
 
+## 2026-08-31 - Windows 目录只读挡不住 store-v4 备份，迁移照样写盘
+
+- Symptom: Windows CI 在频道 hash / proxy 变绿之后，`providers::tests::store_v4::migration_aborts_when_the_backup_cannot_be_written` 期望 `BackupFailed`，实际 `Ok(LoadedStore { version: 4 })`。Linux/macOS 同测试绿。此前被 fail-fast 挡住。
+- Root cause: 夹具用 unix-only `set_mode(0o500)` 把 scratch 目录设成只读。Windows 上目录 readonly 位不阻止在该目录里 `fs::copy` 出新文件。`take_migration_backups` 又用 `exists()` 判断永久快照：若把备份路径占成目录，会当成「已有快照」跳过 copy，照样迁移。
+- Fix: 永久备份只跳过**已存在的文件**（`is_file()`）。测试把 `model_providers.v3.json` 建成目录，让 `fs::copy` 在每个 OS 上都失败。不要靠目录 readonly，也不要放宽 `BackupFailed`。
+- Files: `crates/skillstar-models/src/providers/store_v4.rs`、`crates/skillstar-models/src/providers/tests/store_v4.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p skillstar-models --locked --lib providers::tests::store_v4`；Windows CI 这条必须仍是 `BackupFailed`，且 v3 原文完整。
+
 ## 2026-08-31 - Linux CI 在 skillstar-git 被 `The operation was canceled` 砍掉
 
 - Symptom: `test-linux` 前端 lint/tests 全绿，Rust workspace 跑到 `skillstar-git` 后整步 `cancelled`，annotation 是 `The operation was canceled.` 作业大约 7 分钟。macOS 同 suite 绿。`test-linux` **没有** `timeout-minutes`。main 上已经这样，不是 harness 测试把 cap 撑爆。
