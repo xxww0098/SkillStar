@@ -9,6 +9,20 @@
 - Fix: 五个内嵌 python3 的门禁脚本（check_ts_orphan_modules / check_no_orphan_modules / check_dep_graph_doc / check_workspace_deps / check_command_boundaries）统一在调用行加 `PYTHONIOENCODING=utf-8`，让 Python stdio 与平台代码页解耦。
 - Self-check: `for f in $(grep -l python3 scripts/internal/*.sh); do grep -q PYTHONIOENCODING "$f" || echo "missing: $f"; done` 必须无输出；新增内嵌 python3 的门禁若 print 非 ASCII 字符，调用行必须带 `PYTHONIOENCODING=utf-8`。
 
+## 2026-08-31 - Windows 的持锁文件不能由第二个句柄读取来验证 holder 内容
+
+- Symptom: Windows CI 的 `usage_switch::custody_tests::grok_shares_the_cli_lock_file_and_writes_its_holder_line` 在 `fs::read_to_string(~/.grok/auth.json.lock)` 报 `Os { code: 33, message: The process cannot access the file because another process has locked a portion of the file }`；macOS/Linux 通过。
+- Root cause: `Custody::lock()` 取得 Grok 官方 lock 后，在返回 `CustodyLease` 前写入并 `sync_data()` PID holder 行。Unix 文件锁通常是 advisory，旧测试可以在 lease 持有时用第二个 handle 读取；Windows 正确执行排他/字节范围锁，第二次打开读取被拒绝。测试误把 Unix 的偶然可读性当成跨平台契约。
+- Fix: 在内层作用域取得并释放 lease，随后读取同一官方 lock 文件的持久内容；仍断言内容以当前 PID 开头且 `auth.json.skillstar.lock` 未出现。不要加 retry、`cfg(windows)` skip 或修改生产锁语义。若要测试锁竞争，另建明确的互斥不变量测试。
+- Self-check: `cargo test -p skillstar-app usage_switch::custody_tests::grok_shares_the_cli_lock_file_and_writes_its_holder_line --locked -- --exact`，并以 Windows CI 验证真实文件锁语义。
+
+## 2026-08-31 - Actions runner shutdown 不等于 Rust 测试断言失败
+
+- Symptom: Linux 的 Rust tests job 显示失败，但 job log 没有 `FAILED`、panic 或 `test result: FAILED`；末尾直接是 `The runner has received a shutdown signal` 和 `The operation was canceled`。
+- Root cause: 这是 GitHub Actions runner/工作流层的取消信号，不是测试返回的失败。对有 `cancel-in-progress` 的 workflow，重跑旧 run 也可能与新 push run 争用同一 concurrency group，进一步制造这种假红。
+- Fix: 不要据此修改测试或用无关 retry 掩盖问题；先抓取失败步骤原始日志区分 runner cancel 与断言失败。需要重新取证时，让下一次相关 push 的新 run 自然执行，不要在它运行时重跑旧 run。
+- Self-check: `gh run view <run-id> --job <job-id> --log-failed` 的末尾必须先确认是否存在测试失败标记；只有实际断言/编译错误才进入代码修复。
+
 ## 2026-08-31 - process-backed Vitest gate 的过紧 wall-clock timeout 会把满载调度延迟当成失败
 
 - Symptom: pre-push 的完整 `bun run test` 偶发仅在 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 处失败，断言 `run.timedOut` 收到 `true`；同一脚本单独运行约 0.2–0.6 秒且输出 `0 new orphan module(s)`。

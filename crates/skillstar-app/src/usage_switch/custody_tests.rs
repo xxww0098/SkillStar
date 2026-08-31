@@ -1313,9 +1313,14 @@ async fn a_snapshot_is_never_world_readable() {
 async fn grok_shares_the_cli_lock_file_and_writes_its_holder_line() {
     let sb = sandbox().await;
     let custody = sb.custody("xai");
-    let _lease = custody.lock().unwrap();
-
     let official = sb.home.path().join(".grok").join("auth.json.lock");
+
+    // Windows enforces the live exclusive file lock, so another handle cannot
+    // inspect it as Unix's advisory locks permit. lock() writes the holder
+    // before returning; release the lease, then assert that durable result.
+    {
+        let _lease = custody.lock().unwrap();
+    }
     let holder = fs::read_to_string(&official).unwrap();
     assert!(
         holder.starts_with(&format!("{}:", std::process::id())),
