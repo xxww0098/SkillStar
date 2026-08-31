@@ -322,21 +322,50 @@ fn choose_install_skills(
             preferred,
         )?;
         match find_target_skill(&resolved, *requested_name, name_hint) {
-            Some(skill) => {
-                if !chosen.iter().any(|seen| seen.id == skill.id) {
-                    chosen.push(skill.clone());
+            Some(skill) => push_unique(&mut chosen, skill.clone()),
+            None => match requested_name.and_then(|name| {
+                nameless_root_skill(&resolved).map(|skill| (name, skill.clone()))
+            }) {
+                Some((name, mut skill)) => {
+                    skill.id = name.to_string();
+                    push_unique(&mut chosen, skill);
                 }
-            }
-            None if requested_name.is_some() => missing.push(search.to_string()),
-            None => {
-                return Err("No valid SKILL.md found in the selected source".to_string());
-            }
+                None if requested_name.is_some() => missing.push(search.to_string()),
+                None => {
+                    return Err("No valid SKILL.md found in the selected source".to_string());
+                }
+            },
         }
     }
     if !missing.is_empty() {
         return Err(requested_skill_not_found_error(&missing));
     }
     Ok(chosen)
+}
+
+fn push_unique(chosen: &mut Vec<repo_scanner::DiscoveredSkill>, skill: repo_scanner::DiscoveredSkill) {
+    if !chosen.iter().any(|seen| seen.id == skill.id) {
+        chosen.push(skill);
+    }
+}
+
+/// A genuine root SKILL.md with no frontmatter `name` keeps the requested
+/// identity. Missing name is advisory; the old whole-repo clone used the
+/// caller's name hint, and the pipeline must do the same.
+fn nameless_root_skill(
+    skills: &[repo_scanner::DiscoveredSkill],
+) -> Option<&repo_scanner::DiscoveredSkill> {
+    let roots: Vec<_> = skills
+        .iter()
+        .filter(|skill| skill.folder_path.is_empty())
+        .collect();
+    let [root] = roots.as_slice() else {
+        return None;
+    };
+    root.frontmatter_issues
+        .iter()
+        .any(|code| code == "missing_name")
+        .then_some(*root)
 }
 
 #[derive(Clone, Copy)]
