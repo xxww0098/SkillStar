@@ -91,11 +91,7 @@ vi.mock("../../../lib/ipc", () => ({
 }));
 
 vi.mock("./SkillGrid", () => ({
-  SkillGrid: ({
-    onInstall,
-  }: {
-    onInstall: (url: string, name: string, agentId?: string) => void;
-  }) => (
+  SkillGrid: ({ onInstall }: { onInstall: (url: string, name: string, agentId?: string) => void }) => (
     <div>
       <button type="button" onClick={() => onInstall(RUST.git_url, RUST.name, "deepseek")}>
         carousel-deepseek

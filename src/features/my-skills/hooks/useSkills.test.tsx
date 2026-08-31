@@ -716,11 +716,9 @@ describe("useSkills", () => {
 
     let finished = false;
     act(() => {
-      void result.current
-        .installSkill(INITIAL_SKILLS[0].git_url, "opencli-repair", "cursor")
-        .then(() => {
-          finished = true;
-        });
+      void result.current.installSkill(INITIAL_SKILLS[0].git_url, "opencli-repair", "cursor").then(() => {
+        finished = true;
+      });
     });
 
     await waitFor(() => {
