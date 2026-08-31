@@ -211,6 +211,7 @@ fn api_remote_hashes_drive_update_detection_without_fetching() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn subtree_comparison_ignores_unrelated_repo_changes() {
     let remote = init_repo();
@@ -268,6 +269,7 @@ fn subtree_comparison_ignores_unrelated_repo_changes() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn subtree_comparison_badges_skills_whose_folder_moved() {
     let remote = init_repo();
