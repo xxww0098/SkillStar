@@ -373,6 +373,7 @@ fn clone_sparse_with_skills(
     let skill_dirs = discover_skill_dirs_from_tree(dest)?;
 
     if skill_dirs.is_empty() {
+        let _ = git_ops::checkout_in_session(dest, &["sparse-checkout", "disable"], session);
         let _ = git_ops::checkout_in_session(dest, &["checkout"], session);
         return Ok(());
     }
