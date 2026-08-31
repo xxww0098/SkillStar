@@ -12,9 +12,10 @@ dist
 dist-ssr
 *.local
 
-# Rust build artifacts
+# Rust build artifacts (anchored: an unanchored `target/` also matches source
+# directories named `target` at any depth, e.g. usage_switch/target/).
 src-tauri/target/
-target/
+/target/
 
 # Cargo workspace owns one lockfile at the repository root.
 **/Cargo.lock
