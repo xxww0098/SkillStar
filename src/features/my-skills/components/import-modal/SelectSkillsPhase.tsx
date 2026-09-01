@@ -42,20 +42,16 @@ export function SelectSkillsPhase({
       (s.description?.toLowerCase() || "").includes(searchQuery.toLowerCase()),
   );
 
-  const installableFiltered = filteredSkills.filter((s) => !s.already_installed);
-  const installableCount = installableFiltered.length;
-  const allSelected =
-    filteredSkills.length > 0 &&
-    (installableCount > 0
-      ? installableFiltered.every((s) => selectedSkills.has(s.id))
-      : filteredSkills.every((s) => selectedSkills.has(s.id)));
+  const uninstalledFiltered = filteredSkills.filter((s) => s.installable && !s.already_installed);
+  const selectableFiltered =
+    uninstalledFiltered.length > 0 ? uninstalledFiltered : filteredSkills.filter((s) => s.installable);
+  const allSelected = selectableFiltered.length > 0 && selectableFiltered.every((s) => selectedSkills.has(s.id));
 
   const handleSelectAll = () => {
     if (allSelected) {
-      onDeselectAll(filteredSkills.map((s) => s.id));
+      onDeselectAll(selectableFiltered.map((s) => s.id));
     } else {
-      const targets = installableCount > 0 ? installableFiltered : filteredSkills;
-      onSelectAll(targets.map((s) => s.id));
+      onSelectAll(selectableFiltered.map((s) => s.id));
     }
   };
 
@@ -109,9 +105,10 @@ export function SelectSkillsPhase({
           )}
           {filteredSkills.map((skill) => {
             const isInstalled = skill.already_installed;
-            const isSelected = selectedSkills.has(skill.id);
+            const isSelected = skill.installable && selectedSkills.has(skill.id);
             const frontmatterIssues = skill.frontmatter_issues ?? [];
             const hasFrontmatterIssues = frontmatterIssues.length > 0;
+            const hasBlockingFrontmatterIssues = hasFrontmatterIssues && !skill.installable;
             const frontmatterIssueHint = frontmatterIssues
               .map((issue) =>
                 t(`githubImportModal.frontmatterIssues.${issue}`, {
@@ -130,15 +127,20 @@ export function SelectSkillsPhase({
                 className={cn(
                   "w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition group",
                   isSelected ? "bg-primary/5" : "hover:bg-muted",
+                  !skill.installable && "opacity-70",
                 )}
               >
                 <div
-                  onClick={() => onToggle(skill.id)}
-                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer py-0.5"
+                  onClick={() => skill.installable && onToggle(skill.id)}
+                  className={cn(
+                    "flex items-center gap-3 flex-1 min-w-0 py-0.5",
+                    skill.installable ? "cursor-pointer" : "cursor-not-allowed",
+                  )}
                   role="button"
-                  tabIndex={0}
+                  aria-disabled={!skill.installable}
+                  tabIndex={skill.installable ? 0 : -1}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                    if (skill.installable && (e.key === "Enter" || e.key === " ")) {
                       e.preventDefault();
                       onToggle(skill.id);
                     }
@@ -186,11 +188,20 @@ export function SelectSkillsPhase({
                       )}
                       {hasFrontmatterIssues && (
                         <span
-                          className="text-micro px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 font-medium shrink-0 flex items-center gap-1"
+                          className={cn(
+                            "text-micro px-1.5 py-0.5 rounded-full font-medium shrink-0 flex items-center gap-1",
+                            hasBlockingFrontmatterIssues
+                              ? "bg-red-500/10 text-red-600"
+                              : "bg-amber-500/10 text-amber-600",
+                          )}
                           title={frontmatterIssueHint}
                         >
                           <TriangleAlert className="w-2.5 h-2.5" />
-                          {t("githubImportModal.metadataIssue")}
+                          {t(
+                            hasBlockingFrontmatterIssues
+                              ? "githubImportModal.metadataIssue"
+                              : "githubImportModal.compatibilityWarning",
+                          )}
                         </span>
                       )}
                     </div>

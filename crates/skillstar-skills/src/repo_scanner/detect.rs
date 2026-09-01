@@ -174,6 +174,7 @@ pub(crate) fn skill_at_revision(
         }
     };
     let report = validation::inspect_skill_frontmatter_content(&manifest);
+    let installable = report.is_installable();
     let default_name = folder.rsplit('/').next()?.to_string();
     Some(DiscoveredSkill {
         id: report
@@ -183,6 +184,7 @@ pub(crate) fn skill_at_revision(
         folder_path: folder.to_string(),
         description: report.description.unwrap_or_default(),
         already_installed: false,
+        installable,
         frontmatter_issues: report
             .issues
             .iter()

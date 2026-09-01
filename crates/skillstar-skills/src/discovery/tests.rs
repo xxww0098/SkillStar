@@ -128,6 +128,7 @@ fn dedupe_keeps_higher_priority() {
             folder_path: ".claude/skills/my-skill".to_string(),
             description: "low priority".to_string(),
             already_installed: false,
+            installable: true,
             frontmatter_issues: Vec::new(),
         },
         DiscoveredSkill {
@@ -135,6 +136,7 @@ fn dedupe_keeps_higher_priority() {
             folder_path: "source/skills/my-skill".to_string(),
             description: "high priority".to_string(),
             already_installed: false,
+            installable: true,
             frontmatter_issues: Vec::new(),
         },
     ];
@@ -176,6 +178,7 @@ fn collapse_pack_identity_copies_rejects_two_catalog_folders() {
             folder_path: "skills/one".to_string(),
             description: "a".to_string(),
             already_installed: false,
+            installable: true,
             frontmatter_issues: Vec::new(),
         },
         DiscoveredSkill {
@@ -183,6 +186,7 @@ fn collapse_pack_identity_copies_rejects_two_catalog_folders() {
             folder_path: "skills/two".to_string(),
             description: "b".to_string(),
             already_installed: false,
+            installable: true,
             frontmatter_issues: Vec::new(),
         },
     ];
@@ -430,6 +434,7 @@ fn select_harness_skill_keeps_agent_and_agents_distinct() {
             folder_path: ".agent/skills/impeccable".to_string(),
             description: "antigravity".to_string(),
             already_installed: false,
+            installable: true,
             frontmatter_issues: Vec::new(),
         },
         DiscoveredSkill {
@@ -437,6 +442,7 @@ fn select_harness_skill_keeps_agent_and_agents_distinct() {
             folder_path: ".agents/skills/impeccable".to_string(),
             description: "codex".to_string(),
             already_installed: false,
+            installable: true,
             frontmatter_issues: Vec::new(),
         },
     ];

@@ -75,7 +75,6 @@ impl FrontmatterIssue {
                 | Self::NameTooLong
                 | Self::MissingDescription
                 | Self::DescriptionNotString
-                | Self::DescriptionTooLong
         )
     }
 
@@ -122,7 +121,6 @@ impl FrontmatterReport {
         [
             FrontmatterIssue::MissingDescription,
             FrontmatterIssue::DescriptionNotString,
-            FrontmatterIssue::DescriptionTooLong,
             FrontmatterIssue::NameTooLong,
             FrontmatterIssue::MalformedFrontmatter,
             FrontmatterIssue::UnreadableManifest,
@@ -402,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_description_blocks() {
+    fn oversized_description_is_advisory() {
         let dir = tempfile::tempdir().unwrap();
         let long = "x".repeat(MAX_DESCRIPTION_CHARS + 1);
         write_skill(
@@ -415,7 +413,7 @@ mod tests {
                 .issues
                 .contains(&FrontmatterIssue::DescriptionTooLong)
         );
-        assert!(!report.is_installable());
+        assert!(report.is_installable());
     }
 
     #[test]

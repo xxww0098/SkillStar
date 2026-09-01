@@ -23,6 +23,7 @@ fn discovery_reports_frontmatter_issues_on_invalid_skills() {
         "{:?}",
         valid.frontmatter_issues
     );
+    assert!(valid.installable);
 
     let bare = skills.iter().find(|s| s.id == "bare").unwrap();
     assert!(
@@ -33,4 +34,5 @@ fn discovery_reports_frontmatter_issues_on_invalid_skills() {
         bare.frontmatter_issues
             .contains(&"missing_frontmatter".to_string())
     );
+    assert!(!bare.installable);
 }

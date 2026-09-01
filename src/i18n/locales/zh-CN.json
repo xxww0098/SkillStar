@@ -1007,6 +1007,7 @@
     "somethingWrong": "无法从这个仓库导入",
     "tryAgain": "重试",
     "metadataIssue": "元数据问题",
+    "compatibilityWarning": "兼容性警告",
     "frontmatterIssues": {
       "unreadable_manifest": "SKILL.md 缺失、不可读或超过 1 MiB，无法安装。",
       "missing_frontmatter": "SKILL.md 缺少 YAML frontmatter。",
@@ -1016,7 +1017,7 @@
       "name_not_kebab_case": "name 不是 kebab-case，将按原名显示。",
       "missing_description": "frontmatter 缺少 description，无法安装。",
       "description_not_string": "description 必须是字符串，无法安装。",
-      "description_too_long": "description 超过 1024 个字符，无法安装。"
+      "description_too_long": "description 超过 1024 个字符，部分 Agent 可能不兼容，但仍可安装。"
     }
   },
   "publishModal": {

@@ -385,9 +385,9 @@ export function ImportModal({
         const targetSkill = preSelectedSkillRef.current;
         if (targetSkill) {
           const match = result.skills.find((s) => s.id === targetSkill);
-          setSelectedSkills(match ? new Set([match.id]) : new Set());
+          setSelectedSkills(match?.installable ? new Set([match.id]) : new Set());
         } else {
-          const uninstalled = result.skills.filter((s) => !s.already_installed).map((s) => s.id);
+          const uninstalled = result.skills.filter((s) => s.installable && !s.already_installed).map((s) => s.id);
           setSelectedSkills(new Set(uninstalled));
         }
 
@@ -451,7 +451,7 @@ export function ImportModal({
       setProgressMsg(t("githubImportModal.installing", { count: selectedSkills.size }));
 
       const targets: SkillInstallTarget[] = scanResult.skills
-        .filter((s) => selectedSkills.has(s.id))
+        .filter((s) => s.installable && selectedSkills.has(s.id))
         .map((s) => ({ id: s.id, folder_path: s.folder_path }));
       const sessionId = crypto.randomUUID();
       activeGitSessionRef.current = sessionId;
@@ -483,6 +483,7 @@ export function ImportModal({
 
   // ── Helpers ────────────────────────────────────────────────────
   const toggleSkill = (id: string) => {
+    if (!scanResult?.skills.find((skill) => skill.id === id)?.installable) return;
     setSelectedSkills((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -512,13 +513,14 @@ export function ImportModal({
   const selectAll = (ids?: string[]) => {
     if (!scanResult) return;
     if (ids) {
+      const installable = new Set(scanResult.skills.filter((skill) => skill.installable).map((skill) => skill.id));
       setSelectedSkills((prev) => {
         const next = new Set(prev);
-        ids.forEach((id) => next.add(id));
+        ids.filter((id) => installable.has(id)).forEach((id) => next.add(id));
         return next;
       });
     } else {
-      const all = scanResult.skills.filter((s) => !s.already_installed).map((s) => s.id);
+      const all = scanResult.skills.filter((s) => s.installable && !s.already_installed).map((s) => s.id);
       setSelectedSkills(new Set(all));
     }
   };

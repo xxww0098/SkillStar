@@ -1007,6 +1007,7 @@
     "somethingWrong": "Couldn't import from this repository",
     "tryAgain": "Try Again",
     "metadataIssue": "Metadata issue",
+    "compatibilityWarning": "Compatibility warning",
     "frontmatterIssues": {
       "unreadable_manifest": "SKILL.md is missing, unreadable, or larger than 1 MiB and cannot be installed.",
       "missing_frontmatter": "SKILL.md has no YAML frontmatter.",
@@ -1016,7 +1017,7 @@
       "name_not_kebab_case": "name is not kebab-case; the original name will be used.",
       "missing_description": "Frontmatter has no description and cannot be installed.",
       "description_not_string": "description must be a string and cannot be installed.",
-      "description_too_long": "description exceeds 1024 characters and cannot be installed."
+      "description_too_long": "description exceeds 1024 characters; some agents may not accept it, but it can still be installed."
     }
   },
   "publishModal": {
