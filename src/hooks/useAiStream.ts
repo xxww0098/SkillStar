@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { tauriInvokeDynamic } from "../lib/ipc";
 import type { AiStreamPayload } from "../types";
 import { getAiConfigCached } from "./useAiConfig";
@@ -59,9 +60,10 @@ interface ExecuteAiStreamOptions {
 const SAFETY_TIMEOUT_MS = 60_000;
 
 export function useAiStream({ command, eventChannel, normalizeResult, parseInvokeResult }: UseAiStreamOptions) {
+  const { i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [state, setState] = useState<AiStreamState>(INITIAL_STATE);
   const [aiConfigured, setAiConfigured] = useState(false);
-  const [targetLanguage, setTargetLanguage] = useState<string>("en");
 
   const activeIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -79,7 +81,6 @@ export function useAiStream({ command, eventChannel, normalizeResult, parseInvok
         const config = await getAiConfigCached();
         if (!mountedRef.current) return;
         setAiConfigured(config.enabled && (config.provider_ref != null || config.api_format === "local"));
-        if (config.target_language) setTargetLanguage(config.target_language);
       } catch {
         if (mountedRef.current) setAiConfigured(false);
       }
@@ -252,6 +253,7 @@ export function useAiStream({ command, eventChannel, normalizeResult, parseInvok
         const invokePayload = {
           requestId,
           content: sourceContent,
+          locale,
           ...(forceRefresh ? { forceRefresh: true } : {}),
           ...extraInvokeParams,
         };
@@ -303,7 +305,7 @@ export function useAiStream({ command, eventChannel, normalizeResult, parseInvok
         }
       }
     },
-    [aiConfigured, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult],
+    [aiConfigured, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult, locale],
   );
 
   // Cleanup on unmount
@@ -338,7 +340,7 @@ export function useAiStream({ command, eventChannel, normalizeResult, parseInvok
   return {
     ...state,
     aiConfigured,
-    targetLanguage,
+    locale,
     execute,
     cancel,
     dismiss,

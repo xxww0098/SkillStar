@@ -71,7 +71,6 @@ const config: AiConfig = {
   base_url: "",
   api_key: "",
   model: "deepseek-chat",
-  target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
   openai_preset: { base_url: "", api_key: "", model: "" },

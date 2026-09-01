@@ -91,8 +91,8 @@
 - 状态：accepted
 - 背景：只翻译 `SKILL.md` 无法解释 scripts、references、assets 等完整 Skill 行为，provider 翻译缓存也不能表达“教程是否仍对应当前目录版本”。模型输出 HTML 又不能直接进入应用 DOM。
 - 决策：移除 SKILL.md 翻译功能。教程生成以 `skillstar-skills::content` 的完整递归快照和确定性内容 hash 为输入，通过用户显式配置的 ACP Agent 分析；后端只接受自包含、无脚本、覆盖全部文件清单的 HTML，并与 hash、教程风格、完整 prompt bundle hash/schema 版本 metadata 一起原子持久化。风格来自 Settings 中的受控注册表，每种风格使用独立 prompt 片段；前端用 sandbox iframe 展示。
-- 后果：教程能覆盖整个 Skill 并跨重启复用；任何内容、规范化界面语言、所选风格或生成契约变化都会产生 stale 提醒，刷新失败仍保留旧版。生成成本和时延高于翻译，编辑器必须先保存，ACP 未启用时不能生成新教程。
-- 证据：`crates/skillstar-skills/src/{content,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs`、`src-tauri/prompts/acp/skill_tutorial.md`、Skill 教程面板回归测试。
+- 后果：教程能覆盖整个 Skill 并跨重启复用；任何内容、规范化界面语言、所选风格或生成契约变化都会产生 stale 提醒，刷新失败仍保留旧版。生成成本和时延高于翻译，编辑器必须先保存，ACP 未启用时不能生成新教程。`AiConfig` 不再保存 `target_language` / `short_text_priority`；Skill 摘要与教程一样只消费当前界面语言，旧 `ai.json` 里的这两个字段读入时忽略、下次保存时丢弃。
+- 证据：`crates/skillstar-skills/src/{content,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs`、`src-tauri/prompts/acp/skill_tutorial.md`、`skillstar-models::ai_provider::{summarize_text,language_display_name}`、Skill 教程面板回归测试。
 
 ## D-011：删除设备指纹功能，Usage 请求回归统一代理 client
 

@@ -3,11 +3,22 @@ use skillstar_models::ai_provider;
 
 use super::{emit_summarize_stream_event, ensure_ai_config};
 
-#[tauri::command]
-pub async fn ai_summarize_skill(content: String) -> Result<String, AppError> {
-    let config = ensure_ai_config().await?;
+fn locale_or_default(locale: Option<&str>) -> &str {
+    match locale.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(code) => code,
+        None => "zh-CN",
+    }
+}
 
-    let result = ai_provider::summarize_text(&config, &content).await?;
+#[tauri::command]
+pub async fn ai_summarize_skill(
+    content: String,
+    locale: Option<String>,
+) -> Result<String, AppError> {
+    let config = ensure_ai_config().await?;
+    let locale = locale_or_default(locale.as_deref());
+
+    let result = ai_provider::summarize_text(&config, &content, locale).await?;
 
     Ok(result)
 }
@@ -17,8 +28,10 @@ pub async fn ai_summarize_skill_stream(
     window: tauri::Window,
     request_id: String,
     content: String,
+    locale: Option<String>,
 ) -> Result<String, AppError> {
     let config = ensure_ai_config().await?;
+    let locale = locale_or_default(locale.as_deref());
 
     let _ = emit_summarize_stream_event(&window, &request_id, "start", None, None);
 
@@ -27,7 +40,7 @@ pub async fn ai_summarize_skill_stream(
             .map_err(anyhow::Error::msg)
     };
 
-    match ai_provider::summarize_text_streaming(&config, &content, &mut on_delta).await {
+    match ai_provider::summarize_text_streaming(&config, &content, locale, &mut on_delta).await {
         Ok(result) => {
             let _ = emit_summarize_stream_event(&window, &request_id, "complete", None, None);
             Ok(result)

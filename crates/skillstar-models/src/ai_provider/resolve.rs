@@ -340,20 +340,12 @@ pub fn ai_runtime_ready(config: &AiConfig) -> bool {
 
 // ── Language Mapping ────────────────────────────────────────────────
 
+/// Map a UI locale to the language name used in the summary prompt.
+/// App i18n only ships `zh-CN` and `en` (D-010); anything else is passed through.
 pub fn language_display_name(code: &str) -> &str {
-    match code {
-        "zh-CN" => "Simplified Chinese",
-        "zh-TW" => "Traditional Chinese",
-        "en" => "English",
-        "ja" => "Japanese",
-        "ko" => "Korean",
-        "es" => "Spanish",
-        "fr" => "French",
-        "de" => "German",
-        "ru" => "Russian",
-        "pt-BR" => "Brazilian Portuguese",
-        "ar" => "Arabic",
-        "hi" => "Hindi",
-        _ => code,
+    match code.trim() {
+        "" | "zh-CN" => "Simplified Chinese",
+        "en" | "en-US" => "English",
+        other => other,
     }
 }

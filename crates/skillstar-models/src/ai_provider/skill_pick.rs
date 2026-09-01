@@ -645,7 +645,6 @@ mod tests {
             base_url: "http://127.0.0.1:1/v1".to_string(),
             api_key: "test-key".to_string(),
             model: "test-model".to_string(),
-            target_language: "zh-CN".to_string(),
             context_window_k: 128,
             max_concurrent_requests: 4,
             openai_preset: FormatPreset::default(),
@@ -655,7 +654,6 @@ mod tests {
             claude_sonnet_model: None,
             claude_opus_model: None,
             request_timeout_secs: Some(2),
-            short_text_priority: None,
         };
 
         let skills = vec![

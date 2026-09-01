@@ -60,7 +60,6 @@ export interface AiConfig {
   base_url: string;
   api_key: string;
   model: string;
-  target_language: string;
   /** Model context window in K tokens (e.g. 128 = 128K tokens) */
   context_window_k: number;
   max_concurrent_requests: number;

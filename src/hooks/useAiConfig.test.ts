@@ -13,7 +13,6 @@ const MOCK_CONFIG: AiConfig = {
   base_url: "https://api.example.com",
   api_key: "sk-test-key",
   model: "gpt-5.4",
-  target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
   openai_preset: { base_url: "", api_key: "", model: "" },

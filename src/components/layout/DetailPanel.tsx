@@ -101,7 +101,7 @@ export function DetailPanel({
     eventChannel: "ai://summarize-stream",
   });
   const summaryAiConfigured = quickRead.aiConfigured;
-  const targetLanguage = quickRead.targetLanguage; // Used for quick-read cache key
+  const locale = quickRead.locale;
 
   // Marketplace detail fetching
   const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
@@ -153,7 +153,7 @@ export function DetailPanel({
     // Drop any in-flight stream for the previous skill, then restore the
     // cached quick-read for this one.
     quickRead.cancel();
-    const cacheKey = `${targetLanguage}::${skill?.name ?? ""}`;
+    const cacheKey = `${locale}::${skill?.name ?? ""}`;
     quickRead.hydrate(quickReadCacheRef.current.get(cacheKey) ?? null, null);
     quickRead.setVisible(false);
     quickRead.setError(null);
@@ -172,7 +172,7 @@ export function DetailPanel({
     skill?.localized_description,
     skill?.installed,
     skill?.source,
-    targetLanguage,
+    locale,
     fetchDetails,
     quickRead.cancel,
     quickRead.hydrate,
@@ -205,7 +205,7 @@ export function DetailPanel({
       const result = await quickRead.execute(skillContent.content);
       if (result != null) {
         // Cache completed summary (language-aware)
-        quickReadCacheRef.current.set(`${targetLanguage}::${skill.name}`, result);
+        quickReadCacheRef.current.set(`${locale}::${skill.name}`, result);
       }
     } catch (e) {
       // onReadContent failed before the stream started; execute reports its

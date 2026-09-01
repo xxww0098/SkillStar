@@ -1,5 +1,5 @@
 /**
- * Dev-mock fragment: settings & system config — AI (summarize/translate)
+ * Dev-mock fragment: settings & system config — AI summarize
  * config, proxy, GitHub mirror, ACP tutorial agent, and storage overview.
  * Small data consts are colocated; the ACP config store lives in ./shared.ts
  * because the skills fragment reads it for tutorial metadata.
@@ -14,7 +14,6 @@ export const AI_CONFIG = {
   base_url: "https://api.deepseek.com/v1",
   api_key: "sk-demo-ai",
   model: "deepseek-chat",
-  target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
   openai_preset: {
