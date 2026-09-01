@@ -2,7 +2,7 @@
 //!
 //! A [`BalanceSpec`] captures the parts of a balance query that are pure data —
 //! the endpoint, how the API key is presented, and any provider-specific auth
-//! hint. Response *parsing* is deliberately NOT modelled here: the four
+//! hint. Response *parsing* is deliberately NOT modelled here: the API-key
 //! providers return materially different shapes (monetary balance vs. rate-limit
 //! windows), so each fetcher keeps its own parse step while sharing this spec
 //! for everything that is genuinely common.
@@ -69,8 +69,19 @@ pub const MINIMAX: BalanceSpec = BalanceSpec {
     ),
 };
 
+pub const OLLAMA: BalanceSpec = BalanceSpec {
+    catalog_id: "ollama",
+    display_name: "Ollama Cloud",
+    endpoint: "https://ollama.com/api/usage",
+    auth: AuthScheme::Bearer,
+    auth_error_hint: Some(
+        "Ollama Cloud 401：请填 ollama.com → Settings → Keys 的 Cloud API Key，\
+         不是本机 localhost:11434。",
+    ),
+};
+
 /// All API-key balance specs, in catalog order.
-pub const API_KEY_BALANCE_SPECS: &[BalanceSpec] = &[DEEPSEEK, KIMI, GLM, MINIMAX];
+pub const API_KEY_BALANCE_SPECS: &[BalanceSpec] = &[DEEPSEEK, KIMI, GLM, MINIMAX, OLLAMA];
 
 #[cfg(test)]
 mod tests {

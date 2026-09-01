@@ -1,6 +1,6 @@
-//! API-key fetchers (DeepSeek, GLM, MiniMax, Kimi).
+//! API-key fetchers (DeepSeek, GLM, MiniMax, Kimi, Ollama Cloud).
 //!
-//! The request path is identical across all four providers (build the
+//! The request path is identical across all five providers (build the
 //! client, attach the key per the provider's auth scheme, GET, map transport
 //! errors). That shared boilerplate lives in [`fetch_spec`] + [`map_err`],
 //! driven by the [`BalanceSpec`] table in `skillstar-core::providers`. Only the
@@ -11,6 +11,7 @@ pub mod deepseek_platform;
 pub mod glm;
 pub mod kimi;
 pub mod minimax;
+pub mod ollama;
 
 use serde::de::DeserializeOwned;
 use skillstar_core::providers::balance::{AuthScheme, BalanceSpec};
@@ -39,6 +40,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "glm" => glm::fetch(&subscription.id, &api_key).await,
         "minimax" => minimax::fetch(&subscription.id, &api_key).await,
         "kimi" => kimi::fetch(&subscription.id, &api_key).await,
+        "ollama" => ollama::fetch(&subscription.id, &api_key).await,
         other => Err(super::unsupported(other)),
     }
 }
@@ -165,5 +167,27 @@ mod tests {
             catalog_api_key_ids, spec_ids,
             "ApiKey catalog entries and balance specs must match exactly"
         );
+    }
+
+    #[test]
+    fn hinted_401_surfaces_the_hint_instead_of_generic_reauth() {
+        let hinted: Vec<_> = API_KEY_BALANCE_SPECS
+            .iter()
+            .filter(|spec| spec.auth_error_hint.is_some())
+            .collect();
+        assert!(
+            hinted.iter().any(|s| s.catalog_id == "ollama"),
+            "ollama must keep a Cloud-key 401 hint"
+        );
+        for spec in hinted {
+            let mapped = map_err(spec, http(401));
+            let UsageError::Fetcher(msg) = mapped else {
+                panic!(
+                    "{} 401 should surface the hint as Fetcher, got {mapped:?}",
+                    spec.catalog_id
+                );
+            };
+            assert_eq!(msg, spec.auth_error_hint.unwrap());
+        }
     }
 }

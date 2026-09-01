@@ -45,6 +45,7 @@ export { default as LongCatColor } from "@lobehub/icons/es/LongCat/components/Co
 export { default as MinimaxColor } from "@lobehub/icons/es/Minimax/components/Color";
 export { default as MCPMono } from "@lobehub/icons/es/MCP/components/Mono";
 export { default as MistralColor } from "@lobehub/icons/es/Mistral/components/Color";
+export { default as OllamaMono } from "@lobehub/icons/es/Ollama/components/Mono";
 export { default as OpenAIMono } from "@lobehub/icons/es/OpenAI/components/Mono";
 export { default as OpenCodeMono } from "@lobehub/icons/es/OpenCode/components/Mono";
 export { default as OpenClawColor } from "@lobehub/icons/es/OpenClaw/components/Color";

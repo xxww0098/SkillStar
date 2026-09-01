@@ -23,7 +23,7 @@ pub enum AuthMode {
 pub enum CatalogTier {
     /// OAuth — v1 implements 6 of these.
     OAuth,
-    /// Public API-key endpoint — v1 implements 4.
+    /// Public API-key endpoint — v1 implements 5.
     ApiKey,
     /// Cookie-based web session.
     Cookie,
@@ -195,6 +195,21 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "CNY",
             "https://platform.minimaxi.com/user-center/basic-information/interface-key",
         ),
+        CatalogEntry {
+            id: "ollama",
+            display_name: "Ollama",
+            description: "Cloud 5h / 周额度",
+            tier: CatalogTier::ApiKey,
+            auth_modes: APIKEY_ONLY,
+            brand_color: "111111",
+            default_currency: "USD",
+            subscription_url: "https://ollama.com/settings",
+            warning: Some(
+                "这是 ollama.com Cloud 的 API Key（Settings → Keys），不是本机 \
+                 localhost:11434。本地 Ollama 没有额度。",
+            ),
+            regions: NO_REGIONS,
+        },
         // ── Tier 3: Cookie + Manual ────────────────────────────────────
         CatalogEntry {
             id: "stepfun",
@@ -239,8 +254,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_11_entries() {
-        assert_eq!(catalog().len(), 11);
+    fn catalog_has_12_entries() {
+        assert_eq!(catalog().len(), 12);
     }
 
     #[test]
@@ -260,7 +275,7 @@ mod tests {
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
         assert_eq!(oauth, 5);
-        assert_eq!(api_key, 4);
+        assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
     }

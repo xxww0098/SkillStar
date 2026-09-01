@@ -100,7 +100,7 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("anthropic"),
         preset_ids: &["claude-official"],
     },
-    // ── Subscription-only providers (OAuth / Cookie / Manual; no routing preset) ──
+    // ── Subscription-only providers (no models routing preset) ──
     ProviderIdentity {
         canonical_id: "cursor",
         display_name: "Cursor",
@@ -130,6 +130,14 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         canonical_id: "opencode",
         display_name: "OpenCode",
         catalog_id: Some("opencode"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        // Usage catalog is the ollama.com Cloud API-key account. Local
+        // Ollama is App-AI only and has no models preset / no quota.
+        canonical_id: "ollama",
+        display_name: "Ollama",
+        catalog_id: Some("ollama"),
         preset_ids: &[],
     },
 ];
