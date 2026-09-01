@@ -8,7 +8,7 @@
 
 use chrono::Utc;
 use serde::Deserialize;
-use skillstar_providers::balance;
+use skillstar_core::providers::balance;
 
 use crate::subscription::{MonetaryBalance, SubscriptionUsage};
 use crate::{UsageError, UsageResult};

@@ -6,11 +6,11 @@
 
 ## Provider 分层
 
-- `skillstar-providers` 是零依赖 metadata leaf，拥有 Provider identity、鉴权方案和余额 endpoint。
+- `skillstar-core::providers` 拥有 Provider identity、鉴权方案和余额 endpoint；模块本身不依赖任何产品域，Models 与 Usage 都从它派生。
 - `skillstar-models::providers` 拥有 flat provider store、preset、tool binding 和 runtime resolve。
 - `AiProviderRef` 从 crate root 导出，provider-ref 实现模块保持私有，调用方不依赖内部文件布局。无调用者的旧 Models circuit-breaker 不作为占位模块保留。
 - Usage catalog 与 Models preset 可以不同，但都必须通过 guard test 映射到同一 Provider identity。
-- 添加 Provider 从 `crates/skillstar-providers/src/identity.rs` 开始，再补 Models preset、余额解析 fixture 和映射测试；不得在 command/frontend 手写鉴权头。
+- 添加 Provider 从 `crates/skillstar-core/src/providers/identity.rs` 开始，再补 Models preset、余额解析 fixture 和映射测试；不得在 command/frontend 手写鉴权头。
 - v1 per-app store 只是历史迁移来源：命令面与同步/CRUD 已删除，v1 类型和读取收缩为 crate 内部，仅供 v1→v2 migration 和 `ai_provider` 的 legacy provider-ref fallback 使用。新功能只能进入 flat v2 registry 和 API。
 
 ### v4 数据模型（已接入运行路径）
@@ -151,7 +151,7 @@ Models/MCP 的跨 IPC 大结构使用 ts-rs。修改 Rust 类型后运行 `bun r
 ## 验证
 
 ```bash
-cargo test -p skillstar-providers -p skillstar-models
+cargo test -p skillstar-core -p skillstar-models
 bun run test -- src/features/models
 bun run types:gen
 ```

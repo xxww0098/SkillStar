@@ -1,6 +1,7 @@
 //! Canonical provider-identity map reconciling the two domain id-spaces.
 //!
-//! SkillStar keeps two intentionally separate provider lists (see crate docs):
+//! SkillStar keeps two intentionally separate provider lists (see
+//! [`super`] module docs):
 //! the usage-side subscription catalog (`skillstar-usage::catalog`) and the
 //! models-side routing presets (`skillstar-models::providers::get_all_presets_flat`).
 //! Their ids do not line up 1:1:
@@ -11,7 +12,7 @@
 //!   (`openrouter`, `siliconflow`, …) have no subscription catalog entry.
 //!
 //! Rather than merge the two lists into one sparse mega-table — which would pull
-//! both domains' concerns into this leaf crate — we record the correspondence
+//! both domains' concerns into this module — we record the correspondence
 //! here as a small, tested map. Conformance tests in the consuming crates assert
 //! that every real catalog id and every real preset id resolves to exactly one
 //! identity, so the mapping can never silently drift.
@@ -196,7 +197,7 @@ mod tests {
 
     #[test]
     fn every_api_key_balance_spec_has_an_identity() {
-        for spec in crate::balance::API_KEY_BALANCE_SPECS {
+        for spec in crate::providers::balance::API_KEY_BALANCE_SPECS {
             assert!(
                 identity_for_catalog(spec.catalog_id).is_some(),
                 "balance spec {} has no provider identity",

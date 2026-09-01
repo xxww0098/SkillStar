@@ -74,20 +74,6 @@ pub fn toggle_profile(id: &str) -> Result<bool> {
 }
 
 #[cfg(test)]
-pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
-    use std::sync::{Mutex, OnceLock};
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-#[cfg(test)]
-pub(crate) fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
-    test_env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-#[cfg(test)]
 mod tests {
     use super::builtin::{BuiltinSpec, builtin_agent_data};
     use super::profile_storage::{self, MemPrefsStore, PrefsStore, TomlPrefsStore};
@@ -122,7 +108,11 @@ mod tests {
 
         profile_storage::replace_suspended_global_skill_names(
             &target,
-            &[" beta ".to_string(), "alpha".to_string(), "alpha".to_string()],
+            &[
+                " beta ".to_string(),
+                "alpha".to_string(),
+                "alpha".to_string(),
+            ],
             &store,
         )?;
 

@@ -222,8 +222,8 @@
 - Symptom: 从源码跑 `tauri dev`，侧边栏 GitHub 账户点「开始登录」或「重试」后固定英文错误 `This build does not include a GitHub App client ID`。仓库根已有 `.env` 且填了 `SKILLSTAR_GITHUB_APP_CLIENT_ID` 仍然失败。
 - Root cause: Client ID 只看进程环境变量和编译期 `option_env!`。Vite 会读 `.env`，Rust 后端不会；`ProductionGitHubGateway` 还在进程启动时把缺失结果缓存下来，所以 UI「重试」不会重新解析。官方 Release 靠 CI 仓库变量编进二进制，本地构建两者都空。
 - Fix: 解析顺序改为环境变量 → 编译期嵌入 → 从 cwd / `CARGO_MANIFEST_DIR` 向上查找 `.env`；gateway 改为每次登录动作即时解析，不再缓存 Unavailable。
-- Files: `crates/skillstar-github-auth/src/gateway.rs`、`.env.example`、`docs/features/skills/README.md`。
-- Self-check: 不 `export`、只在仓库根 `.env` 写 Client ID，重启 `tauri dev` 后「开始登录」必须进入设备码界面而不是这条 Unavailable；解析测试覆盖注释行、空值、引号，以及从 `crates/skillstar-github-auth` 子目录向上找到祖先 `.env`。
+- Files: `crates/skillstar-skills/src/github_auth/gateway.rs`、`.env.example`、`docs/features/skills/README.md`。
+- Self-check: 不 `export`、只在仓库根 `.env` 写 Client ID，重启 `tauri dev` 后「开始登录」必须进入设备码界面而不是这条 Unavailable；解析测试覆盖注释行、空值、引号，以及从 `crates/skillstar-skills` 子目录向上找到祖先 `.env`。
 
 ## 2026-08-15 - 声明了却没人写：角色面板收下用户输入然后丢掉，UI 与磁盘长期不一致
 
@@ -275,12 +275,12 @@
 - Symptom: 多个 Agent 解析到同一个物理 skills 目录时，一方的移除会静默删掉另一方仍在使用的技能，两侧各有独立表现。Global 侧：cline 与 zed 共用 `~/.agents/skills`，在 SkillCard 或 Settings 里对 cline 取消部署某技能，zed/warp/loaf/dexto/kimi-code-cli 五个仍启用的 Agent 一并失去它（`deployment/mod.rs:305-336`，全程无共享检查，且用的是 `require_global_profile` 而非 enabled 版本，对已禁用 Agent 也照删）。Project 侧：卸载 hub 技能时 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 对**全部** profile（含从未启用的、含 openclaw 的项目根 `skills`）拼路径，只要 `is_link || is_dir` 就删，用户手写的 `.agents/skills/foo` 被静默删除；一次 `full_sync` 的 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 更是按目录清空而非按 manifest 清空，共享目录里所有未登记技能一次 Apply 后消失。UI 侧的伴生症状是计数串台：6 个共用 `~/.agents/skills` 的 Agent 各自显示同一个总数（`registry.rs:131-153`），任一 Agent 装了技能则 6 个图标一起亮（`installed_skill.rs:532-548`）。
 - Root cause: 一个共同的形状——**磁盘上不存在"这条 entry 是谁装的"这一信息，而代码在需要它时退化成了启发式**。Global 侧 `deployment/` 下根本没有任何归属记录（Project 侧至少有 `skills-list.json`），于是删除判据只剩 `fs_ops.rs:265-274` 的"是 link，或者是含 `SKILL.md` 的目录"——这个判据对"是不是一个技能"回答正确，对"该不该由我删"完全失明。Project 侧有 manifest 却在三条路径上不查它（cleanup、clear、rebuild），等价于退回同一个启发式。更深一层：**per-agent 归属在物理世界从未存在过**。`~/.agents/skills` 是 open agent skills 生态的共享约定，zed 进程 `ls` 一下就能加载 cline 部署的技能；系统曾试图用 manifest 维护一个磁盘无法兑现的隔离承诺，于是任何"存量已有部署但无归属记录"的起手都没有正确答案。这类缺陷在**单所有者场景下永远测不出来**——一个目录一个 Agent 时，"看起来像技能就删"和"是我装的才删"给出完全相同的结果。
 - Fix: 决策见 [decisions.md](./decisions.md) D-024（**已定，落地未开始**）：目录塌缩为一等部署单元 + 归属零状态推导（entry 属于 SkillStar ⟺ 其链接目标落在 `hub_skills_dir()` 下，已验证 5 个全局写入点 src 全是 hub 绝对路径且 `read_link_resolved` 只解一跳）。容器判定**必须复用** `repo_link::is_inside`(`repo_link.rs:65-93`)，不要新写 `starts_with`。
-- Files: `crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/{installed_skill,repo_link}.rs`、`crates/skillstar-agents/src/{builtin,registry,custom}.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。
+- Files: `crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/{installed_skill,repo_link}.rs`、`crates/skillstar-skills/src/agents/{builtin,registry,custom}.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。
 - Self-check:
   - 通用判据：**当一个物理资源可被多个逻辑所有者共享时，"删除"必须由归属回答，不能由"这东西长得像不像我管的类型"回答**。后者在单所有者下与前者等价，因此不会被现有测试发现；任何按 `read_dir` 遍历后逐项判断"像不像技能"的清理循环都是这个反模式的实例。
   - 通用判据：**归属信息如果在物理世界不存在，就不要用状态去发明它**。存量数据没有正确的回填起手（记为无主/归给全部/归给第一个都错），且清单与磁盘是两次写、崩溃必然分叉。优先找一个能从磁盘零状态推导的谓词。
   - 通用判据：**同一个容器判定不允许有第二份实现**。`repo_link.rs:4-9` 已记录过 Windows junction 因两份实现分叉而误判的事故；今天 `local_skill.rs:174`、`git/gh_manager.rs:432`、`storage_maintenance.rs:183` 三处裸 `resolved.starts_with(&dir)` 缺 canonicalize 与大小写折叠，是同一事故的复发预备队。
-  - 回归判据：任何新增的"清理/取消部署/清空目录"路径，必须先回答"这个目录还有没有别的已启用 Agent 解析到它"。用 `crates/skillstar-agents/src/builtin.rs` 的 `BUILTIN_AGENT_DEFS` 按 `resolve_global_dir` 与 `project_skills_rel` 分组即可枚举出全部共享组；今天共 3 组 global 与 4 组 project 共享目录。
+  - 回归判据：任何新增的"清理/取消部署/清空目录"路径，必须先回答"这个目录还有没有别的已启用 Agent 解析到它"。用 `crates/skillstar-skills/src/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS` 按 `resolve_global_dir` 与 `project_skills_rel` 分组即可枚举出全部共享组；今天共 3 组 global 与 4 组 project 共享目录。
   - 反例警告：不要把 `deploy_modes` 当遗留字段。`docs/features/skills/README.md` 曾声称它"只为兼容旧 manifest"，实际 `projects/sync.rs:78-84,227,461-463` 正在读写它决定 symlink/copy。
 
 ## 2026-08-12 - tool-sync 单元测试并行必挂：所有测试共用同一个 sandbox HOME

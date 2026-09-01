@@ -168,7 +168,7 @@ fn now_unix() -> u64 {
 /// already exists. Missing, unreadable, or expired credentials yield `None`
 /// and the caller stays anonymous — this path never starts a login.
 pub(crate) fn optional_github_api_token() -> Option<String> {
-    use skillstar_github_auth::{CredentialStore, FileCredentialStore};
+    use crate::github_auth::{CredentialStore, FileCredentialStore};
 
     let credential = FileCredentialStore::default().load().ok().flatten()?;
     if credential

@@ -2,13 +2,13 @@
 //!
 //! `GET https://www.minimax.io/v1/token_plan/remains` with the **Token Plan
 //! Key** (different from a normal pay-as-you-go API key). The 401 hint lives on
-//! the [`BalanceSpec`] in `skillstar-providers` and is applied by the shared
+//! the [`BalanceSpec`] in `skillstar-core::providers` and is applied by the shared
 //! error mapper.
 
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
-use skillstar_providers::balance;
+use skillstar_core::providers::balance;
 
 use crate::subscription::{SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};

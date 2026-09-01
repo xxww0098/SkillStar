@@ -33,7 +33,6 @@ url = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
-skillstar-providers = { path = "../skillstar-providers" }
 rusqlite = { workspace = true }
 ts-rs = { workspace = true, features = ["serde-compat"] }
 

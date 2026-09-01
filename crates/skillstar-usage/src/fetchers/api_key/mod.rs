@@ -3,7 +3,7 @@
 //! The request path is identical across all four providers (build the
 //! client, attach the key per the provider's auth scheme, GET, map transport
 //! errors). That shared boilerplate lives in [`fetch_spec`] + [`map_err`],
-//! driven by the [`BalanceSpec`] table in `skillstar-providers`. Only the
+//! driven by the [`BalanceSpec`] table in `skillstar-core::providers`. Only the
 //! response *parsing* differs per provider and stays in each module.
 
 pub mod deepseek;
@@ -13,7 +13,7 @@ pub mod kimi;
 pub mod minimax;
 
 use serde::de::DeserializeOwned;
-use skillstar_providers::balance::{AuthScheme, BalanceSpec};
+use skillstar_core::providers::balance::{AuthScheme, BalanceSpec};
 
 use crate::crypto;
 use crate::http_client::usage_http_client;
@@ -99,9 +99,9 @@ mod tests {
     use crate::UsageError;
     use crate::catalog::{CatalogTier, catalog};
     use crate::request::RequestError;
-    use skillstar_providers::balance::API_KEY_BALANCE_SPECS;
+    use skillstar_core::providers::balance::API_KEY_BALANCE_SPECS;
 
-    fn spec_without_hint() -> &'static skillstar_providers::balance::BalanceSpec {
+    fn spec_without_hint() -> &'static skillstar_core::providers::balance::BalanceSpec {
         API_KEY_BALANCE_SPECS
             .iter()
             .find(|spec| spec.auth_error_hint.is_none())
@@ -145,7 +145,7 @@ mod tests {
     }
 
     /// Every API-key-tier catalog entry must have a balance spec in
-    /// `skillstar-providers`, and vice versa — this pins the two tables together
+    /// `skillstar-core::providers`, and vice versa — this pins the two tables together
     /// so they can no longer drift apart.
     #[test]
     fn api_key_catalog_and_balance_specs_stay_in_sync() {
@@ -156,7 +156,7 @@ mod tests {
             .filter(|e| e.tier == CatalogTier::ApiKey)
             .map(|e| e.id)
             .collect();
-        let spec_ids: BTreeSet<&str> = skillstar_providers::balance::API_KEY_BALANCE_SPECS
+        let spec_ids: BTreeSet<&str> = skillstar_core::providers::balance::API_KEY_BALANCE_SPECS
             .iter()
             .map(|s| s.catalog_id)
             .collect();

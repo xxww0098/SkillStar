@@ -5,6 +5,9 @@
 
 use crate::git::transport::GitOperationSession;
 use crate::git::transport::NoopGitProgressSink;
+use crate::github_auth::{
+    FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
+};
 use crate::installed_skill::{self, SkillUpdateState};
 use crate::repo_scanner::{self, ScanResult, SkillInstallTarget};
 use crate::skill_update::{
@@ -12,9 +15,6 @@ use crate::skill_update::{
 };
 use crate::{Skill, local_skill, skill_install, skill_update};
 use skillstar_core::infra::error::AppError;
-use skillstar_github_auth::{
-    FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
-};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

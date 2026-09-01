@@ -6,7 +6,7 @@ use super::{
 };
 use async_trait::async_trait;
 use serde::Deserialize;
-use skillstar_github_auth::GitHubApiCredential;
+use skillstar_skills::github_auth::GitHubApiCredential;
 use std::time::Duration;
 
 pub(super) const API_ROOT: &str = "https://api.github.com";

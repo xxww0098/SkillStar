@@ -1,12 +1,11 @@
 //! skillstar-skills: skill library, install/update, discovery and deployment.
 //!
 //! Owns install/update/uninstall, lockfile, update detection, repo scan,
-//! frontmatter validation, local authoring, bundles, project deployment and
-//! terminal-independent skill content. Agents live in `skillstar-agents`,
-//! patrol/shared channels in `skillstar-channels`, git transport in
-//! `skillstar-git`, GitHub identity in `skillstar-github-auth`. Callers should
-//! use the narrow public modules rather than reaching through temporary
-//! re-exports.
+//! frontmatter validation, local authoring, bundles, project deployment,
+//! Agent profiles, GitHub App identity, and terminal-independent skill content.
+//! patrol/shared channels live in `skillstar-channels`; git transport lives in
+//! `skillstar-git`. Callers should use the narrow public modules rather than
+//! reaching through temporary re-exports.
 //!
 //! Install is one vercel-skills pipeline (`skill_install`): resolve source,
 //! discover `SKILL.md` dirs, hub-link the chosen folder. Harness trees are
@@ -17,14 +16,18 @@
 //! |---|---|
 //! | [`lockfile`] / [`update_checker`] / [`update_api`] | Installed-skill records and repo update detection |
 //! | [`projects`] / [`deployment`] | Project manifest, link-copy deploy |
+//! | [`agents`] | Agent spec, registry, custom profiles, activation prefs |
+//! | [`github_auth`] | GitHub App device flow, token store, API credential |
 //! | [`validation`] / [`discovery`] / [`plugin_manifest`] | Frontmatter gate, repo scan, plugin manifests; pack-root shims |
 //! | library modules | install, update, bundle, local, repo scan, groups |
 
+pub mod agents;
 pub mod content;
 mod content_copy;
 pub mod discovery;
 pub mod git;
 pub mod git_skill;
+pub mod github_auth;
 pub mod hub_entry;
 pub mod lockfile;
 mod pack_layout;
@@ -49,10 +52,8 @@ pub mod update_checker;
 pub mod update_state;
 pub mod validation;
 
-// Agent / project / deployment / patrol / terminal
-// (`agents` and `github_auth` now live in `skillstar-agents` /
-// `skillstar-github-auth`; `git` transport/ops live in `skillstar-git`;
-// `shared_channels` and `patrol` live in `skillstar-channels`)
+// project / deployment (`shared_channels` and `patrol` live in
+// `skillstar-channels`; `git` transport/ops live in `skillstar-git`)
 pub mod deployment;
 pub mod projects;
 

@@ -10,7 +10,7 @@ use skillstar_channels::shared_channels::{
 use skillstar_git::transport::{
     GitAuthMaterial, GitOperationProgress, GitOperationSession, GitProgressSink,
 };
-use skillstar_github_auth::{
+use skillstar_skills::github_auth::{
     FileCredentialStore, GitHubAuthError, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
 use skillstar_skills::git_skill::GitSkillFacade;
@@ -178,7 +178,7 @@ impl GitHubAuthState {
                 .map(|id| id.to_string())
                 .map_err(|_| {
                     GitHubAuthError::new(
-                        skillstar_github_auth::GitHubAuthErrorCode::Protocol,
+                        skillstar_skills::github_auth::GitHubAuthErrorCode::Protocol,
                         "Git operation session id must be a UUID",
                     )
                 })?,
@@ -197,7 +197,7 @@ impl GitHubAuthState {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if sessions.contains_key(session.id()) {
             return Err(GitHubAuthError::new(
-                skillstar_github_auth::GitHubAuthErrorCode::Protocol,
+                skillstar_skills::github_auth::GitHubAuthErrorCode::Protocol,
                 "Git operation session id is already active",
             ));
         }

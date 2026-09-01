@@ -23,7 +23,7 @@ use skillstar_core::infra::path_env::command_with_path;
 use crate::git::transport::{
     GitAuthMaterial, GitOperationSession, NoopGitProgressSink, execute_remote_command,
 };
-use skillstar_github_auth::{
+use crate::github_auth::{
     FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
 

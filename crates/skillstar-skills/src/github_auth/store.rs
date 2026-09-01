@@ -123,8 +123,7 @@ impl CredentialStore for FileCredentialStore {
 
 #[cfg(test)]
 mod tests {
-    use super::FileCredentialStore;
-    use crate::{CredentialStore, StoredCredential};
+    use super::{CredentialStore, FileCredentialStore, StoredCredential};
     use chrono::Utc;
     use std::fs;
     #[cfg(unix)]

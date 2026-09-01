@@ -11,7 +11,7 @@
 //! - **Accepted host keys** (`~/.skillstar/config/ssh_known_hosts.json`) — the
 //!   TOFU store written when the user confirms a server fingerprint.
 //!
-//! This mirrors `skillstar_agents::profile_storage`
+//! This mirrors `skillstar_skills::agents::profile_storage`
 //! (`TomlPrefsStore` + in-memory test double).
 
 use std::path::PathBuf;

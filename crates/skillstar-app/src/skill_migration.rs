@@ -132,7 +132,7 @@ pub fn migrate_renamed_skill(name: &str, facade: &GitSkillFacade) -> Result<Skil
 
 /// Global Agents that currently deploy `name`.
 fn linked_agents(name: &str) -> Vec<String> {
-    skillstar_agents::list_profiles()
+    skillstar_skills::agents::list_profiles()
         .into_iter()
         .filter(|profile| profile.has_global_skills())
         .filter(|profile| {

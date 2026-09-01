@@ -34,11 +34,11 @@
 ## D-004：Provider 元数据使用零依赖叶子
 
 - 日期：2026-07-10
-- 状态：accepted
+- 状态：accepted（crate 形状被 [D-049](#d-049吸收通不过-deletion-test-的浅-crate) 吸收；元数据 SSOT 与「无产品域依赖」不变量仍有效）
 - 背景：Models preset 与 Usage catalog 都需要 Provider identity/鉴权事实，但二者不能相互依赖。
-- 决策：`skillstar-providers` 只保存 canonical identity、鉴权和余额端点元数据；Models 与 Usage 分别从它派生自己的产品注册表，并用测试锁定映射。
+- 决策：canonical identity、鉴权和余额端点元数据只保存在一处；Models 与 Usage 分别从它派生自己的产品注册表，并用测试锁定映射。该处最初是零依赖 crate `skillstar-providers`；D-049 把它收成 `skillstar-core::providers`，模块本身仍不依赖任何产品域。
 - 后果：添加 Provider 先修改 identity；不得在命令层或前端复制鉴权规则。
-- 证据：`crates/skillstar-providers/src/`、Models/Usage guard tests。
+- 证据：`crates/skillstar-core/src/providers/`、Models/Usage guard tests。
 
 ## D-005：技能部署采用 link-first、copy fallback
 
@@ -159,9 +159,9 @@
 - 日期：2026-08-10
 - 状态：accepted
 - 背景：OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-coding-agent`，命令 `pi`）是同源但独立的产品：配置根 `~/.omp` 与 `~/.pi` 互不读取，OMP 的模型配置是 `~/.omp/agent/config.yml`（modelRoles）+ 自有 models.db 目录，不读 `~/.pi/agent/models.json`/`settings.json`，技能位置是 `~/.omp/agent/skills`（全局）与 `.omp/skills`（项目）。此前 SkillStar 只注册 Pi，OMP 用户的技能发现、链接与部署全部失效。
-- 决策：在 `skillstar-agents::builtin` 的 extension 区（与 `grok` 并列，不在 vercel-labs 上游 id 内）注册 `omp`（显示名 Oh My Pi）：全局 `~/.omp/agent/skills`，项目 `.omp/skills`；`skillstar-skills::discovery` 优先级目录加入 `.omp/skills`。`~/.omp/agent/managed-skills`（OMP Auto-Learn 自动生成）不纳入发现与部署。轴②（Models 工具同步）暂不接入——OMP 的 provider 注入 schema（config.yml modelRoles / models.db）与 Pi 不同，待调研后另行设计。
+- 决策：在 `skillstar-skills::agents::builtin` 的 extension 区（与 `grok` 并列，不在 vercel-labs 上游 id 内）注册 `omp`（显示名 Oh My Pi）：全局 `~/.omp/agent/skills`，项目 `.omp/skills`；`skillstar-skills::discovery` 优先级目录加入 `.omp/skills`。`~/.omp/agent/managed-skills`（OMP Auto-Learn 自动生成）不纳入发现与部署。轴②（Models 工具同步）暂不接入——OMP 的 provider 注入 schema（config.yml modelRoles / models.db）与 Pi 不同，待调研后另行设计。
 - 后果：OMP 用户可手动激活并在 Settings / Projects / My Skills 中链接技能；OMP 不进模型绑定矩阵（`ProviderToolId` / AGENT_SPECS）；与 `grok` 同为 SkillStar extension，同步上游注册表时不受影响。
-- 证据：`crates/skillstar-agents/src/builtin.rs`、`crates/skillstar-skills/src/discovery.rs`、`src/components/ui/icons/agentIcons.ts` 及覆盖测试；本机 `~/.omp/agent/`（config.yml、models.db、managed-skills）与 `~/.pi/agent/` 布局实证。
+- 证据：`crates/skillstar-skills/src/agents/builtin.rs`、`crates/skillstar-skills/src/discovery.rs`、`src/components/ui/icons/agentIcons.ts` 及覆盖测试；本机 `~/.omp/agent/`（config.yml、models.db、managed-skills）与 `~/.pi/agent/` 布局实证。
 
 ## D-018：OMP 模型绑定采用 models.yml providers 块 + config.yml modelRoles 指针
 
@@ -224,7 +224,7 @@
 - 背景：`BUILTIN_AGENT_DEFS` 的 74 个内置 Agent 中，多组解析到**同一个物理目录**：Global 侧 `~/.agents/skills`（cline/dexto/kimi-code-cli/loaf/warp/zed）、`<config>/agents/skills`（amp/replit/universal）、`~/.zencoder/skills`（zencoder/zenflow）；Project 侧 `.agents/skills` 被 18 个 Agent 共用，另有 `.qoder/skills`、`.trae/skills`、`.zencoder/skills` 各 2 个。D-007 已为 Project 侧选择"manifest 单一 owner + 按路径去重"，但只读取证证明该模型两侧都未兑现，且失败形状同源：**磁盘上不存在"这条 entry 是谁装的"这一信息，代码在需要它时一律退化为"看起来像技能就删"**。Global 侧更彻底——`deployment/` 下没有任何归属记录，`unlink_skill_from_agent`(`deployment/mod.rs:305-336`) 直接删共享目录里的条目，其余 5 个仍启用的 Agent 静默失去该技能；Project 侧 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 与 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 会删掉从未登记进 `skills-list.json` 的目录，与 `sync.rs:103-106` 自己的注释直接矛盾。根本困难在于 per-agent 归属是产品虚构：`~/.agents/skills` 是生态共享约定，zed 事实上就能加载 cline 部署的技能，任何试图记录归属的方案在存量磁盘上都没有正确的起手（已有部署无归属记录，记为无主/归给全部/归给第一个三种起手都错）。
 - 决策：① **目录即部署单元**：把 canonical 目录键提升为一等"部署目标"，N 个解析到同一目录的 Agent 在部署模型与 UI 上塌缩为 1 项并列出成员 Agent；不记录 per-agent 归属，因为它在物理上不存在。Agent 的**启用开关仍是 per-agent 的**（D-009 不变），只塌缩部署目标，不塌缩激活状态。② **归属零状态推导**：一条 entry 属于 SkillStar，当且仅当其链接目标落在 `hub_skills_dir()` 之下——已验证 5 个全局写入点（`deployment/mod.rs:165/406/532/536/631`）的 src 全是 hub 绝对路径，且 `read_link_resolved`(`fs_ops.rs:174-184`) 确定只解一跳，hub→repo cache 的两跳链返回中间的 hub 路径。③ **容器判定复用 `repo_link::is_inside`**(`repo_link.rs:65-77` 及其 `normalize`:79-93) 的形态（双侧 canonicalize with fallback + 分隔符归一 + Windows 小写折叠），提升为可复用实现，并把 `local_skill.rs:174`、`git/gh_manager.rs:432`、`storage_maintenance.rs:183` 三处裸 `starts_with` 一并收敛；`repo_link.rs:4-9` 已记录过"两份实现分叉导致 Windows junction 误判"的同类事故，不制造第四份。④ **目录身份键**用 `fs_ops::canonicalize_existing_prefix`（`skillstar-core`；`skill_update` 仍保留同名包装）处理"目录尚不存在"，与 ③ 的容器判定是两个不同问题，不合并。键只在每次 `list_profiles()` 快照内重算，**不持久化**——openclaw(`builtin.rs:487-494`) 与 5 个 env 驱动 Agent(`builtin.rs:102/115/152/237/294`)、`XDG_CONFIG_HOME`(`builtin.rs:473-478`) 的目录会随环境与磁盘状态漂移。⑤ **copy 形态用 sibling marker**（无链接可读），判定顺序是先试 link 谓词、`is_link` 为假才查 marker。⑥ **拒绝 project root 等于或包含任一 agent global 目录**：`ensure_project_root_exists`(`projects/types.rs:74-85`) 与 `cli/install.rs:132` 今天只检查 `is_dir()`，HOME 可被注册成 project 从而让 project 部署写进 global 共享目录，此时两个 surface 的 src 同为 hub、谓词无法区分。⑦ 归属判定**不复用** `acquire_skill_mutation_lease`：它是不可重入的进程级 `Mutex`(`skill_update/transaction.rs:4-7`)，三个 resync 入口已在其内，deployment 层再 acquire 会自死锁；改为按目录键的独立同步，并覆盖今天完全无锁的 5 个 Tauri 命令（`commands/skills.rs:91`、`commands/agents.rs:28/44/64/76`）。
 - 后果：获得——存量**零迁移**（磁盘即真相，不需要任何归属回填或"收养"决策）；崩溃后重扫即一致（不引入第二份可与磁盘分叉的状态）；4 处计数串台（`installed_skill.rs:532-548`、`registry.rs:131-153`、`deployment/mod.rs:280-302`、`global_deploy.rs:23-38`）结构性消失而非逐个打补丁；CLI 已有的 `seen_dirs` 去重(`deployment/mod.rs:476,491`)从特例**泛化**为全局不变量。承担——Settings 里共享目录的多行塌缩为一行是**可见的 UX 退让**，需文案说明"这是这些 Agent 自己的生态约定，非 SkillStar 决定"；`AgentProfile` 是冻结的 8 字段 IPC（`registry.rs:16-18`、本文件 D-008），塞不进第 9 个字段，必须新开 `list_deploy_targets` IPC 而非扩展它；unlink 语义从"从某个 Agent 移除"变为"从某个目录移除（影响其全部成员 Agent）"，这是**如实陈述**而非降级——旧语义在磁盘上从未成立。本条扩展 D-007：D-007 的"按路径去重"方向正确但只在 `build_path_plans`(`projects/sync.rs:57-98`) 与 `add_skills_to_project_with_mode`(`sync.rs:419-465`) 两处兑现，scan/rebuild/cleanup 三处未兑现，本条把该不变量的适用范围扩展到 Global 侧并要求两侧同源实现。落地必须先于模型改动修掉三条既有 bug：`swap_in_fresh_deploy` 与 unlink 之间的 lost update（`mod.rs:635-640` + `mod.rs:102`，用户看到"已取消部署"但 rename 把技能复活）、`toggle_skill_for_agent` enable 分支先删后建不回滚（`mod.rs:154-173`，应复用 `mod.rs:619-654` 的先建后换）、以及 ⑦ 的无锁命令同步。
-- 证据：只读取证编排 run `run_f21c372c2a96`（Global 取证 / Project 取证 / lease 与碰撞面 / 候选模型对抗评估 / provenance 验证，5 个 Task）。代码依据见 `crates/skillstar-agents/src/builtin.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/repo_link.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。可复发根因与自检见 [errors.md](./errors.md) 同日条目。
+- 证据：只读取证编排 run `run_f21c372c2a96`（Global 取证 / Project 取证 / lease 与碰撞面 / 候选模型对抗评估 / provenance 验证，5 个 Task）。代码依据见 `crates/skillstar-skills/src/agents/builtin.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/repo_link.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。可复发根因与自检见 [errors.md](./errors.md) 同日条目。
 
 ## D-025：OMP 模型角色存在 binding 级设置袋，未分配角色不写盘
 
@@ -395,7 +395,7 @@
 - 背景：Settings 的旧「所有已安装技能」主开关用当前 Hub inventory 推导动作：部分状态会补齐 Hub 缺口，全量关闭会清空当前链接。它既不能表达「只暂时停用本目录原有集合」，也在刷新或重启后不知道该恢复哪些名字。把集合按 Agent id 保存同样是错误模型：多个 profile 可以合法解析到同一个物理 Global skills 目录，磁盘没有 entry 的 per-Agent ownership 事实（D-024）。
 - 决策：`profiles.toml` 增加 recovery-only journal，键是暂停当刻解析到的物理 Global skills 目录，值是**仍待恢复**的排序去重 Skill 名称。`skillstar-app::agent_managed_skills` 在首次停用前原子落盘精确活动集合，再逐项临时移除；完成后只保留实际已消失的名字。若 journal 存在，恢复只尝试其中目前仍缺失的名字；成功或用户手动放回的名字删除，Hub 源缺失、受保护冲突或失败则保留。当前活动集合永远从磁盘重读，journal 不作为链接真相，也不把目录 entry 归给任一 profile。路径后来解析到其他地方时不得按 id 迁移或重新部署旧 journal。
 - 后果：获得——暂停/恢复跨刷新与重启保持精确集合，且恢复路径没有枚举 Hub inventory 的入口；共享目录天然共用状态和 pending 范围。承担——恢复源已从 Hub 删除时会保留可重试项而非“看似完成”；journal 是 D-024「磁盘即真相」的狭窄例外，只表达用户主动发起的恢复意图，因此必须在每个动作后以磁盘状态收敛，不能扩张为 ownership/provenance store。
-- 证据：`crates/skillstar-agents/src/profile_storage.rs`、`crates/skillstar-app/src/agent_managed_skills.rs`、`src-tauri/src/commands/agents.rs`、`src/features/settings/lib/agentSkillSync.ts`。
+- 证据：`crates/skillstar-skills/src/agents/profile_storage.rs`、`crates/skillstar-app/src/agent_managed_skills.rs`、`src-tauri/src/commands/agents.rs`、`src/features/settings/lib/agentSkillSync.ts`。
 
 ## D-044：pack 根目录 SKILL.md 垫片不是安装单元
 
@@ -432,6 +432,15 @@
 - 决策：所有 git/local 安装走同一入口 `skill_install::install_from_source`：1. `Source::parse` 解析 `owner/repo`、URL、tree URL、本地路径；2. 发现含 `SKILL.md` 的目录；3. Hub 只链所选文件夹；4. Agent 目录 symlink（Windows 必要时 copy）；5. 调用方决定 project vs global。`.<harness>/skills/<name>` 与 `skills/<name>/` 是同一 identity：`--agent X` 优先该 harness，否则 catalog，否则现有 hub，否则另一份 harness 副本。没有 `SKILL.md` 才失败。禁止整仓 clone 回退。
 - 后果：本地路径和 Git URL 产物一致。rust-skills / impeccable / ui-ux-pro-max-skill 都装得上。已删除 git ref 与 prefetch 失败仍按 D-046 / errors.md 处理。share-code 的 embedded 分支不是第六条 git 安装。
 - 证据：`install_from_source`、`resolve_install_skills`、`install_pipeline_table_chooses_harness_or_fallback_folder`。
+
+## D-049：吸收通不过 deletion test 的浅 crate
+
+- 日期：2026-09-01
+- 状态：accepted
+- 背景：D-002 规定 crate 只在独立变更节奏、依赖集合或 deletion test 证明有收益时才拆出。审查时 `skillstar-agents`（约 1.7k 行，只与 skills 同编译）、`skillstar-github-auth`（约 1.9k 行，skills 与 channels 都已依赖 skills）和 `skillstar-providers`（约 327 行静态表，models/usage 本就依赖 core）都通不过 deletion test：没有独立第三方依赖墙，也没有环。另有 `skillstar-sync → skillstar-skills` 幽灵 path dep（源码零引用）已由前置提交拆除。`skillstar-channels` 与 `skillstar-git` 仍独立——前者用 `SkillMutationPolicy` 打破环，后者把 `gix` 挡在 skills/sync 编译单元之外。
+- 决策：`agents` 与 `github_auth` 收进 `skillstar-skills` 的公开模块；Provider identity/balance 收进 `skillstar-core::providers`。对外路径改为 `skillstar_skills::agents`、`skillstar_skills::github_auth`、`skillstar_core::providers`。`check_workspace_deps.sh` 拒绝这三个旧包名再现。不把 channels 或 git 并进 skills。
+- 后果：workspace 从 13 个成员减到 10 个；channels 不再直连认证叶子；models/usage 不再多一跳 providers crate。D-004 的 SSOT 与「无产品域依赖」不变量保留在 `skillstar-core::providers` 模块（模块本身仍无产品域依赖，只是不再是独立 crate）。新增浅 crate 必须先过 deletion test。
+- 证据：`crates/skillstar-skills/src/{agents,github_auth}/`、`crates/skillstar-core/src/providers/`、`scripts/internal/check_workspace_deps.sh`、本决策对应提交。
 
 ## 新增记录格式
 

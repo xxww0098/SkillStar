@@ -481,7 +481,7 @@ fn install_from_source(
 }
 
 pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, AppError> {
-    let profiles = skillstar_agents::list_profiles();
+    let profiles = crate::agents::list_profiles();
     let profile = profiles.iter().find(|profile| profile.id == agent_id);
     let global = profile.map(|profile| profile.global_skills_dir.to_string_lossy().into_owned());
     crate::pack_layout::pack_harness_prefix(

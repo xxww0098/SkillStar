@@ -70,7 +70,7 @@ uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
 
 # Workspace-wide lint table. This is inert for any member that does not also
-# carry `[lints] workspace = true`, so all 13 members opt in explicitly.
+# carry `[lints] workspace = true`, so all 10 members opt in explicitly.
 #
 # Ratchet rule: a lint only enters this table at `deny` when its violation count
 # across the workspace is measured to be 0 on the day it lands, so adding it

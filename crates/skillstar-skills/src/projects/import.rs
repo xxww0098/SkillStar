@@ -12,8 +12,8 @@ use std::path::Path;
 use tracing::warn;
 
 use super::{ImportResult, ImportTarget, load_skills_list, register_project, save_skills_list};
+use crate::agents;
 use crate::local_skill;
-use skillstar_agents as agents;
 
 /// Import discovered skills into local storage and update the project's skills-list.
 pub fn import_scanned_skills(

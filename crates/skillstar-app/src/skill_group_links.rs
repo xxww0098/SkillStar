@@ -58,7 +58,7 @@ pub fn list_groups_with_agent_links() -> Vec<SkillGroup> {
 /// `(agent_id, linked skill names)` for every enabled Agent that takes global
 /// Skills — the same population the deck rail offers as targets.
 fn linked_skills_per_agent() -> Vec<(String, HashSet<String>)> {
-    skillstar_agents::list_profiles()
+    skillstar_skills::agents::list_profiles()
         .into_iter()
         .filter(|profile| profile.enabled && profile.has_global_skills())
         .filter_map(

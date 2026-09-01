@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::Result;
 use serde::Serialize;
-use skillstar_agents::AgentProfile;
+use skillstar_skills::agents::AgentProfile;
 use skillstar_skills::deployment::{self, ToggleSkillOutcome};
 
 /// Current disk state plus the exact names still awaiting restoration.
@@ -76,8 +76,8 @@ fn normalized_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
 }
 
 fn global_profile(agent_id: &str) -> Result<AgentProfile> {
-    let profiles = skillstar_agents::list_profiles();
-    let profile = skillstar_agents::find_profile(&profiles, agent_id)?;
+    let profiles = skillstar_skills::agents::list_profiles();
+    let profile = skillstar_skills::agents::find_profile(&profiles, agent_id)?;
     if !profile.has_global_skills() {
         anyhow::bail!(
             "Agent profile '{}' does not support global skills",
@@ -90,7 +90,7 @@ fn global_profile(agent_id: &str) -> Result<AgentProfile> {
 fn state_for_profile(profile: &AgentProfile) -> Result<AgentManagedSkillsState> {
     Ok(AgentManagedSkillsState {
         active_skill_names: normalized_names(deployment::list_linked_skills(&profile.id)?),
-        suspended_skill_names: normalized_names(skillstar_agents::suspended_global_skill_names(
+        suspended_skill_names: normalized_names(skillstar_skills::agents::suspended_global_skill_names(
             &profile.global_skills_dir,
         )),
     })
@@ -170,7 +170,7 @@ pub fn toggle_agent_managed_skills(agent_id: &str) -> Result<AgentManagedSkillsT
         // Persist before the first destructive unlink. If the process stops
         // between individual items, the complete original set remains a safe
         // recovery intent and restore filters out anything still active.
-        skillstar_agents::replace_suspended_global_skill_names(
+        skillstar_skills::agents::replace_suspended_global_skill_names(
             &profile.global_skills_dir,
             &before.active_skill_names,
         )?;
@@ -180,7 +180,7 @@ pub fn toggle_agent_managed_skills(agent_id: &str) -> Result<AgentManagedSkillsT
         let active_skill_names = normalized_names(deployment::list_linked_skills(&profile.id)?);
         let suspended_skill_names =
             remaining_absent(&before.active_skill_names, &active_skill_names);
-        skillstar_agents::replace_suspended_global_skill_names(
+        skillstar_skills::agents::replace_suspended_global_skill_names(
             &profile.global_skills_dir,
             &suspended_skill_names,
         )?;
@@ -202,7 +202,7 @@ pub fn toggle_agent_managed_skills(agent_id: &str) -> Result<AgentManagedSkillsT
     let active_skill_names = normalized_names(deployment::list_linked_skills(&profile.id)?);
     let suspended_skill_names =
         remaining_absent(&before.suspended_skill_names, &active_skill_names);
-    skillstar_agents::replace_suspended_global_skill_names(
+    skillstar_skills::agents::replace_suspended_global_skill_names(
         &profile.global_skills_dir,
         &suspended_skill_names,
     )?;

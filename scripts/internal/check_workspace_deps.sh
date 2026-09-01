@@ -56,6 +56,12 @@ if "skillstar-ai" in packages:
     errors.append("skillstar-ai must be absorbed into skillstar-models")
 if "skillstar-ssh" in packages:
     errors.append("skillstar-ssh must be absorbed into skillstar-sync (as ssh module)")
+if "skillstar-agents" in packages:
+    errors.append("skillstar-agents must be absorbed into skillstar-skills::agents")
+if "skillstar-github-auth" in packages:
+    errors.append("skillstar-github-auth must be absorbed into skillstar-skills::github_auth")
+if "skillstar-providers" in packages:
+    errors.append("skillstar-providers must be absorbed into skillstar-core::providers")
 
 app = packages.get("skillstar-app")
 if app:

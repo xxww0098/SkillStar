@@ -673,7 +673,7 @@ mod tests {
     /// Upstream ids fold onto persisted SkillStar ids through the same alias
     /// table the CLI and IPC use, so this test cannot drift from it.
     fn skillstar_id(upstream: &str) -> &str {
-        crate::compatible_profile_id(upstream)
+        crate::agents::compatible_profile_id(upstream)
     }
 
     #[test]
@@ -724,7 +724,13 @@ mod tests {
         assert!(mirror_dirs("claude", home).is_empty());
         // The dropped `antigravity-cli` profile id still resolves, so persisted
         // prefs and `--agent antigravity-cli` keep reaching the single row.
-        assert!(!mirror_dirs(crate::compatible_profile_id("antigravity-cli"), home).is_empty());
+        assert!(
+            !mirror_dirs(
+                crate::agents::compatible_profile_id("antigravity-cli"),
+                home
+            )
+            .is_empty()
+        );
     }
 
     #[test]

@@ -369,9 +369,9 @@ impl fmt::Display for SharedChannelError {
 
 impl std::error::Error for SharedChannelError {}
 
-impl From<skillstar_github_auth::GitHubAuthError> for SharedChannelError {
-    fn from(error: skillstar_github_auth::GitHubAuthError) -> Self {
-        use skillstar_github_auth::GitHubAuthErrorCode as AuthCode;
+impl From<skillstar_skills::github_auth::GitHubAuthError> for SharedChannelError {
+    fn from(error: skillstar_skills::github_auth::GitHubAuthError) -> Self {
+        use skillstar_skills::github_auth::GitHubAuthErrorCode as AuthCode;
         let code = match error.code {
             AuthCode::NotAuthenticated | AuthCode::RefreshUnavailable => {
                 SharedChannelErrorCode::NotAuthenticated
