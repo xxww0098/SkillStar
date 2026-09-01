@@ -104,15 +104,11 @@ pub fn pack_harness_prefix(
     if let Some((_, prefix)) = KNOWN_PACK_HARNESS.iter().find(|(id, _)| *id == agent_id) {
         return Some((*prefix).to_string());
     }
-    if let Some(dir) = global_skills_dir {
-        if let Some(prefix) = hidden_skills_parent(dir) {
-            return Some(prefix);
-        }
+    if let Some(prefix) = global_skills_dir.and_then(hidden_skills_parent) {
+        return Some(prefix);
     }
-    if let Some(rel) = project_skills_rel {
-        if let Some(prefix) = hidden_skills_parent(rel) {
-            return Some(prefix);
-        }
+    if let Some(prefix) = project_skills_rel.and_then(hidden_skills_parent) {
+        return Some(prefix);
     }
     None
 }
