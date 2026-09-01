@@ -35,6 +35,8 @@ pub struct DiscoveredSkill {
     pub folder_path: String,
     pub description: String,
     pub already_installed: bool,
+    /// Whether the shared frontmatter validator permits installation.
+    pub installable: bool,
     /// Frontmatter quality issues (stable snake_case codes), empty when the
     /// SKILL.md is a valid skill. Advisory issues (e.g. missing `name`) are
     /// listed here too; blocking ones make the skill un-installable.
@@ -57,6 +59,7 @@ impl SkillCandidate {
             folder_path: self.folder_path,
             description: self.frontmatter.description,
             already_installed: false,
+            installable: self.frontmatter.installable,
             frontmatter_issues: self.frontmatter.issues,
         }
     }
@@ -691,6 +694,7 @@ fn is_safe_skill_manifest(path: &Path) -> bool {
 struct SkillFrontmatter {
     name: Option<String>,
     description: String,
+    installable: bool,
     /// Frontmatter quality issue codes (see `validation`).
     issues: Vec<String>,
 }
@@ -701,9 +705,11 @@ fn extract_frontmatter(skill_md_path: &Path) -> SkillFrontmatter {
     let report = crate::validation::inspect_skill_frontmatter(
         skill_md_path.parent().unwrap_or_else(|| Path::new(".")),
     );
+    let installable = report.is_installable();
     SkillFrontmatter {
         name: report.name,
         description: report.description.unwrap_or_default(),
+        installable,
         issues: report
             .issues
             .iter()

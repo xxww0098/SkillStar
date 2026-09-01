@@ -86,6 +86,8 @@ export interface DiscoveredSkill {
   folder_path: string;
   description: string;
   already_installed: boolean;
+  /** Backend-owned frontmatter verdict; false entries must not be selectable. */
+  installable: boolean;
   /** Frontmatter quality issue codes (e.g. "missing_description"); empty = valid */
   frontmatter_issues: string[];
 }

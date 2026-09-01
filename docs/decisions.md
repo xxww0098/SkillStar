@@ -364,7 +364,7 @@
 ## D-040：frontmatter 门禁以公开 Agent Skills 规范为准
 
 - 日期：2026-08-19
-- 状态：accepted
+- 状态：accepted（description 超长条款由 D-048 取代）
 - 背景：D-019 把 Anthropic `quick_validate.py` 的尖括号限制当成通用生态规则，导致 Vercel 官方技能因 description 中合法的 `` `<ViewTransition>` `` 文本被拒绝；公开 Agent Skills 规范只要求 description 非空且不超过 1024 字符。扫描 UI 又把任何 issue code 固定解释成“缺少 name/description”，掩盖了真实原因。
 - 决策：尖括号不再产生 frontmatter issue，也不阻断安装；其余门禁保持不变。扫描预览直接把后端 issue code 映射为具体本地化原因，不再重建或概括后端规则。此决策仅取代 D-019 的“description 含尖括号”条款。
 - 后果：符合公开规范且描述中含 JSX、HTML 或占位符的技能可以安装；具体元数据问题仍 fail-closed，并在 UI 中准确显示。
@@ -432,6 +432,15 @@
 - 决策：所有 git/local 安装走同一入口 `skill_install::install_from_source`：1. `Source::parse` 解析 `owner/repo`、URL、tree URL、本地路径；2. 发现含 `SKILL.md` 的目录；3. Hub 只链所选文件夹；4. Agent 目录 symlink（Windows 必要时 copy）；5. 调用方决定 project vs global。`.<harness>/skills/<name>` 与 `skills/<name>/` 是同一 identity：`--agent X` 优先该 harness，否则 catalog，否则现有 hub，否则另一份 harness 副本。没有 `SKILL.md` 才失败。禁止整仓 clone 回退。
 - 后果：本地路径和 Git URL 产物一致。rust-skills / impeccable / ui-ux-pro-max-skill 都装得上。已删除 git ref 与 prefetch 失败仍按 D-046 / errors.md 处理。share-code 的 embedded 分支不是第六条 git 安装。
 - 证据：`install_from_source`、`resolve_install_skills`、`install_pipeline_table_chooses_harness_or_fallback_folder`。
+
+## D-048：规范兼容性上限只警告，不阻断技能安装
+
+- 日期：2026-09-01
+- 状态：accepted
+- 背景：公开 Agent Skills 规范将 `description` 限制为 1024 字符，但现实仓库可能只有轻微超限且仍可使用；严格拒绝会让用户无法安装本可运行的技能。
+- 决策：`DescriptionTooLong` 保留稳定 issue code，但降为咨询级；扫描预览显示黄色兼容性警告并允许选择、安装。缺失或非字符串 description、过长 name、损坏或不可读 frontmatter 仍显示红色并阻断。严重级别只由后端 `FrontmatterIssue::is_blocking` / `DiscoveredSkill.installable` 决定，前端不得按 issue code 复制规则。此决策仅取代 D-040 中 description 超长会阻断安装的条款。
+- 后果：用户可以安装规范外的长描述技能，但目标 Agent 仍可能拒绝或忽略它；SkillStar 在安装前保留清晰警告。
+- 证据：`crates/skillstar-skills/src/validation.rs`、`crates/skillstar-skills/src/repo_scanner/scan_install.rs`、`src/features/my-skills/components/import-modal/SelectSkillsPhase.tsx` 及对应回归测试。
 
 ## D-049：吸收通不过 deletion test 的浅 crate
 

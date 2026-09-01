@@ -73,6 +73,8 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
         folder_path: skill.name,
         description: skill.description,
         already_installed: true,
+        installable: true,
+        frontmatter_issues: [],
       })),
     };
   },

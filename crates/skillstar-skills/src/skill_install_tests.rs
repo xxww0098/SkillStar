@@ -7,6 +7,7 @@ fn discovered(id: &str) -> DiscoveredSkill {
         folder_path: format!("skills/{id}"),
         description: String::new(),
         already_installed: false,
+        installable: true,
         frontmatter_issues: Vec::new(),
     }
 }

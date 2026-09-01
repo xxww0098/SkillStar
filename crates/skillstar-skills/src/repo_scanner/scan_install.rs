@@ -361,15 +361,16 @@ mod tests {
     }
 
     #[test]
-    fn install_succeeds_when_all_skills_are_valid() {
+    fn install_succeeds_with_advisory_frontmatter_issue() {
         let _sandbox = Sandbox::new();
         let repo = tempfile::tempdir().unwrap();
 
         let valid = repo.path().join("skills/valid");
         std::fs::create_dir_all(&valid).unwrap();
+        let description = "x".repeat(crate::validation::MAX_DESCRIPTION_CHARS + 1);
         std::fs::write(
             valid.join("SKILL.md"),
-            "---\nname: valid\ndescription: A valid skill\n---\n\n# Valid\n",
+            format!("---\nname: valid\ndescription: {description}\n---\n\n# Valid\n"),
         )
         .unwrap();
 
@@ -379,7 +380,7 @@ mod tests {
             None,
             &[target("valid")],
         )
-        .expect("valid skill installs");
+        .expect("skill with an advisory issue installs");
 
         assert_eq!(installed, vec!["valid".to_string()]);
         let hub = skillstar_core::infra::paths::hub_skills_dir();
