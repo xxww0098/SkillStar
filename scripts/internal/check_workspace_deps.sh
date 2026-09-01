@@ -39,6 +39,9 @@ forbidden = [
     ("skillstar-core", "skillstar-skills"),
     ("skillstar-core", "skillstar-app"),
     ("skillstar-skills", "skillstar-projects"),
+    # SSH listing talks SFTP, not the skills domain. A stale path dep used to
+    # force sync to rebuild whenever skills/git/agents/auth changed.
+    ("skillstar-sync", "skillstar-skills"),
 ]
 
 for a, b in forbidden:

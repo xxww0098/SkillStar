@@ -100,7 +100,6 @@ flowchart LR
   usage --> core
   usage --> providers
   sync --> core
-  sync --> skills
   app --> core
   app --> skills
   app --> git
@@ -162,7 +161,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | MCP catalog → store | 运行时形态选择、draft 映射、安装前确认负载、preset 映射全部在 `skillstar-app::mcp`；两个域 crate 互不知晓，命令层不做映射 | `crates/skillstar-app/src/mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/skillstar-core/src/infra/http_client.rs` |
 | 生成类型 | Rust struct → ts-rs → `src/types/generated/` | `package.json` 的 `types:gen` |
-| 本地技能与远端传输 | `skillstar-sync` 消费 `skillstar-skills` 的公开契约 | `crates/skillstar-sync/Cargo.toml` |
+| 远端 SSH | `skillstar-sync` 只依赖 `skillstar-core`；SFTP 列出远端 hub，不消费 skills 域契约 | `crates/skillstar-sync/Cargo.toml` |
 
 `scripts/internal/check_command_boundaries.sh` 对 command 层新增的直接文件系统/path ownership 与任何 HTTP 构造（`reqwest`/`probe_http_client`）失败；存量按文件计数棘轮，只能下降。
 
