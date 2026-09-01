@@ -4,6 +4,7 @@
 //! and short display identifiers.
 
 use anyhow::{Result, anyhow};
+use std::path::{Path, PathBuf};
 
 // ── Source type ─────────────────────────────────────────────────────
 
@@ -81,8 +82,60 @@ impl Source {
             return parse_http_source(&source_without_fragment, fragment_ref, fragment_skill);
         }
 
+        if looks_like_local_source(&source_without_fragment) {
+            return parse_local_source(&source_without_fragment, fragment_ref, fragment_skill);
+        }
+
         parse_github_shorthand(&source_without_fragment, fragment_ref, fragment_skill)
     }
+}
+
+fn looks_like_local_source(input: &str) -> bool {
+    input.starts_with("file://")
+        || Path::new(input).is_absolute()
+        || input.starts_with('.')
+        || input.starts_with('~')
+}
+
+fn parse_local_source(
+    input: &str,
+    git_ref: Option<String>,
+    skill_filter: Option<String>,
+) -> Result<Source> {
+    let path = if let Some(rest) = input.strip_prefix("file://") {
+        let rest = rest.strip_prefix("//").unwrap_or(rest);
+        PathBuf::from(if rest.len() >= 2 && rest.as_bytes()[1] == b':' {
+            rest.to_string()
+        } else if rest.starts_with('/') {
+            rest.to_string()
+        } else {
+            format!("/{rest}")
+        })
+    } else {
+        PathBuf::from(input)
+    };
+    if !path.exists() {
+        return Err(anyhow!(
+            "Local path does not exist. Use 'owner/repo', a Git URL, or a local path."
+        ));
+    }
+    let canonical = std::fs::canonicalize(&path)
+        .map_err(|error| anyhow!("Invalid local path '{input}': {error}"))?;
+    if !canonical.is_dir() {
+        return Err(anyhow!("Local source must be a directory: {input}"));
+    }
+    let short = canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("local-skill");
+    Ok(Source {
+        repo_url: crate::git::ops::local_file_url(&canonical),
+        short: format!("local/{short}"),
+        git_ref,
+        subpath: None,
+        skill_filter,
+    })
 }
 
 fn split_fragment(input: &str) -> Result<(String, Option<String>, Option<String>)> {
@@ -520,5 +573,25 @@ mod tests {
         assert!(Source::parse("not-valid").is_err());
         assert!(Source::parse("owner/").is_err());
         assert!(Source::parse("/repo").is_err());
+    }
+
+    #[test]
+    fn source_parse_local_git_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let parsed = Source::parse(dir.path().to_str().expect("utf-8 temp path")).unwrap();
+        assert!(
+            parsed.repo_url.starts_with("file://"),
+            "{}",
+            parsed.repo_url
+        );
+        assert!(parsed.short.starts_with("local/"), "{}", parsed.short);
+        assert_eq!(parsed.git_ref, None);
+        assert_eq!(parsed.subpath, None);
+    }
+
+    #[test]
+    fn source_parse_missing_local_path_fails() {
+        assert!(Source::parse("/definitely-not-a-skillstar-source").is_err());
+        assert!(Source::parse("./no-such-local-skill").is_err());
     }
 }

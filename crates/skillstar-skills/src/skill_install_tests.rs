@@ -55,7 +55,7 @@ fn requested_skill_not_found_error_names_missing_identity_and_possible_cause() {
 }
 
 #[cfg(test)]
-mod direct_clone_gate_tests {
+mod pipeline_local_source_tests {
     use super::super::install_skill;
     use std::ffi::OsString;
     use std::process::Command;
@@ -124,11 +124,10 @@ mod direct_clone_gate_tests {
         dir
     }
 
-    /// The legacy whole-repo fallback (scan path failed) must not reopen the
-    /// frontmatter gate: a repo without a valid root SKILL.md is rejected and
-    /// the clone is cleaned up.
+    /// Local path is step 1 of the same pipeline. An invalid root SKILL.md
+    /// is still rejected and must not leave a hub entry.
     #[test]
-    fn direct_clone_fallback_rejects_invalid_root_skill() {
+    fn pipeline_rejects_invalid_root_skill_from_a_local_path() {
         let _sandbox = Sandbox::new();
         let repo = init_repo();
         std::fs::write(repo.path().join("SKILL.md"), "# No frontmatter\n").unwrap();
@@ -145,14 +144,15 @@ mod direct_clone_gate_tests {
             .unwrap();
         assert!(status.success());
 
-        // A plain filesystem path defeats the repo-cache scan, forcing the
-        // direct-clone fallback path.
         let error = install_skill(
             repo.path().to_string_lossy().to_string(),
             Some("demo".into()),
         )
         .unwrap_err();
-        assert!(error.contains("not installable"), "{error}");
+        assert!(
+            error.contains("invalid") || error.contains("not installable"),
+            "{error}"
+        );
         assert!(error.contains("description"), "{error}");
         let hub = skillstar_core::infra::paths::hub_skills_dir();
         assert!(
@@ -162,7 +162,7 @@ mod direct_clone_gate_tests {
     }
 
     #[test]
-    fn direct_clone_fallback_accepts_valid_root_skill() {
+    fn pipeline_installs_a_valid_root_skill_from_a_local_path() {
         let _sandbox = Sandbox::new();
         let repo = init_repo();
         std::fs::write(
@@ -187,12 +187,14 @@ mod direct_clone_gate_tests {
             repo.path().to_string_lossy().to_string(),
             Some("demo".into()),
         )
-        .expect("valid root skill installs via the fallback path");
+        .expect("valid root skill installs through the same pipeline");
         assert_eq!(skill.name, "demo");
+        let hub = skillstar_core::infra::paths::hub_skills_dir().join("demo");
+        assert!(hub.join("SKILL.md").is_file());
     }
 
     #[test]
-    fn direct_clone_fallback_refuses_a_harness_pack_instead_of_the_whole_repo() {
+    fn pipeline_installs_a_harness_folder_from_a_local_pack_not_the_repo_root() {
         let _sandbox = Sandbox::new();
         let repo = init_repo();
         std::fs::write(
@@ -220,25 +222,25 @@ mod direct_clone_gate_tests {
             .unwrap();
         assert!(status.success());
 
-        let error = install_skill(
+        let skill = install_skill(
             repo.path().to_string_lossy().to_string(),
             Some("rust".into()),
         )
-        .unwrap_err();
-        assert!(
-            error.contains("whole repository") || error.contains("harness"),
-            "{error}"
+        .expect("a harness pack must install through the same pipeline");
+        assert_eq!(skill.name, "rust");
+        let lock = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).unwrap();
+        let entry = lock
+            .skills
+            .iter()
+            .find(|entry| entry.name == "rust")
+            .expect("lock entry");
+        assert_eq!(
+            entry.source_folder.as_deref(),
+            Some(".cursor/skills/rust"),
+            "must hub-link the harness folder, not the repo root"
         );
-        let hub = skillstar_core::infra::paths::hub_skills_dir();
-        assert!(
-            !hub.join("rust").symlink_metadata().is_ok(),
-            "must not leave a whole-repo hub entry"
-        );
-        let lock =
-            crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).unwrap_or_default();
-        assert!(
-            !lock.skills.iter().any(|entry| entry.name == "rust"),
-            "must not record source_folder: None for a harness pack"
-        );
+        let hub = skillstar_core::infra::paths::hub_skills_dir().join("rust");
+        assert!(hub.join("SKILL.md").is_file());
+        assert!(!hub.join(".cursor").exists());
     }
 }

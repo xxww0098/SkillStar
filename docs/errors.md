@@ -2,6 +2,13 @@
 
 状态：active
 
+## 2026-08-31 - 安装必须是一条 vercel-skills 管线，harness 文件夹是 identity 别名
+
+- Symptom: rust-skills / impeccable / ui-ux-pro-max-skill 的轮播和 `--agent` 走 scan 列表、chooser、整仓 clone 三条机器，缺 `.dsh` 或只有 `.claude` 时 fail-closed 或链整仓。
+- Root cause: `install_skill` 与 `install_skills_batch` 各自选文件夹；scan 成功时跳过 `resolve_install_skills`；scan 失败再 `git clone` 到 hub。那是第六条路径。
+- Fix: 只留 `install_from_source`：resolve → discover → 一个 chooser → hub link。Agent deploy / scope 仍在调用方。见 [D-047](decisions.md#d-047技能安装是-vercel-skills-五步管线harness-文件夹是-identity-别名)。
+- Self-check: `cargo test -p skillstar-skills --locked --lib skill_install -- --nocapture`。
+
 ## 2026-08-31 - 已删除的 git ref 把无关技能的安装/轮播部署打成「无法安装该技能」
 
 - Symptom: Library 点 banner-design 的 Antigravity 轮播，toast「无法安装该技能」。日志混入 `update_checker: prefetch git fetch failed — will preserve existing update state`，`fatal: couldn't find remote ref cursor/harness-install-units-dc3e`。该 ref 来自另一条 lock 记录（`rust` 钉在已合并并删除的 PR 分支）；cache 目录仍叫 `--ref--cursor--harness-install-units-dc3e`，工作区 HEAD 已是 `main`。

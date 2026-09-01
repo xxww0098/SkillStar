@@ -8,6 +8,11 @@
 //! use the narrow public modules rather than reaching through temporary
 //! re-exports.
 //!
+//! Install is one vercel-skills pipeline (`skill_install`): resolve source,
+//! discover `SKILL.md` dirs, hub-link the chosen folder. Harness trees are
+//! identity aliases via `discovery::resolve_install_skills`. Agent deploy and
+//! project-vs-global scope stay at the caller.
+//!
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`lockfile`] / [`update_checker`] / [`update_api`] | Installed-skill records and repo update detection |
