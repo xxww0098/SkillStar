@@ -16,7 +16,7 @@
 
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
-use skillstar_providers::balance;
+use skillstar_core::providers::balance;
 
 use crate::subscription::{SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
