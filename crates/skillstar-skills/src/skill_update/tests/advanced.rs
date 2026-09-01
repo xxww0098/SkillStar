@@ -436,7 +436,7 @@ fn physical_checkout_comparison_accepts_a_symlinked_path_prefix() {
 
     assert!(same_physical_path(&checkout, &alias));
     assert_eq!(
-        canonicalize_with_missing_tail(&alias.join("missing/nested")).unwrap(),
+        skillstar_core::infra::fs_ops::canonicalize_existing_prefix(&alias.join("missing/nested")),
         std::fs::canonicalize(&checkout)
             .unwrap()
             .join("missing/nested")

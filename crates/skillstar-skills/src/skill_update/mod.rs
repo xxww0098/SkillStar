@@ -435,12 +435,6 @@ fn actual_repo_pathspec(skill_path: &Path, repo_root: &Path) -> Result<Option<St
     Ok(Some(relative.to_string_lossy().replace('\\', "/")))
 }
 
-fn canonicalize_with_missing_tail(path: &Path) -> Result<std::path::PathBuf> {
-    Ok(skillstar_core::infra::fs_ops::canonicalize_existing_prefix(
-        path,
-    ))
-}
-
 fn update_skill_unchecked_locked(
     name: &str,
     session: &crate::git::transport::GitOperationSession,
