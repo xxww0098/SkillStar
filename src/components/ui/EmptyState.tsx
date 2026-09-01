@@ -54,7 +54,7 @@ export function EmptyState({ icon, title, description, action, size = "md", clas
             // language rather than a flat tinted square.
             "flex items-center justify-center mb-4 text-foreground/80",
             "border border-border/80 bg-gradient-to-br from-card to-muted/40",
-            "shadow-[0_8px_24px_-8px_var(--color-shadow)] ring-1 ring-inset ring-white/[0.08] dark:ring-white/[0.06]",
+            "shadow-[0_8px_24px_-8px_var(--color-shadow)] ring-1 ring-inset ring-white/[0.08] paper:ring-black/[0.06]",
             iconSizeMap[size],
           )}
         >

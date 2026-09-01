@@ -65,6 +65,7 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
         type="button"
         onClick={() => setOpen(true)}
         title={title}
+        aria-label={title}
         aria-haspopup="dialog"
         aria-expanded={open}
         className={cn(

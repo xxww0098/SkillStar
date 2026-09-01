@@ -1,5 +1,6 @@
 import { Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
 import { supportedLanguages } from "../../../i18n";
 import { cn } from "../../../lib/utils";
 
@@ -13,26 +14,28 @@ export function LanguageSection({ currentLang, onLanguageChange }: LanguageSecti
 
   return (
     <section>
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 border border-teal-500/20">
-          <Languages className="w-4 h-4 text-teal-500" />
-        </div>
-        <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.language")}</h2>
-      </div>
+      <SettingsSectionHeader icon={<Languages className="h-4 w-4" />} title={t("settings.language")} />
 
       <div className="rounded-xl border border-border bg-card px-4 py-4">
         <div className="flex flex-col gap-3">
           <span className="text-sm font-medium">{t("settings.language")}</span>
-          <div className="flex items-center gap-1.5 flex-wrap p-1 bg-muted/50 rounded-lg w-fit">
+          <div
+            role="radiogroup"
+            aria-label={t("settings.language")}
+            className="flex w-fit flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 p-1"
+          >
             {supportedLanguages.map((lang) => (
               <button
                 key={lang.code}
+                type="button"
+                role="radio"
+                aria-checked={currentLang === lang.code || currentLang.startsWith(lang.code)}
                 onClick={() => onLanguageChange(lang.code)}
                 className={cn(
-                  "px-4 py-1.5 rounded-md text-xs font-medium transition cursor-pointer",
+                  "h-8 cursor-pointer rounded-md px-4 text-xs font-medium transition focus-ring",
                   currentLang === lang.code || currentLang.startsWith(lang.code)
                     ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
                 {lang.label}

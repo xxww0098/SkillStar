@@ -18,6 +18,7 @@ import {
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import type { StorageOverview } from "../../../types";
@@ -70,18 +71,13 @@ export const StorageSection = memo(function StorageSection({
 
   return (
     <section>
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <div className="w-7 h-7 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0 border border-red-500/20">
-          <HardDrive className="w-4 h-4 text-red-500" />
-        </div>
-        <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.storage")}</h2>
-      </div>
+      <SettingsSectionHeader icon={<HardDrive className="h-4 w-4" />} title={t("settings.storage")} />
       <div className="mb-2 px-1 flex items-start justify-between gap-3">
         <p className="text-micro leading-relaxed text-muted-foreground/75">{t("settings.storagePathModelHint")}</p>
         <button
           type="button"
           onClick={() => setPathStructureOpen((prev) => !prev)}
-          className="shrink-0 inline-flex items-center gap-1 text-micro text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-micro text-muted-foreground transition-colors hover:text-foreground focus-ring"
           aria-expanded={pathStructureOpen}
           aria-controls="storage-path-structure"
         >

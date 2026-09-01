@@ -617,13 +617,13 @@ export function Toolbar({
                 "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium cursor-pointer transition-colors focus-ring whitespace-nowrap select-none",
                 onlyUpdatesFilter
                   ? "bg-amber-500 text-amber-950 font-bold shadow-xs"
-                  : "bg-amber-500/15 text-amber-700 dark:text-amber-300 font-semibold hover:bg-amber-500/25",
+                  : "bg-amber-500/15 text-amber-300 paper:text-amber-800 font-semibold hover:bg-amber-500/25",
               )}
             >
               <ListFilter
                 className={cn(
                   "w-3.5 h-3.5 shrink-0",
-                  onlyUpdatesFilter ? "text-amber-950" : "text-amber-600 dark:text-amber-400",
+                  onlyUpdatesFilter ? "text-amber-950" : "text-amber-400 paper:text-amber-700",
                 )}
               />
               <span className="tabular-nums font-bold">{chipUpdateCount}</span>
@@ -641,14 +641,14 @@ export function Toolbar({
                 disabled={isUpdatingAll}
                 title={t("toolbar.updateAllAction", { defaultValue: "Update all" })}
                 className={cn(
-                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-semibold bg-amber-500/20 text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors cursor-pointer focus-ring whitespace-nowrap select-none",
+                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-semibold bg-amber-500/20 text-amber-200 paper:text-amber-900 hover:bg-amber-500/30 transition-colors cursor-pointer focus-ring whitespace-nowrap select-none",
                   isUpdatingAll && "opacity-60 cursor-not-allowed",
                 )}
               >
                 {isUpdatingAll ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
                 ) : (
-                  <ArrowUpCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400 paper:text-amber-700" />
                 )}
                 <span>{isUpdatingAll ? t("common.updating") : t("toolbar.updateAllAction")}</span>
               </button>

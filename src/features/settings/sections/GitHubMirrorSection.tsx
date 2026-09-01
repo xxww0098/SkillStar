@@ -3,6 +3,7 @@ import { Check, ChevronDown, Loader2, Wifi, WifiOff, Zap } from "lucide-react";
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
 import { Switch } from "../../../components/ui/switch";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
@@ -64,29 +65,29 @@ export const GitHubMirrorSection = memo(function GitHubMirrorSection({
 
   return (
     <section>
-      <div className="flex items-center justify-between mb-3 px-1">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 border border-emerald-500/20">
-            <Zap className="w-4 h-4 text-emerald-500" />
-          </div>
-          <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.githubMirror")}</h2>
-          {mirrorConfig.enabled && effectiveUrl && (
-            <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-md bg-muted/50 border border-border truncate max-w-[260px]">
+      <SettingsSectionHeader
+        icon={<Zap className="h-4 w-4" />}
+        title={t("settings.githubMirror")}
+        meta={
+          mirrorConfig.enabled && effectiveUrl ? (
+            <span className="max-w-[260px] truncate rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
               {effectiveUrl}
             </span>
-          )}
-        </div>
-
-        {ready ? (
-          <Switch
-            checked={mirrorConfig.enabled}
-            onCheckedChange={(checked) => onConfigChange({ ...mirrorConfig, enabled: checked })}
-            disabled={mirrorSaving}
-          />
-        ) : (
-          <div className="h-5 w-9 rounded-full border border-border bg-muted/60" />
-        )}
-      </div>
+          ) : undefined
+        }
+        action={
+          ready ? (
+            <Switch
+              checked={mirrorConfig.enabled}
+              onCheckedChange={(checked) => onConfigChange({ ...mirrorConfig, enabled: checked })}
+              disabled={mirrorSaving}
+              aria-label={t("settings.githubMirror")}
+            />
+          ) : (
+            <div className="h-5 w-9 rounded-full border border-border bg-muted/60" />
+          )
+        }
+      />
 
       <div
         className={cn(
@@ -95,13 +96,16 @@ export const GitHubMirrorSection = memo(function GitHubMirrorSection({
         )}
       >
         <button
+          type="button"
           onClick={onToggleExpanded}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+          aria-expanded={mirrorExpanded}
+          className="flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-muted/30 focus-ring"
         >
           <span className="text-sm font-medium text-foreground">{t("settings.githubMirrorConfig")}</span>
           <ChevronDown
+            aria-hidden
             className={cn(
-              "w-4 h-4 text-muted-foreground transition-transform duration-200",
+              "h-4 w-4 text-muted-foreground transition-transform duration-200",
               !mirrorExpanded && "-rotate-90",
             )}
           />
@@ -173,8 +177,8 @@ export const GitHubMirrorSection = memo(function GitHubMirrorSection({
                         "shrink-0 text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer",
                         testResult !== undefined
                           ? testResult === "error"
-                            ? "border-red-500/30 bg-red-500/10 text-red-400"
-                            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                            ? "border-red-500/30 bg-red-500/10 text-red-400 paper:text-red-700"
+                            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 paper:text-emerald-700"
                           : "border-border text-muted-foreground hover:text-foreground hover:border-border/80",
                       )}
                     >
@@ -268,8 +272,8 @@ export const GitHubMirrorSection = memo(function GitHubMirrorSection({
                       "shrink-0 text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer",
                       testResults["custom"] !== undefined
                         ? testResults["custom"] === "error"
-                          ? "border-red-500/30 bg-red-500/10 text-red-400"
-                          : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                          ? "border-red-500/30 bg-red-500/10 text-red-400 paper:text-red-700"
+                          : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 paper:text-emerald-700"
                         : "border-border text-muted-foreground hover:text-foreground hover:border-border/80",
                     )}
                   >

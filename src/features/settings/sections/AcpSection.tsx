@@ -3,6 +3,8 @@ import { BookOpen, Bot, Check, ChevronDown, ChevronRight, Hammer, Map as MapIcon
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
+import { Switch } from "../../../components/ui/switch";
 import { type AcpConfig, tauriInvoke } from "../../../lib/ipc";
 import type { SkillTutorialStyle } from "../../../types";
 import { settingsKeys } from "../api/keys";
@@ -119,10 +121,6 @@ export function AcpSection() {
     }));
   }, []);
 
-  const toggleEnabled = useCallback(() => {
-    setConfig((prev) => ({ ...prev, enabled: !prev.enabled }));
-  }, []);
-
   const selectTutorialStyle = useCallback(
     (tutorialStyle: SkillTutorialStyle) => {
       if (config.tutorial_style === tutorialStyle || saving) return;
@@ -137,43 +135,32 @@ export function AcpSection() {
 
   return (
     <section>
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0 border border-violet-500/20">
-          <Bot className="w-4 h-4 text-violet-400" />
-        </div>
-        <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.acpTitle")}</h2>
-        {saved && (
-          <span className="ml-auto mr-3 text-[11px] text-emerald-400 flex items-center gap-1">
-            <Check className="w-3 h-3" />
-            {t("common.saved")}
-          </span>
-        )}
-        <button
-          role="switch"
-          aria-checked={config.enabled}
-          onClick={toggleEnabled}
-          className={`
-            ${saved ? "" : "ml-auto"}
-            relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full
-            border-2 border-transparent transition-colors duration-200 ease-in-out
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-            ${config.enabled ? "bg-primary" : "bg-muted"}
-          `}
-        >
-          <span
-            className={`
-              pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0
-              transition-transform duration-200 ease-in-out
-              ${config.enabled ? "translate-x-4" : "translate-x-0"}
-            `}
+      <SettingsSectionHeader
+        icon={<Bot className="h-4 w-4" />}
+        title={t("settings.acpTitle")}
+        meta={
+          saved ? (
+            <span className="flex items-center gap-1 text-[11px] text-success">
+              <Check className="h-3 w-3" aria-hidden />
+              {t("common.saved")}
+            </span>
+          ) : undefined
+        }
+        action={
+          <Switch
+            checked={config.enabled}
+            onCheckedChange={(enabled) => setConfig((prev) => ({ ...prev, enabled }))}
+            aria-label={t("settings.acpTitle")}
           />
-        </button>
-      </div>
+        }
+      />
 
       <div className="rounded-xl border border-border bg-card">
         {/* Title bar — click to expand */}
-        <div
-          className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left select-none hover:bg-muted/30 focus-ring"
           onClick={() => setExpanded(!expanded)}
         >
           <div>
@@ -181,11 +168,11 @@ export function AcpSection() {
             <p className="text-[11px] text-muted-foreground">{config.agent_label}</p>
           </div>
           {expanded ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
           ) : (
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
           )}
-        </div>
+        </button>
 
         {/* Expanded config */}
         {expanded && (
@@ -258,6 +245,7 @@ export function AcpSection() {
                   return (
                     <button
                       key={preset.command}
+                      type="button"
                       onClick={() => selectPreset(preset)}
                       className={`
                         px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150
