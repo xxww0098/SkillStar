@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bot,
   EyeOff,
   Globe,
@@ -21,6 +22,7 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
   { id: "settings-proxy", labelKey: "settings.networkProxy", icon: Globe },
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
   { id: "settings-marketplace-mirror", labelKey: "settings.marketplaceMirror", icon: Store },
+  { id: "settings-network-doctor", labelKey: "settings.networkDoctor", icon: Activity },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
   { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },

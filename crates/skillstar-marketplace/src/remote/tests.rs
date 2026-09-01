@@ -238,6 +238,76 @@ fn every_marketplace_host_joins_paths_correctly() {
     }
 }
 
+#[test]
+fn enabled_github_mirrors_wrap_skills_sh_after_the_primary() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    unsafe {
+        std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+    }
+
+    skillstar_core::config::github_mirror::save_config(
+        &skillstar_core::config::github_mirror::GitHubMirrorConfig {
+            enabled: true,
+            preset_id: Some("ghproxy_vip".into()),
+            custom_url: None,
+        },
+    )
+    .unwrap();
+
+    let hosts = super::marketplace_hosts();
+    assert_eq!(hosts[0], "https://skills.sh/");
+    assert!(
+        hosts
+            .iter()
+            .any(|host| host.starts_with("https://ghproxy.vip/https://skills.sh")),
+        "healthy GitHub mirrors must wrap skills.sh: {hosts:?}"
+    );
+    for host in &hosts {
+        let url = super::join_url(host, "/hot");
+        assert!(!url.contains("shhot"), "wrapped host {host} produced {url}");
+        assert!(
+            url.ends_with("/hot") || url.contains("skills.sh/hot"),
+            "wrapped host {host} produced {url}"
+        );
+    }
+
+    unsafe {
+        std::env::remove_var("SKILLSTAR_DATA_DIR");
+    }
+}
+
+#[test]
+fn etag_is_only_sent_to_the_host_that_issued_it() {
+    assert!(super::should_send_etag(
+        Some("\"v1\""),
+        Some("https://skills.sh/"),
+        "https://skills.sh/"
+    ));
+    assert!(super::should_send_etag(
+        Some("\"v1\""),
+        Some("https://skills.sh"),
+        "https://skills.sh/"
+    ));
+    assert!(!super::should_send_etag(
+        Some("\"v1\""),
+        Some("https://skills.sh/"),
+        "https://ghproxy.vip/https://skills.sh/"
+    ));
+    assert!(!super::should_send_etag(
+        Some("\"v1\""),
+        None,
+        "https://skills.sh/"
+    ));
+    assert!(!super::should_send_etag(
+        None,
+        Some("https://skills.sh/"),
+        "https://skills.sh/"
+    ));
+}
+
 /// The rank-1 skill used to be lost: the object regex allowed `{` inside the
 /// character class, so the leftmost match started at the enclosing
 /// `{\"initialSkills\":[{` and produced unbalanced JSON that serde dropped.

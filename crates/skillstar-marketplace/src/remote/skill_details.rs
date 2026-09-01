@@ -63,11 +63,12 @@ pub async fn fetch_marketplace_skill_details_with_meta(
     source: &str,
     name: &str,
     etag: Option<&str>,
+    etag_host: Option<&str>,
 ) -> Result<(MarketplaceSkillDetails, FetchMeta)> {
     let path = format!("/{}/{}", source, name);
     debug!(target: "skills_sh", path = %path, "fetching skill details");
 
-    let (html, meta) = fetch_with_failover(&path, etag).await?;
+    let (html, meta) = fetch_with_failover(&path, etag, etag_host).await?;
     if meta.payload_sha256.is_empty() {
         return Ok((
             MarketplaceSkillDetails {

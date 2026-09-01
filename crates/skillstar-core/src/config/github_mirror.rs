@@ -4,6 +4,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, process::Command};
 
+use super::{github_health, github_rewrite};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorPreset {
     pub id: String,
@@ -82,44 +84,20 @@ pub fn save_config(config: &GitHubMirrorConfig) -> Result<()> {
     let path = config_path();
     let content = serde_json::to_string_pretty(config)?;
     crate::infra::fs_ops::atomic_write(&path, content.as_bytes())?;
+    github_health::reset();
     Ok(())
 }
 
-/// Normalize a mirror URL to a trailing-slash https/http URL, or `None` if
-/// the URL is unusable (empty, non-http scheme).
-fn normalize_mirror_url(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let with_slash = if trimmed.ends_with('/') {
-        trimmed.to_string()
-    } else {
-        format!("{trimmed}/")
-    };
-    (with_slash.starts_with("https://") || with_slash.starts_with("http://")).then_some(with_slash)
-}
-
-/// Preferred mirror URL (first candidate), for compatibility with callers
-/// that need a single value (e.g. the settings UI).
+/// Preferred mirror URL (first ranked candidate), for compatibility with
+/// callers that need a single value (e.g. the settings UI).
 pub fn effective_mirror_url() -> Option<String> {
     candidate_mirror_urls().into_iter().next()
 }
 
-/// Ordered mirror candidates, most preferred first.
-///
-/// Anti-censorship design: a single mirror is a single point of failure — if
-/// the chosen mirror is unreachable or rate-limited there is no fallback.
-/// The candidates are:
-///   1. the explicitly configured custom URL (if any),
-///   2. the explicitly selected preset (if any),
-///   3. every other builtin preset, in declaration order,
-///
-/// deduplicated and normalized.
-///
-/// Callers that spawn git subprocesses should try each candidate in order and
-/// fall back to a direct GitHub connection only after every candidate fails.
-pub fn candidate_mirror_urls() -> Vec<String> {
+/// Declaration-order candidates (custom → selected preset → remaining
+/// presets), before the circuit breaker reorders them. Used by the network
+/// doctor so the UI still lists every configured accelerator.
+pub fn declaration_order_candidates() -> Vec<String> {
     let Ok(config) = load_config() else {
         return Vec::new();
     };
@@ -131,7 +109,7 @@ pub fn candidate_mirror_urls() -> Vec<String> {
     let mut candidates: Vec<String> = Vec::new();
 
     let mut push = |url: String| {
-        if let Some(normalized) = normalize_mirror_url(&url)
+        if let Some(normalized) = github_rewrite::normalize_mirror_url(&url)
             && seen.insert(normalized.clone())
         {
             candidates.push(normalized);
@@ -155,17 +133,32 @@ pub fn candidate_mirror_urls() -> Vec<String> {
     candidates
 }
 
-/// Apply the `insteadOf` rewrite for a single mirror URL to a git command.
-/// `url.<mirror>https://github.com/.insteadOf=https://github.com/`
+/// Ordered mirror candidates, most preferred first.
+///
+/// Anti-censorship design: a single mirror is a single point of failure — if
+/// the chosen mirror is unreachable or rate-limited there is no fallback.
+/// The candidates are declaration order (custom → selected preset → remaining
+/// presets), then ranked by the circuit breaker so recently-dead hosts are
+/// skipped and recently-fast hosts lead. See [`github_health`].
+///
+/// Callers that spawn git subprocesses should try each candidate in order and
+/// fall back to a direct GitHub connection only after every candidate fails.
+pub fn candidate_mirror_urls() -> Vec<String> {
+    github_health::rank_candidates(declaration_order_candidates())
+}
+
+/// Apply GitHub-family `insteadOf` rewrites for a single mirror to a git
+/// command. Origins include github.com, raw, codeload, objects, and gist —
+/// never `api.github.com`, and never when the operation carries credentials
+/// (callers already gate that).
 pub fn apply_mirror_args_for(cmd: &mut Command, mirror_url: &str) {
-    let Some(normalized) = normalize_mirror_url(mirror_url) else {
+    let Some(normalized) = github_rewrite::normalize_mirror_url(mirror_url) else {
         return;
     };
-    let key = format!(
-        "url.{}https://github.com/.insteadOf=https://github.com/",
-        normalized
-    );
-    cmd.arg("-c").arg(key);
+    for origin in github_rewrite::GIT_INSTEAD_OF_ORIGINS {
+        let key = format!("url.{normalized}{origin}.insteadOf={origin}");
+        cmd.arg("-c").arg(key);
+    }
 }
 
 /// Apply the preferred mirror's `insteadOf` rewrite to a git command.
@@ -191,30 +184,35 @@ pub fn is_mirror_transport_error(stderr: &str) -> bool {
         || s.contains("gh-proxy")
 }
 
+/// Probe a mirror by fetching a tiny public raw file through it. A 200 on the
+/// accelerator root does not prove git/raw proxying works.
 pub async fn test_mirror(url: &str) -> Result<u64> {
     let client = crate::infra::http_client::probe_http_client(std::time::Duration::from_secs(10))?;
-
-    let normalised = if url.ends_with('/') {
-        url.to_string()
-    } else {
-        format!("{url}/")
-    };
+    let probe = github_rewrite::mirror_probe_url(url)
+        .ok_or_else(|| anyhow::anyhow!("Mirror URL is not a usable http(s) endpoint"))?;
 
     let start = std::time::Instant::now();
-    let resp = client.head(&normalised).send().await?;
+    let resp = client.get(&probe).send().await?;
     let latency = start.elapsed().as_millis() as u64;
-
-    if resp.status().is_server_error() {
-        anyhow::bail!("Mirror returned server error: {}", resp.status());
+    let status = resp.status();
+    if !status.is_success() {
+        github_health::record_failure(url);
+        anyhow::bail!("Mirror probe returned HTTP {}", status);
     }
-
+    let body = resp.text().await.unwrap_or_default();
+    if !body.to_ascii_lowercase().contains("hello") {
+        github_health::record_failure(url);
+        anyhow::bail!("Mirror probe returned an unexpected body");
+    }
+    github_health::record_success(url, Some(latency));
     Ok(latency)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        GitHubMirrorConfig, builtin_presets, effective_mirror_url, load_config, save_config,
+        GitHubMirrorConfig, builtin_presets, candidate_mirror_urls, declaration_order_candidates,
+        effective_mirror_url, load_config, save_config,
     };
     use tempfile::TempDir;
 
@@ -278,10 +276,77 @@ mod tests {
             effective_mirror_url().as_deref(),
             Some("https://mirror.example/")
         );
+        assert_eq!(declaration_order_candidates()[0], "https://mirror.example/");
+        assert!(candidate_mirror_urls().contains(&"https://mirror.example/".to_string()));
 
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");
         }
+    }
+
+    #[test]
+    fn save_config_resets_health_so_a_dead_custom_url_is_retried() {
+        let _guard = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        save_config(&GitHubMirrorConfig {
+            enabled: true,
+            preset_id: Some("ghproxy_vip".into()),
+            custom_url: None,
+        })
+        .unwrap();
+        let first = declaration_order_candidates()[0].clone();
+        crate::config::github_health::record_failure(&first);
+        crate::config::github_health::record_failure(&first);
+        assert!(
+            !candidate_mirror_urls().contains(&first)
+                || candidate_mirror_urls()[0] != first
+                || candidate_mirror_urls().len() == 1,
+            "open circuit should skip or fail-open; after two failures with other presets, skip"
+        );
+
+        save_config(&GitHubMirrorConfig {
+            enabled: true,
+            preset_id: Some("ghproxy_vip".into()),
+            custom_url: None,
+        })
+        .unwrap();
+        assert_eq!(candidate_mirror_urls()[0], first);
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
+    }
+
+    #[test]
+    fn instead_of_rewrites_github_family_not_just_github_com() {
+        let mut cmd = std::process::Command::new("git");
+        super::apply_mirror_args_for(&mut cmd, "https://ghproxy.vip/");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = args.join(" ");
+        assert!(
+            joined.contains(
+                "url.https://ghproxy.vip/https://github.com/.insteadOf=https://github.com/"
+            )
+        );
+        assert!(joined.contains(
+            "url.https://ghproxy.vip/https://raw.githubusercontent.com/.insteadOf=https://raw.githubusercontent.com/"
+        ));
+        assert!(joined.contains(
+            "url.https://ghproxy.vip/https://codeload.github.com/.insteadOf=https://codeload.github.com/"
+        ));
+        assert!(
+            !joined.contains("api.github.com"),
+            "authenticated API traffic must never be rewritten"
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@
 pub mod db_pool;
 pub mod error;
 pub mod fs_ops;
+pub mod github_http;
 pub mod http_client;
 pub mod migration;
 pub mod parallel;

@@ -49,6 +49,7 @@ fn re_nextjs_skill_data() -> &'static Regex {
 pub async fn get_skills_sh_leaderboard_with_meta(
     category: &str,
     etag: Option<&str>,
+    etag_host: Option<&str>,
 ) -> Result<(Vec<Skill>, FetchMeta)> {
     // Map category to URL path
     let url_path = match category {
@@ -58,7 +59,7 @@ pub async fn get_skills_sh_leaderboard_with_meta(
         _ => "/",
     };
 
-    let (html, mut meta) = fetch_with_failover(url_path, etag).await?;
+    let (html, mut meta) = fetch_with_failover(url_path, etag, etag_host).await?;
     debug!(target: "skills_sh", host = %meta.source_host, "fetching leaderboard");
 
     // 304 Not Modified: the snapshot layer keeps its previous write.
@@ -207,7 +208,7 @@ pub(crate) fn parse_search_supplement(body: &str) -> Result<SearchSupplement> {
 /// offset/cursor, so a second request would return the same first page.
 async fn fetch_all_skills_via_api() -> Result<Vec<Skill>> {
     debug!(target: "skills_sh", "fetching supplemental skills via search API");
-    let (body, _) = fetch_with_failover(&search_supplement_path(), None).await?;
+    let (body, _) = fetch_with_failover(&search_supplement_path(), None, None).await?;
     let supplement = parse_search_supplement(&body)?;
     if supplement.truncated {
         debug!(

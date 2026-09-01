@@ -94,6 +94,7 @@ export const ProxySection = memo(function ProxySection({
                   <option value="http">HTTP</option>
                   <option value="https">HTTPS</option>
                   <option value="socks5">SOCKS5</option>
+                  <option value="socks5h">SOCKS5H</option>
                 </select>
               </div>
               <div>
@@ -115,6 +116,10 @@ export const ProxySection = memo(function ProxySection({
                 />
               </div>
             </div>
+
+            {proxyConfig.proxy_type === "socks5" || proxyConfig.proxy_type === "socks5h" ? (
+              <p className="text-xs text-muted-foreground leading-relaxed px-1">{t("settings.proxySocks5hHint")}</p>
+            ) : null}
 
             <div className="grid grid-cols-3 gap-3">
               <div>

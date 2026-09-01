@@ -1,4 +1,4 @@
-use skillstar_core::config::{github_mirror, marketplace_mirror, proxy};
+use skillstar_core::config::{github_mirror, marketplace_mirror, network_doctor, proxy};
 use skillstar_core::infra::error::AppError;
 
 #[tauri::command]
@@ -51,4 +51,11 @@ pub async fn save_marketplace_mirror_config(
 ) -> Result<(), AppError> {
     marketplace_mirror::save_config(&config)
         .map_err(|e| AppError::Other(format!("Failed to write marketplace mirror config: {}", e)))
+}
+
+#[tauri::command]
+pub async fn diagnose_network() -> Result<network_doctor::NetworkDiagnosis, AppError> {
+    network_doctor::diagnose_network()
+        .await
+        .map_err(|e| AppError::Other(format!("Network diagnosis failed: {}", e)))
 }

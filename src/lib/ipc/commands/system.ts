@@ -2,6 +2,7 @@ import type {
   GitHubMirrorConfig,
   GitHubMirrorPreset,
   MarketplaceMirrorConfig,
+  NetworkDiagnosis,
   ProxyConfig,
   SkillTutorialStyle,
 } from "../../../types";
@@ -63,6 +64,7 @@ export interface SystemCommands {
   // Marketplace mirror (skills.sh accelerators)
   get_marketplace_mirror_config: { args: Record<string, never>; result: MarketplaceMirrorConfig };
   save_marketplace_mirror_config: { args: { config: MarketplaceMirrorConfig }; result: void };
+  diagnose_network: { args: Record<string, never>; result: NetworkDiagnosis };
 
   // Updater
   check_app_update: { args: Record<string, never>; result: UpdateCheckResult };

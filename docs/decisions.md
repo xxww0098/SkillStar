@@ -451,6 +451,15 @@
 - 后果：workspace 从 13 个成员减到 10 个；channels 不再直连认证叶子；models/usage 不再多一跳 providers crate。D-004 的 SSOT 与「无产品域依赖」不变量保留在 `skillstar-core::providers` 模块（模块本身仍无产品域依赖，只是不再是独立 crate）。新增浅 crate 必须先过 deletion test。
 - 证据：`crates/skillstar-skills/src/{agents,github_auth}/`、`crates/skillstar-core/src/providers/`、`scripts/internal/check_workspace_deps.sh`、本决策对应提交。
 
+## D-050：对抗审查加固：熔断排序、SOCKS5H、GitHub 族匿名改写、ETag 绑 host
+
+- 日期：2026-09-01
+- 状态：accepted
+- 背景：D-023 给出了 Git mirror 候选链与 marketplace host 链，但仍按声明顺序串行尝试、SOCKS5 在本地解析 DNS、`insteadOf` 只改写 `github.com`、匿名 HTTP（raw/codeload/api/updater/`skills.sh`）直连 GitHub、ETag 跨 host 复用会假 304。这些在 GFW DNS 污染与单镜像故障下仍会把安装、商店和更新整条链路打掉。
+- 决策：① `state/github_mirror_health.json` 记录每个加速源的成败与延迟；连续 2 次失败熔断 20 分钟；`candidate_mirror_urls()` 按健康度排序并跳过开路；全部开路则 fail-open 回声明顺序；保存新配置重置健康。连通性探测 GET `{mirror}https://raw.githubusercontent.com/octocat/Hello-World/master/README`，不再 HEAD 加速源根。② SOCKS5/SOCKS5H 出网一律 `socks5h`（远端 DNS）；新建 `proxy.json` 带国内 LLM 默认 bypass，**不**回写已有文件。③ 匿名 GitHub 族 URL（github / raw / codeload / objects / gist / 匿名 `api.github.com`）经健康加速源包装；带 `Authorization` 或 userinfo 的请求永不包装。Git `insteadOf` 覆盖同一组 origin，不含 `api.github.com`。④ 启用 GitHub 加速时，`marketplace_hosts()` 在 `skills.sh` 之后追加 `{mirror}https://skills.sh/`；`If-None-Match` 只发给当初签发 ETag 的 `source_host`。⑤ Settings 网络诊断探测代理监听、直连 GitHub、各加速源、skills.sh 与 MCP Registry，建议以 i18n key 返回。⑥ updater 插件直连失败时，经匿名链读取 `latest.json` 只用于发现新版本，安装仍走签名插件或手动 Releases，从不从第三方加速源安装二进制。
+- 后果：公开拉取在单镜像/DNS 污染下可自动绕行；凭据与签名安装边界不变。承担：加速源是中间人，只应用于公开流量；熔断状态是可重建的 `state/` 文件。
+- 证据：`crates/skillstar-core/src/config/{github_health,github_rewrite,github_mirror,proxy,network_doctor}.rs`、`crates/skillstar-core/src/infra/{github_http,http_client}.rs`、`crates/skillstar-git/src/transport.rs`、`crates/skillstar-marketplace/src/remote/mod.rs`。
+
 ## 新增记录格式
 
 ```text

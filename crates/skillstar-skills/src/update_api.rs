@@ -284,8 +284,6 @@ pub async fn fetch_remote_subtree_hashes(
     git_ref: &str,
     token: Option<&str>,
 ) -> Result<ApiRemoteTree, FastPathFailure> {
-    let client = skillstar_core::infra::http_client::probe_http_client(API_TIMEOUT)
-        .map_err(|error| FastPathFailure::transport(owner, repo, git_ref, error.to_string()))?;
     // Non-recursive on purpose: `?recursive=1` returns the whole repo tree
     // (multi-MB for large repos — stably/orca is ~5 MB), which blows the
     // per-call timeout on slow or proxied networks. The shallow listing is a
@@ -296,25 +294,45 @@ pub async fn fetch_remote_subtree_hashes(
         "https://api.github.com/repos/{owner}/{repo}/git/trees/{}",
         urlencode_ref(git_ref)
     );
-    let mut request = client
-        .get(&url)
-        .header(
+    let headers = [
+        (
             "User-Agent",
             concat!("SkillStar/", env!("CARGO_PKG_VERSION")),
-        )
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28");
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    let response = request.send().await.map_err(|error| {
-        FastPathFailure::transport(
-            owner,
-            repo,
-            git_ref,
-            format!("Failed to call GitHub Trees API: {error}"),
-        )
-    })?;
+        ),
+        ("Accept", "application/vnd.github+json"),
+        ("X-GitHub-Api-Version", "2022-11-28"),
+    ];
+    let response = if token.is_some() {
+        // Authenticated REST never transits a public accelerator.
+        let client = skillstar_core::infra::http_client::probe_http_client(API_TIMEOUT)
+            .map_err(|error| FastPathFailure::transport(owner, repo, git_ref, error.to_string()))?;
+        let mut request = client.get(&url);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        request.send().await.map_err(|error| {
+            FastPathFailure::transport(
+                owner,
+                repo,
+                git_ref,
+                format!("Failed to call GitHub Trees API: {error}"),
+            )
+        })?
+    } else {
+        skillstar_core::infra::github_http::get_anonymous_with_headers(&url, API_TIMEOUT, &headers)
+            .await
+            .map_err(|error| {
+                FastPathFailure::transport(
+                    owner,
+                    repo,
+                    git_ref,
+                    format!("Failed to call GitHub Trees API: {error:#}"),
+                )
+            })?
+    };
     let status = response.status();
     if !status.is_success() {
         let failure = classify_http_failure(

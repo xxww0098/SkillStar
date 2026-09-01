@@ -19,6 +19,7 @@ import {
 import { GitHubMirrorSection } from "../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../features/settings/sections/LanguageSection";
 import { MarketplaceMirrorSection } from "../features/settings/sections/MarketplaceMirrorSection";
+import { NetworkDoctorSection } from "../features/settings/sections/NetworkDoctorSection";
 import { ProxySection } from "../features/settings/sections/ProxySection";
 import { StorageSection } from "../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
@@ -838,6 +839,10 @@ export function Settings({
                   onToggleExpanded={handleToggleMarketplaceMirrorExpanded}
                   onConfigChange={handleMarketplaceMirrorConfigChange}
                 />
+              </section>
+
+              <section id="settings-network-doctor" className="scroll-mt-3">
+                <NetworkDoctorSection />
               </section>
 
               <section id="settings-ai" className="scroll-mt-3">
