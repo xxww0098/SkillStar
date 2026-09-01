@@ -143,26 +143,21 @@ pub fn resolve_hermes_config_path() -> Result<PathBuf> {
 
 fn hermes_home() -> Result<PathBuf> {
     let home = sync_home_dir()?;
-    if std::env::var_os(crate::tool_sync::TOOL_SYNC_HOME_ENV)
+    // Unit tests may run without the tool-sync sandbox exported, so test
+    // builds ignore `HERMES_HOME` unconditionally (same rule as `CODEX_HOME`).
+    let sandboxed = std::env::var_os(crate::tool_sync::TOOL_SYNC_HOME_ENV)
         .filter(|value| !value.is_empty())
-        .is_some()
-    {
+        .is_some();
+    if sandboxed || cfg!(test) {
         return Ok(home.join(".hermes"));
     }
-    #[cfg(test)]
-    {
-        return Ok(home.join(".hermes"));
-    }
-    #[cfg(not(test))]
-    {
-        if let Ok(dir) = std::env::var("HERMES_HOME") {
-            let dir = dir.trim();
-            if !dir.is_empty() {
-                return Ok(PathBuf::from(dir));
-            }
+    if let Ok(dir) = std::env::var("HERMES_HOME") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            return Ok(PathBuf::from(dir));
         }
-        Ok(home.join(".hermes"))
     }
+    Ok(home.join(".hermes"))
 }
 
 pub(crate) fn installed_hermes(home: &Path) -> bool {
