@@ -182,7 +182,8 @@ pub fn github_mirror_health_path() -> PathBuf {
     state_dir().join("github_mirror_health.json")
 }
 
-/// `state/github_auth.json` — GitHub access/refresh credentials.
+/// `state/github_auth.json` — encrypted GitHub access/refresh credentials.
+/// Tokens are AES-256-GCM sealed JSON on disk (mode 0600). Not the OS keychain.
 pub fn github_auth_path() -> PathBuf {
     state_dir().join("github_auth.json")
 }

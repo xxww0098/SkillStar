@@ -22,10 +22,10 @@
 
 - 第一版只连接 `github.com`，使用已注册 SkillStar GitHub App 的设备授权流，不要求用户粘贴 PAT，也不复用用户全局 `gh` 登录。
 - GitHub App Client ID 解析顺序：进程环境变量 `SKILLSTAR_GITHUB_APP_CLIENT_ID` → 编译期嵌入 → 从当前工作目录或 crate 源码目录向上查找仓库根 `.env`。官方 Release 走编译期嵌入；本地 `tauri dev` 把该公开值写入 `.env` 即可，不必 `export`。缺失时登录动作明确不可用。
-- `skillstar-skills::github_auth` 提供公开认证 facade；GitHub gateway、凭据仓库和时钟是可替换接缝。生产凭据写入 `SKILLSTAR_DATA_DIR/state/github_auth.json`，首次创建和更新保持 Unix `0600`，不访问系统钥匙串，因此应用启动不会弹出钥匙串密码框。生产 gateway 的所有请求必须通过 `probe_http_client`。
+- `skillstar-skills::github_auth` 提供公开认证 facade；GitHub gateway、凭据仓库和时钟是可替换接缝。生产凭据写入 `SKILLSTAR_DATA_DIR/state/github_auth.json`：AES-256-GCM 加密 JSON（schema v2），首次创建和更新保持 Unix `0600`。密钥由本机 `machine_uid` 派生，**不访问系统钥匙串**，因此应用启动不会弹出钥匙串密码框。schema v1 明文文件在下次读取时就地改写成 v2。生产 gateway 的所有请求必须通过 `probe_http_client`。
 - 设备授权的公开状态只包含用户码、GitHub 验证地址、轮询间隔和到期时间。device code、access token、refresh token 不得进入 IPC DTO、日志、错误、普通配置或 Git remote URL。
 - 登录入口在侧边栏底部，打开同一设备授权面板。关闭面板**不取消**进行中的授权——用户要切到浏览器粘贴设备码；侧栏在等待期间显示「等待授权」。显式「取消」才清除进程内待处理设备授权。登出还会清除本地凭据文件和缓存身份。
-- 界面必须说明凭据写在 `SKILLSTAR_DATA_DIR/state/github_auth.json`（Unix `0600`），**不是**系统钥匙串；不要在登录文案里写「钥匙串 / credential store」。
+- 界面必须说明凭据是本机加密 JSON，**不是**系统钥匙串；不要在登录文案里写「钥匙串 / credential store」。
 - 登录说明以产品能力为主（私有技能、发布、共享频道），GitHub App 的 `Administration: write` / `Contents: write` 作为脚注。不请求 `Workflows: write`；有效操作权限仍受当前 GitHub 用户权限限制。
 - 登录状态按 GitHub 返回的 `expires_in` / `refresh_token_expires_in` 元数据计算，不硬编码 token 寿命。显式刷新会轮换本地凭据文件并重新读取当前用户；过期且无法刷新的状态要求重新登录。
 - GitHub App 由仓库所有者安装到明确选择的仓库。
