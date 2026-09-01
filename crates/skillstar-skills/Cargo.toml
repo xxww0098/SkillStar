@@ -46,3 +46,7 @@ junction = { workspace = true }
 # under `cfg(test)`, which is what those tests compile as.
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[[bench]]
+name = "discovery"
+harness = false
