@@ -5,7 +5,7 @@ import type { AgentProfile, McpToolId } from "../../../types";
  * MCP capability mapping; visual identity always comes from AgentProfile.
  *
  * Keys are `AgentProfile.id` (the Settings/Skills Agent registry, whose SSOT is
- * `crates/skillstar-agents/src/builtin.rs`); values are `McpToolId` (whose SSOT
+ * `crates/skillstar-skills/src/agents/builtin.rs`); values are `McpToolId` (whose SSOT
  * is `MCP_TOOL_IDS` in `crates/skillstar-models/src/mcp/types.rs`). The two
  * vocabularies are deliberately separate — an Agent can exist without an MCP
  * projection and vice versa — so this table is the seam, not a rename.

@@ -7071,12 +7071,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "skillstar-agents",
  "skillstar-app",
  "skillstar-channels",
  "skillstar-core",
  "skillstar-git",
- "skillstar-github-auth",
  "skillstar-marketplace",
  "skillstar-models",
  "skillstar-skills",
@@ -7103,17 +7101,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillstar-agents"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "serde",
- "skillstar-core",
- "tempfile",
- "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
 name = "skillstar-app"
 version = "0.0.0"
 dependencies = [
@@ -7127,7 +7114,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "skillstar-agents",
  "skillstar-channels",
  "skillstar-core",
  "skillstar-git",
@@ -7154,10 +7140,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "skillstar-agents",
  "skillstar-core",
  "skillstar-git",
- "skillstar-github-auth",
  "skillstar-skills",
  "tar",
  "tempfile",
@@ -7206,20 +7190,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillstar-github-auth"
-version = "0.0.0"
-dependencies = [
- "async-trait",
- "chrono",
- "reqwest 0.13.3",
- "serde",
- "serde_json",
- "skillstar-core",
- "skillstar-git",
- "tokio",
-]
-
-[[package]]
 name = "skillstar-marketplace"
 version = "0.0.0"
 dependencies = [
@@ -7263,7 +7233,6 @@ dependencies = [
  "serde_yaml",
  "sha2 0.11.0",
  "skillstar-core",
- "skillstar-providers",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -7275,14 +7244,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillstar-providers"
-version = "0.0.0"
-
-[[package]]
 name = "skillstar-skills"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "dirs",
@@ -7295,13 +7261,12 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.11.0",
- "skillstar-agents",
  "skillstar-core",
  "skillstar-git",
- "skillstar-github-auth",
  "tar",
  "tempfile",
  "tokio",
+ "toml 1.1.2+spec-1.1.0",
  "tracing",
  "uuid",
 ]
@@ -7341,7 +7306,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "skillstar-core",
- "skillstar-providers",
  "tempfile",
  "thiserror 2.0.18",
  "tiny_http",

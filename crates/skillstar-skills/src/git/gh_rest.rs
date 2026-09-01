@@ -15,11 +15,11 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Deserialize;
-use skillstar_github_auth::{
+use crate::github_auth::{
     FileCredentialStore, GitHubAuthError, GitHubAuthErrorCode, GitHubAuthFacade,
     ProductionGitHubGateway, SystemClock,
 };
+use serde::Deserialize;
 
 const API_ROOT: &str = "https://api.github.com";
 const PER_PAGE: u32 = 100;

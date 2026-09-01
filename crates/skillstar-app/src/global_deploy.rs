@@ -20,7 +20,7 @@
 /// Returns the ids of the Agents the skills were (already or newly) linked
 /// to. Errors when at least one enabled Agent could not be deployed.
 pub fn deploy_to_enabled_global_agents(skill_names: &[String]) -> Result<Vec<String>, String> {
-    let enabled_ids = skillstar_agents::list_profiles()
+    let enabled_ids = skillstar_skills::agents::list_profiles()
         .iter()
         .filter(|profile| profile.enabled && profile.has_global_skills())
         .map(|profile| profile.id.clone())

@@ -11,7 +11,7 @@
 
 use chrono::Utc;
 use serde::Deserialize;
-use skillstar_providers::balance;
+use skillstar_core::providers::balance;
 
 use crate::UsageResult;
 use crate::subscription::{CreditInfo, MonetaryBalance, Subscription, SubscriptionUsage};

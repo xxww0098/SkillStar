@@ -281,14 +281,14 @@ mod tests {
     }
 
     /// Every catalog id must resolve to exactly one canonical provider identity
-    /// in `skillstar-providers`. This pins the usage-side half of the
+    /// in `skillstar-core::providers`. This pins the usage-side half of the
     /// catalog↔preset id reconciliation so the two can never silently drift.
     #[test]
     fn every_catalog_id_resolves_to_a_provider_identity() {
         for entry in catalog() {
             assert!(
-                skillstar_providers::identity::identity_for_catalog(entry.id).is_some(),
-                "catalog id `{}` has no provider identity in skillstar-providers",
+                skillstar_core::providers::identity::identity_for_catalog(entry.id).is_some(),
+                "catalog id `{}` has no provider identity in skillstar-core::providers",
                 entry.id
             );
         }

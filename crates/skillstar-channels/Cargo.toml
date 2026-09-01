@@ -25,7 +25,6 @@ serde_json = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
 skillstar-git = { path = "../skillstar-git" }
 skillstar-skills = { path = "../skillstar-skills" }
-skillstar-github-auth = { path = "../skillstar-github-auth" }
 tar = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt-multi-thread"] }
@@ -34,5 +33,4 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-skillstar-agents = { path = "../skillstar-agents" }
 sha2 = { workspace = true }

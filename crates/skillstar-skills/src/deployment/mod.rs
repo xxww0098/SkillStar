@@ -12,7 +12,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-use skillstar_agents as agent_profile;
+use crate::agents as agent_profile;
 
 const PROFILE_CACHE_TTL: Duration = Duration::from_secs(2);
 

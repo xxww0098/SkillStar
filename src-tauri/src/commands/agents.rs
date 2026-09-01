@@ -1,4 +1,4 @@
-use skillstar_agents as agent_profile;
+use skillstar_skills::agents as agent_profile;
 use skillstar_app::agent_managed_skills;
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment::{self, ToggleSkillOutcome};

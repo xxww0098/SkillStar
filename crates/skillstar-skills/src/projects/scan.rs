@@ -11,7 +11,7 @@ use super::types::{
     AmbiguousGroup, DetectedAgent, ProjectAgentDetection, ProjectScanResult, ScannedSkill,
     ensure_project_root_exists,
 };
-use skillstar_agents as agent_profile;
+use crate::agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 
 /// Scan a project directory for existing agent skill directories.

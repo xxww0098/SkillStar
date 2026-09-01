@@ -129,7 +129,7 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
             "---\nname: writer\ndescription: Local writer notes\n---\n# local edits\n",
         )?;
 
-        assert!(skillstar_agents::toggle_profile("codex")?);
+        assert!(skillstar_skills::agents::toggle_profile("codex")?);
         let agent_copy = home.join(".codex/skills/writer");
         fs::create_dir_all(&agent_copy)?;
         fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;

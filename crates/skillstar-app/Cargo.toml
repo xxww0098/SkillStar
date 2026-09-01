@@ -30,7 +30,6 @@ skillstar-core = { path = "../skillstar-core" }
 skillstar-marketplace = { path = "../skillstar-marketplace" }
 skillstar-models = { path = "../skillstar-models" }
 skillstar-skills = { path = "../skillstar-skills" }
-skillstar-agents = { path = "../skillstar-agents" }
 skillstar-git = { path = "../skillstar-git" }
 skillstar-channels = { path = "../skillstar-channels" }
 skillstar-usage = { path = "../skillstar-usage" }

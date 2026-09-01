@@ -10,7 +10,7 @@
 use chrono::{Duration, Timelike, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use skillstar_providers::balance;
+use skillstar_core::providers::balance;
 
 use crate::http_client::usage_http_client;
 use crate::request::{Req, RequestError};

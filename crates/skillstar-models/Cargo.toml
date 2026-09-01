@@ -28,7 +28,6 @@ url = { workspace = true }
 uuid = { workspace = true }
 toml = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
-skillstar-providers = { path = "../skillstar-providers" }
 ts-rs = { workspace = true, features = ["serde-compat"] }
 
 # Inference (former skillstar-ai)

@@ -57,8 +57,6 @@ skillstar-app = { path = "../crates/skillstar-app" }
 skillstar-usage = { path = "../crates/skillstar-usage" }
 skillstar-sync = { path = "../crates/skillstar-sync" }
 skillstar-git = { path = "../crates/skillstar-git" }
-skillstar-agents = { path = "../crates/skillstar-agents" }
-skillstar-github-auth = { path = "../crates/skillstar-github-auth" }
 skillstar-channels = { path = "../crates/skillstar-channels" }
 sha2 = { workspace = true }
 ts-rs.workspace = true

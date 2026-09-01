@@ -26,7 +26,7 @@ use skillstar_core::infra::fs_ops;
 /// Best-effort: mirrors are an extra deployment target, so a failure is logged
 /// and never fails the caller's deploy.
 pub(super) fn sync(agent_id: &str, source_dir: &Path) {
-    let mirrors = skillstar_agents::global_mirror_dirs(agent_id);
+    let mirrors = crate::agents::global_mirror_dirs(agent_id);
     if mirrors.is_empty() {
         return;
     }

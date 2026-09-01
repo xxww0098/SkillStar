@@ -6,7 +6,7 @@ import type { McpSecretStorage } from "./McpSecretStorage";
  *
  * **The deliberate limitation.** Research §7 P0-4 asks for secrets in the OS
  * credential store. A credential store is available (`keyring` is already a
- * workspace dependency, used by `skillstar-github-auth` and `skillstar-sync`),
+ * workspace dependency, used by `skillstar-skills::github_auth` and `skillstar-sync`),
  * but it cannot be used here: the process that needs the secret is the *agent
  * tool* — Claude Code, Codex, Cursor — reading its own config file. A secret
  * only in SkillStar's keychain is a secret the MCP server never receives, so

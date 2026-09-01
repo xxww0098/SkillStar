@@ -89,7 +89,7 @@ fn resolve_install_destination(opts: &InstallOpts<'_>) -> Result<InstallDestinat
     } else if opts.yes || opts.all || !io::stdin().is_terminal() {
         skillstar_skills::projects::ProjectDeployMode::Symlink
     } else {
-        let profiles = skillstar_agents::list_profiles();
+        let profiles = skillstar_skills::agents::list_profiles();
         let unique_targets = agent_ids
             .iter()
             .filter_map(|id| profiles.iter().find(|profile| &profile.id == id))
@@ -782,7 +782,7 @@ pub fn cmd_install(opts: InstallOpts<'_>) {
             }
         }
         InstallScope::Global => {
-            let profiles = skillstar_agents::list_profiles();
+            let profiles = skillstar_skills::agents::list_profiles();
             let mut printed_dirs = std::collections::HashSet::new();
             for agent_id in &destination.agent_ids {
                 let Some(profile) = profiles.iter().find(|profile| &profile.id == agent_id) else {

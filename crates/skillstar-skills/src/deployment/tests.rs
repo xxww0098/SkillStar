@@ -71,7 +71,7 @@ fn batch_link_requires_enabled_agent_and_skips_missing_skills_without_creating_a
             "inactive single or batch requests must not provision the Agent config root"
         );
 
-        assert!(skillstar_agents::toggle_profile("claude")?);
+        assert!(crate::agents::toggle_profile("claude")?);
         invalidate_profile_cache();
         let linked = batch_link_skills_to_agent(&missing, "claude")?;
         assert_eq!(linked, 0);
@@ -351,7 +351,7 @@ fn toggle_skips_an_unmanaged_real_directory_without_overwriting_it() -> Result<(
     set_env("USERPROFILE", &home);
 
     let result = (|| -> Result<()> {
-        assert!(skillstar_agents::toggle_profile("claude")?);
+        assert!(crate::agents::toggle_profile("claude")?);
         invalidate_profile_cache();
 
         let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("research");

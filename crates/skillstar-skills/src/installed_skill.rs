@@ -1,3 +1,4 @@
+use crate::agents::{self as agent_profile, AgentProfile};
 use crate::git::ops as git_ops;
 use crate::lockfile::LockEntry;
 pub use crate::update_state::SkillUpdateState;
@@ -7,7 +8,6 @@ use crate::{
     repo_link, update_checker, update_state,
 };
 use anyhow::{Context, Result, anyhow};
-use skillstar_agents::{self as agent_profile, AgentProfile};
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
 };

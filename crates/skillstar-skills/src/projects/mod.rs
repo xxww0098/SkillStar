@@ -622,7 +622,7 @@ mod tests {
             std::fs::create_dir_all(&project_path)?;
             let project_path_str = project_path.to_string_lossy().to_string();
 
-            let claude_profile = skillstar_agents::list_profiles()
+            let claude_profile = crate::agents::list_profiles()
                 .into_iter()
                 .find(|p| p.id == "claude")
                 .expect("claude profile must exist");

@@ -7,7 +7,7 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use skillstar_agents::list_profiles;
+use skillstar_skills::agents::list_profiles;
 use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
 use skillstar_skills::lockfile::Lockfile;
 use skillstar_skills::source_resolver::same_remote_url;

@@ -17,10 +17,12 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
@@ -29,13 +31,11 @@ dirs = { workspace = true }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "rt-multi-thread"] }
 base64.workspace = true
 scraper = "0.27.0"
 skillstar-git = { path = "../skillstar-git" }
-skillstar-agents = { path = "../skillstar-agents" }
-skillstar-github-auth = { path = "../skillstar-github-auth" }
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
 
 [target."cfg(windows)".dependencies]
 junction = { workspace = true }

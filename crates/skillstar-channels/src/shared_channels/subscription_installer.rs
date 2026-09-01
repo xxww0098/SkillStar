@@ -577,7 +577,7 @@ mod tests {
             fs::create_dir_all(cache.parent().unwrap())?;
             git_clone(&repository, &cache)?;
 
-            assert!(skillstar_agents::toggle_profile("codex")?);
+            assert!(skillstar_skills::agents::toggle_profile("codex")?);
             let agent_copy = home.join(".codex/skills/writer");
             fs::create_dir_all(&agent_copy)?;
             fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;
