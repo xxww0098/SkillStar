@@ -72,7 +72,7 @@
 - destructive action 使用明确确认组件，不调用浏览器 `confirm()`。
 - 后端解析的路径直接展示；不要在浏览器重建数据目录。可编辑 Agent 路径显示平台分隔符，持久化的 `project_skills_rel` 仍规范为 `/`。
 - tray 与 Settings 的后台运行开关消费同一状态和事件；动作标签必须反映 Start/Stop 当前状态。
-- GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态，点击打开设备授权面板。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
+- GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态（含「等待授权」和「登录已失效」），点击打开设备授权面板。关闭面板不取消进行中的设备流。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
 - Marketplace、Models、Usage 等跨页面 request 使用带 nonce 的显式导航事件，避免用不可观察的模块变量传递。
 
 ## 生成类型
