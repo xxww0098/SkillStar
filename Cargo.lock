@@ -7318,7 +7318,6 @@ dependencies = [
  "serde",
  "serde_json",
  "skillstar-core",
- "skillstar-skills",
  "ssh-key",
  "tempfile",
  "tokio",
