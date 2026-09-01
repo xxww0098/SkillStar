@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
+import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { LocalFirstResult, McpServerPage } from "../../../types";
 import { mcpKeys } from "../api/keys";
@@ -14,6 +15,8 @@ import {
 
 const MCP_MARKET_SCOPE = "mcp_registry";
 const MARKET_STALE_TIME_MS = 60_000;
+/** Catalog search hits SQLite FTS across ~21k rows. Wait out a keystroke burst. */
+const SEARCH_DEBOUNCE_MS = 200;
 
 export interface UseMcpMarketPageOptions {
   /** Scope to one publisher bucket; omit for the whole merged catalog. */
@@ -40,10 +43,15 @@ export function useMcpMarketPage({ publisherId = null, pageSize, enabled = true 
   const [filters, setFilters] = useState<McpMarketFilterState>(DEFAULT_MCP_MARKET_FILTERS);
   const [offset, setOffset] = useState(0);
   const queryClient = useQueryClient();
+  const debouncedSearch = useDebouncedValue(filters.search, SEARCH_DEBOUNCE_MS);
+  const queryFilters = useMemo(
+    () => (debouncedSearch === filters.search ? filters : { ...filters, search: debouncedSearch }),
+    [filters, debouncedSearch],
+  );
 
   const query = useMemo(
-    () => buildMcpServerQuery({ filters, limit, offset, publisherId }),
-    [filters, limit, offset, publisherId],
+    () => buildMcpServerQuery({ filters: queryFilters, limit, offset, publisherId }),
+    [queryFilters, limit, offset, publisherId],
   );
 
   const pageQuery = useQuery<LocalFirstResult<McpServerPage>>({
