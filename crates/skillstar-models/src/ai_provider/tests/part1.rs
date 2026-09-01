@@ -129,7 +129,6 @@ fn save_and_load_config_async_roundtrip_keeps_plain_api_key() {
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: "test-secret-key".to_string(),
                 model: "gpt-5.4".to_string(),
-                target_language: "en".to_string(),
                 ..Default::default()
             };
 
@@ -142,9 +141,55 @@ fn save_and_load_config_async_roundtrip_keeps_plain_api_key() {
             assert_eq!(loaded.base_url, cfg.base_url);
             assert_eq!(loaded.api_key, cfg.api_key);
             assert_eq!(loaded.model, cfg.model);
-            assert_eq!(loaded.target_language, cfg.target_language);
         });
     });
+}
+
+#[test]
+fn load_config_ignores_retired_translation_fields() {
+    with_temp_data_root(|_dir| {
+        let config_path = super::config_path();
+        std::fs::create_dir_all(config_path.parent().expect("config dir"))
+            .expect("create config dir");
+        std::fs::write(
+            &config_path,
+            r#"{
+              "enabled": true,
+              "api_format": "openai",
+              "base_url": "https://api.openai.com/v1",
+              "api_key": "",
+              "model": "gpt-5.4",
+              "target_language": "ja",
+              "short_text_priority": {"mode": "short"},
+              "context_window_k": 128,
+              "max_concurrent_requests": 4
+            }"#,
+        )
+        .expect("write legacy json");
+        super::invalidate_config_cache();
+        let loaded = super::load_config();
+        assert!(loaded.enabled);
+        assert_eq!(loaded.model, "gpt-5.4");
+        super::save_config(&loaded).expect("save should succeed");
+        let written = std::fs::read_to_string(super::config_path()).expect("read saved");
+        assert!(
+            !written.contains("target_language"),
+            "retired translation field must not be rewritten: {written}"
+        );
+        assert!(
+            !written.contains("short_text_priority"),
+            "retired translation field must not be rewritten: {written}"
+        );
+    });
+}
+
+#[test]
+fn language_display_name_follows_ui_locales() {
+    assert_eq!(language_display_name("zh-CN"), "Simplified Chinese");
+    assert_eq!(language_display_name(""), "Simplified Chinese");
+    assert_eq!(language_display_name("en"), "English");
+    assert_eq!(language_display_name("en-US"), "English");
+    assert_eq!(language_display_name("ja"), "ja");
 }
 
 #[test]

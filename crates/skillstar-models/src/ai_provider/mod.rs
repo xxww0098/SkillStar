@@ -555,8 +555,9 @@ where
 // ── Public API ───────────────────────────────────────────────────────
 
 /// Generate a structured summary of a SKILL.md content.
-pub async fn summarize_text(config: &AiConfig, text: &str) -> Result<String> {
-    let lang = language_display_name(&config.target_language);
+/// `locale` is the UI language (same source as ACP tutorials), not a stored config field.
+pub async fn summarize_text(config: &AiConfig, text: &str, locale: &str) -> Result<String> {
+    let lang = language_display_name(locale);
     let system_prompt = build_summary_system_prompt(lang);
 
     chat_completion_capped(config, &system_prompt, text, SUMMARY_MAX_TOKENS).await
@@ -567,20 +568,21 @@ pub async fn summarize_text(config: &AiConfig, text: &str) -> Result<String> {
 pub async fn summarize_text_streaming<F>(
     config: &AiConfig,
     text: &str,
+    locale: &str,
     on_delta: &mut F,
 ) -> Result<String>
 where
     F: FnMut(&str) -> Result<()>,
 {
-    let lang = language_display_name(&config.target_language);
+    let lang = language_display_name(locale);
     let system_prompt = build_summary_system_prompt(lang);
 
     match chat_completion_stream(config, &system_prompt, text, SUMMARY_MAX_TOKENS, on_delta).await {
         Ok(result) if !result.trim().is_empty() => Ok(result),
-        Ok(_) => summarize_text(config, text)
+        Ok(_) => summarize_text(config, text, locale)
             .await
             .context("Streaming summary returned empty; non-stream fallback failed"),
-        Err(err) => summarize_text(config, text).await.with_context(|| {
+        Err(err) => summarize_text(config, text, locale).await.with_context(|| {
             format!(
                 "Streaming summary failed ({}); non-stream fallback failed",
                 err

@@ -21,7 +21,6 @@ const baseConfig: AiConfig = {
   base_url: "http://127.0.0.1:11434/v1",
   api_key: "",
   model: "llama3.1:8b",
-  target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
   openai_preset: { base_url: "", api_key: "", model: "" },

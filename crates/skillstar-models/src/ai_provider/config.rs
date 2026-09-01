@@ -58,7 +58,6 @@ pub struct AiConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
-    pub target_language: String,
     #[serde(default = "default_context_window_k")]
     pub context_window_k: u32,
     #[serde(default = "default_max_concurrent_requests")]
@@ -87,9 +86,6 @@ pub struct AiConfig {
     /// HTTP request timeout (seconds) from provider meta — not persisted in ai.json.
     #[serde(default, skip_serializing)]
     pub request_timeout_secs: Option<u64>,
-    // Legacy fields — absorbed on load, not written back.
-    #[serde(default, skip_serializing)]
-    pub short_text_priority: Option<serde_json::Value>,
 }
 
 fn default_context_window_k() -> u32 {
@@ -109,7 +105,6 @@ impl Default for AiConfig {
             base_url: String::new(),
             api_key: String::new(),
             model: "gpt-5.4".to_string(),
-            target_language: "zh-CN".to_string(),
             context_window_k: default_context_window_k(),
             max_concurrent_requests: default_max_concurrent_requests(),
             openai_preset: FormatPreset::default(),
@@ -123,7 +118,6 @@ impl Default for AiConfig {
             claude_sonnet_model: None,
             claude_opus_model: None,
             request_timeout_secs: None,
-            short_text_priority: None,
         }
     }
 }

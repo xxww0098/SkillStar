@@ -36,7 +36,6 @@ export function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
     a.base_url === b.base_url &&
     a.api_key === b.api_key &&
     a.model === b.model &&
-    a.target_language === b.target_language &&
     a.context_window_k === b.context_window_k &&
     a.max_concurrent_requests === b.max_concurrent_requests &&
     JSON.stringify(a.openai_preset) === JSON.stringify(b.openai_preset) &&

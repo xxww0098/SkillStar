@@ -9,7 +9,6 @@ const DEFAULT_CONFIG: AiConfig = {
   base_url: "",
   api_key: "",
   model: "gpt-5.4",
-  target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
   openai_preset: { base_url: "", api_key: "", model: "" },
@@ -80,10 +79,6 @@ export function useAiConfig() {
     setConfig(newConfig);
   }, []);
 
-  const summarizeSkill = useCallback(async (content: string): Promise<string> => {
-    return tauriInvoke("ai_summarize_skill", { content });
-  }, []);
-
   const testConnection = useCallback(async (): Promise<number> => {
     return tauriInvoke("ai_test_connection");
   }, []);
@@ -92,7 +87,6 @@ export function useAiConfig() {
     config,
     loading,
     saveConfig,
-    summarizeSkill,
     testConnection,
   };
 }

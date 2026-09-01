@@ -13,7 +13,7 @@ vi.mock("../../hooks/useAiStream", () => ({
     error: null,
     source: null,
     aiConfigured: false,
-    targetLanguage: "zh-CN",
+    locale: "zh-CN",
     execute: vi.fn(),
     cancel: vi.fn(),
     dismiss: vi.fn(),

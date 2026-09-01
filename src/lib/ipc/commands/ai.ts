@@ -10,9 +10,9 @@ export interface AiCommands {
   get_ai_config: { args: Record<string, never>; result: AiConfig };
   save_ai_config: { args: { config: AiConfig }; result: void };
 
-  ai_summarize_skill: { args: { content: string }; result: string };
+  ai_summarize_skill: { args: { content: string; locale?: string }; result: string };
   ai_summarize_skill_stream: {
-    args: { requestId: string; content: string; forceRefresh?: boolean };
+    args: { requestId: string; content: string; locale?: string; forceRefresh?: boolean };
     result: string;
   };
   ai_test_connection: { args: Record<string, never>; result: number };

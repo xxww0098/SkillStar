@@ -15,11 +15,11 @@ interface SkillReaderProps {
   onClose: () => void;
 }
 
-function buildCacheKey(targetLanguage: string, sourceContent: string): string {
-  return `${targetLanguage}::${sourceContent}`;
+function buildCacheKey(locale: string, sourceContent: string): string {
+  return `${locale}::${sourceContent}`;
 }
 
-/** Module-level summary cache keyed by target language + content. */
+/** Module-level summary cache keyed by UI locale + content. */
 const summaryCache = new Map<string, string>();
 
 const MAX_CACHE_SIZE = 100;
@@ -47,7 +47,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const summarizing = summaryStream.loading;
   const summaryHasDelta = summaryStream.hasDelta;
   const summaryAiConfigured = summaryStream.aiConfigured;
-  const targetLanguage = summaryStream.targetLanguage;
+  const locale = summaryStream.locale;
   const aiError = summaryStream.error;
   const localizedAiError = formatAiErrorMessage(aiError, t);
   const previewSource = normalizeSkillMarkdownForPreview(content);
@@ -55,12 +55,12 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const previewContent = splitFrontmatter(previewSource).body;
 
   useEffect(() => {
-    const summaryKey = buildCacheKey(targetLanguage, content);
+    const summaryKey = buildCacheKey(locale, content);
     const cachedSummary = summaryCache.get(summaryKey) ?? null;
     summaryStream.hydrate(cachedSummary, cachedSummary ? content : null);
     summaryStream.setVisible(false);
     summaryStream.setError(null);
-  }, [content, summaryStream.hydrate, summaryStream.setError, summaryStream.setVisible, targetLanguage]);
+  }, [content, summaryStream.hydrate, summaryStream.setError, summaryStream.setVisible, locale]);
 
   const clearAiError = () => {
     summaryStream.setError(null);
@@ -77,7 +77,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
     clearAiError();
     const result = await summaryStream.execute(content);
     if (result != null) {
-      const key = buildCacheKey(targetLanguage, content);
+      const key = buildCacheKey(locale, content);
       summaryCache.set(key, result);
       trimCache(summaryCache);
     }
