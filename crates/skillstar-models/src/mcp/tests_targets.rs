@@ -51,8 +51,10 @@ fn remote_format_has_type_key(tool_id: &str) -> bool {
         // which keys are present. `claude-desktop-chat` sits here and
         // `claude-code` above on purpose — the two Claude surfaces document
         // opposite rules, and writing Code's `type` into Chat's file would
-        // hand that client a key it does not read.
-        "grok" | "windsurf" | "gemini-cli" | "zed" | "claude-desktop-chat" | "maka" => false,
+        // hand that client a key it does not read. Antigravity rejects
+        // `type: stdio`. Hermes YAML has no type key either.
+        "grok" | "hermes" | "windsurf" | "gemini-cli" | "antigravity" | "zed"
+        | "claude-desktop-chat" | "maka" => false,
         other => panic!(
             "tool '{other}' is in the registry but not in the wire-type policy table — decide whether a remote entry in its format carries a `type` key and record it here"
         ),
@@ -72,7 +74,14 @@ fn stdio_type_token(tool_id: &str) -> Option<&'static str> {
         // Cline's documented `type` values are `streamableHttp` and `sse`
         // only — a local server is identified by having a `command`.
         "cline" => None,
-        "grok" | "windsurf" | "gemini-cli" | "zed" | "claude-desktop-chat" | "maka" => None,
+        "grok"
+        | "hermes"
+        | "windsurf"
+        | "gemini-cli"
+        | "antigravity"
+        | "zed"
+        | "claude-desktop-chat"
+        | "maka" => None,
         other => {
             panic!("tool '{other}' is in the registry but not in the stdio wire-type policy table")
         }
@@ -98,6 +107,14 @@ fn project(spec: &McpToolSpec, entry: &McpServerEntry, dir: &TempDir) -> Value {
                 .unwrap_or_else(|| panic!("{}: server missing from TOML", spec.id)),
         )
         .unwrap();
+    }
+    if spec.id == "hermes" {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+        let entry = yaml
+            .get("mcp_servers")
+            .and_then(|m| m.get(&entry.name))
+            .unwrap_or_else(|| panic!("{}: server missing from YAML {content}", spec.id));
+        return serde_json::to_value(entry).unwrap();
     }
     let root: Value = serde_json::from_str(&content).unwrap();
     for key in [MCP_SERVERS_KEY, VSCODE_SERVERS_KEY, ZED_SERVERS_KEY, "mcp"] {
@@ -243,6 +260,20 @@ fn vscode_and_zed_use_their_own_root_keys() {
     assert!(root.get("mcpServers").is_none(), "{root}");
 }
 
+/// Antigravity rejects `type: "stdio"` and hides the server. It also must not
+/// inherit Gemini CLI's `httpUrl` key — different product, different file.
+#[test]
+fn antigravity_omits_the_type_key_that_the_ide_rejects() {
+    let local = antigravity_spec(&stdio("local"));
+    assert_eq!(local["command"], "npx");
+    assert!(local.get("type").is_none(), "{local}");
+
+    let remote = antigravity_spec(&http("remote"));
+    assert_eq!(remote["url"], "https://example.com/mcp");
+    assert!(remote.get("type").is_none(), "{remote}");
+    assert!(remote.get("httpUrl").is_none(), "{remote}");
+}
+
 /// Claude Desktop Chat documents no `type` key at all — the inverse of Claude
 /// Code, which *rejects* a `url` entry that has none. The two surfaces share
 /// the `mcpServers` root key and nothing else, so they must not share a spec
@@ -361,10 +392,11 @@ fn round_trip_preserves(tool_id: &str, transport: &str) -> bool {
         // OpenCode collapses both remote transports into one `remote` form, so
         // an http entry returns as sse (audit B.7-b, tracked separately).
         ("opencode", "http") => false,
-        // Windsurf, Zed and Claude Desktop Chat have no `type` key: a URL is a
-        // URL. SSE is written faithfully but reads back as http, because the
-        // file genuinely does not record which one it was.
-        ("windsurf" | "zed" | "claude-desktop-chat", "sse") => false,
+        // Windsurf, Zed, Claude Desktop Chat, Antigravity and Hermes have no
+        // `type` key: a URL is a URL. SSE is written faithfully but reads
+        // back as http, because the file genuinely does not record which one
+        // it was.
+        ("windsurf" | "zed" | "claude-desktop-chat" | "antigravity" | "hermes", "sse") => false,
         _ => true,
     }
 }

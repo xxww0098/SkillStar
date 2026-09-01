@@ -41,6 +41,7 @@
     "errorBoundaryRestart": "Restart SkillStar",
     "or": "OR",
     "add": "Add",
+    "agentStoppedHint": "{{name}} is not enabled in Settings",
     "refresh": "Refresh",
     "refreshed": "Data refreshed",
     "unknown": "Unknown",

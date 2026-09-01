@@ -24,7 +24,12 @@ import { useMcpProbe } from "../hooks/useMcpProbe";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
-import { resolveMcpToolFilter, selectMcpAgentTargets } from "../lib/agentTargets";
+import {
+  mcpEnabledMapFromProfiles,
+  resolveMcpToolFilter,
+  selectMcpAgentTargets,
+  selectMcpAgentTargetsForServer,
+} from "../lib/agentTargets";
 import { failedMcpSyncCount, mergeMcpSyncResults, summarizeMcpSyncResults } from "../lib/syncResults";
 import { McpInstallWizard } from "./McpInstallWizard";
 import { McpProbePanel } from "./McpProbePanel";
@@ -41,7 +46,7 @@ import { McpSyncResultsPanel } from "./McpSyncResultsPanel";
  * the same catalog row — seeding this form would drop all three and write the
  * server's API key as a plaintext line in a multi-line textarea.
  */
-function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
+function presetToDefaults(preset: McpPreset, enabled: Record<string, boolean>): Partial<McpServerFormValue> {
   return {
     name: preset.name,
     transport: preset.transport,
@@ -52,6 +57,7 @@ function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
     headers: preset.headers,
     description: preset.description,
     homepage: preset.homepage,
+    enabled,
   };
 }
 
@@ -155,7 +161,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const batchReport = useMemo(() => (batch ? summarizeMcpSyncResults(batch.results) : null), [batch]);
 
   const openCreate = () => {
-    setCreateSeed((prev) => ({ key: prev.key + 1, defaults: undefined }));
+    setCreateSeed((prev) => ({ key: prev.key + 1, defaults: { enabled: mcpEnabledMapFromProfiles(profiles) } }));
     setDrawer({ type: "create" });
   };
 
@@ -172,7 +178,10 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
       setDrawer({ type: "install", catalogId: preset.catalogId });
       return;
     }
-    setCreateSeed((prev) => ({ key: prev.key + 1, defaults: presetToDefaults(preset) }));
+    setCreateSeed((prev) => ({
+      key: prev.key + 1,
+      defaults: presetToDefaults(preset, mcpEnabledMapFromProfiles(profiles)),
+    }));
   };
 
   /**
@@ -447,7 +456,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
                     <McpServerCard
                       key={server.id}
                       server={server}
-                      agentTargets={agentTargets}
+                      agentTargets={selectMcpAgentTargetsForServer(profiles, server.enabled)}
                       updateVersion={info?.hasUpdate ? info.latestVersion : null}
                       onOpen={() => setDrawer({ type: "edit", id: server.id })}
                       onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
@@ -512,6 +521,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
             // not cost the drawer.
             onCancel={() => setDrawer({ type: "create" })}
             noteForTool={noteForTool}
+            defaultEnabled={mcpEnabledMapFromProfiles(profiles)}
           />
         ) : drawer.type === "create" ? (
           <div className="space-y-4">

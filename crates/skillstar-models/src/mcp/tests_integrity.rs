@@ -4,7 +4,7 @@
 //! These all answer the same question from different angles — after something
 //! goes wrong, is the user's data still what it was?
 
-use super::tests_targets::{SANDBOX_HOME_TEST_LOCK, TempDir};
+use super::tests_targets::{TempDir, SANDBOX_HOME_TEST_LOCK};
 use super::*;
 use serde_json::Value;
 
@@ -529,6 +529,37 @@ fn the_desktop_chat_config_path_resolves_inside_the_sandbox_home() {
             "{path:?} points at the real home"
         );
     }
+}
+
+/// Hermes lives under `~/.hermes/config.yaml` inside the sandbox home.
+#[test]
+fn the_hermes_config_path_resolves_inside_the_sandbox_home() {
+    let path = resolve_hermes_config_path().unwrap();
+    assert!(path.is_absolute(), "{path:?}");
+    assert!(path.ends_with(".hermes/config.yaml"), "{path:?}");
+    assert_eq!(path, resolve_mcp_config_path("hermes").unwrap());
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "{path:?} escaped the tool-sync sandbox"
+    );
+}
+
+/// Antigravity's default (no migration marker) is the legacy path, still
+/// inside the sandbox and never Gemini CLI's `settings.json`.
+#[test]
+fn the_antigravity_config_path_resolves_inside_the_sandbox_home() {
+    let path = resolve_antigravity_config_path().unwrap();
+    assert!(path.is_absolute(), "{path:?}");
+    assert!(
+        path.ends_with(".gemini/antigravity/mcp_config.json"),
+        "{path:?}"
+    );
+    assert_eq!(path, resolve_mcp_config_path("antigravity").unwrap());
+    assert_ne!(path, resolve_gemini_cli_config_path().unwrap());
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "{path:?} escaped the tool-sync sandbox"
+    );
 }
 
 /// Maka's MCP file lives under the OS config dir, same sandbox as Desktop Chat.

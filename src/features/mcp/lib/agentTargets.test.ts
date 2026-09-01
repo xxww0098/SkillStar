@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { MCP_TOOL_IDS, isMcpToolId, type AgentProfile } from "../../../types";
-import { mcpToolIdsWithoutAgentProfile, resolveMcpToolFilter, selectMcpAgentTargets } from "./agentTargets";
+import {
+  mcpToolIdsWithoutAgentProfile,
+  resolveMcpToolFilter,
+  selectMcpAgentTargets,
+  selectMcpAgentTargetsForServer,
+} from "./agentTargets";
 
 function profile(id: string, installed = true, enabled = true): AgentProfile {
   return {
@@ -91,12 +96,27 @@ describe("selectMcpAgentTargets", () => {
     expect(selectMcpAgentTargets([profile("maka")]).map(({ toolId }) => toolId)).toEqual(["maka"]);
   });
 
-  it("routes the gemini-cli target through its own profile, never Antigravity's", () => {
-    // Both are rooted at ~/.gemini, but Antigravity is a different product and
-    // must not stand in for Gemini CLI. The `gemini-cli` Agent profile
-    // (crates/skillstar-agents/src/builtin.rs) is what owns this target.
-    expect(selectMcpAgentTargets([profile("antigravity")])).toEqual([]);
+  it("routes gemini-cli and antigravity through their own profiles, never each other's", () => {
+    // Both are rooted at ~/.gemini, but they are different products and write
+    // different files. Mapping either one onto the other would project MCP
+    // into the wrong config.
+    expect(selectMcpAgentTargets([profile("antigravity")]).map(({ toolId }) => toolId)).toEqual(["antigravity"]);
     expect(selectMcpAgentTargets([profile("gemini-cli")]).map(({ toolId }) => toolId)).toEqual(["gemini-cli"]);
+  });
+
+  it("routes the hermes target through its own profile", () => {
+    expect(selectMcpAgentTargets([profile("hermes")]).map(({ toolId }) => toolId)).toEqual(["hermes"]);
+  });
+
+  it("keeps a Settings-disabled Agent on the card rail when the server still writes it", () => {
+    const targets = selectMcpAgentTargetsForServer(
+      [profile("claude", true, false), profile("codex", true, true), profile("cursor", true, false)],
+      { "claude-code": true },
+    );
+    expect(targets.map(({ toolId, profile: agent }) => [toolId, agent.id, agent.enabled])).toEqual([
+      ["claude-code", "claude", false],
+      ["codex", "codex", true],
+    ]);
   });
 
   it("keeps claude-desktop-chat reachable without inventing an Agent profile for it", () => {

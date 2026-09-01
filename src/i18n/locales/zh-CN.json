@@ -43,6 +43,7 @@
     "errorBoundaryRestart": "重启 SkillStar",
     "or": "或",
     "add": "添加",
+    "agentStoppedHint": "{{name}} 未在设置中启用",
     "unknown": "未知",
     "unknownError": "未知错误",
     "helpInfo": "配置帮助信息",

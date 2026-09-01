@@ -97,6 +97,22 @@ describe("SkillCard", () => {
     expect(onToggleAgent).not.toHaveBeenCalled();
   });
 
+  it("keeps a Settings-disabled linked Agent as a stopped rail icon", () => {
+    const onToggleAgent = vi.fn();
+    render(
+      <SkillCard
+        skill={{ ...MOCK_SKILL, installed: true, agent_links: ["Claude"] }}
+        onClick={vi.fn()}
+        onToggleAgent={onToggleAgent}
+        profiles={[{ ...LIBRARY_PROFILE, enabled: false }]}
+      />,
+    );
+    const icon = screen.getByRole("button", { name: /Claude/i });
+    expect(icon).toBeDisabled();
+    fireEvent.click(icon);
+    expect(onToggleAgent).not.toHaveBeenCalled();
+  });
+
   it("falls back to toggle-on when an unlinked icon has no git_url", () => {
     const onInstall = vi.fn();
     const onToggleAgent = vi.fn();

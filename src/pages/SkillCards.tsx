@@ -26,7 +26,7 @@ import {
 } from "../features/my-skills/lib/skillNames";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
-import { selectTargetableAgentProfiles, supportsGlobalDeploy } from "../lib/agentProfiles";
+import { supportsGlobalDeploy } from "../lib/agentProfiles";
 import { tauriInvoke } from "../lib/ipc";
 import { cn } from "../lib/utils";
 import type { SkillCardDeck } from "../types";
@@ -52,10 +52,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
   const [viewMode, setViewMode] = useViewMode("grid");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
-  const enabledProfiles = useMemo(
-    () => selectTargetableAgentProfiles(profiles).filter(supportsGlobalDeploy),
-    [profiles],
-  );
+  const railProfiles = useMemo(() => profiles.filter(supportsGlobalDeploy), [profiles]);
   // Batch-toggle state: { groupId::agentId → "linking" }
   const [linkState, setLinkState] = useState<Record<string, "linking">>({});
   const skillByName = useMemo(
@@ -330,7 +327,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                       groupSkillNames={groupSkillNames}
                       groupInstalledSkillNames={groupInstalledSkillNames}
                       skillByName={skillByName}
-                      enabledProfiles={enabledProfiles}
+                      enabledProfiles={railProfiles}
                       linkState={linkState}
                       installingMissing={installingMissing}
                       installProgress={installProgress}

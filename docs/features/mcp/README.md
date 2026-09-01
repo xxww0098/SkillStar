@@ -118,7 +118,7 @@
 
 - Rust 侧 MCP 工具事实（label、配置路径、安装探测、wire-format 的计数/读取/写入/移除 dispatch）的 SSOT 是 `skillstar_models::mcp` 的 `McpToolSpec` 注册表；新增工具只加一行 spec（新 wire format 才需要新的 spec builder）。隐藏的 legacy cleanup id 刻意不进注册表。
 - `MCP_TOOL_IDS` 在前端有三份人工同步的镜像：`src/types/mcp.ts`、`src/features/mcp/lib/toolRegistry.ts` 的 `MCP_TOOL_LABELS`（原先在 `McpServerForm`）、`src/features/mcp/lib/agentTargets.ts` 的 `MCP_TOOL_BY_AGENT_ID`。Rust 侧的常量是 SSOT，四份必须同一次变更内落地；前两份由 `toolRegistry.test.ts` 钉住，第三份由 `agentTargets.test.ts` 钉住。
-- `MCP_TOOL_BY_AGENT_ID` 有两条需要解释的行：`github-copilot -> vscode`（`vscode` 目标写的就是 `~/.copilot/mcp-config.json`，与该 profile 同一配置根）；`gemini-cli -> gemini-cli` 两侧同名，但配对不是自动的——`~/.gemini` 下从上游同步来的两个 profile 是 Google Antigravity，产品不同不可顶替，`gemini-cli` profile 是为此专门加的 SkillStar 扩展行。
+- `MCP_TOOL_BY_AGENT_ID` 有几条需要解释的行：`github-copilot -> vscode`（`vscode` 目标写的就是 `~/.copilot/mcp-config.json`，与该 profile 同一配置根）；`gemini-cli -> gemini-cli` 与 `antigravity -> antigravity` 两侧各自同名，但配对不是自动的——两者都落在 `~/.gemini` 下，产品不同、写入的文件也不同（`settings.json` vs `config/mcp_config.json`），互不顶替。`hermes -> hermes` 写入 YAML（`$HERMES_HOME/config.yaml`），不是 JSON。
 - **不是每个 MCP target 都该有 Agent profile。** `claude-desktop-chat` 没有映射行是决定而非遗漏：Claude Desktop 是聊天 App，没有可验证的 skills 目录，为了换一个 MCP 开关而在 Skills 注册表里编一个 skills 根目录是本末倒置。没有 profile 只意味着拿不到 Agent rail 上的 per-server 开关；目标本身照样可写——新建/编辑表单和工具视图直接枚举 `MCP_TOOL_IDS`，不走这张映射表，`mcpToolIdsWithoutAgentProfile` 会把它如实列为「无 profile 可达」。
 - MCP store 与 Marketplace snapshot 是不同数据源：市场只负责发现，安装后进入 Models MCP store。
 - create/update/delete/rename 通过统一 store facade 编排各 Agent projector；部分失败要返回每个目标结果，不静默吞掉。
@@ -165,7 +165,7 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 - preset 芯片有两条安装路径，按 `McpPreset.catalogId` 这个显式标记分流，不靠「先试着解析目录行、解析不到再回退」：带 `catalogId` 的 curated 芯片打开安装向导（`McpInstallWizard`，与市场 tab 同一个入口，因而同样有运行时形态选择、密钥掩码密码框、必填标注和完整命令确认）；不带的内置 preset 没有目录行，继续预填新建表单。curated preset 的 id 本来就是目录行 id，所以芯片可以直接把它交给向导。
 - MCP 页面是 MCP 域的唯一入口，四个 tab 共用同一批 hook：**已安装**（`McpManager`）、**市场**（`McpMarketPage`，全目录分页浏览）、**工具**（`McpToolStatusPanel`）、**目录源**（`McpSourcesPanel`）。市场、工具、目录源三项此前完全没有 UI。
 - Marketplace MCP tab 保留 Publisher grid 入口；`McpPublisherDetail` 现在只是一层 hero，主体复用同一个 `McpMarketPage`，只是带上 `publisherId`。发布者页不再自己拉全量再内存过滤。
-- Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。
+- Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。Settings 关掉但这条 server 仍写入的 target 留在轮播里，SVG 进停用态（灰度、不可点），让启停可被卡片感知；工具栏筛选仍只列当前启用的 profile。新建/安装表单的默认勾选跟随当前启用 profile，完整 `MCP_TOOL_IDS` 仍可手选。
 - 商店浏览必须走分页查询命令并展示 `total`；不得再拉全量后在内存里过滤。筛选、排序、分页全部编译进一次 `query_mcp_market_servers_local`，渲染进程不做二次过滤。
 - 弃用条目默认不出现在浏览结果里（前端默认 `statuses: ["active"]`），需要显式打开开关才列出，且始终带弃用标记。后端默认「列出但警告」不变——这是 UI 的取舍，不是契约变化。
 - 市场卡片展示名称、描述、安装/更新动作、弃用/被取代例外和 stars；kind 用图标表达，推荐用标题旁的标记。runtime、版本、仓库和详情留在抽屉与安装向导，不在卡片页脚重复。

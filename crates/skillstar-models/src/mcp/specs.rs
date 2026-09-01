@@ -1,6 +1,6 @@
 //! Per-tool wire-format spec generation (canonical JSON, OpenCode, Codex TOML).
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 use super::*;
@@ -31,8 +31,9 @@ pub(crate) enum JsonDialect {
     /// `httpUrl` — Gemini CLI distinguishes transports purely by which key is
     /// present (research §5.3 #7).
     GeminiUrlKeys,
-    /// No `type` key; `command` means local, `url` means remote — Zed and
-    /// Claude Desktop Chat (research §5.1).
+    /// No `type` key; `command` means local, `url` means remote — Zed,
+    /// Claude Desktop Chat, and Antigravity (research §5.1). Antigravity
+    /// rejects `type: "stdio"` and hides the server from its UI.
     ///
     /// Note this is the *opposite* rule from [`Self::Typed`], which Claude
     /// **Code** uses: there a `url` without a `type` is a hard configuration
@@ -262,6 +263,16 @@ pub(crate) fn cline_spec(entry: &McpServerEntry) -> Value {
         obj.insert("timeout".into(), json!(ms));
     }
     Value::Object(obj)
+}
+
+/// Antigravity IDE value (`~/.gemini/config/mcp_config.json` →
+/// `mcpServers.<name>`).
+///
+/// **Not** Gemini CLI's dialect: the IDE rejects a `type` field (including
+/// `stdio`) and treats a `command` as local / a `url` as remote. Sharing
+/// Gemini's `httpUrl` key would write a field this client does not read.
+pub(crate) fn antigravity_spec(entry: &McpServerEntry) -> Value {
+    json_spec(entry, JsonDialect::PlainNoType)
 }
 
 /// Gemini CLI value (`~/.gemini/settings.json` → `mcpServers.<name>`).

@@ -59,18 +59,22 @@ describe("AgentTargetCarousel", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("uses only the manual Settings switch and ignores installation compatibility state", () => {
+  it("keeps a Settings-disabled Agent as a stopped SVG instead of dropping it", () => {
+    const onToggle = vi.fn();
     render(
       <AgentTargetCarousel
         items={[
           item("ready", false),
-          item("disabled", false, { profile: { ...item("disabled", false).profile, enabled: false } }),
+          item("disabled", true, { profile: { ...item("disabled", true).profile, enabled: false } }),
         ]}
-        onToggle={vi.fn()}
+        onToggle={onToggle}
       />,
     );
 
     expect(screen.getByRole("button", { name: "Toggle ready" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Toggle disabled" })).not.toBeInTheDocument();
+    const stopped = screen.getByRole("button", { name: /disabled/i });
+    expect(stopped).toBeDisabled();
+    fireEvent.click(stopped);
+    expect(onToggle).not.toHaveBeenCalled();
   });
 });

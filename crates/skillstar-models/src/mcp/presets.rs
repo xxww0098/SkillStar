@@ -221,6 +221,19 @@ pub fn get_mcp_presets() -> Vec<McpPreset> {
             &[],
             &["time", "official"],
         ),
+        // ── Code intelligence ───────────────────────────────────────────
+        // Official MCP wire-up is `codegraph serve --mcp`. The npm bin is the
+        // same CLI, so npx is the one-click path (no prior global install).
+        // Each project still needs `codegraph init` before the graph has data.
+        stdio_preset(
+            "codegraph",
+            "CodeGraph MCP — 本地代码知识图谱，一次调用返回符号源码、调用链与影响范围（项目需先 codegraph init）。",
+            "https://github.com/colbymchenry/codegraph",
+            "npx",
+            &["-y", "@colbymchenry/codegraph", "serve", "--mcp"],
+            &[],
+            &["code", "graph", "local"],
+        ),
         // ── Docs / search / crawl ───────────────────────────────────────
         stdio_preset(
             "context7",

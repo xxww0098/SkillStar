@@ -17,11 +17,10 @@ import type { AgentProfile, McpToolId } from "../../../types";
  *   `github-copilot` profile's skills root is `~/.copilot/skills`. Same product,
  *   same config root, so the Copilot profile is the one that legitimately owns
  *   this target's on/off state.
- * - `gemini-cli -> gemini-cli`. Same id on both sides, but the pairing is not
- *   automatic: the two `~/.gemini`-rooted profiles that came from upstream are
- *   Google **Antigravity**'s, a different product that must not stand in for
- *   Gemini CLI. The `gemini-cli` profile is a SkillStar extension added
- *   alongside this row precisely so the target has an owner.
+ * - `gemini-cli -> gemini-cli` and `antigravity -> antigravity`. Same
+ *   `~/.gemini` prefix, different products and different files
+ *   (`settings.json` vs `config/mcp_config.json`). Neither profile stands in
+ *   for the other.
  *
  * `claude-desktop-chat` has **no** row, and that is a decision rather than an
  * omission: Claude Desktop is a chat app with no verified filesystem skills
@@ -35,6 +34,7 @@ const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   claude: "claude-code",
   codex: "codex",
   grok: "grok",
+  hermes: "hermes",
   opencode: "opencode",
   zcode: "zcode",
   kiro: "kiro",
@@ -43,6 +43,7 @@ const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   windsurf: "windsurf",
   cline: "cline",
   "gemini-cli": "gemini-cli",
+  antigravity: "antigravity",
   zed: "zed",
   maka: "maka",
 };
@@ -58,15 +59,38 @@ export function resolveMcpToolFilter(toolFilter: string | null, targets: readonl
   return targets.find(({ toolId }) => toolId === toolFilter)?.toolId ?? null;
 }
 
-/**
- * Intersect manually activated Settings profiles with static MCP support.
- * Host tool detection must never hide a target the user explicitly enabled.
- */
-export function selectMcpAgentTargets(profiles: readonly AgentProfile[]): McpAgentTarget[] {
-  return selectTargetableAgentProfiles(profiles).flatMap((profile) => {
+function mappedMcpTargets(profiles: readonly AgentProfile[]): McpAgentTarget[] {
+  return profiles.flatMap((profile) => {
     const toolId = MCP_TOOL_BY_AGENT_ID[profile.id];
     return toolId ? [{ toolId, profile }] : [];
   });
+}
+
+/**
+ * Intersect manually activated Settings profiles with static MCP support.
+ * Host tool detection must never hide a target the user explicitly enabled.
+ * Toolbar filters and form defaults use this set.
+ */
+export function selectMcpAgentTargets(profiles: readonly AgentProfile[]): McpAgentTarget[] {
+  return mappedMcpTargets(selectTargetableAgentProfiles(profiles));
+}
+
+/** Default `enabled` map for a new MCP server: currently Settings-on targets. */
+export function mcpEnabledMapFromProfiles(profiles: readonly AgentProfile[]): Record<string, boolean> {
+  const enabled: Record<string, boolean> = {};
+  for (const { toolId } of selectMcpAgentTargets(profiles)) enabled[toolId] = true;
+  return enabled;
+}
+
+/**
+ * Card rail: Settings-on MCP Agents, plus any target this server still writes
+ * so a just-disabled Agent stays visible as a stopped SVG.
+ */
+export function selectMcpAgentTargetsForServer(
+  profiles: readonly AgentProfile[],
+  enabledTools: Readonly<Record<string, boolean>>,
+): McpAgentTarget[] {
+  return mappedMcpTargets(profiles).filter(({ toolId, profile }) => profile.enabled || enabledTools[toolId] === true);
 }
 
 /** Tool ids no enabled Agent profile can currently reach, for the tool view. */

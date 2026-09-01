@@ -8,10 +8,10 @@
 //! `specs.rs` when the wire format is new).
 //!
 //! This is a wider, independent domain table from `tool_sync::agents`
-//! (`AgentSpec`): MCP additionally targets grok / zcode / kiro / cursor,
-//! and the hidden legacy `claude-desktop` / `gemini` cleanup ids deliberately
-//! stay outside it (not public targets — their live successors are the
-//! distinct ids `claude-desktop-chat` and `gemini-cli`).
+//! (`AgentSpec`): MCP additionally targets grok / hermes / zcode / kiro /
+//! cursor / antigravity, and the hidden legacy `claude-desktop` / `gemini`
+//! cleanup ids deliberately stay outside it (not public targets — their live
+//! successors are the distinct ids `claude-desktop-chat` and `gemini-cli`).
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -82,6 +82,16 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         read_servers: read_toml_mcp_servers_entries,
         upsert: |path, entry| codex_upsert(path, &entry.name, grok_toml_table(entry)),
         remove: codex_remove,
+    },
+    McpToolSpec {
+        id: "hermes",
+        label: "Hermes Agent",
+        resolve_config_path: resolve_hermes_config_path,
+        installed: installed_hermes,
+        count_live: count_hermes_mcp,
+        read_servers: read_hermes_entries,
+        upsert: |path, entry| hermes_upsert(path, &entry.name, hermes_spec(entry)),
+        remove: hermes_remove,
     },
     McpToolSpec {
         id: "opencode",
@@ -173,6 +183,16 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         count_live: count_json_mcpservers,
         read_servers: read_gemini_cli_entries,
         upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, gemini_cli_spec(entry)),
+        remove: json_mcpservers_remove,
+    },
+    McpToolSpec {
+        id: "antigravity",
+        label: "Antigravity",
+        resolve_config_path: resolve_antigravity_config_path,
+        installed: installed_antigravity,
+        count_live: count_json_mcpservers,
+        read_servers: read_antigravity_entries,
+        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, antigravity_spec(entry)),
         remove: json_mcpservers_remove,
     },
     McpToolSpec {

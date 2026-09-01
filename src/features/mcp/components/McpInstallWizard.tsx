@@ -55,6 +55,8 @@ interface McpInstallWizardProps {
   onCancel?: () => void;
   /** Per-tool note, e.g. "not installed", from `mcp_tool_statuses`. */
   noteForTool?: (toolId: McpToolId) => string | null;
+  /** Settings-enabled MCP targets, used as the first seed for the picker. */
+  defaultEnabled?: Record<string, boolean>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -66,7 +68,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function McpInstallWizard({ serverId, submitting, onSubmit, onCancel, noteForTool }: McpInstallWizardProps) {
+export function McpInstallWizard({
+  serverId,
+  submitting,
+  onSubmit,
+  onCancel,
+  noteForTool,
+  defaultEnabled = {},
+}: McpInstallWizardProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [runtimeId, setRuntimeId] = useState<string | null>(null);
@@ -88,7 +97,8 @@ export function McpInstallWizard({ serverId, submitting, onSubmit, onCancel, not
   );
   const [seededFor, setSeededFor] = useState<string | null>(null);
   const [fields, setFields] = useState(() => buildInstallFields(plan?.inputs));
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+  const [enabled, setEnabled] = useState<Record<string, boolean> | null>(null);
+  const enabledTools = enabled ?? defaultEnabled;
   const [acknowledged, setAcknowledged] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [rejection, setRejection] = useState<McpInstallRejection | null>(null);
@@ -191,7 +201,7 @@ export function McpInstallWizard({ serverId, submitting, onSubmit, onCancel, not
       serverId,
       runtimeId: plan.selectedRuntimeId ?? null,
       answers,
-      enabled,
+      enabled: enabledTools,
       approvedTarget: preview.approvalTarget,
     }).catch(() => null);
     if (outcome?.status !== "rejected") return;
@@ -256,8 +266,8 @@ export function McpInstallWizard({ serverId, submitting, onSubmit, onCancel, not
 
       <Section title={t("mcp.fieldEnabledTools")}>
         <McpToolTargetPicker
-          enabled={enabled}
-          onToggle={(toolId, next) => setEnabled((prev) => ({ ...prev, [toolId]: next }))}
+          enabled={enabledTools}
+          onToggle={(toolId, next) => setEnabled({ ...enabledTools, [toolId]: next })}
           noteFor={noteForTool}
         />
       </Section>

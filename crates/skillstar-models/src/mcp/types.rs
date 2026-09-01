@@ -24,6 +24,7 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "claude-desktop-chat",
     "codex",
     "grok",
+    "hermes",
     "opencode",
     "zcode",
     "kiro",
@@ -32,6 +33,7 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "windsurf",
     "cline",
     "gemini-cli",
+    "antigravity",
     "zed",
     "maka",
 ];

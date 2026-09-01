@@ -1,7 +1,7 @@
 //! Per-tool config paths, installed detection, and live config readers/writers.
 
-use anyhow::{Context, Result, bail};
-use serde_json::{Map, Value, json};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
 use crate::tool_sync::{
@@ -130,6 +130,69 @@ pub fn resolve_cline_config_path() -> Result<PathBuf> {
 /// one. See [`LEGACY_GEMINI_TOOL_ID`] for how the two are kept from fighting.
 pub fn resolve_gemini_cli_config_path() -> Result<PathBuf> {
     resolve_legacy_gemini_settings_path()
+}
+
+/// Hermes Agent MCP config: `$HERMES_HOME/config.yaml`, else `~/.hermes/config.yaml`.
+///
+/// `HERMES_HOME` is ignored inside the tool-sync sandbox so a developer export
+/// cannot punch a unit test through to the real Hermes home (same rule as
+/// `CODEX_HOME`).
+pub fn resolve_hermes_config_path() -> Result<PathBuf> {
+    Ok(hermes_home()?.join("config.yaml"))
+}
+
+fn hermes_home() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    if std::env::var_os(crate::tool_sync::TOOL_SYNC_HOME_ENV)
+        .filter(|value| !value.is_empty())
+        .is_some()
+    {
+        return Ok(home.join(".hermes"));
+    }
+    #[cfg(test)]
+    {
+        return Ok(home.join(".hermes"));
+    }
+    #[cfg(not(test))]
+    {
+        if let Ok(dir) = std::env::var("HERMES_HOME") {
+            let dir = dir.trim();
+            if !dir.is_empty() {
+                return Ok(PathBuf::from(dir));
+            }
+        }
+        Ok(home.join(".hermes"))
+    }
+}
+
+pub(crate) fn installed_hermes(home: &Path) -> bool {
+    home.join(".hermes").exists()
+        || skillstar_core::infra::path_env::binary_on_enriched_path("hermes")
+}
+
+/// Antigravity MCP config.
+///
+/// Prefers the post-migration unified path `~/.gemini/config/mcp_config.json`
+/// when the `.migrated` marker or the unified file exists; otherwise the
+/// legacy `~/.gemini/antigravity/mcp_config.json`. Distinct from Gemini CLI's
+/// `~/.gemini/settings.json`.
+pub fn resolve_antigravity_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    let unified_dir = home.join(".gemini").join("config");
+    let unified = unified_dir.join("mcp_config.json");
+    if unified_dir.join(".migrated").exists() || unified.exists() {
+        return Ok(unified);
+    }
+    Ok(home
+        .join(".gemini")
+        .join("antigravity")
+        .join("mcp_config.json"))
+}
+
+pub(crate) fn installed_antigravity(home: &Path) -> bool {
+    home.join(".gemini").join("antigravity").exists()
+        || home.join(".gemini").join("config").exists()
+        || skillstar_core::infra::path_env::desktop_app_installed("Antigravity")
 }
 
 /// `~/.config/zed/settings.json` — Zed's settings file (top-level

@@ -522,6 +522,24 @@ fn mcp_presets_catalog_is_well_formed() {
             );
         }
     }
+
+    // Official MCP config is `codegraph serve --mcp`; the npm package bin is
+    // that same CLI, so the built-in chip must launch it via npx (not the
+    // installer, which is what a bare `npx @colbymchenry/codegraph` runs).
+    let codegraph = presets
+        .iter()
+        .find(|p| p.id == "codegraph")
+        .expect("CodeGraph must be a built-in MCP preset");
+    assert_eq!(codegraph.command.as_deref(), Some("npx"));
+    assert_eq!(
+        codegraph.args,
+        ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+    );
+    assert_eq!(codegraph.transport, "stdio");
+    assert_eq!(
+        codegraph.homepage,
+        "https://github.com/colbymchenry/codegraph"
+    );
 }
 
 #[test]

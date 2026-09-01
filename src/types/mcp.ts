@@ -102,6 +102,7 @@ export const MCP_TOOL_IDS = [
   "claude-desktop-chat",
   "codex",
   "grok",
+  "hermes",
   "opencode",
   "zcode",
   "kiro",
@@ -110,6 +111,7 @@ export const MCP_TOOL_IDS = [
   "windsurf",
   "cline",
   "gemini-cli",
+  "antigravity",
   "zed",
   "maka",
 ] as const;

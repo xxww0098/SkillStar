@@ -19,6 +19,7 @@ export const MCP_TOOL_LABELS: Record<McpToolId, string> = {
   "claude-desktop-chat": "Claude Desktop",
   codex: "Codex",
   grok: "Grok",
+  hermes: "Hermes Agent",
   opencode: "OpenCode",
   zcode: "ZCode",
   kiro: "Kiro",
@@ -27,6 +28,7 @@ export const MCP_TOOL_LABELS: Record<McpToolId, string> = {
   windsurf: "Windsurf",
   cline: "Cline",
   "gemini-cli": "Gemini CLI",
+  antigravity: "Antigravity",
   zed: "Zed",
   maka: "Maka",
 };

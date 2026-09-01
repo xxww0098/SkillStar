@@ -77,6 +77,13 @@ export const MCP_TOOL_STATUSES = [
     serverCount: 0,
   },
   {
+    toolId: "hermes",
+    label: "Hermes Agent",
+    configPath: "~/.hermes/config.yaml",
+    installed: false,
+    serverCount: 0,
+  },
+  {
     toolId: "opencode",
     label: "OpenCode",
     configPath: "~/.config/opencode/opencode.json",
@@ -130,6 +137,13 @@ export const MCP_TOOL_STATUSES = [
     label: "Gemini CLI",
     configPath: "~/.gemini/settings.json",
     installed: true,
+    serverCount: 0,
+  },
+  {
+    toolId: "antigravity",
+    label: "Antigravity",
+    configPath: "~/.gemini/config/mcp_config.json",
+    installed: false,
     serverCount: 0,
   },
   {

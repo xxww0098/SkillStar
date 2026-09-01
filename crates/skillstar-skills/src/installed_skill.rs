@@ -591,6 +591,14 @@ fn api_tree_is_at_tracked_tip(repo_root: &Path, tree: &crate::update_api::ApiRem
     tree.subtree_hash(None) == Some(local_tip.as_str())
 }
 
+/// Agent links for one Skill, read from disk.
+///
+/// A freshly installed `Skill` carries no links yet, so callers that deploy and
+/// then return the Skill must re-read them here instead of guessing.
+pub fn agent_links_for(skill_name: &str) -> Vec<String> {
+    detect_agent_links(skill_name, &agent_profile::list_profiles())
+}
+
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {
     let mut links = Vec::with_capacity(2); // most skills link to 1-2 agents
     for profile in profiles {
@@ -676,6 +684,45 @@ mod tests {
             !skills[1].update_available,
             "unscanned skills stay as built"
         );
+    }
+
+    #[cfg(unix)]
+    fn profile_at(id: &str, dir: &Path) -> AgentProfile {
+        AgentProfile {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            icon: String::new(),
+            global_skills_dir: dir.to_path_buf(),
+            project_skills_rel: String::new(),
+            installed: true,
+            enabled: true,
+            synced_count: 0,
+        }
+    }
+
+    /// Regression: `install_skill` used to return only the just-deployed Agent,
+    /// so the card carousel behaved like a radio group.
+    #[cfg(unix)]
+    #[test]
+    fn every_deployed_agent_is_detected_not_just_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let payload = temp.path().join("payload");
+        std::fs::create_dir_all(&payload).unwrap();
+        std::fs::write(payload.join("SKILL.md"), "# s").unwrap();
+
+        let profiles: Vec<AgentProfile> = ["a", "b", "c"]
+            .iter()
+            .map(|id| {
+                let dir = temp.path().join(id);
+                std::fs::create_dir_all(&dir).unwrap();
+                if *id != "c" {
+                    std::os::unix::fs::symlink(&payload, dir.join("demo")).unwrap();
+                }
+                profile_at(id, &dir)
+            })
+            .collect();
+
+        assert_eq!(detect_agent_links("demo", &profiles), vec!["a", "b"]);
     }
 }
 

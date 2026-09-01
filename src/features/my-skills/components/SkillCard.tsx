@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Button } from "../../../components/ui/button";
-import { selectTargetableAgentProfiles } from "../../../lib/agentProfiles";
+import { selectRailAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import { handleExternalAnchorClick } from "../../../lib/externalOpen";
 import { tauriInvoke } from "../../../lib/ipc";
 import { agentIconCls, cn, formatInstalls } from "../../../lib/utils";
@@ -275,7 +275,9 @@ function SkillCardInner({
     return null;
   })();
 
-  const targetableProfiles = profiles ? selectTargetableAgentProfiles(profiles) : [];
+  const targetableProfiles = profiles
+    ? selectRailAgentProfiles(profiles.filter(supportsGlobalDeploy), new Set(skill.agent_links ?? []))
+    : [];
 
   let agentRail: React.ReactNode = null;
   if (remoteContext) {

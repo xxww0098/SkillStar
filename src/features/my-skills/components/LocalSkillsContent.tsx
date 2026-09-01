@@ -853,7 +853,7 @@ export function LocalSkillsContent({
               selectable
               selectedSkills={selectedSkillNames}
               onSelectSkill={handleSelectSkill}
-              profiles={enabledProfiles}
+              profiles={profiles}
               onToggleAgent={toggleSkillForAgent}
               pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}

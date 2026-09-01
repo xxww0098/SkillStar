@@ -26,7 +26,7 @@ pub(crate) enum JsonReadDialect {
     ServerUrlNoType,
     /// No `type`; `httpUrl` means Streamable HTTP, `url` means SSE.
     GeminiUrlKeys,
-    /// No `type`; a `url` means remote, otherwise stdio. Zed.
+    /// No `type`; a `url` means remote, otherwise stdio. Zed, Antigravity.
     PlainNoType,
     /// No `type`; `command` means stdio, `url` means remote. Maka records the
     /// remote transport in its own `transport` field (`streamable-http` /
@@ -343,6 +343,11 @@ pub(crate) fn read_cline_entries(content: &str) -> Result<Vec<McpServerEntry>> {
 /// Gemini CLI's `mcpServers` map (`url` = SSE, `httpUrl` = Streamable HTTP).
 pub(crate) fn read_gemini_cli_entries(content: &str) -> Result<Vec<McpServerEntry>> {
     read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::GeminiUrlKeys)
+}
+
+/// Antigravity's `mcpServers` map (no `type`: a `url` means remote).
+pub(crate) fn read_antigravity_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::PlainNoType)
 }
 
 /// Zed's top-level `context_servers` map.

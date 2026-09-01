@@ -17,7 +17,9 @@ Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以�
 裸 id `gemini` 只是 MCP 的 cleanup 墓碑，永远不是 target（见
 [MCP 的墓碑与公开后继规则](../mcp/README.md#墓碑与它的公开后继distinct-id--subsumption)）。
 Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 Gemini CLI 是不同
-产品，两个 profile 互不顶替。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
+产品，两个 profile 互不顶替；MCP 也是独立 target（`antigravity` →
+`~/.gemini/config/mcp_config.json`，未迁移时回落 `~/.gemini/antigravity/mcp_config.json`），
+不会写进 Gemini CLI 的 `settings.json`。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
 **一个** Agent profile，部署时再扇出到三份 `builtin/skills`，见下面的[镜像目录](#镜像目录一个-profile多份技能目录)。Usage/Cloud Code 中的 Gemini **模型名**
 与 Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store 的 `gemini`
 字段仅用于迁移读取。

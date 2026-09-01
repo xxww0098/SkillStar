@@ -7,6 +7,7 @@ import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { cn } from "../../../lib/utils";
+import { selectRailAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import type { AgentProfile, Skill, SkillCardDeck, ViewMode } from "../../../types";
 
 interface DeckCardProps {
@@ -18,7 +19,7 @@ interface DeckCardProps {
   groupInstalledSkillNames: string[];
   /** Installed-skill lookup (normalized name → skill), from the hub skills list. */
   skillByName: Map<string, Skill>;
-  /** Enabled agent profiles shown in the footer's link-toggle row. */
+  /** Agent profiles shown in the footer's link-toggle row (Settings-on plus still-claimed). */
   enabledProfiles: AgentProfile[];
   /** Batch-toggle state: `${groupId}::${agentId}` → "linking". */
   linkState: Record<string, "linking">;
@@ -73,6 +74,7 @@ export function DeckCard({
   // happen to have: a new deck starts dark even though installing a Skill
   // already deploys it to every enabled Agent.
   const deckAgentLinks = new Set(group.agent_links ?? []);
+  const railProfiles = selectRailAgentProfiles(enabledProfiles.filter(supportsGlobalDeploy), deckAgentLinks);
 
   return (
     <motion.div
@@ -262,7 +264,7 @@ export function DeckCard({
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
               {/* Link to Agent icons */}
               <AgentTargetCarousel
-                items={enabledProfiles.map((profile) => {
+                items={railProfiles.map((profile) => {
                   const claimed = deckAgentLinks.has(profile.id);
                   const linkedCount = groupInstalledSkillNames.filter((name) =>
                     skillByName.get(name)?.agent_links?.includes(profile.display_name),
@@ -295,7 +297,7 @@ export function DeckCard({
               />
 
               {/* Separator */}
-              {enabledProfiles.length > 0 && <div className="w-px h-4 bg-border mx-0.5 ml-auto shrink-0" />}
+              {railProfiles.length > 0 && <div className="w-px h-4 bg-border mx-0.5 ml-auto shrink-0" />}
 
               {missingCount > 0 && (
                 <Button

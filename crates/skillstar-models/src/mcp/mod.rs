@@ -22,6 +22,7 @@
 //! | `claude-desktop-chat` | OS config dir `Claude/claude_desktop_config.json` | `mcpServers.<name>`, **no `type`** |
 //! | `codex`          | `~/.codex/config.toml`                 | `[mcp_servers.<name>]` TOML table |
 //! | `grok`           | `~/.grok/config.toml`                  | `[mcp_servers.<name>]` TOML (`headers` for HTTP) |
+//! | `hermes`         | `~/.hermes/config.yaml` (or `$HERMES_HOME`) | YAML `mcp_servers.<name>` + `platform_toolsets.cli` `mcp-<name>` |
 //! | `opencode`       | `~/.config/opencode/opencode.json`     | `mcp.<name>` (`local`/`remote` form) |
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
 //! | `kiro`           | `~/.kiro/settings/mcp.json`            | `mcpServers.<name>` (community JSON, keeps `type`) |
@@ -30,6 +31,7 @@
 //! | `windsurf`       | `~/.codeium/windsurf/mcp_config.json`  | `mcpServers.<name>`, remote under **`serverUrl`**, no `type` |
 //! | `cline`          | `~/.cline/mcp.json`                    | `mcpServers.<name>`, `type: `**`streamableHttp`**`/sse` |
 //! | `gemini-cli`     | `~/.gemini/settings.json`              | `mcpServers.<name>`, no `type`: `url` = SSE, **`httpUrl`** = HTTP |
+//! | `antigravity`    | `~/.gemini/config/mcp_config.json` (legacy `~/.gemini/antigravity/mcp_config.json`) | `mcpServers.<name>`, **no `type`** (the IDE rejects `type: stdio`) |
 //! | `zed`            | `~/.config/zed/settings.json`          | **`context_servers`**`.<name>`, no `type` |
 //! | `maka`           | OS config dir `Maka/workspaces/default/mcp.json` | `mcpServers.<name>`, **`version: 2`**, no `type`, remote `transport` |
 //!
@@ -110,9 +112,9 @@ pub use validate::*;
 
 mod specs;
 pub(crate) use specs::{
-    claude_code_spec, claude_desktop_chat_spec, cline_spec, codex_toml_table, cursor_spec,
-    gemini_cli_spec, grok_toml_table, kiro_spec, maka_spec, opencode_spec, vscode_spec,
-    windsurf_spec, zcode_cli_spec, zed_spec,
+    antigravity_spec, claude_code_spec, claude_desktop_chat_spec, cline_spec, codex_toml_table,
+    cursor_spec, gemini_cli_spec, grok_toml_table, kiro_spec, maka_spec, opencode_spec,
+    vscode_spec, windsurf_spec, zcode_cli_spec, zed_spec,
 };
 
 // ---------------------------------------------------------------------------
@@ -142,6 +144,15 @@ pub use sync::*;
 
 mod import;
 pub use import::*;
+
+// ---------------------------------------------------------------------------
+// Hermes YAML live config (mcp_servers + platform_toolsets.cli)
+// ---------------------------------------------------------------------------
+
+mod hermes;
+pub(crate) use hermes::{
+    count_hermes_mcp, hermes_remove, hermes_spec, hermes_upsert, read_hermes_entries,
+};
 
 // ---------------------------------------------------------------------------
 // Post-install health check (dual-epoch probe)

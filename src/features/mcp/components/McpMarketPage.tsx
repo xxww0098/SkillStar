@@ -12,7 +12,9 @@ import type { McpInstallOutcome, ViewMode } from "../../../types";
 import { useMcpMarketPage } from "../hooks/useMcpMarketPage";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpSources } from "../hooks/useMcpSources";
+import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
+import { mcpEnabledMapFromProfiles } from "../lib/agentTargets";
 import { buildInstalledIndex } from "../lib/installState";
 import { hasActiveMcpNarrowing } from "../lib/marketQuery";
 import { failedMcpSyncCount } from "../lib/syncResults";
@@ -48,6 +50,7 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
 
   const market = useMcpMarketPage({ publisherId });
   const { servers, installFromMarket } = useMcpServers();
+  const { profiles } = useAgentProfiles();
   const { health } = useMcpSources();
   const { noteForTool } = useMcpToolStatuses();
 
@@ -209,6 +212,7 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
             onSubmit={handleInstall}
             onCancel={() => setInstallId(null)}
             noteForTool={noteForTool}
+            defaultEnabled={mcpEnabledMapFromProfiles(profiles)}
           />
         ) : null}
       </DrawerShell>

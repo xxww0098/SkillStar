@@ -14,6 +14,22 @@ export function selectTargetableAgentProfiles(profiles: readonly AgentProfile[])
 }
 
 /**
+ * Agents that belong on a resource rail: Settings-on, or still attached to
+ * this resource so a just-disabled Agent stays visible as a stopped SVG.
+ *
+ * `attached` matches either profile id or display name — Skills store
+ * display names in `agent_links`, decks store ids.
+ */
+export function selectRailAgentProfiles<T extends Pick<AgentProfile, "id" | "display_name" | "enabled">>(
+  profiles: readonly T[],
+  attached: ReadonlySet<string>,
+): T[] {
+  return profiles.filter(
+    (profile) => profile.enabled || attached.has(profile.id) || attached.has(profile.display_name),
+  );
+}
+
+/**
  * Whether an agent can receive project-level skill deploys. Global-only
  * agents (e.g. OpenClaw) are expressed in the builtin data table with an
  * empty `project_skills_rel` — keep this check data-driven so new

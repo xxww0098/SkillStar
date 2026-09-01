@@ -70,13 +70,9 @@ pub async fn install_skill(
             );
             error
         })?;
-        if let Some(id) = agent_id.as_deref()
-            && let Some(profile) = skillstar_agents::list_profiles()
-                .into_iter()
-                .find(|profile| profile.id == id)
-        {
-            skill.agent_links = Some(vec![profile.display_name]);
-        }
+        // The freshly installed Skill carries no links; re-read every Agent that
+        // now holds it, otherwise a carousel click would blank the other icons.
+        skill.agent_links = Some(installed_skill::agent_links_for(&skill.name));
         Ok(skill)
     })
     .await;
