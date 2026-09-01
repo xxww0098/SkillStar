@@ -116,8 +116,10 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - 卡片品牌带的账号标题预留两行高度，下面的本地工具状态预留一行固定槽；因此同一供应商内某张卡显示「当前」或邮箱恰好换行时，不会把重置条和额度主体单独推低。超过两行的异常长身份仍允许自然撑开，不能用省略号伪造完整邮箱。
 - Usage 页头部提供持久化的邮箱隐私开关；开启后所有卡片只显示遮罩身份，原始邮箱仍留在订阅数据中，不能影响切号、刷新、对账或后端请求。
 - 同一供应商的横向卡片使用最高卡片的高度作为行高，较短卡片的主体和页脚保持底部对齐；邮箱换行不会让同一行的操作位置参差不齐。
-- 所有额度条共享 `UsageMeter` primitive（标签+已用徽章 / 大号等宽数字 / `ProgressTrack` / 脚注+重置芯片）；货币/绝对/百分比额度读作同一套语法，各渲染器只组合它，不自绘嵌套卡片。鉴权方式、CLI 能力徽标、计费周期和「即将重置」提示文案不占卡片：前三项在编辑对话框，重置紧急度由倒计时着色和卡片描边承担。
-- 重置倒计时归属唯一律：meter 只在 `windowRendersOwnReset(window)` 为真时渲染自身重置芯片，否则由 card MetaStrip 顶部显示；二者互补，同一 reset 绝不出现两次。
+- 所有额度条共享 `UsageMeter` primitive（标签+已用徽章 / 大号等宽数字 / `ProgressTrack` / 脚注+重置芯片）；货币/绝对/百分比额度读作同一套语法，各渲染器只组合它，不自绘嵌套卡片。鉴权方式、CLI 能力徽标、计费周期和「即将重置」提示文案不占卡片：前三项在编辑对话框，重置紧急度由倒计时着色、卡片描边和徽章图标承担。
+- `ProgressTrack` 是剩余导向的 `progressbar`：`aria-valuenow` 为剩余百分比，轨道在剩余 25% / 10% 处打阈值刻度，紧急色只做补充。≥90% 已用的脉冲和高紧急重置图标只在 `motion-safe` 下旋转/闪动，尊重 `prefers-reduced-motion`。
+- 已用徽章必须带「已用 N%」或「剩余 N%」文案，不能只靠红/黄/灰。达到 75% 已用时附加警告图标。页脚 icon 按钮有 `aria-label`；删除/重置确认是卡内 `alertdialog`，Esc 和点遮罩取消，初始焦点在「取消」。
+- 重置倒计时归属唯一律：meter 只在 `windowRendersOwnReset(window)` 为真时渲染自身重置芯片，否则由 card MetaStrip 顶部显示；二者互补，同一 reset 绝不出现两次。倒计时图标只在 now/critical/urgent 时旋转，平常状态保持静止。
 - Cursor 的 Total/分类明细只保留卡片级主 reset，分类行不重复显示同一个 7d 倒计时；DeepSeek 的余额卡以可用余额为唯一主视觉，状态、分析提示和余额构成作为无嵌套卡片的次级分组。
 - 主卡与独立窗口共享逻辑 body，不共享 chrome。浮窗使用 dark chrome + `LightBodySurface`，compact body 的品牌 CSS vars 必须来自 `brandThemes.ts`。
 - 每个 catalog 的品牌 header、bar 和 glow 只在 `src/features/usage/lib/brandThemes.ts` 定义；卡片内不得硬编码另一套颜色。

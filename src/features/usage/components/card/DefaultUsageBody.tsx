@@ -11,7 +11,7 @@ export function DefaultUsageBody({ usage, catalogId, density }: UsageBodyProps) 
   if (!hasAny) {
     if (usage.error) return null;
     return (
-      <p className="py-1 text-[11px] text-zinc-400 italic">
+      <p className="py-1 text-[11px] text-zinc-500">
         {usage.plan_name
           ? t("usage.awaitingUsageWithPlan", { plan: usage.plan_name })
           : t("usage.awaitingUsageRefresh")}

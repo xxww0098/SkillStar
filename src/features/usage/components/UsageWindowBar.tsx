@@ -112,7 +112,7 @@ function UsageQuotaPanel({
       footNote={
         <>
           {t("usage.remaining")} {formatUsdCents(remainingCents)}
-          <span className="ml-1 font-sans font-normal text-zinc-400">({remainingPct}%)</span>
+          <span className="ml-1 font-sans font-normal text-zinc-500">({remainingPct}%)</span>
         </>
       }
       footNoteClass={remainingTone.text}
@@ -187,6 +187,8 @@ function UsageCategoryBar({
       usedPercent={percent}
       size="category"
       tone="consumed"
+      ariaLabel={label}
+      ariaValueText={t("usage.remainingPercent", { percent: Math.max(0, 100 - percent) })}
     />
   );
 
@@ -200,7 +202,7 @@ function UsageCategoryBar({
           hasInlineReset && "col-span-2",
         )}
       >
-        <span className="min-w-0 flex-1 truncate font-medium text-zinc-700" title={title}>
+        <span className="min-w-0 flex-1 truncate font-medium text-zinc-800" title={title}>
           {label}
         </span>
         <span className={cn("shrink-0 whitespace-nowrap text-right font-mono tabular-nums", tone.text)}>

@@ -26,6 +26,7 @@ export function VendorPlaceholderCard({ entry, onClick }: VendorPlaceholderCardP
       className={usageCardShellClassName({
         className: "max-w-[280px] cursor-pointer text-left select-none",
       })}
+      aria-label={`${entry.display_name}. ${t("usage.bindNow")}`}
     >
       <div
         className={usageCardSlotClassName.headerBand}
@@ -60,13 +61,13 @@ export function VendorPlaceholderCard({ entry, onClick }: VendorPlaceholderCardP
       <div className={usageCardSlotClassName.body}>
         <div className="space-y-2">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[11px] font-semibold text-zinc-400">{t("usage.emptyUsageWindowName")}</span>
-            <span className="font-mono text-[11px] tabular-nums text-zinc-300">—</span>
+            <span className="text-[11px] font-semibold text-zinc-500">{t("usage.emptyUsageWindowName")}</span>
+            <span className="font-mono text-[11px] tabular-nums text-zinc-400">—</span>
           </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+          <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-100" aria-hidden>
             <div className="h-full w-0 rounded-full bg-zinc-200" />
           </div>
-          <p className="text-[11px] leading-relaxed text-zinc-400">{entry.warning ?? t("usage.emptyUsageTip")}</p>
+          <p className="text-[11px] leading-relaxed text-zinc-600">{entry.warning ?? t("usage.emptyUsageTip")}</p>
         </div>
       </div>
 

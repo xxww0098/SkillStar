@@ -96,4 +96,11 @@ describe("UsageCardHeader CLI badge", () => {
     expect(heading).toHaveClass("min-h-[2.25rem]");
     expect(heading.nextElementSibling).toHaveClass("h-[18px]");
   });
+
+  it("gives the drag handle a 24px target that stays visible without hover", () => {
+    renderHeader("none", "cursor", "account@example.com");
+    const handle = screen.getByRole("button", { name: "usage.dragHandle" });
+    expect(handle).toHaveClass("size-6");
+    expect(handle.className).not.toContain("opacity-0");
+  });
 });
