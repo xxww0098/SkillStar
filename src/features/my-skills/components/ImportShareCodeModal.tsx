@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
+import { Textarea } from "../../../components/ui/textarea";
 import { tauriInvoke } from "../../../lib/ipc";
 import { extractShareCode, parseShareCode } from "../../../lib/shareCode";
 import type { ShareCodeSkillInput, SkillCardDeck } from "../../../types";
@@ -200,11 +201,11 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
           <div className="px-6 py-4 space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">{t("importShareCodeModal.shareCode")}</label>
-              <textarea
+              <Textarea
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder={t("importShareCodeModal.shareCodePlaceholder")}
-                className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[100px] resize-y font-mono"
+                className="min-h-[100px] resize-y font-mono"
               />
             </div>
 

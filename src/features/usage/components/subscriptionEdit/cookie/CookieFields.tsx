@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Textarea } from "../../../../../components/ui/textarea";
 import type { CatalogEntry, Subscription } from "../../../types";
 import { Field } from "../fields";
 
@@ -28,7 +29,7 @@ export function CookieFields({ editing, selectedEntry, cookieHeader, setCookieHe
       hint={t("usage.cookieHint", { url: hostOf(selectedEntry.subscription_url) })}
     >
       <div className="space-y-2">
-        <textarea
+        <Textarea
           value={cookieHeader}
           onChange={(e) => setCookieHeader(e.target.value)}
           placeholder={t("usage.cookiePlaceholder")}
@@ -36,7 +37,7 @@ export function CookieFields({ editing, selectedEntry, cookieHeader, setCookieHe
           spellCheck={false}
           autoComplete="off"
           aria-label={t("usage.fieldCookie")}
-          className="w-full resize-y rounded-xl border border-input-border bg-input px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground outline-none focus:border-ring"
+          className="min-h-16 resize-y font-mono text-[11px] leading-relaxed"
         />
         {configured && <p className="text-[9px] text-muted-foreground">{t("usage.cookieConfigured")}</p>}
       </div>

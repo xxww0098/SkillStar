@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { ModalCloseButton, ModalShell } from "../../../components/ui/ModalShell";
+import { Textarea } from "../../../components/ui/textarea";
 import { getAiConfigCached } from "../../../hooks/useAiConfig";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
@@ -133,11 +134,11 @@ export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSki
         {phase === "input" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
             <p className="text-xs text-muted-foreground">{t("aiPickModal.description")}</p>
-            <textarea
+            <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={t("aiPickModal.placeholder")}
-              className="w-full h-28 resize-none rounded-xl border border-border bg-sidebar/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 transition"
+              className="h-28 min-h-28 resize-none rounded-xl bg-sidebar/50"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   handlePick();

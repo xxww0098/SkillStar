@@ -2,6 +2,7 @@ import { Eye, EyeOff, KeyRound, Lock } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
+import { StatusChip } from "../../../components/ui/StatusChip";
 import { cn } from "../../../lib/utils";
 import type { McpInputFormat, McpInstallInputScope } from "../../../types";
 import type { McpFieldError, McpInstallField } from "../lib/installForm";
@@ -160,16 +161,16 @@ export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariable
                   <span className="font-mono">{field.key}</span>
                   {field.mustAsk ? <span className="text-destructive">*</span> : null}
                   {field.input.isSecret ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-amber-500/12 px-1.5 text-micro font-medium text-amber-600 dark:text-amber-400">
+                    <StatusChip size="sm" tone="warning">
                       <KeyRound className="h-3 w-3" />
                       {t("mcp.inputSecret")}
-                    </span>
+                    </StatusChip>
                   ) : null}
                   {field.templated ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 text-micro text-muted-foreground">
+                    <StatusChip size="sm" tone="muted">
                       <Lock className="h-3 w-3" />
                       {t("mcp.inputPinned")}
-                    </span>
+                    </StatusChip>
                   ) : null}
                 </label>
 
@@ -199,10 +200,10 @@ export function McpInstallInputsForm({ fields, errors, onFieldChange, onVariable
                               <span className="text-destructive">*</span>
                             ) : null}
                             {variable.variable.isSecret ? (
-                              <span className="inline-flex items-center gap-1 rounded bg-amber-500/12 px-1.5 text-micro font-medium text-amber-600 dark:text-amber-400">
+                              <StatusChip size="sm" tone="warning">
                                 <KeyRound className="h-3 w-3" />
                                 {t("mcp.inputSecret")}
-                              </span>
+                              </StatusChip>
                             ) : null}
                           </label>
                           {variable.variable.description ? (

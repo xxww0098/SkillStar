@@ -21,6 +21,7 @@ import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { Github } from "../../../components/ui/icons/Github";
 import { ModalCloseButton, ModalShell } from "../../../components/ui/ModalShell";
 import { SearchInput } from "../../../components/ui/SearchInput";
+import { Textarea } from "../../../components/ui/textarea";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { copyToClipboard } from "../../../lib/utils";
@@ -436,12 +437,12 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">{t("publishModal.description_label")}</label>
-                    <textarea
+                    <Textarea
                       value={newRepoDesc}
                       onChange={(e) => setNewRepoDesc(e.target.value)}
                       placeholder="SkillStar skills collection"
                       rows={3}
-                      className="flex min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y custom-scrollbar"
+                      className="min-h-[72px] resize-y custom-scrollbar"
                     />
                     <p className="text-micro text-muted-foreground">{t("publishModal.descriptionHint")}</p>
                   </div>

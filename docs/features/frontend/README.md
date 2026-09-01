@@ -44,6 +44,8 @@
 
 - 样式使用 Tailwind utilities；不新增 CSS Modules 或 styled-components。
 - 优先复用 `src/components/ui/`。需要焦点管理、Esc、portal 的组件使用 Radix primitive。
+- 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。嵌套面板用 `InsetPanel`，不要用会 hover 抬升的 `Card`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
+- 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。 Models 的 `ProviderConfigPrimitives` 是该域自己的表单语言，不并进通用 `Input`/`Textarea`。
 - 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。
 - 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。
 - 外链元素使用 `ExternalAnchor`；按钮/程序化跳转使用 `openExternalUrl`，避免业务页面直接写 `<a target="_blank">`。

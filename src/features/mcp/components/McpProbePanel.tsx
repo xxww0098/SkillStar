@@ -1,7 +1,8 @@
 import { Activity, KeyRound, PackageX, Stethoscope, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
-import { cn } from "../../../lib/utils";
+import { InsetPanel } from "../../../components/ui/InsetPanel";
+import { StatusChip, type StatusChipTone } from "../../../components/ui/StatusChip";
 import type { McpProbeStatus } from "../../../types";
 import type { McpProbeEntry } from "../hooks/useMcpProbe";
 
@@ -28,11 +29,11 @@ const STATUS_ICON: Record<McpProbeStatus, typeof Activity> = {
   unreachable: WifiOff,
 };
 
-const STATUS_TONE: Record<McpProbeStatus, string> = {
-  healthy: "bg-emerald-500/12 text-emerald-600 ring-emerald-500/25 dark:text-emerald-400",
-  "authorization-required": "bg-sky-500/12 text-sky-600 ring-sky-500/25 dark:text-sky-400",
-  "runtime-missing": "bg-amber-500/12 text-amber-600 ring-amber-500/25 dark:text-amber-400",
-  unreachable: "bg-destructive/12 text-destructive ring-destructive/25",
+const STATUS_TONE: Record<McpProbeStatus, StatusChipTone> = {
+  healthy: "success",
+  "authorization-required": "info",
+  "runtime-missing": "warning",
+  unreachable: "danger",
 };
 
 interface McpProbePanelProps {
@@ -47,22 +48,17 @@ export function McpProbePanel({ entry, onProbe, className }: McpProbePanelProps)
   const Icon = report ? STATUS_ICON[report.status] : Stethoscope;
 
   return (
-    <div className={cn("space-y-2.5 rounded-xl border border-border/60 bg-background/40 p-3.5", className)}>
+    <InsetPanel className={className}>
       <div className="flex flex-wrap items-center gap-2">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
           <Stethoscope className="h-3.5 w-3.5 text-primary" />
           {t("mcp.probeTitle")}
         </p>
         {report ? (
-          <span
-            className={cn(
-              "inline-flex h-5 items-center gap-1 rounded px-1.5 text-micro font-medium ring-1 ring-inset",
-              STATUS_TONE[report.status],
-            )}
-          >
+          <StatusChip tone={STATUS_TONE[report.status]}>
             <Icon className="h-3 w-3" />
             {t(`mcp.probeStatus_${report.status}`)}
-          </span>
+          </StatusChip>
         ) : null}
         <Button
           type="button"
@@ -121,6 +117,6 @@ export function McpProbePanel({ entry, onProbe, className }: McpProbePanelProps)
       ) : (
         <p className="text-[11px] leading-relaxed text-muted-foreground">{t("mcp.probeIdleHint")}</p>
       )}
-    </div>
+    </InsetPanel>
   );
 }

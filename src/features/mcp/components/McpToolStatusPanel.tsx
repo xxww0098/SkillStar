@@ -2,6 +2,7 @@ import { CircleSlash, FolderOpen, RefreshCw, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
+import { StatusChip } from "../../../components/ui/StatusChip";
 import { cn } from "../../../lib/utils";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { MCP_TOOL_IDS } from "../../../types";
@@ -77,16 +78,9 @@ export function McpToolStatusPanel({ className }: McpToolStatusPanelProps) {
               <span className="text-xs font-medium text-foreground">
                 {status.label || MCP_TOOL_LABELS[status.toolId]}
               </span>
-              <span
-                className={cn(
-                  "inline-flex h-4 items-center gap-1 rounded px-1.5 text-micro font-medium ring-1 ring-inset",
-                  status.installed
-                    ? "bg-emerald-500/12 text-emerald-600 ring-emerald-500/25 dark:text-emerald-400"
-                    : "bg-muted text-muted-foreground ring-border/60",
-                )}
-              >
+              <StatusChip size="sm" tone={status.installed ? "success" : "muted"}>
                 {status.installed ? t("mcp.toolInstalled") : t("mcp.toolNotInstalled")}
-              </span>
+              </StatusChip>
               <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
                 {t("mcp.toolServerCount", { count: status.serverCount })}
               </span>
