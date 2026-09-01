@@ -2,7 +2,7 @@ import { Activity, KeyRound, PackageX, Stethoscope, WifiOff } from "lucide-react
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/utils";
-import type { McpProbeStatus } from "../../../types";
+import type { McpProbeStatus, McpSpecEpoch } from "../../../types";
 import type { McpProbeEntry } from "../hooks/useMcpProbe";
 
 /**
@@ -29,10 +29,15 @@ const STATUS_ICON: Record<McpProbeStatus, typeof Activity> = {
 };
 
 const STATUS_TONE: Record<McpProbeStatus, string> = {
-  healthy: "bg-emerald-500/12 text-emerald-600 ring-emerald-500/25 dark:text-emerald-400",
-  "authorization-required": "bg-sky-500/12 text-sky-600 ring-sky-500/25 dark:text-sky-400",
-  "runtime-missing": "bg-amber-500/12 text-amber-600 ring-amber-500/25 dark:text-amber-400",
+  healthy: "bg-emerald-500/12 text-emerald-600 ring-emerald-500/25 paper:text-emerald-700",
+  "authorization-required": "bg-sky-500/12 text-sky-600 ring-sky-500/25 paper:text-sky-700",
+  "runtime-missing": "bg-amber-500/12 text-amber-600 ring-amber-500/25 paper:text-amber-700",
   unreachable: "bg-destructive/12 text-destructive ring-destructive/25",
+};
+
+const EPOCH_TONE: Record<McpSpecEpoch, string> = {
+  modern: "bg-emerald-500/12 text-emerald-600 ring-emerald-500/25 paper:text-emerald-700",
+  legacy: "bg-amber-500/12 text-amber-600 ring-amber-500/25 paper:text-amber-700",
 };
 
 interface McpProbePanelProps {
@@ -72,7 +77,7 @@ export function McpProbePanel({ entry, onProbe, className }: McpProbePanelProps)
           onClick={onProbe}
           disabled={entry.pending}
         >
-          <Activity className={entry.pending ? "h-3 w-3 animate-pulse" : "h-3 w-3"} />
+          <Activity className={entry.pending ? "h-3 w-3 motion-safe:animate-pulse" : "h-3 w-3"} />
           {entry.pending ? t("mcp.probeRunning") : t("mcp.probeRun")}
         </Button>
       </div>
@@ -83,13 +88,35 @@ export function McpProbePanel({ entry, onProbe, className }: McpProbePanelProps)
         <div className="space-y-2 text-[11px] text-muted-foreground">
           <p className="leading-relaxed">{t(`mcp.probeStatusHint_${report.status}`)}</p>
 
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {report.epoch ? <span>{t(`mcp.probeEpoch_${report.epoch}`)}</span> : null}
-            {report.protocolVersion ? (
-              <span className="font-mono">{t("mcp.probeProtocol", { version: report.protocolVersion })}</span>
+          <div className="flex flex-wrap gap-1.5">
+            {report.epoch ? (
+              <span
+                className={cn(
+                  "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium ring-1 ring-inset",
+                  EPOCH_TONE[report.epoch],
+                )}
+              >
+                {t(`mcp.probeEpoch_${report.epoch}`)}
+              </span>
             ) : null}
-            {report.cachePrivate ? <span>{t("mcp.probeCachePrivate")}</span> : null}
+            {report.protocolVersion ? (
+              <span className="inline-flex h-5 items-center rounded bg-muted/70 px-1.5 font-mono text-micro text-foreground/80">
+                {t("mcp.probeProtocol", { version: report.protocolVersion })}
+              </span>
+            ) : null}
+            {report.cachePrivate ? (
+              <span className="inline-flex h-5 items-center rounded bg-muted/70 px-1.5 text-micro">
+                {t("mcp.probeCachePrivate")}
+              </span>
+            ) : null}
+            {report.cacheTtlMs != null ? (
+              <span className="inline-flex h-5 items-center rounded bg-muted/70 px-1.5 text-micro">
+                {t("mcp.probeCacheTtl", { ms: report.cacheTtlMs })}
+              </span>
+            ) : null}
           </div>
+
+          {report.epoch ? <p className="leading-relaxed">{t(`mcp.probeEpochHint_${report.epoch}`)}</p> : null}
 
           {report.status === "authorization-required" && report.authChallenge ? (
             <p className="break-all rounded-lg border border-border/50 bg-muted/40 px-2.5 py-1.5 font-mono">
