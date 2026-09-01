@@ -1,8 +1,10 @@
+import { TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { ResetUrgencyMode } from "../../../lib/usageLabels";
+import { remainingBarPercent, type ResetUrgencyMode } from "../../../lib/usageLabels";
 import { ResetCountdown } from "../../ResetCountdown";
-import { ProgressTrack, type ProgressTrackTone } from "./ProgressTrack";
+import { ProgressTrack, usageFillUrgency, type ProgressTrackTone } from "./ProgressTrack";
 
 /**
  * Unified usage "meter" — the single quota-bar grammar shared across every
@@ -66,9 +68,9 @@ export interface UsageMeterProps {
 }
 
 function usedBadgeTone(percent: number): string {
-  if (percent >= 90) return "bg-rose-500/10 text-rose-600";
-  if (percent >= 75) return "bg-amber-500/10 text-amber-600";
-  return "bg-zinc-100 text-zinc-600";
+  if (percent >= 90) return "bg-rose-500/10 text-rose-700";
+  if (percent >= 75) return "bg-amber-500/10 text-amber-800";
+  return "bg-zinc-100 text-zinc-700";
 }
 
 export function UsageMeter({
@@ -93,7 +95,16 @@ export function UsageMeter({
   children,
   "data-testid": testId,
 }: UsageMeterProps) {
+  const { t } = useTranslation();
   const resetChip = showReset && resetAt ? resetAt : null;
+  const remainingPct = remainingBarPercent(usedPercent);
+  const urgency = usageFillUrgency(usedPercent);
+  const badgeText =
+    badgePercent != null
+      ? t("usage.remainingPercent", { percent: badgePercent })
+      : t("usage.usedPercent", { percent: usedPercent });
+  const badgeHint = badgeTitle ?? badgeText;
+
   return (
     <div className={cn("relative", compact ? "space-y-1.5" : "space-y-2")} data-testid={testId}>
       <div className="flex items-center justify-between gap-2">
@@ -105,30 +116,32 @@ export function UsageMeter({
               aria-hidden
             />
           ) : null}
-          <p className="truncate text-[11px] leading-none font-bold text-zinc-700" title={label}>
+          <p className="min-w-0 truncate text-[11px] leading-none font-bold text-zinc-800" title={label}>
             {label}
           </p>
-          {tag ? <span className="shrink-0 text-[10px] font-medium text-zinc-400">{tag}</span> : null}
+          {tag ? <span className="shrink-0 text-[10px] font-medium text-zinc-500">{tag}</span> : null}
         </div>
         {showUsedBadge ? (
           <span
             className={cn(
-              "shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
+              "inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums",
               usedBadgeTone(usedPercent),
             )}
-            title={badgeTitle}
+            title={badgeHint}
+            data-urgency={urgency}
           >
-            {badgePercent ?? usedPercent}%
+            {urgency !== "ok" ? <TriangleAlert className="h-2.5 w-2.5" aria-hidden /> : null}
+            {badgeText}
           </span>
         ) : null}
       </div>
 
-      {hint ? <p className="text-[9px] leading-none text-zinc-400">{hint}</p> : null}
+      {hint ? <p className="text-[10px] leading-snug text-zinc-500">{hint}</p> : null}
 
       {figure ? (
         <div className="flex items-baseline gap-1.5">
           {figure}
-          {caption ? <span className="ml-auto text-[10px] font-medium text-zinc-400">{caption}</span> : null}
+          {caption ? <span className="ml-auto text-[10px] font-medium text-zinc-500">{caption}</span> : null}
         </div>
       ) : null}
 
@@ -138,11 +151,13 @@ export function UsageMeter({
         tone={tone}
         resetAt={resetAt}
         accent={accent}
+        ariaLabel={label}
+        ariaValueText={t("usage.remainingPercent", { percent: remainingPct })}
       />
 
       {footNote || resetChip ? (
         <div className="flex items-center justify-between gap-2">
-          <span className={cn("font-mono text-[10px] font-semibold tabular-nums text-zinc-400", footNoteClass)}>
+          <span className={cn("font-mono text-[10px] font-semibold tabular-nums text-zinc-500", footNoteClass)}>
             {footNote}
           </span>
           {resetChip ? <ResetCountdown resetAt={resetChip} usedPercent={usedPercent} mode={resetMode} /> : null}
@@ -174,7 +189,7 @@ export function MeterFigure({
       >
         {value}
       </span>
-      {unit ? <span className="font-mono text-[11px] font-semibold tabular-nums text-zinc-400">{unit}</span> : null}
+      {unit ? <span className="font-mono text-[11px] font-semibold tabular-nums text-zinc-500">{unit}</span> : null}
     </>
   );
 }

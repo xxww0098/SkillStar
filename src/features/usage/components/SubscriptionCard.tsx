@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { getBrandTheme } from "../lib/brandThemes";
 import { cliAccountBadgeFor } from "../lib/cliCustody";
@@ -63,6 +63,7 @@ export function SubscriptionCard({
   refreshDisabled = false,
   onDragHandlePointerDown,
 }: SubscriptionCardProps) {
+  const reduceMotion = useReducedMotion();
   const usage = sub.usage ?? null;
   const planName = (usage?.plan_name ?? sub.plan_tier ?? null) || null;
   const showRenewFooter = sub.renew_date > 0;
@@ -80,10 +81,10 @@ export function SubscriptionCard({
 
   return (
     <motion.article
-      layout
-      initial={{ opacity: 0, scale: 0.96 }}
+      layout={!reduceMotion}
+      initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96 }}
+      exit={reduceMotion ? undefined : { opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       style={brandThemeToCssVars(theme)}
       className={cn(

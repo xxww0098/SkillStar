@@ -19,7 +19,7 @@ export function MetaRow({ label, value, accent, showDivider = false, className }
         className,
       )}
     >
-      <span className="font-semibold uppercase tracking-wider text-zinc-500">{label}</span>
+      <span className="font-semibold uppercase tracking-wider text-zinc-600">{label}</span>
       <span className="font-mono font-bold tabular-nums" style={{ color }}>
         {value}
       </span>

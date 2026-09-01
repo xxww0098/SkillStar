@@ -61,6 +61,8 @@ export function UsageCardHeader({
         }
       : BADGE_COPY;
   const isEmailIdentity = displayName.includes("@");
+  const badgeLabel = cliBadge !== "none" ? t(badgeCopy[cliBadge].label) : "";
+  const badgeTitle = cliBadge !== "none" ? t(badgeCopy[cliBadge].title) : "";
 
   return (
     <div
@@ -70,17 +72,22 @@ export function UsageCardHeader({
       <div className="relative flex items-start gap-3" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.18)" }}>
         {brandIcon ? (
           // text-zinc-900 fixes mono logos that inherit band white fg on the white chip.
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-zinc-900 shadow-[0_2px_8px_rgba(0,0,0,0.18)] ring-1 ring-black/5 [text-shadow:none]">
+          <div
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-zinc-900 shadow-[0_2px_8px_rgba(0,0,0,0.18)] ring-1 ring-black/5 [text-shadow:none]"
+            aria-hidden
+          >
             <ProviderLogo catalogId={catalogId} displayName={displayName} brandColor={brandColorHex} size="md" />
           </div>
         ) : (
-          <ProviderLogo
-            catalogId={catalogId}
-            displayName={displayName}
-            brandColor={brandColorHex}
-            size="lg"
-            className="shrink-0 shadow-[0_2px_8px_rgba(0,0,0,0.2)] ring-1 ring-white/30"
-          />
+          <div aria-hidden className="shrink-0">
+            <ProviderLogo
+              catalogId={catalogId}
+              displayName={displayName}
+              brandColor={brandColorHex}
+              size="lg"
+              className="shadow-[0_2px_8px_rgba(0,0,0,0.2)] ring-1 ring-white/30"
+            />
+          </div>
         )}
         <div className="min-w-0 flex-1">
           <h3
@@ -88,7 +95,6 @@ export function UsageCardHeader({
               "min-h-[2.25rem] min-w-0 pr-1 whitespace-normal text-sm leading-snug font-bold",
               isEmailIdentity && "break-all text-[13px]",
             )}
-            title={displayName}
           >
             {displayName}
           </h3>
@@ -99,17 +105,17 @@ export function UsageCardHeader({
                   "inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide ring-1 backdrop-blur-[2px]",
                   BADGE_STYLES[cliBadge],
                 )}
-                title={t(badgeCopy[cliBadge].title)}
+                title={badgeTitle}
                 data-cli-badge={cliBadge}
               >
                 {cliBadge === "current" ? (
-                  <BadgeCheck className="h-2.5 w-2.5 shrink-0" />
+                  <BadgeCheck className="h-2.5 w-2.5 shrink-0" aria-hidden />
                 ) : cliBadge === "diverged" ? (
-                  <TriangleAlert className="h-2.5 w-2.5 shrink-0" />
+                  <TriangleAlert className="h-2.5 w-2.5 shrink-0" aria-hidden />
                 ) : (
-                  <Unplug className="h-2.5 w-2.5 shrink-0" />
+                  <Unplug className="h-2.5 w-2.5 shrink-0" aria-hidden />
                 )}
-                <span className="truncate">{t(badgeCopy[cliBadge].label)}</span>
+                <span className="truncate">{badgeLabel}</span>
               </span>
             )}
           </div>
@@ -120,13 +126,14 @@ export function UsageCardHeader({
             type="button"
             onPointerDown={onDragHandlePointerDown}
             className={cn(
-              "cursor-grab text-current/70 hover:text-current active:cursor-grabbing",
-              onDragHandlePointerDown ? "opacity-70 group-hover:opacity-100" : "opacity-0 group-hover:opacity-100",
+              "grid size-6 shrink-0 place-items-center rounded-md text-current/80",
+              "hover:bg-white/15 hover:text-current focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none",
+              "cursor-grab active:cursor-grabbing",
             )}
             aria-label={t("usage.dragHandle")}
             tabIndex={-1}
           >
-            <GripVertical className="h-3.5 w-3.5" />
+            <GripVertical className="h-3.5 w-3.5" aria-hidden />
           </button>
         </div>
       </div>

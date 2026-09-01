@@ -64,9 +64,9 @@ export function UsageCardBody({ subscription: sub, brandColorHex, density, surfa
       {showBalance && balance && <BalanceLine balance={balance} brandColor={brandColorHex} />}
       {showCredits && <CreditsLine credits={credits} brandColor={brandColorHex} />}
       {showManual && <ManualUsage sub={sub} density={density} />}
-      {showEmptyHint && <p className="py-1 text-[11px] text-zinc-400 italic">{t("usage.awaitingUsageRefresh")}</p>}
+      {showEmptyHint && <p className="py-1 text-[11px] text-zinc-500">{t("usage.awaitingUsageRefresh")}</p>}
       {showError && (
-        <p className="line-clamp-3 text-[11px] text-amber-600" title={usage?.error ?? usageError ?? undefined}>
+        <p className="line-clamp-3 text-[11px] text-amber-800" title={usage?.error ?? usageError ?? undefined}>
           {usageError}
         </p>
       )}
@@ -97,7 +97,7 @@ function BalanceLine({
         {available != null && (
           <span
             className={
-              available ? "text-[10px] font-semibold text-emerald-700" : "text-[10px] font-semibold text-amber-700"
+              available ? "text-[10px] font-semibold text-emerald-800" : "text-[10px] font-semibold text-amber-800"
             }
           >
             {available ? t("usage.deepseekAvailable") : t("usage.deepseekUnavailable")}
@@ -109,7 +109,7 @@ function BalanceLine({
         {fmt(balance.total)}
       </div>
       {(balance.granted > 0 || balance.topped_up > 0) && (
-        <div className="flex justify-between gap-2 text-[10px] text-zinc-500">
+        <div className="flex justify-between gap-2 text-[10px] text-zinc-600">
           <span>{t("usage.balanceGrantedOnly", { granted: fmt(balance.granted) })}</span>
           <span>{t("usage.balanceTopupOnly", { topup: fmt(balance.topped_up) })}</span>
         </div>
@@ -148,11 +148,11 @@ function CreditProgressItem({ credit }: { credit: CreditInfo }) {
     return (
       <div className="flex flex-col gap-0.5 text-[10px]">
         <div className="flex items-center justify-between gap-2">
-          <span className="capitalize text-zinc-500">{label}</span>
+          <span className="capitalize text-zinc-600">{label}</span>
           <span className="font-mono font-semibold tabular-nums text-zinc-800">{credit.credit_amount ?? "—"}</span>
         </div>
         {credit.minimum_credit_amount_for_usage ? (
-          <p className="text-[9px] text-zinc-400">
+          <p className="text-[10px] text-zinc-500">
             {t("usage.creditMinimum", { min: credit.minimum_credit_amount_for_usage })}
           </p>
         ) : null}
@@ -174,7 +174,7 @@ function CreditProgressItem({ credit }: { credit: CreditInfo }) {
       footNote={t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}
     >
       {credit.minimum_credit_amount_for_usage ? (
-        <p className="text-right text-[9px] text-zinc-400">
+        <p className="text-right text-[10px] text-zinc-500">
           {t("usage.creditMinimum", { min: credit.minimum_credit_amount_for_usage })}
         </p>
       ) : null}
@@ -213,7 +213,7 @@ function ManualUsage({ sub, density }: { sub: Subscription; density: "comfortabl
   const { t } = useTranslation();
   const q = sub.manual_quota;
   if (!q || (!q.total_tokens && !q.used_tokens)) {
-    return <p className="py-2 text-[11px] text-zinc-400 italic">{t("usage.noUsageData")}</p>;
+    return <p className="py-2 text-[11px] text-zinc-500">{t("usage.noUsageData")}</p>;
   }
   const total = q.total_tokens ?? 0;
   const used = q.used_tokens ?? 0;
@@ -281,15 +281,15 @@ function OpenCodeApiKeyCopyBar({
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[9px] font-medium tracking-wider text-zinc-500 uppercase">
+          <p className="text-[10px] font-medium tracking-wider text-zinc-600 uppercase">
             {t("usage.apiKeyLabel")}
             {apiKeys.length > 1 ? ` · ${apiKeys.length}` : ""}
           </p>
-          <p className="truncate font-mono text-[10px] text-zinc-600" title={apiKeys[0]?.display}>
+          <p className="truncate font-mono text-[10px] text-zinc-700" title={apiKeys[0]?.display}>
             {apiKeys[0]?.display ?? "—"}
           </p>
           {(apiKeys[0]?.name || apiKeys[0]?.email) && (
-            <p className="truncate text-[9px] text-zinc-400">
+            <p className="truncate text-[10px] text-zinc-500">
               {[apiKeys[0]?.name, apiKeys[0]?.email].filter(Boolean).join(" · ")}
             </p>
           )}
@@ -299,19 +299,21 @@ function OpenCodeApiKeyCopyBar({
           variant="ghost"
           onClick={handleCopy}
           disabled={copying}
+          aria-busy={copying}
           title={t("usage.copyApiKey")}
-          className={cn("shrink-0 transition-all", copied ? "text-emerald-500" : "text-zinc-400 hover:text-zinc-700")}
+          aria-label={t("usage.copyApiKey")}
+          className={cn("shrink-0 transition-all", copied ? "text-emerald-600" : "text-zinc-500 hover:text-zinc-800")}
         >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
         </Button>
       </div>
       {apiKeys.length > 1 && (
         <ul className="space-y-0.5 border-t border-zinc-200/50 pt-1">
           {apiKeys.slice(1).map((k) => (
-            <li key={k.id} className="truncate font-mono text-[9px] text-zinc-500" title={k.display}>
+            <li key={k.id} className="truncate font-mono text-[10px] text-zinc-600" title={k.display}>
               {k.display}
               {k.name || k.email ? (
-                <span className="ml-1 font-sans text-zinc-400">({[k.name, k.email].filter(Boolean).join(" · ")})</span>
+                <span className="ml-1 font-sans text-zinc-500">({[k.name, k.email].filter(Boolean).join(" · ")})</span>
               ) : null}
             </li>
           ))}

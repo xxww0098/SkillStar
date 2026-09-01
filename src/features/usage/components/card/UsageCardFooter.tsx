@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { formatCurrencyAmount } from "../../lib/pricing";
 import { formatRelativeSync } from "../../lib/usageLabels";
 import type { Subscription } from "../../types";
+import { UsageCardConfirmOverlay } from "./UsageCardConfirmOverlay";
 import { usageCardSlotClassName } from "./usageCardShell";
 
 export interface UsageCardFooterProps {
@@ -130,22 +131,23 @@ export function UsageCardFooter({
   const resetCountLabel =
     resetCreditsRemaining === null ? null : t("usage.resetQuotaRemaining", { count: resetCreditsRemaining });
   const resetTitle = resetCreditsRemaining === 0 ? t("usage.resetQuotaUnavailable") : t("usage.resetQuota");
+  const resyncLabel = t(sub.catalog_id === "antigravity" ? "usage.resyncAntigravity" : "usage.resyncCli");
 
   return (
     <>
       <footer className={usageCardSlotClassName.footer}>
         <div className="flex w-full items-center gap-2">
           {hasFacts ? (
-            <p className="min-w-0 flex-1 truncate text-[11px] text-zinc-500" title={factsTitle}>
+            <p className="min-w-0 flex-1 truncate text-[11px] text-zinc-600" title={factsTitle}>
               {monthlyCost !== null && (
-                <span className="font-semibold tabular-nums text-zinc-700">
+                <span className="font-semibold tabular-nums text-zinc-800">
                   {formatCurrencyAmount(monthlyCost, sub.currency)}
-                  <span className="ml-0.5 font-normal text-zinc-400">{t("usage.perMonth")}</span>
+                  <span className="ml-0.5 font-normal text-zinc-500">{t("usage.perMonth")}</span>
                 </span>
               )}
-              {monthlyCost !== null && renewLabel ? <span className="mx-1.5 text-zinc-300">·</span> : null}
+              {monthlyCost !== null && renewLabel ? <span className="mx-1.5 text-zinc-400">·</span> : null}
               {renewLabel ? (
-                <span className={cn("tabular-nums", renewUrgent ? "font-semibold text-amber-600" : "text-zinc-600")}>
+                <span className={cn("tabular-nums", renewUrgent ? "font-semibold text-amber-700" : "text-zinc-700")}>
                   {renewLabel}
                 </span>
               ) : null}
@@ -159,27 +161,31 @@ export function UsageCardFooter({
                 size="icon-sm"
                 variant="ghost"
                 title={t("usage.setActive")}
+                aria-label={t("usage.setActive")}
                 onClick={() => void handleSetActive()}
                 disabled={activating}
+                aria-busy={activating}
                 className="text-zinc-500 hover:text-emerald-600"
               >
-                <BadgeCheck className={cn("h-3.5 w-3.5", activating && "animate-pulse")} />
+                <BadgeCheck className={cn("h-3.5 w-3.5", activating && "motion-safe:animate-pulse")} aria-hidden />
               </Button>
             )}
             {onSwitchToCli && sub.is_active && sub.supports_cli_switch && (
               <Button
                 size="icon-sm"
                 variant="ghost"
-                title={t(sub.catalog_id === "antigravity" ? "usage.resyncAntigravity" : "usage.resyncCli")}
+                title={resyncLabel}
+                aria-label={resyncLabel}
                 onClick={() => void handleSwitchToCli()}
                 disabled={cliSyncing}
+                aria-busy={cliSyncing}
                 className={
                   sub.switch_result && !sub.switch_result.success
-                    ? "text-amber-500 hover:text-amber-600"
+                    ? "text-amber-600 hover:text-amber-700"
                     : "text-zinc-500 hover:text-zinc-800"
                 }
               >
-                <RefreshCw className={cn("h-3.5 w-3.5", cliSyncing && "animate-spin")} />
+                <RefreshCw className={cn("h-3.5 w-3.5", cliSyncing && "motion-safe:animate-spin")} aria-hidden />
               </Button>
             )}
             {subscriptionUrl ? (
@@ -187,10 +193,11 @@ export function UsageCardFooter({
                 size="icon-sm"
                 variant="ghost"
                 title={t("usage.renewConsole")}
+                aria-label={t("usage.renewConsole")}
                 onClick={(e) => handleOpenConsole(e)}
                 className="text-zinc-500 hover:text-zinc-800"
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
               </Button>
             ) : null}
             {sub.requires_reauth ? (
@@ -198,20 +205,23 @@ export function UsageCardFooter({
                 size="icon-sm"
                 variant="destructive"
                 title={t("usage.requiresReauth")}
+                aria-label={t("usage.requiresReauth")}
                 onClick={() => onReauth?.()}
               >
-                <ShieldAlert className="h-3.5 w-3.5" />
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
               </Button>
             ) : (
               <Button
                 size="icon-sm"
                 variant="ghost"
                 title={refreshTitle}
+                aria-label={refreshTitle}
                 onClick={() => void handleRefresh()}
                 disabled={refreshing || refreshDisabled}
+                aria-busy={refreshing}
                 className="text-zinc-500 hover:text-zinc-800"
               >
-                <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "motion-safe:animate-spin")} aria-hidden />
               </Button>
             )}
             {onResetQuota && (
@@ -223,11 +233,11 @@ export function UsageCardFooter({
                 onClick={() => setResetPending(true)}
                 disabled={resetting || refreshing || refreshDisabled || resetCreditsRemaining === 0}
                 className={cn(
-                  "text-amber-600 hover:text-amber-700",
+                  "text-amber-700 hover:text-amber-800",
                   resetCountLabel && "h-8 gap-1 px-1.5 text-[10px] font-semibold tabular-nums",
                 )}
               >
-                <RotateCcw className={cn("h-3.5 w-3.5", resetting && "animate-spin")} />
+                <RotateCcw className={cn("h-3.5 w-3.5", resetting && "motion-safe:animate-spin")} aria-hidden />
                 {resetCountLabel}
               </Button>
             )}
@@ -235,71 +245,55 @@ export function UsageCardFooter({
               size="icon-sm"
               variant="ghost"
               title={t("common.edit")}
+              aria-label={t("common.edit")}
               onClick={onEdit}
               className="text-zinc-500 hover:text-zinc-800"
             >
-              <Pencil className="h-3.5 w-3.5" />
+              <Pencil className="h-3.5 w-3.5" aria-hidden />
             </Button>
             <Button
               size="icon-sm"
               variant="ghost"
               title={t("common.delete")}
+              aria-label={t("common.delete")}
               onClick={() => setDeletePending(true)}
-              className="text-red-500 hover:bg-red-50 hover:text-red-600"
+              className="text-red-600 hover:bg-red-50 hover:text-red-700"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
             </Button>
           </div>
         </div>
       </footer>
 
       {deletePending && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-white/90 backdrop-blur-sm">
-          <div className="mx-4 rounded-2xl border border-red-200 bg-white p-5 shadow-xl">
-            <p className="mb-1 text-sm font-semibold text-zinc-900">{t("usage.confirmDeleteTitle")}</p>
-            <p className="mb-4 text-xs text-zinc-500">{t("usage.confirmDeleteMsg", { name: sub.display_name })}</p>
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setDeletePending(false)}>
-                {t("common.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => {
-                  setDeletePending(false);
-                  onDelete();
-                }}
-              >
-                {t("common.delete")}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <UsageCardConfirmOverlay
+          title={t("usage.confirmDeleteTitle")}
+          message={t("usage.confirmDeleteMsg", { name: sub.display_name })}
+          confirmLabel={t("common.delete")}
+          cancelLabel={t("common.cancel")}
+          confirmVariant="destructive"
+          onCancel={() => setDeletePending(false)}
+          onConfirm={() => {
+            setDeletePending(false);
+            onDelete();
+          }}
+        />
       )}
 
       {resetPending && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-white/90 backdrop-blur-sm">
-          <div className="mx-4 rounded-2xl border border-amber-200 bg-white p-5 shadow-xl">
-            <p className="mb-1 text-sm font-semibold text-zinc-900">{t("usage.resetQuotaConfirmTitle")}</p>
-            <p className="mb-4 text-xs text-zinc-500">{t("usage.resetQuotaConfirmMsg", { name: sub.display_name })}</p>
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setResetPending(false)}>
-                {t("common.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                variant="default"
-                disabled={resetting}
-                onClick={() => {
-                  setResetPending(false);
-                  void handleResetQuota();
-                }}
-              >
-                {t("usage.resetQuota")}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <UsageCardConfirmOverlay
+          title={t("usage.resetQuotaConfirmTitle")}
+          message={t("usage.resetQuotaConfirmMsg", { name: sub.display_name })}
+          confirmLabel={t("usage.resetQuota")}
+          cancelLabel={t("common.cancel")}
+          confirmVariant="default"
+          confirmDisabled={resetting}
+          onCancel={() => setResetPending(false)}
+          onConfirm={() => {
+            setResetPending(false);
+            void handleResetQuota();
+          }}
+        />
       )}
     </>
   );
