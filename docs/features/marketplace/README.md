@@ -26,8 +26,9 @@
 
 对抗审查设计：商店不能依赖单一远端。
 
-- 拉取按 host 候选链执行：`remote::marketplace_hosts()` 以 `https://skills.sh` 为首，按 `config/marketplace_mirror.json` 的 `enabled`/`hosts` 追加镜像（仅接受 `https://`，去重，主站始终第一）。`fetch_with_failover` 按序尝试，成功即停，全部失败返回聚合错误。
+- 拉取按 host 候选链执行：`remote::marketplace_hosts()` 以 `https://skills.sh` 为首；若启用了 GitHub 加速，则追加 `{mirror}https://skills.sh/`（按熔断健康度排序）；再按 `config/marketplace_mirror.json` 的 `enabled`/`hosts` 追加用户镜像（仅接受 `https://`，去重）。`fetch_with_failover` 按序尝试，成功即停，全部失败返回聚合错误。
 - 每次成功拉取产生 `FetchMeta{payload_sha256, source_host, etag, degraded}`：sha256 是响应体内容指纹；`source_host` 记录实际服务端；服务端 ETag 存在时记录；`degraded` 标记这份 payload 是解析降级/兜底得到的，不是完整可信结果。
+- `If-None-Match` **只**发给当初签发该 ETag 的 `source_host`。把 skills.sh 的 validator 带到加速源包装地址上会产生假 304，把快照钉死在旧 host 上。
 - snapshot schema v11 起，`marketplace_sync_state` 含 `source_host`/`payload_sha256`/`etag` 三列。快照同步与 MCP registry 同步都是内容寻址增量写：本次 payload 与上次记录相同（304 或 sha256 一致）时，只刷新 scope 时间戳并保留旧指纹与旧 `source_host`，不重写数据表；内容变化才走既有 delete+reinsert 事务。唯一例外是 `etag`：服务端可能在同字节响应上轮换 validator，所以本次带回 ETag 就采纳（`COALESCE(new, old)`），否则一直发一个服务端已经不认的 token，再也拿不到 304。
 - 镜像只在主站不可达时启用；镜像内容是中间代理，应只添加可信来源。
 

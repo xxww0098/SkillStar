@@ -53,7 +53,8 @@ export const initialProxyConfig: ProxyConfig = {
   port: 7897,
   username: null,
   password: null,
-  bypass: null,
+  bypass:
+    "localhost,127.0.0.1,::1,.local,.deepseek.com,.zhipuai.cn,.bigmodel.cn,.moonshot.cn,.minimax.io,.volces.com,.aliyuncs.com",
 };
 
 export const initialMirrorConfig: GitHubMirrorConfig = {

@@ -349,6 +349,7 @@ pub fn run() {
             commands::test_github_mirror,
             commands::get_marketplace_mirror_config,
             commands::save_marketplace_mirror_config,
+            commands::diagnose_network,
             commands::projects::register_project,
             commands::projects::list_projects,
             commands::projects::get_project_skills,

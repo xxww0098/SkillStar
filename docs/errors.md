@@ -2,6 +2,13 @@
 
 状态：active
 
+## 2026-09-01 - 跨 host 复用 ETag 造成假 304；SOCKS5 本地 DNS 被污染
+
+- Symptom: 启用 marketplace / GitHub 加速后，商店同步“成功”但内容停在旧版；GitHub clone 卡在 DNS 或连到错误 IP；镜像 Test 显示可达，实际 git/raw 失败。
+- Root cause: (1) `fetch_with_failover` 把上一 host 的 ETag 带到下一 host，加速源用自己的 validator 答 304。(2) `socks5://` 让 reqwest/git 在本地解析，GFW 污染把 `github.com` 指到黑洞。(3) `test_mirror` HEAD 加速源根，根路径 200 不代表 raw/git 代理可用。(4) `insteadOf` 只改写 `github.com`，raw/codeload/objects 仍直连。
+- Fix: `If-None-Match` 绑定 `source_host`；SOCKS5 出网改 `socks5h`；探测改为 GET 公开 raw README；GitHub 族匿名 URL 经健康加速源包装；连续失败熔断。见 [D-050](decisions.md#d-050对抗审查加固熔断排序socks5hgithub-族匿名改写etag-绑-host)。
+- Self-check: `cargo test -p skillstar-core --locked --lib -- github_health github_rewrite github_mirror proxy http_client github_http network_doctor`；`cargo test -p skillstar-marketplace --locked --lib -- etag_is_only_sent_to_the_host_that_issued_it enabled_github_mirrors_wrap_skills_sh`。
+
 ## 2026-08-31 - 安装必须是一条 vercel-skills 管线，harness 文件夹是 identity 别名
 
 - Symptom: rust-skills / impeccable / ui-ux-pro-max-skill 的轮播和 `--agent` 走 scan 列表、chooser、整仓 clone 三条机器，缺 `.dsh` 或只有 `.claude` 时 fail-closed 或链整仓。

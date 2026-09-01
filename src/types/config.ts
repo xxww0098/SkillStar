@@ -1,7 +1,7 @@
 //! config domain types. Split out of the old monolithic index for
 //! navigability; all re-exported by `index.ts`.
 
-export type ProxyType = "http" | "https" | "socks5";
+export type ProxyType = "http" | "https" | "socks5" | "socks5h";
 
 export interface ProxyConfig {
   enabled: boolean;
@@ -30,6 +30,22 @@ export interface GitHubMirrorConfig {
 export interface MarketplaceMirrorConfig {
   enabled: boolean;
   hosts: string[];
+}
+
+export interface NetworkHostCheck {
+  id: string;
+  label: string;
+  url: string;
+  status: "ok" | "fail" | "skip" | string;
+  latency_ms: number | null;
+  detail: string | null;
+}
+
+export interface NetworkDiagnosis {
+  proxy_enabled: boolean;
+  proxy_type: string | null;
+  checks: NetworkHostCheck[];
+  recommendations: string[];
 }
 
 export interface StorageOverview {

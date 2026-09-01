@@ -17,8 +17,9 @@ use crate::OfficialPublisher;
 /// [`get_skills_sh_leaderboard_with_meta`](super::get_skills_sh_leaderboard_with_meta).
 pub async fn get_official_publishers_with_meta(
     etag: Option<&str>,
+    etag_host: Option<&str>,
 ) -> Result<(Vec<OfficialPublisher>, FetchMeta)> {
-    let (html, meta) = fetch_with_failover("/official", etag).await?;
+    let (html, meta) = fetch_with_failover("/official", etag, etag_host).await?;
     if meta.payload_sha256.is_empty() {
         return Ok((Vec::new(), meta));
     }

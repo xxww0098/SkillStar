@@ -46,12 +46,13 @@ pub async fn get_publisher_repo_skills_with_meta(
     publisher_name: &str,
     repo_name: &str,
     etag: Option<&str>,
+    etag_host: Option<&str>,
 ) -> Result<(Vec<PublisherRepoSkill>, FetchMeta)> {
     let publisher_lower = publisher_name.to_lowercase();
     let repo_lower = repo_name.to_lowercase();
     let path = format!("/{}/{}", publisher_lower, repo_lower);
 
-    let (html, meta) = fetch_with_failover(&path, etag).await?;
+    let (html, meta) = fetch_with_failover(&path, etag, etag_host).await?;
     if meta.payload_sha256.is_empty() {
         return Ok((Vec::new(), meta));
     }
@@ -199,11 +200,12 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
 pub async fn get_publisher_repos_with_meta(
     publisher_name: &str,
     etag: Option<&str>,
+    etag_host: Option<&str>,
 ) -> Result<(Vec<PublisherRepo>, FetchMeta)> {
     let publisher_lower = publisher_name.to_lowercase();
 
     // Strategy 1: official page SSR payload (complete data)
-    if let Ok((html, official_meta)) = fetch_with_failover("/official", etag).await {
+    if let Ok((html, official_meta)) = fetch_with_failover("/official", etag, etag_host).await {
         // 304 Not Modified: the body is empty, so parsing yields zero repos.
         // Without this early return the empty result falls through to Strategy
         // 2, whose per-publisher page omits low-traffic repos — and because
@@ -227,7 +229,7 @@ pub async fn get_publisher_repos_with_meta(
 
     // Strategy 2: fall back to per-publisher page
     let path = format!("/{publisher_lower}");
-    let (html, meta) = fetch_with_failover(&path, etag).await?;
+    let (html, meta) = fetch_with_failover(&path, etag, etag_host).await?;
     if meta.payload_sha256.is_empty() {
         return Ok((Vec::new(), meta));
     }

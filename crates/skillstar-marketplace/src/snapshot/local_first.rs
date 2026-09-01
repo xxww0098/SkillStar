@@ -168,7 +168,7 @@ pub async fn get_leaderboard_local(category: &str) -> Result<LocalFirstResult<Ve
         }
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "leaderboard local read failed");
-            match remote::get_skills_sh_leaderboard_with_meta(category, None).await {
+            match remote::get_skills_sh_leaderboard_with_meta(category, None, None).await {
                 Ok((skills, meta)) => Ok(error_fallback(
                     apply_installed_state(skills).await,
                     &err,
@@ -254,7 +254,7 @@ pub async fn list_skills_local() -> Result<LocalFirstResult<Vec<Skill>>> {
             // reader in this file — try remote, and only then admit both halves
             // failed.
             warn!(target: "marketplace_snapshot", error = %err, "full marketplace local read failed");
-            match remote::get_skills_sh_leaderboard_with_meta("all", None).await {
+            match remote::get_skills_sh_leaderboard_with_meta("all", None, None).await {
                 Ok((skills, meta)) => Ok(error_fallback(
                     apply_installed_state(skills).await,
                     &err,
@@ -332,7 +332,7 @@ pub async fn search_local(query: &str, limit: Option<u32>) -> Result<LocalFirstR
         }
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "search local read failed");
-            match remote::search_skills_sh_with_meta(query, limit, None).await {
+            match remote::search_skills_sh_with_meta(query, limit, None, None).await {
                 Ok((result, meta)) => Ok(error_fallback(
                     apply_installed_state(result.skills).await,
                     &err,
@@ -400,7 +400,7 @@ pub async fn get_publishers_local() -> Result<LocalFirstResult<Vec<OfficialPubli
         }
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "publishers local read failed");
-            match remote::get_official_publishers_with_meta(None).await {
+            match remote::get_official_publishers_with_meta(None, None).await {
                 Ok((publishers, meta)) => Ok(error_fallback(publishers, &err, &meta)),
                 Err(remote_err) => Ok(LocalFirstResult {
                     data: Vec::new(),
@@ -467,7 +467,7 @@ pub async fn get_publisher_repos_local(
         }
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "publisher repos local read failed");
-            match remote::get_publisher_repos_with_meta(&publisher_name, None).await {
+            match remote::get_publisher_repos_with_meta(&publisher_name, None, None).await {
                 Ok((repos, meta)) => Ok(error_fallback(repos, &err, &meta)),
                 Err(remote_err) => Ok(LocalFirstResult {
                     data: Vec::new(),
@@ -532,8 +532,13 @@ pub async fn get_repo_skills_local(source: &str) -> Result<LocalFirstResult<Vec<
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "repo skills local read failed");
             let (publisher_name, repo_name) = split_source(&source);
-            match remote::get_publisher_repo_skills_with_meta(&publisher_name, &repo_name, None)
-                .await
+            match remote::get_publisher_repo_skills_with_meta(
+                &publisher_name,
+                &repo_name,
+                None,
+                None,
+            )
+            .await
             {
                 Ok((skills, meta)) => {
                     let data = skills
@@ -626,7 +631,9 @@ pub async fn get_skill_detail_local(
         }
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "detail local read failed");
-            match remote::fetch_marketplace_skill_details_with_meta(&source, &name, None).await {
+            match remote::fetch_marketplace_skill_details_with_meta(&source, &name, None, None)
+                .await
+            {
                 Ok((details, meta)) => Ok(error_fallback(details, &err, &meta)),
                 Err(remote_err) => Ok(LocalFirstResult {
                     data: empty_details(),

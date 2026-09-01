@@ -14,10 +14,12 @@
 
 ## GitHub Mirror
 
-- 配置写入 `~/.skillstar/config/github_mirror.json`，preset、校验、URL rewrite、connectivity test 和 circuit breaker 由 core config module 拥有。
-- mirror 只改写 `https://github.com/`，通过每条 Git 子进程的 `-c url.*.insteadOf` 注入；永不修改用户全局 `.gitconfig`。
-- transport error 可以回退 direct GitHub，并在进程内打开冷却 circuit，防止批量操作重复等待同一故障。
-- 保存新配置重置 circuit；test 命令只做可观察的连通性/延迟探测。
+- 配置写入 `~/.skillstar/config/github_mirror.json`，preset、校验、GitHub 族 URL rewrite、raw 文件连通性探测和 circuit breaker 由 core config module 拥有。健康状态写入 `~/.skillstar/state/github_mirror_health.json`（可重建，不是用户配置）。
+- 匿名公开流量改写 GitHub 族 origin：`github.com`、`raw.githubusercontent.com`、`codeload.github.com`、`objects.githubusercontent.com`、`gist.github.com`。通过每条 Git 子进程的 `-c url.*.insteadOf` 注入；永不修改用户全局 `.gitconfig`。`api.github.com` 只在**无 Authorization** 的 HTTP 路径上经加速源包装。
+- 连续两次传输失败打开 20 分钟熔断；候选链按最近延迟排序并跳过开路；全部开路则 fail-open。保存新配置重置 circuit；test 命令 GET 一个公开 raw 文件，而不是 HEAD 加速源根。
+- SOCKS5 出网使用 `socks5h`（远端 DNS）。新建代理配置带国内 LLM 默认 bypass，已有 `proxy.json` 不自动改写。
+- Settings 网络诊断探测代理、直连 GitHub、各加速源、skills.sh 和 MCP Registry。
+- Updater 插件直连 GitHub Releases 失败时，经匿名加速链读取 `latest.json` 只用于发现新版本；签名安装仍走插件，或提示用户打开 Releases 页面。永不从第三方加速源安装二进制。
 
 ## ACP
 

@@ -4,7 +4,7 @@
 //! proxy, cancellation, progress, and redaction share one boundary.
 
 use serde::Serialize;
-use skillstar_core::config::{github_mirror, proxy};
+use skillstar_core::config::{github_health, github_mirror, proxy};
 use skillstar_core::infra::path_env::command_with_path;
 use std::fmt;
 use std::io::Read;
@@ -387,7 +387,10 @@ fn execute_anonymous_with_mirror_fallback(
     // direct attempt is the final authority, not just the last resort.
     for mirror in &candidates {
         match execute_remote_git_once(repo_path, args, remote, session, Some(mirror)) {
-            Ok(output) => return Ok(output),
+            Ok(output) => {
+                github_health::record_success(mirror, None);
+                return Ok(output);
+            }
             Err(error)
                 if matches!(
                     error.code,
@@ -402,7 +405,9 @@ fn execute_anonymous_with_mirror_fallback(
             // `network` error, and `execute_remote_git` only retries with
             // credentials for auth-class codes — which is why a signed-in
             // user with mirrors enabled could never reach a private repo.
-            Err(_) => {}
+            Err(_) => {
+                github_health::record_failure(mirror);
+            }
         }
     }
 
@@ -666,7 +671,7 @@ fn proxy_url_from_config(config: &proxy::ProxyConfig) -> Option<String> {
     }
     let raw = format!(
         "{}://{}:{}",
-        config.proxy_type.as_scheme(),
+        config.proxy_type.as_transport_scheme(),
         config.host.trim(),
         config.port
     );

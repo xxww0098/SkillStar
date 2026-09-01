@@ -11,6 +11,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tracing::warn;
 
+use skillstar_core::config::{github_mirror, github_rewrite, marketplace_mirror};
+
 const MARKETPLACE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Primary marketplace host.
 const PRIMARY_HOST: &str = "https://skills.sh";
@@ -32,7 +34,26 @@ const PRIMARY_HOST: &str = "https://skills.sh";
 pub fn marketplace_hosts() -> Vec<String> {
     let mut hosts =
         vec![normalize_host(PRIMARY_HOST).unwrap_or_else(|| format!("{PRIMARY_HOST}/"))];
-    if let Ok(config) = skillstar_core::config::marketplace_mirror::load_config()
+
+    // When GitHub accelerators are enabled, wrap skills.sh through each
+    // healthy mirror so a DNS-poisoned or SNI-blocked primary does not take
+    // the store offline. User-configured marketplace mirrors still append
+    // after the wrap chain.
+    if github_mirror::load_config()
+        .map(|config| config.enabled)
+        .unwrap_or(false)
+    {
+        for mirror in github_mirror::candidate_mirror_urls() {
+            let Some(wrapped) = github_rewrite::wrap_skills_sh(&mirror) else {
+                continue;
+            };
+            if !hosts.iter().any(|existing| existing == &wrapped) {
+                hosts.push(wrapped);
+            }
+        }
+    }
+
+    if let Ok(config) = marketplace_mirror::load_config()
         && config.enabled
     {
         for raw in &config.hosts {
@@ -131,11 +152,14 @@ pub struct FetchMeta {
 /// Fetch `path` (e.g. `/hot`) from each candidate host in preference order,
 /// returning the first success together with content-addressing metadata.
 ///
-/// Requests carry an `If-None-Match` header when `etag` is given; a 304 then
-/// counts as a successful no-change fetch (`body` empty, `etag` preserved).
+/// Requests carry an `If-None-Match` header when `etag` is given **and** the
+/// current host matches `etag_host`. Sending a skills.sh ETag to a GitHub
+/// accelerator (or vice versa) produces a false 304 and pins a stale
+/// snapshot — see `docs/errors.md`.
 pub(crate) async fn fetch_with_failover(
     path: &str,
     etag: Option<&str>,
+    etag_host: Option<&str>,
 ) -> Result<(String, FetchMeta)> {
     let client = marketplace_client()?;
     let mut last_error: Option<anyhow::Error> = None;
@@ -148,8 +172,8 @@ pub(crate) async fn fetch_with_failover(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
             .header("Accept", "text/html,application/xhtml+xml,application/json");
-        if let Some(tag) = etag {
-            request = request.header(reqwest::header::IF_NONE_MATCH, tag);
+        if should_send_etag(etag, etag_host, &host) {
+            request = request.header(reqwest::header::IF_NONE_MATCH, etag.unwrap_or_default());
         }
 
         match request.send().await {
@@ -210,6 +234,23 @@ pub(crate) async fn fetch_with_failover(
     }
 
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All marketplace hosts failed for {path}")))
+}
+
+/// Send `If-None-Match` only when the stored ETag belongs to this host.
+pub(crate) fn should_send_etag(
+    etag: Option<&str>,
+    etag_host: Option<&str>,
+    current_host: &str,
+) -> bool {
+    let Some(etag) = etag.filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let _ = etag;
+    let Some(etag_host) = etag_host else {
+        return false;
+    };
+    normalize_host(etag_host).as_deref() == normalize_host(current_host).as_deref()
+        || etag_host.trim_end_matches('/') == current_host.trim_end_matches('/')
 }
 
 /// SHA-256 hex digest of a byte string.

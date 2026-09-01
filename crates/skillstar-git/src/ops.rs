@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use skillstar_core::config::github_mirror;
+use skillstar_core::config::{github_health, github_mirror};
 use skillstar_core::infra::path_env::command_with_path;
 use tracing::{debug, warn};
 
@@ -726,8 +726,12 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
     let mut last_error: Option<anyhow::Error> = None;
     for mirror in &candidates {
         match run_git_with_mirror(repo_path, args, Some(mirror)) {
-            Ok(output) => return Ok(output),
+            Ok(output) => {
+                github_health::record_success(mirror, None);
+                return Ok(output);
+            }
             Err(e) if github_mirror::is_mirror_transport_error(&e.to_string()) => {
+                github_health::record_failure(mirror);
                 last_error = Some(e);
             }
             Err(e) => return Err(e),

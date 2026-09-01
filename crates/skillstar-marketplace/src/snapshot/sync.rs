@@ -20,6 +20,7 @@ pub async fn sync_marketplace_scope(scope: &str) -> Result<()> {
 pub(crate) struct StoredScopeState {
     pub(crate) payload_sha256: Option<String>,
     pub(crate) etag: Option<String>,
+    pub(crate) source_host: Option<String>,
     pub(crate) degraded: bool,
 }
 
@@ -36,6 +37,7 @@ pub(crate) fn stored_scope_state(scope: &str) -> StoredScopeState {
         Ok(Some(state)) => StoredScopeState {
             payload_sha256: state.payload_sha256,
             etag: state.etag,
+            source_host: state.source_host,
             degraded: state.degraded_reason.is_some(),
         },
         Ok(None) => StoredScopeState::default(),
@@ -269,6 +271,7 @@ pub async fn sync_scope_leaderboard(category: &str) -> Result<()> {
     let (skills, meta) = match remote::get_skills_sh_leaderboard_with_meta(
         category,
         conditional_etag(&stored.etag, has_local_rows, stored.degraded),
+        stored.source_host.as_deref(),
     )
     .await
     {
@@ -333,11 +336,10 @@ pub async fn sync_scope_publishers() -> Result<()> {
     let stored = stored_scope_state(scope);
     let has_local_rows = scope_has_local_rows(scope);
 
-    let (publishers, meta) = match remote::get_official_publishers_with_meta(conditional_etag(
-        &stored.etag,
-        has_local_rows,
-        stored.degraded,
-    ))
+    let (publishers, meta) = match remote::get_official_publishers_with_meta(
+        conditional_etag(&stored.etag, has_local_rows, stored.degraded),
+        stored.source_host.as_deref(),
+    )
     .await
     {
         Ok(fetched) => fetched,
@@ -413,6 +415,7 @@ pub async fn sync_scope_publisher_repos(publisher_name: &str) -> Result<()> {
     let (repos, meta) = match remote::get_publisher_repos_with_meta(
         &publisher_name,
         conditional_etag(&stored.etag, has_local_rows, stored.degraded),
+        stored.source_host.as_deref(),
     )
     .await
     {
@@ -567,6 +570,7 @@ pub async fn sync_scope_repo_skills(source: &str) -> Result<()> {
         &publisher_name,
         &repo_name,
         conditional_etag(&stored.etag, has_local_rows, stored.degraded),
+        stored.source_host.as_deref(),
     )
     .await
     {
@@ -651,6 +655,7 @@ pub async fn sync_scope_skill_detail(source: &str, name: &str) -> Result<()> {
         &source,
         &name,
         conditional_etag(&stored.etag, has_local_rows, stored.degraded),
+        stored.source_host.as_deref(),
     )
     .await
     {
@@ -718,7 +723,7 @@ pub(crate) async fn seed_search_results(query: &str, limit: u32) -> Result<()> {
     let scope = search_seed_scope(trimmed);
 
     let synced_at = now_rfc3339();
-    let fetched = remote::search_skills_sh_with_meta(trimmed, limit, None)
+    let fetched = remote::search_skills_sh_with_meta(trimmed, limit, None, None)
         .await
         .with_context(|| {
             format!("Failed to seed marketplace search results for query '{trimmed}'")

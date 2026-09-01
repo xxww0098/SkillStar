@@ -75,7 +75,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - Settings 可通过 GitHub App 设备授权登录 `github.com`，无需粘贴 PAT；access/refresh token 只进入应用数据目录下的私有文件，不访问 macOS 钥匙串，代理、刷新、失效与登出状态均可见。该身份用于后续私有共享频道能力，所需 App 权限会在界面中解释。
 - 登录后可直接扫描、安装和更新当前身份有权访问的私有 `github.com` Skill 仓库，无需另外配置 `gh` 或全局 Git 凭据。认证只在单次 Git 操作期间提供；私有操作遵循 SkillStar 代理、支持取消，并且不会把 token 写入仓库 remote 或 Git 配置。
 - SSH 首次连接使用 host-key TOFU，在认证材料发送前完成信任检查。
-- 所有业务 HTTP 统一遵循 SkillStar proxy 配置；GitHub mirror 不修改用户全局 Git 配置。GitHub 加速与商店加速均支持候选链：主源不可达时按序尝试配置的镜像，全部失败才回退直连，且只用于公开仓库。
+- 所有业务 HTTP 统一遵循 SkillStar proxy 配置（SOCKS5 出网走远端 DNS）；GitHub mirror 不修改用户全局 Git 配置。GitHub 加速与商店加速走健康排序的候选链：失败的加速源会熔断，公开 GitHub 族流量与 skills.sh 可经加速源包装，全部失败才回退直连，且只用于公开仓库。Settings 提供网络诊断；应用更新发现可走加速源，签名安装仍直连 GitHub Releases。
 - 测试和生成工具有专用临时 home，避免触碰真实 Agent 配置。
 
 ## 安装

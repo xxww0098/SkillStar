@@ -42,7 +42,7 @@ impl ProxyFingerprint {
     fn from_config(config: &proxy::ProxyConfig) -> Self {
         Self {
             enabled: config.enabled && !config.host.trim().is_empty(),
-            scheme: config.proxy_type.as_scheme().to_string(),
+            scheme: config.proxy_type.as_transport_scheme().to_string(),
             host: config.host.trim().to_string(),
             port: config.port,
             username: config
@@ -78,7 +78,9 @@ fn current_proxy_fingerprint() -> ProxyFingerprint {
 fn build_client(fingerprint: &ProxyFingerprint, timeout: Duration) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .timeout(timeout)
-        .connect_timeout(Duration::from_secs(10));
+        .connect_timeout(Duration::from_secs(10))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(4);
 
     if fingerprint.enabled {
         let proxy_url = format!(
@@ -215,6 +217,32 @@ mod tests {
                 "bypass {raw:?} should still yield a usable client"
             );
         }
+    }
+
+    #[test]
+    fn fingerprint_uses_socks5h_transport_for_both_socks_types() {
+        let socks5 = ProxyFingerprint::from_config(&ProxyConfig {
+            enabled: true,
+            proxy_type: ProxyType::Socks5,
+            host: "127.0.0.1".into(),
+            port: 1080,
+            username: None,
+            password: None,
+            bypass: None,
+        });
+        let socks5h = ProxyFingerprint::from_config(&ProxyConfig {
+            enabled: true,
+            proxy_type: ProxyType::Socks5h,
+            host: "127.0.0.1".into(),
+            port: 1080,
+            username: None,
+            password: None,
+            bypass: None,
+        });
+        assert_eq!(socks5.scheme, "socks5h");
+        assert_eq!(socks5h.scheme, "socks5h");
+        assert_eq!(socks5, socks5h);
+        assert!(build_client(&socks5, Duration::from_secs(5)).is_ok());
     }
 
     #[test]

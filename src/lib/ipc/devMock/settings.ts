@@ -67,7 +67,8 @@ export const SETTINGS_HANDLERS: DevMockHandlers = {
     port: 7890,
     username: null,
     password: null,
-    bypass: null,
+    bypass:
+      "localhost,127.0.0.1,::1,.local,.deepseek.com,.zhipuai.cn,.bigmodel.cn,.moonshot.cn,.minimax.io,.volces.com,.aliyuncs.com",
   }),
   get_github_mirror_config: () => ({
     enabled: false,
@@ -97,6 +98,21 @@ export const SETTINGS_HANDLERS: DevMockHandlers = {
     void config;
     return undefined;
   },
+  diagnose_network: () => ({
+    proxy_enabled: false,
+    proxy_type: null,
+    checks: [
+      {
+        id: "github",
+        label: "GitHub",
+        url: "https://github.com/",
+        status: "ok",
+        latency_ms: 120,
+        detail: "HTTP 200",
+      },
+    ],
+    recommendations: [],
+  }),
   get_acp_config: () => ({ ...getAcpConfigState() }),
   save_acp_config: (args) => {
     const config = args.config as AcpConfigState;

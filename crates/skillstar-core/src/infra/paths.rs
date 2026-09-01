@@ -177,6 +177,11 @@ pub fn patrol_state_path() -> PathBuf {
     state_dir().join("patrol.json")
 }
 
+/// `state/github_mirror_health.json` — GitHub accelerator circuit-breaker state.
+pub fn github_mirror_health_path() -> PathBuf {
+    state_dir().join("github_mirror_health.json")
+}
+
 /// `state/github_auth.json` — GitHub access/refresh credentials.
 pub fn github_auth_path() -> PathBuf {
     state_dir().join("github_auth.json")
