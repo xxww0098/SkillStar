@@ -174,6 +174,12 @@ skillstar gui
 ```bash
 git clone https://github.com/xxww0098/SkillStar.git
 cd SkillStar
+./dev.sh
+```
+
+`./dev.sh` 一步完成：`git pull --ff-only` 拉取最新代码 → `bun install` 同步依赖 → 缺失时安装 git hooks → 以 `bun tauri dev` 启动。手动等价流程：
+
+```bash
 bun install
 bun run tauri dev
 ```
