@@ -55,6 +55,14 @@
 - 分级实现见 `UsageError::{http_status, transport, is_transient}`、`request::RequestError::{is_auth_error, is_transient}` 与 `SubscriptionUsage::from_refresh_error`。
 - 没有 token 交换腿的 fetcher（`anthropic`）在额度请求上复用同一张表的另一半：`Resp::is_auth_error()` 判 401，其余非 2xx 交给 `UsageError::http_status`，传输失败交给 `UsageError::transport`。不允许再写第二套状态码匹配。
 
+### Ollama Cloud
+
+- 本机 `localhost:11434` 没有额度。这张卡读的是 ollama.com Cloud，密钥来自 [Settings → Keys](https://ollama.com/settings/keys)。
+- `GET https://ollama.com/api/usage`，`Authorization: Bearer <key>`。公开的 chat/generate 文档不暴露账号额度；该路径无密钥返回 401 `invalid credentials`，有密钥时社区已对过真实账号：`limits.session.usage` / `limits.weekly.usage` 是 0–1 已消耗比例。
+- API 不返回重置时间。5h 窗口按 Unix epoch 对齐的 5 小时网格本地推算；周窗口是每周一 00:00 UTC。解析失败按窗口降级，两个窗口都没有才算账号失败。
+- 401 走 `BalanceSpec.auth_error_hint`（与 MiniMax Token Plan Key 同一条路径）：卡片显示「请填 Cloud API Key」而不是通用「重新授权」——API Key 没有 reauth 流。
+- 卡片走 `DefaultUsageBody`（百分比 + 重置），不进 `bodyRegistry`。
+
 ## 本地工具账号切换：CLI 软链与 IDE 适配器
 
 切号的本质是「让目标应用下次读凭证时读到另一个账号的凭证」。SkillStar **不持有凭证**，CLI

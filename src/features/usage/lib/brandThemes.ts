@@ -41,6 +41,7 @@ const THEMES: Record<string, BrandTheme> = {
   glm: { header: ["#3B82F6", "#1D4ED8"], bar: ["#60A5FA", "#2563EB"], fg: "#ffffff", glow: "#3B82F6" },
   kimi: { header: ["#23201A", "#F5B400"], bar: ["#F5B400", "#FF8A00"], fg: "#ffffff", glow: "#F5B400" },
   minimax: { header: ["#9333EA", "#C026D3"], bar: ["#9333EA", "#A855F7"], fg: "#ffffff", glow: "#9333EA" },
+  ollama: { header: ["#1A1A1A", "#000000"], bar: ["#94A3B8", "#64748B"], fg: "#ffffff", glow: "#94A3B8" },
 };
 
 function normalizeHex(hex: string): string {

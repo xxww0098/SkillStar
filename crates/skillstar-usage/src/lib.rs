@@ -2,7 +2,7 @@
 //!
 //! Provides a unified data model and storage for tracking subscriptions across
 //! AI coding plan providers (Cursor, Codex, Antigravity, Grok, DeepSeek, GLM,
-//! Kimi, MiniMax, plus cookie/manual-entry providers).
+//! Kimi, MiniMax, Ollama Cloud, plus cookie/manual-entry providers).
 //!
 //! The crate is organized into:
 //! - [`subscription`] — Domain types (Subscription, SubscriptionUsage, UsageWindow, ...)

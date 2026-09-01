@@ -8,6 +8,7 @@ import {
   KimiMono,
   type LobeIconComponent,
   MinimaxColor,
+  OllamaMono,
   ZhipuColor,
 } from "@/components/ui/icons/lobe";
 import { LobeIcon } from "@/components/ui/icons/LobeIcon";
@@ -34,6 +35,7 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   glm: ZhipuColor,
   kimi: KimiMono,
   minimax: MinimaxColor,
+  ollama: OllamaMono,
 };
 
 /** Whether a brand-authentic icon (not the letter fallback) exists for this id. */
