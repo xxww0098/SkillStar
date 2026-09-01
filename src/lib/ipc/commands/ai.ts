@@ -1,9 +1,4 @@
-import type { AiConfig, AiPickResponse } from "../../../types";
-
-interface SkillMetaInput {
-  name: string;
-  description: string;
-}
+import type { AiConfig } from "../../../types";
 
 /** AI provider config, one-shot + streaming AI operations. */
 export interface AiCommands {
@@ -16,8 +11,4 @@ export interface AiCommands {
     result: string;
   };
   ai_test_connection: { args: Record<string, never>; result: number };
-  ai_pick_skills: {
-    args: { prompt: string; skills: SkillMetaInput[] };
-    result: AiPickResponse;
-  };
 }

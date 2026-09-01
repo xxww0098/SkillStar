@@ -1,6 +1,6 @@
 //! AI command module — split into domain-specific submodules.
 //!
-//! - `summarize`: summarization, AI connection test, skill pick
+//! - `summarize`: summarization and AI connection test
 
 pub mod summarize;
 

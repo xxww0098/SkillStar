@@ -5,12 +5,6 @@
 //! with everything re-exported from the parent `ai_provider` module.
 
 use super::*;
-// Internal `pub(super)` skill-pick helpers, accessible to this test subtree
-// (a descendant of `ai_provider`) but not re-exportable from `mod.rs`.
-use super::skill_pick::{
-    RankedSkillPickCandidate, fallback_skill_pick, parse_skill_pick_response,
-    shortlist_skill_pick_candidates,
-};
 
 mod part1;
 mod part2;
