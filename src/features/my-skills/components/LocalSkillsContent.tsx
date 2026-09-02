@@ -17,7 +17,6 @@ import type { RepoNewSkill, Skill, SkillUpdateRunReport, SortOption } from "../.
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
 import { hasPendingUpdate } from "../lib/pendingUpdates";
-import { AiPickSkillsModal } from "./AiPickSkillsModal";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
 import { ExportShareCodeModal } from "./ExportShareCodeModal";
@@ -98,7 +97,6 @@ export function LocalSkillsContent({
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importBundleOpen, setImportBundleOpen] = useState(false);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
-  const [aiPickModalOpen, setAiPickModalOpen] = useState(false);
   const [brokenCount, setBrokenCount] = useState(0);
   const [sourceFilter, setSourceFilter] = useState<"all" | "hub" | "local">("all");
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
@@ -748,7 +746,6 @@ export function LocalSkillsContent({
           onImport={() => setImportModalOpen(true)}
           onRefresh={() => refresh(false, true)}
           isRefreshing={loading}
-          onAiPick={() => setAiPickModalOpen(true)}
           sourceFilter={sourceFilter}
           onSourceFilterChange={(f) => {
             setSourceFilter(f);
@@ -959,15 +956,6 @@ export function LocalSkillsContent({
           // The user dismisses via the footer button (→ onClose). Refresh in
           // the background so the now-published skill reflects its new state.
           refresh(false, true);
-        }}
-      />
-
-      <AiPickSkillsModal
-        open={aiPickModalOpen}
-        onClose={() => setAiPickModalOpen(false)}
-        skills={skills}
-        onResult={(names) => {
-          setSelectedSkillNames(new Set(names));
         }}
       />
     </>

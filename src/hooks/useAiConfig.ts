@@ -19,7 +19,7 @@ const DEFAULT_CONFIG: AiConfig = {
 // ── Module-level config singleton ───────────────────────────────────
 //
 // Deduplicates concurrent `get_ai_config` IPC calls from multiple hooks
-// (e.g. 2× useAiStream + AiPickSkillsModal mounting at the same time).
+// (e.g. two `useAiStream` instances mounting at the same time).
 // Cached for 3 seconds — long enough to cover a single render cycle,
 // short enough to always reflect saves within the same session.
 

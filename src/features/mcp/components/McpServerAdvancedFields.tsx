@@ -1,6 +1,8 @@
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
+import { InsetPanel } from "../../../components/ui/InsetPanel";
+import { Textarea } from "../../../components/ui/textarea";
 import { cn } from "../../../lib/utils";
 import type { McpToolId } from "../../../types";
 import { MCP_TOOL_LABELS, type McpOptionalField, splitTargetsByFieldSupport } from "../lib/toolRegistry";
@@ -21,8 +23,7 @@ import { MCP_TOOL_LABELS, type McpOptionalField, splitTargetsByFieldSupport } fr
  * support matrix the user then has to cross-reference.
  */
 
-const textareaCls =
-  "w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-mono text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20";
+const textareaCls = "min-h-16 font-mono text-xs";
 
 function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
@@ -97,7 +98,7 @@ export function McpServerAdvancedFields({
   const { t } = useTranslation();
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/60 bg-background/30 p-3">
+    <InsetPanel className="space-y-3 bg-background/30 p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium text-foreground">{t("mcp.autoApproveAll")}</p>
@@ -129,7 +130,7 @@ export function McpServerAdvancedFields({
       ) : (
         <div>
           <FieldLabel hint={t("mcp.toolListHint")}>{t("mcp.autoApproveTools")}</FieldLabel>
-          <textarea
+          <Textarea
             value={autoApproveText}
             onChange={(event) => onAutoApproveTextChange(event.target.value)}
             rows={2}
@@ -142,7 +143,7 @@ export function McpServerAdvancedFields({
 
       <div>
         <FieldLabel hint={t("mcp.toolListHint")}>{t("mcp.disabledTools")}</FieldLabel>
-        <textarea
+        <Textarea
           value={disabledToolsText}
           onChange={(event) => onDisabledToolsTextChange(event.target.value)}
           rows={2}
@@ -163,6 +164,6 @@ export function McpServerAdvancedFields({
         />
         <SupportNote field="timeout" enabledToolIds={enabledToolIds} />
       </div>
-    </div>
+    </InsetPanel>
   );
 }

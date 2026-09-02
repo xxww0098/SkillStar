@@ -67,6 +67,20 @@
 - **「本机缺工具链」与「这个形态根本表达不出来」是两种失败。** 前者（`npx` 没装）仍然预填草稿——条目本身是对的，装上运行时就能起来，给一张空表单帮不了任何人；阻塞原因由安装计划陈述。后者（mcpb、无 hint 的 cargo、没有 runner 的包）绝不作为预填来源，否则会拼出一条本身就是错的命令行。
 - 选中的形态写进 `McpServerEntry::runtime_kind`，与 store 的来源指纹是同一套词汇。
 
+## 手动添加表单的传输标签
+
+内部 store 仍是三个值：`stdio` / `http` / `sse`。`http` **就是** Streamable HTTP，对应 `2026-07-28` 无状态协议（无 `initialize` 握手、无 `Mcp-Session-Id`，每次请求自带 `MCP-Protocol-Version`）。
+
+表单不得把这三个 token 原样画给用户：
+
+| store 值 | 展示名 | 说明 |
+| --- | --- | --- |
+| `http` | Streamable HTTP | 推荐远端。URL 占位符是 `/mcp`，不是 `/sse`。 |
+| `stdio` | 本地进程 | 本机启动命令。 |
+| `sse` | SSE（已弃用） | 只在发布者没有 streamable HTTP 端点时使用。 |
+
+健康检查把 `epoch: modern` 展示成「无状态 · 2026-07-28」，把 `legacy` 展示成「会话握手」，不要把内部词 modern/legacy 暴露给用户。`tools/list` 带来的 `ttlMs` 一并显示。
+
 ## 来源指纹
 
 安装时记录，用于更新检测、弃用提示和精确的「已安装」判定——不再依赖 server 名字字符串：
@@ -110,6 +124,7 @@
 - legacy：`initialize` → `notifications/initialized`。
 - 两条路都收敛到 `tools/list`，它是真正的存活证明，也是 `ttlMs` / `cacheScope` 的来源。
 - 纪元结论按**进程（stdio）/ origin（HTTP）** 缓存；探测失败即驱逐，被升级或临时故障的 server 会重新判定而不是钉死在旧结论上。
+- 前端把 `modern` 读成「无状态 · 2026-07-28」，把 `legacy` 读成「会话握手 · ≤2025-11-25」；内部枚举值不进界面文案。`ttlMs` 有值就显示。
 - **`401 + WWW-Authenticate` 不是失败**，它是 server 正确地要求授权，有独立状态 `authorization-required`，前端应据此发起 OAuth 而不是画红叉。
 - stdio launcher 不在 `PATH` 上也有独立状态 `runtime-missing`：「装 Node」和「这个 server 坏了」是两条完全不同的指令。
 - `McpProbeStatus` 是 kebab-case 上线的（`#[serde(rename_all = "kebab-case")]`），Rust 变体名是驼峰。前端一律以 `src/types/generated/McpProbeStatus.ts` 的字面量为准，dev mock 也必须——写成驼峰不会报错，只会让这个状态在浏览器 dev 模式下静默渲染不出来。

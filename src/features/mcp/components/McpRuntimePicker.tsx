@@ -90,6 +90,12 @@ export function McpRuntimePicker({ selection, selectedId, onSelect, disabled }: 
 
             <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{candidateTitle(candidate)}</p>
 
+            {candidate.shape === "remoteStreamableHttp" ? (
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                {t("mcp.shapeHint_remoteStreamableHttp")}
+              </p>
+            ) : null}
+
             {candidate.runtimeCommand ? (
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {t("mcp.runtimeLauncher", { command: candidate.runtimeCommand })}

@@ -9,7 +9,6 @@ import {
   Loader2,
   RefreshCw,
   Search,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -50,8 +49,6 @@ interface ToolbarProps {
   pendingUpdateCount?: number;
   /** Hide the "Stars" sort option */
   hideStarsSort?: boolean;
-  /** Optional callback for AI pick skills button */
-  onAiPick?: () => void;
   /** Callback to update all pending skills */
   onUpdateAll?: () => void;
   /** Whether batch update-all is in progress */
@@ -120,7 +117,6 @@ export function Toolbar({
   countText,
   pendingUpdateCount,
   hideStarsSort,
-  onAiPick,
   onAiSearch,
   aiSearching,
   titleNode,
@@ -305,17 +301,6 @@ export function Toolbar({
   const filtersSlot = (
     <>
       {filtersLead}
-      {/* AI Pick Skills */}
-      {onAiPick && (
-        <button
-          onClick={onAiPick}
-          className="flex items-center h-8 px-3 rounded-lg border border-ai-border/60 bg-ai-bg-hover/40 text-xs font-semibold text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover/80 hover:border-ai-border transition duration-200 cursor-pointer shadow-[0_0_10px_var(--color-ai-shadow)] gap-1.5 whitespace-nowrap shrink-0 focus-ring"
-        >
-          <Sparkles className="w-3.5 h-3.5 shrink-0 text-ai-text" />
-          {t("toolbar.aiPick")}
-        </button>
-      )}
-
       {/* Agent filter */}
       {enabledProfiles.length > 0 && onAgentFilterChange && (
         <AgentFilterPill items={enabledProfiles} value={agentFilter ?? null} onChange={onAgentFilterChange} />

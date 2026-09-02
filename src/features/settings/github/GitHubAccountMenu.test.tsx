@@ -34,11 +34,18 @@ describe("GitHubAccountMenu", () => {
 
     openPanel();
     expect(await screen.findByText("通过 GitHub 登录")).toBeInTheDocument();
+    expect(screen.getByText("私有 GitHub 技能")).toBeInTheDocument();
     expect(screen.getByText(/Administration: write/)).toBeInTheDocument();
-    expect(screen.getByText(/Contents: write/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "开始登录" }));
+    fireEvent.click(screen.getByRole("button", { name: "用 GitHub 继续" }));
     expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
     expect(screen.getByText("等待你在 GitHub 完成授权…")).toBeInTheDocument();
+    expect(screen.getByText("等待 GitHub 授权…")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText("等待 GitHub 授权…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "等待 GitHub 授权…" }));
+    expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
   });
 
   it("shows the signed-in identity and keeps entry and panel on one state", async () => {
@@ -83,6 +90,7 @@ describe("GitHubAccountMenu", () => {
 
     fireEvent(window, new CustomEvent(GITHUB_ACCOUNT_MENU_EVENT));
     expect(await screen.findByText("GitHub 登录已失效")).toBeInTheDocument();
+    expect(screen.getByText("登录已失效")).toBeInTheDocument();
   });
 
   it("reports a proxy failure and retries", async () => {

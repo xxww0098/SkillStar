@@ -51,7 +51,7 @@ impl GitHubAuthError {
     pub fn credential_store() -> Self {
         Self::new(
             GitHubAuthErrorCode::CredentialStore,
-            "Unable to access the system credential store",
+            "Unable to read or write GitHub credentials on this device",
         )
     }
 }

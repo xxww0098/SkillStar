@@ -1,6 +1,7 @@
 import { AlertTriangle, Check, CircleSlash, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { InsetPanel } from "../../../components/ui/InsetPanel";
 import { cn } from "../../../lib/utils";
 import { isMcpToolId, type McpToolId } from "../../../types";
 import { MCP_TOOL_LABELS } from "../lib/toolRegistry";
@@ -59,7 +60,7 @@ export function McpSyncResultsPanel({
   const { consistency } = report;
 
   return (
-    <div className={cn("space-y-2.5 rounded-xl border border-border/60 bg-background/40 p-3.5", className)}>
+    <InsetPanel className={className}>
       <div className="flex flex-wrap items-center gap-2">
         <p
           className={cn(
@@ -149,6 +150,6 @@ export function McpSyncResultsPanel({
           );
         })}
       </ul>
-    </div>
+    </InsetPanel>
   );
 }

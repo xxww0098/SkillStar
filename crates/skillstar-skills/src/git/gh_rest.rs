@@ -40,7 +40,7 @@ pub enum GhRestErrorCode {
     NotAuthenticated,
     /// Signed in, but this account (or the App installation) lacks access.
     Unauthorized,
-    /// The system credential store could not be read.
+    /// SkillStar's encrypted GitHub credential file could not be read.
     CredentialUnavailable,
     /// GitHub throttled the request.
     RateLimited,

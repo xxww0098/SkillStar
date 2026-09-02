@@ -165,7 +165,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "add_custom_agent_profile",
   "adopt_local_folder",
   "ai_extract_search_keywords",
-  "ai_pick_skills",
   "ai_search_marketplace_local",
   "ai_summarize_skill",
   "ai_summarize_skill_stream",

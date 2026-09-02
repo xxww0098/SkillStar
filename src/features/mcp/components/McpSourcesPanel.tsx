@@ -3,7 +3,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
+import { InsetPanel } from "../../../components/ui/InsetPanel";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
+import { StatusChip, type StatusChipTone } from "../../../components/ui/StatusChip";
 import { Switch } from "../../../components/ui/switch";
 import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
@@ -35,12 +37,12 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-const HEALTH_TONE: Record<McpSourceStatus["health"], string> = {
-  fresh: "bg-emerald-500/12 text-emerald-600 ring-emerald-500/25 dark:text-emerald-400",
-  degraded: "bg-amber-500/12 text-amber-600 ring-amber-500/25 dark:text-amber-400",
-  stale: "bg-muted text-muted-foreground ring-border/60",
-  error: "bg-destructive/12 text-destructive ring-destructive/25",
-  never: "bg-muted text-muted-foreground ring-border/60",
+const HEALTH_TONE: Record<McpSourceStatus["health"], StatusChipTone> = {
+  fresh: "success",
+  degraded: "warning",
+  stale: "muted",
+  error: "danger",
+  never: "muted",
 };
 
 function AddSourceForm({ onAdd, busy }: { onAdd: (source: McpCustomSource) => Promise<unknown>; busy: boolean }) {
@@ -93,7 +95,7 @@ function AddSourceForm({ onAdd, busy }: { onAdd: (source: McpCustomSource) => Pr
   }
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-border/60 bg-background/40 p-3">
+    <InsetPanel className="p-3">
       <div className="flex gap-2">
         {(["registry", "localDirectory"] as const).map((option) => (
           <button
@@ -132,7 +134,7 @@ function AddSourceForm({ onAdd, busy }: { onAdd: (source: McpCustomSource) => Pr
           {t("common.add")}
         </Button>
       </div>
-    </div>
+    </InsetPanel>
   );
 }
 
@@ -187,14 +189,9 @@ export function McpSourcesPanel({ className }: McpSourcesPanelProps) {
                   </span>
                 ) : null}
                 {status ? (
-                  <span
-                    className={cn(
-                      "inline-flex h-4 items-center rounded px-1.5 text-micro font-medium ring-1 ring-inset",
-                      HEALTH_TONE[status.health],
-                    )}
-                  >
+                  <StatusChip size="sm" tone={HEALTH_TONE[status.health]}>
                     {t(`mcp.sourceHealth_${status.health}`)}
-                  </span>
+                  </StatusChip>
                 ) : null}
                 <div className="ml-auto flex items-center gap-2">
                   <Switch

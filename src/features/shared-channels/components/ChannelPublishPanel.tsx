@@ -3,6 +3,7 @@ import { CheckCircle2, ExternalLink, GitCommitHorizontal, Loader2, Rocket, ScanS
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { Textarea } from "../../../components/ui/textarea";
 import type { ChannelPublishPreview, ChannelPublishResult, SharedChannelDescriptor } from "../../../types";
 import type { GitOperationProgress } from "../../../types/github";
 import { cancelSharedChannelPublish, previewSharedChannelPublish, publishSharedChannel } from "../api/channels";
@@ -180,12 +181,11 @@ export function ChannelPublishPanel({ channel }: Props) {
         </label>
         <label className="block space-y-1.5 text-xs font-medium sm:row-span-2">
           <span>{t("sharedChannels.releaseNotes")}</span>
-          <textarea
+          <Textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             maxLength={20_000}
             rows={4}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             placeholder={t("sharedChannels.releaseNotesPlaceholder")}
           />
         </label>

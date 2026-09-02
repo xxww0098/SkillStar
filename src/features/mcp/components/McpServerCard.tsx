@@ -64,7 +64,11 @@ export function McpServerCard({ server, agentTargets, updateVersion, onOpen, onT
             <TransportIcon
               className={cn(
                 "h-4 w-4",
-                isRemote ? "text-sky-400 paper:text-sky-600" : "text-emerald-400 paper:text-emerald-600",
+                server.transport === "sse"
+                  ? "text-amber-400 paper:text-amber-700"
+                  : isRemote
+                    ? "text-sky-400 paper:text-sky-600"
+                    : "text-emerald-400 paper:text-emerald-600",
               )}
             />
           </div>

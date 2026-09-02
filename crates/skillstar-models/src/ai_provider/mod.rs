@@ -7,7 +7,6 @@ pub mod constants;
 pub mod http_client;
 pub mod openai_client;
 pub mod resolve;
-pub mod skill_pick;
 
 pub use config::{AiConfig, AiProviderRef, ApiFormat, FormatPreset};
 
@@ -16,10 +15,7 @@ pub use config_io::*;
 // Provider resolution + runtime-config helpers + language display names.
 pub use resolve::*;
 
-use constants::{
-    AI_MAX_TOKENS, MARKETPLACE_SEARCH_MAX_TOKENS, SKILL_PICK_MAX_RECOMMENDATIONS,
-    SUMMARY_MAX_TOKENS,
-};
+use constants::{AI_MAX_TOKENS, MARKETPLACE_SEARCH_MAX_TOKENS, SUMMARY_MAX_TOKENS};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatCompletionUsage {
@@ -37,21 +33,11 @@ pub struct ChatCompletionOutput {
 // ── Prompts ─────────────────────────────────────────────────────────
 
 const SUMMARY_PROMPT: &str = include_str!("../../../../src-tauri/prompts/ai/summary.md");
-const PICK_SKILLS_PROMPT: &str = include_str!("../../../../src-tauri/prompts/ai/pick_skills.md");
 const MARKETPLACE_SEARCH_PROMPT: &str =
     include_str!("../../../../src-tauri/prompts/ai/marketplace_search.md");
 
 fn build_summary_system_prompt(lang: &str) -> String {
     SUMMARY_PROMPT.replace("{lang}", lang)
-}
-
-pub fn build_skill_pick_system_prompt(skill_catalog: &str) -> String {
-    PICK_SKILLS_PROMPT
-        .replace("{skill_catalog}", skill_catalog)
-        .replace(
-            "{max_recommendations}",
-            &SKILL_PICK_MAX_RECOMMENDATIONS.to_string(),
-        )
 }
 
 // ── OpenAI-Compatible Chat Completion (via async-openai) ─────────────
@@ -501,31 +487,6 @@ pub async fn chat_completion_capped_with_usage(
     }
 }
 
-/// Chat completion with temperature and seed overrides for deterministic output.
-pub(super) async fn chat_completion_deterministic(
-    config: &AiConfig,
-    system_prompt: &str,
-    user_content: &str,
-    seed: Option<u64>,
-    max_tokens: u32,
-) -> Result<String> {
-    if is_anthropic_format(config) {
-        // Anthropic API does not support temperature/seed overrides in this wrapper,
-        // but temperature 0 is roughly achieved by using the same prompt.
-        anthropic_messages_completion(config, system_prompt, user_content, max_tokens).await
-    } else {
-        openai_chat_completion_with_opts(
-            config,
-            system_prompt,
-            user_content,
-            0.0,
-            seed,
-            Some(max_tokens),
-        )
-        .await
-    }
-}
-
 /// Generic streaming chat completion dispatcher — routes to OpenAI or Anthropic.
 async fn chat_completion_stream<F>(
     config: &AiConfig,
@@ -633,10 +594,6 @@ pub async fn extract_search_keywords(config: &AiConfig, user_query: &str) -> Res
 
     Ok(deduped)
 }
-
-// ── Skill Pick (delegated to skill_pick.rs) ─────────────────────────
-
-pub use skill_pick::{SkillPickCandidate, SkillPickRecommendation, SkillPickResponse, pick_skills};
 
 /// Test API connectivity with a minimal request.
 pub async fn test_connection(config: &AiConfig) -> Result<u64> {

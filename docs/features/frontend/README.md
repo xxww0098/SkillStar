@@ -15,6 +15,14 @@
 - 服务端状态使用 TanStack Query；本地组合状态使用 React hooks。没有经过决策记录，不引入另一个全局状态库。
 - 真正跨页的 deploy/detail/navigation 状态由 `App.tsx` 统一持有。
 
+## 桌面性能
+
+- Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
+- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。发布者详情是钻入页，不保活。
+- 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
+- MCP 目录搜索对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
+- `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
+
 `scripts/internal/check_feature_imports.sh` 阻止新增跨 feature 深层导入，但允许从目标 feature 根 `index.ts` 导入。存量基线只能减少；跨域协作优先由 page 组合，确需依赖时只消费目标 feature 的公开入口；若组件确实无业务语义且通用，应先提升到 shared/lib，再改调用方。
 
 ## Tauri 事件与流式 UX
@@ -44,6 +52,8 @@
 
 - 样式使用 Tailwind utilities；不新增 CSS Modules 或 styled-components。
 - 优先复用 `src/components/ui/`。需要焦点管理、Esc、portal 的组件使用 Radix primitive。
+- 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。嵌套面板用 `InsetPanel`，不要用会 hover 抬升的 `Card`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
+- 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。 Models 的 `ProviderConfigPrimitives` 是该域自己的表单语言，不并进通用 `Input`/`Textarea`。
 - 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。
 - Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。侧栏图标负责找路。
 - 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。
@@ -73,7 +83,7 @@
 - destructive action 使用明确确认组件，不调用浏览器 `confirm()`。
 - 后端解析的路径直接展示；不要在浏览器重建数据目录。可编辑 Agent 路径显示平台分隔符，持久化的 `project_skills_rel` 仍规范为 `/`。
 - tray 与 Settings 的后台运行开关消费同一状态和事件；动作标签必须反映 Start/Stop 当前状态。
-- GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态，点击打开设备授权面板。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
+- GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态（含「等待授权」和「登录已失效」），点击打开设备授权面板。关闭面板不取消进行中的设备流。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
 - Marketplace、Models、Usage 等跨页面 request 使用带 nonce 的显式导航事件，避免用不可观察的模块变量传递。
 
 ## 生成类型

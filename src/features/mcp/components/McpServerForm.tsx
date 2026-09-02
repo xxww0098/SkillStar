@@ -2,12 +2,13 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
-import { cn } from "../../../lib/utils";
+import { Textarea } from "../../../components/ui/textarea";
 import type { McpServerEntry, McpToolId } from "../../../types";
 import { kvToText, parseKv, parseList } from "../lib/kv";
 import { enabledMcpToolIds } from "../lib/toolRegistry";
 import { McpServerAdvancedFields } from "./McpServerAdvancedFields";
 import { McpToolTargetPicker } from "./McpToolTargetPicker";
+import { McpTransportPicker } from "./McpTransportPicker";
 
 export interface McpServerFormValue {
   name: string;
@@ -41,8 +42,7 @@ interface McpServerFormProps {
   noteForTool?: (toolId: McpToolId) => string | null;
 }
 
-const textareaCls =
-  "w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-mono text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20";
+const textareaCls = "min-h-16 font-mono text-xs";
 
 function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
@@ -64,6 +64,9 @@ function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: stri
  * - The approval / exposure / timeout block lives in
  *   `./McpServerAdvancedFields`, which says per selected target whether the
  *   field will actually be written.
+ * - Transport labels live in `./McpTransportPicker`. The stored token `http`
+ *   means Streamable HTTP (2026-07-28, stateless); showing the raw token next
+ *   to `sse` hid that from anyone filling this form by hand.
  */
 export function McpServerForm({
   initial,
@@ -157,46 +160,22 @@ export function McpServerForm({
         />
       </div>
 
-      <div>
-        <FieldLabel>{t("mcp.fieldTransport")}</FieldLabel>
-        <div className="flex gap-2">
-          {(["stdio", "http", "sse"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setTransport(option)}
-              className={cn(
-                "flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition",
-                transport === option
-                  ? "border-primary/60 bg-primary/10 text-primary"
-                  : "border-border bg-background/40 text-muted-foreground hover:bg-muted/40",
-              )}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-        {transport === "sse" ? (
-          <p className="mt-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-            {t("mcp.sseDeprecatedHint")}
-          </p>
-        ) : null}
-      </div>
+      <McpTransportPicker value={transport} onChange={setTransport} />
 
       {isRemote ? (
         <>
           <div>
-            <FieldLabel>URL</FieldLabel>
+            <FieldLabel>{t("mcp.fieldUrl")}</FieldLabel>
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://mcp.example.com/sse"
+              placeholder={t(transport === "sse" ? "mcp.fieldUrlPlaceholderSse" : "mcp.fieldUrlPlaceholderHttp")}
               className="h-9 font-mono"
             />
           </div>
           <div>
             <FieldLabel hint={t("mcp.kvHint")}>{t("mcp.fieldHeaders")}</FieldLabel>
-            <textarea
+            <Textarea
               value={headersText}
               onChange={(e) => setHeadersText(e.target.value)}
               rows={3}
@@ -219,7 +198,7 @@ export function McpServerForm({
           </div>
           <div>
             <FieldLabel hint={t("mcp.oneLineHint")}>{t("mcp.fieldArgs")}</FieldLabel>
-            <textarea
+            <Textarea
               value={argsText}
               onChange={(e) => setArgsText(e.target.value)}
               rows={3}
@@ -229,7 +208,7 @@ export function McpServerForm({
           </div>
           <div>
             <FieldLabel hint={t("mcp.kvHint")}>{t("mcp.fieldEnv")}</FieldLabel>
-            <textarea
+            <Textarea
               value={envText}
               onChange={(e) => setEnvText(e.target.value)}
               rows={2}

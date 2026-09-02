@@ -149,13 +149,6 @@ pub(crate) struct ParsedFrontmatter {
 /// This is the single parsing implementation used by both discovery and
 /// validation, so the id derivation and the quality report never disagree.
 pub(crate) fn parse_frontmatter(content: &str) -> ParsedFrontmatter {
-    #[derive(Deserialize)]
-    struct Frontmatter {
-        name: Option<String>,
-        #[serde(default)]
-        description: Option<serde_yaml::Value>,
-    }
-
     if !content.starts_with("---") {
         return ParsedFrontmatter {
             name: None,
@@ -166,18 +159,136 @@ pub(crate) fn parse_frontmatter(content: &str) -> ParsedFrontmatter {
         };
     }
 
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
+    let mut parts = content.splitn(3, "---");
+    let _opening = parts.next();
+    let Some(yaml) = parts.next() else {
+        return unterminated_frontmatter();
+    };
+    if parts.next().is_none() {
+        return unterminated_frontmatter();
+    }
+
+    if yaml.trim().is_empty() {
         return ParsedFrontmatter {
             name: None,
             description: None,
             description_not_string: false,
-            yaml_error: Some("unterminated frontmatter block".to_string()),
+            yaml_error: None,
             has_frontmatter: true,
         };
     }
 
-    match serde_yaml::from_str::<Frontmatter>(parts[1]) {
+    parse_simple_scalar_frontmatter(yaml).unwrap_or_else(|| parse_yaml_frontmatter(yaml))
+}
+
+fn unterminated_frontmatter() -> ParsedFrontmatter {
+    ParsedFrontmatter {
+        name: None,
+        description: None,
+        description_not_string: false,
+        yaml_error: Some("unterminated frontmatter block".to_string()),
+        has_frontmatter: true,
+    }
+}
+
+/// Fast path for the common SKILL.md shape: unquoted `name:` / `description:`
+/// scalars. Anything that might be a YAML non-string, multiline, quoted, or
+/// nested value falls through to [`parse_yaml_frontmatter`] so issue codes
+/// stay identical.
+fn parse_simple_scalar_frontmatter(yaml: &str) -> Option<ParsedFrontmatter> {
+    let mut name = None;
+    let mut description = None;
+
+    for line in yaml.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            return None;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (key, value) = trimmed.split_once(':')?;
+        let key = key.trim();
+        if key.is_empty() || key.chars().any(|ch| ch.is_whitespace()) {
+            return None;
+        }
+        let value = value.trim();
+        if looks_like_yaml_non_string(value) {
+            return None;
+        }
+        match key {
+            "name" => name = Some(value.to_string()),
+            "description" => description = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    Some(ParsedFrontmatter {
+        name,
+        description,
+        description_not_string: false,
+        yaml_error: None,
+        has_frontmatter: true,
+    })
+}
+
+fn looks_like_yaml_non_string(value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    let first = value.as_bytes()[0];
+    if matches!(
+        first,
+        b'|' | b'>' | b'[' | b'{' | b'&' | b'*' | b'!' | b'\'' | b'"' | b'%' | b'?'
+    ) {
+        return true;
+    }
+    if value.contains(": ") || value.contains('#') || value.contains('\n') {
+        return true;
+    }
+    match value.len() {
+        1 if matches!(value, "~" | "y" | "Y" | "n" | "N") => true,
+        2 if value.eq_ignore_ascii_case("on") || value.eq_ignore_ascii_case("no") => true,
+        3 if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("yes") => true,
+        4 if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("null") => true,
+        5 if value.eq_ignore_ascii_case("false") => true,
+        _ => yaml_plain_scalar_is_number(value),
+    }
+}
+
+fn yaml_plain_scalar_is_number(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    if bytes.first().is_some_and(|b| *b == b'+' || *b == b'-') {
+        index = 1;
+    }
+    if index >= bytes.len() {
+        return false;
+    }
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    let mut saw_exp = false;
+    for &byte in &bytes[index..] {
+        match byte {
+            b'0'..=b'9' => saw_digit = true,
+            b'.' if !saw_dot && !saw_exp => saw_dot = true,
+            b'e' | b'E' if !saw_exp && saw_digit => saw_exp = true,
+            b'+' | b'-' if saw_exp => {}
+            _ => return false,
+        }
+    }
+    saw_digit
+}
+
+fn parse_yaml_frontmatter(yaml: &str) -> ParsedFrontmatter {
+    #[derive(Deserialize)]
+    struct Frontmatter {
+        name: Option<String>,
+        #[serde(default)]
+        description: Option<serde_yaml::Value>,
+    }
+
+    match serde_yaml::from_str::<Frontmatter>(yaml) {
         Ok(fm) => {
             let (description, description_not_string) = match fm.description {
                 Some(serde_yaml::Value::String(value)) => (Some(value), false),
