@@ -15,6 +15,14 @@
 - 服务端状态使用 TanStack Query；本地组合状态使用 React hooks。没有经过决策记录，不引入另一个全局状态库。
 - 真正跨页的 deploy/detail/navigation 状态由 `App.tsx` 统一持有。
 
+## 桌面性能
+
+- Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
+- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。发布者详情是钻入页，不保活。
+- 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
+- MCP 目录搜索对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
+- `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
+
 `scripts/internal/check_feature_imports.sh` 阻止新增跨 feature 深层导入，但允许从目标 feature 根 `index.ts` 导入。存量基线只能减少；跨域协作优先由 page 组合，确需依赖时只消费目标 feature 的公开入口；若组件确实无业务语义且通用，应先提升到 shared/lib，再改调用方。
 
 ## Tauri 事件与流式 UX

@@ -107,7 +107,7 @@ function useSkillsState() {
   const skillsQuery = useQuery({
     queryKey: SKILLS_QUERY_KEY,
     queryFn: listSkills,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchInterval: isTogglingAgent ? false : SKILL_LIST_REFRESH_INTERVAL_MS,
   });
 
