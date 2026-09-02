@@ -76,7 +76,7 @@ fn authenticated_command_exposes_secret_only_through_exact_askpass_environment()
         GitAuthMaterial::available(TOKEN),
         Arc::new(RecordingSink::default()),
     );
-    let mut command = Command::new("git");
+    let mut command = skillstar_core::infra::path_env::command_with_path("git");
 
     configure_remote_command(
         &mut command,
@@ -128,7 +128,7 @@ fn credential_is_not_attached_to_non_github_or_public_sessions() {
         ("https://gitlab.com/acme/skills.git", &authenticated),
         ("https://github.com/acme/public-skills.git", &public),
     ] {
-        let mut command = Command::new("git");
+        let mut command = skillstar_core::infra::path_env::command_with_path("git");
         configure_remote_command(&mut command, remote, session).unwrap();
         let env = command
             .get_envs()
@@ -158,7 +158,7 @@ fn signed_in_public_probe_uses_the_same_session_without_credential() {
         Arc::new(RecordingSink::default()),
     );
     let anonymous = authenticated.unauthenticated_view();
-    let mut command = Command::new("git");
+    let mut command = skillstar_core::infra::path_env::command_with_path("git");
 
     configure_remote_command(
         &mut command,
@@ -206,7 +206,7 @@ fn credential_bearing_remote_is_rejected_before_git_can_persist_or_log_it() {
         GitAuthMaterial::available(TOKEN),
         Arc::new(RecordingSink::default()),
     );
-    let mut command = Command::new("git");
+    let mut command = skillstar_core::infra::path_env::command_with_path("git");
     let error = configure_remote_command(
         &mut command,
         "https://already-secret@github.com/acme/repo.git",
@@ -246,7 +246,7 @@ fn configured_proxy_is_operation_local_and_its_password_is_redacted() {
         GitAuthMaterial::available(TOKEN),
         Arc::new(RecordingSink::default()),
     );
-    let mut command = Command::new("git");
+    let mut command = skillstar_core::infra::path_env::command_with_path("git");
     configure_remote_command(
         &mut command,
         "https://github.com/acme/private-skills.git",

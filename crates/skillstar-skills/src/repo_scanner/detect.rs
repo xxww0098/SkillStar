@@ -208,10 +208,9 @@ fn upstream_added_skills(repo_dir: &Path, session: &GitOperationSession) -> Vec<
 mod tests {
     use super::*;
     use std::fs;
-    use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
+        let output = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(dir)
             .args(args)
             .output()

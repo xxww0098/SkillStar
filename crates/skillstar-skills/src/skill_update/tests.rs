@@ -1,5 +1,4 @@
 use super::*;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use crate::git::transport::{
@@ -62,7 +61,7 @@ impl Drop for TestHub {
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = skillstar_core::infra::path_env::command_with_path("git")
         .current_dir(repo)
         .args(args)
         .output()
@@ -75,7 +74,7 @@ fn run_git(repo: &Path, args: &[&str]) {
 }
 
 fn git_stdout(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = skillstar_core::infra::path_env::command_with_path("git")
         .current_dir(repo)
         .args(args)
         .output()

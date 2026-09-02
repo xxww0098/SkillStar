@@ -6,7 +6,6 @@ use crate::projects::ProjectDeployMode;
 use crate::repo_scanner;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 struct Sandbox {
     previous: Vec<(&'static str, Option<OsString>)>,
@@ -80,7 +79,7 @@ impl Drop for Sandbox {
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = skillstar_core::infra::path_env::command_with_path("git")
         .current_dir(repo)
         .args(args)
         .output()
@@ -351,7 +350,7 @@ fn poison_cached_remotes() {
         if !entry.path().join(".git").exists() {
             continue;
         }
-        let output = Command::new("git")
+        let output = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(entry.path())
             .args([
                 "remote",

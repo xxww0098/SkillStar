@@ -59,7 +59,6 @@ fn requested_skill_not_found_error_names_missing_identity_and_possible_cause() {
 mod pipeline_local_source_tests {
     use super::super::install_skill;
     use std::ffi::OsString;
-    use std::process::Command;
 
     struct Sandbox {
         previous: Vec<(&'static str, Option<OsString>)>,
@@ -115,7 +114,7 @@ mod pipeline_local_source_tests {
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "SkillStar Tests"],
         ] {
-            let status = Command::new("git")
+            let status = skillstar_core::infra::path_env::command_with_path("git")
                 .current_dir(dir.path())
                 .args(&args)
                 .status()
@@ -132,13 +131,13 @@ mod pipeline_local_source_tests {
         let _sandbox = Sandbox::new();
         let repo = init_repo();
         std::fs::write(repo.path().join("SKILL.md"), "# No frontmatter\n").unwrap();
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repo.path())
             .args(["add", "."])
             .status()
             .unwrap();
         assert!(status.success());
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repo.path())
             .args(["commit", "-m", "init"])
             .status()
@@ -171,13 +170,13 @@ mod pipeline_local_source_tests {
             "---\nname: demo\ndescription: A valid root skill\n---\n\n# Demo\n",
         )
         .unwrap();
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repo.path())
             .args(["add", "."])
             .status()
             .unwrap();
         assert!(status.success());
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repo.path())
             .args(["commit", "-m", "init"])
             .status()
@@ -210,13 +209,13 @@ mod pipeline_local_source_tests {
             "---\nname: rust\ndescription: cursor copy\n---\n\n# rust\n",
         )
         .unwrap();
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repo.path())
             .args(["add", "."])
             .status()
             .unwrap();
         assert!(status.success());
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repo.path())
             .args(["commit", "-m", "init"])
             .status()

@@ -822,7 +822,6 @@ fn registration_session_not_found() -> SharedChannelError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     #[test]
     fn sparse_checkout_inventory_uses_the_tracked_tree_and_materializes_every_skill() {
@@ -873,7 +872,7 @@ mod tests {
     }
 
     fn run_git(directory: &Path, args: &[&str]) {
-        let output = Command::new("git")
+        let output = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(directory)
             .args(args)
             .output()

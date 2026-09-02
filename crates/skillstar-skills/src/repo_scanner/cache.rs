@@ -510,7 +510,7 @@ mod tests {
             let source = repo.join("skills/writer");
             std::fs::create_dir_all(&source)?;
             std::fs::write(source.join("SKILL.md"), "# locally edited\n")?;
-            let status = std::process::Command::new("git")
+            let status = skillstar_core::infra::path_env::command_with_path("git")
                 .args(["init", "-q"])
                 .current_dir(&repo)
                 .status()?;
@@ -564,7 +564,7 @@ mod tests {
             let source = repo.join("skills/writer");
             std::fs::create_dir_all(&source)?;
             std::fs::write(source.join("SKILL.md"), "# clean\n")?;
-            let status = std::process::Command::new("git")
+            let status = skillstar_core::infra::path_env::command_with_path("git")
                 .args(["init", "-q"])
                 .current_dir(&repo)
                 .status()?;

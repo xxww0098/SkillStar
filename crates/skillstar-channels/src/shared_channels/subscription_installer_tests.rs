@@ -1,7 +1,6 @@
 use super::*;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -52,7 +51,7 @@ impl Drop for InstallSandbox {
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = skillstar_core::infra::path_env::command_with_path("git")
         .args(args)
         .current_dir(repo)
         .output()
@@ -264,7 +263,7 @@ async fn production_installer_verifies_the_exact_release_checkout() {
         skillstar_skills::repo_scanner::cache_dir_name(&commit)
     ));
     std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    let clone = Command::new("git")
+    let clone = skillstar_core::infra::path_env::command_with_path("git")
         .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", "-q"])
         .arg(&origin)
         .arg(&cache)

@@ -225,7 +225,6 @@ fn skill_folder_rejects_a_link_outside_the_managed_hub() {
 #[test]
 fn materialized_snapshot_checks_out_a_nested_repo_cache_skill() {
     use std::os::unix::fs::symlink;
-    use std::process::Command;
 
     let _guard = crate::lock_test_env();
     let hub = TestHub::new();
@@ -234,7 +233,7 @@ fn materialized_snapshot_checks_out_a_nested_repo_cache_skill() {
     std::fs::write(repo.join("skills/demo/SKILL.md"), "# Demo\n").unwrap();
 
     let git = |args: &[&str]| {
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .args(args)
             .current_dir(&repo)
             .status()

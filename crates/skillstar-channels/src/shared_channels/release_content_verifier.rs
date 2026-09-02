@@ -158,7 +158,6 @@ mod tests {
     use super::*;
     use skillstar_skills::git::transport::{GitTransportError, GitTransportErrorCode};
     use std::fs;
-    use std::process::Command;
 
     fn transport_error(code: GitTransportErrorCode, message: &str) -> anyhow::Error {
         anyhow::Error::new(GitTransportError {
@@ -297,7 +296,7 @@ mod tests {
     }
 
     fn git(repository: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repository)
             .args(args)
             .status()
@@ -306,7 +305,7 @@ mod tests {
     }
 
     fn git_output(repository: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(repository)
             .args(args)
             .output()

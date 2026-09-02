@@ -732,10 +732,9 @@ mod api_tip_tests {
     use crate::update_api::ApiRemoteTree;
     use std::collections::HashMap;
     use std::path::Path;
-    use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = skillstar_core::infra::path_env::command_with_path("git")
             .current_dir(dir)
             .args(args)
             .output()
