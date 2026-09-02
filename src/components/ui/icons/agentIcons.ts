@@ -86,7 +86,6 @@ export const AGENT_ICON_BY_ID: Record<string, LobeIconComponent> = {
   kode: LobeHubMono,
   lingma: LobeHubMono,
   loaf: LobeHubMono,
-  maka: LobeHubMono,
   mcpjam: MCPMono,
   "mistral-vibe": MistralColor,
   moxby: LobeHubMono,

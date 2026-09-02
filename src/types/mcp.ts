@@ -113,7 +113,6 @@ export const MCP_TOOL_IDS = [
   "gemini-cli",
   "antigravity",
   "zed",
-  "maka",
 ] as const;
 
 export type McpToolId = (typeof MCP_TOOL_IDS)[number];

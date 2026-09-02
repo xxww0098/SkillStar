@@ -207,16 +207,6 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         },
         remove: |path, name| json_named_map_remove(path, ZED_SERVERS_KEY, name),
     },
-    McpToolSpec {
-        id: "maka",
-        label: "Maka",
-        resolve_config_path: resolve_maka_config_path,
-        installed: installed_maka,
-        count_live: count_json_mcpservers,
-        read_servers: read_maka_entries,
-        upsert: |path, entry| maka_upsert(path, &entry.name, maka_spec(entry)),
-        remove: maka_remove,
-    },
 ];
 
 /// All registered MCP tools, in canonical display order.

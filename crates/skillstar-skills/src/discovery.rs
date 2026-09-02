@@ -229,7 +229,6 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".kilocode/skills",
     ".kiro/skills",
     ".kode/skills",
-    ".maka/skills",
     ".mcpjam/skills",
     ".mux/skills",
     ".neovate/skills",

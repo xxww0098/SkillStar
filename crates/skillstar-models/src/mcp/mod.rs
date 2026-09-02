@@ -33,7 +33,6 @@
 //! | `gemini-cli`     | `~/.gemini/settings.json`              | `mcpServers.<name>`, no `type`: `url` = SSE, **`httpUrl`** = HTTP |
 //! | `antigravity`    | `~/.gemini/config/mcp_config.json` (legacy `~/.gemini/antigravity/mcp_config.json`) | `mcpServers.<name>`, **no `type`** (the IDE rejects `type: stdio`) |
 //! | `zed`            | `~/.config/zed/settings.json`          | **`context_servers`**`.<name>`, no `type` |
-//! | `maka`           | OS config dir `Maka/workspaces/default/mcp.json` | `mcpServers.<name>`, **`version: 2`**, no `type`, remote `transport` |
 //!
 //! The bolded cells are the ones that make a config silently ignored rather
 //! than rejected when written in another client's spelling; `specs.rs` encodes
@@ -113,8 +112,8 @@ pub use validate::*;
 mod specs;
 pub(crate) use specs::{
     antigravity_spec, claude_code_spec, claude_desktop_chat_spec, cline_spec, codex_toml_table,
-    cursor_spec, gemini_cli_spec, grok_toml_table, kiro_spec, maka_spec, opencode_spec,
-    vscode_spec, windsurf_spec, zcode_cli_spec, zed_spec,
+    cursor_spec, gemini_cli_spec, grok_toml_table, kiro_spec, opencode_spec, vscode_spec,
+    windsurf_spec, zcode_cli_spec, zed_spec,
 };
 
 // ---------------------------------------------------------------------------
@@ -126,9 +125,8 @@ pub use tools::*;
 pub(crate) use tools::{
     MCP_SERVERS_KEY, VSCODE_SERVERS_KEY, ZED_SERVERS_KEY, backup_if_exists, codex_remove,
     codex_upsert, json_mcpservers_remove, json_mcpservers_remove_strict, json_mcpservers_upsert,
-    json_named_map_remove, json_named_map_upsert, maka_remove, maka_upsert, opencode_remove,
-    opencode_upsert, restore_from_backup, zcode_cli_remove, zcode_cli_upsert,
-    zcode_v2_opencode_mcp_remove,
+    json_named_map_remove, json_named_map_upsert, opencode_remove, opencode_upsert,
+    restore_from_backup, zcode_cli_remove, zcode_cli_upsert, zcode_v2_opencode_mcp_remove,
 };
 
 // ---------------------------------------------------------------------------

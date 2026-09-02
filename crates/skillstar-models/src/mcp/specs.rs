@@ -310,31 +310,6 @@ pub(crate) fn zed_spec(entry: &McpServerEntry) -> Value {
     json_spec(entry, JsonDialect::PlainNoType)
 }
 
-/// Maka value (`<config>/Maka/workspaces/default/mcp.json` → `mcpServers.<name>`).
-///
-/// No `type` key: a `command` is stdio, a `url` is remote. Remote transport is
-/// Maka's own `transport` field (`streamable-http` / `sse`), not a `type`.
-/// `enabled` is projected as `true` because SkillStar removes an entry it
-/// should not project rather than flipping Maka's own toggle. The wrapper
-/// `version: 2` is owned by the writer in `tools.rs`.
-pub(crate) fn maka_spec(entry: &McpServerEntry) -> Value {
-    let mut obj = match json_spec(entry, JsonDialect::PlainNoType) {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    };
-    obj.insert("enabled".into(), json!(true));
-    match entry.transport.as_str() {
-        "http" => {
-            obj.insert("transport".into(), json!("streamable-http"));
-        }
-        "sse" => {
-            obj.insert("transport".into(), json!("sse"));
-        }
-        _ => {}
-    }
-    Value::Object(obj)
-}
-
 /// Grok `[mcp_servers.<name>]` TOML table (`~/.grok/config.toml`).
 pub(crate) fn grok_toml_table(entry: &McpServerEntry) -> toml::Table {
     let mut t = toml::Table::new();

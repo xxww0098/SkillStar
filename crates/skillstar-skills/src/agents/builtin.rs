@@ -64,7 +64,7 @@ const fn unsupported() -> GlobalDirDef {
 // The three legacy SkillStar ids (`claude`, `kiro`, `hermes`) retain
 // their persisted identity. CLI/API normalization accepts the corresponding
 // upstream ids. Every other row uses the upstream id verbatim. `grok`,
-// `omp`, `gemini-cli`, `deepseek` and `maka` are SkillStar extensions kept
+// `omp`, `gemini-cli` and `deepseek` are SkillStar extensions kept
 // after the synchronized upstream block.
 const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
@@ -460,12 +460,6 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         env_or_home("DSH_HOME", &[".dsh"], &["skills"]),
         ".dsh/skills",
     ),
-    // Apache Maka (Incubating). Global and project skills live under
-    // `.maka/skills`; Maka also reads the shared `.agents/skills` dir as a
-    // lower-precedence compatibility path, so this target is the exclusive
-    // SkillStar deploy surface. MCP writes the released `Maka` profile
-    // (`<config>/Maka/workspaces/default/mcp.json`), not `Maka Dev`.
-    ("maka", "Maka", home(&[".maka", "skills"]), ".maka/skills"),
 ];
 
 /// Home-relative directories that must receive the same global deployments as

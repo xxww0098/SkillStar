@@ -153,13 +153,6 @@ export const MCP_TOOL_STATUSES = [
     installed: false,
     serverCount: 0,
   },
-  {
-    toolId: "maka",
-    label: "Maka",
-    configPath: "~/Library/Application Support/Maka/workspaces/default/mcp.json",
-    installed: false,
-    serverCount: 0,
-  },
 ];
 
 export const MCP_PRESETS = [
