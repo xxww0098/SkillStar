@@ -44,8 +44,9 @@ flowchart LR
 | 全局配置、日志和状态 | `~/.skillstar/{config,logs,state}/` | `skillstar-core` + 对应域 |
 | SQLite 数据库 | `~/.skillstar/db/` | marketplace 等具体模块 |
 | 已安装、创作和仓库技能 | `~/.skillstar/hub/{skills,local,repos,content}/` | `skillstar-skills` |
+| 本地 Skill 长期身份 sidecar | `~/.skillstar/hub/local/<name>/.skillstar/identity.json` | `skillstar-skills::local_identity`；`.skillstar` 被 v2 snapshot 排除，不进入内容 revision |
 | Skill 安装来源、Git tree 与完整内容 baseline | `~/.skillstar/hub/lock.json` | `skillstar-skills::lockfile` 持久化；`skillstar-skills::skill_update` 独占更新事务 |
-| Skill 图文教程 artifact | `~/.skillstar/tutorials/<skill-key>/{tutorial.html,metadata.json}` | `skillstar-skills` 提供内容快照并拥有校验/freshness/原子持久化；`src-tauri::core::skill_tutorial` 只编排 ACP 会话 |
+| Skill 图文教程 artifact | `~/.skillstar/learning/tutorials/<identity-key>/{tutorial.html,metadata.json}`；旧 `~/.skillstar/tutorials/<name-key>/` 仅只读 fallback | `skillstar-learning` 拥有校验/freshness/identity-keyed 原子持久化；`skillstar-app::learning` 解析 `Skill → ResolvedSkill`；`src-tauri::core::skill_tutorial` 只编排 ACP 会话。新写入只走 identity 路径，失败不覆盖最后一个可用 artifact |
 | Project 技能 manifest | `~/.skillstar/state/projects/` | `skillstar-skills`；共享项目路径只记录一个 Agent owner |
 | 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；批量 refresh、patrol 和 update 完成都写穿它，UI 与事件只是投影 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
@@ -116,9 +117,10 @@ flowchart LR
 ### ACP 教程生成
 
 - Skill 教程走独立 ACP 子进程，不复用 Models provider 的 HTTP 翻译链路。会话根固定为当前 Skill 的隔离快照，模型读取递归清单后只返回自包含 HTML 文件内容；SkillStar 在本机落盘，不接受在线链接替代 artifact。
-- 持久化教程是昂贵生成结果而不是临时页面状态。可复用性的判据是当前内容 hash、Settings 所选教程风格、规范化界面语言、完整 prompt bundle hash 和 artifact schema 均匹配；不匹配的旧 artifact 仍可展示，但状态必须是 stale。
+- 持久化教程是昂贵生成结果而不是临时页面状态。artifact 绑定 `SkillIdentity` + 精确 `SkillRevision`（当前 v2 content hash），而不是安装名。可复用性的判据是当前 revision、Settings 所选教程风格、规范化界面语言、完整 prompt bundle hash 和 artifact schema 均匹配；不匹配的旧 artifact 仍可展示，但状态必须是 stale。
 - HTML 在后端完成结构、完整清单覆盖和主动内容安全校验；前端再以无脚本、无同源权限的 sandbox iframe 隔离展示。两层都不能把模型输出当作可信应用 DOM。
-- 生成事务采用“快照 → ACP → 再快照 → DOM/CSP/文件覆盖校验 → 跨进程锁 → 同步落盘 → staging/backup 目录替换”。启动读取会恢复中断窗口留下的最后一个已提交 backup；ACP 失败、输出不合格或生成期间内容变化时，最后一个可用 artifact 保持不变。
+- 生成事务采用“解析身份 → 快照 → ACP → 再快照 → DOM/CSP/文件覆盖校验 → 跨进程锁 → 同步落盘 → staging/backup 目录替换”。启动读取会恢复中断窗口留下的最后一个已提交 backup；ACP 失败、输出不合格或生成期间内容变化时，最后一个可用 artifact 保持不变。
+- 存储双读单写：新写入只进入 `~/.skillstar/learning/tutorials/<identity-key>/`；缺失时只读旧 `~/.skillstar/tutorials/<name-key>/`。旧目录没有来源证据，不能自动嫁接到新 identity，也不能转为 Guide Draft。
 
 ## 前端运行模型
 

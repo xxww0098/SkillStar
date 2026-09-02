@@ -33,6 +33,7 @@ SkillStar/
 │   ├── skillstar-models/        # Provider store、AI、MCP store、tool sync
 │   ├── skillstar-usage/         # 订阅、OAuth 和配额
 │   ├── skillstar-sync/          # SSH 远端技能传输
+│   ├── skillstar-learning/      # 学习身份、私人教程、Guide/进度/Draft
 │   └── skillstar-app/           # 跨域 use case 与共享 CLI 解析
 ├── docs/                        # 宪章、功能活文档和冻结历史
 ├── scripts/internal/            # CI 棘轮和一致性检查
@@ -54,7 +55,8 @@ SkillStar/
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store 与 per-tool 投影、双纪元健康探测 | Usage 订阅、Marketplace 快照或 catalog 形态选择 |
 | `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排 |
 | `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
-| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别 | Tauri command 宏或窗口对象 |
+| `skillstar-learning` | `SkillIdentity` / `SkillRevision` 值对象与稳定 key；私人 CSP-strict HTML tutorial 的校验、freshness、artifact I/O lock、staging/backup/恢复与 identity-keyed 存储；Guide / GuideRevision / GuideStep、LearningProgress、GuideDraft 及其 freshness/原子持久化 | Skill 扫描/安装/更新/lockfile/local sidecar/频道；Git/HTTP/ACP 子进程与 AI provider；跨域生成事务；Tauri State/事件/DTO；命令执行、verifier、云端 schema、社区发布 |
+| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；把已安装 `Skill` 投影为 `ResolvedSkill` 的学习 source adapter | Tauri command 宏或窗口对象 |
 
 ## 允许的依赖方向
 
@@ -70,6 +72,7 @@ flowchart LR
   models["skillstar-models"]
   usage["skillstar-usage"]
   sync["skillstar-sync"]
+  learning["skillstar-learning"]
   app["skillstar-app"]
   tauri["src-tauri"]
 
@@ -83,6 +86,7 @@ flowchart LR
   git --> core
   usage --> core
   sync --> core
+  learning --> core
   app --> core
   app --> skills
   app --> git
@@ -90,6 +94,7 @@ flowchart LR
   app --> market
   app --> models
   app --> usage
+  app --> learning
   tauri --> app
   tauri --> core
   tauri --> skills
@@ -136,7 +141,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | --- | --- | --- |
 | React → Rust | 只通过集中 IPC wrapper 调用 Tauri command | `src/lib/ipc/`、`src-tauri/src/commands/mod.rs` |
 | Tauri → 域 | command 做参数/State/事件适配后调用 facade | `src-tauri/src/commands/` |
-| Skill → ACP 教程 | `skillstar-skills::content` 提供只读快照，`skillstar-skills::tutorial` 校验并持久化 artifact；`src-tauri::core` 只限定 ACP 会话与临时 staging；command 不直接读写文件 | `crates/skillstar-skills/src/{content,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs` |
+| Skill → 私人教程 | `skillstar-skills::content` 提供只读快照，`skillstar-skills::local_identity` 拥有本地 UUID sidecar；`skillstar-app::learning` 按 channel > local > Git 解析 `ResolvedSkill`；`skillstar-learning` 拥有 identity/revision、HTML 安全/覆盖校验、freshness 与 identity-keyed 持久化。生成事务与 ACP 子进程仍由 app / Tauri core 编排；command 不直接读写文件 | `crates/skillstar-learning/`、`crates/skillstar-app/src/learning/`、`crates/skillstar-skills/src/{content,local_identity,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs` |
 | 跨域事务 | 放入 `skillstar-app`，由窄 facade 组合 | `crates/skillstar-app/src/` |
 | MCP catalog → store | 运行时形态选择、draft 映射、安装前确认负载、preset 映射全部在 `skillstar-app::mcp`；两个域 crate 互不知晓，命令层不做映射 | `crates/skillstar-app/src/mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/skillstar-core/src/infra/http_client.rs` |

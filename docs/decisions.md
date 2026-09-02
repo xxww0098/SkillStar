@@ -460,7 +460,17 @@
 - 后果：公开拉取在单镜像/DNS 污染下可自动绕行；凭据与签名安装边界不变。承担：加速源是中间人，只应用于公开流量；熔断状态是可重建的 `state/` 文件。
 - 证据：`crates/skillstar-core/src/config/{github_health,github_rewrite,github_mirror,proxy,network_doctor}.rs`、`crates/skillstar-core/src/infra/{github_http,http_client}.rs`、`crates/skillstar-git/src/transport.rs`、`crates/skillstar-marketplace/src/remote/mod.rs`。
 
+## D-051：来源复合身份、精确内容修订与 skillstar-learning
+
+- 日期：2026-09-01
+- 状态：accepted
+- 背景：私人教程按 `skill.name` 分桶，同名不同仓库会串学习记录；`skillstar-skills::tutorial` 把 HTML 安全、freshness 和 ACP 生成输入混在安装域里。P0 Learn 需要精确 revision 绑定，但不能一次拆完 `skillstar-core::Skill` 或新增一簇浅 crate。
+- 决策：唯一新增 crate 是 `skillstar-learning`。身份是来源复合值（Git canonical repository + ref + content root / 本地 UUID sidecar / 频道 numeric repository ID + content root），教程与 Guide 绑定当前 v2 content hash 的 `SkillRevision`，`name` 只作安装表查找句柄。learning 只依赖 `skillstar-core`；`skillstar-app::learning` 按 channel > local > Git 投影 `ResolvedSkill`。私人教程双读单写：新写入 identity 路径，旧 name 路径只读且不能自动绑定。迁移按 [issue #49](https://github.com/xxww0098/SkillStar/issues/49) 冻结序列逐步接线，任一步可独立回退。不拆 `skillstar-tutorial` / `skillstar-guide` / `skillstar-identity`，三者共同构成 learning 的 deletion test。
+- 后果：获得——同名 Skill 的学习记录可区分，本地编辑只使教程 stale 而不改 identity，失败保留最后一个可用 artifact。承担——旧 name-keyed artifact 在重新生成前保持 unbound；P0 不升级 lockfile schema，频道离线时可选 release 标签允许缺省。
+- 证据：`crates/skillstar-learning/`、`crates/skillstar-app/src/learning/`、`crates/skillstar-skills/src/local_identity.rs`、`docs/features/learning/README.md`、issue #48 / #49。
+
 ## 新增记录格式
+
 
 ```text
 ## D-NNN：标题

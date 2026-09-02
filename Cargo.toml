@@ -52,6 +52,7 @@ regex = "1.12"
 # config) succeeds.
 reqwest = { version = "0.13.3", default-features = false, features = ["system-proxy"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
+scraper = "0.27.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
@@ -70,7 +71,7 @@ uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
 
 # Workspace-wide lint table. This is inert for any member that does not also
-# carry `[lints] workspace = true`, so all 10 members opt in explicitly.
+# carry `[lints] workspace = true`, so all 11 members opt in explicitly.
 #
 # Ratchet rule: a lint only enters this table at `deny` when its violation count
 # across the workspace is measured to be 0 on the day it lands, so adding it
