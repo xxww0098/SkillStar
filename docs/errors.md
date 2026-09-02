@@ -535,13 +535,6 @@
 - Investigation: `src/hooks/useTauriSetup.ts` listens to `skillstar://window-hidden` and `patrol://enabled-changed`, but a repo-wide search for `deep-link` / `deepLink` / `DEEP_LINK` in `src/` finds no `listen(...)` call for `skillstar://deep-link`. The backend half is wired but the frontend consumer is missing.
 - Status: recorded as an in-progress gap, not fixed here — the current branch (`refactor/models-frontend-ia`) is mid frontend refactor and the deep-link consumer likely belongs to that work. When wiring it up, register a listener in `useTauriSetup.ts` that routes the parsed `{ host, path, query }` payload to navigation (e.g. open a skill detail / models drawer) the way `useNavigation` already models drawer deep-link requests.
 
-## 2026-06-15 - AI skill pick errored instead of falling back when provider unreachable
-
-- Symptom: `pick_skills` returned a hard error ("All 3 AI skill-pick rounds failed") whenever the configured AI provider was unreachable (e.g. ollama not running, wrong endpoint). The UI got no recommendations at all instead of a local-ranked fallback.
-- Root cause: when `raw_success_count == 0` (all 3 consensus rounds failed at the network level), the function called `anyhow::bail!` and exited before reaching the existing `fallback_used` branch lower down. So the deterministic local shortlist that AGENTS.md requires ("fall back to deterministic local ranking when AI output is partial or invalid") was never reached on a total transport failure — only on parse failures.
-- Fix: `pick_skills` now logs the all-rounds-failed case and returns a `SkillPickResponse` with `fallback_used = true, rounds_succeeded = 0` populated from `fallback_skill_pick(&ranked_candidates)`, so the UI can still show recommendations and indicate the fallback state. Verified by a new tokio test pointing at `127.0.0.1:1` (connection refused): returns in ~1.5s with the name-matching candidate ranked first.
-- Note: `test_connection` and `summarize_text` correctly keep returning `Err` on transport failure — they have no meaningful fallback, unlike skill pick which has a pre-computed local ranking.
-
 ## 2026-06-15 - CLI commands find/remove/init hung launching the GUI
 
 - Symptom: `skillstar find`, `search`, `remove`, `init` (and their aliases) appeared to hang for minutes when run from the `skillstar` binary, eventually timing out. Other commands (`list`, `install`, `doctor`) returned instantly.

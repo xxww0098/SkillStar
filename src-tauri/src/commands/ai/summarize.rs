@@ -64,26 +64,3 @@ pub async fn ai_test_connection() -> Result<u64, AppError> {
     let config = ensure_ai_config().await?;
     Ok(ai_provider::test_connection(&config).await?)
 }
-
-#[derive(serde::Deserialize)]
-pub struct SkillMeta {
-    pub name: String,
-    pub description: String,
-}
-
-#[tauri::command]
-pub async fn ai_pick_skills(
-    prompt: String,
-    skills: Vec<SkillMeta>,
-) -> Result<ai_provider::SkillPickResponse, AppError> {
-    let config = ensure_ai_config().await?;
-    let candidates = skills
-        .into_iter()
-        .map(|skill| ai_provider::SkillPickCandidate {
-            name: skill.name,
-            description: skill.description,
-        })
-        .collect();
-
-    Ok(ai_provider::pick_skills(&config, &prompt, candidates).await?)
-}

@@ -17,18 +17,6 @@ export interface AiConfigStatus {
   api_key: string;
 }
 
-export interface AiPickRecommendation {
-  name: string;
-  score: number;
-  reason: string;
-}
-
-export interface AiPickResponse {
-  recommendations: AiPickRecommendation[];
-  fallbackUsed: boolean;
-  roundsSucceeded: number;
-}
-
 export interface AiStreamPayload {
   requestId: string;
   event: AiStreamEvent;

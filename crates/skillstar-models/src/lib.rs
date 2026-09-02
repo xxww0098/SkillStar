@@ -4,7 +4,7 @@
 //! - [`tool_sync`]: external tool config projection
 //! - [`latency`]: provider health probes
 //! - [`mcp`]: MCP types / local store helpers
-//! - [`ai_provider`]: pure inference (chat, summarize, skill pick)
+//! - [`ai_provider`]: pure inference (chat, summarize)
 //!
 //! Formerly split across `skillstar-models` + `skillstar-ai` (Wave 2A merge).
 
