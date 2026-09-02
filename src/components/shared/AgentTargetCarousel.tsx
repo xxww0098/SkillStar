@@ -39,7 +39,7 @@ export function AgentTargetCarousel<T extends AgentTargetCarouselItem>({
   if (items.length === 0) return null;
 
   return (
-    <HScrollRow count={items.length} itemWidth={28} gap={6} className={cn("min-w-0 gap-1.5", className)}>
+    <HScrollRow count={items.length} itemWidth={28} gap={6} maxVisible={4} className={cn("min-w-0 gap-1.5", className)}>
       {items.map((item) => {
         const stopped = !item.profile.enabled;
         const active = !stopped && item.selected === true;

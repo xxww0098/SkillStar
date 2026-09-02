@@ -73,7 +73,7 @@
 - 项目级能力再通过 `supportsProjectDeploy` 判断；不要硬编码 global-only Agent id。
 - 全局能力通过后端 `has_global_skills()` 判断；空全局路径是“不支持全局部署”的能力标记，
   不能被解释为当前工作目录。
-- Skills、Deck 和 MCP 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。Settings `enabled` 决定 SVG 是可操作还是停用态：关掉但资源仍挂着的 Agent 留在轮播里（灰度、不可点），不要从 SVG 行里抹掉。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
+- Skills、Deck 和 MCP 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播最多直接展示 4 个 Agent，更多目标通过横向滚动访问。Settings `enabled` 决定 SVG 是可操作还是停用态：关掉但资源仍挂着的 Agent 留在轮播里（灰度、不可点），不要从 SVG 行里抹掉。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
 - MCP 等能力消费者可以叠加静态能力映射，但不得再用本机安装探测隐藏用户已手动启用的 Agent；执行时的真实失败由对应 mutation 显式反馈。
 - Claude Settings profile `claude` 映射到唯一能力 id `claude-code`；不要生成第二张 Claude 卡。
 - SSH 远端 Agent 由远端 discovery 决定，不复用本机 rail。
