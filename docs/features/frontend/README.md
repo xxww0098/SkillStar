@@ -55,6 +55,7 @@
 - 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。嵌套面板用 `InsetPanel`，不要用会 hover 抬升的 `Card`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
 - 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。 Models 的 `ProviderConfigPrimitives` 是该域自己的表单语言，不并进通用 `Input`/`Textarea`。
 - 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。
+- Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。侧栏图标负责找路。
 - 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。
 - 外链元素使用 `ExternalAnchor`；按钮/程序化跳转使用 `openExternalUrl`，避免业务页面直接写 `<a target="_blank">`。
 - Marketplace 与 MCP 共用的 Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；两个 feature 都只能依赖该 shared interface。

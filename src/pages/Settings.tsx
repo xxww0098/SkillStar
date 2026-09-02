@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast as sonnerToast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -59,6 +59,7 @@ export function Settings({
   isCheckingUpdate?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const [currentLang, setCurrentLang] = useState(i18n.language);
   const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(() => readBackgroundStyle());
   const [backgroundRun, setBackgroundRun] = useState(() => readBackgroundRun());
@@ -768,9 +769,9 @@ export function Settings({
       </div>
 
       <motion.main
-        initial={{ opacity: 0, y: 10 }}
+        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: "easeOut" }}
+        transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
         className="flex flex-col flex-1 min-h-0 overflow-hidden relative"
       >
         {/* Content */}

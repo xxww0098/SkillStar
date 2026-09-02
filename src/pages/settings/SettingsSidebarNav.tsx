@@ -145,13 +145,15 @@ export function SettingsSidebarNav() {
             type="button"
             onClick={() => handleClick(section.id)}
             title={t(section.labelKey)}
-            className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer ${
+            aria-label={t(section.labelKey)}
+            aria-current={isActive ? "true" : undefined}
+            className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl focus-ring ${
               isActive
                 ? "bg-primary/15 text-primary"
-                : "text-muted-foreground/45 hover:text-foreground hover:bg-muted/50"
+                : "text-muted-foreground/70 hover:bg-muted/50 hover:text-foreground"
             }`}
           >
-            <Icon className={`w-[18px] h-[18px] ${nudgeClass}`} strokeWidth={isActive ? 2.2 : 1.7} />
+            <Icon className={`h-[18px] w-[18px] ${nudgeClass}`} strokeWidth={isActive ? 2.2 : 1.7} aria-hidden />
           </button>
         );
       })}

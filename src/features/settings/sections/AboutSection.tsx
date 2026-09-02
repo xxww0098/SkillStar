@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
 import { UPDATER_ENABLED, UPDATER_MODE } from "../../../hooks/useUpdater";
 import { openExternalUrl } from "../../../lib/externalOpen";
 import { tauriInvoke } from "../../../lib/ipc";
@@ -159,12 +160,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
 
   return (
     <section>
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <div className="w-7 h-7 rounded-lg bg-zinc-500/10 flex items-center justify-center shrink-0 border border-zinc-500/20">
-          <Terminal className="w-4 h-4 text-zinc-500" />
-        </div>
-        <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.about")}</h2>
-      </div>
+      <SettingsSectionHeader icon={<Terminal className="h-4 w-4" />} title={t("settings.about")} />
       <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
         {/* ── Git CLI ──────────────────────────────────────────── */}
         <div className="px-4 py-3 flex items-center justify-between">

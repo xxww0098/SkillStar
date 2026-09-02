@@ -2,6 +2,7 @@ import { Activity, Loader2 } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { NetworkDiagnosis, NetworkHostCheck } from "../../../types";
@@ -37,17 +38,16 @@ export const NetworkDoctorSection = memo(function NetworkDoctorSection() {
 
   return (
     <section>
-      <div className="flex items-center justify-between mb-3 px-1">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0 border border-sky-500/20">
-            <Activity className="w-4 h-4 text-sky-500" />
-          </div>
-          <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.networkDoctor")}</h2>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => void run()} disabled={running}>
-          {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t("settings.networkDoctorRun")}
-        </Button>
-      </div>
+      <SettingsSectionHeader
+        icon={<Activity className="h-4 w-4" />}
+        title={t("settings.networkDoctor")}
+        action={
+          <Button size="sm" variant="outline" onClick={() => void run()} disabled={running} aria-busy={running}>
+            {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {t("settings.networkDoctorRun")}
+          </Button>
+        }
+      />
 
       <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-3">
         <p className="text-xs text-muted-foreground leading-relaxed">{t("settings.networkDoctorHint")}</p>
@@ -63,7 +63,7 @@ export const NetworkDoctorSection = memo(function NetworkDoctorSection() {
             </ul>
             {diagnosis.recommendations.length > 0 && (
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 space-y-1">
-                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                <p className="text-xs font-medium text-amber-400 paper:text-amber-800">
                   {t("settings.networkDoctorRecommendations")}
                 </p>
                 <ul className="list-disc pl-4 space-y-0.5">
@@ -93,7 +93,7 @@ function CheckRow({ check }: { check: NetworkHostCheck }) {
       <span
         className={cn(
           "shrink-0 rounded-md px-1.5 py-0.5 font-mono",
-          check.status === "ok" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+          check.status === "ok" && "bg-emerald-500/10 text-emerald-400 paper:text-emerald-700",
           check.status === "fail" && "bg-destructive/10 text-destructive",
           check.status === "skip" && "bg-muted text-muted-foreground",
         )}

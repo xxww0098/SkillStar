@@ -67,20 +67,25 @@ export function DevModeBanner() {
           className="overflow-hidden"
         >
           <div className="relative mx-auto max-w-[720px] mt-6 mb-2 lg:pl-16">
-            <div className="rounded-xl border border-sky-400/20 bg-sky-500/5 backdrop-blur-sm p-4">
+            <div className="rounded-xl border border-warning/25 bg-warning/5 p-4 backdrop-blur-sm">
               {/* Close button */}
               <button
+                type="button"
                 onClick={handleDismiss}
-                className="absolute top-3 right-3 p-1 rounded-md text-muted-foreground/50 hover:text-foreground/70 hover:bg-muted/40 transition-colors cursor-pointer"
+                aria-label={t("settings.devModeBannerDismiss")}
+                className="absolute top-3 right-3 cursor-pointer rounded-md p-1 text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground/70 focus-ring"
                 title={t("settings.devModeBannerDismiss")}
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="h-3.5 w-3.5" aria-hidden />
               </button>
 
               {/* Header */}
-              <div className="flex items-center gap-2.5 mb-2.5">
-                <div className="w-7 h-7 rounded-lg bg-sky-500/12 flex items-center justify-center shrink-0">
-                  <ShieldAlert className="w-4 h-4 text-sky-400" />
+              <div className="mb-2.5 flex items-center gap-2.5">
+                <div
+                  aria-hidden
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning"
+                >
+                  <ShieldAlert className="h-4 w-4" />
                 </div>
                 <h3 className="text-sm font-semibold text-foreground/90">{t("settings.devModeBannerTitle")}</h3>
               </div>
@@ -93,7 +98,7 @@ export function DevModeBanner() {
               {/* Steps */}
               <div className="space-y-1.5 mb-3.5">
                 <div className="flex items-start gap-2">
-                  <Monitor className="w-3.5 h-3.5 text-sky-400/70 mt-0.5 shrink-0" />
+                  <Monitor className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning/70" aria-hidden />
                   <div>
                     <span className="text-xs font-medium text-foreground/70">Windows 11: </span>
                     <span className="text-xs text-muted-foreground/75 font-mono tracking-tight">
@@ -102,7 +107,7 @@ export function DevModeBanner() {
                   </div>
                 </div>
                 <div className="flex items-start gap-2">
-                  <Monitor className="w-3.5 h-3.5 text-sky-400/70 mt-0.5 shrink-0" />
+                  <Monitor className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning/70" aria-hidden />
                   <div>
                     <span className="text-xs font-medium text-foreground/70">Windows 10: </span>
                     <span className="text-xs text-muted-foreground/75 font-mono tracking-tight">
@@ -115,15 +120,17 @@ export function DevModeBanner() {
               {/* Actions */}
               <div className="flex items-center gap-2.5">
                 <button
+                  type="button"
                   onClick={handleOpenSettings}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 transition-colors cursor-pointer"
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-warning/15 px-3 py-1.5 text-xs font-medium text-warning transition-colors hover:bg-warning/25 focus-ring"
                 >
-                  <ExternalLink className="w-3 h-3" />
+                  <ExternalLink className="h-3 w-3" aria-hidden />
                   {t("settings.devModeBannerLearnMore")}
                 </button>
                 <button
+                  type="button"
                   onClick={handleDismiss}
-                  className="text-xs text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors cursor-pointer"
+                  className="cursor-pointer text-xs text-muted-foreground/70 transition-colors hover:text-muted-foreground focus-ring"
                 >
                   {t("settings.devModeBannerDismiss")}
                 </button>

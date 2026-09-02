@@ -73,8 +73,9 @@ export function ProjectListPanel({
                 </div>
                 <div className="shrink-0">
                   <button
+                    type="button"
                     onClick={(event) => onRemoveProject(event, project.name)}
-                    className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all duration-200 cursor-pointer focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-destructive/40"
+                    className="cursor-pointer rounded-md p-1.5 text-muted-foreground opacity-70 transition-all duration-200 hover:bg-destructive/10 hover:text-destructive hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-destructive/40"
                     aria-label={t("projects.removeProject")}
                   >
                     <Trash2 className="w-4 h-4" />

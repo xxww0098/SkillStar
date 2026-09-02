@@ -3,6 +3,7 @@ import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
+import { SettingsSectionHeader } from "../../../../components/ui/SettingsSectionHeader";
 import { Switch } from "../../../../components/ui/switch";
 import { cn } from "../../../../lib/utils";
 import type { AiConfig } from "../../../../types";
@@ -92,25 +93,29 @@ export const AiProviderSection = memo(function AiProviderSection({
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between px-1">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10">
-            <Sparkles className="h-4 w-4 text-emerald-500" />
-          </div>
-          <h2 className="text-sm font-semibold tracking-tight text-foreground">{t("settings.aiProvider")}</h2>
-          {badgeLabel && (
-            <span className="ml-2 rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
+      <SettingsSectionHeader
+        icon={<Sparkles className="h-4 w-4" />}
+        title={t("settings.aiProvider")}
+        meta={
+          badgeLabel ? (
+            <span className="rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
               {badgeLabel}
             </span>
-          )}
-        </div>
-
-        {ready ? (
-          <Switch checked={localAiConfig.enabled} onCheckedChange={onEnabledChange} disabled={aiSaving} />
-        ) : (
-          <div className="h-5 w-9 rounded-full border border-border bg-muted/60" />
-        )}
-      </div>
+          ) : undefined
+        }
+        action={
+          ready ? (
+            <Switch
+              checked={localAiConfig.enabled}
+              onCheckedChange={onEnabledChange}
+              disabled={aiSaving}
+              aria-label={t("settings.aiProvider")}
+            />
+          ) : (
+            <div className="h-5 w-9 rounded-full border border-border bg-muted/60" />
+          )
+        }
+      />
 
       <div
         className={cn(
@@ -121,7 +126,8 @@ export const AiProviderSection = memo(function AiProviderSection({
         <button
           type="button"
           onClick={onToggleExpanded}
-          className="flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-muted/30"
+          aria-expanded={aiExpanded}
+          className="flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-muted/30 focus-ring"
         >
           <span className="text-sm font-medium text-foreground">
             {t("settings.aiConfigTitle", { defaultValue: "AI Summary & Scan" })}

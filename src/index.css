@@ -90,7 +90,7 @@
   --color-border: rgba(15, 23, 42, 0.15);
   --color-border-subtle: rgba(15, 23, 42, 0.08);
   --color-muted: rgba(15, 23, 42, 0.07);
-  --color-muted-foreground: #64748b;
+  --color-muted-foreground: #475569;
   --color-accent: rgba(59, 130, 246, 0.12);
   --color-accent-foreground: #2563eb;
   --color-ai: #7c3aed;
@@ -139,6 +139,29 @@
     min-height: 100dvh;
     overflow: hidden;
     font-kerning: normal;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 28%, transparent);
+    color: var(--color-foreground);
+  }
+
+  /* Raw <button> / <a> that skip `.focus-ring` still need a visible focus.
+     Components that set `focus-visible:outline-none` keep their own ring. */
+  :where(button, a, [role="button"], [role="tab"], [role="radio"], [role="switch"]):focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--color-primary) 55%, transparent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    .animate-spin,
+    .animate-pulse,
+    .animate-ping {
+      animation: none !important;
+    }
   }
 
   :root[data-bg-style="paper"] body {

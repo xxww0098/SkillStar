@@ -3,6 +3,7 @@ import { ChevronDown, Plus, Unlink, X } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { SettingsSectionHeader } from "../../../components/ui/SettingsSectionHeader";
 import { Switch } from "../../../components/ui/switch";
 import { supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import {
@@ -278,7 +279,7 @@ const AgentRow = memo(function AgentRow({
                         onClick={() => onUnlinkSkill(skillName, profile.id)}
                         disabled={managedSkillsPending}
                         className={cn(
-                          "cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition group-hover/chip:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-ring focus:opacity-100",
+                          "cursor-pointer rounded p-1 text-muted-foreground opacity-70 transition hover:bg-destructive/10 hover:text-destructive hover:opacity-100 focus-ring focus:opacity-100",
                           managedSkillsPending &&
                             "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground",
                         )}
@@ -398,32 +399,23 @@ export const AgentConnectionsSection = memo(function AgentConnectionsSection({
 
   return (
     <section aria-labelledby="settings-agent-connections-title">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-indigo-500/20 bg-indigo-500/10">
-            <Unlink className="h-4 w-4 text-indigo-500" />
-          </div>
-          <div className="min-w-0">
-            <h2
-              id="settings-agent-connections-title"
-              className="text-[13px] font-semibold tracking-tight text-foreground"
+      <SettingsSectionHeader
+        icon={<Unlink className="h-4 w-4" />}
+        title={t("settings.agentConnections")}
+        titleId="settings-agent-connections-title"
+        action={
+          onAddCustomProfile ? (
+            <button
+              type="button"
+              onClick={() => setAddModalOpen(true)}
+              className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/10 px-2.5 py-1.5 text-[11px] font-medium text-primary transition-colors hover:border-primary/40 hover:bg-primary/15 focus-ring"
             >
-              {t("settings.agentConnections")}
-            </h2>
-          </div>
-        </div>
-
-        {onAddCustomProfile && (
-          <button
-            type="button"
-            onClick={() => setAddModalOpen(true)}
-            className="group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/10 px-2.5 py-1.5 text-[11px] font-medium text-primary transition-[background-color,border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/15 focus-ring active:translate-y-0"
-          >
-            <Plus className="h-3.5 w-3.5 transition-transform group-hover:rotate-90" />
-            {t("settings.addCustomAgent", { defaultValue: "Add Custom Agent" })}
-          </button>
-        )}
-      </div>
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              {t("settings.addCustomAgent", { defaultValue: "Add Custom Agent" })}
+            </button>
+          ) : undefined
+        }
+      />
 
       {profilesLoading ? (
         <div
