@@ -92,10 +92,6 @@ describe("selectMcpAgentTargets", () => {
     expect(selectMcpAgentTargets([profile("github-copilot")]).map(({ toolId }) => toolId)).toEqual(["vscode"]);
   });
 
-  it("routes the maka target through its own profile", () => {
-    expect(selectMcpAgentTargets([profile("maka")]).map(({ toolId }) => toolId)).toEqual(["maka"]);
-  });
-
   it("routes gemini-cli and antigravity through their own profiles, never each other's", () => {
     // Both are rooted at ~/.gemini, but they are different products and write
     // different files. Mapping either one onto the other would project MCP

@@ -30,7 +30,6 @@ export const MCP_TOOL_LABELS: Record<McpToolId, string> = {
   "gemini-cli": "Gemini CLI",
   antigravity: "Antigravity",
   zed: "Zed",
-  maka: "Maka",
 };
 
 /** Optional entry fields whose projection is tool-specific. */

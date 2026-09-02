@@ -173,26 +173,6 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
   角色词表、回落语义、写盘跳过回报与能力裁剪见
   [models/README.md](../models/README.md#角色路由跨-agent)，不在此重复。
 
-### Maka 注册说明
-
-Maka（Apache Maka Incubating，命令 `maka`，Desktop 应用名 `Maka`）是
-SkillStar 扩展行，不在 vercel-labs 上游 id 内。Desktop、TUI 与 CLI 共用同一套
-Runtime Host 与 released `Maka` profile。
-
-- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区：全局技能目录 `~/.maka/skills`，
-  项目级 `.maka/skills`；`skillstar-skills::discovery` 的优先级目录包含
-  `.maka/skills`。Maka 同时扫描 `.agents/skills` 作为跨客户端兼容路径，但
-  client-specific 的 `.maka/skills` 优先级更高，因此 SkillStar 只部署到专属目录。
-- `~/.maka/skill-sources` 是 Maka Desktop 自己的 managed skill source catalog，
-  **不纳入** SkillStar 的发现、部署与卸载。
-- 目前轴①（Skills 分发）与 MCP 写入都已接入。MCP 落点是 OS config dir 下
-  `Maka/workspaces/default/mcp.json`（与 released Desktop / `maka` CLI 共用的
-  `Maka` profile；开发隔离用的 `Maka Dev` 不写）。wire format 为顶层
-  `version: 2` + `mcpServers.<name>`，无 `type`：stdio 靠 `command`，远端靠
-  `url` + `transport: streamable-http | sse`。轴② Models 工具同步**未接入**。
-
----
-
 ## 轴②：Models 工具同步（可选）
 
 仅当该 Agent 有自己的磁盘配置文件、且希望在 Models 工作台一键写入

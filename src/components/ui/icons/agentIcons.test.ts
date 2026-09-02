@@ -45,7 +45,6 @@ const BUILTIN_AGENT_IDS = [
   "kode",
   "lingma",
   "loaf",
-  "maka",
   "mcpjam",
   "mistral-vibe",
   "moxby",
