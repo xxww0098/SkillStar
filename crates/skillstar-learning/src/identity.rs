@@ -46,6 +46,10 @@ impl SkillRevisionKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn storage_segment(&self) -> String {
+        self.0.replace(':', "-")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -39,6 +39,7 @@ describe("useNavigation - AppMode support", () => {
   it("defaults to skills mode", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
     expect(result.current.appMode).toBe("skills");
+    expect(result.current.activePage).toBe("learn");
     expect(result.current.modelsActivePage).toBe("hub");
   });
 
@@ -311,6 +312,7 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
    */
 
   const PAGE_TO_HASH: Record<NavPage, string> = {
+    learn: "learn",
     "my-skills": "skills",
     marketplace: "marketplace",
     "skill-cards": "cards",

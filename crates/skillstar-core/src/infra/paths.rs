@@ -122,6 +122,22 @@ pub fn learning_tutorials_dir() -> PathBuf {
     learning_dir().join("tutorials")
 }
 
+/// `~/.skillstar/learning/guides/` — bundled and user Guide documents.
+pub fn learning_guides_dir() -> PathBuf {
+    learning_dir().join("guides")
+}
+
+/// `~/.skillstar/learning/progress/` — LearningProgress keyed by Guide revision.
+pub fn learning_progress_dir() -> PathBuf {
+    learning_dir().join("progress")
+}
+
+/// `~/.skillstar/learning/drafts/` — local Block JSON Guide Drafts.
+pub fn learning_drafts_dir() -> PathBuf {
+    learning_dir().join("drafts")
+}
+
+
 /// `config/ai.json` — AI provider configuration.
 pub fn ai_config_path() -> PathBuf {
     config_dir().join("ai.json")
@@ -258,8 +274,8 @@ pub(crate) fn shellexpand_home(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        data_root, home_dir, hub_root, learning_dir, learning_tutorials_dir, shellexpand_home,
-        tutorials_dir,
+        data_root, home_dir, hub_root, learning_dir, learning_drafts_dir, learning_guides_dir,
+        learning_progress_dir, learning_tutorials_dir, shellexpand_home, tutorials_dir,
     };
     use tempfile::TempDir;
 
@@ -279,6 +295,12 @@ mod tests {
             learning_tutorials_dir(),
             temp.path().join("learning/tutorials")
         );
+        assert_eq!(learning_guides_dir(), temp.path().join("learning/guides"));
+        assert_eq!(
+            learning_progress_dir(),
+            temp.path().join("learning/progress")
+        );
+        assert_eq!(learning_drafts_dir(), temp.path().join("learning/drafts"));
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");
         }

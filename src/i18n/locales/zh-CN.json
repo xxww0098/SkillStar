@@ -77,7 +77,44 @@
     "restart": "重启",
     "updateError": "无法更新",
     "updateErrorFetchRelease": "无法下载更新说明。请检查网络后重试。",
-    "updateErrorOpenRelease": "无法打开下载页面，请手动访问 GitHub Releases"
+    "updateErrorOpenRelease": "无法打开下载页面，请手动访问 GitHub Releases",
+    "learn": "学习"
+  },
+  "learn": {
+    "title": "学习",
+    "subtitle": "阅读绑定精确 revision 的 Guide，不必先安装。只有进入实践并确认后才会安装该 Skill。",
+    "featured": "首发",
+    "installed": "已安装",
+    "notInstalled": "未安装",
+    "revisionBound": "已绑定 revision",
+    "read": "阅读",
+    "start": "开始",
+    "continue": "继续",
+    "resumeTitle": "从这里继续",
+    "resumeBody": "步骤 {{step}} · 已完成 {{done}}/{{total}}",
+    "resumeEmpty": "这个 Guide revision 还没有本地进度。",
+    "emptyTitle": "还没有 Guide",
+    "emptyBody": "内置或本地转换的 Guide 会显示在这里。",
+    "loadFailed": "无法加载学习页",
+    "back": "返回",
+    "practice": "实践",
+    "skillDrift": "已安装 Skill 与这份 Guide revision 不一致",
+    "completeStep": "完成本步",
+    "practiceHint": "阅读不会安装任何内容。进入实践前请确认精确 revision。",
+    "previewInstall": "预览安装",
+    "installPreviewTitle": "精确 revision 安装",
+    "runsCommands": "这次安装会执行作者命令。P0 不会走这条路径。",
+    "noAuthorCommands": "这次安装不会执行作者命令。",
+    "confirmInstall": "安装此 revision",
+    "staleTitle": "这份进度属于旧的 Guide revision",
+    "staleBody": "不会被静默套用到当前 Guide。你可以继续旧进度，或从当前 revision 重新开始。",
+    "continueOld": "保留旧进度",
+    "restart": "开始当前 revision",
+    "kind": {
+      "reading": "阅读",
+      "practice": "实践",
+      "verify": "验收"
+    }
   },
   "settings": {
     "title": "设置",
@@ -1234,7 +1271,15 @@
     "iframeTitle": "{{skillName}} 使用教程",
     "oldIframeTitle": "{{skillName}} 旧版使用教程",
     "oldVersionBadge": "旧版",
-    "freshBadge": "已匹配当前版本"
+    "freshBadge": "已匹配当前版本",
+    "convertDraft": "转换为 Guide Draft",
+    "convertPreviewTitle": "Block JSON Draft 预览",
+    "convertLocalOnly": "只保存在这台电脑，没有发布或上传。",
+    "convertSave": "保存本地 Draft",
+    "convertDismiss": "关闭预览",
+    "convertSteps": "{{count}} 个步骤",
+    "convertSaved": "已保存 Draft {{revisionKey}}。HTML 教程未被替换。",
+    "convertFailed": "无法转换：{{message}}"
   },
   "shareCodeImport": {
     "smartInputHint": "输入 GitHub 地址或粘贴分享码（ags-... / agd-...）",
