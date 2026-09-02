@@ -154,7 +154,7 @@ fn dual_read_uses_legacy_name_path_but_new_writes_only_identity_path() {
     let loaded = load_private_tutorial(&skill, &inventory, 3, &generator).unwrap();
     assert_eq!(loaded.state, TutorialState::Fresh);
     assert!(!loaded.bound);
-    assert!(create_guide_draft_from_tutorial(&loaded).is_err());
+    assert!(crate::create_guide_draft_from_tutorial(&loaded, "zh-CN").is_err());
 
     commit_private_tutorial(
         &skill,

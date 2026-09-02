@@ -3,9 +3,10 @@ import { AlertTriangle, BookOpen, Bot, Loader2, RefreshCw, X } from "lucide-reac
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useTauriMutation, useTauriQuery, useTauriQueryWithArgs } from "../../lib/ipc";
+import { useTauriMutation, useTauriQuery, useTauriQueryWithArgs, tauriInvoke } from "../../lib/ipc";
 import { navigateToAcpSettings } from "../../lib/utils";
 import type { SkillTutorial, SkillTutorialStyle } from "../../types";
+import type { GuideDraftDto } from "../../types/generated/GuideDraft";
 import { Button } from "../ui/button";
 import { ResizablePanel } from "../ui/ResizablePanel";
 
@@ -291,7 +292,92 @@ export function SkillTutorialPanel({ skillName, onClose }: SkillTutorialPanelPro
           <X className="h-4 w-4" aria-hidden />
         </button>
       </header>
+      {html ? <ConvertToDraftSection skillName={skillName} locale={locale} /> : null}
       <div className="flex min-h-0 flex-1 flex-col">{body}</div>
     </ResizablePanel>
+  );
+}
+
+function ConvertToDraftSection({ skillName, locale }: { skillName: string; locale: string }) {
+  const { t } = useTranslation();
+  const [preview, setPreview] = useState<GuideDraftDto | null>(null);
+  const [saved, setSaved] = useState<GuideDraftDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const previewDraft = async () => {
+    setBusy(true);
+    setError(null);
+    setSaved(null);
+    try {
+      setPreview(await tauriInvoke("preview_guide_draft", { name: skillName, locale }));
+    } catch (caught) {
+      setPreview(null);
+      setError(String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveDraft = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await tauriInvoke("create_guide_draft", { name: skillName, locale });
+      setSaved(next);
+      setPreview(next);
+    } catch (caught) {
+      setError(String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="shrink-0 border-b border-border px-5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void previewDraft()}>
+          {t("skillTutorial.convertDraft")}
+        </Button>
+        <p className="text-xs text-muted-foreground">{t("skillTutorial.convertLocalOnly")}</p>
+      </div>
+      {error ? (
+        <p className="mt-2 text-xs text-destructive">{t("skillTutorial.convertFailed", { message: error })}</p>
+      ) : null}
+      {saved ? (
+        <p className="mt-2 font-mono text-[11px] break-all text-muted-foreground">
+          {t("skillTutorial.convertSaved", { revisionKey: saved.revisionKey })}
+        </p>
+      ) : null}
+      {preview ? (
+        <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3">
+          <p className="text-sm font-semibold text-foreground">{t("skillTutorial.convertPreviewTitle")}</p>
+          <p className="mt-1 text-sm text-foreground">{preview.title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("skillTutorial.convertSteps", { count: preview.steps.length })}
+          </p>
+          <p className="mt-1 font-mono text-[11px] leading-relaxed break-all text-sky-400/90">
+            {preview.skillIdentity.key}
+            <br />
+            {preview.sourceTutorialKey}
+          </p>
+          <ol className="mt-2 grid gap-1 text-xs text-muted-foreground">
+            {preview.steps.map((step) => (
+              <li key={step.id}>
+                {step.title} · {step.blocks.length} · {step.kind}
+              </li>
+            ))}
+          </ol>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
+              {t("skillTutorial.convertDismiss")}
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => void saveDraft()}>
+              {t("skillTutorial.convertSave")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -14,6 +14,14 @@ vi.mock("react-i18next", () => {
     "skillTutorial.acpMissingTitle": "ACP agent is not configured",
     "skillTutorial.configureAcp": "Configure ACP",
     "skillTutorial.freshBadge": "Matches current version",
+    "skillTutorial.convertDraft": "Convert to Guide Draft",
+    "skillTutorial.convertPreviewTitle": "Block JSON Draft preview",
+    "skillTutorial.convertLocalOnly": "This stays on this computer. There is no publish or upload.",
+    "skillTutorial.convertSave": "Save local Draft",
+    "skillTutorial.convertDismiss": "Close preview",
+    "skillTutorial.convertSteps": "{{count}} steps",
+    "skillTutorial.convertSaved": "Saved Draft {{revisionKey}}. The HTML tutorial was not replaced.",
+    "skillTutorial.convertFailed": "Could not convert: {{message}}",
     "skillTutorial.generateFailed": "Guide generation failed: {{message}}",
     "skillTutorial.hideOld": "Hide old guide",
     "skillTutorial.iframeTitle": "{{skillName}} usage guide",
@@ -169,5 +177,78 @@ describe("SkillTutorialPanel", () => {
     expect(await screen.findByText("Couldn't load the usage guide")).toBeInTheDocument();
     expect(screen.queryByTitle("demo usage guide")).not.toBeInTheDocument();
     expect(screen.queryByText("Matches current version")).not.toBeInTheDocument();
+  });
+
+  it("previews and saves a local Guide Draft without replacing HTML or publishing", async () => {
+    const draft = {
+      id: "draft:demo",
+      title: "Converted demo",
+      locale: "en",
+      schemaVersion: "1",
+      skillIdentity: {
+        key: "ski:v1:demo",
+        source: { type: "local", localId: "00000000-0000-4000-8000-000000000007" },
+      },
+      skillRevision: {
+        key: "skr:v1:demo",
+        skillKey: "ski:v1:demo",
+        content: { hashVersion: 2, contentHash: "sha256:current" },
+        source: { type: "local" },
+      },
+      sourceTutorialKey: "ski-v1-demo",
+      convertedAt: "2026-09-01T00:00:00Z",
+      revisionKey: "gkr:v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      steps: [
+        {
+          id: "step-1",
+          kind: "reading",
+          title: "Intro",
+          requiresSkill: false,
+          blocks: [{ type: "paragraph", text: "Converted body" }],
+        },
+      ],
+    };
+    const calls: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      calls.push(String(command));
+      if (command === "get_skill_tutorial") return tutorial();
+      if (command === "get_acp_config") {
+        return { enabled: true, agent_command: "codex --acp", agent_label: "Codex", tutorial_style: "guided" };
+      }
+      if (command === "preview_guide_draft") return draft;
+      if (command === "create_guide_draft") return draft;
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Convert to Guide Draft" }));
+    expect(await screen.findByText("Block JSON Draft preview")).toBeInTheDocument();
+    expect(screen.getByText("Converted demo")).toBeInTheDocument();
+    expect(screen.getByTitle("demo usage guide")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save local Draft" }));
+    expect(await screen.findByText(/Saved Draft gkr:v1:c+\. The HTML tutorial was not replaced\./)).toBeInTheDocument();
+    expect(screen.getByTitle("demo usage guide")).toBeInTheDocument();
+    expect(calls).not.toContain("publish_skill_to_github");
+    expect(calls).not.toContain("upload_guide");
+  });
+
+  it("keeps the HTML tutorial when conversion fails closed", async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "get_skill_tutorial") return tutorial();
+      if (command === "get_acp_config") {
+        return { enabled: true, agent_command: "codex --acp", agent_label: "Codex", tutorial_style: "guided" };
+      }
+      if (command === "preview_guide_draft") {
+        throw new Error("Unbound legacy tutorials cannot be converted into a Guide Draft");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Convert to Guide Draft" }));
+    expect(await screen.findByText(/Unbound legacy tutorials cannot be converted/)).toBeInTheDocument();
+    expect(screen.getByTitle("demo usage guide")).toBeInTheDocument();
   });
 });

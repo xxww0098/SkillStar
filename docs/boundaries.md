@@ -141,7 +141,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | --- | --- | --- |
 | React → Rust | 只通过集中 IPC wrapper 调用 Tauri command | `src/lib/ipc/`、`src-tauri/src/commands/mod.rs` |
 | Tauri → 域 | command 做参数/State/事件适配后调用 facade | `src-tauri/src/commands/` |
-| Skill → 私人教程 | `skillstar-skills::content` 提供只读快照，`skillstar-skills::local_identity` 拥有本地 UUID sidecar；`skillstar-app::learning` 按 channel > local > Git 解析 `ResolvedSkill`；`skillstar-learning` 拥有 identity/revision、HTML 安全/覆盖校验、freshness 与 identity-keyed 持久化。生成事务与 ACP 子进程仍由 app / Tauri core 编排；command 不直接读写文件 | `crates/skillstar-learning/`、`crates/skillstar-app/src/learning/`、`crates/skillstar-skills/src/{content,local_identity,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs` |
+| Skill → 私人教程 / Guide | `skillstar-skills::content` 提供只读快照，`skillstar-skills::local_identity` 拥有本地 UUID sidecar；`skillstar-app::learning` 按 channel > local > Git 解析 `ResolvedSkill`，并把 Guide 阅读所需的 installed/drift overlay 投影到 DTO；`skillstar-learning` 拥有 identity/revision、HTML 安全/覆盖校验、Guide/进度/Draft 与 identity-keyed 持久化。生成事务与 ACP 子进程仍由 app / Tauri core 编排；command 不直接读写文件。前端 Learn 页与教程面板只走 typed IPC | `crates/skillstar-learning/`、`crates/skillstar-app/src/learning/`、`src/features/learn/`、`src/components/shared/SkillTutorialPanel.tsx`、`src-tauri/src/commands/learning.rs`、`src-tauri/src/core/skill_tutorial.rs` |
 | 跨域事务 | 放入 `skillstar-app`，由窄 facade 组合 | `crates/skillstar-app/src/` |
 | MCP catalog → store | 运行时形态选择、draft 映射、安装前确认负载、preset 映射全部在 `skillstar-app::mcp`；两个域 crate 互不知晓，命令层不做映射 | `crates/skillstar-app/src/mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/skillstar-core/src/infra/http_client.rs` |

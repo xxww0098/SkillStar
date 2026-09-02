@@ -4,6 +4,7 @@ import { FILTER_ALL, type CatalogFilter } from "../features/usage/types";
 import type { AppMode, ModelsNavPage, NavPage, SubPage } from "../types";
 
 // ── Page imports (for prefetching) ──────────────────────────────────
+const importLearnPage = () => import("../pages/Learn");
 const importMySkillsPage = () => import("../pages/MySkills");
 const importMarketplacePage = () => import("../pages/Marketplace");
 const importPublisherDetailPage = () => import("../pages/PublisherDetail");
@@ -14,7 +15,7 @@ const importMcpPage = () => import("../pages/Mcp");
 const importSettingsPage = () => import("../pages/Settings");
 const importUsagePage = () => import("../pages/Usage");
 
-const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "mcp", "settings"];
+const ALL_PAGES: NavPage[] = ["learn", "my-skills", "marketplace", "skill-cards", "projects", "mcp", "settings"];
 
 /** Models hub drawer deep-link request (request-nonce pattern, like usageCreateRequest). */
 export interface ModelsDrawerRequest {
@@ -25,15 +26,17 @@ export interface ModelsDrawerRequest {
 }
 
 const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
-  "my-skills": ["marketplace", "projects"],
-  marketplace: ["my-skills", "skill-cards"],
+  learn: ["my-skills", "marketplace"],
+  "my-skills": ["learn", "marketplace"],
+  marketplace: ["learn", "my-skills"],
   "skill-cards": ["projects", "my-skills"],
   projects: ["my-skills", "settings"],
   mcp: ["my-skills", "marketplace"],
-  settings: ["my-skills", "projects"],
+  settings: ["learn", "my-skills"],
 };
 
 const PAGE_IMPORTERS: Record<NavPage, () => Promise<unknown>> = {
+  learn: importLearnPage,
   "my-skills": importMySkillsPage,
   marketplace: () => {
     void importPublisherDetailPage();
@@ -75,6 +78,7 @@ function persistLastProviderId(id: string | null): void {
 
 // ── Hash ↔ NavPage mapping ──────────────────────────────────────────
 const PAGE_TO_HASH: Record<NavPage, string> = {
+  learn: "learn",
   "my-skills": "skills",
   marketplace: "marketplace",
   "skill-cards": "cards",
@@ -112,9 +116,9 @@ function modelsPageFromHash(_hash: string): ModelsNavPage {
 
 function pageFromHash(): NavPage {
   const hash = window.location.hash.slice(1);
-  if (isModelsHash(hash) || isUsageHash(hash)) return "my-skills";
+  if (isModelsHash(hash) || isUsageHash(hash)) return "learn";
   if (hash === "ssh") return "my-skills";
-  return HASH_TO_PAGE[hash] ?? "my-skills";
+  return HASH_TO_PAGE[hash] ?? "learn";
 }
 
 function appModeFromHash(): AppMode {
@@ -366,7 +370,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       } else if (isUsageHash(hash)) {
         setAppModeState("usage");
       } else {
-        const page = HASH_TO_PAGE[hash] ?? "my-skills";
+        const page = HASH_TO_PAGE[hash] ?? "learn";
         setAppModeState("skills");
         setActivePage((prev) => (prev !== page ? page : prev));
       }

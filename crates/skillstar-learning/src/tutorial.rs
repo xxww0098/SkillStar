@@ -114,22 +114,5 @@ pub fn commit_private_tutorial(
     )
 }
 
-pub fn create_guide_draft_from_tutorial(tutorial: &PrivateTutorial) -> Result<(), AppError> {
-    if !tutorial.bound {
-        return Err(AppError::Other(
-            "Unbound legacy tutorials cannot be converted into a Guide Draft".to_string(),
-        ));
-    }
-    if tutorial.state == TutorialState::Missing || tutorial.html.is_none() {
-        return Err(AppError::Other(
-            "A Guide Draft requires a stored private tutorial".to_string(),
-        ));
-    }
-    Err(AppError::Other(
-        "Guide Draft conversion is owned by a later Learn ticket and is not available yet"
-            .to_string(),
-    ))
-}
-
 #[cfg(test)]
 mod tests;

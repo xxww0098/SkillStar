@@ -1,5 +1,7 @@
 //! Project installed Skills into learning-domain identity and revision.
 
+pub mod dto;
+
 use skillstar_channels::shared_channels::{
     ChannelSkillPin, ChannelSubscribedSkill, ChannelSubscription, ChannelSubscriptionRegistry,
     ChannelSubscriptionStore, DiskChannelSubscriptionRegistry,
@@ -7,10 +9,16 @@ use skillstar_channels::shared_channels::{
 use skillstar_core::infra::error::AppError;
 use skillstar_core::types::Skill;
 use skillstar_learning::{
-    ChannelReleaseRef, ContentRevision, GeneratorFingerprint, GitTrackingRef, PrivateTutorial,
-    ResolvedSkill, SkillIdentity, SkillRevision, commit_private_tutorial, load_private_tutorial,
+    ChannelReleaseRef, ContentRevision, GeneratorFingerprint, GitTrackingRef, GuideId,
+    GuideRevisionKey, LearningProgress, PrivateTutorial, ResolvedSkill, SkillIdentity,
+    SkillRevision, commit_private_tutorial, load_private_tutorial,
 };
 use skillstar_skills::source_identity::{self, InstalledSkillFacts};
+
+use self::dto::{
+    GuideDraftDto, GuideDto, GuideSummaryDto, LearningProgressDto, PracticeInstallPreviewDto,
+    ProgressSnapshotDto,
+};
 
 /// Resolve an installed Skill handle into a source-compound identity.
 ///
@@ -176,6 +184,92 @@ fn content_revision(
     snapshot: &skillstar_skills::source_identity::SnapshotFacts,
 ) -> Result<ContentRevision, AppError> {
     ContentRevision::new(snapshot.hash_version, snapshot.content_hash.clone())
+}
+
+pub fn list_guides() -> Result<Vec<GuideSummaryDto>, AppError> {
+    skillstar_learning::list_guides()?
+        .into_iter()
+        .map(|summary| {
+            let (installed, skill_drift) = install_overlay(&summary.skill_identity, &summary.skill_revision);
+            Ok(GuideSummaryDto::from_summary(summary, installed, skill_drift))
+        })
+        .collect()
+}
+
+pub fn get_guide(id: &str) -> Result<Option<GuideDto>, AppError> {
+    let Some(guide) = skillstar_learning::get_guide(id)? else {
+        return Ok(None);
+    };
+    let (installed, skill_drift) = install_overlay(&guide.skill_identity, &guide.skill_revision);
+    Ok(Some(GuideDto::from_guide(guide, installed, skill_drift)))
+}
+
+pub fn load_guide_progress(
+    guide_id: &str,
+    guide_revision_key: &str,
+) -> Result<ProgressSnapshotDto, AppError> {
+    let id = GuideId::new(guide_id)?;
+    let revision = GuideRevisionKey::from_wire(guide_revision_key)?;
+    Ok(skillstar_learning::load_progress(&id, &revision)?.into())
+}
+
+pub fn save_guide_progress(
+    guide_id: String,
+    guide_revision_key: String,
+    current_step_id: String,
+    completed_step_ids: Vec<String>,
+) -> Result<LearningProgressDto, AppError> {
+    let saved = skillstar_learning::save_progress(&LearningProgress {
+        guide_id: GuideId::new(guide_id)?,
+        guide_revision_key: GuideRevisionKey::from_wire(&guide_revision_key)?,
+        current_step_id,
+        completed_step_ids,
+        updated_at: String::new(),
+    })?;
+    Ok(saved.into())
+}
+
+pub fn preview_practice_install(
+    guide_id: &str,
+    step_id: &str,
+) -> Result<PracticeInstallPreviewDto, AppError> {
+    let preview = skillstar_learning::preview_practice_install(guide_id, step_id)?;
+    let (installed, skill_drift) = install_overlay(&preview.skill_identity, &preview.skill_revision);
+    Ok(PracticeInstallPreviewDto::from_preview(
+        preview,
+        installed,
+        skill_drift,
+    ))
+}
+
+pub fn preview_guide_draft(name: &str, locale: &str) -> Result<GuideDraftDto, AppError> {
+    let tutorial = load_tutorial(name, &conversion_fingerprint())?;
+    Ok(skillstar_learning::preview_guide_draft_from_tutorial(&tutorial, locale)?.into())
+}
+
+pub fn create_guide_draft(name: &str, locale: &str) -> Result<GuideDraftDto, AppError> {
+    let tutorial = load_tutorial(name, &conversion_fingerprint())?;
+    Ok(skillstar_learning::create_guide_draft_from_tutorial(&tutorial, locale)?.into())
+}
+
+pub fn list_guide_drafts() -> Result<Vec<GuideDraftDto>, AppError> {
+    Ok(skillstar_learning::list_guide_drafts()?
+        .into_iter()
+        .map(GuideDraftDto::from)
+        .collect())
+}
+
+fn conversion_fingerprint() -> GeneratorFingerprint {
+    GeneratorFingerprint::new("guided.v1", "artifact.v1")
+}
+
+fn install_overlay(identity: &SkillIdentity, bound: &SkillRevision) -> (bool, bool) {
+    match resolve_installed_name(skillstar_learning::SEED_DISPLAY_NAME) {
+        Ok(resolved) if resolved.identity.key == identity.key => {
+            (true, resolved.revision.key != bound.key)
+        }
+        _ => (false, false),
+    }
 }
 
 #[cfg(test)]

@@ -66,7 +66,7 @@ export type SortOption = "stars-desc" | "updated" | "name";
 
 export type ViewMode = "grid" | "list";
 
-export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "mcp" | "settings";
+export type NavPage = "learn" | "my-skills" | "marketplace" | "skill-cards" | "projects" | "mcp" | "settings";
 
 /** Drill-down sub-page payloads; `mcp-publisher-detail` carries the generated `McpPublisherSummary` (see `./mcp`). */
 

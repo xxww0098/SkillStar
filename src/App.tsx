@@ -15,6 +15,7 @@ import { deepLinkNavTarget } from "./lib/deepLink";
 import { looksLikeShareCode } from "./lib/shareCode";
 import type { McpPublisherSummary, NavPage, OfficialPublisher } from "./types";
 
+const LearnPage = lazy(() => import("./pages/Learn").then((mod) => ({ default: mod.Learn })));
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
 const PublisherDetailPage = lazy(() =>
@@ -48,7 +49,7 @@ const MAIN_CONTENT_PAD_EXPANDED_PX = 8 + 180;
 const MAIN_CONTENT_PAD_COLLAPSED_PX = 8 + 56;
 
 /** Skills-mode list pages whose search/scroll should survive a sidebar hop. */
-const SKILLS_KEEP_PAGES = ["my-skills", "marketplace", "mcp", "skill-cards", "projects", "settings"] as const;
+const SKILLS_KEEP_PAGES = ["learn", "my-skills", "marketplace", "mcp", "skill-cards", "projects", "settings"] as const;
 
 function UsageModeShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
@@ -217,6 +218,8 @@ function AppContent() {
     }
 
     switch (id) {
+      case "learn":
+        return <LearnPage />;
       case "my-skills":
         return (
           <MySkillsPage

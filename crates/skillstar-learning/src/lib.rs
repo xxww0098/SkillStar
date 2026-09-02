@@ -9,8 +9,11 @@ mod identity;
 mod tutorial;
 
 pub use guide::{
-    GuideSummary, LearningProgress, create_guide_draft_from_tutorial, get_guide, list_guides,
-    load_progress, save_progress,
+    CalloutTone, ConversionPreview, Guide, GuideBlock, GuideDraft, GuideId, GuideRevisionKey,
+    GuideStep, GuideStepKind, GuideSummary, LearningProgress, PracticeInstallPreview,
+    ProgressSnapshot, create_guide_draft_from_tutorial, frontend_design_first_success, get_guide,
+    list_guide_drafts, list_guides, load_progress, preview_guide_draft_from_tutorial,
+    preview_practice_install, save_progress, SEED_DISPLAY_NAME, SEED_GUIDE_ID,
 };
 pub use identity::{
     ChannelReleaseRef, ContentRevision, GitTrackingRef, ResolvedSkill, SkillIdentity,

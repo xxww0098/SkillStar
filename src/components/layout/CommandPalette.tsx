@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  BookOpen,
   Command,
   Download,
   FolderKanban,
@@ -55,6 +56,14 @@ export function CommandPalette({
   // Build action list
   const actions: CommandPaletteAction[] = useMemo(() => {
     const navActions: CommandPaletteAction[] = [
+      {
+        id: "nav-learn",
+        label: t("sidebar.learn"),
+        icon: <BookOpen className="w-4 h-4" />,
+        section: t("commandPalette.navigation"),
+        onSelect: () => onNavigate("learn"),
+        keywords: ["learn", "guide", "tutorial"],
+      },
       {
         id: "nav-skills",
         label: t("sidebar.skills"),

@@ -77,7 +77,44 @@
     "restart": "Restart",
     "updateError": "Couldn't update",
     "updateErrorFetchRelease": "Couldn't download the release notes. Check your network and try again.",
-    "updateErrorOpenRelease": "Could not open the download page. Please visit GitHub Releases manually."
+    "updateErrorOpenRelease": "Could not open the download page. Please visit GitHub Releases manually.",
+    "learn": "Learn"
+  },
+  "learn": {
+    "title": "Learn",
+    "subtitle": "Read a revision-bound Guide without installing. Practice installs only after you confirm the exact Skill revision.",
+    "featured": "Featured",
+    "installed": "Installed",
+    "notInstalled": "Not installed",
+    "revisionBound": "Revision-bound",
+    "read": "Read",
+    "start": "Start",
+    "continue": "Continue",
+    "resumeTitle": "Continue here",
+    "resumeBody": "Step {{step}} · {{done}}/{{total}} complete",
+    "resumeEmpty": "No local progress on this Guide revision yet.",
+    "emptyTitle": "No Guides yet",
+    "emptyBody": "Guides appear here when they are bundled or converted locally.",
+    "loadFailed": "Couldn't load Learn",
+    "back": "Back",
+    "practice": "Practice",
+    "skillDrift": "Installed Skill differs from this Guide revision",
+    "completeStep": "Mark step complete",
+    "practiceHint": "Reading did not install anything. Confirm the exact revision before practice.",
+    "previewInstall": "Preview install",
+    "installPreviewTitle": "Exact revision install",
+    "runsCommands": "This install would run author commands. P0 blocks that path.",
+    "noAuthorCommands": "This install does not run author commands.",
+    "confirmInstall": "Install this revision",
+    "staleTitle": "This progress belongs to an older Guide revision",
+    "staleBody": "It will not be applied silently to the current Guide. Continue the old revision or start this one.",
+    "continueOld": "Keep old progress",
+    "restart": "Start this revision",
+    "kind": {
+      "reading": "Reading",
+      "practice": "Practice",
+      "verify": "Verify"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -1234,7 +1271,15 @@
     "iframeTitle": "{{skillName}} usage guide",
     "oldIframeTitle": "Old usage guide for {{skillName}}",
     "oldVersionBadge": "Old version",
-    "freshBadge": "Matches current version"
+    "freshBadge": "Matches current version",
+    "convertDraft": "Convert to Guide Draft",
+    "convertPreviewTitle": "Block JSON Draft preview",
+    "convertLocalOnly": "This stays on this computer. There is no publish or upload.",
+    "convertSave": "Save local Draft",
+    "convertDismiss": "Close preview",
+    "convertSteps": "{{count}} steps",
+    "convertSaved": "Saved Draft {{revisionKey}}. The HTML tutorial was not replaced.",
+    "convertFailed": "Could not convert: {{message}}"
   },
   "shareCodeImport": {
     "smartInputHint": "Enter a GitHub URL or paste a share code (ags-... / agd-...)",
