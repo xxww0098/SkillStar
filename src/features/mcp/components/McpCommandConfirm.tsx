@@ -1,5 +1,6 @@
 import { AlertTriangle, FileWarning, ShieldCheck, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { InsetPanel } from "../../../components/ui/InsetPanel";
 import { cn } from "../../../lib/utils";
 import type { McpSecretPolicy } from "../../../types";
 import type { McpCommandConfirmation, McpEnvPreviewRow } from "../lib/commandPreview";
@@ -73,7 +74,7 @@ export function McpCommandConfirm({
   const { t } = useTranslation();
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/60 bg-background/40 p-3.5">
+    <InsetPanel className="space-y-3">
       <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
         <Terminal className="h-3.5 w-3.5 text-primary" />
         {confirmation.preview ? t("mcp.confirmCommandTitle") : t("mcp.confirmEndpointTitle")}
@@ -148,6 +149,6 @@ export function McpCommandConfirm({
           <span>{t("mcp.confirmAcknowledge")}</span>
         </label>
       ) : null}
-    </div>
+    </InsetPanel>
   );
 }

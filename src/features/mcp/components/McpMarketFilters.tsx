@@ -2,6 +2,7 @@ import { ArrowDownWideNarrow, ArrowUpWideNarrow, FilterX, SlidersHorizontal } fr
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
+import { InsetPanel } from "../../../components/ui/InsetPanel";
 import { cn } from "../../../lib/utils";
 import type { McpServerKind, McpSortKey } from "../../../types";
 import { activeMcpFilterCount, type McpMarketFilterState, toggleFilterValue } from "../lib/marketQuery";
@@ -84,7 +85,7 @@ export function McpMarketFilters({ filters, onChange, onReset, className }: McpM
   const patch = (next: Partial<McpMarketFilterState>) => onChange({ ...filters, ...next });
 
   return (
-    <div className={cn("space-y-4 rounded-xl border border-border/60 bg-background/40 p-3.5", className)}>
+    <InsetPanel className={cn("space-y-4", className)}>
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
           <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
@@ -206,6 +207,6 @@ export function McpMarketFilters({ filters, onChange, onReset, className }: McpM
               : t("mcp.sortDirectionAsc")}
         </Chip>
       </Group>
-    </div>
+    </InsetPanel>
   );
 }

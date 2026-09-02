@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
+import { Textarea } from "../../../components/ui/textarea";
 import type { McpServerEntry, McpToolId } from "../../../types";
 import { kvToText, parseKv, parseList } from "../lib/kv";
 import { enabledMcpToolIds } from "../lib/toolRegistry";
@@ -41,8 +42,7 @@ interface McpServerFormProps {
   noteForTool?: (toolId: McpToolId) => string | null;
 }
 
-const textareaCls =
-  "w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-mono text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20";
+const textareaCls = "min-h-16 font-mono text-xs";
 
 function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
@@ -175,7 +175,7 @@ export function McpServerForm({
           </div>
           <div>
             <FieldLabel hint={t("mcp.kvHint")}>{t("mcp.fieldHeaders")}</FieldLabel>
-            <textarea
+            <Textarea
               value={headersText}
               onChange={(e) => setHeadersText(e.target.value)}
               rows={3}
@@ -198,7 +198,7 @@ export function McpServerForm({
           </div>
           <div>
             <FieldLabel hint={t("mcp.oneLineHint")}>{t("mcp.fieldArgs")}</FieldLabel>
-            <textarea
+            <Textarea
               value={argsText}
               onChange={(e) => setArgsText(e.target.value)}
               rows={3}
@@ -208,7 +208,7 @@ export function McpServerForm({
           </div>
           <div>
             <FieldLabel hint={t("mcp.kvHint")}>{t("mcp.fieldEnv")}</FieldLabel>
-            <textarea
+            <Textarea
               value={envText}
               onChange={(e) => setEnvText(e.target.value)}
               rows={2}

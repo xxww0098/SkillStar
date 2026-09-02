@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Github } from "../../../components/ui/icons/Github";
 import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
+import { Textarea } from "../../../components/ui/textarea";
 import { tauriInvoke } from "../../../lib/ipc";
 import { createShareCode, formatShareMessage, type ShareCodeData, type ShareCodeType } from "../../../lib/shareCode";
 import { toast } from "../../../lib/toast";
@@ -451,10 +452,10 @@ export function ExportShareCodeModal({
                   </span>
                 </div>
                 <div className="relative group">
-                  <textarea
+                  <Textarea
                     readOnly
                     value={shareData && code ? formatShareMessage(shareData.data, code, shareData.type) : code || ""}
-                    className="flex w-full rounded-xl border border-input bg-muted/50 px-3 py-2.5 text-micro font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[140px] resize-none pr-20"
+                    className="min-h-[140px] resize-none bg-muted/50 pr-20 font-mono text-micro"
                   />
                   <div className="absolute right-2 top-2 flex items-center gap-1.5">
                     <button
