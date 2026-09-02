@@ -7247,6 +7247,7 @@ dependencies = [
 name = "skillstar-skills"
 version = "0.0.0"
 dependencies = [
+ "aes-gcm 0.10.3",
  "anyhow",
  "async-trait",
  "base64 0.22.1",
@@ -7254,6 +7255,7 @@ dependencies = [
  "dirs",
  "flate2",
  "junction",
+ "machine-uid",
  "regex",
  "reqwest 0.13.3",
  "scraper",

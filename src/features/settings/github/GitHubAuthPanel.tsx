@@ -3,6 +3,7 @@ import {
   ArrowUpFromLine,
   Check,
   Copy,
+  Download,
   ExternalLink,
   KeyRound,
   Loader2,
@@ -98,8 +99,8 @@ function ScopeRow({ icon, name, hint }: { icon: React.ReactNode; name: string; h
     <li className="flex items-start gap-2.5">
       <span className="mt-0.5 text-muted-foreground">{icon}</span>
       <span className="min-w-0">
-        <span className="font-mono text-[11.5px] font-medium text-foreground/90">{name}</span>
-        <span className="ml-1.5 text-xs text-muted-foreground">{hint}</span>
+        <span className="text-[12px] font-medium text-foreground/90">{name}</span>
+        <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{hint}</span>
       </span>
     </li>
   );
@@ -118,14 +119,19 @@ function SignInState({ auth }: { auth: GitHubAuthController }) {
       <div className="rounded-xl border border-border bg-muted/30 p-3.5">
         <ul className="space-y-2.5">
           <ScopeRow
-            icon={<UserRoundCog className="h-4 w-4" strokeWidth={1.75} />}
-            name={t("settings.githubAuthScopeAdmin")}
-            hint={t("settings.githubAuthScopeAdminHint")}
+            icon={<Download className="h-4 w-4" strokeWidth={1.75} />}
+            name={t("settings.githubAuthUsePrivate")}
+            hint={t("settings.githubAuthUsePrivateHint")}
           />
           <ScopeRow
             icon={<ArrowUpFromLine className="h-4 w-4" strokeWidth={1.75} />}
-            name={t("settings.githubAuthScopeContents")}
-            hint={t("settings.githubAuthScopeContentsHint")}
+            name={t("settings.githubAuthUsePublish")}
+            hint={t("settings.githubAuthUsePublishHint")}
+          />
+          <ScopeRow
+            icon={<UserRoundCog className="h-4 w-4" strokeWidth={1.75} />}
+            name={t("settings.githubAuthUseChannels")}
+            hint={t("settings.githubAuthUseChannelsHint")}
           />
         </ul>
         <p className="mt-3 border-t border-border pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
@@ -135,7 +141,11 @@ function SignInState({ auth }: { auth: GitHubAuthController }) {
 
       <div className="space-y-3">
         <Button className="w-full" disabled={auth.busy} onClick={() => void auth.start()}>
-          {auth.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Github className="h-4 w-4" />}
+          {auth.busy ? (
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+          ) : (
+            <Github className="h-4 w-4" />
+          )}
           {t("settings.githubAuthStart")}
         </Button>
         <KeychainNote />
@@ -159,7 +169,7 @@ function DeviceCodeState({ auth }: { auth: GitHubAuthController }) {
   }, [authorization?.verification_uri, code, copy]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="relative flex h-2 w-2 shrink-0">
@@ -209,7 +219,7 @@ function DeviceCodeState({ auth }: { auth: GitHubAuthController }) {
       <ol className="space-y-1.5 text-xs text-muted-foreground">
         <li className="flex gap-2.5">
           <span className="font-mono text-[11px] text-muted-foreground">1</span>
-          {t("settings.githubAuthStepCopy")}
+          {t("settings.githubAuthStepOpen")}
         </li>
         <li className="flex gap-2.5">
           <span className="font-mono text-[11px] text-muted-foreground">2</span>
@@ -261,12 +271,15 @@ function ConnectedState({
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold tracking-tight text-foreground">@{identity.login}</p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{t("settings.githubAuthConnected")}</p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            {t("settings.githubAuthConnectedUses")}
+          </p>
         </div>
       </div>
 
       <div className="flex gap-2">
-        <Button variant="outline" className="flex-1" disabled={auth.busy} onClick={() => void auth.refresh()}>
-          <RefreshCw className={cn("h-4 w-4", auth.busy && "animate-spin")} />
+        <Button variant="ghost" className="flex-1" disabled={auth.busy} onClick={() => void auth.refresh()}>
+          <RefreshCw className={cn("h-4 w-4", auth.busy && "animate-spin motion-reduce:animate-none")} />
           {t("common.refresh")}
         </Button>
         <Button variant="outline" className="flex-1" disabled={auth.busy} onClick={() => void auth.logout()}>
@@ -299,7 +312,7 @@ function ExpiredState({ auth, identity }: { auth: GitHubAuthController; identity
 
       <div className="flex gap-2">
         <Button className="flex-1" disabled={auth.busy} onClick={() => void auth.refresh()}>
-          <RefreshCw className={cn("h-4 w-4", auth.busy && "animate-spin")} />
+          <RefreshCw className={cn("h-4 w-4", auth.busy && "animate-spin motion-reduce:animate-none")} />
           {t("common.refresh")}
         </Button>
         <Button variant="outline" className="flex-1" disabled={auth.busy} onClick={() => void auth.start()}>
@@ -333,7 +346,7 @@ export function GitHubAuthPanel({ auth }: { auth: GitHubAuthController }) {
       {auth.loading ? (
         <StateFrame id="loading">
           <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
             {t("settings.githubAuthLoading")}
           </div>
         </StateFrame>

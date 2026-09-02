@@ -44,19 +44,37 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
   }, []);
 
   const status = auth.status;
-  const state = status?.state ?? "signed_out";
+  const authorizing = Boolean(auth.authorization);
+  const state = authorizing ? "authorizing" : (status?.state ?? "signed_out");
   const identity = status && status.state !== "signed_out" ? status.identity : null;
-  const label = identity ? `@${identity.login}` : t("sidebar.githubSignIn");
-  const title = state === "expired" ? t("settings.githubAuthExpired") : label;
+  const label = authorizing
+    ? t("sidebar.githubAuthorizing")
+    : identity
+      ? `@${identity.login}`
+      : t("sidebar.githubSignIn");
+  const title =
+    state === "expired"
+      ? t("settings.githubAuthExpired")
+      : state === "authorizing"
+        ? t("settings.githubAuthWaiting")
+        : label;
+  const ariaLabel =
+    state === "expired" && identity ? t("sidebar.githubExpiredAccount", { login: identity.login }) : label;
 
   const avatar = identity?.avatar_url ? (
-    <img src={identity.avatar_url} alt={label} className="w-5 h-5 rounded-full object-cover shrink-0" />
+    <img src={identity.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
   ) : (
     <Github className="w-[17px] h-[17px] shrink-0" strokeWidth={1.75} />
   );
 
   const statusDot =
-    state === "connected" ? "bg-emerald-500" : state === "expired" ? "bg-amber-500" : "bg-muted-foreground/40";
+    state === "connected"
+      ? "bg-emerald-500"
+      : state === "expired"
+        ? "bg-amber-500"
+        : state === "authorizing"
+          ? "bg-primary"
+          : "bg-muted-foreground/40";
 
   return (
     <>
@@ -65,6 +83,7 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
         type="button"
         onClick={() => setOpen(true)}
         title={title}
+        aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         className={cn(
@@ -77,12 +96,30 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
         {collapsed ? (
           <span
             aria-hidden
-            className={cn("absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full ring-2 ring-background", statusDot)}
+            className={cn(
+              "absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full ring-2 ring-background",
+              statusDot,
+              state === "authorizing" && "motion-safe:animate-pulse",
+            )}
           />
         ) : (
           <>
-            <span className="flex-1 min-w-0 truncate text-left text-[12px] leading-tight">{label}</span>
-            <span aria-hidden className={cn("w-1.5 h-1.5 rounded-full shrink-0", statusDot)} />
+            <span className="flex min-w-0 flex-1 flex-col text-left">
+              <span className="truncate text-[12px] leading-tight">{label}</span>
+              {state === "expired" ? (
+                <span className="truncate text-[10px] leading-tight text-amber-400 paper:text-amber-700">
+                  {t("sidebar.githubExpired")}
+                </span>
+              ) : null}
+            </span>
+            <span
+              aria-hidden
+              className={cn(
+                "w-1.5 h-1.5 rounded-full shrink-0",
+                statusDot,
+                state === "authorizing" && "motion-safe:animate-pulse",
+              )}
+            />
           </>
         )}
       </button>
