@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPalette } from "./components/layout/CommandPalette";
+import { KeepAliveOutlet } from "./components/layout/KeepAliveOutlet";
 import { Sidebar } from "./components/layout/Sidebar";
 import { LoadingLogo } from "./components/ui/LoadingLogo";
 import { Toaster } from "./components/ui/sonner";
@@ -45,6 +46,9 @@ function PageFallback() {
 const MAIN_CONTENT_PAD_EXPANDED_PX = 8 + 180;
 /** `w-14` is 3.5rem; default 16px root → 56px. */
 const MAIN_CONTENT_PAD_COLLAPSED_PX = 8 + 56;
+
+/** Skills-mode list pages whose search/scroll should survive a sidebar hop. */
+const SKILLS_KEEP_PAGES = ["my-skills", "marketplace", "mcp", "skill-cards", "projects", "settings"] as const;
 
 function UsageModeShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
@@ -189,59 +193,30 @@ function AppContent() {
   );
   const handleClearPreSelectedProjects = useCallback(() => nav.setProjectsPreSelectedSkills(null), [nav]);
 
-  const renderPage = () => {
-    if (nav.appMode === "usage") {
-      return (
-        <UsagePage
-          filter={nav.usageCatalogFilter}
-          usageCreateRequest={nav.usageCreateRequest}
-          clearUsageCreateRequest={nav.clearUsageCreateRequest}
-        />
-      );
-    }
+  const skillsOutletId =
+    nav.subPage?.type === "publisher-detail"
+      ? "publisher-detail"
+      : nav.subPage?.type === "mcp-publisher-detail"
+        ? "mcp-publisher-detail"
+        : nav.activePage;
 
-    // Models mode (single hub page). Pass nav fields from this (eager) tree so
-    // the lazy Models chunk never calls useNavigation / NavContext itself.
-    if (nav.appMode === "models") {
+  const renderSkillsPage = (id: string) => {
+    if (id === "publisher-detail" && nav.subPage?.type === "publisher-detail") {
       return (
-        <ModelsPage
-          selectedProviderId={nav.selectedProviderId}
-          setSelectedProviderId={nav.setSelectedProviderId}
-          modelsDrawerRequest={nav.modelsDrawerRequest}
-          clearModelsDrawerRequest={nav.clearModelsDrawerRequest}
-        />
-      );
-    }
-
-    // Skills mode pages
-    if (nav.activePage === "marketplace" && nav.subPage?.type === "publisher-detail") {
-      return (
-        <motion.div
-          key="publisher-detail"
-          initial={{ opacity: 0, x: 30 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex-1 min-w-0 flex overflow-hidden"
-        >
+        <div className="flex min-w-0 flex-1 overflow-hidden">
           <PublisherDetailPage publisher={nav.subPage.publisher} onBack={handlePublisherBack} />
-        </motion.div>
+        </div>
       );
     }
-    if (nav.activePage === "marketplace" && nav.subPage?.type === "mcp-publisher-detail") {
+    if (id === "mcp-publisher-detail" && nav.subPage?.type === "mcp-publisher-detail") {
       return (
-        <motion.div
-          key="mcp-publisher-detail"
-          initial={{ opacity: 0, x: 30 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex-1 min-w-0 flex overflow-hidden"
-        >
+        <div className="flex min-w-0 flex-1 overflow-hidden">
           <McpPublisherDetailPage publisher={nav.subPage.publisher} onBack={handlePublisherBack} />
-        </motion.div>
+        </div>
       );
     }
 
-    switch (nav.activePage) {
+    switch (id) {
       case "my-skills":
         return (
           <MySkillsPage
@@ -292,6 +267,33 @@ function AppContent() {
     }
   };
 
+  const renderPage = () => {
+    if (nav.appMode === "usage") {
+      return (
+        <UsagePage
+          filter={nav.usageCatalogFilter}
+          usageCreateRequest={nav.usageCreateRequest}
+          clearUsageCreateRequest={nav.clearUsageCreateRequest}
+        />
+      );
+    }
+
+    // Models mode (single hub page). Pass nav fields from this (eager) tree so
+    // the lazy Models chunk never calls useNavigation / NavContext itself.
+    if (nav.appMode === "models") {
+      return (
+        <ModelsPage
+          selectedProviderId={nav.selectedProviderId}
+          setSelectedProviderId={nav.setSelectedProviderId}
+          modelsDrawerRequest={nav.modelsDrawerRequest}
+          clearModelsDrawerRequest={nav.clearModelsDrawerRequest}
+        />
+      );
+    }
+
+    return <KeepAliveOutlet active={skillsOutletId} keep={SKILLS_KEEP_PAGES} render={renderSkillsPage} />;
+  };
+
   const mainContentStyle = useMemo(
     () => ({ paddingLeft: sidebarCollapsed ? MAIN_CONTENT_PAD_COLLAPSED_PX : MAIN_CONTENT_PAD_EXPANDED_PX }),
     [sidebarCollapsed],
@@ -324,15 +326,15 @@ function AppContent() {
         />
         <div id="main-content" className="h-full w-full flex flex-col overflow-hidden pt-0" style={mainContentStyle}>
           <div className="ss-main-chrome">
-            {/* No `AnimatePresence mode="wait"`: it made every switch wait out the
-                outgoing page's exit animation before the incoming one even mounted,
-                so the cheapest 200ms of a page switch was spent showing nothing.
-                The incoming page now mounts immediately and fades itself in. */}
+            {/* Keyed on appMode only: skills-mode list pages stay mounted via
+                KeepAliveOutlet, so a sidebar hop must not remount this shell
+                (that threw away search, scroll, and a 200ms fade). Mode
+                switches still fade; reduced-motion skips even that. */}
             <motion.div
-              key={nav.appMode === "models" ? "models" : nav.appMode === "usage" ? "usage" : nav.activePage}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: prefersReducedMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
+              key={nav.appMode}
+              initial={prefersReducedMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: prefersReducedMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }}
               className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             >
               <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>

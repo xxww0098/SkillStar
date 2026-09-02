@@ -67,7 +67,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 按 Agent 能力支持 single-provider 或 multi-provider binding。
 - Oh My Pi（`omp`）额外支持**模型角色**：把 `default`（正常编码）、`smol`（廉价子代理 fan-out）、`slow`（深度推理）、`plan`（规划模式）等角色分别指到不同 Provider 和模型，可选推理强度，直接写入 omp 的 `modelRoles`，无需手写 YAML。
 - Tool sync 只修改 SkillStar 管理的字段，保留用户已有配置并在写入前备份。
-- 内置摘要和 Skill 推荐共享 Models provider 配置，并以流式事件报告 route/fallback；Skill 图文教程使用独立的 ACP Agent 配置。
+- 内置摘要共享 Models provider 配置，并以流式事件报告 route/fallback；Skill 图文教程使用独立的 ACP Agent 配置。
 
 ### 桌面体验与安全
 

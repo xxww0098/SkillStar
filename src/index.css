@@ -154,6 +154,19 @@
     display: flex;
   }
 
+  /* One rule for every screen: loading spinners and skeleton pulses must not
+     keep moving when the user asked the OS to cut motion. Per-component
+     `motion-safe:` is easy to miss; this is the backstop. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    .animate-spin,
+    .animate-pulse {
+      animation: none !important;
+    }
+  }
+
   /* Scrollbar */
   ::-webkit-scrollbar {
     width: 6px;

@@ -367,7 +367,6 @@ pub fn run() {
             commands::ai::summarize::ai_summarize_skill,
             commands::ai::summarize::ai_summarize_skill_stream,
             commands::ai::summarize::ai_test_connection,
-            commands::ai::summarize::ai_pick_skills,
             commands::github::scan_github_repo,
             commands::github::install_from_scan,
             commands::github::list_repo_history,

@@ -132,7 +132,7 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 
 - `AiProviderRef` 的 `app_id` 改名为 `agent_id`，取值来自 Agent 注册表（`claude` → `claude-code`，`codex` 不变）。这是 Models 域的第五套 id 空间，现在并入第四套。旧文件靠 serde `alias = "app_id"` 继续解析，`normalize_agent_id` 负责把旧拼法映射过来。
 - Claude 的三档模型同样读 `claude-code` binding 的角色，与写盘 writer 同源，两者不会漂移。
-- chat、summary、skill pick 的 provider resolve 与 HTTP 实现在 `skillstar-models::ai_provider`。Skill 图文教程不走 Models provider，而由 Skills 详情页调用用户配置的 ACP Agent。Skill 摘要的输出语言是当前界面语言（与教程同一套 locale），不是 `ai.json` 里的独立字段。
+- chat、summary 的 provider resolve 与 HTTP 实现在 `skillstar-models::ai_provider`。Skill 图文教程不走 Models provider，而由 Skills 详情页调用用户配置的 ACP Agent。Skill 摘要的输出语言是当前界面语言（与教程同一套 locale），不是 `ai.json` 里的独立字段。
 - 前端展示后端报告的 route/provider/fallback，不复制 provider 选择逻辑。
 - provider timeout 在 resolve 时应用，不写进旧 `ai.json` 兼容格式。
 - 流式 UX 的共享规范见 [../frontend/README.md](../frontend/README.md#tauri-事件与流式-ux)。

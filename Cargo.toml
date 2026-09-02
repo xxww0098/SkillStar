@@ -100,3 +100,16 @@ strip = "symbols"
 inherits = "release"
 lto = false
 codegen-units = 16
+
+# Same opt-level / LTO / codegen-units as `release`, plus line tables and
+# frame-pointer-friendly symbols so samply / cargo-flamegraph can name frames.
+# `strip` must stay off — inheriting `release`'s `strip = "symbols"` produces
+# `[unknown]` graphs (PERF-06). Force frame pointers on the profiling command
+# with `RUSTFLAGS='-C force-frame-pointers=yes'`, not the default rustflags.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+[profile.profiling.build-override]
+debug = false
