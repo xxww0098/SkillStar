@@ -153,6 +153,8 @@ fn copy_adopted_skill(name: &str, source_dir: &Path) -> Result<Skill> {
         let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&local_path);
         return Err(error).with_context(|| format!("Failed to create hub symlink for '{name}'"));
     }
+    crate::local_identity::replace_untrusted_sidecar(&local_path)
+        .with_context(|| format!("Failed to mint local Skill identity for '{name}'"))?;
 
     let description = skillstar_core::types::extract_skill_description(&local_path);
     installed_local_skill(name, description)
@@ -241,6 +243,8 @@ fn create_locked(name: &str, content: Option<&str>) -> Result<Skill> {
     // Create symlink in hub: skills/<name> → skills-local/<name>
     skillstar_core::infra::fs_ops::create_symlink(&skill_local_path, &skill_hub_path)
         .with_context(|| format!("Failed to create hub symlink for '{}'", name))?;
+    crate::local_identity::ensure_local_identity(&skill_local_path)
+        .with_context(|| format!("Failed to mint local Skill identity for '{name}'"))?;
 
     let description = extract_skill_description(&skill_local_path);
 
@@ -285,6 +289,9 @@ pub(crate) fn create_from_snapshot(
         let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&skill_local_path);
         return Err(error);
     }
+    crate::local_identity::ensure_local_identity(&skill_local_path)
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("Failed to mint local Skill identity for '{name}'"))?;
 
     let description = extract_skill_description(&skill_local_path);
     installed_local_skill(name, description)
@@ -361,6 +368,9 @@ pub(crate) fn adopt_existing_dir_locked(name: &str, source_dir: &Path) -> Result
         }
         return Err(err);
     }
+    crate::local_identity::replace_untrusted_sidecar(&skill_local_path)
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("Failed to mint local Skill identity for '{name}'"))?;
 
     Ok(skill_local_path)
 }
@@ -615,6 +625,12 @@ fn migrate_single_skill(src: &Path, dest: &Path) -> Result<()> {
     // Create symlink: src (hub) → dest (skills-local)
     skillstar_core::infra::fs_ops::create_symlink(dest, src)
         .with_context(|| format!("Failed to create migration symlink {:?} → {:?}", src, dest))?;
+    crate::local_identity::ensure_local_identity(dest).with_context(|| {
+        format!(
+            "Failed to mint local Skill identity during migration to {}",
+            dest.display()
+        )
+    })?;
 
     Ok(())
 }
@@ -737,6 +753,11 @@ mod adopt_folder_tests {
         assert!(local.join("scripts/run.sh").exists());
         // And exposed through the hub link.
         assert!(is_local_skill("demo"));
+        let sidecar_id = crate::local_identity::read_local_identity(&local)
+            .unwrap()
+            .expect("adopted Skill must mint a local identity sidecar");
+        assert!(!sidecar_id.is_nil());
+        assert!(!source.path().join("skills/demo/.skillstar").exists());
         // The source folder is untouched (adoption copies, it does not move).
         assert!(source.path().join("skills/demo/SKILL.md").exists());
     }

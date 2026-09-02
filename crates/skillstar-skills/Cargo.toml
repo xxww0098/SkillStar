@@ -24,7 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
 skillstar-core = { path = "../skillstar-core" }
 serde_yaml = { workspace = true }
 dirs = { workspace = true }
@@ -35,7 +35,7 @@ aes-gcm = { workspace = true }
 machine-uid = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "rt-multi-thread"] }
 base64.workspace = true
-scraper = "0.27.0"
+scraper = { workspace = true }
 skillstar-git = { path = "../skillstar-git" }
 reqwest = { workspace = true, features = ["form"] }
 

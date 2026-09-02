@@ -12,7 +12,7 @@
 - 搜索结果安装等跨 marketplace/skills 流程由 `skillstar-app` 编排。
 - 技能组部署的“补全 Marketplace 来源 → 安装缺失技能 → 同步 Project”由 `skillstar-app::skill_group_deploy` 编排，command 与单域 crate 都不复制该事务。
 - `skillstar-skills::content` 是技能内容读取、文件枚举、本地创建/删除和嵌套内容目录解析的 facade；Tauri command 不直接组合 hub path、lockfile、Git checkout 与 cache invalidation。内容 facade 对外部输入先执行 `validate_skill_name`，再 canonicalize 有效目录并限制在 SkillStar hub 内；外部符号链接不会被 read/list/open 跟随。
-- `skillstar-skills::content` 同时产出教程生成使用的只读 Skill 快照：有效内容根、递归文件清单和确定性内容 hash。`skillstar-skills::tutorial` 拥有 HTML 安全/覆盖校验、freshness 和 artifact 持久化；ACP 子进程与会话编排属于 `src-tauri/src/core/` 的桌面胶水，command 只转发 DTO 和事件。
+- `skillstar-skills::content` 同时产出教程生成使用的只读 Skill 快照：有效内容根、递归文件清单和确定性内容 hash。私人教程的身份绑定、HTML 安全/覆盖校验、freshness 与 identity-keyed 持久化由 [`skillstar-learning`](../learning/README.md) 拥有；`skillstar-app::learning` 把当前安装表中的 `Skill.name` 解析为 `ResolvedSkill`。ACP 子进程与会话编排属于 `src-tauri/src/core/` 的桌面胶水，command 只转发 DTO 和事件。旧 `skillstar-skills::tutorial` 在迁移完成前仍服务现有 IPC，不得再扩展为新的学习存储。
 - `skillstar-skills::skill_update` 拥有 update 事务，`update_skill` 返回完整公开结果，command 不再从底层 update outcome 二次拼装 `Skill` DTO。批量入口 `update_skills` 按物理 checkout 合并更新；相同 URL 的独立 clone 或不同 ref cache 不得误判为共享 checkout。
 - `skillstar-skills::update_state` 是 `update_available` 的唯一所有者。批量 refresh、patrol 和 update 完成都写穿它；陈旧判定在该 module 内解决，UI 不再自行挡竞态。
 - `skillstar-skills::repo_link` 拥有「hub 条目是否为 repo cache 链接、其 repo root 在哪」的判定；update 检测与 update 应用不得各自解析 symlink/junction。
@@ -142,7 +142,7 @@
 
 ## 本地创作、Bundle 与 Share
 
-- 本地创作位于 `~/.skillstar/hub/local/<name>`，通过 hub link 暴露。
+- 本地创作位于 `~/.skillstar/hub/local/<name>`，通过 hub link 暴露。每个受管本地 Skill 在 `<local>/<name>/.skillstar/identity.json` 持有 UUID 身份；改名移动 sidecar，复制或外部 adopt 必须 mint 新 UUID，不得信任来源里的 sidecar。
 - 从项目 Agent 目录导入的技能必须先采用到 local，再进入 hub；发布到 GitHub 后可以毕业为 repo-backed install，但只有 staged 安装与最终校验成功才提交新的 Git lock provenance，失败时同时恢复本地内容与发布前 lock 状态。
 - 发布前置检查的三态含义是「发布所需的 `git` 是否可用 → SkillStar 是否有可用 GitHub App 身份 → 该身份的 login」，不再是 `gh` 的安装与登录状态。凭据有效但网络/限流导致读不到 login 时仍视为可发布，只是身份标签未知，不把连通性问题报成未登录。
 - 发布目标仓库列举使用 `affiliation=owner,collaborator,organization_member` 分页拉取，因此组织仓库和被邀请为协作者的仓库都可以作为发布目标；此前的 `gh repo list <login>` 只能看到个人仓库。新建仓库以 `auto_init=false` 建在当前 GitHub 用户名下，首个 commit 由本地缓存推上去。
@@ -153,15 +153,11 @@
 
 ## ACP 图文教程
 
-- SKILL.md 翻译入口已移除。已安装 Skill 的详情页提供唯一的“AI 图文教程”入口，阅读器和编辑器只保留原文/编辑与摘要能力；教程只使用 Settings 中显式启用的 ACP Agent。摘要输出语言跟随当前界面语言，与教程同一套 locale。
-- 教程分析对象是当前 Skill 的**整个有效内容目录**，不是只把 `SKILL.md` 文本发给模型。`skillstar-skills::content` 递归枚举目录内的文件，排除不属于 Skill 内容的 `.git`、`.skillstar`、操作系统垃圾和编辑器临时文件，不跟随逃出 Skill 根目录的内部符号链接；确定性 SHA-256 同时覆盖相对路径、文件类型、Unix executable 状态和内容。该文件清单随 prompt 提供，生成结果必须逐项给出覆盖说明。
-- Skill 文件是待分析的不可信资料，不能覆盖系统任务。教程 ACP 会话必须以当前 Skill 的隔离 staging 快照为工作目录，ACP 协议侧只开放根内读文件能力并拒绝 terminal/写入权限，prompt 同时禁止网络和修改；模型必须先核对完整清单，再输出一个自包含 HTML5 文档。用户配置的 ACP 可执行程序仍是本机受信任边界，SkillStar 不把任意外部程序伪装成 OS sandbox。
-- HTML 必须使用当前界面语言，包含基于真实内容的步骤、示例、文件导航、故障排查和至少一个有信息量的内联 SVG 图示；不得虚构未在 Skill 中出现的能力。证据引用使用相对文件路径；推断必须显式标记。
-- Settings → ACP 持久化教程风格，初始提供 `guided`（循序导览，默认）、`reference`（技术手册）与 `workshop`（实战工坊）。三种风格分别使用独立 prompt 片段改变信息组织、示例密度和图示重点，而不是给同一 HTML 换 CSS；风格 id、所选风格在内的完整 prompt bundle hash 与规范化界面语言共同进入 artifact 版本键和 freshness 判定，修改提示词无需依赖人工记得提升版本号。
-- 输出只允许内联 CSS、内联 SVG 和 `data:` 图片，不允许 JavaScript、事件属性、表单、iframe、外链资源或网络 URL。后端在持久化前校验完整 HTML、全部文件覆盖和危险结构；前端只在无权限的 sandbox iframe 中展示。
-- ACP 只返回完整 HTML 文件内容，不负责发布或托管；在线预览/分享 URL 不能视为成功结果。后端校验后通过跨进程文件锁、同步落盘、staging/backup 目录替换与中断恢复，把结果持久化到本机 `~/.skillstar/tutorials/<skill-key>/tutorial.html` 与同目录 metadata，断网仍可打开。metadata 至少记录 Skill 名称、内容 hash、完整源文件清单、教程风格、prompt/schema 版本、ACP Agent 和生成时间；目录 key 由 Skill 名称派生，不能直接信任名称作为路径。
-- 打开详情时先计算当前 Skill hash。hash、所选风格、规范化界面语言与 prompt/schema 版本均匹配时直接复用持久化 HTML；内容、语言或风格/prompt 变化时保留旧教程可读，但必须显示过期原因和“更新教程”动作。刷新失败不得覆盖最后一个可用教程。
-- 生成开始和结束各取一次快照；若 Skill 在 ACP 分析期间发生变化，本次结果不得标记或写入为最新，用户需要基于新版本重试。编辑器存在未保存修改时不得开始生成，避免磁盘快照与屏幕内容不一致。
+行为契约见 [Learning](../learning/README.md)。Skills 只拥有只读快照与本地身份 sidecar：
+
+- 教程分析对象是当前 Skill 的**整个有效内容目录**。`skillstar-skills::content` 递归枚举目录内的文件，排除不属于 Skill 内容的 `.git`、`.skillstar`、操作系统垃圾和编辑器临时文件，不跟随逃出 Skill 根目录的内部符号链接；确定性 SHA-256 同时覆盖相对路径、文件类型、Unix executable 状态和内容。
+- Skill 文件是待分析的不可信资料。教程 ACP 会话必须以当前 Skill 的隔离 staging 快照为工作目录。
+- 现有详情页“AI 图文教程”入口、command 名和 wire DTO 在迁移期间保持兼容；Learn UI、Guide/Progress 与 Draft 转换不在本文件。
 
 ## Patrol 与页面职责
 

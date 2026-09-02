@@ -17,6 +17,8 @@
 //!     ├── repos/              # Cached git repositories
 //!     ├── publish/            # Publish staging area
 //!     └── lock.json           # Installation lockfile
+//! ~/.skillstar/learning/      # identity-keyed tutorials, guides, progress
+//! ~/.skillstar/tutorials/     # legacy name-keyed tutorials (read-only fallback)
 //! ```
 //!
 //! ## Environment variable overrides
@@ -105,9 +107,19 @@ pub fn state_dir() -> PathBuf {
     data_root().join("state")
 }
 
-/// `~/.skillstar/tutorials/` — persistent generated Skill tutorials.
+/// `~/.skillstar/tutorials/` — legacy name-keyed Skill tutorials (read-only fallback).
 pub fn tutorials_dir() -> PathBuf {
     data_root().join("tutorials")
+}
+
+/// `~/.skillstar/learning/` — learning domain root (identity-keyed tutorials, guides, progress).
+pub fn learning_dir() -> PathBuf {
+    data_root().join("learning")
+}
+
+/// `~/.skillstar/learning/tutorials/` — identity-keyed private tutorial artifacts.
+pub fn learning_tutorials_dir() -> PathBuf {
+    learning_dir().join("tutorials")
 }
 
 /// `config/ai.json` — AI provider configuration.
@@ -245,7 +257,10 @@ pub(crate) fn shellexpand_home(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{data_root, home_dir, hub_root, shellexpand_home, tutorials_dir};
+    use super::{
+        data_root, home_dir, hub_root, learning_dir, learning_tutorials_dir, shellexpand_home,
+        tutorials_dir,
+    };
     use tempfile::TempDir;
 
     #[test]
@@ -259,6 +274,11 @@ mod tests {
         }
         assert_eq!(data_root(), temp.path());
         assert_eq!(tutorials_dir(), temp.path().join("tutorials"));
+        assert_eq!(learning_dir(), temp.path().join("learning"));
+        assert_eq!(
+            learning_tutorials_dir(),
+            temp.path().join("learning/tutorials")
+        );
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");
         }
