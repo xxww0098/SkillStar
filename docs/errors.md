@@ -2,6 +2,17 @@
 
 状态：active
 
+## 2026-09-02 - 测试继承 hook 的 GIT_DIR，会污染真实仓库
+
+- Symptom: pre-push 里的 `cargo test --workspace --locked` 必然失败；同一命令在普通 shell 里通过。失败集中在 `skillstar-channels` 的 fixture git 测试。更糟的是失败测试会把 `git init` / `config` / `branch` 打到宿主仓库上，写坏 `.git/config`（`core.worktree` 指向已删除临时目录、user.name 被改成 SkillStar Test）并删掉工作树里的跟踪文件。
+- Root cause: git 调用 hook 时导出 `GIT_DIR` / `GIT_WORK_TREE`。测试和产品代码 spawn 的 `git` 继承这两个变量，于是操作到真实仓库而不是夹具。CI 不受影响（没有 hook 环境）。这与 Failure lesson「测试不得依赖 runner 的真实 $HOME / 宿主机状态」同类，换成了 git 环境。
+- Fix: `command_with_path` 统一剥离 `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` / `GIT_COMMON_DIR` / `GIT_OBJECT_DIRECTORY` / `GIT_PREFIX` / `GIT_NAMESPACE`（保留 `GIT_EXEC_PATH`）。夹具测试改为走同一入口，不再裸 `Command::new("git")`。产品路径操作的永远是别人的仓库，同样不该继承宿主 git 环境。
+- Files: `crates/skillstar-core/src/infra/path_env.rs`，以及各 crate 里仍直接 spawn git 的测试辅助函数。
+- Self-check:
+  - `GIT_DIR=/.git GIT_WORK_TREE=. cargo test -p skillstar-core --lib path_env::tests::command_with_path_strips_host_git_dir`
+  - `GIT_DIR=/.git GIT_WORK_TREE=. cargo test -p skillstar-channels --lib`
+  - `grep -rn 'Command::new("git")' crates/` 除 `github_mirror` 的 args 检视与 `path_env` 对照测试外，不应再有真实 spawn。
+
 ## 2026-09-01 - 跨 host 复用 ETag 造成假 304；SOCKS5 本地 DNS 被污染
 
 - Symptom: 启用 marketplace / GitHub 加速后，商店同步“成功”但内容停在旧版；GitHub clone 卡在 DNS 或连到错误 IP；镜像 Test 显示可达，实际 git/raw 失败。

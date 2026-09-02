@@ -1,10 +1,9 @@
 use super::*;
 use anyhow::anyhow;
 use std::fs;
-use std::process::Command;
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = skillstar_core::infra::path_env::command_with_path("git")
         .current_dir(repo)
         .args(args)
         .output()

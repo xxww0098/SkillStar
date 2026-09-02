@@ -343,7 +343,7 @@ mod tests {
             let repo = skillstar_core::infra::paths::repos_cache_dir()
                 .join(crate::repo_scanner::cache_dir_name(source));
             std::fs::create_dir_all(&repo)?;
-            let status = std::process::Command::new("git")
+            let status = skillstar_core::infra::path_env::command_with_path("git")
                 .args(["init", "-q"])
                 .current_dir(&repo)
                 .status()?;

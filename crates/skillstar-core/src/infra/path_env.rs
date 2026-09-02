@@ -1,6 +1,23 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Git variables that pin commands to the *calling* repository.
+///
+/// SkillStar always operates on other repos (skill checkouts, shared
+/// channels, test fixtures). Inheriting these from a git hook or parent
+/// process would retarget those commands at the host repo and can rewrite
+/// `.git/config` / branches. `GIT_EXEC_PATH` is left alone — it locates the
+/// git implementation, not a work tree.
+const HOST_GIT_ENV_VARS: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_NAMESPACE",
+];
+
 /// Build an enriched PATH that includes common binary directories.
 ///
 /// GUI-launched desktop apps (Tauri) often inherit a minimal login PATH that
@@ -129,9 +146,15 @@ fn join_path_parts(extra_dirs: &[String], current: &str, sep: char) -> String {
 }
 
 /// Create a [`Command`] with enriched PATH so it can find Homebrew/snap/scoop binaries.
+///
+/// Also strips inherited git work-tree variables so spawned `git` always
+/// operates on `current_dir` / explicit args, never the host process repo.
 pub fn command_with_path(program: &str) -> Command {
     let mut cmd = Command::new(program);
     cmd.env("PATH", enriched_path());
+    for var in HOST_GIT_ENV_VARS {
+        cmd.env_remove(var);
+    }
 
     #[cfg(windows)]
     {
@@ -321,6 +344,62 @@ mod tests {
         assert!(
             desktop_app_path("SkillStarNonexistentAppXYZ").is_none(),
             "unknown desktop app must not resolve"
+        );
+    }
+
+    #[test]
+    fn command_with_path_strips_host_git_dir_so_fixture_repos_are_not_retargeted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        let init = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .status()
+            .expect("spawn git init");
+        assert!(init.success(), "git init of fixture repo must succeed");
+
+        let previous_dir = std::env::var_os("GIT_DIR");
+        let previous_tree = std::env::var_os("GIT_WORK_TREE");
+        unsafe {
+            std::env::set_var("GIT_DIR", "/this-is-not-a-git-dir");
+            std::env::set_var("GIT_WORK_TREE", "/this-is-not-a-work-tree");
+        }
+
+        let isolated = command_with_path("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .current_dir(repo)
+            .output()
+            .expect("spawn isolated git");
+
+        let inherited = std::process::Command::new("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .current_dir(repo)
+            .output()
+            .expect("spawn inherited git");
+
+        match previous_dir {
+            Some(value) => unsafe { std::env::set_var("GIT_DIR", value) },
+            None => unsafe { std::env::remove_var("GIT_DIR") },
+        }
+        match previous_tree {
+            Some(value) => unsafe { std::env::set_var("GIT_WORK_TREE", value) },
+            None => unsafe { std::env::remove_var("GIT_WORK_TREE") },
+        }
+
+        assert!(
+            isolated.status.success(),
+            "command_with_path must ignore host GIT_DIR; stderr={}",
+            String::from_utf8_lossy(&isolated.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&isolated.stdout).trim(),
+            "true"
+        );
+        assert!(
+            !inherited.status.success(),
+            "control: a raw Command must still inherit GIT_DIR and fail against the bogus path"
         );
     }
 }
