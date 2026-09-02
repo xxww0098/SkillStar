@@ -17,7 +17,7 @@
 //!                                  └ 400 empty / 404 / 405 → try legacy
 //!                                  └ 401 + WWW-Authenticate → needs authorization
 //! legacy         → initialize → notifications/initialized
-//! both           → tools/list  (also yields ttlMs / cacheScope)
+//! both           → tools/list  (also yields ttlMs / cacheScope / schema bytes)
 //! ```
 //!
 //! The distinction that makes this work is [`JsonRpcError::proves_modern`]: a
@@ -122,6 +122,14 @@ pub struct McpProbeReport {
     /// authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_challenge: Option<String>,
+    /// UTF-8 byte length of the compact `tools` array JSON from `tools/list`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
+    pub schema_bytes: Option<u64>,
+    /// `ceil(schema_bytes / 4)`. A context-cost estimate, not a tokenizer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
+    pub schema_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[ts(type = "number")]
@@ -141,6 +149,8 @@ impl McpProbeReport {
             cache_ttl_ms: None,
             cache_private: false,
             auth_challenge: None,
+            schema_bytes: None,
+            schema_tokens: None,
             error: None,
             checked_at: now_ms(),
         }
@@ -352,7 +362,7 @@ async fn run_probe<T: ProbeTransport>(entry: &McpServerEntry, transport: &mut T)
     // Both paths converge here: the tool listing is the actual proof of life,
     // and it is where the cache directives come from.
     match list_tools(transport, &mut next_id, epoch, &protocol_version).await {
-        Ok((tools, cache)) => {
+        Ok((tools, cache, schema_bytes)) => {
             if let Some(key) = cache_key.as_deref() {
                 remember_epoch(key, epoch);
             }
@@ -361,6 +371,8 @@ async fn run_probe<T: ProbeTransport>(entry: &McpServerEntry, transport: &mut T)
             report.protocol_version = Some(protocol_version);
             report.tools = tools;
             report.instructions = discovery.instructions;
+            report.schema_bytes = Some(schema_bytes as u64);
+            report.schema_tokens = Some(rpc::schema_tokens(schema_bytes));
             if let Some(cache) = cache {
                 report.cache_ttl_ms = Some(cache.ttl_ms);
                 report.cache_private = cache.private;
@@ -511,7 +523,7 @@ async fn list_tools<T: ProbeTransport>(
     next_id: &mut u64,
     epoch: McpSpecEpoch,
     protocol_version: &str,
-) -> Result<(Vec<String>, Option<CacheHint>)> {
+) -> Result<(Vec<String>, Option<CacheHint>, usize)> {
     let id = take_id(next_id);
     let params = match epoch {
         McpSpecEpoch::Modern => rpc::modern_params(protocol_version),
@@ -526,9 +538,11 @@ async fn list_tools<T: ProbeTransport>(
         })
         .await?;
     match reply {
-        ProbeReply::Result(result) => {
-            Ok((rpc::tool_names(&result), CacheHint::from_result(&result)))
-        }
+        ProbeReply::Result(result) => Ok((
+            rpc::tool_names(&result),
+            CacheHint::from_result(&result),
+            rpc::tools_schema_bytes(&result),
+        )),
         ProbeReply::Error(error) => anyhow::bail!("tools/list failed: {}", describe_error(&error)),
         ProbeReply::Unauthorized { .. } => {
             anyhow::bail!("the server requires authorization for tools/list")

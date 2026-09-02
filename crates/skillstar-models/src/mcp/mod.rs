@@ -143,6 +143,9 @@ pub use sync::*;
 mod import;
 pub use import::*;
 
+mod import_paste;
+pub use import_paste::*;
+
 // ---------------------------------------------------------------------------
 // Hermes YAML live config (mcp_servers + platform_toolsets.cli)
 // ---------------------------------------------------------------------------

@@ -469,6 +469,15 @@
 - 后果：获得——同名 Skill 的学习记录可区分，本地编辑只使教程 stale 而不改 identity，失败保留最后一个可用 artifact。承担——旧 name-keyed artifact 在重新生成前保持 unbound；P0 不升级 lockfile schema，频道离线时可选 release 标签允许缺省。
 - 证据：`crates/skillstar-learning/`、`crates/skillstar-app/src/learning/`、`crates/skillstar-skills/src/local_identity.rs`、`docs/features/learning/README.md`、issue #48 / #49。
 
+## D-052：MCP 指挥中心是 SkillStar 原生形态，只吸收 Hermes 0.21 的平台能力
+
+- 日期：2026-09-02
+- 状态：accepted
+- 背景：Hermes Agent v0.21（Pantheon）把 MCP 做成单一桌面指挥中心：已安装机群与目录同页、粘贴即导入、后台健康/重新授权、机群 schema token 加 30 天用量、`hermes://` 深链需确认。SkillStar 已有约两万行 FTS catalog、双纪元探测、CursorJack 级命令确认、多 Agent 投影，以及只按 host 跳到 `#mcp`、丢掉 query 的 `skillstar://` 深链。把 Hermes 的单页堆叠搬过来会卡死界面；编造 30 天用量则不诚实——SkillStar 不是 Agent 运行时，看不到调用次数。
+- 决策：① 主分段是 **Fleet | Catalog**；Tools / Sources 是次级。禁止把两万行目录堆在机群下面一次滚完。② 「粘贴即解析」落在 `skillstar_models::mcp::parse_pasted_mcp`：社区 `mcpServers` JSON、URL、`npx`/`uvx`/`docker` 命令行、`skillstar://mcp?url|catalog|config|command`。解析只返回草稿，**永不自动写入 store**；UI 必须走现有新建表单或市场安装向导的确认路径。③ 机群 schema 成本用 `tools/list` 里 `tools` 数组的紧凑 JSON 字节数，`schema_tokens = ceil(bytes / 4)`。不引入 tiktoken，不展示 30 天用量。④ 指挥中心挂载后对可见机群做一次顺序探测，上限 8，不在 window focus 上跑。`401 + WWW-Authenticate` 仍是 `authorization-required`，不是失败。⑤ `skillstar://mcp` 的 query 打开确认 UI；跳过确认即失败。不新增 crate，不抄 Hermes 页面。
+- 后果：获得——粘贴/深链与市场安装共用同一条确认边界，机群能看到真实的 schema 体积和需要重新授权的 server。承担——超过 8 个已装 server 不会在后台全部探测；token 数字是字节估算不是模型 tokenizer；catalog 深链仍依赖本地快照里真有那一行。
+- 证据：`docs/features/mcp/README.md`、`crates/skillstar-models/src/mcp/import_paste.rs`、`crates/skillstar-models/src/mcp/probe/`、`src/pages/Mcp.tsx`、`src/lib/deepLink.ts`、issue [#79](https://github.com/xxww0098/SkillStar/issues/79)。
+
 ## 新增记录格式
 
 

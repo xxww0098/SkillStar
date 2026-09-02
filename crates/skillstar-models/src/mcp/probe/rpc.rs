@@ -171,3 +171,18 @@ pub fn tool_names(result: &Value) -> Vec<String> {
         })
         .unwrap_or_default()
 }
+
+/// Compact JSON byte length of the `tools` array from a `tools/list` result.
+///
+/// This is the schema the model would ingest, minus `ttlMs` / `cacheScope`.
+pub fn tools_schema_bytes(result: &Value) -> usize {
+    result
+        .get("tools")
+        .map(|tools| tools.to_string().len())
+        .unwrap_or(0)
+}
+
+/// Ceiling of `bytes / 4`. A cheap context-cost estimate, not a tokenizer.
+pub fn schema_tokens(bytes: usize) -> u64 {
+    (bytes as u64).div_ceil(4)
+}

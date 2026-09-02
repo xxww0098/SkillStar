@@ -16,8 +16,8 @@ use tokio::sync::Mutex;
 use ts_rs::TS;
 
 use skillstar_models::mcp::{
-    self, McpPreset, McpProbeReport, McpServerEntry, McpServerPatch, McpStore, McpSyncResult,
-    McpToolStatus,
+    self, McpPasteParse, McpPreset, McpProbeReport, McpServerEntry, McpServerPatch, McpStore,
+    McpSyncResult, McpToolStatus,
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,16 @@ pub async fn probe_mcp_server(id: String) -> Result<McpProbeReport, AppError> {
         .find(|server| server.id == id)
         .ok_or_else(|| AppError::Other(format!("MCP server '{id}' not found")))?;
     Ok(mcp::probe_server(entry).await)
+}
+
+/// Parse a pasted snippet or `skillstar://mcp` URL into drafts.
+///
+/// Never writes the store. Catalog hits still need the install wizard;
+/// everything else still needs the create form. The parser is a pure
+/// function — unknown input is a result, not an exception.
+#[tauri::command]
+pub fn parse_mcp_paste(text: String) -> Result<McpPasteParse, AppError> {
+    Ok(mcp::parse_pasted_mcp(&text))
 }
 
 // ---------------------------------------------------------------------------

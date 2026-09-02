@@ -182,7 +182,10 @@ crates/skillstar-app/src/mcp/     # 跨域 use case（本域唯一编排层）
 └── presets.rs           #   curated 行 → preset 芯片
 
 crates/skillstar-models/src/mcp/  # 本地 store 与投影
-└── probe/               #   双纪元健康探测（modern / legacy）
+├── import.rs            #   从各 Agent 活配置读入
+├── import_paste.rs      #   粘贴 / 深链 → 草稿（不写 store）
+└── probe/               #   双纪元健康探测（modern / legacy）+ schema 体积
+
 
 src-tauri/src/commands/mcp_commands.rs      # 只有命令注册 / DTO / State / 错误
 src-tauri/src/commands/mcp_marketplace.rs   # 同上

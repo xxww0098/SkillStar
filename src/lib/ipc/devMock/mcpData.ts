@@ -781,8 +781,76 @@ export function mcpProbeReport(id: string): MockRecord {
     authChallenge: remote
       ? 'Bearer resource_metadata="https://api.githubcopilot.com/.well-known/oauth-protected-resource"'
       : null,
+    schemaBytes: remote ? null : 78,
+    schemaTokens: remote ? null : 20,
     error: null,
     checkedAt: Date.now(),
+  };
+}
+
+/** Browser-dev stand-in for `parse_mcp_paste`. Mirrors the Rust dialects enough for the fleet page. */
+export function parseMcpPaste(text: string): MockRecord {
+  const trimmed = text.trim();
+  if (!trimmed) return { kind: "empty", drafts: [], warnings: [] };
+  const catalogMatch = /(?:^|[?&])catalog=([^&]+)/i.exec(trimmed);
+  if (catalogMatch) {
+    return { kind: "catalog", drafts: [], catalogId: decodeURIComponent(catalogMatch[1]), warnings: [] };
+  }
+  const urlMatch = /(?:^|[?&])url=([^&]+)/i.exec(trimmed);
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || urlMatch) {
+    const url = trimmed.startsWith("http") ? trimmed : decodeURIComponent(urlMatch?.[1] ?? "");
+    return {
+      kind: trimmed.includes("skillstar://") ? "deep-link" : "url",
+      drafts: [
+        { id: "", name: "imported", transport: "http", url, args: [], env: {}, headers: {}, tags: [], enabled: {} },
+      ],
+      warnings: [],
+    };
+  }
+  if (trimmed.includes("mcpServers") || trimmed.includes('"servers"')) {
+    return {
+      kind: "json-servers",
+      drafts: [
+        {
+          id: "",
+          name: "github",
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "demo"],
+          env: {},
+          headers: {},
+          tags: [],
+          enabled: {},
+        },
+      ],
+      warnings: [],
+    };
+  }
+  if (/^(npx|uvx|docker|bunx)\b/.test(trimmed)) {
+    const parts = trimmed.split(/\s+/);
+    return {
+      kind: "command",
+      drafts: [
+        {
+          id: "",
+          name: parts[parts.length - 1]?.replace(/^@.*\//, "") ?? "imported",
+          transport: "stdio",
+          command: parts[0],
+          args: parts.slice(1),
+          env: {},
+          headers: {},
+          tags: [],
+          enabled: {},
+        },
+      ],
+      warnings: [],
+    };
+  }
+  return {
+    kind: "unknown",
+    drafts: [],
+    warnings: [],
+    error: "could not parse as MCP JSON, URL, command, or skillstar://mcp link",
   };
 }
 

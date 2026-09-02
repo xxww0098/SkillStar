@@ -6,24 +6,35 @@ import { CardTemplate } from "../../../components/ui/card-template";
 import { cn } from "../../../lib/utils";
 import type { McpServerEntry, McpToolId } from "../../../types";
 import type { McpAgentTarget } from "../lib/agentTargets";
+import { formatSchemaTokens } from "../lib/pasteDraft";
+import type { McpProbeEntry } from "../hooks/useMcpProbe";
 
 interface McpServerCardProps {
   server: McpServerEntry;
   agentTargets: readonly McpAgentTarget[];
   /** Catalog version this entry is behind, when the catalog knows a newer one. */
   updateVersion?: string | null;
+  probe?: McpProbeEntry;
   onOpen: () => void;
   onToggleTool: (toolId: McpToolId, enabled: boolean) => void;
 }
 
-export function McpServerCard({ server, agentTargets, updateVersion, onOpen, onToggleTool }: McpServerCardProps) {
+export function McpServerCard({
+  server,
+  agentTargets,
+  updateVersion,
+  probe,
+  onOpen,
+  onToggleTool,
+}: McpServerCardProps) {
   const { t } = useTranslation();
   const isRemote = server.transport === "http" || server.transport === "sse";
   const summary = isRemote ? server.url : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
   const TransportIcon = isRemote ? Globe : Terminal;
   const description = server.description?.trim();
   const bodyText = description && description !== summary ? description : null;
-  const hasBadges = Boolean(updateVersion || server.autoApproveAll);
+  const hasBadges = Boolean(updateVersion || server.autoApproveAll || probe?.report?.schemaTokens);
+
   const hasFooter = agentTargets.length > 0;
 
   return (
@@ -52,6 +63,18 @@ export function McpServerCard({ server, agentTargets, updateVersion, onOpen, onT
               >
                 <Zap className="h-2.5 w-2.5" />
                 {t("mcp.yoloBadge")}
+              </span>
+            ) : null}
+            {probe?.report?.schemaTokens ? (
+              <span
+                title={t("mcp.probeSchemaHint")}
+                className="inline-flex items-center rounded-md bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-foreground/70"
+              >
+                {t("mcp.cardSchemaTokens", { tokens: formatSchemaTokens(probe.report.schemaTokens) })}
+              </span>
+            ) : probe?.report?.status === "authorization-required" ? (
+              <span className="inline-flex items-center rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-400 paper:text-sky-700">
+                {t("mcp.probeStatus_authorization-required")}
               </span>
             ) : null}
           </span>

@@ -34,4 +34,15 @@ describe("McpProbePanel", () => {
     );
     expect(screen.getByText("工具列表缓存 60000 ms")).toBeInTheDocument();
   });
+
+  it("shows the schema-token estimate from tools/list, not 30-day usage", () => {
+    render(
+      <McpProbePanel
+        entry={{ report: report({ schemaTokens: 42, schemaBytes: 168 }), error: null, pending: false }}
+        onProbe={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("42 个 schema token（168 B）")).toBeInTheDocument();
+    expect(screen.queryByText(/30/)).toBeNull();
+  });
 });
