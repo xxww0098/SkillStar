@@ -59,6 +59,17 @@ describe("AgentTargetCarousel", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("caps the visible rail at four Agent icons", () => {
+    const { container } = render(
+      <AgentTargetCarousel
+        items={["one", "two", "three", "four", "five"].map((id) => item(id, false))}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".hscroll-row-wrapper > div")).toHaveStyle({ maxWidth: "130px" });
+  });
+
   it("keeps a Settings-disabled Agent as a stopped SVG instead of dropping it", () => {
     const onToggle = vi.fn();
     render(
