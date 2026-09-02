@@ -442,6 +442,7 @@ pub fn run() {
             commands::mcp_commands::list_mcp_servers,
             commands::mcp_commands::mcp_tool_statuses,
             commands::mcp_commands::probe_mcp_server,
+            commands::mcp_commands::parse_mcp_paste,
             commands::mcp_commands::create_mcp_server,
             commands::mcp_commands::update_mcp_server,
             commands::mcp_commands::delete_mcp_server,

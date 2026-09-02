@@ -111,6 +111,11 @@ export function McpProbePanel({ entry, onProbe, className }: McpProbePanelProps)
                 {t("mcp.probeCacheTtl", { ms: report.cacheTtlMs })}
               </span>
             ) : null}
+            {report.schemaTokens != null ? (
+              <span className="inline-flex h-5 items-center rounded bg-muted/70 px-1.5 font-mono text-micro">
+                {t("mcp.probeSchema", { tokens: report.schemaTokens, bytes: report.schemaBytes ?? 0 })}
+              </span>
+            ) : null}
           </div>
 
           {report.epoch ? <p className="leading-relaxed">{t(`mcp.probeEpochHint_${report.epoch}`)}</p> : null}

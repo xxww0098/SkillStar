@@ -1,5 +1,5 @@
 import { Boxes, Download, PackageSearch, Plug, RefreshCw, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageToolbar } from "../../../components/layout/PageToolbar";
 import { DrawerShell } from "../../../components/shared/DrawerShell";
@@ -11,8 +11,11 @@ import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
+import { tauriInvoke } from "../../../lib/ipc";
+import { mcpImportPasteText, type McpImportRequest } from "../../../lib/deepLink";
 import type {
   McpInstallOutcome,
+  McpPasteParse,
   McpPreset,
   McpServerEntry,
   McpServerWithSync,
@@ -20,7 +23,7 @@ import type {
   McpToolId,
 } from "../../../types";
 import { useMcpCatalogUpdates } from "../hooks/useMcpCatalogUpdates";
-import { useMcpProbe } from "../hooks/useMcpProbe";
+import { useMcpFleetProbe, useMcpProbe } from "../hooks/useMcpProbe";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
@@ -30,7 +33,10 @@ import {
   selectMcpAgentTargets,
   selectMcpAgentTargetsForServer,
 } from "../lib/agentTargets";
+import { mcpDraftToFormValue } from "../lib/pasteDraft";
 import { failedMcpSyncCount, mergeMcpSyncResults, summarizeMcpSyncResults } from "../lib/syncResults";
+import { McpFleetStrip } from "./McpFleetStrip";
+import { McpImportBar } from "./McpImportBar";
 import { McpInstallWizard } from "./McpInstallWizard";
 import { McpProbePanel } from "./McpProbePanel";
 import { McpServerCard } from "./McpServerCard";
@@ -78,6 +84,8 @@ interface SyncBatch {
 interface McpManagerProps {
   /** Navigate to the unified Marketplace MCP tab. */
   onOpenMarket?: () => void;
+  importRequest?: McpImportRequest | null;
+  onImportRequestHandled?: () => void;
 }
 
 function matchesQuery(query: string, values: Array<string | string[] | undefined | null>): boolean {
@@ -94,7 +102,7 @@ function serverCommand(server: McpServerEntry): string {
   return [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
 }
 
-export function McpManager({ onOpenMarket }: McpManagerProps) {
+export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled }: McpManagerProps) {
   const { t } = useTranslation();
   const { profiles } = useAgentProfiles();
   const {
@@ -117,6 +125,10 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const { noteForTool } = useMcpToolStatuses();
   const updates = useMcpCatalogUpdates(servers);
   const probe = useMcpProbe();
+  useMcpFleetProbe(
+    servers.map((server) => server.id),
+    probe.probeFleet,
+  );
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [saving, setSaving] = useState(false);
   const [batch, setBatch] = useState<SyncBatch | null>(null);
@@ -183,6 +195,45 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
       defaults: presetToDefaults(preset, mcpEnabledMapFromProfiles(profiles)),
     }));
   };
+
+  const applyPaste = (parsed: McpPasteParse) => {
+    if (parsed.catalogId) {
+      setDrawer({ type: "install", catalogId: parsed.catalogId });
+      return;
+    }
+    const drafts = parsed.drafts ?? [];
+    if (drafts.length === 0) {
+      toast.error(parsed.error ?? t("mcp.pasteUnknown"));
+      return;
+    }
+    if (drafts.length > 1) {
+      toast.info(t("mcp.pasteMultiple", { count: drafts.length }));
+    }
+    const enabled = mcpEnabledMapFromProfiles(profiles);
+    setCreateSeed((prev) => ({
+      key: prev.key + 1,
+      defaults: mcpDraftToFormValue(drafts[0], enabled),
+    }));
+    setDrawer({ type: "create" });
+  };
+
+  useEffect(() => {
+    if (!importRequest) return;
+    const text = mcpImportPasteText(importRequest);
+    onImportRequestHandled?.();
+    if (!text) return;
+    let cancelled = false;
+    void tauriInvoke("parse_mcp_paste", { text })
+      .then((parsed) => {
+        if (!cancelled) applyPaste(parsed);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) toast.error(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [importRequest?.nonce]);
 
   /**
    * Same verdict handling as the store tab: a refusal is an answer the wizard
@@ -409,6 +460,9 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
             </div>
           ) : null}
 
+          <McpImportBar onParsed={(parsed) => applyPaste(parsed)} disabled={saving} />
+          <McpFleetStrip servers={filteredServers} entryFor={probe.entryFor} />
+
           {batch && batchReport ? (
             <section className="space-y-2">
               <div className="flex items-center gap-2 px-1">
@@ -458,6 +512,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
                       server={server}
                       agentTargets={selectMcpAgentTargetsForServer(profiles, server.enabled)}
                       updateVersion={info?.hasUpdate ? info.latestVersion : null}
+                      probe={probe.entryFor(server.id)}
                       onOpen={() => setDrawer({ type: "edit", id: server.id })}
                       onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
                     />

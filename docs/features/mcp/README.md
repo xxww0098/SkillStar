@@ -122,7 +122,7 @@
 
 - modern：`server/discover` 成功即 modern；收到 MCP 保留错误码段内的错误仍是 modern（换版本重试一次）；其他错误或超时才回落 legacy。
 - legacy：`initialize` → `notifications/initialized`。
-- 两条路都收敛到 `tools/list`，它是真正的存活证明，也是 `ttlMs` / `cacheScope` 的来源。
+- 两条路都收敛到 `tools/list`，它是真正的存活证明，也是 `ttlMs` / `cacheScope` / schema 体积的来源。`schemaBytes` 是 `tools` 数组紧凑 JSON 的 UTF-8 字节数，`schemaTokens` 是 `ceil(schemaBytes / 4)`；两者只在探测真正拿到 listing 时出现。这是上下文成本的粗指标，不是 tiktoken，也不是 30 天调用量。
 - 纪元结论按**进程（stdio）/ origin（HTTP）** 缓存；探测失败即驱逐，被升级或临时故障的 server 会重新判定而不是钉死在旧结论上。
 - 前端把 `modern` 读成「无状态 · 2026-07-28」，把 `legacy` 读成「会话握手 · ≤2025-11-25」；内部枚举值不进界面文案。`ttlMs` 有值就显示。
 - **`401 + WWW-Authenticate` 不是失败**，它是 server 正确地要求授权，有独立状态 `authorization-required`，前端应据此发起 OAuth 而不是画红叉。
@@ -174,11 +174,21 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 - Publisher 顺序、source id 和 server 清单以 `skillstar-marketplace` seed/query 代码为准，不在文档复制枚举。
 - curated 行与 registry 行列对称，从而复用同一条查询和同一条安装路径。
 
+## 指挥中心（Fleet | Catalog）
+
+MCP 页面是该域的唯一入口，但不再把四个表面画成同等权重的 tab。主分段是 **机群（Fleet）** 与 **目录（Catalog）**；**工具** 与 **目录源** 是次级，因为它们回答的是「投影写到了哪」和「目录从哪来」，不是每天的安装/运行工作台。这是吸收 Hermes Agent v0.21 指挥中心的产品形状，同时守住 SkillStar 自己的约束（见 [D-052](../../decisions.md#d-052mcp-指挥中心是-skillstar-原生形态只吸收-hermes-021-的平台能力)）：
+
+- catalog 是两万量级，**禁止**把已装列表和全量目录堆在同一条滚动里。浏览目录仍然走分页查询，不得拉全量进渲染进程。
+- 机群页顶部是「粘贴即解析」条：用户可以丢进社区 `mcpServers` JSON、Streamable HTTP URL、`npx`/`uvx`/`docker` 命令行，或 `skillstar://mcp` 深链。解析在 `skillstar_models::mcp::parse_pasted_mcp`，命令适配器只是把它露出来。**解析结果不是安装。** 目录命中打开现有 `McpInstallWizard`；其余命中预填现有新建表单。两条路都要用户确认后才写 store。
+- 机群在指挥中心**首次挂载**时对已装列表做一次顺序健康探测，上限 8，不在 window focus / 缓存过期时重跑。超过上限的 server 仍可在编辑抽屉里按需探测。`401 + WWW-Authenticate` 继续是 `authorization-required`，机群条把它显示成「需要登录」而不是红叉。
+- `skillstar://mcp?url=` / `?catalog=` / `?config=` / `?command=` 会唤醒应用并打开对应的确认 UI。深链不得绕过安装确认。后端本来就把 `query` 放进 `skillstar://deep-link` 事件；前端必须读它，而不能只按 host 跳到 MCP 页。
+- 「从工具导入」仍然是读各 Agent 活配置的那条路（`import_from_tool`），与粘贴解析互补：前者有磁盘上的权威文件，后者接受用户随手丢来的片段。
+
 ## 前端职责
 
 - preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。这整段编排（初始化快照 → 列 curated → 过滤 recommended → 映射 → 合并去重）在 `skillstar_app::mcp::presets`，命令层只是适配器；快照 runtime 的装配（db 路径、data root、已装技能 loader）仍属宿主胶水（GUI 在 `src-tauri/src/core/marketplace_snapshot`，CLI 在 `skillstar_app::cli`）。
 - preset 芯片有两条安装路径，按 `McpPreset.catalogId` 这个显式标记分流，不靠「先试着解析目录行、解析不到再回退」：带 `catalogId` 的 curated 芯片打开安装向导（`McpInstallWizard`，与市场 tab 同一个入口，因而同样有运行时形态选择、密钥掩码密码框、必填标注和完整命令确认）；不带的内置 preset 没有目录行，继续预填新建表单。curated preset 的 id 本来就是目录行 id，所以芯片可以直接把它交给向导。
-- MCP 页面是 MCP 域的唯一入口，四个 tab 共用同一批 hook：**已安装**（`McpManager`）、**市场**（`McpMarketPage`，全目录分页浏览）、**工具**（`McpToolStatusPanel`）、**目录源**（`McpSourcesPanel`）。市场、工具、目录源三项此前完全没有 UI。
+- MCP 页面是 MCP 域的唯一入口。主分段是 **机群（Fleet）** 与 **目录（Catalog）**，次级是 **工具** 与 **目录源**；四者仍共用同一批 hook。机群页（`McpManager`）承载已装卡片、粘贴解析条、机群健康条和新建/安装抽屉；目录页仍是 `McpMarketPage` 的全目录分页浏览。市场、工具、目录源三项此前完全没有 UI。
 - Marketplace MCP tab 保留 Publisher grid 入口；`McpPublisherDetail` 现在只是一层 hero，主体复用同一个 `McpMarketPage`，只是带上 `publisherId`。发布者页不再自己拉全量再内存过滤。
 - Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。Settings 关掉但这条 server 仍写入的 target 留在轮播里，SVG 进停用态（灰度、不可点），让启停可被卡片感知；工具栏筛选仍只列当前启用的 profile。新建/安装表单的默认勾选跟随当前启用 profile，完整 `MCP_TOOL_IDS` 仍可手选。
 - 商店浏览必须走分页查询命令并展示 `total`；不得再拉全量后在内存里过滤。筛选、排序、分页全部编译进一次 `query_mcp_market_servers_local`，渲染进程不做二次过滤。

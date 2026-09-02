@@ -6,7 +6,8 @@
 //! struct and regenerate instead.
 //! - McpServerEntry, McpServerPatch, McpStore, McpSyncResult,
 //!   McpSyncConsistency, McpToolStatus, McpPreset, McpProbeReport,
-//!   McpProbeStatus, McpSpecEpoch come from `skillstar_models::mcp`.
+//!   McpProbeStatus, McpSpecEpoch, McpPasteKind, McpPasteParse come from
+//!   `skillstar_models::mcp`.
 //! - McpPublisherSummary, McpServerKind, McpServerStatus, McpIcon,
 //!   McpTransportSpec, McpRegistryPackageSummary, McpRegistryRemoteSummary,
 //!   McpMarketEntry, McpMarketServerDetail, the `Input` family (McpInput,
@@ -34,6 +35,8 @@ export type { McpPreset } from "./generated/McpPreset";
 export type { McpProbeReport } from "./generated/McpProbeReport";
 export type { McpProbeStatus } from "./generated/McpProbeStatus";
 export type { McpSpecEpoch } from "./generated/McpSpecEpoch";
+export type { McpPasteKind } from "./generated/McpPasteKind";
+export type { McpPasteParse } from "./generated/McpPasteParse";
 
 export type { McpPublisherSummary } from "./generated/McpPublisherSummary";
 export type { McpServerKind } from "./generated/McpServerKind";

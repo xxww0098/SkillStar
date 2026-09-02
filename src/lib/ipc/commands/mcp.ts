@@ -1,4 +1,5 @@
 import type {
+  McpPasteParse,
   McpPreset,
   McpProbeReport,
   McpServerEntry,
@@ -31,6 +32,12 @@ export interface McpCommands {
    * a failure, and must not render as one.
    */
   probe_mcp_server: { args: { id: string }; result: McpProbeReport };
+  /**
+   * Parse a pasted snippet or `skillstar://mcp` URL into drafts. Never writes
+   * the store — catalog hits still open the install wizard, everything else
+   * still opens the create form.
+   */
+  parse_mcp_paste: { args: { text: string }; result: McpPasteParse };
   create_mcp_server: { args: { entry: Partial<McpServerEntry> }; result: McpServerWithSync };
   update_mcp_server: { args: { id: string; patch: McpServerPatch }; result: McpServerWithSync };
   delete_mcp_server: { args: { id: string }; result: McpSyncResult[] };

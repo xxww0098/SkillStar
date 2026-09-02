@@ -11,7 +11,7 @@ import { useNavigation } from "./hooks/useNavigation";
 import { useTauriSetup } from "./hooks/useTauriSetup";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdater } from "./hooks/useUpdater";
-import { deepLinkNavTarget } from "./lib/deepLink";
+import { deepLinkNavTarget, mcpImportQuery } from "./lib/deepLink";
 import { looksLikeShareCode } from "./lib/shareCode";
 import type { McpPublisherSummary, NavPage, OfficialPublisher } from "./types";
 
@@ -79,11 +79,20 @@ function AppContent() {
 
   // ── OS deep links (skillstar:// scheme, emitted by the backend) ──
   // Routes the link to the matching page; unknown targets are ignored.
-  useTauriEvent<{ host?: string | null; path?: string }>("skillstar://deep-link", (payload) => {
-    const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
-    if (target === "models") nav.setAppMode("models");
-    else if (target) nav.navigate(target);
-  });
+  useTauriEvent<{ host?: string | null; path?: string; query?: string | null; url?: string | null }>(
+    "skillstar://deep-link",
+    (payload) => {
+      const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
+      if (target === "models") nav.setAppMode("models");
+      else if (target) nav.navigate(target);
+      if (target === "mcp") {
+        const query = mcpImportQuery(payload.query);
+        if (query || payload.url) {
+          nav.openMcpImport({ url: payload.url ?? null, query });
+        }
+      }
+    },
+  );
 
   // ── Sidebar collapsed ──────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
@@ -261,6 +270,8 @@ function AppContent() {
               nav.setMarketplaceTab("mcp-official");
               nav.navigate("marketplace");
             }}
+            importRequest={nav.mcpImportRequest}
+            onImportRequestHandled={nav.clearMcpImportRequest}
           />
         );
       case "settings":

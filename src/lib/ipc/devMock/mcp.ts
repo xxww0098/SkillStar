@@ -17,6 +17,7 @@ import {
   mcpInstallPreview,
   mcpMarketPage,
   mcpProbeReport,
+  parseMcpPaste,
 } from "./mcpData";
 import { type DevMockHandlers, iso } from "./shared";
 
@@ -30,6 +31,7 @@ export const MCP_HANDLERS: DevMockHandlers = {
   mcp_tool_statuses: () => MCP_TOOL_STATUSES,
   get_mcp_presets: () => MCP_PRESETS,
   probe_mcp_server: (args) => mcpProbeReport(arg(args, "id")),
+  parse_mcp_paste: (args) => parseMcpPaste(arg(args, "text")),
 
   // MCP marketplace
   query_mcp_market_servers_local: (args) => ({

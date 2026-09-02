@@ -37,4 +37,12 @@ cachePrivate: boolean,
  * The `WWW-Authenticate` challenge, when the server asked for
  * authorization.
  */
-authChallenge?: string | null, error?: string | null, checkedAt: number, };
+authChallenge?: string | null, 
+/**
+ * UTF-8 byte length of the compact `tools` array JSON from `tools/list`.
+ */
+schemaBytes?: number, 
+/**
+ * `ceil(schema_bytes / 4)`. A context-cost estimate, not a tokenizer.
+ */
+schemaTokens?: number, error?: string | null, checkedAt: number, };

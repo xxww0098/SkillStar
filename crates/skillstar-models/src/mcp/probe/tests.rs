@@ -111,6 +111,11 @@ async fn discover_result_selects_the_modern_epoch() {
     assert_eq!(report.instructions.as_deref(), Some("read me"));
     assert_eq!(report.cache_ttl_ms, Some(60_000));
     assert!(!report.cache_private);
+    let expected_bytes = serde_json::json!([{"name": "search"}, {"name": "fetch"}])
+        .to_string()
+        .len() as u64;
+    assert_eq!(report.schema_bytes, Some(expected_bytes));
+    assert_eq!(report.schema_tokens, Some(expected_bytes.div_ceil(4)));
     assert_eq!(transport.methods(), vec!["server/discover", "tools/list"]);
     // No handshake exists in this revision — sending one would be a protocol error.
     assert!(transport.notifications.is_empty());
