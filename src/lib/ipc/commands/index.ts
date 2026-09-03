@@ -16,6 +16,7 @@ import type { LearningCommands } from "./learning";
 import type { SkillCommands } from "./skills";
 import type { SshCommands } from "./ssh";
 import type { StorageCommands } from "./storage";
+import type { InstanceCommands } from "./instances";
 import type { SystemCommands } from "./system";
 
 export type TauriCommands = SkillCommands &
@@ -31,12 +32,14 @@ export type TauriCommands = SkillCommands &
   McpMarketplaceCommands &
   SshCommands &
   SharedChannelCommands &
-  SystemCommands;
+  SystemCommands &
+  InstanceCommands;
 
 export type {
   AgentCommands,
   AiCommands,
   GitHubCommands,
+  InstanceCommands,
   LearningCommands,
   MarketplaceCommands,
   McpCommands,

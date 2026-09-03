@@ -478,6 +478,15 @@
 - 后果：获得——粘贴/深链与市场安装共用同一条确认边界，机群能看到真实的 schema 体积和需要重新授权的 server。承担——超过 8 个已装 server 不会在后台全部探测；token 数字是字节估算不是模型 tokenizer；catalog 深链仍依赖本地快照里真有那一行。
 - 证据：`docs/features/mcp/README.md`、`crates/skillstar-models/src/mcp/import_paste.rs`、`crates/skillstar-models/src/mcp/probe/`、`src/pages/Mcp.tsx`、`src/lib/deepLink.ts`、issue [#79](https://github.com/xxww0098/SkillStar/issues/79)。
 
+## D-053：桌面多开是 SkillStar 原生实例，不绑 Usage catalog
+
+- 日期：2026-09-03
+- 状态：accepted
+- 背景：Usage 卡片今天是订阅配额 + 默认 live 工具切号，不是启动器。用户需要在本机同时开多个 Cursor / Grok Bot / Antigravity，各自独立 Chromium/Electron profile。把多开塞进 `catalog.rs` / `Subscription`、或复用 `open_usage_card_window` / `open_external_url`，会把额度卡伪装成 IDE 启动器，也会把 Grok Bot 桌面应用误绑到 xAI CLI（`xai` / `~/.grok`），或把 Claude Desktop 误绑到 `anthropic`。
+- 决策：① 独立实例清单与 profile，落点固定为 `~/.skillstar/instances/<app>/<id>/`，清单在 `config/app_instances.json`。禁止使用 `~/.grok-bot-profiles` 或第三方 Cockpit 目录。② 只交付已验证能隔离的三个 macOS 应用：Cursor（`--user-data-dir <dir> --new-window`）、Grok Bot desktop（`grok-bot`，`--user-data-dir <dir>`）、Antigravity（**必须** `--user-data-dir=<dir>` 等号形式，空格形式会被丢掉并附着默认 profile）。③ Claude Desktop 忽略 `--user-data-dir` 与 `CLAUDE_USER_DATA_DIR`，不交付；UI 若提及须标明原因。④ 不把 Grok Bot 启动绑到 catalog `xai`，不把 Claude 启动绑到 `anthropic`。⑤ 启动经域层 `/usr/bin/open -n`，停止只杀 cmdline 匹配该 `user-data-dir` 的 PID。Windows/Linux 返回明确不支持。⑥ 默认 live 切号仍只写各工具自己的默认存储；实例 Start 不得改写 `~/Library/Application Support/Cursor` 或 `~/.grok`。
+- 后果：获得——同一台 Mac 可同时跑两份 Cursor / Grok Bot / Antigravity 而不污染默认 profile。承担——语言服务等仍可能写共享日志目录；Claude Desktop 无法多开；非 macOS 没有启动能力。
+- 证据：`crates/skillstar-app/src/instances/`、`docs/features/usage/README.md`、本决策对应提交。
+
 ## 新增记录格式
 
 

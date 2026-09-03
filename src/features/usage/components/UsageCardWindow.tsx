@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { BadgeCheck, Pin, PinOff, RefreshCw, RotateCcw, TriangleAlert, Unplug, X } from "lucide-react";
+import { BadgeCheck, Layers, Pin, PinOff, RefreshCw, RotateCcw, TriangleAlert, Unplug, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -10,6 +10,8 @@ import { ProviderLogo, hasBrandIcon } from "./ProviderLogo";
 import { ResetCountdown } from "./ResetCountdown";
 import { LightBodySurface, UsageCardBody, resolveUsageBodyRegistration } from "./card";
 import { getBrandTheme } from "../lib/brandThemes";
+import { desktopAppIdForCatalog } from "../lib/desktopApps";
+import { AppInstancesOverlay } from "./instances/AppInstancesOverlay";
 import { cliAccountBadgeFor, isDegradedCopyBinding } from "../lib/cliCustody";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
 import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
@@ -62,6 +64,7 @@ export function UsageCardWindow() {
   const [syncing, setSyncing] = useState(false);
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [instancesOpen, setInstancesOpen] = useState(false);
 
   const loadData = useCallback(
     async (subId: string) => {
@@ -351,6 +354,7 @@ export function UsageCardWindow() {
     subscription.supports_cli_switch && subscription.switch_result && !subscription.switch_result.success;
   const cliBadge = cliAccountBadgeFor(subscription, cliAccounts);
   const isIde = subscription.catalog_id === "antigravity" || subscription.catalog_id === "cursor";
+  const instanceApp = desktopAppIdForCatalog(subscription.catalog_id);
   const copyBound = isDegradedCopyBinding(subscription.switch_result);
 
   return (
@@ -477,6 +481,11 @@ export function UsageCardWindow() {
           </div>
         )}
         {error && <div className="text-[11px] text-red-400">{error}</div>}
+        {instancesOpen && instanceApp ? (
+          <div className="relative min-h-[180px] overflow-hidden rounded-md border border-border/50">
+            <AppInstancesOverlay appId={instanceApp} onClose={() => setInstancesOpen(false)} />
+          </div>
+        ) : null}
       </div>
 
       {/* Footer: actions */}
@@ -544,6 +553,17 @@ export function UsageCardWindow() {
             )}
           </button>
         )}
+        {instanceApp ? (
+          <button
+            type="button"
+            onClick={() => setInstancesOpen((open) => !open)}
+            className="rounded-md border border-border/50 p-1.5 text-muted-foreground hover:bg-foreground/10"
+            title={t("usage.instances")}
+            aria-label={t("usage.instances")}
+          >
+            <Layers size={13} />
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => void handleRefresh()}

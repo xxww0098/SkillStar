@@ -5,9 +5,11 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { mergeSubscriptionOrder } from "../lib/pricing";
+import { desktopAppsForFilter } from "../lib/desktopApps";
 import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type CliAccountState, type Subscription } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 import { SubscriptionCard } from "./SubscriptionCard";
+import { DesktopAppsSection } from "./instances/DesktopAppsSection";
 import { UsageHomeEmpty } from "./UsageHomeEmpty";
 import { VendorPlaceholderCard } from "./VendorPlaceholderCard";
 
@@ -79,6 +81,7 @@ export function UsageGrid({
   const { t } = useTranslation();
   const catalogById = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
   const isHomeView = filter === FILTER_ALL;
+  const desktopAppIds = desktopAppsForFilter(filter);
 
   const providerEntry = useMemo(() => {
     if (isHomeView) return null;
@@ -206,6 +209,7 @@ export function UsageGrid({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+      {desktopAppIds ? <DesktopAppsSection appIds={desktopAppIds} /> : null}
       {isHomeView ? (
         subscriptions.length === 0 ? (
           <UsageHomeEmpty onBrowseProviders={onBrowseProviders ?? NOOP_BROWSE} />

@@ -64,3 +64,10 @@ export interface ActiveChangedPayload {
 /** Sidebar selection: "all" | a specific catalog id. */
 export type CatalogFilter = string;
 export const FILTER_ALL: CatalogFilter = "__all__";
+
+/** Sidebar sentinel for the Grok Bot desktop app (not catalog `xai`). */
+export const GROK_BOT_FILTER = "grok-bot";
+
+export type { AppInstance } from "@/types/generated/AppInstance";
+export type { DesktopApp } from "@/types/generated/DesktopApp";
+export type { DesktopAppId } from "@/types/generated/DesktopAppId";

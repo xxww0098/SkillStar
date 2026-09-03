@@ -32,6 +32,7 @@ const THEMES: Record<string, BrandTheme> = {
   codex: { header: ["#0E8E6D", "#19C37D"], bar: ["#10A37F", "#19C37D"], fg: "#ffffff", glow: "#10A37F" },
   antigravity: { header: ["#4285F4", "#34A853"], bar: ["#4285F4", "#1A73E8"], fg: "#ffffff", glow: "#4285F4" },
   xai: { header: ["#1A1A1A", "#000000"], bar: ["#3F3F46", "#18181B"], fg: "#ffffff", glow: "#52525B" },
+  "grok-bot": { header: ["#1A1A1A", "#000000"], bar: ["#3F3F46", "#18181B"], fg: "#ffffff", glow: "#52525B" },
   // Anthropic terracotta ("crail"); the deeper stop keeps white header text at AA.
   anthropic: { header: ["#A8412A", "#D97757"], bar: ["#D97757", "#C15F3C"], fg: "#ffffff", glow: "#D97757" },
 

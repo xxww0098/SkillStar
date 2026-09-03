@@ -70,5 +70,24 @@ describe("UsageCardFooter confirms", () => {
     expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /同步用量/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "多开实例" })).not.toBeInTheDocument();
+  });
+
+  it("exposes instance actions only when the parent opts in", () => {
+    const onOpenInstances = vi.fn();
+    render(
+      <UsageCardFooter
+        subscription={{ ...subscription, catalog_id: "cursor" } as Subscription}
+        monthlyCost={null}
+        showRenewFooter={false}
+        renewDays={null}
+        onRefresh={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onOpenInstances={onOpenInstances}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "多开实例" }));
+    expect(onOpenInstances).toHaveBeenCalledTimes(1);
   });
 });

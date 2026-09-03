@@ -1,6 +1,8 @@
 import { motion, useReducedMotion } from "framer-motion";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { getBrandTheme } from "../lib/brandThemes";
+import { desktopAppIdForCatalog } from "../lib/desktopApps";
 import { cliAccountBadgeFor } from "../lib/cliCustody";
 import { monthlyEquivalentPrice } from "../lib/pricing";
 import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
@@ -18,6 +20,7 @@ import {
   usageCardShellClassName,
   usageCardSlotClassName,
 } from "./card";
+import { AppInstancesOverlay } from "./instances/AppInstancesOverlay";
 
 interface SubscriptionCardProps {
   subscription: Subscription;
@@ -64,6 +67,8 @@ export function SubscriptionCard({
   onDragHandlePointerDown,
 }: SubscriptionCardProps) {
   const reduceMotion = useReducedMotion();
+  const [instancesOpen, setInstancesOpen] = useState(false);
+  const instanceApp = desktopAppIdForCatalog(sub.catalog_id);
   const usage = sub.usage ?? null;
   const planName = (usage?.plan_name ?? sub.plan_tier ?? null) || null;
   const showRenewFooter = sub.renew_date > 0;
@@ -137,8 +142,12 @@ export function SubscriptionCard({
         onReauth={onReauth ? () => onReauth(sub.id) : undefined}
         onSetActive={onSetActive ? () => onSetActive(sub.id) : undefined}
         onSwitchToCli={onSwitchToCli ? () => onSwitchToCli(sub.catalog_id) : undefined}
+        onOpenInstances={instanceApp ? () => setInstancesOpen(true) : undefined}
         refreshDisabled={refreshDisabled}
       />
+      {instancesOpen && instanceApp ? (
+        <AppInstancesOverlay appId={instanceApp} onClose={() => setInstancesOpen(false)} />
+      ) : null}
     </motion.article>
   );
 }

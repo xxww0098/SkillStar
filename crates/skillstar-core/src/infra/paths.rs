@@ -11,6 +11,7 @@
 //! ├── db/                     # SQLite databases
 //! ├── logs/                   # Runtime and per-run logs
 //! ├── state/                  # Rebuildable runtime state & metadata
+//! ├── instances/              # Desktop-app multi-instance Chromium profiles
 //! └── hub/                    # hub_root() — skill hub, repos, lockfile
 //!     ├── skills/             # Central symlink index
 //!     ├── local/              # User-authored local skills
@@ -137,6 +138,24 @@ pub fn learning_drafts_dir() -> PathBuf {
     learning_dir().join("drafts")
 }
 
+/// `~/.skillstar/instances/` — isolated Chromium/Electron profiles for desktop multi-instance.
+pub fn instances_dir() -> PathBuf {
+    data_root().join("instances")
+}
+
+/// `~/.skillstar/instances/<app>/<id>/` — one instance's user-data-dir.
+///
+/// `app` and `id` must be single path segments (no separators). Callers that
+/// accept user input must validate before calling; this function does not
+/// create the directory.
+pub fn instance_profile_dir(app: &str, id: &str) -> PathBuf {
+    instances_dir().join(app).join(id)
+}
+
+/// `config/app_instances.json` — desktop multi-instance registry.
+pub fn app_instances_config_path() -> PathBuf {
+    config_dir().join("app_instances.json")
+}
 
 /// `config/ai.json` — AI provider configuration.
 pub fn ai_config_path() -> PathBuf {
@@ -274,7 +293,8 @@ pub(crate) fn shellexpand_home(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        data_root, home_dir, hub_root, learning_dir, learning_drafts_dir, learning_guides_dir,
+        app_instances_config_path, data_root, home_dir, hub_root, instance_profile_dir,
+        instances_dir, learning_dir, learning_drafts_dir, learning_guides_dir,
         learning_progress_dir, learning_tutorials_dir, shellexpand_home, tutorials_dir,
     };
     use tempfile::TempDir;
@@ -301,6 +321,15 @@ mod tests {
             temp.path().join("learning/progress")
         );
         assert_eq!(learning_drafts_dir(), temp.path().join("learning/drafts"));
+        assert_eq!(instances_dir(), temp.path().join("instances"));
+        assert_eq!(
+            instance_profile_dir("cursor", "work"),
+            temp.path().join("instances/cursor/work")
+        );
+        assert_eq!(
+            app_instances_config_path(),
+            temp.path().join("config/app_instances.json")
+        );
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");
         }
