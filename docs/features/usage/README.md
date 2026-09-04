@@ -152,6 +152,30 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - macOS Dock 菜单经 app delegate 的 `applicationDockMenu:` 提供，通过 objc2 动态注入 Tauri delegate 类；Tray 菜单在系统状态栏常驻。
 - 触发点：启动（`setup_tray` 与 `dock_menu::refresh`）、订阅增删改、排序、刷新、导入与 CLI 切换时统一通过 `refresh_tray_and_dock_menu(&app)` 刷新。
 
+## 桌面应用多开
+
+Usage 卡片仍是订阅配额 + 默认 live 工具切号，**不是**启动器。`open_usage_card_window` / `open_external_url` 只开浮窗或浏览器，不会拉起 IDE。
+
+独立于 catalog / `Subscription` 的实例清单由 `skillstar-app::instances` 拥有：
+
+- Profile 根固定为 `~/.skillstar/instances/<app>/<instance-id>/`（尊重 `SKILLSTAR_DATA_DIR`）。创建目录不够；**Start 必须 `open -n` 拉起本机应用**并带上该 profile。
+- 只交付三个已验证能隔离的 macOS 应用：
+  - **Cursor**（catalog `cursor`）：`open -n -a "Cursor.app" --args --user-data-dir <dir> --new-window`
+  - **Grok Bot desktop**（应用 id `grok-bot`，**不是** catalog `xai` / Grok CLI / `~/.grok`）：`open -n -a "Grok Bot.app" --args --user-data-dir <dir>`
+  - **Antigravity**（catalog `antigravity`）：`open -n -a "Antigravity.app" --args --user-data-dir=<dir> --new-window`。**必须用等号形式**；空格分隔的 `--user-data-dir <dir>` 会被丢掉，新进程死掉或附着默认 profile。
+- **Claude Desktop 不交付。** `/Applications/Claude.app` 忽略 `--user-data-dir` 和 `CLAUDE_USER_DATA_DIR`，继续写 `~/Library/Application Support/Claude`；`open -n` 只是第二个同 profile 进程（账号碰撞）。UI 若提及，标明该原因。不要把 Claude 聊天绑到 catalog `anthropic`。
+- Stop 只终止 cmdline 含该实例 `--user-data-dir` / `--user-data-dir=` 的 PID，不动默认 profile 或其它实例。
+- Start **不**改写 `~/Library/Application Support/Cursor` 或 `~/.grok`。默认 live 切号仍只作用于各工具自己的默认存储。
+- Windows / Linux 列出与创建可以工作；Start / Stop 返回明确的「仅支持 macOS」。
+- UX：Cursor / Antigravity 配额卡提供实例动作，但不把额度卡做成 Cockpit。Grok Bot 在 Usage 侧栏和首页有独立桌面入口，不挂在 xAI CLI 额度卡上。
+
+### 在 SkillStar 里开两份 Cursor / Grok Bot / Antigravity
+
+1. Usage 首页的「桌面应用」区（或 Cursor / Antigravity 卡上的多开按钮；Grok Bot 走侧栏独立入口，不要点 xAI 额度卡）。
+2. 为每个应用各建两个实例，例如 `Work` 与 `Personal`。每个实例得到自己的 `~/.skillstar/instances/<app>/<id>/`。
+3. 分别点 Start。macOS 会再起一份带该 `--user-data-dir` 的进程；默认 `~/Library/Application Support/Cursor`、Grok Bot 默认 profile、Antigravity 默认 profile 保持不动。
+4. Stop 只停该实例目录对应的进程。切号/配额刷新继续作用于默认 live 工具存储，不会被实例 Start 覆盖。
+
 ## 验证
 
 ```bash

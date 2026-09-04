@@ -2,6 +2,7 @@ pub mod acp;
 pub mod agents;
 pub mod ai;
 pub mod github;
+pub mod instances;
 pub mod marketplace;
 pub mod mcp_commands;
 pub mod mcp_marketplace;

@@ -53,10 +53,10 @@ SkillStar/
 | `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、统一 `GitSkillFacade`、GitHub 仓库管理（`git::gh_manager` 编排 + `git::gh_rest` 发布 REST）、项目 manifest、deployment；SKILL.md frontmatter 质量校验（`validation`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub API 更新检测快速路径（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝；Agent spec/registry/custom profile 与 profile storage（`agents`）；GitHub App 设备授权、token 生命周期、凭据存储与网关（`github_auth`） | Marketplace 搜索、Usage、Models，或拆出叶子的业务编排 |
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场；MCP 多源 catalog（源注册表、用户自定义源持久化、跨源抓取合并、`server.json` 解析、参数化卡片查询）与 curated 数据 | 技能安装实现、MCP 本地配置、registry→store 的映射 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store 与 per-tool 投影、双纪元健康探测 | Usage 订阅、Marketplace 快照或 catalog 形态选择 |
-| `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排 |
+| `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排、桌面应用多开 |
 | `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
 | `skillstar-learning` | `SkillIdentity` / `SkillRevision` 值对象与稳定 key；私人 CSP-strict HTML tutorial 的校验、freshness、artifact I/O lock、staging/backup/恢复与 identity-keyed 存储；Guide / GuideRevision / GuideStep、LearningProgress、GuideDraft 及其 freshness/原子持久化 | Skill 扫描/安装/更新/lockfile/local sidecar/频道；Git/HTTP/ACP 子进程与 AI provider；跨域生成事务；Tauri State/事件/DTO；命令执行、verifier、云端 schema、社区发布 |
-| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；把已安装 `Skill` 投影为 `ResolvedSkill` 的学习 source adapter | Tauri command 宏或窗口对象 |
+| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；把已安装 `Skill` 投影为 `ResolvedSkill` 的学习 source adapter；桌面应用多开（Cursor / Grok Bot / Antigravity 的独立 Chromium profile） | Tauri command 宏或窗口对象 |
 
 ## 允许的依赖方向
 

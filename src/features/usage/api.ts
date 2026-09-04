@@ -1,8 +1,9 @@
-import { tauriInvokeDynamic as invoke } from "../../lib/ipc/core";
+import { tauriInvoke, tauriInvokeDynamic as invoke } from "../../lib/ipc/core";
 import type {
   CatalogEntry,
   CliAccountState,
   CreateSubscriptionInput,
+  DesktopAppId,
   OAuthStart,
   Subscription,
   SubscriptionAlert,
@@ -57,4 +58,11 @@ export const usageApi = {
   // ── Floating card windows (multi-window) ─────────────────────────
   openUsageCardWindow: (subscriptionId: string) => invoke<void>("open_usage_card_window", { subscriptionId }),
   closeUsageCardWindow: (subscriptionId: string) => invoke<void>("close_usage_card_window", { subscriptionId }),
+
+  listDesktopApps: () => tauriInvoke("list_desktop_apps"),
+  listAppInstances: (app: DesktopAppId) => tauriInvoke("list_app_instances", { app }),
+  createAppInstance: (app: DesktopAppId, name: string) => tauriInvoke("create_app_instance", { app, name }),
+  startAppInstance: (id: string) => tauriInvoke("start_app_instance", { id }),
+  stopAppInstance: (id: string) => tauriInvoke("stop_app_instance", { id }),
+  deleteAppInstance: (id: string) => tauriInvoke("delete_app_instance", { id }),
 };

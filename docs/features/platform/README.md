@@ -6,7 +6,7 @@
 
 ## 路径、存储和 HTTP
 
-- 数据根、hub 根和配置路径统一由 `skillstar-core` resolver 产生；UI 使用后端返回的 resolved path。
+- 数据根、hub 根和配置路径统一由 `skillstar-core` resolver 产生；UI 使用后端返回的 resolved path。桌面多开 profile 根是 `data_root()/instances/<app>/<id>/`（`instances_dir()`），清单在 `config/app_instances.json`；覆盖 `SKILLSTAR_DATA_DIR` 时两者一起走。
 - Storage overview 扫描 hub/cache/config 时不跟随 symlink/junction target，避免递归和 Windows 卡死。
 - Storage overview、cache cleanup 与 force-delete 的跨域维护流程由 `skillstar-app::storage_maintenance` 拥有；Tauri command 只调度并返回 DTO。
 - `SKILLSTAR_DATA_DIR`、`SKILLSTAR_HUB_DIR` 覆盖适用于所有调用方。

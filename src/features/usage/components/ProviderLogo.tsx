@@ -29,6 +29,7 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   codex: CodexColor,
   antigravity: AntigravityColor,
   xai: GrokMono,
+  "grok-bot": GrokMono,
   anthropic: ClaudeColor,
   // api-key
   deepseek: DeepSeekColor,

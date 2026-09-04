@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ProviderLogo } from "@/features/usage/components/ProviderLogo";
 import { useUsageDataContext } from "@/features/usage/context/UsageDataContext";
-import { FILTER_ALL, type CatalogEntry, type CatalogFilter } from "@/features/usage/types";
+import { FILTER_ALL, GROK_BOT_FILTER, type CatalogEntry, type CatalogFilter } from "@/features/usage/types";
 import { cn } from "@/lib/utils";
 
 export interface UsageNavProps {
@@ -54,6 +54,17 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
             ) : (
               <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             )
+          }
+        />
+        <NavItem
+          label={t("usage.grokBotDesktop")}
+          description={collapsed ? undefined : t("usage.grokBotDesktopHint")}
+          count={0}
+          selected={selected === GROK_BOT_FILTER}
+          onClick={() => onSelect(GROK_BOT_FILTER)}
+          collapsed={collapsed}
+          logo={
+            <ProviderLogo catalogId="grok-bot" displayName={t("usage.grokBotDesktop")} brandColor="18181B" size="sm" />
           }
         />
       </div>

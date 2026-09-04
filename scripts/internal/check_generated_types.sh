@@ -28,6 +28,7 @@
 #     domain enums and the usage-snapshot tree the DTOs embed)
 #   - `crates/skillstar-app/src/mcp/` (the MCP cross-domain use cases:
 #     runtime-shape candidates and the pre-install confirmation plan)
+#   - `crates/skillstar-app/src/instances/` (desktop multi-instance DTOs)
 #   - `crates/skillstar-app/src/usage/dto.rs` (the /usage page's frontend
 #     contract; `src/features/usage/types.ts` only re-exports it)
 #   - `crates/skillstar-app/src/models/dto.rs` (the Models page's frontend

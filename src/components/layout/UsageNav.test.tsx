@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { FILTER_ALL, type CatalogEntry, type Subscription } from "@/features/usage/types";
 
@@ -6,6 +6,8 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
       if (key === "usage.allSubscriptions") return "全部订阅";
+      if (key === "usage.grokBotDesktop") return "Grok Bot";
+      if (key === "usage.grokBotDesktopHint") return "桌面应用多开";
       if (key === "usage.searchCatalog") return "搜索订阅商...";
       if (key === "usage.sidebarNav") return "供应商";
       if (key === "usage.addSubscription") return "新增订阅";
@@ -51,7 +53,16 @@ describe("UsageNav", () => {
   it("keeps the add button out of navigation when a provider is selected", () => {
     render(<UsageNav selected="xai" onSelect={vi.fn()} collapsed={false} />);
 
-    expect(screen.getByRole("button", { name: /Grok/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /xAI Grok CLI/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新增订阅" })).not.toBeInTheDocument();
+  });
+
+  it("offers Grok Bot desktop as its own entry, not the xai quota row", () => {
+    const onSelect = vi.fn();
+    render(<UsageNav selected="xai" onSelect={onSelect} collapsed={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Grok Bot/ }));
+    expect(onSelect).toHaveBeenCalledWith("grok-bot");
+    expect(onSelect).not.toHaveBeenCalledWith("xai");
   });
 });

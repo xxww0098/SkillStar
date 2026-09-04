@@ -27,6 +27,10 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("./instances/DesktopAppsSection", () => ({
+  DesktopAppsSection: () => <section data-testid="desktop-apps" />,
+}));
+
 vi.mock("./SubscriptionCard", () => ({
   SubscriptionCard: ({
     subscription,

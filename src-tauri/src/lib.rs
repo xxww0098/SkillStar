@@ -482,6 +482,13 @@ pub fn run() {
             // Usage floating card windows (multi-window)
             commands::usage_windows::open_usage_card_window,
             commands::usage_windows::close_usage_card_window,
+            // Desktop-app multi-instance (Cursor / Grok Bot / Antigravity)
+            commands::instances::list_desktop_apps,
+            commands::instances::list_app_instances,
+            commands::instances::create_app_instance,
+            commands::instances::start_app_instance,
+            commands::instances::stop_app_instance,
+            commands::instances::delete_app_instance,
             // SSH remote skill management
             commands::list_ssh_hosts,
             commands::add_ssh_host,

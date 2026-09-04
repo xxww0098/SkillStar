@@ -57,6 +57,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 卡片显示 provider 原生配额窗口、余额、重置时间、套餐和计费周期。
 - OAuth 重新授权会原位更新既有订阅，避免生成重复账号。
 - 支持的 CLI 账号切换以事务方式更新 active 状态和磁盘凭证；失败时保留原可用账号。
+- 可在 Usage 里为 Cursor、Grok Bot 桌面应用和 Antigravity 创建隔离实例（`~/.skillstar/instances/<app>/<id>/`），Start 会用独立 `--user-data-dir` 拉起本机 macOS 应用，不改默认 profile。Claude Desktop 无法隔离，不提供多开。
 - API key、access token、refresh token 使用域内加密存储；SSH secret 使用系统 keyring。
 
 > Provider 私有接口可能随上游升级变化。SkillStar 会区分“需要重新授权”“暂时无数据”和普通请求失败，不把所有错误伪装成空额度。

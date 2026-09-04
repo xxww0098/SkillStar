@@ -1,4 +1,4 @@
-import { BadgeCheck, ExternalLink, Pencil, RefreshCw, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
+import { BadgeCheck, ExternalLink, Layers, Pencil, RefreshCw, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ export interface UsageCardFooterProps {
   onReauth?: () => void;
   onSetActive?: () => Promise<void>;
   onSwitchToCli?: () => Promise<void>;
+  onOpenInstances?: () => void;
   refreshDisabled?: boolean;
 }
 
@@ -46,6 +47,7 @@ export function UsageCardFooter({
   onReauth,
   onSetActive,
   onSwitchToCli,
+  onOpenInstances,
   refreshDisabled = false,
 }: UsageCardFooterProps) {
   const { t } = useTranslation();
@@ -156,6 +158,18 @@ export function UsageCardFooter({
             <span className="min-w-0 flex-1" />
           )}
           <div className="flex shrink-0 items-center justify-end gap-0.5">
+            {onOpenInstances ? (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title={t("usage.instances")}
+                aria-label={t("usage.instances")}
+                onClick={onOpenInstances}
+                className="text-zinc-500 hover:text-zinc-800"
+              >
+                <Layers className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            ) : null}
             {onSetActive && !sub.is_active && (
               <Button
                 size="icon-sm"
