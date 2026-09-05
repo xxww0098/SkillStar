@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentProfile } from "../types";
-import { selectRailAgentProfiles, selectTargetableAgentProfiles, supportsGlobalDeploy } from "./agentProfiles";
+import { selectTargetableAgentProfiles, supportsGlobalDeploy } from "./agentProfiles";
 
 function profile(id: string, installed: boolean, enabled: boolean): AgentProfile {
   return {
@@ -41,16 +41,9 @@ describe("selectTargetableAgentProfiles", () => {
     expect(profiles).toEqual(snapshot);
   });
 
-  it("keeps a disabled Agent on the rail when the resource is still attached", () => {
+  it("drops a Settings-disabled Agent even when a resource is still attached", () => {
     const profiles = [profile("active", true, true), profile("stale", true, false), profile("idle", true, false)];
-    const rail = selectRailAgentProfiles(profiles, new Set(["stale"]));
-    expect(rail.map(({ id }) => id)).toEqual(["active", "stale"]);
-  });
-
-  it("matches attached Skills by display name as well as id", () => {
-    const claude = profile("claude", true, false);
-    claude.display_name = "Claude Code";
-    expect(selectRailAgentProfiles([claude], new Set(["Claude Code"])).map(({ id }) => id)).toEqual(["claude"]);
+    expect(selectTargetableAgentProfiles(profiles).map(({ id }) => id)).toEqual(["active"]);
   });
 
   it("treats an empty global path as project-only", () => {

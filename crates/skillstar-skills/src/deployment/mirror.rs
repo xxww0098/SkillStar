@@ -1,17 +1,15 @@
 //! Replay an Agent's global deployments into its mirror directories.
 //!
-//! Antigravity installs as three independent states (app / CLI / IDE) under
-//! `~/.gemini`, each reading skills only from its own `builtin/skills`. One
-//! SkillStar profile serves all three: its `global_skills_dir` stays the single
-//! bookkeeping source of truth (link counts, deploy status, unlink-all) and this
-//! module reconciles every mirror against it after each deploy or unlink.
+//! Antigravity supports multiple runtime surfaces (App / CLI / IDE / Shared) under
+//! `~/.gemini`. One SkillStar profile serves all of them: its `global_skills_dir`
+//! stays the single bookkeeping source of truth (link counts, deploy status, unlink-all)
+//! and this module reconciles every mirror against it after each deploy or unlink.
 //!
 //! Reconcile rather than mirror each operation: rerunning repairs states that
-//! were installed later, or whose `builtin/` an Antigravity upgrade re-extracted.
+//! were installed later.
 //!
-//! Mirrors also hold Antigravity's own bundled skills, which are real
-//! directories. Only links are ever removed from a mirror, and an existing real
-//! directory is never replaced.
+//! Mirrors also hold external or bundled skills that are real directories.
+//! Only links are ever removed from a mirror, and an existing real directory is never replaced.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,6 +18,42 @@ use anyhow::Result;
 use tracing::warn;
 
 use skillstar_core::infra::fs_ops;
+
+/// Legacy mirror directories in system-managed `builtin/` spaces that previous
+/// versions of SkillStar incorrectly deployed to.
+const LEGACY_BUILTIN_MIRRORS: &[(&str, &[&[&str]])] = &[(
+    "antigravity",
+    &[
+        &[".gemini", "antigravity", "builtin", "skills"],
+        &[".gemini", "antigravity-cli", "builtin", "skills"],
+        &[".gemini", "antigravity-ide", "builtin", "skills"],
+    ],
+)];
+
+/// Clean up legacy symlinks left by previous versions of SkillStar in system `builtin/` dirs.
+/// Real directories (Google-bundled built-in skills) are never touched.
+fn cleanup_legacy_builtin_mirrors(agent_id: &str, home: &Path) {
+    for (id, dirs) in LEGACY_BUILTIN_MIRRORS {
+        if *id != agent_id {
+            continue;
+        }
+        for parts in *dirs {
+            let legacy_dir = parts.iter().fold(home.to_path_buf(), |p, part| p.join(part));
+            if !legacy_dir.exists() {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&legacy_dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if fs_ops::is_link(&path) {
+                    let _ = fs_ops::remove_link_or_copy(&path);
+                }
+            }
+        }
+    }
+}
 
 /// Reconcile every mirror directory of `agent_id` against `source_dir`.
 ///
@@ -31,10 +65,13 @@ pub(super) fn sync(agent_id: &str, source_dir: &Path) {
         return;
     }
 
+    let home = skillstar_core::infra::paths::home_dir();
+    cleanup_legacy_builtin_mirrors(agent_id, &home);
+
     let wanted = managed_deployments(source_dir);
     for mirror in mirrors {
-        // `builtin/` is created by Antigravity itself; its absence means that
-        // state is not installed and we must not conjure a skills dir for it.
+        // The mirror's parent must exist; its absence means that runtime
+        // surface is not installed and we must not conjure a skills dir for it.
         if !mirror.parent().is_some_and(Path::exists) || mirror == source_dir {
             continue;
         }
@@ -146,6 +183,35 @@ mod tests {
         );
         assert!(mirror.join("bundled/SKILL.md").exists());
         assert!(!mirror.join("stale").exists());
+        Ok(())
+    }
+
+    /// Legacy builtin symlinks deployed by earlier versions of SkillStar are
+    /// cleaned up without touching bundled real directories.
+    #[test]
+    fn cleans_legacy_builtin_symlinks_without_touching_real_dirs() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let legacy_dir = temp.path().join(".gemini/antigravity/builtin/skills");
+        std::fs::create_dir_all(&legacy_dir)?;
+
+        let hub = temp.path().join("hub");
+        std::fs::create_dir_all(hub.join("test-skill"))?;
+
+        // Old symlink in builtin
+        fs_ops::create_symlink_or_copy(&hub.join("test-skill"), &legacy_dir.join("test-skill"))?;
+
+        // Real bundled directory (like agy-customizations)
+        let bundled = legacy_dir.join("agy-customizations");
+        std::fs::create_dir_all(&bundled)?;
+        std::fs::write(
+            bundled.join("SKILL.md"),
+            "---\nname: agy-customizations\n---\n",
+        )?;
+
+        cleanup_legacy_builtin_mirrors("antigravity", temp.path());
+
+        assert!(!legacy_dir.join("test-skill").exists());
+        assert!(bundled.join("SKILL.md").exists());
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
 /**
  * Dev-mock sample data: skills mode — installed skills, skill groups (decks),
- * registered projects, and the inline demo tutorial document. Consumed by the
+ * registered projects. Consumed by the
  * skills fragment (../devMock/skills.ts); SAMPLE_SKILLS is also the base for
  * the marketplace fragment's MARKET_SKILLS.
  */
@@ -143,17 +143,3 @@ export const PROJECTS = [
     created_at: iso(12),
   },
 ];
-
-export const DEMO_TUTORIAL_HTML = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
-  <title>PDF Tools Tutorial</title>
-  <style>
-    :root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#172033;background:#f5f7fb}
-    body{margin:0;padding:40px}.page{max-width:900px;margin:auto}.hero,.card{background:#fff;border:1px solid #dde3ee;border-radius:20px;padding:28px;box-shadow:0 12px 32px #1f2a4412}.hero{background:#172033;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:20px}.card{padding:20px}code{background:#edf1f7;border-radius:6px;padding:2px 6px}pre{overflow:auto;background:#111827;color:#e5e7eb;border-radius:12px;padding:16px}svg{width:100%;height:auto;margin-top:18px}.muted{color:#64748b}</style>
-</head>
-<body><main class="page"><section class="hero"><p>SKILLSTAR GUIDE</p><h1>PDF Tools</h1><p>Merge, split, OCR, and fill PDF documents with a predictable workflow.</p><svg viewBox="0 0 760 120" role="img" aria-label="PDF workflow"><rect x="10" y="30" width="180" height="60" rx="14" fill="#334155"/><rect x="290" y="30" width="180" height="60" rx="14" fill="#2563eb"/><rect x="570" y="30" width="180" height="60" rx="14" fill="#0f766e"/><path d="M190 60h100M470 60h100" stroke="#93c5fd" stroke-width="6"/><text x="100" y="66" fill="white" text-anchor="middle">Choose files</text><text x="380" y="66" fill="white" text-anchor="middle">Run a command</text><text x="660" y="66" fill="white" text-anchor="middle">Verify output</text></svg></section><section class="grid"><article class="card"><h2>1. Merge</h2><p class="muted">Combine several documents while preserving bookmarks.</p><pre><code>skillstar run pdf-tools merge a.pdf b.pdf -o out.pdf</code></pre></article><article class="card"><h2>2. OCR</h2><p class="muted">Turn scans into searchable PDFs with automatic language detection.</p></article><article class="card"><h2>3. Validate</h2><p class="muted">Open the result and confirm page order, text layer, and metadata.</p></article></section><section hidden><span data-skillstar-file="SKILL.md"></span><span data-skillstar-file="scripts/merge.py"></span><span data-skillstar-file="README.md"></span></section></main></body>
-</html>`;

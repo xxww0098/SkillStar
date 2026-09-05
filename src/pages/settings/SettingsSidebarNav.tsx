@@ -1,6 +1,5 @@
 import {
   Activity,
-  Bot,
   EyeOff,
   Globe,
   HardDrive,
@@ -24,7 +23,6 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
   { id: "settings-marketplace-mirror", labelKey: "settings.marketplaceMirror", icon: Store },
   { id: "settings-network-doctor", labelKey: "settings.networkDoctor", icon: Activity },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
-  { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },
   { id: "settings-appearance", labelKey: "settings.backgroundStyle", icon: Paintbrush },
   { id: "settings-language", labelKey: "settings.language", icon: LanguagesIcon },
@@ -34,7 +32,6 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
 
 export const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
   "ai-provider": "settings-ai",
-  acp: "settings-acp",
   storage: "settings-storage",
 };
 
@@ -130,7 +127,7 @@ export function SettingsSidebarNav() {
   };
 
   return (
-    <nav className="hidden lg:flex z-20 flex-col items-center gap-1.5 py-3 px-1.5 rounded-2xl border border-border/50 bg-card/80 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.3),0_0_0_1px_rgba(255,255,255,0.04)]">
+    <nav className="hidden lg:flex z-20 flex-col items-center gap-1.5 rounded-xl border border-border bg-card px-1.5 py-3">
       {SETTINGS_SECTIONS.map((section) => {
         const isActive = activeId === section.id;
         const Icon = section.icon;

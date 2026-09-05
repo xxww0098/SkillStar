@@ -44,12 +44,8 @@ flowchart LR
 | 全局配置、日志和状态 | `~/.skillstar/{config,logs,state}/` | `skillstar-core` + 对应域 |
 | SQLite 数据库 | `~/.skillstar/db/` | marketplace 等具体模块 |
 | 已安装、创作和仓库技能 | `~/.skillstar/hub/{skills,local,repos,content}/` | `skillstar-skills` |
-| 本地 Skill 长期身份 sidecar | `~/.skillstar/hub/local/<name>/.skillstar/identity.json` | `skillstar-skills::local_identity`；`.skillstar` 被 v2 snapshot 排除，不进入内容 revision |
+| 本地 Skill 长期身份 sidecar | `~/.skillstar/hub/local/<name>/.skillstar/identity.json` | `skillstar-skills::local_identity`；`.skillstar` 被 v2 snapshot 排除，不进入内容 hash |
 | Skill 安装来源、Git tree 与完整内容 baseline | `~/.skillstar/hub/lock.json` | `skillstar-skills::lockfile` 持久化；`skillstar-skills::skill_update` 独占更新事务 |
-| Skill 图文教程 artifact | `~/.skillstar/learning/tutorials/<identity-key>/{tutorial.html,metadata.json}`；旧 `~/.skillstar/tutorials/<name-key>/` 仅只读 fallback | `skillstar-learning` 拥有校验/freshness/identity-keyed 原子持久化；`skillstar-app::learning` 解析 `Skill → ResolvedSkill`；`src-tauri::core::skill_tutorial` 只编排 ACP 会话。新写入只走 identity 路径，失败不覆盖最后一个可用 artifact |
-| Guide 文档 | 内置 seed 由 `skillstar-learning::guide::seed` 提供；可选本地文件在 `~/.skillstar/learning/guides/` | `skillstar-learning` 拥有 Block JSON 闭集与 revision key；阅读不看 `skill.installed`。P0 seed 绑定 `anthropics/skills` + `skills/frontend-design` 的精确 commit/tree/hash pin |
-| LearningProgress | `~/.skillstar/learning/progress/<guide-id>/<revision-key>.json` | `skillstar-learning`；同 Guide 的旧 revision 只作为 stale 提示，不得静默套用到当前 revision |
-| Guide Draft | `~/.skillstar/learning/drafts/` | `skillstar-learning`；只能从 bound 私人教程显式转换。失败不覆盖最后一个可用 Draft，也不替换 HTML tutorial。P0 不写发布状态或云端 ID |
 | Project 技能 manifest | `~/.skillstar/state/projects/` | `skillstar-skills`；共享项目路径只记录一个 Agent owner |
 | 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；批量 refresh、patrol 和 update 完成都写穿它，UI 与事件只是投影 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
@@ -117,21 +113,6 @@ flowchart LR
 
 - Marketplace 和已安装技能列表优先从本地快照返回；远程刷新是显式的后续动作。
 - SQLite 使用适合并发读的短连接/WAL 模式；页面不得用浏览器网络请求绕过快照层。
-
-### ACP 教程生成
-
-- Skill 教程走独立 ACP 子进程，不复用 Models provider 的 HTTP 翻译链路。会话根固定为当前 Skill 的隔离快照，模型读取递归清单后只返回自包含 HTML 文件内容；SkillStar 在本机落盘，不接受在线链接替代 artifact。
-- 持久化教程是昂贵生成结果而不是临时页面状态。artifact 绑定 `SkillIdentity` + 精确 `SkillRevision`（当前 v2 content hash），而不是安装名。可复用性的判据是当前 revision、Settings 所选教程风格、规范化界面语言、完整 prompt bundle hash 和 artifact schema 均匹配；不匹配的旧 artifact 仍可展示，但状态必须是 stale。
-- HTML 在后端完成结构、完整清单覆盖和主动内容安全校验；前端再以无脚本、无同源权限的 sandbox iframe 隔离展示。两层都不能把模型输出当作可信应用 DOM。
-- 生成事务采用“解析身份 → 快照 → ACP → 再快照 → DOM/CSP/文件覆盖校验 → 跨进程锁 → 同步落盘 → staging/backup 目录替换”。启动读取会恢复中断窗口留下的最后一个已提交 backup；ACP 失败、输出不合格或生成期间内容变化时，最后一个可用 artifact 保持不变。
-- 存储双读单写：新写入只进入 `~/.skillstar/learning/tutorials/<identity-key>/`；缺失时只读旧 `~/.skillstar/tutorials/<name-key>/`。旧目录没有来源证据，不能自动嫁接到新 identity，也不能转为 Guide Draft。
-
-### Learn 阅读与 Draft
-
-- Skills 模式默认落地 `#learn`。Guide 阅读只要求内容可用且 revision 可解析，不要求 Skill 已安装。
-- 进度文件名包含 Guide revision；加载当前 revision 时若只找到旧 revision，必须给出继续旧进度 / 重开当前 revision 的选择。
-- 实践步骤的安装预览由 `skillstar-learning` 给出精确 identity/revision；真正安装仍走既有 `install_skill`。P0 `runs_author_commands = false`。
-- HTML → Block JSON 是显式、可审计边界：私人教程保持 CSP-strict HTML，Draft 是另一份本地 artifact。未知结构 fail closed。前端只通过 typed invoke 访问这些命令。
 
 ## 前端运行模型
 

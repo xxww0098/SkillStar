@@ -3,7 +3,6 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowRightLeft,
-  BookMarked,
   BookOpen,
   Calendar,
   Download,
@@ -34,10 +33,6 @@ import { Markdown } from "../ui/Markdown";
 const SkillEditor = lazy(() => import("../shared/SkillEditor").then((mod) => ({ default: mod.SkillEditor })));
 
 const SkillReader = lazy(() => import("../shared/SkillReader").then((mod) => ({ default: mod.SkillReader })));
-
-const SkillTutorialPanel = lazy(() =>
-  import("../shared/SkillTutorialPanel").then((mod) => ({ default: mod.SkillTutorialPanel })),
-);
 
 interface DetailPanelProps {
   skill: Skill | null;
@@ -78,11 +73,10 @@ export function DetailPanel({
   const prefersReducedMotion = useReducedMotion();
   const [editing, setEditing] = useState(false);
   const [reading, setReading] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   // Close on Escape key
   useEffect(() => {
-    if (!skill || editing || reading || tutorialOpen) return;
+    if (!skill || editing || reading) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -91,7 +85,7 @@ export function DetailPanel({
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [skill, editing, reading, tutorialOpen, onClose]);
+  }, [skill, editing, reading, onClose]);
 
   // ── AI Quick Read ─────────────────────────────────────────────
   // Streaming state machine, AI readiness, cancellation and the safety
@@ -160,7 +154,6 @@ export function DetailPanel({
 
     setSkillDetails(null);
     setReading(false);
-    setTutorialOpen(false);
 
     // Fetch details for remote marketplace skills
     if (skill && skill.source) {
@@ -279,28 +272,7 @@ export function DetailPanel({
         </motion.div>
       )}
 
-      {tutorialOpen && skill?.installed && (
-        <motion.div
-          key="skill-tutorial"
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 20 }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute inset-0 z-50"
-        >
-          <Suspense
-            fallback={
-              <div className="absolute right-0 top-0 bottom-0 z-50 flex h-full w-full max-w-xl items-center justify-center overflow-hidden rounded-bl-xl rounded-tl-xl border-l border-border bg-background shadow-2xl">
-                <LoadingLogo size="md" label={t("skillTutorial.loading")} />
-              </div>
-            }
-          >
-            <SkillTutorialPanel skillName={skill.name} onClose={() => setTutorialOpen(false)} />
-          </Suspense>
-        </motion.div>
-      )}
-
-      {skill && !editing && !reading && !tutorialOpen && (
+      {skill && !editing && !reading && (
         <motion.aside
           key="skill-detail"
           initial={{ x: prefersReducedMotion ? 0 : "100%", opacity: prefersReducedMotion ? 0 : 1 }}
@@ -526,17 +498,6 @@ export function DetailPanel({
               )}
 
               {/* SKILL.md — reader uses marketplace snapshot; skip when editor is available (same AI preview there). */}
-              {skill.installed && (
-                <Button
-                  variant="outline"
-                  className="w-full border-primary/30 text-primary hover:bg-primary/10 hover:text-primary"
-                  onClick={() => setTutorialOpen(true)}
-                >
-                  <BookMarked className="mr-2 h-4 w-4" />
-                  {t("skillTutorial.open")}
-                </Button>
-              )}
-
               {skillDetails?.readme && !canEdit && (
                 <Button variant="outline" className="w-full" onClick={() => setReading(true)}>
                   <BookOpen className="w-4 h-4 mr-2" />

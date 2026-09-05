@@ -21,6 +21,11 @@ export function mcpDraftToFormValue(draft: McpServerEntry, enabled: Record<strin
   };
 }
 
+export function mcpServerCommandLine(server: Pick<McpServerEntry, "transport" | "url" | "command" | "args">): string {
+  if (server.transport === "http" || server.transport === "sse") return server.url ?? "";
+  return [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
+}
+
 export function formatSchemaTokens(tokens: number): string {
   if (tokens >= 10_000) return `~${Math.round(tokens / 1000)}k`;
   if (tokens >= 1000) return `~${(tokens / 1000).toFixed(1)}k`;

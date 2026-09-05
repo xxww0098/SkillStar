@@ -4,7 +4,6 @@ import type {
   MarketplaceMirrorConfig,
   NetworkDiagnosis,
   ProxyConfig,
-  SkillTutorialStyle,
 } from "../../../types";
 
 interface PatrolStatus {
@@ -12,13 +11,6 @@ interface PatrolStatus {
   running: boolean;
   interval_secs: number;
   last_check: string | null;
-}
-
-interface AcpConfig {
-  enabled: boolean;
-  agent_command: string;
-  agent_label: string;
-  tutorial_style: SkillTutorialStyle;
 }
 
 interface UpdateCheckResult {
@@ -32,7 +24,7 @@ interface UpdateCheckResult {
 
 /**
  * OS / shell adapter commands: file system, external open, tray language,
- * patrol, proxy, GitHub mirror, updater, ACP, and platform checks.
+ * patrol, proxy, GitHub mirror, updater, and platform checks.
  */
 export interface SystemCommands {
   // Files / shell
@@ -70,10 +62,6 @@ export interface SystemCommands {
   check_app_update: { args: Record<string, never>; result: UpdateCheckResult };
   download_and_install_update: { args: Record<string, never>; result: void };
   restart_after_update: { args: Record<string, never>; result: void };
-
-  // ACP
-  get_acp_config: { args: Record<string, never>; result: AcpConfig };
-  save_acp_config: { args: { config: AcpConfig }; result: void };
 }
 
-export type { AcpConfig, PatrolStatus, UpdateCheckResult };
+export type { PatrolStatus, UpdateCheckResult };

@@ -21,7 +21,6 @@ pub fn migrate_legacy_paths() {
     let _ = std::fs::create_dir_all(paths::hub_root());
 
     migrate_file(&root.join("ai_config.json"), &paths::ai_config_path());
-    migrate_file(&root.join("acp_config.json"), &paths::acp_config_path());
     migrate_file(&root.join("proxy.json"), &paths::proxy_config_path());
     migrate_file(&root.join("profiles.toml"), &paths::profiles_config_path());
 

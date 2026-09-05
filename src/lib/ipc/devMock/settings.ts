@@ -1,11 +1,10 @@
 /**
  * Dev-mock fragment: settings & system config — AI summarize
- * config, proxy, GitHub mirror, ACP tutorial agent, and storage overview.
- * Small data consts are colocated; the ACP config store lives in ./shared.ts
- * because the skills fragment reads it for tutorial metadata.
+ * config, proxy, GitHub mirror, and storage overview.
+ * Small data consts are colocated.
  */
 
-import { type AcpConfigState, type DevMockHandlers, getAcpConfigState, setAcpConfigState } from "./shared";
+import type { DevMockHandlers } from "./shared";
 
 export const AI_CONFIG = {
   enabled: true,
@@ -113,12 +112,6 @@ export const SETTINGS_HANDLERS: DevMockHandlers = {
     ],
     recommendations: [],
   }),
-  get_acp_config: () => ({ ...getAcpConfigState() }),
-  save_acp_config: (args) => {
-    const config = args.config as AcpConfigState;
-    setAcpConfigState(config);
-    return undefined;
-  },
   get_storage_overview: () => STORAGE_OVERVIEW,
   get_repo_cache_info: () => ({
     total_bytes: 64_200_000,

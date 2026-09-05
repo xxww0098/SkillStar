@@ -1,15 +1,14 @@
 import { Boxes, Download, PackageSearch, Plug, RefreshCw, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageToolbar } from "../../../components/layout/PageToolbar";
-import { DrawerShell } from "../../../components/shared/DrawerShell";
+import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
 import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
-import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
 import { tauriInvoke } from "../../../lib/ipc";
 import { mcpImportPasteText, type McpImportRequest } from "../../../lib/deepLink";
@@ -27,19 +26,16 @@ import { useMcpFleetProbe, useMcpProbe } from "../hooks/useMcpProbe";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
-import {
-  mcpEnabledMapFromProfiles,
-  resolveMcpToolFilter,
-  selectMcpAgentTargets,
-  selectMcpAgentTargetsForServer,
-} from "../lib/agentTargets";
-import { mcpDraftToFormValue } from "../lib/pasteDraft";
+import { mcpEnabledMapFromProfiles, resolveMcpToolFilter, selectMcpAgentTargets } from "../lib/agentTargets";
+import { mcpDraftToFormValue, mcpServerCommandLine } from "../lib/pasteDraft";
+import { type McpFleetHealthFilter, mcpFleetStatus, mcpFleetStatusMatches } from "../lib/fleetStatus";
 import { failedMcpSyncCount, mergeMcpSyncResults, summarizeMcpSyncResults } from "../lib/syncResults";
+import { McpFleetCard } from "./McpFleetCard";
 import { McpFleetStrip } from "./McpFleetStrip";
 import { McpImportBar } from "./McpImportBar";
 import { McpInstallWizard } from "./McpInstallWizard";
 import { McpProbePanel } from "./McpProbePanel";
-import { McpServerCard } from "./McpServerCard";
+import { McpRecommendedPresets } from "./McpRecommendedPresets";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
 import { McpSyncResultsPanel } from "./McpSyncResultsPanel";
 
@@ -97,10 +93,8 @@ function matchesQuery(query: string, values: Array<string | string[] | undefined
   });
 }
 
-function serverCommand(server: McpServerEntry): string {
-  if (server.transport === "http" || server.transport === "sse") return server.url ?? "";
-  return [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
-}
+const GRID_GAP_PX = 16;
+const MCP_MIN_COLUMN_WIDTH = 320;
 
 export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled }: McpManagerProps) {
   const { t } = useTranslation();
@@ -135,28 +129,72 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
   // Seed values + a nonce key so picking a preset re-mounts the create form
   // (the form only reads `defaults` on mount).
   const [createSeed, setCreateSeed] = useState<{ key: number; defaults?: Partial<McpServerFormValue> }>({ key: 0 });
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
   // Active tool filter: only show servers synced into this tool (null = all).
   const [toolFilter, setToolFilter] = useState<string | null>(null);
+  const [healthFilter, setHealthFilter] = useState<McpFleetHealthFilter>("all");
+  const [dropping, setDropping] = useState(false);
+  const [pasteSeed, setPasteSeed] = useState({ key: 0, text: "" });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const prevColCountRef = useRef(0);
   const agentTargets = useMemo(() => selectMcpAgentTargets(profiles), [profiles]);
   const activeToolFilter = resolveMcpToolFilter(toolFilter, agentTargets);
+
+  const gridColumnCount = useMemo(() => {
+    if (containerWidth === 0) return prevColCountRef.current || 1;
+
+    const safeMinWidth = Math.max(220, MCP_MIN_COLUMN_WIDTH);
+    let cols = Math.max(1, Math.floor((containerWidth + GRID_GAP_PX) / (safeMinWidth + GRID_GAP_PX)));
+    if (prevColCountRef.current > 0 && cols < prevColCountRef.current) {
+      const thresholdForPrev = prevColCountRef.current * (safeMinWidth + GRID_GAP_PX) - GRID_GAP_PX;
+      if (containerWidth >= thresholdForPrev - 8) {
+        cols = prevColCountRef.current;
+      }
+    }
+    prevColCountRef.current = cols;
+    return cols;
+  }, [containerWidth]);
 
   const filteredServers = useMemo(
     () =>
       servers.filter((server) => {
         if (activeToolFilter && !server.enabled[activeToolFilter]) return false;
+        if (!mcpFleetStatusMatches(mcpFleetStatus(probe.entryFor(server.id)), healthFilter)) return false;
         return matchesQuery(normalizedQuery, [
           server.name,
           server.description,
           server.homepage,
           server.transport,
           server.tags,
-          serverCommand(server),
+          mcpServerCommandLine(server),
         ]);
       }),
-    [servers, normalizedQuery, activeToolFilter],
+    [servers, normalizedQuery, activeToolFilter, healthFilter, probe.entryFor],
   );
+
+  useLayoutEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const updateWidth = () => setContainerWidth(element.clientWidth);
+    updateWidth();
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [filteredServers.length]);
+
+  const gridStyle = useMemo<CSSProperties>(() => {
+    if (gridColumnCount > 0) {
+      return {
+        gridTemplateColumns: `repeat(${gridColumnCount}, minmax(0, 1fr))`,
+      };
+    }
+    return {};
+  }, [gridColumnCount]);
 
   // The toolbar uses the same Settings-backed target set as every MCP card.
   const toolFilterItems = useMemo(
@@ -169,10 +207,13 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
     [agentTargets],
   );
 
+  const installedNames = useMemo(() => new Set(servers.map((server) => server.name.trim().toLowerCase())), [servers]);
+
   const editing = drawer.type === "edit" ? (servers.find((s) => s.id === drawer.id) ?? null) : null;
   const batchReport = useMemo(() => (batch ? summarizeMcpSyncResults(batch.results) : null), [batch]);
 
   const openCreate = () => {
+    setSelectedPresetId(null);
     setCreateSeed((prev) => ({ key: prev.key + 1, defaults: { enabled: mcpEnabledMapFromProfiles(profiles) } }));
     setDrawer({ type: "create" });
   };
@@ -186,6 +227,7 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
    * point still works.
    */
   const pickPreset = (preset: McpPreset) => {
+    setSelectedPresetId(preset.id);
     if (preset.catalogId) {
       setDrawer({ type: "install", catalogId: preset.catalogId });
       return;
@@ -194,9 +236,11 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
       key: prev.key + 1,
       defaults: presetToDefaults(preset, mcpEnabledMapFromProfiles(profiles)),
     }));
+    setDrawer({ type: "create" });
   };
 
   const applyPaste = (parsed: McpPasteParse) => {
+    setSelectedPresetId(null);
     if (parsed.catalogId) {
       setDrawer({ type: "install", catalogId: parsed.catalogId });
       return;
@@ -407,19 +451,27 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
 
   const actionsSlot = (
     <>
-      {onOpenMarket ? (
-        <Button type="button" variant="outline" size="sm" onClick={onOpenMarket}>
-          <PackageSearch className="h-3.5 w-3.5" />
-          {t("mcp.openMarket")}
-        </Button>
-      ) : null}
-      <Button type="button" variant="outline" size="sm" onClick={() => void handleImport()} disabled={importing}>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        onClick={() => void handleImport()}
+        disabled={importing}
+        title={t("mcp.importFromTools")}
+        aria-label={t("mcp.importFromTools")}
+      >
         <Download className="h-3.5 w-3.5" />
-        {t("mcp.importFromTools")}
       </Button>
-      <Button type="button" variant="outline" size="sm" onClick={() => void handleSyncAll()} disabled={syncing}>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        onClick={() => void handleSyncAll()}
+        disabled={syncing}
+        title={t("mcp.syncAll")}
+        aria-label={t("mcp.syncAll")}
+      >
         <RefreshCw className={syncing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
-        {t("mcp.syncAll")}
       </Button>
       <Button type="button" size="sm" onClick={openCreate}>
         <Plug className="h-3.5 w-3.5" />
@@ -431,13 +483,59 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
   const hasSearch = normalizedQuery.length > 0;
   // Any active narrowing (text search or tool filter) means an empty result is a
   // "no matches" state, not a "you have no servers yet" state.
-  const hasActiveFilter = hasSearch || activeToolFilter !== null;
+  const hasActiveFilter = hasSearch || activeToolFilter !== null || healthFilter !== "all";
   const showServers = filteredServers.length > 0;
 
+  const closeEditor = () => {
+    if (!saving) {
+      setSelectedPresetId(null);
+      setDrawer({ type: "closed" });
+    }
+  };
+
+  useEffect(() => {
+    if (drawer.type === "closed") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeEditor();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer.type, saving]);
+
+  const editorTitle =
+    drawer.type === "edit"
+      ? (editing?.name ?? t("mcp.title"))
+      : drawer.type === "install"
+        ? t("mcp.installWizardTitle")
+        : t("mcp.addServer");
+  const editorSubtitle = drawer.type === "install" ? t("mcp.installWizardSubtitle") : t("mcp.drawerSubtitle");
+
+  const applyDroppedText = (event: { preventDefault: () => void; dataTransfer: DataTransfer }) => {
+    event.preventDefault();
+    setDropping(false);
+    const text = event.dataTransfer.getData("text/plain") || event.dataTransfer.getData("text/uri-list");
+    if (text.trim()) setPasteSeed((prev) => ({ key: prev.key + 1, text }));
+  };
+
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setDropping(true);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+        setDropping(false);
+      }}
+      onDrop={applyDroppedText}
+    >
       <PageToolbar
-        title={<h1>{t("mcp.title")}</h1>}
+        title={<h1>{t("mcp.tabFleet")}</h1>}
         search={
           <SearchInput
             containerClassName="w-64"
@@ -451,6 +549,11 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
         filters={filtersSlot}
         actions={actionsSlot}
       />
+      {dropping ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/70 text-sm font-medium text-primary">
+          {t("mcp.pasteDropHint")}
+        </div>
+      ) : null}
 
       <main className="ss-page-scroll">
         <div className="ss-page-stack">
@@ -460,9 +563,18 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
             </div>
           ) : null}
 
-          <McpImportBar onParsed={(parsed) => applyPaste(parsed)} disabled={saving} />
-          <McpFleetStrip servers={filteredServers} entryFor={probe.entryFor} />
-
+          <McpImportBar
+            key={pasteSeed.key}
+            initialText={pasteSeed.text}
+            onParsed={(parsed) => applyPaste(parsed)}
+            disabled={saving}
+          />
+          <McpFleetStrip
+            servers={servers}
+            entryFor={probe.entryFor}
+            filter={healthFilter}
+            onFilterChange={setHealthFilter}
+          />
           {batch && batchReport ? (
             <section className="space-y-2">
               <div className="flex items-center gap-2 px-1">
@@ -486,11 +598,11 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
             </section>
           ) : null}
 
-          <section className="space-y-3">
+          <section className="space-y-2">
             <div className="flex items-center gap-2 px-1">
               <Boxes className="h-3.5 w-3.5 text-primary" />
               <h2 className="text-sm font-semibold text-foreground">{t("mcp.installedSection")}</h2>
-              <span className="text-xs text-muted-foreground">({filteredServers.length})</span>
+              <span className="text-xs tabular-nums text-muted-foreground">({filteredServers.length})</span>
               {updates.uncheckedCount > 0 ? (
                 <span className="text-[11px] text-muted-foreground/80">
                   {t("mcp.updatesUnchecked", { count: updates.uncheckedCount })}
@@ -503,19 +615,21 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
                 <LoadingLogo size="md" label={t("mcp.loading")} />
               </div>
             ) : showServers ? (
-              <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+              <div ref={containerRef} className="ss-cards-grid" style={gridStyle}>
                 {filteredServers.map((server) => {
                   const info = updates.byServerId.get(server.id);
                   return (
-                    <McpServerCard
-                      key={server.id}
-                      server={server}
-                      agentTargets={selectMcpAgentTargetsForServer(profiles, server.enabled)}
-                      updateVersion={info?.hasUpdate ? info.latestVersion : null}
-                      probe={probe.entryFor(server.id)}
-                      onOpen={() => setDrawer({ type: "edit", id: server.id })}
-                      onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
-                    />
+                    <div key={server.id} className="h-full">
+                      <McpFleetCard
+                        server={server}
+                        agentTargets={selectMcpAgentTargets(profiles)}
+                        updateVersion={info?.hasUpdate ? info.latestVersion : null}
+                        probe={probe.entryFor(server.id)}
+                        onOpen={() => setDrawer({ type: "edit", id: server.id })}
+                        onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
+                        onProbe={() => void probe.probe(server.id)}
+                      />
+                    </div>
                   );
                 })}
               </div>
@@ -527,6 +641,11 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
                 action={
                   hasActiveFilter ? null : (
                     <div className="flex flex-wrap justify-center gap-2">
+                      {onOpenMarket ? (
+                        <Button variant="outline" onClick={onOpenMarket}>
+                          {t("mcp.openMarket")}
+                        </Button>
+                      ) : null}
                       <Button variant="outline" onClick={() => void handleImport()}>
                         <Download className="h-4 w-4" />
                         {t("mcp.importFromTools")}
@@ -545,91 +664,88 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
         </div>
       </main>
 
-      <DrawerShell
+      <ModalShell
         open={drawer.type !== "closed"}
-        onOpenChange={(open) => {
-          if (!open) setDrawer({ type: "closed" });
-        }}
-        title={
-          <span className="flex items-center gap-2 text-foreground">
-            {drawer.type === "install" ? (
+        onClose={closeEditor}
+        ariaLabel={editorTitle}
+        dismissable={!saving}
+        panelClassName="max-w-[760px]"
+        surfaceClassName="flex max-h-[min(780px,calc(100vh-2rem))] flex-col overflow-hidden"
+        contentClassName="flex min-h-0 flex-col"
+      >
+        <ModalHeader
+          icon={
+            drawer.type === "install" ? (
               <PackageSearch className="h-4 w-4 text-primary" />
             ) : (
               <Boxes className="h-4 w-4 text-primary" />
-            )}
-            {drawer.type === "edit"
-              ? (editing?.name ?? t("mcp.title"))
-              : drawer.type === "install"
-                ? t("mcp.installWizardTitle")
-                : t("mcp.addServer")}
-          </span>
-        }
-        subtitle={drawer.type === "install" ? t("mcp.installWizardSubtitle") : t("mcp.drawerSubtitle")}
-      >
-        {drawer.type === "install" ? (
-          <McpInstallWizard
-            key={drawer.catalogId}
-            serverId={drawer.catalogId}
-            submitting={saving}
-            onSubmit={handleInstall}
-            // Back to the chips rather than closed: a mis-clicked chip should
-            // not cost the drawer.
-            onCancel={() => setDrawer({ type: "create" })}
-            noteForTool={noteForTool}
-            defaultEnabled={mcpEnabledMapFromProfiles(profiles)}
-          />
-        ) : drawer.type === "create" ? (
-          <div className="space-y-4">
-            {presets.length > 0 ? (
-              <div className="rounded-lg border border-border/60 bg-background/40 p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
-                  <PackageSearch className="h-3.5 w-3.5 text-primary" />
-                  {t("mcp.presetsTitle")}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {presets.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      title={preset.description}
-                      onClick={() => pickPreset(preset)}
-                      className={cn(
-                        "rounded-md border px-2 py-1 text-[11px] transition-colors",
-                        createSeed.defaults?.name === preset.name
-                          ? "border-primary/60 bg-primary/10 text-primary"
-                          : "border-border/70 bg-background/50 text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-                      )}
-                    >
-                      {preset.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <McpServerForm
-              key={createSeed.key}
-              defaults={createSeed.defaults}
-              onSubmit={handleSubmit}
+            )
+          }
+          title={editorTitle}
+          onClose={closeEditor}
+          closeDisabled={saving}
+          className="px-6 pt-5 pb-4"
+        />
+        {drawer.type === "install" ? <p className="shrink-0 px-6 pb-3 text-caption">{editorSubtitle}</p> : null}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
+          {drawer.type === "install" ? (
+            <McpInstallWizard
+              key={drawer.catalogId}
+              serverId={drawer.catalogId}
               submitting={saving}
+              onSubmit={handleInstall}
+              onCancel={() => {
+                setSelectedPresetId(null);
+                setDrawer({ type: "create" });
+              }}
               noteForTool={noteForTool}
+              defaultEnabled={mcpEnabledMapFromProfiles(profiles)}
+              targets={agentTargets}
             />
-          </div>
-        ) : drawer.type === "edit" && editing ? (
-          <div className="space-y-4">
-            <McpProbePanel entry={probe.entryFor(editing.id)} onProbe={() => void probe.probe(editing.id)} />
-            <McpServerForm
-              key={editing.id}
-              initial={editing}
-              onSubmit={handleSubmit}
-              onDelete={handleDelete}
-              submitting={saving}
-              noteForTool={noteForTool}
-            />
-          </div>
-        ) : drawer.type === "edit" ? (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("mcp.notFound")}</div>
-        ) : null}
-      </DrawerShell>
+          ) : drawer.type === "create" ? (
+            <div className="space-y-4">
+              <McpRecommendedPresets
+                presets={presets}
+                installedNames={installedNames}
+                selectedPresetId={selectedPresetId}
+                onPick={pickPreset}
+                onReset={() => {
+                  setSelectedPresetId(null);
+                  setCreateSeed((prev) => ({
+                    key: prev.key + 1,
+                    defaults: { enabled: mcpEnabledMapFromProfiles(profiles) },
+                  }));
+                }}
+              />
+              <McpServerForm
+                key={createSeed.key}
+                defaults={createSeed.defaults}
+                onSubmit={handleSubmit}
+                submitting={saving}
+                noteForTool={noteForTool}
+                targets={agentTargets}
+              />
+            </div>
+          ) : drawer.type === "edit" && editing ? (
+            <div className="space-y-4">
+              <McpProbePanel entry={probe.entryFor(editing.id)} onProbe={() => void probe.probe(editing.id)} />
+              <McpServerForm
+                key={editing.id}
+                initial={editing}
+                onSubmit={handleSubmit}
+                onDelete={handleDelete}
+                submitting={saving}
+                noteForTool={noteForTool}
+                targets={agentTargets}
+              />
+            </div>
+          ) : drawer.type === "edit" ? (
+            <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+              {t("mcp.notFound")}
+            </div>
+          ) : null}
+        </div>
+      </ModalShell>
     </div>
   );
 }

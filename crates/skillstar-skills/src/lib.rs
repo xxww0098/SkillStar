@@ -34,7 +34,6 @@ mod pack_layout;
 mod plugin_manifest;
 pub mod skill_mutation;
 pub mod source_resolver;
-pub mod tutorial;
 
 pub mod installed_skill;
 pub mod local_identity;
@@ -48,7 +47,6 @@ pub mod skill_install;
 #[cfg(test)]
 mod skill_install_removal_tests;
 pub mod skill_update;
-pub mod source_identity;
 pub mod update_api;
 pub mod update_checker;
 pub mod update_state;

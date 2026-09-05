@@ -58,10 +58,11 @@
 ### Ollama Cloud
 
 - 本机 `localhost:11434` 没有额度。这张卡读的是 ollama.com Cloud，密钥来自 [Settings → Keys](https://ollama.com/settings/keys)。
-- `GET https://ollama.com/api/usage`，`Authorization: Bearer <key>`。公开的 chat/generate 文档不暴露账号额度；该路径无密钥返回 401 `invalid credentials`，有密钥时社区已对过真实账号：`limits.session.usage` / `limits.weekly.usage` 是 0–1 已消耗比例。
+- `GET https://ollama.com/api/usage`，`Authorization: Bearer <key>`。公开的 chat/generate 文档不暴露账号额度；该路径无密钥返回 401 `invalid credentials`，有密钥时社区已对过真实账号：`limits.session.usage` / `limits.weekly.usage` 是 0–1 已消耗比例；`limits.session.models` / `limits.weekly.models` 是 `{ name, request_count }` 列表（请求次数，不是 token、也不是额度份额）。
+- 模型行解析进对应窗口的 `breakdown`，不写 `percent`/`total`。无法解析的模型行丢弃，不影响窗口本身。卡片把这些行画成本时段 / 本周「用过的模型」列表（色点 + 名称 + 次数），不走分类额度条。
 - API 不返回重置时间。5h 窗口按 Unix epoch 对齐的 5 小时网格本地推算；周窗口是每周一 00:00 UTC。解析失败按窗口降级，两个窗口都没有才算账号失败。
 - 401 走 `BalanceSpec.auth_error_hint`（与 MiniMax Token Plan Key 同一条路径）：卡片显示「请填 Cloud API Key」而不是通用「重新授权」——API Key 没有 reauth 流。
-- 卡片走 `DefaultUsageBody`（百分比 + 重置），不进 `bodyRegistry`。
+- 卡片走 `DefaultUsageBody`（百分比 + 重置 + 模型列表），不进 `bodyRegistry`。
 
 ## 本地工具账号切换：CLI 软链与 IDE 适配器
 
@@ -119,7 +120,7 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - 所有额度条共享 `UsageMeter` primitive（标签+已用徽章 / 大号等宽数字 / `ProgressTrack` / 脚注+重置芯片）；货币/绝对/百分比额度读作同一套语法，各渲染器只组合它，不自绘嵌套卡片。鉴权方式、CLI 能力徽标、计费周期和「即将重置」提示文案不占卡片：前三项在编辑对话框，重置紧急度由倒计时着色、卡片描边和徽章图标承担。
 - `ProgressTrack` 是剩余导向的 `progressbar`：`aria-valuenow` 为剩余百分比，轨道在剩余 25% / 10% 处打阈值刻度，紧急色只做补充。≥90% 已用的脉冲和高紧急重置图标只在 `motion-safe` 下旋转/闪动，尊重 `prefers-reduced-motion`。
 - 已用徽章必须带「已用 N%」或「剩余 N%」文案，不能只靠红/黄/灰。达到 75% 已用时附加警告图标。页脚 icon 按钮有 `aria-label`；删除/重置确认是卡内 `alertdialog`，Esc 和点遮罩取消，初始焦点在「取消」。
-- 重置倒计时归属唯一律：meter 只在 `windowRendersOwnReset(window)` 为真时渲染自身重置芯片，否则由 card MetaStrip 顶部显示；二者互补，同一 reset 绝不出现两次。倒计时图标只在 now/critical/urgent 时旋转，平常状态保持静止。
+- 重置倒计时归属唯一律：meter 只在 `windowRendersOwnReset(window)` 为真时渲染自身重置芯片，否则由 card MetaStrip 顶部显示；二者互补，同一 reset 绝不出现两次。5h/7d 限流窗口各自拥有倒计时，画在「剩余」行右侧（右对齐），不再把唯一的 primary reset 抬到 MetaStrip——否则 7d 刷新时间会被 5h 吃掉。货币/绝对/分类额度仍把账期 reset 留在 MetaStrip。倒计时图标只在 now/critical/urgent 时旋转，平常状态保持静止。
 - Cursor 的 Total/分类明细只保留卡片级主 reset，分类行不重复显示同一个 7d 倒计时；DeepSeek 的余额卡以可用余额为唯一主视觉，状态、分析提示和余额构成作为无嵌套卡片的次级分组。
 - 主卡与独立窗口共享逻辑 body，不共享 chrome。浮窗使用 dark chrome + `LightBodySurface`，compact body 的品牌 CSS vars 必须来自 `brandThemes.ts`。
 - 每个 catalog 的品牌 header、bar 和 glow 只在 `src/features/usage/lib/brandThemes.ts` 定义；卡片内不得硬编码另一套颜色。

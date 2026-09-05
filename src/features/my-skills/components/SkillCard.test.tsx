@@ -97,7 +97,7 @@ describe("SkillCard", () => {
     expect(onToggleAgent).not.toHaveBeenCalled();
   });
 
-  it("keeps a Settings-disabled linked Agent as a stopped rail icon", () => {
+  it("omits a Settings-disabled linked Agent from the rail", () => {
     const onToggleAgent = vi.fn();
     render(
       <SkillCard
@@ -107,9 +107,7 @@ describe("SkillCard", () => {
         profiles={[{ ...LIBRARY_PROFILE, enabled: false }]}
       />,
     );
-    const icon = screen.getByRole("button", { name: /Claude/i });
-    expect(icon).toBeDisabled();
-    fireEvent.click(icon);
+    expect(screen.queryByRole("button", { name: /Claude/i })).not.toBeInTheDocument();
     expect(onToggleAgent).not.toHaveBeenCalled();
   });
 

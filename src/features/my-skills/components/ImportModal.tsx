@@ -19,6 +19,7 @@ import type {
   ShareCodeSkillInput,
   SkillInstallTarget,
 } from "../../../types";
+import { deckNameFromRepoSource } from "../lib/deckNameFromRepoSource";
 import {
   CompletedPhase,
   ErrorPhase,
@@ -87,8 +88,9 @@ export interface ImportModalProps {
   preSelectedSkill?: string;
   /** Callback to trigger local file (.ags) import flow */
   onPickLocalFile?: () => void;
-  /** Callback to pack installed skills into a deck immediately */
-  onPackGroup?: (skillNames: string[]) => void;
+  /** Callback to pack installed skills into a deck immediately.
+   *  `defaultName` is the repository name after the slash (`owner/repo` → `repo`). */
+  onPackGroup?: (skillNames: string[], defaultName: string) => void;
   /** Pre-filled share code from clipboard auto-detect */
   initialShareCode?: string;
   /** Called when the share code is consumed */
@@ -469,7 +471,7 @@ export function ImportModal({
         onInstalled(installed);
 
         if (pack && onPackGroup) {
-          onPackGroup(installed);
+          onPackGroup(installed, deckNameFromRepoSource(scanResult.source));
         }
       } catch (e) {
         setErrorMsg(gitOperationErrorMessage(e, t));

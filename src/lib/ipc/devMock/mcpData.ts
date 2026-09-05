@@ -157,6 +157,18 @@ export const MCP_TOOL_STATUSES = [
 
 export const MCP_PRESETS = [
   {
+    id: "preset-cua-driver",
+    name: "cua-driver",
+    description:
+      "Cua Driver — 跨平台 Computer-Use 驱动层，支持应用控制、窗口感知、AX 元素树、屏幕截图、键鼠操作与浏览器自动化。",
+    homepage: "https://cua.ai",
+    transport: "stdio",
+    command: "cua-driver",
+    args: ["mcp"],
+    tags: ["computer-use", "automation", "desktop", "os"],
+    requiredEnv: [],
+  },
+  {
     id: "preset-fs",
     name: "filesystem",
     description: "Local filesystem access.",

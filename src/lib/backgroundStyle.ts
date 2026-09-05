@@ -1,7 +1,7 @@
 export type BackgroundStyle = "current" | "paper";
 
 const STORAGE_KEY = "skillstar:background-style";
-const DEFAULT_BACKGROUND_STYLE: BackgroundStyle = "paper";
+const DEFAULT_BACKGROUND_STYLE: BackgroundStyle = "current";
 
 function normalizeBackgroundStyle(value: string | null): BackgroundStyle {
   if (value === "current" || value === "paper") return value;

@@ -7,7 +7,6 @@ import { DevModeBanner } from "../features/settings/components/DevModeBanner";
 import { globalSkillsTargetKey } from "../features/settings/lib/agentSkillSync";
 import { GlobalSkillsTargetReadGuard } from "../features/settings/lib/globalSkillsTargetReadGuard";
 import { AboutSection } from "../features/settings/sections/AboutSection";
-import { AcpSection } from "../features/settings/sections/AcpSection";
 import { AgentConnectionsSection } from "../features/settings/sections/AgentConnectionsSection";
 import { AppearanceSection } from "../features/settings/sections/AppearanceSection";
 import {
@@ -229,7 +228,7 @@ export function Settings({
     const applyStoredFocus = () => {
       try {
         const focus = localStorage.getItem("skillstar:settings-focus");
-        if (focus === "ai-provider" || focus === "acp" || focus === "storage") {
+        if (focus === "ai-provider" || focus === "storage") {
           localStorage.removeItem("skillstar:settings-focus");
           focusSettingsSection(focus);
         }
@@ -240,7 +239,7 @@ export function Settings({
 
     const handleFocusEvent = (event: Event) => {
       const target = (event as CustomEvent<{ target?: SettingsFocusTarget }>).detail?.target;
-      if (target === "ai-provider" || target === "acp" || target === "storage") {
+      if (target === "ai-provider" || target === "storage") {
         focusSettingsSection(target);
       }
     };
@@ -760,7 +759,7 @@ export function Settings({
   const handleForceDeleteCache = useCallback(() => handleForceDelete("cache"), [handleForceDelete]);
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-background">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div
         data-tauri-drag-region
         className="h-14 flex items-center px-6 border-b border-border/70 bg-sidebar z-10 shrink-0"
@@ -861,10 +860,6 @@ export function Settings({
                   onConfigChange={handleAiConfigChange}
                   onTestConnection={handleAiTestConnection}
                 />
-              </section>
-
-              <section id="settings-acp" className="scroll-mt-3">
-                <AcpSection />
               </section>
 
               <section id="settings-background" className="scroll-mt-3">

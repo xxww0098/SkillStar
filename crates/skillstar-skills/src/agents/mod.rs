@@ -30,8 +30,8 @@ pub fn list_profiles() -> Vec<AgentProfile> {
 /// profile's `global_skills_dir`.
 ///
 /// Empty for every Agent with a single skills directory. Antigravity is the
-/// exception: one profile, three installed states, each reading its own
-/// `builtin/skills` (see `builtin::GLOBAL_MIRROR_DEFS`).
+/// exception: one profile fanning out to App, CLI, and shared skills directories
+/// (see `builtin::GLOBAL_MIRROR_DEFS`).
 pub fn global_mirror_dirs(agent_id: &str) -> Vec<std::path::PathBuf> {
     builtin::mirror_dirs(
         registry::compatible_profile_id(agent_id),

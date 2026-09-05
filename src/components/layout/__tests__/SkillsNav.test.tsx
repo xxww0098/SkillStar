@@ -6,7 +6,6 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => {
       const translations: Record<string, string> = {
-        "sidebar.learn": "Learn",
         "sidebar.skills": "My Skills",
         "sidebar.market": "Marketplace",
         "sidebar.groups": "Groups",
@@ -41,7 +40,6 @@ describe("SkillsNav", () => {
   it("renders all navigation items", () => {
     render(<SkillsNav {...defaultProps} />);
 
-    expect(screen.getByText("Learn")).toBeInTheDocument();
     expect(screen.getByText("My Skills")).toBeInTheDocument();
     expect(screen.getByText("Marketplace")).toBeInTheDocument();
     expect(screen.getByText("Groups")).toBeInTheDocument();
@@ -53,8 +51,8 @@ describe("SkillsNav", () => {
     const onNavigate = vi.fn();
     render(<SkillsNav {...defaultProps} onNavigate={onNavigate} />);
 
-    fireEvent.click(screen.getByText("Learn"));
-    expect(onNavigate).toHaveBeenCalledWith("learn");
+    fireEvent.click(screen.getByText("My Skills"));
+    expect(onNavigate).toHaveBeenCalledWith("my-skills");
 
     fireEvent.click(screen.getByText("Marketplace"));
     expect(onNavigate).toHaveBeenCalledWith("marketplace");

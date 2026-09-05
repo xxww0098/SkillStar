@@ -145,7 +145,11 @@ export function authModeLabel(mode: AuthMode, t: TFunction): string {
 // an unknown value arrives as an *absent key*, i.e. `undefined`, never `null`.
 // (The old hand-written `number | null` was the drift `src/types/generated` now
 // prevents — see `crates/skillstar-usage/src/subscription.rs`.)
-export function isMonetaryQuota(window: { label?: string; total?: number | null; breakdown?: unknown[] }): boolean {
+export function isMonetaryQuota(window: {
+  label?: string;
+  total?: number | null;
+  breakdown?: unknown[] | null;
+}): boolean {
   // Grok legacy monthly bar is USD cents when total is set. Weekly is percent-only (never monetary).
   if (window.label === "Monthly credits") {
     return window.total != null && window.total > 0;
@@ -157,13 +161,22 @@ export function isMonetaryQuota(window: { label?: string; total?: number | null;
   return window.total != null && window.total > 100 && (window.breakdown?.length ?? 0) > 0;
 }
 
+/** Per-model request counts (Ollama Cloud `limits.*.models`), not quota shares. */
+export function isRequestCountBreakdown(window: {
+  breakdown?: Array<{ percent?: number | null; total?: number | null }> | null;
+}): boolean {
+  const rows = window.breakdown ?? [];
+  if (rows.length === 0) return false;
+  return rows.every((row) => row.percent == null && (row.total == null || row.total <= 0));
+}
+
 /** Parent window with per-model/category percent breakdown (Antigravity, Copilot, etc.). */
 export function isBreakdownQuotaWindow(window: {
   label?: string;
   total?: number | null;
-  breakdown?: unknown[];
+  breakdown?: Array<{ percent?: number | null; total?: number | null }> | null;
 }): boolean {
-  return (window.breakdown?.length ?? 0) > 0 && !isMonetaryQuota(window);
+  return (window.breakdown?.length ?? 0) > 0 && !isMonetaryQuota(window) && !isRequestCountBreakdown(window);
 }
 
 /** Token/credit style window with absolute used + total (not rate-limit % only). */

@@ -88,7 +88,7 @@
 ## D-010：Skill 教程使用 ACP 全目录快照与版本化 HTML artifact
 
 - 日期：2026-07-14
-- 状态：accepted
+- 状态：superseded（被 [D-053](#d-053移除学习功能与-skillstar-learning) 取代）
 - 背景：只翻译 `SKILL.md` 无法解释 scripts、references、assets 等完整 Skill 行为，provider 翻译缓存也不能表达“教程是否仍对应当前目录版本”。模型输出 HTML 又不能直接进入应用 DOM。
 - 决策：移除 SKILL.md 翻译功能。教程生成以 `skillstar-skills::content` 的完整递归快照和确定性内容 hash 为输入，通过用户显式配置的 ACP Agent 分析；后端只接受自包含、无脚本、覆盖全部文件清单的 HTML，并与 hash、教程风格、完整 prompt bundle hash/schema 版本 metadata 一起原子持久化。风格来自 Settings 中的受控注册表，每种风格使用独立 prompt 片段；前端用 sandbox iframe 展示。
 - 后果：教程能覆盖整个 Skill 并跨重启复用；任何内容、规范化界面语言、所选风格或生成契约变化都会产生 stale 提醒，刷新失败仍保留旧版。生成成本和时延高于翻译，编辑器必须先保存，ACP 未启用时不能生成新教程。`AiConfig` 不再保存 `target_language` / `short_text_priority`；Skill 摘要与教程一样只消费当前界面语言，旧 `ai.json` 里的这两个字段读入时忽略、下次保存时丢弃。
@@ -463,7 +463,7 @@
 ## D-051：来源复合身份、精确内容修订与 skillstar-learning
 
 - 日期：2026-09-01
-- 状态：accepted
+- 状态：superseded（被 [D-053](#d-053移除学习功能与-skillstar-learning) 取代）
 - 背景：私人教程按 `skill.name` 分桶，同名不同仓库会串学习记录；`skillstar-skills::tutorial` 把 HTML 安全、freshness 和 ACP 生成输入混在安装域里。P0 Learn 需要精确 revision 绑定，但不能一次拆完 `skillstar-core::Skill` 或新增一簇浅 crate。
 - 决策：唯一新增 crate 是 `skillstar-learning`。身份是来源复合值（Git canonical repository + ref + content root / 本地 UUID sidecar / 频道 numeric repository ID + content root），教程与 Guide 绑定当前 v2 content hash 的 `SkillRevision`，`name` 只作安装表查找句柄。learning 只依赖 `skillstar-core`；`skillstar-app::learning` 按 channel > local > Git 投影 `ResolvedSkill`。私人教程双读单写：新写入 identity 路径，旧 name 路径只读且不能自动绑定。迁移按 [issue #49](https://github.com/xxww0098/SkillStar/issues/49) 冻结序列逐步接线，任一步可独立回退。不拆 `skillstar-tutorial` / `skillstar-guide` / `skillstar-identity`，三者共同构成 learning 的 deletion test。
 - 后果：获得——同名 Skill 的学习记录可区分，本地编辑只使教程 stale 而不改 identity，失败保留最后一个可用 artifact。承担——旧 name-keyed artifact 在重新生成前保持 unbound；P0 不升级 lockfile schema，频道离线时可选 release 标签允许缺省。
@@ -478,7 +478,16 @@
 - 后果：获得——粘贴/深链与市场安装共用同一条确认边界，机群能看到真实的 schema 体积和需要重新授权的 server。承担——超过 8 个已装 server 不会在后台全部探测；token 数字是字节估算不是模型 tokenizer；catalog 深链仍依赖本地快照里真有那一行。
 - 证据：`docs/features/mcp/README.md`、`crates/skillstar-models/src/mcp/import_paste.rs`、`crates/skillstar-models/src/mcp/probe/`、`src/pages/Mcp.tsx`、`src/lib/deepLink.ts`、issue [#79](https://github.com/xxww0098/SkillStar/issues/79)。
 
-## D-053：桌面多开是 SkillStar 原生实例，不绑 Usage catalog
+## D-053：移除学习功能与 skillstar-learning
+
+- 日期：2026-09-02
+- 状态：accepted
+- 背景：Learn 页、私人教程、Guide/进度/Draft 与 ACP 教程生成构成独立产品域，但不再作为 SkillStar 交付面。继续保留 `skillstar-learning`、ACP 子进程和默认 `#learn` 会让安装/分发主路径背负无消费者的 crate、IPC 与 Settings。
+- 决策：整枝删除学习功能。去掉 `skillstar-learning` crate、`skillstar-app::learning`、Learn 页/导航、私人教程面板、Guide/进度/Draft 命令、ACP 教程生成（含 Settings ACP 段与 `src-tauri` ACP client/prompts），以及仅为该域服务的 `skillstar-skills::tutorial` / `source_identity`。Skills 模式默认落地 `#skills`（`my-skills`）；旧 `#learn` hash 回落到同一页。`skillstar-skills::content` 快照与 `local_identity` sidecar 仍服务安装/更新，不随学习域删除。`~/.skillstar/learning/`、`~/.skillstar/tutorials/` 与 `config/acp.json` 成为孤儿，不再读写，也不做迁移删除。
+- 后果：获得——workspace 少一个域 crate，GUI 不再暴露教程/Guide，ACP 依赖退出二进制。承担——已生成的本地教程/进度不会被应用清理；若将来恢复学习域，以 D-051 的 identity 模型为历史参考，而不是复活本次删除的代码路径。
+- 证据：`docs/boundaries.md`、`docs/architecture.md`、`docs/features/frontend/README.md`、本决策对应提交。
+
+## D-054：桌面多开是 SkillStar 原生实例，不绑 Usage catalog
 
 - 日期：2026-09-03
 - 状态：accepted

@@ -7,7 +7,7 @@ import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { cn } from "../../../lib/utils";
-import { selectRailAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
+import { supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import type { AgentProfile, Skill, SkillCardDeck, ViewMode } from "../../../types";
 
 interface DeckCardProps {
@@ -19,7 +19,7 @@ interface DeckCardProps {
   groupInstalledSkillNames: string[];
   /** Installed-skill lookup (normalized name → skill), from the hub skills list. */
   skillByName: Map<string, Skill>;
-  /** Agent profiles shown in the footer's link-toggle row (Settings-on plus still-claimed). */
+  /** Agent profiles shown in the footer's link-toggle row (Settings-enabled only). */
   enabledProfiles: AgentProfile[];
   /** Batch-toggle state: `${groupId}::${agentId}` → "linking". */
   linkState: Record<string, "linking">;
@@ -74,7 +74,7 @@ export function DeckCard({
   // happen to have: a new deck starts dark even though installing a Skill
   // already deploys it to every enabled Agent.
   const deckAgentLinks = new Set(group.agent_links ?? []);
-  const railProfiles = selectRailAgentProfiles(enabledProfiles.filter(supportsGlobalDeploy), deckAgentLinks);
+  const railProfiles = enabledProfiles.filter(supportsGlobalDeploy);
 
   return (
     <motion.div
@@ -90,7 +90,7 @@ export function DeckCard({
     >
       <CardTemplate
         className={cn(
-          "hover:bg-card-hover flex relative group shadow-sm hover:shadow-[0_12px_32px_-8px_var(--color-shadow)] transition-all duration-200 p-0 border border-border/80 bg-card/70 hover:border-primary/50 hover:-translate-y-0.5",
+          "hover:bg-card-hover relative flex group p-0 transition-all duration-200 hover:border-primary/40 hover:-translate-y-px hover:shadow-[0_8px_24px_-12px_var(--color-shadow)]",
           viewMode === "list" ? "flex-row items-center min-h-[96px]" : "flex-col h-full",
         )}
       >

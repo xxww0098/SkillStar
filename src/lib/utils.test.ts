@@ -9,7 +9,6 @@ import {
   formatPlatformPath,
   inferUserHomeRoot,
   navigateToAiSettings,
-  navigateToAcpSettings,
   navigateToSettingsSection,
   resolveSkillstarDataPath,
 } from "./utils";
@@ -200,20 +199,6 @@ describe("settings navigation helpers", () => {
     expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({
       target: "ai-provider",
     });
-
-    window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
-  });
-
-  it("should navigate tutorial configuration to the ACP section", () => {
-    const handleFocus = vi.fn();
-
-    window.addEventListener("skillstar:settings-focus", handleFocus as EventListener);
-
-    navigateToAcpSettings();
-
-    expect(localStorage.getItem("skillstar:settings-focus")).toBe("acp");
-    expect(handleFocus).toHaveBeenCalledTimes(1);
-    expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({ target: "acp" });
 
     window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
   });

@@ -35,7 +35,6 @@ aes-gcm = { workspace = true }
 machine-uid = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "rt-multi-thread"] }
 base64.workspace = true
-scraper = { workspace = true }
 skillstar-git = { path = "../skillstar-git" }
 reqwest = { workspace = true, features = ["form"] }
 

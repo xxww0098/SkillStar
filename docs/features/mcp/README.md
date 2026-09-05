@@ -179,22 +179,22 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 MCP 页面是该域的唯一入口，但不再把四个表面画成同等权重的 tab。主分段是 **机群（Fleet）** 与 **目录（Catalog）**；**工具** 与 **目录源** 是次级，因为它们回答的是「投影写到了哪」和「目录从哪来」，不是每天的安装/运行工作台。这是吸收 Hermes Agent v0.21 指挥中心的产品形状，同时守住 SkillStar 自己的约束（见 [D-052](../../decisions.md#d-052mcp-指挥中心是-skillstar-原生形态只吸收-hermes-021-的平台能力)）：
 
 - catalog 是两万量级，**禁止**把已装列表和全量目录堆在同一条滚动里。浏览目录仍然走分页查询，不得拉全量进渲染进程。
-- 机群页顶部是「粘贴即解析」条：用户可以丢进社区 `mcpServers` JSON、Streamable HTTP URL、`npx`/`uvx`/`docker` 命令行，或 `skillstar://mcp` 深链。解析在 `skillstar_models::mcp::parse_pasted_mcp`，命令适配器只是把它露出来。**解析结果不是安装。** 目录命中打开现有 `McpInstallWizard`；其余命中预填现有新建表单。两条路都要用户确认后才写 store。
-- 机群在指挥中心**首次挂载**时对已装列表做一次顺序健康探测，上限 8，不在 window focus / 缓存过期时重跑。超过上限的 server 仍可在编辑抽屉里按需探测。`401 + WWW-Authenticate` 继续是 `authorization-required`，机群条把它显示成「需要登录」而不是红叉。
+- 机群页顶部是紧凑的「粘贴即解析」条（也可把文本拖进页面）：用户可以丢进社区 `mcpServers` JSON、Streamable HTTP URL、`npx`/`uvx`/`docker` 命令行，或 `skillstar://mcp` 深链。解析在 `skillstar_models::mcp::parse_pasted_mcp`，命令适配器只是把它露出来。条会先预览推断出的名字和命令/URL，**解析结果不是安装。** 目录命中打开现有 `McpInstallWizard`；其余命中预填现有新建表单。两条路都要用户确认后才写 store。
+- 机群在指挥中心**首次挂载**时对已装列表做一次顺序健康探测，上限 8，不在 window focus / 缓存过期时重跑。超过上限的 server 仍可在编辑悬浮窗里按需探测。`401 + WWW-Authenticate` 继续是 `authorization-required`，机群条把它显示成可点的「需要登录」筛选芯片而不是红叉；健康 / 需登录 / 异常芯片会过滤列表。
 - `skillstar://mcp?url=` / `?catalog=` / `?config=` / `?command=` 会唤醒应用并打开对应的确认 UI。深链不得绕过安装确认。后端本来就把 `query` 放进 `skillstar://deep-link` 事件；前端必须读它，而不能只按 host 跳到 MCP 页。
 - 「从工具导入」仍然是读各 Agent 活配置的那条路（`import_from_tool`），与粘贴解析互补：前者有磁盘上的权威文件，后者接受用户随手丢来的片段。
 
 ## 前端职责
 
-- preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。这整段编排（初始化快照 → 列 curated → 过滤 recommended → 映射 → 合并去重）在 `skillstar_app::mcp::presets`，命令层只是适配器；快照 runtime 的装配（db 路径、data root、已装技能 loader）仍属宿主胶水（GUI 在 `src-tauri/src/core/marketplace_snapshot`，CLI 在 `skillstar_app::cli`）。
+- preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。机群和目录工具栏的推荐悬浮框复用同一批 preset，已安装的按 name 隐藏。这整段编排（初始化快照 → 列 curated → 过滤 recommended → 映射 → 合并去重）在 `skillstar_app::mcp::presets`，命令层只是适配器；快照 runtime 的装配（db 路径、data root、已装技能 loader）仍属宿主胶水（GUI 在 `src-tauri/src/core/marketplace_snapshot`，CLI 在 `skillstar_app::cli`）。
 - preset 芯片有两条安装路径，按 `McpPreset.catalogId` 这个显式标记分流，不靠「先试着解析目录行、解析不到再回退」：带 `catalogId` 的 curated 芯片打开安装向导（`McpInstallWizard`，与市场 tab 同一个入口，因而同样有运行时形态选择、密钥掩码密码框、必填标注和完整命令确认）；不带的内置 preset 没有目录行，继续预填新建表单。curated preset 的 id 本来就是目录行 id，所以芯片可以直接把它交给向导。
-- MCP 页面是 MCP 域的唯一入口。主分段是 **机群（Fleet）** 与 **目录（Catalog）**，次级是 **工具** 与 **目录源**；四者仍共用同一批 hook。机群页（`McpManager`）承载已装卡片、粘贴解析条、机群健康条和新建/安装抽屉；目录页仍是 `McpMarketPage` 的全目录分页浏览。市场、工具、目录源三项此前完全没有 UI。
+- MCP 页面是 MCP 域的唯一入口。主分段是 **机群（Fleet）** 与 **目录（Catalog）**，次级是 **工具** 与 **目录源**；四者仍共用同一批 hook。机群页（`McpManager`）承载已装列表、粘贴解析条、机群健康条和新建/安装/编辑居中悬浮窗；目录页仍是 `McpMarketPage` 的全目录分页浏览。市场、工具、目录源三项此前完全没有 UI。
 - Marketplace MCP tab 保留 Publisher grid 入口；`McpPublisherDetail` 现在只是一层 hero，主体复用同一个 `McpMarketPage`，只是带上 `publisherId`。发布者页不再自己拉全量再内存过滤。
-- Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。Settings 关掉但这条 server 仍写入的 target 留在轮播里，SVG 进停用态（灰度、不可点），让启停可被卡片感知；工具栏筛选仍只列当前启用的 profile。新建/安装表单的默认勾选跟随当前启用 profile，完整 `MCP_TOOL_IDS` 仍可手选。
+- Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。Settings 关掉但这条 server 仍写入的 target 留在轮播里，SVG 进停用态（灰度、不可点），让启停可被卡片感知；工具栏筛选仍只列当前启用的 profile。新建/安装/编辑表单的启用工具列表与默认勾选都跟随当前 Settings 已启用的 Agent（`selectMcpAgentTargets`）：启用几个就渲染几个。没有 Agent profile 的 target（如 `claude-desktop-chat`）不进这张表，仍可在工具视图里看到。
 - 商店浏览必须走分页查询命令并展示 `total`；不得再拉全量后在内存里过滤。筛选、排序、分页全部编译进一次 `query_mcp_market_servers_local`，渲染进程不做二次过滤。
 - 弃用条目默认不出现在浏览结果里（前端默认 `statuses: ["active"]`），需要显式打开开关才列出，且始终带弃用标记。后端默认「列出但警告」不变——这是 UI 的取舍，不是契约变化。
-- 市场卡片展示名称、描述、安装/更新动作、弃用/被取代例外和 stars；kind 用图标表达，推荐用标题旁的标记。runtime、版本、仓库和详情留在抽屉与安装向导，不在卡片页脚重复。
-- 已安装卡片用运输图标区分 stdio / http，不重复运输文字徽标；描述与命令行/URL 相同时不画第二行。YOLO 与待更新仍作为例外保留。
+- 市场卡片展示名称、描述、安装/更新动作、弃用/被取代例外和 stars；kind 用图标表达，推荐用标题旁的标记。runtime、版本、仓库和详情留在详情抽屉与安装向导，不在卡片页脚重复。安装向导是居中悬浮窗。
+- 机群采用与技能卡一致的卡片网格形态（`McpFleetCard` + `ss-cards-grid`）：每张卡片包含身份与传输图标、健康状态点与状态说明、描述或命令预览，右上角独立探测操作，底部页脚包含能力/成本（健康、工具数、schema token）与负责多目标投影的 Agent rail。YOLO 与待更新作为例外保留。目录浏览继续用卡片。
 - 三态标记（已安装 / 有更新 / 已弃用）以来源指纹判定：`McpServerEntry.registryName` 对 `McpMarketEntry.namespace`。按 `name` 的字符串比对只作为老条目（无指纹）的兜底，且**永远不判定"有更新"**——那份版本号不一定来自这一行。
 - 安装向导必须展示完整命令预览与运行时候选；secret 字段必须掩码，且不得回显进日志。用户填写的参数会改变命令行，因此确认步骤显示的是 `mcp_market_install_preview` 按最终值渲染出的那一条——前端不持有任何参数拼装、模板替换或命令行渲染逻辑，只做掩码与即时的必填/格式/可选值校验（纯函数，即时反馈不该走一趟 IPC；后端的校验才是权威）。预览按 300ms 去抖调用，在途期间提交按钮禁用，避免批准一条过期的命令。向导提交的是答案 + 已确认的那条字符串，不是自己拼出来的 entry；提交时传的运行时形态是安装计划**选定**的那个（`selectedRuntimeId`），不是选择器的临时状态——`null` 会让后端回落到排序推荐，可能是另一种形态。本地（stdio）安装必须勾选确认框才能提交；远端形态零本地执行，不要求这次勾选。字段级校验**不禁用提交按钮**：禁用只会说「不行」而不说哪一项不行。带着错误提交会就地标出出错的字段并且什么都不发出去。
 - 同步结果必须逐 target 展示成功/跳过/失败/已回滚/回滚失败，并给出错误原文、配置路径与备份路径；失败项可单条重试（`set_mcp_tool_enabled`）或整条重投（`sync_mcp_server`，`force`）。批次一致性（applied / rolledBack / drifted）由前端按同一语义从结果数组重算。

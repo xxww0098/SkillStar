@@ -15,7 +15,6 @@ import { deepLinkNavTarget, mcpImportQuery } from "./lib/deepLink";
 import { looksLikeShareCode } from "./lib/shareCode";
 import type { McpPublisherSummary, NavPage, OfficialPublisher } from "./types";
 
-const LearnPage = lazy(() => import("./pages/Learn").then((mod) => ({ default: mod.Learn })));
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
 const PublisherDetailPage = lazy(() =>
@@ -43,13 +42,18 @@ function PageFallback() {
   );
 }
 
-/** Match `Sidebar` fixed inset (`left-2` = 8px) + aside width (`w-[180px]` / `w-14`). */
-const MAIN_CONTENT_PAD_EXPANDED_PX = 8 + 180;
+/** Canvas gutter around both panels (`top-2` / `left-2` / `p-2` = 8px). */
+const SHELL_GAP_PX = 8;
+/** Match `Sidebar` expanded width (`w-[180px]`). */
+const SIDEBAR_EXPANDED_PX = 180;
 /** `w-14` is 3.5rem; default 16px root → 56px. */
-const MAIN_CONTENT_PAD_COLLAPSED_PX = 8 + 56;
+const SIDEBAR_COLLAPSED_PX = 56;
+/** left gutter + rail + gap before the workspace. */
+const MAIN_CONTENT_PAD_EXPANDED_PX = SHELL_GAP_PX + SIDEBAR_EXPANDED_PX + SHELL_GAP_PX;
+const MAIN_CONTENT_PAD_COLLAPSED_PX = SHELL_GAP_PX + SIDEBAR_COLLAPSED_PX + SHELL_GAP_PX;
 
 /** Skills-mode list pages whose search/scroll should survive a sidebar hop. */
-const SKILLS_KEEP_PAGES = ["learn", "my-skills", "marketplace", "mcp", "skill-cards", "projects", "settings"] as const;
+const SKILLS_KEEP_PAGES = ["my-skills", "marketplace", "mcp", "skill-cards", "projects", "settings"] as const;
 
 function UsageModeShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
@@ -227,8 +231,6 @@ function AppContent() {
     }
 
     switch (id) {
-      case "learn":
-        return <LearnPage />;
       case "my-skills":
         return (
           <MySkillsPage
@@ -264,16 +266,7 @@ function AppContent() {
           />
         );
       case "mcp":
-        return (
-          <McpPage
-            onOpenMarket={() => {
-              nav.setMarketplaceTab("mcp-official");
-              nav.navigate("marketplace");
-            }}
-            importRequest={nav.mcpImportRequest}
-            onImportRequestHandled={nav.clearMcpImportRequest}
-          />
-        );
+        return <McpPage importRequest={nav.mcpImportRequest} onImportRequestHandled={nav.clearMcpImportRequest} />;
       case "settings":
         return <SettingsPage onCheckUpdate={updater.check} isCheckingUpdate={updater.state.status === "checking"} />;
       default:
@@ -315,7 +308,7 @@ function AppContent() {
 
   return (
     <UsageModeShell>
-      <div className="relative h-screen w-screen overflow-hidden bg-background border border-border/50">
+      <div className="relative h-screen w-screen overflow-hidden bg-background">
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:text-sm"
@@ -338,7 +331,11 @@ function AppContent() {
           onDismiss={updater.dismiss}
           onRetry={updater.retry}
         />
-        <div id="main-content" className="h-full w-full flex flex-col overflow-hidden pt-0" style={mainContentStyle}>
+        <div
+          id="main-content"
+          className="flex h-full w-full flex-col overflow-hidden pt-2 pr-2 pb-2"
+          style={mainContentStyle}
+        >
           <div className="ss-main-chrome">
             {/* Keyed on appMode only: skills-mode list pages stay mounted via
                 KeepAliveOutlet, so a sidebar hop must not remount this shell

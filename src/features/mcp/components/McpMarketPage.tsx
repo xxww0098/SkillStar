@@ -1,7 +1,7 @@
 import { Boxes, ChevronLeft, ChevronRight, PackageSearch, SlidersHorizontal } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DrawerShell } from "../../../components/shared/DrawerShell";
+import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
@@ -10,15 +10,17 @@ import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
 import type { McpInstallOutcome, ViewMode } from "../../../types";
 import { useMcpMarketPage } from "../hooks/useMcpMarketPage";
+import { useMcpPresets } from "../hooks/useMcpPresets";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpSources } from "../hooks/useMcpSources";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
-import { mcpEnabledMapFromProfiles } from "../lib/agentTargets";
+import { mcpEnabledMapFromProfiles, selectMcpAgentTargets } from "../lib/agentTargets";
 import { buildInstalledIndex } from "../lib/installState";
 import { hasActiveMcpNarrowing } from "../lib/marketQuery";
 import { failedMcpSyncCount } from "../lib/syncResults";
 import { McpCatalogHealthBanner } from "./McpCatalogHealthBanner";
+import { McpRecommendedStrip } from "./McpRecommendedStrip";
 import { McpInstallWizard } from "./McpInstallWizard";
 import { McpMarketBrowser } from "./McpMarketBrowser";
 import { McpMarketFilters } from "./McpMarketFilters";
@@ -50,11 +52,15 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
 
   const market = useMcpMarketPage({ publisherId });
   const { servers, installFromMarket } = useMcpServers();
+  const { presets } = useMcpPresets();
   const { profiles } = useAgentProfiles();
   const { health } = useMcpSources();
   const { noteForTool } = useMcpToolStatuses();
 
   const installedIndex = useMemo(() => buildInstalledIndex(servers), [servers]);
+  const agentTargets = useMemo(() => selectMcpAgentTargets(profiles), [profiles]);
+  const installedNames = useMemo(() => new Set(servers.map((server) => server.name.trim().toLowerCase())), [servers]);
+  const catalogPresets = useMemo(() => presets.filter((preset) => preset.catalogId), [presets]);
 
   /**
    * A refused install is not an error: the wizard keeps the drawer open and
@@ -83,6 +89,19 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
   const { window: pageWindow } = market;
   const narrowed = hasActiveMcpNarrowing(market.filters);
 
+  const closeInstall = () => {
+    if (!saving) setInstallId(null);
+  };
+
+  useEffect(() => {
+    if (installId == null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeInstall();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [installId, saving]);
+
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>
       <div className="flex items-center gap-2 border-b border-border/60 px-6 py-2.5">
@@ -104,6 +123,15 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
           <SlidersHorizontal className="h-3.5 w-3.5" />
           {t("mcp.filtersTitle")}
         </Button>
+        {publisherId ? null : (
+          <McpRecommendedStrip
+            presets={catalogPresets}
+            installedNames={installedNames}
+            onPick={(preset) => {
+              if (preset.catalogId) setInstallId(preset.catalogId);
+            }}
+          />
+        )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {pageWindow.total > 0
             ? t("mcp.showingRange", { from: pageWindow.from, to: pageWindow.to, total: pageWindow.total })
@@ -191,31 +219,39 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
         </div>
       </main>
 
-      <DrawerShell
+      <ModalShell
         open={installId != null}
-        onOpenChange={(open) => {
-          if (!open) setInstallId(null);
-        }}
-        title={
-          <span className="flex items-center gap-2 text-foreground">
-            <PackageSearch className="h-4 w-4 text-primary" />
-            {t("mcp.installWizardTitle")}
-          </span>
-        }
-        subtitle={t("mcp.installWizardSubtitle")}
+        onClose={closeInstall}
+        ariaLabel={t("mcp.installWizardTitle")}
+        dismissable={!saving}
+        panelClassName="max-w-[760px]"
+        surfaceClassName="flex max-h-[min(780px,calc(100vh-2rem))] flex-col overflow-hidden"
+        contentClassName="flex min-h-0 flex-col"
       >
-        {installId ? (
-          <McpInstallWizard
-            key={installId}
-            serverId={installId}
-            submitting={saving}
-            onSubmit={handleInstall}
-            onCancel={() => setInstallId(null)}
-            noteForTool={noteForTool}
-            defaultEnabled={mcpEnabledMapFromProfiles(profiles)}
-          />
-        ) : null}
-      </DrawerShell>
+        <ModalHeader
+          icon={<PackageSearch className="h-4 w-4 text-primary" />}
+          title={t("mcp.installWizardTitle")}
+          onClose={closeInstall}
+          closeDisabled={saving}
+        />
+        <p className="shrink-0 px-6 pb-2 text-[11px] leading-relaxed text-muted-foreground">
+          {t("mcp.installWizardSubtitle")}
+        </p>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
+          {installId ? (
+            <McpInstallWizard
+              key={installId}
+              serverId={installId}
+              submitting={saving}
+              onSubmit={handleInstall}
+              onCancel={closeInstall}
+              noteForTool={noteForTool}
+              defaultEnabled={mcpEnabledMapFromProfiles(profiles)}
+              targets={agentTargets}
+            />
+          ) : null}
+        </div>
+      </ModalShell>
     </div>
   );
 }

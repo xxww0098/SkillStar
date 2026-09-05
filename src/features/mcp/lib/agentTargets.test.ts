@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { MCP_TOOL_IDS, isMcpToolId, type AgentProfile } from "../../../types";
 import {
+  mcpIconAgentIdForTool,
   mcpToolIdsWithoutAgentProfile,
   resolveMcpToolFilter,
   selectMcpAgentTargets,
-  selectMcpAgentTargetsForServer,
 } from "./agentTargets";
 
 function profile(id: string, installed = true, enabled = true): AgentProfile {
@@ -72,6 +72,13 @@ describe("selectMcpAgentTargets", () => {
     expect(isMcpToolId("gemini")).toBe(false);
   });
 
+  it("projects brand SVG ids, including Copilot→vscode and Desktop Chat→claude", () => {
+    expect(mcpIconAgentIdForTool("claude-code")).toBe("claude");
+    expect(mcpIconAgentIdForTool("claude-desktop-chat")).toBe("claude");
+    expect(mcpIconAgentIdForTool("vscode")).toBe("github-copilot");
+    expect(mcpIconAgentIdForTool("cursor")).toBe("cursor");
+  });
+
   it("maps the four newly reachable targets to their own Agent profiles", () => {
     const targets = selectMcpAgentTargets([
       profile("windsurf"),
@@ -104,15 +111,13 @@ describe("selectMcpAgentTargets", () => {
     expect(selectMcpAgentTargets([profile("hermes")]).map(({ toolId }) => toolId)).toEqual(["hermes"]);
   });
 
-  it("keeps a Settings-disabled Agent on the card rail when the server still writes it", () => {
-    const targets = selectMcpAgentTargetsForServer(
-      [profile("claude", true, false), profile("codex", true, true), profile("cursor", true, false)],
-      { "claude-code": true },
-    );
-    expect(targets.map(({ toolId, profile: agent }) => [toolId, agent.id, agent.enabled])).toEqual([
-      ["claude-code", "claude", false],
-      ["codex", "codex", true],
+  it("omits a Settings-disabled Agent from the card rail even when the server still writes it", () => {
+    const targets = selectMcpAgentTargets([
+      profile("claude", true, false),
+      profile("codex", true, true),
+      profile("cursor", true, false),
     ]);
+    expect(targets.map(({ toolId, profile: agent }) => [toolId, agent.id])).toEqual([["codex", "codex"]]);
   });
 
   it("keeps claude-desktop-chat reachable without inventing an Agent profile for it", () => {

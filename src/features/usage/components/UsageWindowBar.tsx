@@ -8,6 +8,7 @@ import {
   isAbsoluteQuotaWindow,
   isBreakdownQuotaWindow,
   isMonetaryQuota,
+  isRequestCountBreakdown,
   localizeCategoryLabel,
   localizeWindowLabel,
   pickConsumedTone,
@@ -34,7 +35,16 @@ interface UsageWindowBarProps {
  */
 export function UsageWindowBar({ window, compact, catalogId, showCategoryReset = true }: UsageWindowBarProps) {
   if (compact) {
-    return <UsageCategoryBar window={window} catalogId={catalogId} showReset={showCategoryReset} />;
+    const models = isRequestCountBreakdown(window) ? window.breakdown : null;
+    if (!models?.length) {
+      return <UsageCategoryBar window={window} catalogId={catalogId} showReset={showCategoryReset} />;
+    }
+    return (
+      <div className="space-y-1.5">
+        <UsageCategoryBar window={window} catalogId={catalogId} showReset={showCategoryReset} />
+        <ModelRequestList rows={models} windowLabel={window.label} compact />
+      </div>
+    );
   }
 
   if (isMonetaryQuota(window)) {
@@ -293,7 +303,59 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
           : `${t("usage.remaining")} ${remainingPct}%`
       }
       footNoteClass={tone.text}
-    />
+    >
+      {isRequestCountBreakdown(window) ? (
+        <ModelRequestList rows={window.breakdown ?? []} windowLabel={window.label} />
+      ) : null}
+    </UsageMeter>
+  );
+}
+
+const MODEL_DOT_COLORS = ["var(--brand-color)", "#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#06b6d4"];
+
+function modelsHeadingKey(
+  windowLabel: string,
+): "usage.modelsUsedThisWeek" | "usage.modelsUsedThisSession" | "usage.modelsUsed" {
+  if (windowLabel === "7d") return "usage.modelsUsedThisWeek";
+  if (windowLabel === "5h") return "usage.modelsUsedThisSession";
+  return "usage.modelsUsed";
+}
+
+/** Request counts are not a quota — names + counts, no nested bars. */
+function ModelRequestList({
+  rows,
+  windowLabel,
+  compact,
+}: {
+  rows: UsageWindow[];
+  windowLabel: string;
+  compact?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (rows.length === 0) return null;
+  return (
+    <div className={cn(compact ? "space-y-1 pt-0.5" : "space-y-1.5 pt-1")}>
+      <p className="text-[11px] font-semibold text-zinc-600">{t(modelsHeadingKey(windowLabel))}</p>
+      <ul className={compact ? "space-y-1" : "space-y-1.5"}>
+        {rows.map((row, index) => (
+          <li key={`${row.label}-${index}`} className="flex min-w-0 items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                className="size-1.5 shrink-0 rounded-full"
+                style={{ backgroundColor: MODEL_DOT_COLORS[index % MODEL_DOT_COLORS.length] }}
+                aria-hidden
+              />
+              <span className="truncate text-[12px] font-medium text-zinc-800" title={row.label}>
+                {row.label}
+              </span>
+            </span>
+            <span className="shrink-0 font-mono text-[11px] tabular-nums text-zinc-500">
+              {t("usage.requestCount", { count: row.used })}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

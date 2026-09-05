@@ -12,7 +12,6 @@ import type { McpMarketplaceCommands } from "./mcpMarketplace";
 import type { ModelsCommands } from "./models";
 import type { ProjectCommands } from "./projects";
 import type { SharedChannelCommands } from "./sharedChannels";
-import type { LearningCommands } from "./learning";
 import type { SkillCommands } from "./skills";
 import type { SshCommands } from "./ssh";
 import type { StorageCommands } from "./storage";
@@ -20,7 +19,6 @@ import type { InstanceCommands } from "./instances";
 import type { SystemCommands } from "./system";
 
 export type TauriCommands = SkillCommands &
-  LearningCommands &
   AgentCommands &
   ProjectCommands &
   MarketplaceCommands &
@@ -40,7 +38,6 @@ export type {
   AiCommands,
   GitHubCommands,
   InstanceCommands,
-  LearningCommands,
   MarketplaceCommands,
   McpCommands,
   McpMarketplaceCommands,
@@ -52,7 +49,7 @@ export type {
   StorageCommands,
   SystemCommands,
 };
-export type { PatrolStatus, UpdateCheckResult, AcpConfig } from "./system";
+export type { PatrolStatus, UpdateCheckResult } from "./system";
 export type { AgentDeployStatus, DeployKind } from "./agents";
 export type { RepoCacheInfo } from "./storage";
 export type { ConfigConflict, ToolInstallStatus } from "./models";

@@ -1,13 +1,13 @@
 /**
- * Dev-mock fragment: skills mode — installed skills, skill content/tutorials,
+ * Dev-mock fragment: skills mode — installed skills, skill content,
  * deploy status, skill groups, and project skill management. Sample data lives
  * in ./skillsData.ts; AGENTS comes from the app-shell fragment.
  */
 
 import type { LocalDivergenceResolution } from "../../../types";
 import { AGENTS } from "./appShell";
-import { type DevMockHandlers, getAcpConfigState, iso } from "./shared";
-import { DECKS, DEMO_TUTORIAL_HTML, PROJECTS } from "./skillsData";
+import { type DevMockHandlers, iso } from "./shared";
+import { DECKS, PROJECTS } from "./skillsData";
 import {
   devGhostSkills,
   devListSkills,
@@ -25,27 +25,6 @@ function managedSkillsState(agentId: string) {
   return {
     active_skill_names: suspended.length > 0 ? [] : DEMO_MANAGED_SKILL_NAMES.slice(),
     suspended_skill_names: suspended.slice(),
-  };
-}
-
-function demoSkillTutorial(args: Record<string, unknown>) {
-  const skillName = String(args.name ?? "pdf-tools");
-  return {
-    state: "fresh",
-    currentHash: "demo-skill-content-hash",
-    html: DEMO_TUTORIAL_HTML,
-    metadata: {
-      skillName,
-      contentHash: "demo-skill-content-hash",
-      promptVersion: "1",
-      schemaVersion: "1",
-      tutorialStyle: getAcpConfigState().tutorial_style,
-      agentLabel: "Claude Code",
-      generatedAt: iso(0),
-      fileCount: 3,
-      totalBytes: 8_192,
-    },
-    staleReason: null,
   };
 }
 
@@ -71,8 +50,6 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
   read_skill_file_raw: (args) =>
     `---\nname: ${String((args?.name as string) ?? "pdf-tools")}\ndescription: Read, merge, split, and OCR PDF files.\n---\n\n# PDF Tools\n\nA skill for working with **PDF** files.\n\n## Commands\n\n| Command | Description | Input formats | Output | Notes |\n| --- | --- | --- | --- | --- |\n| \`merge\` | Combine multiple PDFs into one document | PDF, PDF/A | single PDF | preserves bookmarks and metadata |\n| \`split\` | Split a PDF into separate pages or ranges | PDF | many PDFs | supports \`1-3,5,8-\` page expressions |\n| \`ocr\` | Run OCR over scanned pages and embed a text layer | PDF, PNG, JPEG, TIFF | searchable PDF | language auto-detected, falls back to English |`,
   list_skill_files: () => ["SKILL.md", "scripts/merge.py", "README.md"],
-  get_skill_tutorial: (args) => demoSkillTutorial(args),
-  generate_skill_tutorial: (args) => demoSkillTutorial(args),
   get_skill_deploy_status: (args) => {
     const name = String((args?.skillName as string) ?? "pdf-tools");
     // Mixed kinds so the degraded-deploy badges are visible in browser dev:

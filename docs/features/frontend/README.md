@@ -18,7 +18,7 @@
 ## 桌面性能
 
 - Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
-- Skills 模式的列表页（Learn / 我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#learn`。
+- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
 - 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
 - MCP 目录搜索对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
 - `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
@@ -30,18 +30,17 @@
 - 生命周期型订阅使用 `src/hooks/useTauriEvent`，由它处理 `listen()` promise 与卸载 cleanup 的竞争。
 - 单次请求流可以由对应 hook 管理监听，但必须处理 start、delta、complete、error 和中断。
 - AI 摘要展示后端返回的 route/provider/fallback 元数据，不在前端猜测路由。
-- Skill 教程是后端持久化状态；前端不计算目录 hash、不缓存另一份 HTML，也不渲染 ACP 的半成品输出。fresh artifact 直接打开，stale artifact 同时提供旧版查看与更新动作。
-- 模型生成 HTML 只能放入不带 `allow-scripts`/`allow-same-origin` 的 sandbox iframe；禁止用 `dangerouslySetInnerHTML` 注入应用 DOM，也不直接交给系统浏览器执行。
 - 安全扫描应区分文件准备和 AI chunk 进度，不能压成一个模糊 spinner。
 
 ## 视觉系统
 
 精确 token 在 `src/index.css` 和 Tailwind theme 中维护，本文只维护不变量：
 
-- 默认视觉是深色精密玻璃界面；卡片可以半透明，正文密集的 modal 必须使用 `.modal-surface` / `.modal-surface-subtle` 的近实色表面，避免退回低对比度 `bg-card/95`。
+- 默认视觉是深色 OLED 分栏：窗口画布是 `--color-background`，侧栏与主工作区是不透明的 `--color-sidebar` 面板，卡片用 `--color-card` 抬升。`.ss-main-chrome` 禁止 `backdrop-filter` 和大模糊阴影。
+- 壳层：侧栏 `fixed top-2 left-2 bottom-2`，主栏 `pt-2 pr-2 pb-2`，左内边距 = 8px + 侧栏宽 + 8px；两栏都是 16px 圆角。不要给 `#main-content` 的 padding 加 CSS transition。
 - 浅色由应用内的 `data-bg-style="paper"` 驱动，与系统色彩偏好无关。需要随主题换色的状态色写 `text-amber-400 paper:text-amber-700` 这类 `paper:` variant（`@custom-variant paper`），不要用 `dark:`——它匹配的是系统偏好，在应用内主题切换时不生效。
 - 小字号次级文本优先使用有足够对比度的 `text-foreground/60–75`。disabled 状态不能只靠 `opacity-50`。
-- 大容器使用统一大圆角尺度；紧凑控件使用较小尺度。
+- 大容器（侧栏、工作区、卡片、modal）使用 16px 圆角；紧凑控件使用较小尺度。
 - 动效只表达进入、退出、层级和直接反馈；尊重 `prefers-reduced-motion`。
 - 所有正文、焦点、禁用和错误状态满足 WCAG AA。
 - 模型与核心行为字段提供 `InfoTip`；枚举选项说明使用可解析的 `Label: explanation` 行，不在每个表单重造提示样式。
@@ -61,19 +60,19 @@
 - Marketplace 与 MCP 共用的 Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；两个 feature 都只能依赖该 shared interface。
 - 动态颜色无法用 utility 表达时才使用 inline style。
 - 侧边栏导航的选中态由带 `layoutId` 的 motion 元素承载，切换时弹簧滑动；收起态改为静态高亮，不做滑动。新增导航区沿用这条约定，不要再写第三种选中态实现。
-- Skill / MCP 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。
+- Skill 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。MCP 机群是指挥中心密集列表（状态点 + 能力/成本行 + Agent rail），不套用技能卡网格；MCP 目录浏览仍用卡片。
 - 卡片列表（`.ss-cards-grid` / `.ss-cards-list`）第 13 项起由 CSS `content-visibility: auto` 跳过屏幕外的样式、布局和绘制；卡片高度由内容决定，`SkillGrid` 量出首张卡片写入 `--ss-card-h` 供 `contain-intrinsic-size` 占位。新增卡片列表沿用这两个类，不要自己写 JS 虚拟滚动。
 
 ## Agent 手动激活投影
 
-- 本机 Agent 的注册、手动启用和 rail 可见性规则由 [Skills 行为文档](../skills/README.md#agent-注册手动启用与项目检测) 维护；前端统一通过 `selectTargetableAgentProfiles` 按 `enabled` 投影，并由共享 rail 再次过滤。前端不得根据 binary、应用、目录或冻结兼容字段 `installed` 推断可用性。
+- 本机 Agent 的注册、手动启用和 rail 可见性规则由 [Skills 行为文档](../skills/README.md#agent-注册手动启用与项目检测) 维护；前端统一通过 `selectTargetableAgentProfiles` 按 `enabled` 投影。前端不得根据 binary、应用、目录或冻结兼容字段 `installed` 推断可用性。
 - 内置 Agent 的品牌图标统一通过 `src/components/ui/icons/agentIcons.ts` 投影到
   `@lobehub/icons`；deep import 只允许出现在 `icons/lobe.ts`。包内无专属品牌时使用
   `LobeHubMono`，不得为同步上游清单批量复制本地 SVG。
 - 项目级能力再通过 `supportsProjectDeploy` 判断；不要硬编码 global-only Agent id。
 - 全局能力通过后端 `has_global_skills()` 判断；空全局路径是“不支持全局部署”的能力标记，
   不能被解释为当前工作目录。
-- Skills、Deck 和 MCP 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播最多直接展示 4 个 Agent，更多目标通过横向滚动访问。Settings `enabled` 决定 SVG 是可操作还是停用态：关掉但资源仍挂着的 Agent 留在轮播里（灰度、不可点），不要从 SVG 行里抹掉。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
+- Skills、Deck 和 MCP 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播轨道占满卡片底栏可用宽度，图标之间保持固定间距、不随剩余空间拉开；滚动箭头贴在轨道最左/最右，超出可视宽度时横向滚动，不固定可见个数。轮播只展示 Settings 已启用的 Agent；未启用的 profile 不占轮播位，即使资源仍挂着。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
 - MCP 等能力消费者可以叠加静态能力映射，但不得再用本机安装探测隐藏用户已手动启用的 Agent；执行时的真实失败由对应 mutation 显式反馈。
 - Claude Settings profile `claude` 映射到唯一能力 id `claude-code`；不要生成第二张 Claude 卡。
 - SSH 远端 Agent 由远端 discovery 决定，不复用本机 rail。

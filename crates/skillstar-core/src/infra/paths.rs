@@ -18,8 +18,6 @@
 //!     ├── repos/              # Cached git repositories
 //!     ├── publish/            # Publish staging area
 //!     └── lock.json           # Installation lockfile
-//! ~/.skillstar/learning/      # identity-keyed tutorials, guides, progress
-//! ~/.skillstar/tutorials/     # legacy name-keyed tutorials (read-only fallback)
 //! ```
 //!
 //! ## Environment variable overrides
@@ -108,36 +106,6 @@ pub fn state_dir() -> PathBuf {
     data_root().join("state")
 }
 
-/// `~/.skillstar/tutorials/` — legacy name-keyed Skill tutorials (read-only fallback).
-pub fn tutorials_dir() -> PathBuf {
-    data_root().join("tutorials")
-}
-
-/// `~/.skillstar/learning/` — learning domain root (identity-keyed tutorials, guides, progress).
-pub fn learning_dir() -> PathBuf {
-    data_root().join("learning")
-}
-
-/// `~/.skillstar/learning/tutorials/` — identity-keyed private tutorial artifacts.
-pub fn learning_tutorials_dir() -> PathBuf {
-    learning_dir().join("tutorials")
-}
-
-/// `~/.skillstar/learning/guides/` — bundled and user Guide documents.
-pub fn learning_guides_dir() -> PathBuf {
-    learning_dir().join("guides")
-}
-
-/// `~/.skillstar/learning/progress/` — LearningProgress keyed by Guide revision.
-pub fn learning_progress_dir() -> PathBuf {
-    learning_dir().join("progress")
-}
-
-/// `~/.skillstar/learning/drafts/` — local Block JSON Guide Drafts.
-pub fn learning_drafts_dir() -> PathBuf {
-    learning_dir().join("drafts")
-}
-
 /// `~/.skillstar/instances/` — isolated Chromium/Electron profiles for desktop multi-instance.
 pub fn instances_dir() -> PathBuf {
     data_root().join("instances")
@@ -156,15 +124,9 @@ pub fn instance_profile_dir(app: &str, id: &str) -> PathBuf {
 pub fn app_instances_config_path() -> PathBuf {
     config_dir().join("app_instances.json")
 }
-
 /// `config/ai.json` — AI provider configuration.
 pub fn ai_config_path() -> PathBuf {
     config_dir().join("ai.json")
-}
-
-/// `config/acp.json` — ACP agent configuration.
-pub fn acp_config_path() -> PathBuf {
-    config_dir().join("acp.json")
 }
 
 /// `config/proxy.json` — proxy configuration.
@@ -294,8 +256,7 @@ pub(crate) fn shellexpand_home(path: &str) -> String {
 mod tests {
     use super::{
         app_instances_config_path, data_root, home_dir, hub_root, instance_profile_dir,
-        instances_dir, learning_dir, learning_drafts_dir, learning_guides_dir,
-        learning_progress_dir, learning_tutorials_dir, shellexpand_home, tutorials_dir,
+        instances_dir, shellexpand_home,
     };
     use tempfile::TempDir;
 
@@ -309,18 +270,6 @@ mod tests {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
         }
         assert_eq!(data_root(), temp.path());
-        assert_eq!(tutorials_dir(), temp.path().join("tutorials"));
-        assert_eq!(learning_dir(), temp.path().join("learning"));
-        assert_eq!(
-            learning_tutorials_dir(),
-            temp.path().join("learning/tutorials")
-        );
-        assert_eq!(learning_guides_dir(), temp.path().join("learning/guides"));
-        assert_eq!(
-            learning_progress_dir(),
-            temp.path().join("learning/progress")
-        );
-        assert_eq!(learning_drafts_dir(), temp.path().join("learning/drafts"));
         assert_eq!(instances_dir(), temp.path().join("instances"));
         assert_eq!(
             instance_profile_dir("cursor", "work"),

@@ -405,9 +405,7 @@ fn parse_url(text: &str) -> Option<McpPasteParse> {
     if url.scheme() != "http" && url.scheme() != "https" {
         return None;
     }
-    if url.host_str().is_none() {
-        return None;
-    }
+    url.host_str()?;
     let mut entry = blank_entry(&name_from_url(text), "http");
     entry.url = Some(text.to_string());
     Some(McpPasteParse {
@@ -470,6 +468,7 @@ fn looks_like_launcher(command: &str) -> bool {
             | "node"
             | "deno"
             | "cargo"
+            | "cua-driver"
     )
 }
 
@@ -523,6 +522,12 @@ fn name_from_url(url: &str) -> String {
 }
 
 fn name_from_tokens(tokens: &[String]) -> String {
+    if let Some(cmd) = tokens.first() {
+        let base = cmd.trim_end_matches('/').rsplit('/').next().unwrap_or(cmd);
+        if base == "cua-driver" {
+            return "cua-driver".into();
+        }
+    }
     tokens
         .iter()
         .rev()
@@ -695,5 +700,17 @@ mod tests {
     fn never_writes_an_id_so_create_path_assigns_one() {
         let parsed = parse_pasted_mcp("https://example.com/mcp");
         assert!(parsed.drafts[0].id.is_empty());
+    }
+
+    #[test]
+    fn parses_cua_driver_command() {
+        let parsed = parse_pasted_mcp("cua-driver mcp");
+        assert_eq!(parsed.kind, McpPasteKind::Command);
+        assert_eq!(parsed.drafts.len(), 1);
+        let draft = &parsed.drafts[0];
+        assert_eq!(draft.name, "cua-driver");
+        assert_eq!(draft.command.as_deref(), Some("cua-driver"));
+        assert_eq!(draft.args, ["mcp"]);
+        assert_eq!(draft.transport, "stdio");
     }
 }

@@ -1,7 +1,7 @@
 use super::apps::{DesktopAppId, open_argv};
 use super::error::{CLAUDE_DESKTOP_REASON, InstanceError};
 use super::process::{cmdline_uses_user_data_dir, parse_ps_line};
-use super::{create_instance, list_desktop_apps, list_instances, start_instance};
+use super::{create_instance, list_desktop_apps, list_instances};
 use crate::test_support::{ENV_LOCK, EnvGuard};
 use std::path::Path;
 use tempfile::TempDir;

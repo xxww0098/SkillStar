@@ -174,19 +174,6 @@ pub async fn install_from_scan(
         let install_result = facade.install_from_scan(&source, &repo_url, &skills);
         skillstar_skills::installed_skill::invalidate_cache();
         let installed = install_result?;
-        // Match the CLI: after a successful hub install, deploy the skills to
-        // every Agent the user has enabled in Settings.
-        skillstar_app::global_deploy::deploy_to_enabled_global_agents(&installed).map_err(
-            |error| {
-                tracing::warn!(
-                    target: "cmd",
-                    count = installed.len(),
-                    error = %error,
-                    "hub install succeeded but Agent deployment failed"
-                );
-                anyhow::anyhow!(error)
-            },
-        )?;
         Ok(installed)
     })
     .await;

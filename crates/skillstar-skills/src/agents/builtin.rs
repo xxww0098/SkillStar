@@ -465,17 +465,18 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
 /// Home-relative directories that must receive the same global deployments as
 /// an Agent's own `global_skills_dir`.
 ///
-/// Antigravity installs as three independent states — the app (`antigravity`),
-/// the CLI (`antigravity-cli`) and the IDE (`antigravity-ide`) — and each state
-/// reads skills only from its own `builtin/skills`. One SkillStar profile
-/// therefore has to land in all three, which is what the deployment layer
-/// replays after every link/unlink.
+/// Antigravity supports multiple runtime surfaces — the desktop app (`antigravity`),
+/// the CLI (`antigravity-cli`), and the ecosystem-wide shared directory (`~/.gemini/skills`).
+/// One SkillStar profile (`antigravity`) serves all of them, keeping
+/// `global_skills_dir` (`~/.gemini/antigravity/skills`) as the bookkeeping source of truth
+/// and fanning out deployments to the CLI and shared directories through `GLOBAL_MIRROR_DEFS`.
 const GLOBAL_MIRROR_DEFS: &[(&str, &[&[&str]])] = &[(
     "antigravity",
     &[
-        &[".gemini", "antigravity", "builtin", "skills"],
-        &[".gemini", "antigravity-cli", "builtin", "skills"],
-        &[".gemini", "antigravity-ide", "builtin", "skills"],
+        &[".gemini", "antigravity-cli", "skills"],
+        &[".gemini", "skills"],
+        &[".gemini", "config", "skills"],
+        &[".gemini", "antigravity-ide", "skills"],
     ],
 )];
 
@@ -710,9 +711,10 @@ mod tests {
         assert_eq!(
             dirs,
             [
-                home.join(".gemini/antigravity/builtin/skills"),
-                home.join(".gemini/antigravity-cli/builtin/skills"),
-                home.join(".gemini/antigravity-ide/builtin/skills"),
+                home.join(".gemini/antigravity-cli/skills"),
+                home.join(".gemini/skills"),
+                home.join(".gemini/config/skills"),
+                home.join(".gemini/antigravity-ide/skills"),
             ]
         );
         assert!(mirror_dirs("claude", home).is_empty());

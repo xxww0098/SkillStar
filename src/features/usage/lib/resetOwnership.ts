@@ -3,13 +3,13 @@ import { isAbsoluteQuotaWindow, isBreakdownQuotaWindow, isMonetaryQuota, type Pr
 
 /**
  * True when `UsageWindowBar` will draw its own `ResetCountdown` (simple bar path).
- * Codex-style 5h/7d bars defer countdown to the card header/meta.
+ * 5h/7d rate-limit bars own the chip on the remaining row so both windows
+ * stay visible; monetary / breakdown / absolute windows still defer to MetaStrip.
  *
- * @see docs/design-usage-card.md K13
+ * @see docs/features/usage/README.md
  */
 export function windowRendersOwnReset(window: UsageWindow | null | undefined): boolean {
   if (!window?.reset_at) return false;
-  if (window.label === "5h" || window.label === "7d") return false;
   if (isMonetaryQuota(window) || isBreakdownQuotaWindow(window) || isAbsoluteQuotaWindow(window)) {
     return false;
   }

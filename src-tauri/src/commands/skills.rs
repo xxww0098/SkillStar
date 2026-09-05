@@ -49,27 +49,22 @@ pub async fn install_skill(
                 .map_err(|error| error.to_string())?,
             None => facade.install_skill(url, name)?,
         };
-        let deploy = match agent_id.as_deref() {
-            Some(id) => {
-                let ids = vec![id.to_string()];
-                skillstar_app::global_deploy::deploy_to_selected_global_agents(
-                    std::slice::from_ref(&skill.name),
-                    &ids,
-                )
-            }
-            None => skillstar_app::global_deploy::deploy_to_enabled_global_agents(
+        if let Some(id) = agent_id.as_deref() {
+            let ids = vec![id.to_string()];
+            let deploy = skillstar_app::global_deploy::deploy_to_selected_global_agents(
                 std::slice::from_ref(&skill.name),
-            ),
-        };
-        deploy.map_err(|error| {
-            tracing::warn!(
-                target: "cmd",
-                skill = %skill.name,
-                error = %error,
-                "hub install succeeded but Agent deployment failed"
+                &ids,
             );
-            error
-        })?;
+            deploy.map_err(|error| {
+                tracing::warn!(
+                    target: "cmd",
+                    skill = %skill.name,
+                    error = %error,
+                    "hub install succeeded but Agent deployment failed"
+                );
+                error
+            })?;
+        }
         // The freshly installed Skill carries no links; re-read every Agent that
         // now holds it, otherwise a carousel click would blank the other icons.
         skill.agent_links = Some(installed_skill::agent_links_for(&skill.name));

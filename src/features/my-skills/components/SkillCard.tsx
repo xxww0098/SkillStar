@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Button } from "../../../components/ui/button";
-import { selectRailAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
+import { selectTargetableAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import { handleExternalAnchorClick } from "../../../lib/externalOpen";
 import { tauriInvoke } from "../../../lib/ipc";
 import { agentIconCls, cn, formatInstalls } from "../../../lib/utils";
@@ -275,9 +275,7 @@ function SkillCardInner({
     return null;
   })();
 
-  const targetableProfiles = profiles
-    ? selectRailAgentProfiles(profiles.filter(supportsGlobalDeploy), new Set(skill.agent_links ?? []))
-    : [];
+  const targetableProfiles = profiles ? selectTargetableAgentProfiles(profiles).filter(supportsGlobalDeploy) : [];
 
   let agentRail: React.ReactNode = null;
   if (remoteContext) {
@@ -354,9 +352,8 @@ function SkillCardInner({
     <div
       onClick={() => onClick(skill)}
       className={cn(
-        "group relative h-full flex flex-col justify-between rounded-[20px] border border-border/80 bg-card/70 backdrop-blur-md cursor-pointer transition-all duration-200 overflow-hidden",
-        "hover:bg-card-hover hover:border-primary/50 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_var(--color-shadow)]",
-        "border-t border-t-white/20 paper:border-t-black/10",
+        "group relative h-full flex flex-col justify-between overflow-hidden rounded-xl border border-border bg-card cursor-pointer transition-all duration-200",
+        "hover:bg-card-hover hover:border-primary/40 hover:-translate-y-px hover:shadow-[0_8px_24px_-12px_var(--color-shadow)]",
         selected &&
           "ring-2 ring-primary border-primary bg-primary/10 shadow-[0_0_24px_-4px_rgba(var(--color-primary-rgb),0.4)]",
         compact && "p-2",
@@ -425,12 +422,14 @@ function SkillCardInner({
 
       {/* Footer / Agent Target Rail */}
       {(stars || remoteSize || agentRail) && (
-        <div className="px-3.5 py-2 border-t border-border/40 bg-muted/30 flex items-center justify-between min-h-[42px] gap-2 rounded-b-[20px]">
-          <div className="flex items-center gap-2 shrink-0">
-            {remoteSize}
-            {stars}
-          </div>
-          <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">{agentRail}</div>
+        <div className="flex min-h-[42px] items-center gap-2 rounded-b-xl border-t border-border/40 bg-muted/30 px-3.5 py-2">
+          {(remoteSize || stars) && (
+            <div className="flex shrink-0 items-center gap-2">
+              {remoteSize}
+              {stars}
+            </div>
+          )}
+          {agentRail ? <div className="relative z-10 flex min-w-0 flex-1 items-center">{agentRail}</div> : null}
         </div>
       )}
     </div>

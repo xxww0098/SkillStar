@@ -7,7 +7,6 @@
  */
 export { tauriInvoke, tauriInvokeDynamic, useTauriMutation, useTauriQuery, useTauriQueryWithArgs } from "./core";
 export type {
-  AcpConfig,
   AgentCommands,
   AgentDeployStatus,
   AiCommands,

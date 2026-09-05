@@ -47,30 +47,3 @@ export function iso(daysAgo = 0): string {
   d.setDate(d.getDate() - daysAgo);
   return d.toISOString();
 }
-
-// ── ACP config store (cross-domain) ─────────────────────────────────
-// Written by the settings fragment (get/save_acp_config) and read by the
-// skills fragment (tutorial metadata reflects the configured tutorial style),
-// so it lives here instead of inside either domain.
-
-export interface AcpConfigState {
-  enabled: boolean;
-  agent_command: string;
-  agent_label: string;
-  tutorial_style: "guided" | "reference" | "workshop";
-}
-
-let acpConfigStore: AcpConfigState = {
-  enabled: false,
-  agent_command: "",
-  agent_label: "",
-  tutorial_style: "guided",
-};
-
-export function getAcpConfigState(): AcpConfigState {
-  return acpConfigStore;
-}
-
-export function setAcpConfigState(next: AcpConfigState): void {
-  acpConfigStore = { ...next };
-}

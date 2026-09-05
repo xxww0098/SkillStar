@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { BookOpen, Boxes, FolderKanban, Globe, Layers, Package } from "lucide-react";
+import { Boxes, FolderKanban, Globe, Layers, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSkillBadgeCounts } from "../../features/my-skills/hooks/useSkills";
 import { cn } from "../../lib/utils";
@@ -22,7 +22,6 @@ export function SkillsNav({ activePage, onNavigate, onPrefetch, collapsed }: Ski
   const { ghostSkillCount, pendingUpdatesCount } = useSkillBadgeCounts();
 
   const navItems: NavItemNode[] = [
-    { id: "learn", label: t("sidebar.learn"), icon: BookOpen },
     { id: "my-skills", label: t("sidebar.skills"), icon: Package },
     { id: "marketplace", label: t("sidebar.market"), icon: Globe },
     { id: "skill-cards", label: t("sidebar.groups"), icon: Layers },

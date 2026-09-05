@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Textarea } from "../../../components/ui/textarea";
 import type { McpServerEntry, McpToolId } from "../../../types";
+import type { McpAgentTarget } from "../lib/agentTargets";
 import { kvToText, parseKv, parseList } from "../lib/kv";
 import { enabledMcpToolIds } from "../lib/toolRegistry";
 import { McpServerAdvancedFields } from "./McpServerAdvancedFields";
@@ -40,16 +41,18 @@ interface McpServerFormProps {
   submitLabel?: string;
   /** Per-tool note for the target picker, e.g. "not installed". */
   noteForTool?: (toolId: McpToolId) => string | null;
+  /** Settings-enabled MCP agents; picker length follows this list. */
+  targets?: readonly McpAgentTarget[];
 }
 
-const textareaCls = "min-h-16 font-mono text-xs";
+const textareaCls = "min-h-[4.5rem] font-mono text-[13px] leading-relaxed";
 
 function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
-    <label className="mb-1 block text-xs font-medium text-foreground">
-      {children}
-      {hint ? <span className="ml-1.5 font-normal text-muted-foreground">{hint}</span> : null}
-    </label>
+    <div className="mb-1.5">
+      <label className="block text-[13px] font-medium leading-none tracking-tight text-foreground">{children}</label>
+      {hint ? <p className="mt-1 text-micro font-normal tracking-normal text-muted-foreground">{hint}</p> : null}
+    </div>
   );
 }
 
@@ -76,6 +79,7 @@ export function McpServerForm({
   submitting,
   submitLabel,
   noteForTool,
+  targets = [],
 }: McpServerFormProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(initial?.name ?? defaults?.name ?? "");
@@ -149,28 +153,29 @@ export function McpServerForm({
   };
 
   return (
-    <div className="space-y-5">
-      <div>
-        <FieldLabel hint={t("mcp.fieldNameHint")}>{t("mcp.fieldName")}</FieldLabel>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t("mcp.fieldNamePlaceholder")}
-          className="h-9"
-        />
+    <div className="flex flex-col gap-6">
+      <div className="space-y-3">
+        <div>
+          <FieldLabel hint={t("mcp.fieldNameHint")}>{t("mcp.fieldName")}</FieldLabel>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t("mcp.fieldNamePlaceholder")}
+            className="h-10 text-sm"
+          />
+        </div>
+        <McpTransportPicker value={transport} onChange={setTransport} />
       </div>
 
-      <McpTransportPicker value={transport} onChange={setTransport} />
-
       {isRemote ? (
-        <>
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <FieldLabel>{t("mcp.fieldUrl")}</FieldLabel>
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder={t(transport === "sse" ? "mcp.fieldUrlPlaceholderSse" : "mcp.fieldUrlPlaceholderHttp")}
-              className="h-9 font-mono"
+              className="h-10 font-mono text-[13px]"
             />
           </div>
           <div>
@@ -178,22 +183,31 @@ export function McpServerForm({
             <Textarea
               value={headersText}
               onChange={(e) => setHeadersText(e.target.value)}
-              rows={3}
+              rows={2}
               placeholder={"Authorization=Bearer xxx"}
               className={textareaCls}
             />
-            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">{t("mcp.kvQuotingHint")}</p>
+            <p className="mt-1.5 text-caption">{t("mcp.kvQuotingHint")}</p>
           </div>
-        </>
+        </div>
       ) : (
-        <>
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <FieldLabel>{t("mcp.fieldCommand")}</FieldLabel>
             <Input
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               placeholder="npx"
-              className="h-9 font-mono"
+              className="h-10 font-mono text-[13px]"
+            />
+          </div>
+          <div>
+            <FieldLabel hint={t("common.optional")}>{t("mcp.fieldCwd")}</FieldLabel>
+            <Input
+              value={cwd}
+              onChange={(e) => setCwd(e.target.value)}
+              placeholder="/path/to/dir"
+              className="h-10 font-mono text-[13px]"
             />
           </div>
           <div>
@@ -201,7 +215,7 @@ export function McpServerForm({
             <Textarea
               value={argsText}
               onChange={(e) => setArgsText(e.target.value)}
-              rows={3}
+              rows={2}
               placeholder={"-y\n@upstash/context7-mcp"}
               className={textareaCls}
             />
@@ -215,34 +229,35 @@ export function McpServerForm({
               placeholder={"API_KEY=sk-xxx"}
               className={textareaCls}
             />
-            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">{t("mcp.kvQuotingHint")}</p>
+            <p className="mt-1.5 text-caption">{t("mcp.kvQuotingHint")}</p>
           </div>
-          <div>
-            <FieldLabel hint={t("common.optional")}>{t("mcp.fieldCwd")}</FieldLabel>
-            <Input
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-              placeholder="/path/to/dir"
-              className="h-9 font-mono"
-            />
-          </div>
-        </>
+        </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-4">
         <div>
           <FieldLabel hint={t("common.optional")}>{t("mcp.fieldDescription")}</FieldLabel>
-          <Input value={description} onChange={(e) => setDescription(e.target.value)} className="h-9" />
+          <Input value={description} onChange={(e) => setDescription(e.target.value)} className="h-10 text-sm" />
         </div>
         <div>
           <FieldLabel hint={t("common.optional")}>{t("mcp.homepage")}</FieldLabel>
           <Input
             value={homepage}
             onChange={(e) => setHomepage(e.target.value)}
-            className="h-9"
+            className="h-10 text-sm"
             placeholder="https://"
           />
         </div>
+      </div>
+
+      <div className="space-y-3">
+        <FieldLabel hint={t("mcp.fieldEnabledToolsHint")}>{t("mcp.fieldEnabledTools")}</FieldLabel>
+        <McpToolTargetPicker
+          targets={targets}
+          enabled={enabled}
+          onToggle={(toolId, next) => setEnabled((prev) => ({ ...prev, [toolId]: next }))}
+          noteFor={noteForTool}
+        />
       </div>
 
       <McpServerAdvancedFields
@@ -257,18 +272,9 @@ export function McpServerForm({
         onTimeoutTextChange={setTimeoutText}
       />
 
-      <div>
-        <FieldLabel hint={t("mcp.fieldEnabledToolsHint")}>{t("mcp.fieldEnabledTools")}</FieldLabel>
-        <McpToolTargetPicker
-          enabled={enabled}
-          onToggle={(toolId, next) => setEnabled((prev) => ({ ...prev, [toolId]: next }))}
-          noteFor={noteForTool}
-        />
-      </div>
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
 
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
-
-      <div className="flex items-center justify-between gap-3 pt-1">
+      <div className="sticky bottom-0 z-10 -mx-6 mt-1 flex items-center justify-between gap-3 border-t border-border/60 bg-card/95 px-6 py-3 backdrop-blur-md">
         {onDelete ? (
           <Button
             variant="ghost"

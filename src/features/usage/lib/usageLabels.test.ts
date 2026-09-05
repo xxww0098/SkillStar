@@ -5,6 +5,7 @@ import {
   isAbsoluteQuotaWindow,
   isBreakdownQuotaWindow,
   isMonetaryQuota,
+  isRequestCountBreakdown,
   remainingBarPercent,
   subscriptionCardTitle,
 } from "./usageLabels";
@@ -100,6 +101,22 @@ describe("isBreakdownQuotaWindow", () => {
         breakdown: [],
       }),
     ).toBe(false);
+  });
+
+  it("does not treat Ollama model request rows as a percent breakdown", () => {
+    const window = {
+      label: "7d",
+      total: 100,
+      percent: 10,
+      breakdown: [
+        { label: "glm-5.3-flash", used: 1294 },
+        { label: "web fetch", used: 2, percent: null, total: null },
+      ],
+    };
+
+    expect(isRequestCountBreakdown(window)).toBe(true);
+    expect(isBreakdownQuotaWindow(window)).toBe(false);
+    expect(isMonetaryQuota(window)).toBe(false);
   });
 });
 

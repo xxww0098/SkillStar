@@ -1,4 +1,3 @@
-pub mod acp;
 pub mod agents;
 pub mod ai;
 pub mod github;
@@ -24,8 +23,6 @@ mod share_install;
 mod shared_channels;
 mod skill_content;
 mod skill_groups;
-mod skill_tutorial;
-mod learning;
 mod skills;
 mod ssh_hosts;
 
@@ -37,7 +34,5 @@ pub use shared_channels::*;
 pub use shell::*;
 pub use skill_content::*;
 pub use skill_groups::*;
-pub use skill_tutorial::*;
-pub use learning::*;
 pub use skills::*;
 pub use ssh_hosts::*;

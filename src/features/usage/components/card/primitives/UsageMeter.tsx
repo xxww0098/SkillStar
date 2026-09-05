@@ -47,10 +47,10 @@ export interface UsageMeterProps {
   /** Reset timestamp — drives track urgency and (when `showReset`) the footer chip. */
   resetAt?: number | null;
   /**
-   * Whether to render the reset countdown chip in the footer. Gate this on
-   * `windowRendersOwnReset(window)` so the meter and the card MetaStrip stay
-   * complementary and never show the same reset twice. `resetAt` still colors
-   * the track regardless.
+   * Whether to render the reset countdown chip on the remaining row (right).
+   * Gate this on `windowRendersOwnReset(window)` so the meter and the card
+   * MetaStrip stay complementary and never show the same reset twice.
+   * `resetAt` still colors the track regardless.
    */
   showReset?: boolean;
   /** Urgency model for the reset chip. */
@@ -160,7 +160,14 @@ export function UsageMeter({
           <span className={cn("font-mono text-[10px] font-semibold tabular-nums text-zinc-500", footNoteClass)}>
             {footNote}
           </span>
-          {resetChip ? <ResetCountdown resetAt={resetChip} usedPercent={usedPercent} mode={resetMode} /> : null}
+          {resetChip ? (
+            <ResetCountdown
+              resetAt={resetChip}
+              usedPercent={usedPercent}
+              mode={resetMode}
+              className="ml-auto shrink-0"
+            />
+          ) : null}
         </div>
       ) : null}
 

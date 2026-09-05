@@ -2,14 +2,12 @@
 //  Tauri-specific glue modules
 // ═══════════════════════════════════════════════════════════════════
 
-pub mod acp_client;
 pub mod app_shell;
 pub mod channel_auto_update;
 pub mod dock_menu;
 pub mod github_auth;
 pub mod marketplace_snapshot;
 pub mod patrol;
-pub mod skill_tutorial;
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {

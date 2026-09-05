@@ -75,8 +75,12 @@ export function CreateGroupModal({
 
   const handleClose = () => onClose();
 
+  const isDuplicateName =
+    existingNames.includes(name.trim()) && !(mode === "edit" && name.trim() === initialName.trim());
+  const canSave = name.trim().length > 0 && selectedSkills.length > 0 && !isDuplicateName;
+
   const handleSave = async () => {
-    if (!name.trim() || selectedSkills.length === 0) return;
+    if (!canSave) return;
     setSaving(true);
     try {
       await onSave(name.trim(), description.trim(), icon, selectedSkills);
@@ -100,9 +104,6 @@ export function CreateGroupModal({
       s.name.toLowerCase().includes(skillSearch.toLowerCase()) ||
       s.description.toLowerCase().includes(skillSearch.toLowerCase()),
   );
-
-  const isDuplicateName = name.trim() !== initialName.trim() && existingNames.includes(name.trim());
-  const canSave = name.trim().length > 0 && selectedSkills.length > 0 && !isDuplicateName;
 
   const isAllSelected = filteredSkills.length > 0 && filteredSkills.every((s) => selectedSkills.includes(s.name));
 

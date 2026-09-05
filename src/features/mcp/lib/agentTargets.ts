@@ -47,6 +47,19 @@ const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   zed: "zed",
 };
 
+const AGENT_ID_BY_MCP_TOOL: Partial<Record<McpToolId, string>> = Object.fromEntries(
+  Object.entries(MCP_TOOL_BY_AGENT_ID).map(([agentId, toolId]) => [toolId, agentId]),
+) as Partial<Record<McpToolId, string>>;
+
+/**
+ * Agent registry id whose brand SVG should represent this MCP target.
+ * `claude-desktop-chat` has no profile (by design) but still uses Claude's mark.
+ */
+export function mcpIconAgentIdForTool(toolId: McpToolId): string {
+  if (toolId === "claude-desktop-chat") return "claude";
+  return AGENT_ID_BY_MCP_TOOL[toolId] ?? toolId;
+}
+
 export interface McpAgentTarget {
   toolId: McpToolId;
   profile: AgentProfile;
@@ -79,17 +92,6 @@ export function mcpEnabledMapFromProfiles(profiles: readonly AgentProfile[]): Re
   const enabled: Record<string, boolean> = {};
   for (const { toolId } of selectMcpAgentTargets(profiles)) enabled[toolId] = true;
   return enabled;
-}
-
-/**
- * Card rail: Settings-on MCP Agents, plus any target this server still writes
- * so a just-disabled Agent stays visible as a stopped SVG.
- */
-export function selectMcpAgentTargetsForServer(
-  profiles: readonly AgentProfile[],
-  enabledTools: Readonly<Record<string, boolean>>,
-): McpAgentTarget[] {
-  return mappedMcpTargets(profiles).filter(({ toolId, profile }) => profile.enabled || enabledTools[toolId] === true);
 }
 
 /** Tool ids no enabled Agent profile can currently reach, for the tool view. */

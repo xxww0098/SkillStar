@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { McpServerEntry } from "../../../types";
-import { formatSchemaTokens, mcpDraftToFormValue } from "./pasteDraft";
+import { formatSchemaTokens, mcpDraftToFormValue, mcpServerCommandLine } from "./pasteDraft";
 
 const draft = {
   id: "",
@@ -26,6 +26,15 @@ describe("mcpDraftToFormValue", () => {
       enabled: { "claude-code": true },
     });
     expect(value).not.toHaveProperty("id");
+  });
+});
+
+describe("mcpServerCommandLine", () => {
+  it("joins stdio command/args and uses the URL for remote transports", () => {
+    expect(mcpServerCommandLine(draft)).toBe("npx -y @modelcontextprotocol/server-github");
+    expect(mcpServerCommandLine({ transport: "http", url: "https://example.com/mcp", command: "npx", args: [] })).toBe(
+      "https://example.com/mcp",
+    );
   });
 });
 

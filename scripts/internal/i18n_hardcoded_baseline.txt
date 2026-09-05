@@ -23,12 +23,11 @@
 # through i18n; the fixture is only what the browser sees with no backend.
 src/components/layout/CommandPalette.tsx:9
 src/components/shared/ProviderBrandIcon.tsx:3
-src/features/settings/sections/BackgroundRunSection.tsx:2
 src/features/usage/components/SubscriptionEditDialog.tsx:3
 src/features/usage/components/UsageGrid.tsx:2
 src/features/usage/lib/usageLabels.ts:3
 src/lib/ipc/devMock/marketplace.ts:2
-src/lib/ipc/devMock/mcpData.ts:2
+src/lib/ipc/devMock/mcpData.ts:3
 src/lib/ipc/devMock/models.ts:1
 src/lib/ipc/devMock/modelsData.ts:1
 src/lib/ipc/devMock/skillsData.ts:4

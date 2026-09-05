@@ -81,37 +81,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-client-protocol"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10eeef5e80864f9c3c148a3f395c3e35a66d37ec7561c7845b2bffae8e841759"
-dependencies = [
- "agent-client-protocol-schema",
- "anyhow",
- "async-broadcast",
- "async-trait",
- "derive_more 2.1.1",
- "futures",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agent-client-protocol-schema"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca68e7e55681ce56546c0cecc6bc8f20493d24b44c6d93ec46174f310730bba2"
-dependencies = [
- "anyhow",
- "derive_more 2.1.1",
- "schemars 1.2.1",
- "serde",
- "serde_json",
- "strum",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1007,15 +976,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
-name = "convert_case"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
 name = "cookie"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1184,7 +1144,7 @@ version = "0.29.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93d03419cb5950ccfd3daf3ff1c7a36ace64609a1a8746d493df1ca0afde0fa"
 dependencies = [
- "cssparser-macros 0.6.1",
+ "cssparser-macros",
  "dtoa-short",
  "itoa",
  "matches",
@@ -1201,20 +1161,7 @@ version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae61cf9c0abb83bd659dab65b7e4e38d8236824c85f0f804f173567bda257d2"
 dependencies = [
- "cssparser-macros 0.6.1",
- "dtoa-short",
- "itoa",
- "phf 0.13.1",
- "smallvec",
-]
-
-[[package]]
-name = "cssparser"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c9cdaae01d5ed7882b04d795e7f752f46ff52d2fa3b50a20d28c464510bba98"
-dependencies = [
- "cssparser-macros 0.7.0",
+ "cssparser-macros",
  "dtoa-short",
  "itoa",
  "phf 0.13.1",
@@ -1226,16 +1173,6 @@ name = "cssparser-macros"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13b588ba4ac1a99f7f2964d24b3d896ddc6bf847ee3855dbd4366f058cfcd331"
-dependencies = [
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "cssparser-macros"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a2a99df6e410a8ff4245aa2006499ea662245f967cc7c0a38c83ef8eb44dbf"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -1492,7 +1429,7 @@ version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
 dependencies = [
- "convert_case 0.4.0",
+ "convert_case",
  "proc-macro2",
  "quote",
  "rustc_version",
@@ -1514,12 +1451,10 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
 dependencies = [
- "convert_case 0.10.0",
  "proc-macro2",
  "quote",
  "rustc_version",
  "syn 2.0.117",
- "unicode-xid",
 ]
 
 [[package]]
@@ -1736,12 +1671,6 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
-
-[[package]]
-name = "ego-tree"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b04dc5a38e4f151a79d9f2451ae6037fb6eaf5cba34771f44781f80e508498e3"
 
 [[package]]
 name = "elliptic-curve"
@@ -2287,15 +2216,6 @@ dependencies = [
  "generic-array 0.14.7",
  "rustversion",
  "typenum",
-]
-
-[[package]]
-name = "getopts"
-version = "0.2.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df"
-dependencies = [
- "unicode-width",
 ]
 
 [[package]]
@@ -3479,16 +3399,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "html5ever"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a1761807faccc9a19e86944bbf40610014066306f96edcdedc2fb714bcb7b8"
-dependencies = [
- "log",
- "markup5ever 0.39.0",
-]
-
-[[package]]
 name = "http"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4277,17 +4187,6 @@ name = "markup5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8983d30f2915feeaaab2d6babdd6bc7e9ed1a00b66b5e6d74df19aa9c0e91862"
-dependencies = [
- "log",
- "tendril 0.5.0",
- "web_atoms",
-]
-
-[[package]]
-name = "markup5ever"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7122d987ec5f704ee56f6e5b41a7d93722e9aae27ae07cafa4036c4d3f9757de"
 dependencies = [
  "log",
  "tendril 0.5.0",
@@ -6468,7 +6367,7 @@ checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
  "indexmap 1.9.3",
- "schemars_derive 0.8.22",
+ "schemars_derive",
  "serde",
  "serde_json",
  "url",
@@ -6495,7 +6394,6 @@ checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
  "ref-cast",
- "schemars_derive 1.2.1",
  "serde",
  "serde_json",
 ]
@@ -6513,37 +6411,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "schemars_derive"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde_derive_internals",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "scraper"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd0be4d296f048bfb06dd01bbc80ef789ddd2e55583e8d2e6b804942abfabc2"
-dependencies = [
- "cssparser 0.37.0",
- "ego-tree",
- "getopts",
- "html5ever 0.39.0",
- "precomputed-hash",
- "selectors 0.38.0",
- "tendril 0.5.0",
-]
 
 [[package]]
 name = "scrypt"
@@ -6649,25 +6520,6 @@ checksum = "c5d9c0c92a92d33f08817311cf3f2c29a3538a8240e94a6a3c622ce652d7e00c"
 dependencies = [
  "bitflags 2.11.1",
  "cssparser 0.36.0",
- "derive_more 2.1.1",
- "log",
- "new_debug_unreachable",
- "phf 0.13.1",
- "phf_codegen 0.13.1",
- "precomputed-hash",
- "rustc-hash",
- "servo_arc 0.4.3",
- "smallvec",
-]
-
-[[package]]
-name = "selectors"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8adfa1c298912827b8a28b223b3b874357397ae706e6190acd9bf28cee99114d"
-dependencies = [
- "bitflags 2.11.1",
- "cssparser 0.37.0",
  "derive_more 2.1.1",
  "log",
  "new_debug_unreachable",
@@ -7060,9 +6912,7 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 name = "skillstar"
 version = "0.0.4"
 dependencies = [
- "agent-client-protocol",
  "anyhow",
- "async-trait",
  "chrono",
  "dirs",
  "objc2",
@@ -7090,7 +6940,6 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tokio",
- "tokio-util",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
@@ -7117,7 +6966,6 @@ dependencies = [
  "skillstar-channels",
  "skillstar-core",
  "skillstar-git",
- "skillstar-learning",
  "skillstar-marketplace",
  "skillstar-models",
  "skillstar-skills",
@@ -7191,21 +7039,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillstar-learning"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "regex",
- "scraper",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "skillstar-core",
- "tempfile",
- "uuid",
-]
-
-[[package]]
 name = "skillstar-marketplace"
 version = "0.0.0"
 dependencies = [
@@ -7274,7 +7107,6 @@ dependencies = [
  "machine-uid",
  "regex",
  "reqwest 0.13.3",
- "scraper",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -7554,27 +7386,6 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "strum"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
-dependencies = [
- "strum_macros",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
 
 [[package]]
 name = "subtle"
@@ -8332,7 +8143,6 @@ checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
  "futures-util",
  "pin-project-lite",
@@ -8739,12 +8549,6 @@ name = "unicode-segmentation"
 version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
-
-[[package]]
-name = "unicode-width"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "unicode-xid"

@@ -304,8 +304,9 @@ pub struct UsageWindow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "number")]
     pub reset_at: Option<i64>,
-    /// Nested sub-quotas (e.g. Cursor's Auto+Composer / API split under Total).
-    /// The UI renders these inside a visual container beneath the main bar.
+    /// Nested sub-quotas (Cursor Auto+Composer / API) **or** per-model request
+    /// counts (Ollama Cloud `limits.*.models`). Request-count rows omit
+    /// `percent`/`total`; the UI lists them instead of drawing quota bars.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breakdown: Vec<UsageWindow>,
 }

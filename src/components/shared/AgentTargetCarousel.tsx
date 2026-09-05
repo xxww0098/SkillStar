@@ -39,7 +39,11 @@ export function AgentTargetCarousel<T extends AgentTargetCarouselItem>({
   if (items.length === 0) return null;
 
   return (
-    <HScrollRow count={items.length} itemWidth={28} gap={6} maxVisible={4} className={cn("min-w-0 gap-1.5", className)}>
+    // Fill the card footer: the track stretches to the wrapper's free width
+    // so the scroll arrows pin to its far edges, while the icons themselves
+    // keep their fixed spacing (start-anchored, never spread apart).
+    // No fixed visible-icon cap: narrow cards scroll, wide cards show all.
+    <HScrollRow count={items.length} itemWidth={28} gap={6} className={cn("min-w-0 flex-1 gap-1.5", className)}>
       {items.map((item) => {
         const stopped = !item.profile.enabled;
         const active = !stopped && item.selected === true;

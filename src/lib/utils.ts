@@ -122,7 +122,7 @@ export function formatInstalls(count: number): string {
   return count.toLocaleString();
 }
 
-export type SettingsFocusTarget = "ai-provider" | "acp" | "storage";
+export type SettingsFocusTarget = "ai-provider" | "storage";
 
 /** Event that opens the sidebar's GitHub account panel. */
 export const GITHUB_ACCOUNT_MENU_EVENT = "skillstar:open-github-account";
@@ -141,11 +141,6 @@ export function navigateToSettingsSection(target: SettingsFocusTarget) {
 /** Navigate to AI settings page via custom event */
 export function navigateToAiSettings() {
   navigateToSettingsSection("ai-provider");
-}
-
-/** Navigate to the ACP agent section used by Skill tutorial generation. */
-export function navigateToAcpSettings() {
-  navigateToSettingsSection("acp");
 }
 
 /** Open the sidebar GitHub account panel used by shared-channel sign-in. */

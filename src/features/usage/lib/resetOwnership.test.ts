@@ -18,9 +18,9 @@ describe("windowRendersOwnReset", () => {
     expect(windowRendersOwnReset(win({ reset_at: undefined }))).toBe(false);
   });
 
-  it("false for Codex 5h/7d labels (defer to meta)", () => {
-    expect(windowRendersOwnReset(win({ label: "5h" }))).toBe(false);
-    expect(windowRendersOwnReset(win({ label: "7d" }))).toBe(false);
+  it("true for 5h/7d rate-limit bars so each remaining row owns its countdown", () => {
+    expect(windowRendersOwnReset(win({ label: "5h" }))).toBe(true);
+    expect(windowRendersOwnReset(win({ label: "7d" }))).toBe(true);
   });
 
   it("false for monetary / breakdown / absolute", () => {
@@ -45,6 +45,17 @@ describe("computeBodyOwnsPrimaryReset", () => {
       usedPercent: 40,
       mode: "billing" as const,
       source: "weekly" as const,
+    };
+    expect(computeBodyOwnsPrimaryReset(usage, resetInfo, "infer")).toBe(true);
+  });
+
+  it("infers body ownership for 5h hourly so MetaStrip does not steal the 7d chip", () => {
+    const usage = { hourly: win({ label: "5h" }), weekly: win({ label: "7d" }), monthly: null };
+    const resetInfo = {
+      resetAt: 1_700_000_000,
+      usedPercent: 0,
+      mode: "rateLimit" as const,
+      source: "hourly" as const,
     };
     expect(computeBodyOwnsPrimaryReset(usage, resetInfo, "infer")).toBe(true);
   });

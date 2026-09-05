@@ -9,7 +9,6 @@ import type {
   SkillCardDeck,
   SkillContent,
   SkillMigrationReport,
-  SkillTutorial,
   SkillUpdateReport,
   SkillUpdateState,
   ResolveSkillUpdateResult,
@@ -37,11 +36,6 @@ export interface SkillCommands {
   read_skill_content: { args: { name: string }; result: SkillContent };
   update_skill_content: { args: { name: string; content: string }; result: void };
   list_skill_files: { args: { name: string }; result: string[] };
-  get_skill_tutorial: { args: { name: string; locale: string }; result: SkillTutorial };
-  generate_skill_tutorial: {
-    args: { name: string; locale: string; forceRefresh?: boolean };
-    result: SkillTutorial;
-  };
 
   // Local-authored skills
   delete_local_skill: { args: { name: string }; result: void };

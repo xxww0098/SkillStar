@@ -23,14 +23,14 @@ import { MCP_TOOL_LABELS, type McpOptionalField, splitTargetsByFieldSupport } fr
  * support matrix the user then has to cross-reference.
  */
 
-const textareaCls = "min-h-16 font-mono text-xs";
+const textareaCls = "min-h-[4.5rem] font-mono text-[13px] leading-relaxed";
 
 function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
-    <label className="mb-1 block text-xs font-medium text-foreground">
-      {children}
-      {hint ? <span className="ml-1.5 font-normal text-muted-foreground">{hint}</span> : null}
-    </label>
+    <div className="mb-1.5">
+      <label className="block text-[13px] font-medium leading-none tracking-tight text-foreground">{children}</label>
+      {hint ? <p className="mt-1 text-micro font-normal tracking-normal text-muted-foreground">{hint}</p> : null}
+    </div>
   );
 }
 
@@ -40,24 +40,20 @@ function SupportNote({ field, enabledToolIds }: { field: McpOptionalField; enabl
 
   if (enabledToolIds.length === 0) {
     return (
-      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">
+      <p className="mt-1.5 text-caption">
         {t("mcp.fieldSupportNoTargets", { tools: t(`mcp.fieldSupportList_${field}`) })}
       </p>
     );
   }
 
   if (ignored.length === 0) {
-    return (
-      <p className="mt-1 text-[11px] leading-relaxed text-emerald-600 dark:text-emerald-400">
-        {t("mcp.fieldSupportAll")}
-      </p>
-    );
+    return <p className="mt-1.5 text-caption text-emerald-600 paper:text-emerald-700">{t("mcp.fieldSupportAll")}</p>;
   }
 
   return (
     <p
       className={cn(
-        "mt-1 flex items-start gap-1.5 text-[11px] leading-relaxed",
+        "mt-1.5 flex items-start gap-1.5 text-caption",
         honoured.length === 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
       )}
     >
@@ -101,8 +97,8 @@ export function McpServerAdvancedFields({
     <InsetPanel className="space-y-3 bg-background/30 p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-foreground">{t("mcp.autoApproveAll")}</p>
-          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{t("mcp.autoApproveAllHint")}</p>
+          <p className="text-[13px] font-medium tracking-tight text-foreground">{t("mcp.autoApproveAll")}</p>
+          <p className="mt-1 text-caption">{t("mcp.autoApproveAllHint")}</p>
         </div>
         <button
           type="button"
@@ -124,7 +120,7 @@ export function McpServerAdvancedFields({
       </div>
 
       {autoApproveAll ? (
-        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-caption text-amber-600 paper:text-amber-700">
           {t("mcp.yoloWarning")}
         </p>
       ) : (
@@ -160,7 +156,7 @@ export function McpServerAdvancedFields({
           onChange={(event) => onTimeoutTextChange(event.target.value.replace(/[^0-9]/g, ""))}
           inputMode="numeric"
           placeholder="30000"
-          className="h-9 font-mono"
+          className="h-10 font-mono text-[13px]"
         />
         <SupportNote field="timeout" enabledToolIds={enabledToolIds} />
       </div>

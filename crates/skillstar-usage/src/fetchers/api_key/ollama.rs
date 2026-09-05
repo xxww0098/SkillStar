@@ -7,12 +7,14 @@
 //! `GET https://ollama.com/api/usage` with `Authorization: Bearer <key>`.
 //! The documented chat/generate APIs do not expose account quota; this
 //! endpoint exists (401 without a key) and is community-verified to return
-//! 0–1 consumed fractions on `limits.session.usage` / `limits.weekly.usage`.
+//! 0–1 consumed fractions on `limits.session.usage` / `limits.weekly.usage`,
+//! plus `{ name, request_count }` rows on `limits.*.models`.
 //! It does **not** report reset timestamps — those are a global grid
 //! (5h from Unix epoch; weekly Monday 00:00 UTC) predicted locally.
 //!
 //! Unknown extra fields are ignored. A window that cannot be read is
-//! dropped; the account only fails when **neither** window parses.
+//! dropped; a model row that cannot be read is dropped. The account only
+//! fails when **neither** window parses.
 
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
@@ -99,8 +101,51 @@ fn fraction_window(
         total: Some(100),
         percent: Some(percent),
         reset_at: Some(next_reset_epoch_secs(now, period, phase)),
+        breakdown: model_request_rows(node),
+    })
+}
+
+/// `{ name, request_count }` (aliases `model` / `requests`). Unreadable rows
+/// are dropped so a malformed model never kills the parent window.
+fn model_request_rows(node: Option<&Value>) -> Vec<UsageWindow> {
+    let Some(models) = node.and_then(|n| n.get("models")).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<UsageWindow> = models.iter().filter_map(parse_model_row).collect();
+    rows.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.label.cmp(&b.label)));
+    rows
+}
+
+fn parse_model_row(item: &Value) -> Option<UsageWindow> {
+    let name = item
+        .get("name")
+        .or_else(|| item.get("model"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    let count = item
+        .get("request_count")
+        .or_else(|| item.get("requests"))
+        .and_then(json_nonneg_i64)?;
+    Some(UsageWindow {
+        label: name.to_string(),
+        used: count,
+        total: None,
+        percent: None,
+        reset_at: None,
         breakdown: Vec::new(),
     })
+}
+
+fn json_nonneg_i64(value: &Value) -> Option<i64> {
+    let n = match value {
+        Value::Number(num) => num
+            .as_i64()
+            .or_else(|| num.as_u64().and_then(|u| i64::try_from(u).ok())),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    }?;
+    (n >= 0).then_some(n)
 }
 
 /// `usage` is a 0–1 consumed fraction. Values above 1.5 are treated as
@@ -236,6 +281,71 @@ mod tests {
         assert_eq!(consumed_percent(Some(&json!(42))), Some(42));
         assert_eq!(consumed_percent(Some(&json!("0.5"))), Some(50));
         assert_eq!(consumed_percent(Some(&json!(-0.1))), None);
+    }
+
+    #[test]
+    fn weekly_models_become_request_count_rows_sorted_by_count() {
+        let body = json!({
+            "limits": {
+                "session": {
+                    "usage": 0.056,
+                    "models": [
+                        { "name": "web search", "request_count": 3 },
+                        { "name": "glm-5.3-flash", "request_count": 1294 }
+                    ]
+                },
+                "weekly": {
+                    "usage": 0.095,
+                    "models": [
+                        { "name": "web fetch", "request_count": 2 },
+                        { "model": "glm-5.3-flash", "requests": 1294 },
+                        { "name": "  ", "request_count": 9 },
+                        { "name": "web search", "request_count": 3 }
+                    ]
+                }
+            }
+        });
+        let parsed = parse_usage(&body, ts(1_700_000_000));
+        let weekly = parsed.weekly.expect("weekly");
+        assert_eq!(
+            weekly
+                .breakdown
+                .iter()
+                .map(|row| (row.label.as_str(), row.used, row.percent, row.total))
+                .collect::<Vec<_>>(),
+            vec![
+                ("glm-5.3-flash", 1294, None, None),
+                ("web search", 3, None, None),
+                ("web fetch", 2, None, None),
+            ]
+        );
+        let hourly = parsed.hourly.expect("session");
+        assert_eq!(hourly.breakdown.len(), 2);
+        assert_eq!(hourly.breakdown[0].label, "glm-5.3-flash");
+        assert_eq!(hourly.breakdown[0].used, 1294);
+    }
+
+    #[test]
+    fn unreadable_model_rows_are_dropped() {
+        let body = json!({
+            "limits": {
+                "weekly": {
+                    "usage": 0.1,
+                    "models": [
+                        { "name": "ok", "request_count": 4 },
+                        { "name": "bad-count", "request_count": -1 },
+                        { "request_count": 8 },
+                        "not-an-object"
+                    ]
+                }
+            }
+        });
+        let parsed = parse_usage(&body, ts(1_700_000_000));
+        let weekly = parsed.weekly.expect("weekly");
+        assert_eq!(weekly.percent, Some(10));
+        assert_eq!(weekly.breakdown.len(), 1);
+        assert_eq!(weekly.breakdown[0].label, "ok");
+        assert_eq!(weekly.breakdown[0].used, 4);
     }
 
     #[test]

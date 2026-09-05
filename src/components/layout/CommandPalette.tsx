@@ -1,6 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  BookOpen,
   Command,
   Download,
   FolderKanban,
@@ -56,14 +55,6 @@ export function CommandPalette({
   // Build action list
   const actions: CommandPaletteAction[] = useMemo(() => {
     const navActions: CommandPaletteAction[] = [
-      {
-        id: "nav-learn",
-        label: t("sidebar.learn"),
-        icon: <BookOpen className="w-4 h-4" />,
-        section: t("commandPalette.navigation"),
-        onSelect: () => onNavigate("learn"),
-        keywords: ["learn", "guide", "tutorial"],
-      },
       {
         id: "nav-skills",
         label: t("sidebar.skills"),
@@ -264,10 +255,7 @@ export function CommandPalette({
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-[15%] -translate-x-1/2 w-full max-w-lg z-[201]"
           >
-            <div
-              className="overflow-hidden rounded-2xl border border-border/60 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5"
-              onKeyDown={handleKeyDown}
-            >
+            <div className="modal-surface overflow-hidden" onKeyDown={handleKeyDown}>
               {/* Search input */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50">
                 <Search className="w-4 h-4 text-muted-foreground shrink-0" />

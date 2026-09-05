@@ -2,7 +2,6 @@ pub mod agent_managed_skills;
 pub mod cli;
 pub mod global_deploy;
 pub mod instances;
-pub mod learning;
 pub mod mcp;
 pub mod models;
 pub mod skill_group_deploy;

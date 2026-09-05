@@ -540,6 +540,15 @@ fn mcp_presets_catalog_is_well_formed() {
         codegraph.homepage,
         "https://github.com/colbymchenry/codegraph"
     );
+
+    let cua_driver = presets
+        .iter()
+        .find(|p| p.id == "cua-driver")
+        .expect("Cua Driver must be a built-in MCP preset");
+    assert_eq!(cua_driver.command.as_deref(), Some("cua-driver"));
+    assert_eq!(cua_driver.args, ["mcp"]);
+    assert_eq!(cua_driver.transport, "stdio");
+    assert_eq!(cua_driver.homepage, "https://cua.ai");
 }
 
 #[test]

@@ -13,7 +13,7 @@
 | [mcp-modern-design-research.md](./mcp-modern-design-research.md) | historical | 冻结 | 2026-08 一次性外部调研快照（MCP 2026-07-28 规范、官方 registry、客户端配置矩阵）；被采纳的结论进入 `features/mcp` 与 `decisions.md` |
 | [mcp-current-state-audit.md](./mcp-current-state-audit.md) | historical | 冻结 | 2026-08 一次性代码盘点快照；其 B.4-a/F1/F2/A.3-f 与 R1 第 1 条已被 P0 修复实现，当前 MCP 契约见 `features/mcp` |
 | [skill-hooks-research-2026-08.md](./skill-hooks-research-2026-08.md) | historical | 冻结 | `skill_hooks` 模块从未被任何 command/CLI/前端调用，已删除；只保留 Claude 与 Codex hook 文件落点、条目结构和信任账本的实测结论，供日后重新实现时复核 |
-| [learn-p0-first-success.html](./learn-p0-first-success.html) | historical | 冻结 | 2026-08 Learn P0 首次成功体验的交互原型；明确为非生产稿，当前产品契约仍见 `docs/features/` |
+| [learn-p0-first-success.html](./learn-p0-first-success.html) | historical | 冻结 | 2026-08 Learn P0 首次成功体验的交互原型；学习功能已按 [D-053](../decisions.md#d-053移除学习功能与-skillstar-learning) 移除，本稿不再对应产品契约 |
 | [rust-engineering-audit-2026-08.md](./rust-engineering-audit-2026-08.md) | historical | 冻结 | 2026-08 对照《Rust 大型项目开发宝典》的一次性全仓审计快照；只保留**未落地**的量化发现、实测推翻宝典的结论与方法学边界。已落地部分见 git 历史；dev profile / `build-override` / `target/` 搬迁的决定见 `decisions.md` D-032 |
 
 ## 维护规则

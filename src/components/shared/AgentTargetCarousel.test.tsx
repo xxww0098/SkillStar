@@ -59,7 +59,7 @@ describe("AgentTargetCarousel", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("caps the visible rail at four Agent icons", () => {
+  it("fills the footer track with fixed-spacing icons: no visible-icon cap", () => {
     const { container } = render(
       <AgentTargetCarousel
         items={["one", "two", "three", "four", "five"].map((id) => item(id, false))}
@@ -67,7 +67,14 @@ describe("AgentTargetCarousel", () => {
       />,
     );
 
-    expect(container.querySelector(".hscroll-row-wrapper > div")).toHaveStyle({ maxWidth: "130px" });
+    const rail = container.querySelector(".hscroll-row-wrapper > div");
+    expect(rail).not.toHaveStyle({ maxWidth: "130px" });
+    // The track stretches to the wrapper (the card footer's free width, so
+    // scroll arrows pin to its far edges) while the icons keep their fixed
+    // spacing — start-anchored, never spread apart.
+    expect(rail).toHaveClass("flex-1");
+    expect(rail).toHaveClass("gap-1.5");
+    expect(rail).not.toHaveClass("justify-between");
   });
 
   it("keeps a Settings-disabled Agent as a stopped SVG instead of dropping it", () => {

@@ -85,7 +85,7 @@ export function RichMatrixShell({
           is a bordered filler column (grid lines, not blank). Extra agents
           still force horizontal scroll via min-w on agent cols.
         */}
-      <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-border/80 bg-card/70 shadow-sm [-webkit-overflow-scrolling:touch]">
+      <div className="overflow-x-auto overscroll-x-contain rounded-xl border border-border bg-card shadow-sm [-webkit-overflow-scrolling:touch]">
         <table className="w-full min-w-max border-collapse text-left text-xs">
           <colgroup>
             <col className="w-[200px]" />

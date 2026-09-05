@@ -138,6 +138,16 @@ fn remote_preset(
 pub fn get_mcp_presets() -> Vec<McpPreset> {
     let mcp_servers_repo = "https://github.com/modelcontextprotocol/servers";
     vec![
+        // ── Computer Use / OS Automation ────────────────────────────────
+        stdio_preset(
+            "cua-driver",
+            "Cua Driver — 跨平台 Computer-Use 驱动层，支持应用控制、窗口感知、AX 元素树、屏幕截图、键鼠操作与浏览器自动化（56 项工具）。",
+            "https://cua.ai",
+            "cua-driver",
+            &["mcp"],
+            &[],
+            &["computer-use", "automation", "desktop", "os"],
+        ),
         // ── Browser / automation ────────────────────────────────────────
         stdio_preset(
             "adspower-local-api",

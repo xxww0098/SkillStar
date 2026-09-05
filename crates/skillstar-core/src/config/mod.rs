@@ -1,6 +1,5 @@
 //! Backend-owned user configuration for SkillStar.
 
-pub mod acp;
 pub mod github_health;
 pub mod github_mirror;
 pub mod github_rewrite;

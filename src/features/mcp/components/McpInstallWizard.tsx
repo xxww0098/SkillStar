@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import type { McpInstallOutcome, McpInstallInputScope, McpInstallRejection, McpToolId } from "../../../types";
+import type { McpAgentTarget } from "../lib/agentTargets";
 import { buildCommandConfirmation, buildEnvPreview } from "../lib/commandPreview";
 import {
   buildInstallAnswers,
@@ -57,6 +58,8 @@ interface McpInstallWizardProps {
   noteForTool?: (toolId: McpToolId) => string | null;
   /** Settings-enabled MCP targets, used as the first seed for the picker. */
   defaultEnabled?: Record<string, boolean>;
+  /** Settings-enabled MCP agents; picker length follows this list. */
+  targets?: readonly McpAgentTarget[];
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -75,6 +78,7 @@ export function McpInstallWizard({
   onCancel,
   noteForTool,
   defaultEnabled = {},
+  targets = [],
 }: McpInstallWizardProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -266,6 +270,7 @@ export function McpInstallWizard({
 
       <Section title={t("mcp.fieldEnabledTools")}>
         <McpToolTargetPicker
+          targets={targets}
           enabled={enabledTools}
           onToggle={(toolId, next) => setEnabled({ ...enabledTools, [toolId]: next })}
           noteFor={noteForTool}

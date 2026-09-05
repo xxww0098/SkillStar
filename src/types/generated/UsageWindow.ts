@@ -14,7 +14,8 @@ percent?: number | null,
  */
 reset_at?: number, 
 /**
- * Nested sub-quotas (e.g. Cursor's Auto+Composer / API split under Total).
- * The UI renders these inside a visual container beneath the main bar.
+ * Nested sub-quotas (Cursor Auto+Composer / API) **or** per-model request
+ * counts (Ollama Cloud `limits.*.models`). Request-count rows omit
+ * `percent`/`total`; the UI lists them instead of drawing quota bars.
  */
 breakdown?: Array<UsageWindow>, };

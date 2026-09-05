@@ -173,34 +173,6 @@ export interface SkillContent {
   content: string;
 }
 
-export type SkillTutorialState = "missing" | "fresh" | "stale";
-
-export type SkillTutorialStaleReason = "content_changed" | "generator_changed";
-
-export type SkillTutorialStyle = "guided" | "reference" | "workshop";
-
-export interface SkillTutorialMetadata {
-  skillName: string;
-  contentHash: string;
-  promptVersion: string;
-  schemaVersion: string;
-  /** Prompt style used to generate this artifact. Missing only on legacy artifacts. */
-  tutorialStyle?: SkillTutorialStyle;
-  agentLabel: string;
-  generatedAt: string;
-  fileCount: number;
-  totalBytes: number;
-}
-
-/** Persisted HTML tutorial status returned by the backend after hash validation. */
-export interface SkillTutorial {
-  state: SkillTutorialState;
-  currentHash: string;
-  html: string | null;
-  metadata: SkillTutorialMetadata | null;
-  staleReason: SkillTutorialStaleReason | null;
-}
-
 export interface FrontmatterEntry {
   key: string;
   value: string;

@@ -86,6 +86,7 @@ export function LocalSkillsContent({
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [selectedSkillNames, setSelectedSkillNames] = useState<Set<string>>(new Set());
   const [quickPackSkills, setQuickPackSkills] = useState<string[]>([]);
+  const [quickPackName, setQuickPackName] = useState("");
   const [deployModalOpen, setDeployModalOpen] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
@@ -898,14 +899,17 @@ export function LocalSkillsContent({
         onClose={() => {
           setGroupModalOpen(false);
           setQuickPackSkills([]);
+          setQuickPackName("");
         }}
         availableSkills={skills}
         existingNames={groups.map((g) => g.name)}
+        initialName={quickPackName}
         initialSkills={quickPackSkills.length > 0 ? quickPackSkills : Array.from(selectedSkillNames)}
         onSave={async (name, description, icon, skillList) => {
           await createGroup(name, description, icon, skillList);
           clearSelection();
           setQuickPackSkills([]);
+          setQuickPackName("");
         }}
       />
 
@@ -928,9 +932,10 @@ export function LocalSkillsContent({
           setImportModalOpen(false);
           setImportBundleOpen(true);
         }}
-        onPackGroup={(names: string[]) => {
+        onPackGroup={(names: string[], defaultName: string) => {
           setImportModalOpen(false);
           setQuickPackSkills(names);
+          setQuickPackName(defaultName);
           setGroupModalOpen(true);
         }}
         initialShareCode={initialShareCode}

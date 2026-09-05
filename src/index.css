@@ -30,26 +30,30 @@
    system color scheme, so status colors need their own variant to swap on it. */
 @custom-variant paper (&:where([data-bg-style="paper"] *));
 
-/* ========== SkillStar Dark Glassmorphism Design System ========== */
+/* ========== SkillStar shell: OLED canvas + opaque panels ==========
+   Dark tokens follow the developer-tool OLED palette (slate navy, opaque
+   surfaces). Brand primary stays blue — the palette's "run green" is
+   reserved for success, not chrome. Paper is a cool professional desk,
+   not inverted dark. */
 
 @theme {
-  --color-background: #0a0a0f;
-  --color-foreground: #f4f4f5;
+  --color-background: #080d16;
+  --color-foreground: #f8fafc;
   --color-primary: #3b82f6;
   --color-primary-rgb: 59, 130, 246;
   --color-warning-rgb: 245, 158, 11;
   --color-success-rgb: 16, 185, 129;
   --color-primary-hover: #60a5fa;
   --color-primary-foreground: #ffffff;
-  --color-card: rgba(255, 255, 255, 0.055);
-  --color-card-hover: rgba(255, 255, 255, 0.09);
-  --color-card-foreground: #f4f4f5;
-  --color-border: rgba(255, 255, 255, 0.13);
-  --color-border-subtle: rgba(255, 255, 255, 0.075);
-  --color-muted: rgba(255, 255, 255, 0.085);
-  --color-muted-foreground: #a1a1aa;
+  --color-card: #1b2336;
+  --color-card-hover: #222b40;
+  --color-card-foreground: #f8fafc;
+  --color-border: rgba(148, 163, 184, 0.16);
+  --color-border-subtle: rgba(148, 163, 184, 0.09);
+  --color-muted: #272f42;
+  --color-muted-foreground: #94a3b8;
   --color-accent: rgba(59, 130, 246, 0.18);
-  --color-accent-foreground: #60a5fa;
+  --color-accent-foreground: #93c5fd;
   --color-destructive: #ef4444;
   --color-success: #22c55e;
   --color-warning: #f59e0b;
@@ -62,15 +66,15 @@
   --color-ai-border-hover: rgba(139, 92, 246, 0.6);
   --color-ai-bg-hover: rgba(139, 92, 246, 0.12);
   --color-ai-shadow: rgba(139, 92, 246, 0.12);
-  --color-sidebar: rgba(255, 255, 255, 0.035);
-  --color-sidebar-hover: rgba(255, 255, 255, 0.07);
-  --color-sidebar-active: rgba(59, 130, 246, 0.18);
-  --color-input: rgba(255, 255, 255, 0.06);
-  --color-input-border: rgba(255, 255, 255, 0.13);
-  --color-overlay: rgba(0, 0, 0, 0.45);
-  --color-shadow: rgba(0, 0, 0, 0.6);
-  --color-glass-border: rgba(255, 255, 255, 0.13);
-  --color-glass-ring: rgba(255, 255, 255, 0.07);
+  --color-sidebar: #0f172a;
+  --color-sidebar-hover: rgba(148, 163, 184, 0.1);
+  --color-sidebar-active: rgba(59, 130, 246, 0.2);
+  --color-input: #151c2c;
+  --color-input-border: rgba(148, 163, 184, 0.18);
+  --color-overlay: rgba(2, 6, 23, 0.55);
+  --color-shadow: rgba(2, 6, 23, 0.45);
+  --color-glass-border: rgba(148, 163, 184, 0.18);
+  --color-glass-ring: rgba(148, 163, 184, 0.08);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -79,17 +83,22 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+:root {
+  color-scheme: dark;
+}
+
 :root[data-bg-style="paper"] {
-  --color-background: #f5f7fb;
+  color-scheme: light;
+  --color-background: #e2e8f0;
   --color-foreground: #0f172a;
   --color-success: #15803d;
   --color-success-rgb: 21, 128, 61;
   --color-card: #ffffff;
   --color-card-hover: #f8fafc;
   --color-card-foreground: #0f172a;
-  --color-border: rgba(15, 23, 42, 0.15);
-  --color-border-subtle: rgba(15, 23, 42, 0.08);
-  --color-muted: rgba(15, 23, 42, 0.07);
+  --color-border: #cbd5e1;
+  --color-border-subtle: #e2e8f0;
+  --color-muted: #e8ecf1;
   --color-muted-foreground: #475569;
   --color-accent: rgba(59, 130, 246, 0.12);
   --color-accent-foreground: #2563eb;
@@ -101,16 +110,16 @@
   --color-ai-border-hover: rgba(109, 40, 217, 0.75);
   --color-ai-bg-hover: rgba(109, 40, 217, 0.12);
   --color-ai-shadow: rgba(109, 40, 217, 0.18);
-  --color-sidebar: rgba(255, 255, 255, 0.92);
+  --color-sidebar: #f8fafc;
   --color-sidebar-hover: #ffffff;
   --color-sidebar-active: rgba(59, 130, 246, 0.18);
   --color-input: #ffffff;
-  --color-input-border: rgba(15, 23, 42, 0.15);
+  --color-input-border: #cbd5e1;
   --color-primary-hover: #2563eb;
-  --color-overlay: rgba(15, 23, 42, 0.35);
-  --color-shadow: rgba(15, 23, 42, 0.18);
-  --color-glass-border: rgba(15, 23, 42, 0.15);
-  --color-glass-ring: rgba(15, 23, 42, 0.08);
+  --color-overlay: rgba(15, 23, 42, 0.32);
+  --color-shadow: rgba(15, 23, 42, 0.1);
+  --color-glass-border: #cbd5e1;
+  --color-glass-ring: rgba(15, 23, 42, 0.06);
 }
 
 /* ========== Base ========== */
@@ -126,13 +135,11 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-color: var(--color-background);
   }
 
   body {
     background-color: var(--color-background);
-    background-image:
-      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
     color: var(--color-foreground);
     min-height: 100vh;
     /* biome-ignore lint/suspicious/noDuplicateProperties: dvh fallback for older browsers */
@@ -162,12 +169,6 @@
     .animate-ping {
       animation: none !important;
     }
-  }
-
-  :root[data-bg-style="paper"] body {
-    background-image:
-      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.12) 0%, transparent 55%),
-      radial-gradient(ellipse at 100% 100%, rgba(148, 163, 184, 0.14) 0%, transparent 45%);
   }
 
   #root {
@@ -282,24 +283,23 @@
   }
 
   .ss-page-scroll {
-    @apply flex-1 overflow-y-auto p-6;
+    @apply flex-1 overflow-y-auto p-5;
     scrollbar-gutter: stable;
     container-type: inline-size;
     overscroll-behavior-y: contain;
   }
 
   /**
-   * Main-column glass shell (Skills mode + Models mode): single fixed layer in App, outside route `key`.
+   * Main workspace panel. Lives outside the route `key` so Skills-mode hops
+   * do not remount the shell.
    *
-   * Deliberately has no `backdrop-filter`: the app root paints an opaque
-   * `--color-background` directly behind this element, so blurring that
-   * backdrop is a no-op that only costs a viewport-sized composited layer
-   * (and greys out text by dropping subpixel antialiasing). Same reason the
-   * shadow does not animate on hover — a 95px blur repaint across the whole
-   * column for an invisible delta.
+   * Opaque `--color-sidebar` (same as the rail) on the canvas
+   * `--color-background`. No `backdrop-filter` and no large blur shadow:
+   * those used to grey out text and, when the sidebar width animated,
+   * force a viewport-sized WKWebView repaint every frame.
    */
   .ss-main-chrome {
-    @apply flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-l-[26px] rounded-r-none border border-border/80 bg-card/80 shadow-[0_24px_80px_-40px_var(--color-shadow)] ring-1 ring-glass-ring;
+    @apply flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-sidebar;
   }
 
   .ss-page-stack {
@@ -683,15 +683,15 @@
      Dark glass uses a near-solid mix of background (not translucent card)
      so secondary text and disabled controls keep WCAG AA contrast. */
   .modal-surface {
-    @apply relative overflow-hidden rounded-[24px] border border-glass-border backdrop-blur-3xl ring-1 ring-glass-ring;
-    background-color: color-mix(in srgb, var(--color-background) 90%, rgb(255 255 255) 10%);
-    box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
+    @apply relative overflow-hidden rounded-xl border border-glass-border ring-1 ring-glass-ring;
+    background-color: var(--color-sidebar);
+    box-shadow: 0 16px 48px -24px var(--color-shadow);
   }
 
   .modal-surface-subtle {
-    @apply relative overflow-hidden rounded-[24px] border border-border backdrop-blur-3xl ring-1 ring-border-subtle;
-    background-color: color-mix(in srgb, var(--color-background) 92%, rgb(255 255 255) 8%);
-    box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
+    @apply relative overflow-hidden rounded-xl border border-border ring-1 ring-border-subtle;
+    background-color: var(--color-sidebar);
+    box-shadow: 0 16px 48px -24px var(--color-shadow);
   }
 
   :root[data-bg-style="paper"] .modal-surface,

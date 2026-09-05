@@ -91,11 +91,13 @@ Settings 的 Agent 列表自带**搜索 + 状态筛选**（全部 / 已启用 / 
 的软链重放（reconcile）到全部镜像目录（`deployment/mirror.rs`）。重放是幂等对账，所以
 后装的状态、被产品升级重新解包过的目录都会在下一次部署时自动补齐。
 
-目前只有 Antigravity：一个 `antigravity` profile，镜像到 app / CLI / IDE 三种状态的
-`~/.gemini/antigravity{,-cli,-ide}/builtin/skills`。约束：
+目前只有 Antigravity：一个 `antigravity` profile 统一支持 App、CLI 与 IDE 三种状态，
+主全局目录为 `~/.gemini/antigravity/skills`，镜像到 CLI 专属的 `~/.gemini/antigravity-cli/skills`、
+跨端共享的 `~/.gemini/skills`、生态配置全局 `~/.gemini/config/skills` 以及 IDE 专属的 `~/.gemini/antigravity-ide/skills`。约束：
 
-- 镜像目录的父目录（`builtin/`）由产品自己创建，不存在即视为该状态未安装，SkillStar 不代建。
-- 镜像里只删软链，绝不动真实目录 —— 产品自带的内置技能就住在旁边。
+- 镜像目录的父目录由对应产品或运行时创建，不存在即视为该状态未安装，SkillStar 不代建（`~/.gemini/skills` 的父目录为 `~/.gemini/`）。
+- 绝不向产品的 `builtin/skills` 注入用户软链（那是系统自带技能空间）；部署对账时会自动自愈清理历史遗留在 `builtin/skills` 下的旧软链。
+- 镜像里只删软链，绝不动用户或系统自带的真实目录 —— 产品自带的内置技能就住在旁边。
 - 弃用的 per-state id（`antigravity-cli` / `antigravity-ide`）通过 `compatible_profile_id`
   与 CLI 的 `normalize_agent_ids` 折叠到 `antigravity`，旧配置和 `--agent antigravity-cli` 继续可用。
 
