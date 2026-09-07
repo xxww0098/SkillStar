@@ -24,6 +24,8 @@ flowchart LR
 
 前端不直接触达业务文件或网络。GUI 和 CLI 应复用同一域实现；表现层只负责输入输出差异。
 
+协议叶子（当前为 `skill-spec`）位于域 crate 之下：它们只解析外部技术规范，不依赖任何 `skillstar-*` 产品 crate。SkillStar 的安装门禁、发现与打包仍由 `skillstar-skills` 等产品 crate 做薄 adapter。
+
 ## 技术选择的事实源
 
 版本不在文档硬编码：

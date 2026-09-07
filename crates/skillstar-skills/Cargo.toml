@@ -26,7 +26,7 @@ toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 skillstar-core = { path = "../skillstar-core" }
-serde_yaml = { workspace = true }
+skill-spec = { path = "../skill-spec" }
 dirs = { workspace = true }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
