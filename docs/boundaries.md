@@ -25,6 +25,7 @@ SkillStar/
 │   ├── src/lib.rs               # Tauri composition root
 │   └── src/main.rs              # 可执行入口
 ├── crates/
+│   ├── skill-spec/              # 产品无关的 Agent Skills SKILL.md 规范叶子
 │   ├── skillstar-core/          # 共享契约、配置、基础设施、Provider 元数据
 │   ├── skillstar-git/           # Git transport/ops/tree/history 叶子
 │   ├── skillstar-skills/        # 技能、项目、部署、Agent profile、GitHub App 身份
@@ -46,10 +47,11 @@ SkillStar/
 
 | Crate | 拥有 | 不拥有 |
 | --- | --- | --- |
+| `skill-spec` | 公开 Agent Skills `SKILL.md` 的 frontmatter 解析与诊断（issue code、阻塞/咨询分级、manifest 大小上限） | SkillStar 安装编排、Hub/lockfile、discovery、bundle，或任何 `skillstar-*` 产品依赖 |
 | `skillstar-core` | 路径、文件操作、DB pool/migration、共享错误和配置、HTTP client、共享 `Skill` 契约、Provider identity/鉴权/余额端点元数据（`providers`） | 任一产品域的业务流程 |
 | `skillstar-git` | Git 子进程 transport（认证材料、代理、取消、进度、脱敏）、tree-hash、repo history、dismissed skills、操作级 Git 辅助 | 依赖 content/lockfile/channels 的 GitHub 仓库管理（`gh_manager` 留在 `skillstar-skills::git`） |
 | `skillstar-channels` | 组织共享频道（GitHub REST 编排、权限投影、descriptor、registry、成员/邀请、registration、release manifest/publish、subscription store、精确发布安装、逐 Skill 升级事务、自动升级策略）与 patrol；`policy::ChannelAwarePolicy` 实现 skills 的 mutation gate | 技能安装/更新核心实现、Marketplace、Usage、Models |
-| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、统一 `GitSkillFacade`、GitHub 仓库管理（`git::gh_manager` 编排 + `git::gh_rest` 发布 REST）、项目 manifest、deployment；SKILL.md frontmatter 质量校验（`validation`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub API 更新检测快速路径（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝；Agent spec/registry/custom profile 与 profile storage（`agents`）；GitHub App 设备授权、token 生命周期、凭据存储与网关（`github_auth`） | Marketplace 搜索、Usage、Models，或拆出叶子的业务编排 |
+| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、统一 `GitSkillFacade`、GitHub 仓库管理（`git::gh_manager` 编排 + `git::gh_rest` 发布 REST）、项目 manifest、deployment；SKILL.md 安装门禁适配（`validation::ensure_installable`，解析委托 `skill-spec`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub API 更新检测快速路径（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝；Agent spec/registry/custom profile 与 profile storage（`agents`）；GitHub App 设备授权、token 生命周期、凭据存储与网关（`github_auth`） | Marketplace 搜索、Usage、Models，或拆出叶子的业务编排；不再拥有 SKILL.md frontmatter 解析实现 |
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场；MCP 多源 catalog（源注册表、用户自定义源持久化、跨源抓取合并、`server.json` 解析、参数化卡片查询）与 curated 数据 | 技能安装实现、MCP 本地配置、registry→store 的映射 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store 与 per-tool 投影、双纪元健康探测 | Usage 订阅、Marketplace 快照或 catalog 形态选择 |
 | `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排、桌面应用多开 |
@@ -62,6 +64,7 @@ SkillStar/
 
 ```mermaid
 flowchart LR
+  spec["skill-spec"]
   core["skillstar-core"]
   git["skillstar-git"]
   skills["skillstar-skills"]
@@ -75,6 +78,7 @@ flowchart LR
 
   market --> core
   models --> core
+  skills --> spec
   skills --> core
   skills --> git
   channels --> core
@@ -111,6 +115,7 @@ flowchart LR
 - `skills ↔ marketplace`、`usage → models`、域 crate → `src-tauri`。
 - 命令层为绕过边界而直接拼装跨域事务。
 - leaf crate 用 default feature 隐式决定最终二进制的重 feature；由 `src-tauri` 显式选择。
+- 协议叶子（`skill-spec`，以及将来若拆出的 `mcp-registry-spec`）依赖任一 `skillstar-*` crate、Tauri、业务 HTTP/DB 运行时或打包库。它们只解析外部技术规范，由产品 crate 做薄 adapter。
 
 依赖方向由 `Cargo.toml` 和 `scripts/internal/check_workspace_deps.sh` 共同看门；本文件不维护依赖版本。
 Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfile 由同一 guard 拒绝。
@@ -195,6 +200,7 @@ src-tauri/src/commands/mcp_marketplace.rs   # 同上
 4. 仅命令序列化/事件适配：放 `src-tauri/src/commands/`。
 5. 真正跨域且无业务语义的基础能力：才考虑 `skillstar-core` 或前端 shared/lib。
 6. 只有变更节奏、依赖集合或 deletion test 证明独立编译单元有收益时，才晋升为新 crate。
+7. 外部技术规范（Agent Skills frontmatter、未来的 MCP registry schema）若满足 D-002，可成为产品无关协议叶子；不得把产品编排塞进该叶子。
 
 ## 变化触发器
 

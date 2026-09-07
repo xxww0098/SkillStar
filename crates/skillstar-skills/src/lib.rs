@@ -18,7 +18,7 @@
 //! | [`projects`] / [`deployment`] | Project manifest, link-copy deploy |
 //! | [`agents`] | Agent spec, registry, custom profiles, activation prefs |
 //! | [`github_auth`] | GitHub App device flow, token store, API credential |
-//! | [`validation`] / [`discovery`] / [`plugin_manifest`] | Frontmatter gate, repo scan, plugin manifests; pack-root shims |
+//! | [`validation`] / [`discovery`] / [`plugin_manifest`] | Frontmatter install gate (via `skill-spec`), repo scan, plugin manifests; pack-root shims |
 //! | library modules | install, update, bundle, local, repo scan, groups |
 
 pub mod agents;

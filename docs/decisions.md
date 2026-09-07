@@ -496,6 +496,15 @@
 - 后果：获得——同一台 Mac 可同时跑两份 Cursor / Grok Bot / Antigravity 而不污染默认 profile。承担——语言服务等仍可能写共享日志目录；Claude Desktop 无法多开；非 macOS 没有启动能力。
 - 证据：`crates/skillstar-app/src/instances/`、`docs/features/usage/README.md`、本决策对应提交。
 
+## D-055：外部技术规范可以成为产品无关叶子 crate
+
+- 日期：2026-09-07
+- 状态：accepted
+- 背景：D-002 要求新能力先留在最内聚的现有 crate，只有独立变更节奏、依赖集合或 deletion test 证明收益时才拆出。Agent Skills `SKILL.md` frontmatter 是上游公开规范（agentskills.io），其解析与诊断不依赖 SkillStar 的 Hub、lockfile、discovery 或安装编排；继续放在 `skillstar-skills::validation` 会把规范演进绑在产品 crate 的编译单元上。D-049 吸收的是通不过 deletion test 的浅产品 crate，不禁止真正的规范叶子。
+- 决策：满足 D-002 时，外部技术规范可以成为产品无关叶子 crate。第一例是 `skill-spec`：只拥有 SKILL.md frontmatter 解析与 issue 诊断，不得依赖任何 `skillstar-*` crate，也不得引入 Tauri、业务 HTTP/DB 或打包库。`skillstar-skills::validation` 保留公开路径与 `ensure_installable` 产品 adapter。同类候选（如 MCP registry schema）沿用同一规则，但不在本决策中预建空 crate。
+- 后果：获得——规范解析可独立测试、独立跟随上游，产品 crate 不再编译这份纯 YAML 逻辑的反向依赖。承担——多一个 workspace member；产品策略（何为阻塞、安装错误文案）必须留在 adapter，不能渗进叶子。Deletion test：删掉 `skill-spec` 只会把 frontmatter 解析搬回 `skillstar-skills`，不会拆散安装/发现/打包；它能独立存在是因为上游规范节奏与极小依赖集，而不是因为产品编排需要它。
+- 证据：`crates/skill-spec/`、`crates/skillstar-skills/src/validation.rs`、`scripts/internal/check_workspace_deps.sh`、[boundaries.md](./boundaries.md) 协议叶子规则。
+
 ## 新增记录格式
 
 
