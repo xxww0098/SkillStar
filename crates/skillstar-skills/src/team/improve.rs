@@ -3,11 +3,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use skillstar_core::infra::error::AppError;
+use std::cmp::Reverse;
 use uuid::Uuid;
 
-use super::FRICTION_THRESHOLD;
 use super::recall::installed_skill_names;
 use super::store::{self, UsageEvent};
+use super::FRICTION_THRESHOLD;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Learning {
@@ -153,7 +154,7 @@ pub fn share_learning(draft: LearningDraft, now: DateTime<Utc>) -> Result<Learni
 
 pub fn list_learnings() -> Result<Vec<Learning>, AppError> {
     let mut learnings = store::load()?.learnings;
-    learnings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    learnings.sort_by_key(|learning| Reverse(learning.created_at));
     Ok(learnings)
 }
 
@@ -251,7 +252,7 @@ pub fn digest(now: DateTime<Utc>) -> Result<TeamDigest, AppError> {
 
     let learning_count = store.learnings.len();
     let mut recent_learnings = store.learnings;
-    recent_learnings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    recent_learnings.sort_by_key(|learning| Reverse(learning.created_at));
     recent_learnings.truncate(8);
 
     Ok(TeamDigest {
