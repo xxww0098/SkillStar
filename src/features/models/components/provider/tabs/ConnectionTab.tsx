@@ -1,5 +1,5 @@
-import { Copy, Eye, EyeOff, KeyRound, Network, Plus, UserRound } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Copy, Eye, EyeOff, KeyRound, Network, UserRound } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
@@ -7,12 +7,12 @@ import { copyToClipboard } from "../../../../../lib/utils";
 import type { ProviderForm } from "../../../hooks/useProviderForm";
 import { ModelFormField, ModelFormSection, modelInputClass } from "../../providerForm/ProviderConfigPrimitives";
 
-/** 连接页签：名称、API Key、双端点、模型列表 URL。 */
+/** 连接页签优先配置 Anthropic，附加设置保留其它协议与目录地址。 */
 export function ConnectionTab({ form }: { form: ProviderForm }) {
   const { values, setField, validationErrorCode } = form;
   const { t } = useTranslation();
   const [showApiKey, setShowApiKey] = useState(false);
-  const [showAnthropicUrl, setShowAnthropicUrl] = useState(Boolean(values.baseUrlAnthropic.trim()));
+  const [showAdditionalSettings, setShowAdditionalSettings] = useState(Boolean(values.baseUrlOpenai.trim()));
 
   const handleCopyApiKey = useCallback(async () => {
     if (!values.apiKey) return;
@@ -25,6 +25,10 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
   const openaiError = fieldError("invalidOpenaiUrl");
   const anthropicError = fieldError("invalidAnthropicUrl");
   const modelsUrlError = fieldError("invalidModelsUrl");
+
+  useEffect(() => {
+    if (openaiError || modelsUrlError) setShowAdditionalSettings(true);
+  }, [openaiError, modelsUrlError]);
 
   return (
     <div className="grid gap-3.5">
@@ -93,68 +97,66 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
         icon={<Network className="h-4 w-4" />}
       >
         <ModelFormField
-          id="provider-openai-endpoint"
-          label={t("models.connectionTab.openaiEndpoint")}
-          info={t("models.connectionTab.openaiEndpointHint")}
-          error={openaiError}
+          id="provider-anthropic-endpoint"
+          label={t("models.connectionTab.anthropicEndpoint")}
+          info={t("models.connectionTab.anthropicEndpointHint")}
+          error={anthropicError}
         >
           <Input
-            id="provider-openai-endpoint"
-            value={values.baseUrlOpenai}
-            onChange={(e) => setField("baseUrlOpenai", e.target.value)}
-            placeholder="https://api.example.com/v1"
-            className={modelInputClass}
-            aria-invalid={Boolean(openaiError)}
-            aria-describedby={openaiError ? "provider-openai-endpoint-error" : undefined}
-          />
-        </ModelFormField>
-
-        {showAnthropicUrl || values.baseUrlAnthropic ? (
-          <ModelFormField
             id="provider-anthropic-endpoint"
-            label={t("models.connectionTab.anthropicEndpoint")}
-            info={t("models.connectionTab.anthropicEndpointHint")}
-            error={anthropicError}
-          >
-            <Input
-              id="provider-anthropic-endpoint"
-              value={values.baseUrlAnthropic}
-              onChange={(e) => setField("baseUrlAnthropic", e.target.value)}
-              placeholder="https://api.example.com/anthropic"
-              className={modelInputClass}
-              aria-invalid={Boolean(anthropicError)}
-              aria-describedby={anthropicError ? "provider-anthropic-endpoint-error" : undefined}
-            />
-          </ModelFormField>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-fit gap-1.5 text-xs text-muted-foreground"
-            onClick={() => setShowAnthropicUrl(true)}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {t("models.connectionTab.addAnthropicEndpoint")}
-          </Button>
-        )}
-
-        <ModelFormField
-          id="provider-models-url"
-          label={t("models.connectionTab.modelsUrl")}
-          info={t("models.connectionTab.modelsUrlHint")}
-          error={modelsUrlError}
-        >
-          <Input
-            id="provider-models-url"
-            value={values.modelsUrl}
-            onChange={(e) => setField("modelsUrl", e.target.value)}
-            placeholder="https://api.example.com/v1/models"
+            value={values.baseUrlAnthropic}
+            onChange={(e) => setField("baseUrlAnthropic", e.target.value)}
+            placeholder="https://api.example.com/anthropic"
             className={modelInputClass}
-            aria-invalid={Boolean(modelsUrlError)}
-            aria-describedby={modelsUrlError ? "provider-models-url-error" : undefined}
+            aria-invalid={Boolean(anthropicError)}
+            aria-describedby={anthropicError ? "provider-anthropic-endpoint-error" : undefined}
           />
         </ModelFormField>
+
+        <details
+          open={showAdditionalSettings}
+          onToggle={(event) => setShowAdditionalSettings(event.currentTarget.open)}
+          className="border-t border-border/50 pt-3"
+        >
+          <summary className="cursor-pointer rounded-md text-xs font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+            {t("models.claudeWorkbench.additionalSettings")}
+          </summary>
+          <div className="mt-3.5 grid gap-3.5">
+            <ModelFormField
+              id="provider-openai-endpoint"
+              label={t("models.connectionTab.openaiEndpoint")}
+              info={t("models.connectionTab.openaiEndpointHint")}
+              error={openaiError}
+            >
+              <Input
+                id="provider-openai-endpoint"
+                value={values.baseUrlOpenai}
+                onChange={(e) => setField("baseUrlOpenai", e.target.value)}
+                placeholder="https://api.example.com/v1"
+                className={modelInputClass}
+                aria-invalid={Boolean(openaiError)}
+                aria-describedby={openaiError ? "provider-openai-endpoint-error" : undefined}
+              />
+            </ModelFormField>
+
+            <ModelFormField
+              id="provider-models-url"
+              label={t("models.connectionTab.modelsUrl")}
+              info={t("models.connectionTab.modelsUrlHint")}
+              error={modelsUrlError}
+            >
+              <Input
+                id="provider-models-url"
+                value={values.modelsUrl}
+                onChange={(e) => setField("modelsUrl", e.target.value)}
+                placeholder="https://api.example.com/v1/models"
+                className={modelInputClass}
+                aria-invalid={Boolean(modelsUrlError)}
+                aria-describedby={modelsUrlError ? "provider-models-url-error" : undefined}
+              />
+            </ModelFormField>
+          </div>
+        </details>
       </ModelFormSection>
     </div>
   );

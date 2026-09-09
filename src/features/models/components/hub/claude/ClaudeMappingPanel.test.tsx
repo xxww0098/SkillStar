@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderEntryFlat, RoleTarget } from "../../../../../../types";
-import type { RoleDefDto } from "../../../../../../types/generated/RoleDefDto";
+import type { ProviderEntryFlat, RoleTarget } from "../../../../../types";
+import type { RoleDefDto } from "../../../../../types/generated/RoleDefDto";
 import { claudeFillCount, oneClickClaudeRoles, seedClaudeRoles } from "./ClaudeMappingPanel";
 
 function provider(partial: Partial<ProviderEntryFlat> = {}): ProviderEntryFlat {
@@ -31,6 +31,11 @@ const DEFS: RoleDefDto[] = [
 ];
 
 describe("oneClickClaudeRoles", () => {
+  it("cannot propose assignments without declared roles", () => {
+    expect(oneClickClaudeRoles({}, [], "p1", ["catalog-model"], "default-model")).toBeNull();
+    expect(seedClaudeRoles(provider(), [])).toEqual({});
+  });
+
   it("broadcasts the first filled role model to every declared role", () => {
     const roles: Record<string, RoleTarget> = {
       opus: { provider_id: "p1", model: "custom-opus" },

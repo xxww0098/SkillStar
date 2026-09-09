@@ -14,7 +14,7 @@ export { useAppAiProvider, type AppAiAppId } from "./api/appAi";
 export { buildModelCatalog, CLAUDE_MODEL_META_KEYS, getMetaString } from "./lib/providerPatch";
 export {
   isNativeOfficialProvider,
-  matrixProviders,
+  apiProviders,
   CLAUDE_OFFICIAL_ID,
   CODEX_OFFICIAL_ID,
 } from "./lib/officialProviders";

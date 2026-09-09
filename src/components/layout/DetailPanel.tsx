@@ -16,7 +16,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { degradedDeploys, useDeployStatus } from "../../features/my-skills/hooks/useDeployStatus";
 import { useAiStream } from "../../hooks/useAiStream";
@@ -101,46 +101,36 @@ export function DetailPanel({
   const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
   const quickReadCacheRef = useRef<Map<string, string>>(new Map());
 
-  // Guard async setState after component unmount
-  const mountedRef = useRef(true);
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+    setSkillDetails(null);
+    const source = skill?.source;
+    const name = skill?.name;
+    if (!source || !name) return;
+    let cancelled = false;
+    const readLocal = () => tauriInvoke("get_skill_detail_local", { source, name });
 
-  // Fetch marketplace details for remote skills
-  const fetchDetails = useCallback(async (source: string, name: string) => {
-    try {
-      const readLocal = () =>
-        tauriInvoke("get_skill_detail_local", {
-          source,
-          name,
+    void (async () => {
+      try {
+        const result = await readLocal();
+        if (cancelled) return;
+        setSkillDetails(result.data);
+        if (result.snapshot_status !== "stale") return;
+
+        await tauriInvoke("sync_marketplace_scope", {
+          scope: `skill_detail:${source}/${name}`.toLowerCase(),
         });
-      const result = await readLocal();
-      if (!mountedRef.current) return;
-      setSkillDetails(result.data);
-      if (result.snapshot_status === "stale") {
-        void (async () => {
-          try {
-            await tauriInvoke("sync_marketplace_scope", {
-              scope: `skill_detail:${source}/${name}`.toLowerCase(),
-            });
-            const fresh = await readLocal();
-            if (!mountedRef.current) return;
-            setSkillDetails(fresh.data);
-          } catch (e) {
-            if (import.meta.env.DEV) console.warn("[DetailPanel] Failed to refresh local skill detail:", e);
-          }
-        })();
+        if (cancelled) return;
+        const fresh = await readLocal();
+        if (!cancelled) setSkillDetails(fresh.data);
+      } catch (error) {
+        if (!cancelled && import.meta.env.DEV) console.warn("[DetailPanel] Failed to load skill details:", error);
       }
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn("[DetailPanel] Failed to fetch skill details:", e);
-      if (!mountedRef.current) return;
-      setSkillDetails(null);
-    }
-  }, []);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [skill?.source, skill?.name]);
 
   // Reset state when skill changes
   useEffect(() => {
@@ -152,13 +142,7 @@ export function DetailPanel({
     quickRead.setVisible(false);
     quickRead.setError(null);
 
-    setSkillDetails(null);
     setReading(false);
-
-    // Fetch details for remote marketplace skills
-    if (skill && skill.source) {
-      fetchDetails(skill.source, skill.name);
-    }
   }, [
     skill?.name,
     skill?.description,
@@ -166,7 +150,6 @@ export function DetailPanel({
     skill?.installed,
     skill?.source,
     locale,
-    fetchDetails,
     quickRead.cancel,
     quickRead.hydrate,
     quickRead.setVisible,
@@ -623,6 +606,17 @@ export function DetailPanel({
                   </Button>
                 </div>
               </>
+            ) : skill.upstream_change?.successor && onMigrate ? (
+              // Ghost card for an upstream-renamed skill: migrate (carries
+              // deployments over) instead of a bare install.
+              <Button className="w-full" disabled={migrating} onClick={() => onMigrate(skill.name)}>
+                <ArrowRightLeft className="w-4 h-4 mr-2" />
+                {migrating
+                  ? t("skillCard.migrating")
+                  : t("detailPanel.migrateToSuccessor", {
+                      name: skill.upstream_change?.successor?.skill_id,
+                    })}
+              </Button>
             ) : (
               <Button className="w-full" onClick={() => onInstall(skill.git_url, skill.name)}>
                 <Download className="w-4 h-4" />

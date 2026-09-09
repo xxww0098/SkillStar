@@ -6,7 +6,7 @@ import {
   findOfficialProvider,
   isNativeOfficialProvider,
   isToolOnOfficial,
-  matrixProviders,
+  apiProviders,
   officialBindToolId,
   officialProviderIdForTool,
   toolSupportsOfficial,
@@ -49,7 +49,7 @@ describe("officialProviders", () => {
 
   it("hides Official from matrix provider rows", () => {
     const next = withEnsuredOfficialProviders([thirdParty("deepseek", 1)]);
-    const rows = matrixProviders(next);
+    const rows = apiProviders(next);
     expect(rows.map((p) => p.id)).toEqual(["deepseek"]);
     expect(rows.every((p) => !isNativeOfficialProvider(p))).toBe(true);
   });

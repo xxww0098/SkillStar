@@ -11,7 +11,7 @@ import {
   modelTextareaClass,
 } from "../../providerForm/ProviderConfigPrimitives";
 
-/** 高级页签：运行参数、备注。Agent 专属参数在各 Agent 的接入设置对话框里。 */
+/** Provider runtime defaults and notes; Claude roles live in the workbench. */
 export function AdvancedTab({ form }: { form: ProviderForm }) {
   const { values, setField } = form;
   const { t } = useTranslation();

@@ -11,13 +11,14 @@ interface UsageAlertBannerProps {
 
 export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   if (alerts.length === 0) return null;
-  const top = alerts.slice(0, collapsed ? 1 : 4);
+  const visibleAlerts = expanded ? alerts : alerts.slice(0, 2);
+  const hiddenCount = alerts.length - visibleAlerts.length;
 
   return (
-    <div className="space-y-1.5 border-b border-border/40 bg-card/30 px-4 py-2">
-      {top.map((alert) => (
+    <div className="max-h-[30vh] shrink-0 overflow-y-auto space-y-1.5 border-b border-border/40 bg-card/30 px-4 py-2">
+      {visibleAlerts.map((alert) => (
         <div
           key={alert.id}
           className={cn(
@@ -39,22 +40,14 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
           </button>
         </div>
       ))}
-      {alerts.length > 4 && !collapsed && (
+      {alerts.length > 2 && (
         <button
           type="button"
           className="text-[11px] text-muted-foreground hover:text-foreground"
-          onClick={() => setCollapsed(true)}
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
         >
-          {t("usage.collapseAlerts", { count: alerts.length - 4 })}
-        </button>
-      )}
-      {collapsed && alerts.length > 1 && (
-        <button
-          type="button"
-          className="text-[11px] text-muted-foreground hover:text-foreground"
-          onClick={() => setCollapsed(false)}
-        >
-          {t("usage.expandAlerts", { count: alerts.length })}
+          {expanded ? t("common.collapse") : t("usage.expandAlerts", { count: hiddenCount })}
         </button>
       )}
     </div>

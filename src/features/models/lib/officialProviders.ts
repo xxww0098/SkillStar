@@ -61,8 +61,8 @@ export function officialBindToolId(provider: { id?: string | null; preset_id?: s
   return OFFICIAL_META[key]?.bindToolId ?? null;
 }
 
-/** Third-party (and non-native) rows shown in the Provider × Agent matrix. */
-export function matrixProviders(providers: ProviderEntryFlat[]): ProviderEntryFlat[] {
+/** Editable API connections, excluding native-login seeds. */
+export function apiProviders(providers: ProviderEntryFlat[]): ProviderEntryFlat[] {
   return providers.filter((p) => !isNativeOfficialProvider(p));
 }
 
@@ -113,7 +113,7 @@ export function makeOfficialProviderSeed(id: OfficialProviderId, sortIndex: numb
 
 /**
  * Prefer store Official rows; inject missing seeds only as fallback.
- * Does not pin Official into the matrix — callers use `matrixProviders`.
+ * Native-login seeds stay out of API connection pickers via `apiProviders`.
  */
 export function withEnsuredOfficialProviders(providers: ProviderEntryFlat[]): ProviderEntryFlat[] {
   const byId = new Map(providers.map((p) => [p.id, p]));

@@ -15,7 +15,7 @@ SkillStar/
 │   ├── features/                # 产品域切片；内部实现默认私有
 │   ├── components/              # ui/、layout/、跨域 shared/
 │   ├── hooks/                   # 真正全局的生命周期与事件 hooks
-│   ├── lib/                     # 无 UI 的共享工具、IPC 契约和 adapters
+│   ├── lib/                     # 无 UI 的共享工具、页面生命周期上下文、IPC 契约和 adapters
 │   ├── i18n/                    # en / zh-CN 同步维护
 │   └── types/                   # 共享类型与 Rust 生成类型
 ├── src-tauri/
@@ -133,7 +133,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 - 通用技能 mutation gate 是依赖倒置接缝：`skillstar-skills::skill_mutation::SkillMutationPolicy` 定义查询接口（默认 allow-all），`skillstar-channels::policy::ChannelAwarePolicy` 查订阅注册表实现它；组合根（Tauri setup、CLI 入口）必须调用 `install_global_policy`，任何新的可执行入口都要注册后才能执行技能写路径。
 - `scripts/internal/check_feature_imports.sh` 允许通过目标 feature 根 `index.ts` 的显式依赖，对新跨 feature 深层导入直接失败；既有基线只能缩减。
 - `scripts/internal/check_ts_orphan_modules.sh` 是 `check_no_orphan_modules.sh` 的 TypeScript 对偶：`src/features/` 下每个 `.ts`/`.tsx` 必须能从 `src/main.tsx` 或 `src/pages/` 走静态与动态 import 抵达。只被测试或只被另一个孤儿引用都算孤儿——lint/build/test 全绿并不能证明文件在生产路径上。基线 `ts_orphan_modules_baseline.txt` 为空且应保持为空。
-- Models 工作台的生产组件树在 `src/features/models/components/hub/`：`ModelsHub.tsx` 是入口，矩阵实现在 `hub/matrix/`（`rich/` 为单元格与面板）。**不存在 `hub/prototype/`**；原型目录不得再作为生产代码的落点。
+- Models 工作台的生产入口是 `src/features/models/components/hub/ModelsHub.tsx`，Claude 专用客户端切换、连接配置、创建与角色面板位于 `hub/claude/`；`lib/claudeClients.ts` 只拥有该工作台的展示范围与 Desktop 只读保护。完整后端 Agent 注册表、Provider store 与兼容 IPC 不因 UI 收敛而删改。旧 `hub/matrix/` 与 `hub/prototype/` 均不作为生产代码落点。
 
 ## 关键接缝
 

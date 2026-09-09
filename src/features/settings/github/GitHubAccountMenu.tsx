@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Github } from "../../../components/ui/icons/Github";
 import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
@@ -17,23 +16,7 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
   const { t } = useTranslation();
   const auth = useGitHubAuth();
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  // Returning focus to the rail keeps the keyboard path continuous, since the
-  // shared ModalShell does not manage focus itself.
-  const close = useCallback(() => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, close]);
+  const close = () => setOpen(false);
 
   // Other surfaces (e.g. shared-channel sign-in prompts) ask for the panel by
   // event instead of importing this component's state.
@@ -79,7 +62,6 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
   return (
     <>
       <button
-        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         title={title}
@@ -124,21 +106,16 @@ export function GitHubAccountMenu({ collapsed }: { collapsed?: boolean }) {
         )}
       </button>
 
-      {/* Portalled: the sidebar is a transformed, sometimes overflow-hidden
-          fixed rail, which would otherwise clip the modal. */}
-      {createPortal(
-        <ModalShell open={open} onClose={close} ariaLabel={t("settings.githubAccount")} panelClassName="max-w-md">
-          <ModalHeader
-            icon={<Github className="w-4 h-4 text-primary" strokeWidth={1.75} />}
-            title={t("settings.githubAccount")}
-            onClose={close}
-          />
-          <div className="px-6 pb-6 pt-5">
-            <GitHubAuthPanel auth={auth} />
-          </div>
-        </ModalShell>,
-        document.body,
-      )}
+      <ModalShell open={open} onClose={close} ariaLabel={t("settings.githubAccount")} panelClassName="max-w-md">
+        <ModalHeader
+          icon={<Github className="w-4 h-4 text-primary" strokeWidth={1.75} />}
+          title={t("settings.githubAccount")}
+          onClose={close}
+        />
+        <div className="px-6 pb-6 pt-5">
+          <GitHubAuthPanel auth={auth} />
+        </div>
+      </ModalShell>
     </>
   );
 }

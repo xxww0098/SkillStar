@@ -1,9 +1,8 @@
 import { motion } from "framer-motion";
-import { AlertTriangle, Globe, Layers } from "lucide-react";
+import { Globe, Layers } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MOTION_TRANSITION } from "../../../comm/motion";
-import { Toolbar } from "../../../components/layout/Toolbar";
+import { cn } from "../../../lib/utils";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
@@ -12,11 +11,12 @@ import { useViewMode } from "../../../hooks/useViewMode";
 import { selectTargetableAgentProfiles, supportsGlobalDeploy, supportsProjectDeploy } from "../../../lib/agentProfiles";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
-import { navigateToSettingsSection } from "../../../lib/utils";
+import { Toolbar } from "../../../components/layout/Toolbar";
 import type { RepoNewSkill, Skill, SkillUpdateRunReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
 import { hasPendingUpdate } from "../lib/pendingUpdates";
+import { syntheticSkillFromGhost } from "../lib/ghostSkill";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
 import { ExportShareCodeModal } from "./ExportShareCodeModal";
@@ -25,8 +25,11 @@ import { ImportModal } from "./ImportModal";
 import { PublishSkillModal } from "./PublishSkillModal";
 import { ScopeDetailDrawer } from "./ScopeDetailDrawer";
 import { SkillGrid } from "./SkillGrid";
+import { SkillListBanners } from "./SkillListBanners";
 import { SkillSelectionBar } from "./SkillSelectionBar";
 import { UninstallConfirmDialog } from "./UninstallConfirmDialog";
+
+type SkillSelection = { kind: "installed"; name: string } | { kind: "ghost"; ghost: RepoNewSkill };
 
 interface LocalSkillsContentProps {
   /** Scope switch element built by the page; rendered inside the toolbar title. */
@@ -83,7 +86,7 @@ export function LocalSkillsContent({
   const [sortBy, setSortBy] = useState<SortOption>("updated");
   const [viewMode, setViewMode] = useViewMode("grid");
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
-  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+  const [selection, setSelection] = useState<SkillSelection | null>(null);
   const [selectedSkillNames, setSelectedSkillNames] = useState<Set<string>>(new Set());
   const [quickPackSkills, setQuickPackSkills] = useState<string[]>([]);
   const [quickPackName, setQuickPackName] = useState("");
@@ -108,12 +111,23 @@ export function LocalSkillsContent({
   const [batchLoading, setBatchLoading] = useState(false);
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
 
-  useEffect(() => {
-    setSelectedSkill((current) => {
-      if (!current) return null;
-      return skills.find((skill) => skill.name === current.name) ?? current;
+  // The query cache owns Skill data; async completions never restore an old selection.
+  const selectedSkill = useMemo(() => {
+    if (!selection) return null;
+    if (selection.kind === "installed") return skills.find((skill) => skill.name === selection.name) ?? null;
+    const { ghost } = selection;
+    return (
+      skills.find((skill) => skill.name === ghost.skill_id && skill.source === ghost.repo_source) ??
+      syntheticSkillFromGhost(ghost)
+    );
+  }, [selection, skills]);
+
+  const closeSkillIfSelected = useCallback((name: string) => {
+    setSelection((current) => {
+      const selectedName = current?.kind === "installed" ? current.name : current?.ghost.skill_id;
+      return selectedName === name ? null : current;
     });
-  }, [skills]);
+  }, []);
 
   const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
 
@@ -140,30 +154,20 @@ export function LocalSkillsContent({
 
   const handleSpotlightSelect = useCallback(
     (id: string) => {
-      const skill = skills.find((s) => s.name === id);
-      if (skill) setSelectedSkill(skill);
+      if (skills.some((skill) => skill.name === id)) setSelection({ kind: "installed", name: id });
     },
     [skills],
   );
 
-  // Convert a ghost skill into a synthetic Skill for the detail drawer
   const handleGhostClick = useCallback((ghost: RepoNewSkill) => {
-    const syntheticSkill: Skill = {
-      name: ghost.skill_id,
-      description: ghost.description,
-      skill_type: "hub",
-      stars: 0,
-      installed: false,
-      update_available: false,
-      last_updated: new Date().toISOString(),
-      git_url: ghost.repo_url,
-      tree_hash: null,
-      category: "None",
-      author: null,
-      topics: [],
-      source: ghost.repo_source,
-    };
-    setSelectedSkill((prev) => (prev?.name === syntheticSkill.name ? null : syntheticSkill));
+    setSelection((current) =>
+      current?.kind === "ghost" &&
+      current.ghost.repo_source === ghost.repo_source &&
+      current.ghost.skill_id === ghost.skill_id &&
+      current.ghost.folder_path === ghost.folder_path
+        ? null
+        : { kind: "ghost", ghost },
+    );
   }, []);
 
   // Fetch broken skill count after skills load (lightweight, one extra field from StorageOverview)
@@ -187,7 +191,7 @@ export function LocalSkillsContent({
   useEffect(() => {
     if (initialFocusSkill && skills.length > 0) {
       const skill = skills.find((s) => s.name === initialFocusSkill);
-      if (skill) setSelectedSkill(skill);
+      if (skill) setSelection({ kind: "installed", name: skill.name });
       onClearFocus?.();
     }
   }, [initialFocusSkill, skills, onClearFocus]);
@@ -303,17 +307,15 @@ export function LocalSkillsContent({
         }
         if (report.uninstalled.includes(name)) {
           toast.success(t("mySkills.droppedSkillRemoved", { name }));
-          setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+          closeSkillIfSelected(name);
           return;
         }
-        const updated = report.updated.find((entry) => entry.skill.name === name)?.skill;
-        if (updated) setSelectedSkill((prev) => (prev?.name === name ? updated : prev));
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
         toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
       }
     },
-    [runSkillUpdate, t],
+    [runSkillUpdate, closeSkillIfSelected, t],
   );
 
   /** Upstream dropped the Skill: same dialog and exits as a blocked update. */
@@ -323,24 +325,25 @@ export function LocalSkillsContent({
       if (!outcome) return;
       if (outcome.uninstalled.includes(name)) {
         toast.success(t("mySkills.droppedSkillRemoved", { name }));
-        setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+        closeSkillIfSelected(name);
       }
       for (const copy of outcome.localCopies) {
         toast.success(t("mySkills.keptAsLocalCopy", { from: name, to: copy.name }));
-        setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+        closeSkillIfSelected(name);
       }
       const failure = outcome.failed[0];
       if (failure) {
         toast.error(failure.error ? `${t("mySkills.updateFailed")}: ${failure.error}` : t("mySkills.updateFailed"));
       }
     },
-    [resolveRemovedSkill, t],
+    [resolveRemovedSkill, closeSkillIfSelected, t],
   );
 
   /** Upstream renamed the Skill: one step installs the successor, keeps the
    *  deployments and removes the old entry. Partial outcomes are spelled out. */
   const handleMigrate = useCallback(
     async (name: string) => {
+      if (pendingMigrationNames.has(name)) return;
       try {
         const report = await migrateRenamedSkill(name);
         const details = [
@@ -353,7 +356,7 @@ export function LocalSkillsContent({
         } else {
           toast.success(t("mySkills.migrateSuccess", { from: name, to: report.installed }));
         }
-        setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+        closeSkillIfSelected(name);
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
         toast.error(
@@ -361,20 +364,30 @@ export function LocalSkillsContent({
         );
       }
     },
-    [migrateRenamedSkill, t],
+    [migrateRenamedSkill, pendingMigrationNames, closeSkillIfSelected, t],
   );
 
   const handleMigrateGhost = useCallback(
     (ghost: RepoNewSkill) => {
-      if (ghost.renamed_from) void handleMigrate(ghost.renamed_from);
+      if (ghost.renamed_from) return handleMigrate(ghost.renamed_from);
     },
     [handleMigrate],
   );
 
-  const handleSkillClick = useCallback(
-    (skill: Skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill)),
-    [],
-  );
+  const drawerMigrationName = selectedSkill?.installed
+    ? selectedSkill.name
+    : selection?.kind === "ghost"
+      ? selection.ghost.renamed_from
+      : null;
+  const handleDrawerMigrate = useCallback(() => {
+    if (drawerMigrationName) void handleMigrate(drawerMigrationName);
+  }, [drawerMigrationName, handleMigrate]);
+
+  const handleSkillClick = useCallback((skill: Skill) => {
+    setSelection((current) =>
+      current?.kind === "installed" && current.name === skill.name ? null : { kind: "installed", name: skill.name },
+    );
+  }, []);
 
   const handleSelectSkill = useCallback((name: string) => {
     setSelectedSkillNames((prev) => {
@@ -396,14 +409,17 @@ export function LocalSkillsContent({
 
   const hasSelection = selectedSkillNames.size > 0;
 
-  const removeSkillFromUi = useCallback((name: string) => {
-    setSelectedSkill((current) => (current?.name === name ? null : current));
-    setSelectedSkillNames((prev) => {
-      const next = new Set(prev);
-      next.delete(name);
-      return next;
-    });
-  }, []);
+  const removeSkillFromUi = useCallback(
+    (name: string) => {
+      closeSkillIfSelected(name);
+      setSelectedSkillNames((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    },
+    [closeSkillIfSelected],
+  );
 
   const openUninstallDialog = useCallback((names: Iterable<string>, removeSource: string | null = null) => {
     const nextNames = Array.from(new Set(names));
@@ -586,10 +602,7 @@ export function LocalSkillsContent({
       setBusy(true);
       try {
         const report = await runSkillUpdate(names);
-        const refreshed = report.updated.find((result) => result.skill.name === selectedSkill?.name);
-        if (refreshed) {
-          setSelectedSkill(refreshed.skill);
-        }
+        for (const name of report.uninstalled) closeSkillIfSelected(name);
         reportBatchUpdate(report);
         return true;
       } catch (error) {
@@ -600,7 +613,7 @@ export function LocalSkillsContent({
         setBusy(false);
       }
     },
-    [reportBatchUpdate, runSkillUpdate, selectedSkill?.name, t],
+    [reportBatchUpdate, runSkillUpdate, closeSkillIfSelected, t],
   );
 
   const handleBatchUpdate = useCallback(async () => {
@@ -679,7 +692,8 @@ export function LocalSkillsContent({
     onUninstall: handleBatchUninstall,
   });
 
-  // One-time hint when the user first enters selection mode.
+  // One-time hint when the user first enters selection mode. Bottom-center so
+  // it never covers the detail drawer's action buttons in the bottom-right.
   useEffect(() => {
     if (!hasSelection) return;
     if (typeof localStorage === "undefined") return;
@@ -689,6 +703,7 @@ export function LocalSkillsContent({
       t("mySkills.selectionShortcutsHint", {
         defaultValue: "Selection mode: A select all · L link · U unlink · Enter deploy · Esc clear",
       }),
+      { position: "bottom-center", duration: 5000 },
     );
   }, [hasSelection, t]);
 
@@ -717,7 +732,14 @@ export function LocalSkillsContent({
 
   return (
     <>
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col overflow-hidden transition-[padding] duration-300 ease-out",
+          // Make room for the detail drawer instead of letting it cover the
+          // rightmost grid column (drawer is w-full max-w-md = 448px).
+          selectedSkill && "lg:pr-[448px]",
+        )}
+      >
         <Toolbar
           titleNode={
             <div className="flex flex-wrap items-center gap-3">
@@ -797,32 +819,12 @@ export function LocalSkillsContent({
           onPublishSkill={(name) => setPublishTarget(name)}
         />
 
-        {/* Broken skills banner — same column, same rule as the selection bar:
-            fade in place instead of animating height, so the grid below relayouts
-            once rather than on every frame. */}
-        {brokenCount > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={MOTION_TRANSITION.fadeFast}
-          >
-            <div className="flex items-center gap-2.5 px-6 py-2 bg-amber-500/8 border-b border-amber-500/20">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="text-caption text-amber-300/90">
-                {t("mySkills.brokenBanner", { count: brokenCount })}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  navigateToSettingsSection("storage");
-                }}
-                className="text-caption text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
-              >
-                {t("mySkills.brokenBannerAction")} →
-              </button>
-            </div>
-          </motion.div>
-        )}
+        <SkillListBanners
+          brokenCount={brokenCount}
+          onlyUpdatesFilter={onlyUpdatesFilter}
+          filteredCount={filteredSkills.length}
+          onClearUpdatesFilter={() => setOnlyUpdatesFilter(false)}
+        />
 
         <motion.main
           initial={{ opacity: 0 }}
@@ -873,14 +875,14 @@ export function LocalSkillsContent({
       <ScopeDetailDrawer
         kind="local"
         skill={selectedSkill}
-        onClose={() => setSelectedSkill(null)}
+        onClose={() => setSelection(null)}
         onInstall={handleInstall}
         onUpdate={handleUpdate}
         onUninstall={handleUninstall}
         uninstalling={uninstalling && selectedSkill != null && pendingUninstallNames.includes(selectedSkill.name)}
         onResolveRemoved={handleResolveRemoved}
-        onMigrate={handleMigrate}
-        migrating={selectedSkill != null && pendingMigrationNames.has(selectedSkill.name)}
+        onMigrate={handleDrawerMigrate}
+        migrating={drawerMigrationName != null && pendingMigrationNames.has(drawerMigrationName)}
         onReadContent={readSkillContent}
         onSaveContent={updateSkillContent}
         onPublish={(name) => setPublishTarget(name)}

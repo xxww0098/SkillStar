@@ -3,7 +3,7 @@ import type { ProviderForm } from "../../../hooks/useProviderForm";
 import { ConnectionStatusPanel } from "../../diagnostics/ConnectionStatusPanel";
 import { EndpointSpeedPanel } from "../../diagnostics/EndpointSpeedPanel";
 
-/** 诊断页签：连接测试、余额、端点测速。磁盘配置文件在各 Agent 的接入设置里。 */
+/** Provider connection tests, balance, and endpoint latency diagnostics. */
 export function DiagnosticsTab({ form, provider }: { form: ProviderForm; provider: ProviderEntryFlat }) {
   const { values } = form;
   return (

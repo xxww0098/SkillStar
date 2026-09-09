@@ -205,8 +205,8 @@ function collectModelIds(values: ProviderFormValues): string[] {
   ]);
 }
 
-/** Build the update patch from form values, preserving unrelated meta keys. */
-export function buildProviderPatch(
+/** Serialize form fields while preserving unrelated meta keys. */
+function serializeProviderForm(
   values: ProviderFormValues,
   baseMeta: Record<string, unknown> | undefined,
 ): ProviderPatchFlat {
@@ -239,34 +239,28 @@ export function buildProviderPatch(
   };
 }
 
-/** Would saving `values` change anything on `provider`? */
-export function computeDirty(provider: ProviderEntryFlat, values: ProviderFormValues): boolean {
-  const persisted = providerToFormValues(provider);
-  const modelIds = collectModelIds(values);
-  const modelsChanged =
-    modelIds.length !== provider.models.length || modelIds.some((model, index) => model !== provider.models[index]);
-  const modelCatalogChanged = JSON.stringify(values.modelCatalog) !== JSON.stringify(persisted.modelCatalog);
-
-  return (
-    values.name !== persisted.name ||
-    values.baseUrlOpenai !== persisted.baseUrlOpenai ||
-    values.baseUrlAnthropic !== persisted.baseUrlAnthropic ||
-    values.modelsUrl !== persisted.modelsUrl ||
-    values.notes !== persisted.notes ||
-    values.apiKey !== persisted.apiKey ||
-    modelsChanged ||
-    modelCatalogChanged ||
-    values.defaultModel.trim() !== provider.default_model ||
-    values.claudeMainModel !== persisted.claudeMainModel ||
-    values.claudeHaikuModel !== persisted.claudeHaikuModel ||
-    values.claudeSonnetModel !== persisted.claudeSonnetModel ||
-    values.claudeOpusModel !== persisted.claudeOpusModel ||
-    values.codexWireApi !== persisted.codexWireApi ||
-    values.codexAuthMode !== persisted.codexAuthMode ||
-    values.contextLength !== persisted.contextLength ||
-    values.maxTokens !== persisted.maxTokens ||
-    values.timeout !== persisted.timeout ||
-    values.retryCount !== persisted.retryCount ||
-    values.streaming !== persisted.streaming
+/** Only changed fields may cross IPC: an empty projected key is not a credential edit. */
+export function buildProviderPatch(
+  values: ProviderFormValues,
+  baseMeta: Record<string, unknown> | undefined,
+  baseline: ProviderFormValues,
+): ProviderPatchFlat {
+  const current = serializeProviderForm(values, baseMeta);
+  const previous = serializeProviderForm(baseline, baseMeta);
+  return Object.fromEntries(
+    Object.entries(current).filter(
+      ([key, value]) =>
+        (key === "models" && JSON.stringify(values.models) !== JSON.stringify(baseline.models)) ||
+        JSON.stringify(value) !== JSON.stringify(previous[key as keyof ProviderPatchFlat]),
+    ),
   );
+}
+
+/** Would saving `values` change anything relative to the form baseline? */
+export function computeDirty(
+  provider: ProviderEntryFlat,
+  values: ProviderFormValues,
+  baseline = providerToFormValues(provider),
+): boolean {
+  return Object.keys(buildProviderPatch(values, provider.meta, baseline)).length > 0;
 }

@@ -88,6 +88,16 @@ describe("providerToFormValues", () => {
 });
 
 describe("buildProviderPatch", () => {
+  it("persists explicitly adding an already referenced model without dirtying untouched forms", () => {
+    const provider = makeProvider({ models: ["a"], default_model: "b", meta: {} });
+    const baseline = providerToFormValues(provider);
+    expect(computeDirty(provider, baseline)).toBe(false);
+    expect(buildProviderPatch({ ...baseline, name: "Renamed" }, provider.meta, baseline)).toEqual({ name: "Renamed" });
+    const edited = { ...baseline, models: ["a", "b"] };
+    expect(buildProviderPatch(edited, provider.meta, baseline)).toEqual({ models: ["a", "b"] });
+    expect(computeDirty(provider, edited)).toBe(true);
+  });
+
   it("collects referenced model ids and preserves unrelated meta keys", () => {
     const provider = makeProvider();
     const values = {
@@ -96,7 +106,7 @@ describe("buildProviderPatch", () => {
       defaultModel: "deepseek-coder",
       claudeMainModel: "claude-x",
     };
-    const patch = buildProviderPatch(values, provider.meta);
+    const patch = buildProviderPatch(values, provider.meta, providerToFormValues(provider));
     expect(patch.models).toEqual(["deepseek-chat", "deepseek-coder", "claude-x"]);
     expect(patch.default_model).toBe("deepseek-coder");
     expect((patch.meta as Record<string, unknown>).custom_key).toBe("keep-me");
@@ -106,7 +116,7 @@ describe("buildProviderPatch", () => {
   it("trims fields and turns empty notes into undefined", () => {
     const provider = makeProvider();
     const values = { ...providerToFormValues(provider), name: "  X  ", notes: "   " };
-    const patch = buildProviderPatch(values, provider.meta);
+    const patch = buildProviderPatch(values, provider.meta, providerToFormValues(provider));
     expect(patch.name).toBe("X");
     expect(patch.notes).toBeUndefined();
   });

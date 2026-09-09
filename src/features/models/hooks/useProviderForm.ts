@@ -10,7 +10,7 @@
  * cache refresh, which could clobber keystrokes typed while an autosave was
  * in flight.
  */
-import { useCallback, useMemo, useReducer, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
 import i18n from "../../../i18n";
 import type { ProviderEntryFlat } from "../../../types";
@@ -44,6 +44,8 @@ function reducer(values: ProviderFormValues, action: FormAction): ProviderFormVa
 
 export function useProviderForm(provider: ProviderEntryFlat) {
   const [values, dispatch] = useReducer(reducer, provider, providerToFormValues);
+  const [baseline, setBaseline] = useState(values);
+  const baselineRef = useRef(baseline);
   const { presets } = useProviderPresets();
   const { updateProvider } = useProviderMutations();
   const { fetchModelCatalog, isLoading: isFetchingModels, error: fetchError } = useModelFetch();
@@ -57,12 +59,12 @@ export function useProviderForm(provider: ProviderEntryFlat) {
     dispatch({ type: "set", key, value });
   }, []);
 
-  const dirty = useMemo(() => computeDirty(provider, values), [provider, values]);
+  const dirty = useMemo(() => computeDirty(provider, values, baseline), [provider, values, baseline]);
 
   /** One save attempt for useAutosave — validates, then persists via the api layer. */
   const save = useCallback(async (): Promise<SaveAttemptResult> => {
-    const patch = buildProviderPatch(values, provider.meta);
-    const errorCode = validatePatch(patch);
+    const patch = buildProviderPatch(values, provider.meta, baselineRef.current);
+    const errorCode = validatePatch({ ...patch, name: values.name.trim() });
     if (errorCode) {
       setValidationErrorCode(errorCode);
       toast.error(i18n.t(`models.errors.${errorCode}`));
@@ -70,7 +72,11 @@ export function useProviderForm(provider: ProviderEntryFlat) {
     }
     setValidationErrorCode(null);
     try {
-      await updateProvider(provider.id, patch);
+      if (Object.keys(patch).length > 0) await updateProvider(provider.id, patch);
+      // Cache updates may be optimistic; only a successful request advances the baseline.
+      // The ref also covers a queued autosave before React renders this success.
+      baselineRef.current = values;
+      setBaseline(values);
       return "saved";
     } catch (error) {
       toast.error(

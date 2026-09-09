@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Badge } from "../../../components/ui/badge";
+import { Button } from "../../../components/ui/button";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
@@ -56,7 +57,18 @@ export function AgentAccordion({
       </div>
       <CardTemplate className="rounded-[1rem] overflow-hidden divide-y divide-border/40 shadow-sm hover:shadow-md transition-shadow duration-300">
         {enabledProfiles.length === 0 && (
-          <div className="px-3.5 py-6 text-xs text-muted-foreground text-center">{t("projects.noAgents")}</div>
+          <div className="px-3.5 py-6 text-center space-y-3">
+            <p className="text-xs text-muted-foreground">{t("projects.noAgents")}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("skillstar:navigate", { detail: { page: "settings" } }))
+              }
+            >
+              {t("projects.goToSettings")}
+            </Button>
+          </div>
         )}
         {enabledProfiles.map((profile) => {
           const isEnabled = enabledAgents.includes(profile.id);

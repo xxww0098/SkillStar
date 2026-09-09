@@ -76,7 +76,7 @@
 ## 前端信息架构
 
 - Marketplace 是统一发现入口，但 Skills 与 MCP 在左侧 category rail 中保持清晰分组。
-- skill tab 进入技能列表；MCP 官方入口先显示 Publisher grid，再进入 Publisher detail。
+- skill tab 进入技能列表；MCP 官方入口先显示 Publisher grid，再进入 Publisher detail。两组 tab 的胶囊文案不重复：skill 组内的「官方」是官方发布者入口，MCP 组内的叫「官方服务器」，避免两个相邻胶囊同名不同义。
 - Publisher drill-down 复用主市场的 grid/list 和 toolbar 交互，不创建第二套 fetch 逻辑。
 - installed MCP 管理不放 Marketplace，而在 MCP 页面处理。
 

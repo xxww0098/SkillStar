@@ -2,6 +2,27 @@
 
 状态：active
 
+## 2026-09-08 - Provider 的空凭据投影不能作为编辑补丁回传
+
+- Symptom: 只改供应商名称，也可能把环境变量或文件来源的凭据变成空凭据。
+- Root cause: flat IPC 的空 `api_key` 是一种有损投影，不证明后端没有凭据；把完整表单作为 patch 会把未编辑字段当成清空操作。乐观缓存也不能充当成功保存的基线，否则失败重试会丢掉补丁。
+- Fix: 表单以初始状态和已确认保存快照计算最小补丁；未触碰的密钥、端点和元数据不提交，显式清空仍能表达。持久化约束见 [Models 工作台](features/models/README.md#models-工作台)。
+- Self-check: 运行 `src/features/models/hooks/__tests__/useProviderForm.test.tsx` 的重命名、显式清空、失败重试与元数据保留回归；测试仅 mock IPC，不访问真实用户配置。
+
+## 2026-09-08 - 保活页面的弹窗不能只隐藏父页面或卸载表单
+
+- Symptom: 切走页面后旧弹窗仍挡住新页；改为直接返回空节点后，返回页面又丢失 MCP 表单未保存的名称、命令和环境变量。
+- Root cause: body portal 不在保活页的 DOM 隐藏边界内；卸载整个弹窗则会清掉子表单自身的 React 状态。只把草稿放在外层的测试夹具不能覆盖真实消费路径。
+- Fix: 页面活跃上下文跨过 portal 边界；在 portal 内保留表单子树、停用模态交互生命周期。契约与实现选择见 [Frontend](features/frontend/README.md#桌面性能)。
+- Self-check: `bun run test src/components/layout/KeepAliveOutlet.test.tsx src/components/ui/ModalShell.test.tsx`；直接使用真实 MCP 表单编辑后切页，核对草稿提交值、焦点锁释放和快捷键恢复。
+
+## 2026-09-08 - 详情面板复用时，旧请求把正文覆盖到新技能
+
+- Symptom: 从技能 A 直接切到 B，B 的标题下却出现 A 的说明；打开阅读器后，B 的名称与 A 的 SKILL.md 正文被组合展示。
+- Root cause: `mountedRef` 只证明组件没有卸载，不证明请求仍属于当前选择。同一个详情面板会被多个技能复用，本地读取、后台同步和再次读取都可能晚于下一次选择。
+- Fix: 详情请求以来源和技能名绑定 effect 生命周期；切换后失效的结果不能写入状态，已结束的后台同步也不能再为旧选择发起读取。当前选择仍保留本地快照与后台刷新能力。交互契约见 [Frontend](features/frontend/README.md#tauri-事件与流式-ux)。
+- Self-check: `bun run test src/components/layout/DetailPanel.test.tsx`；用延迟 IPC 让 A 晚于 B 返回，并覆盖同名不同来源的切换，核对说明、阅读器正文和过期刷新是否停止。
+
 ## 2026-09-02 - 测试继承 hook 的 GIT_DIR，会污染真实仓库
 
 - Symptom: pre-push 里的 `cargo test --workspace --locked` 必然失败；同一命令在普通 shell 里通过。失败集中在 `skillstar-channels` 的 fixture git 测试。更糟的是失败测试会把 `git init` / `config` / `branch` 打到宿主仓库上，写坏 `.git/config`（`core.worktree` 指向已删除临时目录、user.name 被改成 SkillStar Test）并删掉工作树里的跟踪文件。

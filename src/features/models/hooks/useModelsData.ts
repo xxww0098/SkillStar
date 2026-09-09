@@ -1,55 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProvidersFlat } from "./useProvidersFlat";
-import { PROVIDER_AGENTS, type ProviderToolId } from "../lib/agentRegistry";
-import { withEnsuredOfficialProviders } from "../lib/officialProviders";
-import {
-  DEFAULT_VISIBLE_COLUMN_IDS,
-  MATRIX_COLUMNS,
-  type MatrixColumnId,
-} from "../components/hub/matrix/matrixColumns";
+import type { ClaudeClientId } from "../lib/claudeClients";
 import type { ModelsNavBridge } from "../lib/navBridge";
-import type { ModelsHubData, ModelsHubOverlay } from "../components/hub/matrix/types";
+import { findOfficialProvider, apiProviders, withEnsuredOfficialProviders } from "../lib/officialProviders";
+import { activeEntry } from "../lib/toolBinding";
+import type { ProviderEditorTab } from "../types";
 
-/**
- * Shared data + overlay state. Syncs with the left ModelsSidebar via
- * `modelsDrawerRequest` / `selectedProviderId` so Add / Recent open the
- * main-pane editor instead of a drawer.
- *
- * Official seeds come from `get_providers_flat` (backend `ensure_official_providers`)
- * for header activate/deactivate. Matrix rows hide them via `matrixProviders`.
- * Client inject is only a fallback when the store lacks them (e.g. stale mock).
- *
- * Nav fields come from {@link ModelsNavBridge} (App passes them) — do not call
- * `useNavigation` here; the Models page is lazy-loaded and must not depend on
- * NavContext identity inside that chunk.
- */
-export function useModelsData(nav: ModelsNavBridge): ModelsHubData {
-  const {
-    providers: storeProviders,
-    toolActivations,
-    isLoading,
-    activateTool,
-    deactivateTool,
-    removeBindingEntry,
-    createProvider,
-  } = useProvidersFlat();
+export type ModelsHubOverlay =
+  | { type: "none" }
+  | { type: "create" }
+  | { type: "edit"; providerId: string; tab?: ProviderEditorTab }
+  | { type: "delete"; providerId: string };
+
+/** View state only: changing a client or preview source never changes a binding. */
+export function useModelsData(nav: ModelsNavBridge) {
+  const store = useProvidersFlat();
   const { selectedProviderId, setSelectedProviderId, modelsDrawerRequest, clearModelsDrawerRequest } = nav;
-  const [selectedAgentId, setSelectedAgentId] = useState<ProviderToolId>("claude-code");
-  const [visibleColumnIds, setVisibleColumnIds] = useState<MatrixColumnId[]>(() => [...DEFAULT_VISIBLE_COLUMN_IDS]);
+  const [clientId, setClientId] = useState<ClaudeClientId>("claude-code");
+  const [interactionLocked, setInteractionLocked] = useState(false);
+  // null follows the current binding; an empty string previews an empty API connection.
+  const [preferredSourceId, setPreferredSourceId] = useState<string | null>(null);
   const [overlay, setOverlayState] = useState<ModelsHubOverlay>({ type: "none" });
+  const providers = useMemo(() => withEnsuredOfficialProviders(store.providers), [store.providers]);
+  const thirdPartyProviders = useMemo(() => apiProviders(providers), [providers]);
+  const officialId = findOfficialProvider(providers, "claude-code")!.id;
+  const binding = store.toolActivations[clientId] ?? null;
+  const currentEntry = activeEntry(binding);
+  const sourceExists = (id: string) => id === officialId || thirdPartyProviders.some((p) => p.id === id);
+  const sourceId =
+    preferredSourceId === "" || (preferredSourceId !== null && sourceExists(preferredSourceId))
+      ? preferredSourceId
+      : currentEntry && sourceExists(currentEntry.provider_id)
+        ? currentEntry.provider_id
+        : officialId;
 
-  // Prefer store Official seeds; inject only when ensure/mock omitted them.
-  const providers = useMemo(() => withEnsuredOfficialProviders(storeProviders), [storeProviders]);
-
-  const toggleVisibleColumn = useCallback((id: MatrixColumnId) => {
-    setVisibleColumnIds((prev) => {
-      if (prev.includes(id)) {
-        if (prev.length <= 1) return prev;
-        return prev.filter((x) => x !== id);
-      }
-      const order = MATRIX_COLUMNS.map((c) => c.columnId);
-      return order.filter((columnId) => columnId === id || prev.includes(columnId));
-    });
+  const selectClient = useCallback((id: ClaudeClientId) => {
+    setClientId(id);
+    setPreferredSourceId(null);
   }, []);
 
   const setOverlay = useCallback(
@@ -57,8 +44,8 @@ export function useModelsData(nav: ModelsNavBridge): ModelsHubData {
       setOverlayState(next);
       if (next.type === "edit") {
         setSelectedProviderId(next.providerId);
+        setPreferredSourceId(next.providerId);
       }
-      // `none` keeps selectedProviderId so B3 can collapse page → row inspector.
     },
     [setSelectedProviderId],
   );
@@ -68,46 +55,40 @@ export function useModelsData(nav: ModelsNavBridge): ModelsHubData {
     setSelectedProviderId(null);
   }, [setSelectedProviderId]);
 
-  // Sidebar "Add provider" / Recent provider clicks arrive as drawer requests —
-  // map them to page/modal overlays instead.
   useEffect(() => {
-    if (!modelsDrawerRequest) return;
-    const req = modelsDrawerRequest;
+    // Sidebar requests must obey the same pending-write/draft boundary as local controls.
+    if (!modelsDrawerRequest || interactionLocked) return;
+    const request = modelsDrawerRequest;
     clearModelsDrawerRequest();
-    if (req.kind === "create") {
+    if (request.kind === "create") {
       setOverlayState({ type: "create" });
-      return;
+    } else if (request.providerId) {
+      setSelectedProviderId(request.providerId);
+      setPreferredSourceId(request.providerId);
+      setOverlayState({ type: "edit", providerId: request.providerId });
     }
-    if (req.providerId) {
-      setSelectedProviderId(req.providerId);
-      setOverlayState({ type: "edit", providerId: req.providerId });
-    }
-  }, [modelsDrawerRequest, clearModelsDrawerRequest, setSelectedProviderId]);
-
-  const stub = useCallback((action: string, detail?: Record<string, unknown>) => {
-    // Claude mapping UI still has a few local-only actions; keep quiet in prod.
-    if (import.meta.env.DEV) {
-      console.info("[models-hub]", action, detail ?? {});
-    }
-  }, []);
+  }, [modelsDrawerRequest, clearModelsDrawerRequest, setSelectedProviderId, interactionLocked]);
 
   return {
     providers,
-    toolActivations,
-    agents: PROVIDER_AGENTS,
-    isLoading,
-    visibleColumnIds,
-    toggleVisibleColumn,
-    selectedAgentId,
-    setSelectedAgentId,
+    thirdPartyProviders,
+    toolActivations: store.toolActivations,
+    isLoading: store.isLoading,
+    error: store.error,
+    refresh: store.refresh,
+    activateTool: store.activateTool,
+    clientId,
+    setInteractionLocked,
+    selectClient,
+    sourceId,
+    selectSource: setPreferredSourceId,
+    binding,
+    currentEntry,
     selectedProviderId,
     overlay,
     setOverlay,
     closeOverlay,
-    stub,
-    activateTool,
-    deactivateTool,
-    removeBindingEntry,
-    createProvider,
   };
 }
+
+export type ModelsHubData = ReturnType<typeof useModelsData>;

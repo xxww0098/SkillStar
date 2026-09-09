@@ -134,7 +134,7 @@
 - Rust 侧 MCP 工具事实（label、配置路径、安装探测、wire-format 的计数/读取/写入/移除 dispatch）的 SSOT 是 `skillstar_models::mcp` 的 `McpToolSpec` 注册表；新增工具只加一行 spec（新 wire format 才需要新的 spec builder）。隐藏的 legacy cleanup id 刻意不进注册表。
 - `MCP_TOOL_IDS` 在前端有三份人工同步的镜像：`src/types/mcp.ts`、`src/features/mcp/lib/toolRegistry.ts` 的 `MCP_TOOL_LABELS`（原先在 `McpServerForm`）、`src/features/mcp/lib/agentTargets.ts` 的 `MCP_TOOL_BY_AGENT_ID`。Rust 侧的常量是 SSOT，四份必须同一次变更内落地；前两份由 `toolRegistry.test.ts` 钉住，第三份由 `agentTargets.test.ts` 钉住。
 - `MCP_TOOL_BY_AGENT_ID` 有几条需要解释的行：`github-copilot -> vscode`（`vscode` 目标写的就是 `~/.copilot/mcp-config.json`，与该 profile 同一配置根）；`gemini-cli -> gemini-cli` 与 `antigravity -> antigravity` 两侧各自同名，但配对不是自动的——两者都落在 `~/.gemini` 下，产品不同、写入的文件也不同（`settings.json` vs `config/mcp_config.json`），互不顶替。`hermes -> hermes` 写入 YAML（`$HERMES_HOME/config.yaml`），不是 JSON。
-- **不是每个 MCP target 都该有 Agent profile。** `claude-desktop-chat` 没有映射行是决定而非遗漏：Claude Desktop 是聊天 App，没有可验证的 skills 目录，为了换一个 MCP 开关而在 Skills 注册表里编一个 skills 根目录是本末倒置。没有 profile 只意味着拿不到 Agent rail 上的 per-server 开关；目标本身照样可写——新建/编辑表单和工具视图直接枚举 `MCP_TOOL_IDS`，不走这张映射表，`mcpToolIdsWithoutAgentProfile` 会把它如实列为「无 profile 可达」。
+- **不是每个 MCP target 都该有 Agent profile。** `claude-desktop-chat` 没有映射行是决定而非遗漏：Claude Desktop 是聊天 App，没有可验证的 skills 目录，为了换一个 MCP 开关而在 Skills 注册表里编一个 skills 根目录是本末倒置。没有 profile 只意味着拿不到 Agent rail 上的 per-server 开关；目标本身照样可写——新建/编辑表单和工具视图直接枚举 `MCP_TOOL_IDS`，不走这张映射表，`mcpToolIdsWithoutAgentProfile` 会把它如实列为「无 profile 可达」。工具状态卡上的提示保持一句话（未绑定 + 表单可写），不在每张卡重复整段解释。
 - MCP store 与 Marketplace snapshot 是不同数据源：市场只负责发现，安装后进入 Models MCP store。
 - create/update/delete/rename 通过统一 store facade 编排各 Agent projector；部分失败要返回每个目标结果，不静默吞掉。
 - live config 路径使用与 Models tool-sync 相同的 `SKILLSTAR_TOOL_SYNC_HOME` resolver，测试不写真实 home。

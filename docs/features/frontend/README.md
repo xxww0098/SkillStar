@@ -7,7 +7,7 @@
 ## 结构与数据流
 
 - `src/pages/*.tsx` 是薄路由壳；页面目录目前只有 `src/pages/settings/`，不要在文档虚构不存在的 page 子目录。
-- `src/pages/Settings.tsx` 只组合各域公开的 settings section；section 及其数据 hooks 仍归 Models、S3、Usage 等所属 feature，不在 `features/settings` 建跨域实现副本。
+- `src/pages/Settings.tsx` 只组合各域公开的 settings section；section 及其数据 hooks 仍归各自的 feature，不在 `features/settings` 建跨域实现副本。
 - 产品实现放 `src/features/<domain>/`，内部 `api/`、`hooks/`、`lib/`、`components/` 默认私有。
 - 后端已归属某域的子系统在前端也作为该域子模块组织，不建立仅为目录对称而存在的平级 feature。
 - 跨 feature 复用的无业务展示组件放 `src/components/shared/`；原子 UI 放 `src/components/ui/`；纯工具放 `src/lib/`。
@@ -18,7 +18,7 @@
 ## 桌面性能
 
 - Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
-- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
+- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
 - 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
 - MCP 目录搜索对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
 - `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
@@ -29,6 +29,7 @@
 
 - 生命周期型订阅使用 `src/hooks/useTauriEvent`，由它处理 `listen()` promise 与卸载 cleanup 的竞争。
 - 单次请求流可以由对应 hook 管理监听，但必须处理 start、delta、complete、error 和中断。
+- 详情读取绑定当前所选资源身份；切换选择或关闭后，旧请求的成功、失败和后台刷新不得覆盖新选择的内容，也不应继续发起已无消费者的后续读取。
 - AI 摘要展示后端返回的 route/provider/fallback 元数据，不在前端猜测路由。
 - 安全扫描应区分文件准备和 AI chunk 进度，不能压成一个模糊 spinner。
 
@@ -53,8 +54,8 @@
 - 优先复用 `src/components/ui/`。需要焦点管理、Esc、portal 的组件使用 Radix primitive。
 - 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。嵌套面板用 `InsetPanel`，不要用会 hover 抬升的 `Card`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
 - 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。 Models 的 `ProviderConfigPrimitives` 是该域自己的表单语言，不并进通用 `Input`/`Textarea`。
-- 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。
-- Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。侧栏图标负责找路。
+- 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。`ModalShell` 由 Radix 管理层叠、portal 与焦点；Esc 只作用于最上层，不穿透到底层弹窗或页面快捷键。Esc 与 backdrop 共用 `dismissable` 门控，处理中不可关闭的弹窗仍拦截 Esc；调用方不再重复注册关闭监听。关闭后焦点返回打开前的控件。modal 活跃期间不启动全局命令面板，避免非模态命令面板与焦点锁冲突；关闭后 ⌘K / Ctrl+K 恢复，包括输入框内。
+- Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。设置侧栏 lg 断点保持纯图标（900–1280px 窗口放不下文字），xl 起图标 + 文字标签。
 - 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。
 - 外链元素使用 `ExternalAnchor`；按钮/程序化跳转使用 `openExternalUrl`，避免业务页面直接写 `<a target="_blank">`。
 - Marketplace 与 MCP 共用的 Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；两个 feature 都只能依赖该 shared interface。

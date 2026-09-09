@@ -493,15 +493,6 @@ export function McpManager({ onOpenMarket, importRequest, onImportRequestHandled
     }
   };
 
-  useEffect(() => {
-    if (drawer.type === "closed") return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeEditor();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer.type, saving]);
-
   const editorTitle =
     drawer.type === "edit"
       ? (editing?.name ?? t("mcp.title"))

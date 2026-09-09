@@ -119,7 +119,7 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - 同一供应商的横向卡片使用最高卡片的高度作为行高，较短卡片的主体和页脚保持底部对齐；邮箱换行不会让同一行的操作位置参差不齐。
 - 所有额度条共享 `UsageMeter` primitive（标签+已用徽章 / 大号等宽数字 / `ProgressTrack` / 脚注+重置芯片）；货币/绝对/百分比额度读作同一套语法，各渲染器只组合它，不自绘嵌套卡片。鉴权方式、CLI 能力徽标、计费周期和「即将重置」提示文案不占卡片：前三项在编辑对话框，重置紧急度由倒计时着色、卡片描边和徽章图标承担。
 - `ProgressTrack` 是剩余导向的 `progressbar`：`aria-valuenow` 为剩余百分比，轨道在剩余 25% / 10% 处打阈值刻度，紧急色只做补充。≥90% 已用的脉冲和高紧急重置图标只在 `motion-safe` 下旋转/闪动，尊重 `prefers-reduced-motion`。
-- 已用徽章必须带「已用 N%」或「剩余 N%」文案，不能只靠红/黄/灰。达到 75% 已用时附加警告图标。页脚 icon 按钮有 `aria-label`；删除/重置确认是卡内 `alertdialog`，Esc 和点遮罩取消，初始焦点在「取消」。
+- 已用徽章必须带「已用 N%」或「剩余 N%」文案，不能只靠红/黄/灰。达到 75% 已用时附加警告图标。页脚 icon 按钮有 `aria-label`；删除/重置确认是卡内 `alertdialog`，Esc 和点遮罩取消，初始焦点在「取消」。订阅告警横幅默认只预览前两条，避免堆叠吃掉滚动区；展开入口的数量表示尚未显示的告警，展开后可滚动查看全部，区域高度受限以保留额度卡片的工作空间，收起恢复预览。展开/收起只改变可见性，不得要求用户先关闭已有告警才能查看后续项。
 - 重置倒计时归属唯一律：meter 只在 `windowRendersOwnReset(window)` 为真时渲染自身重置芯片，否则由 card MetaStrip 顶部显示；二者互补，同一 reset 绝不出现两次。5h/7d 限流窗口各自拥有倒计时，画在「剩余」行右侧（右对齐），不再把唯一的 primary reset 抬到 MetaStrip——否则 7d 刷新时间会被 5h 吃掉。货币/绝对/分类额度仍把账期 reset 留在 MetaStrip。倒计时图标只在 now/critical/urgent 时旋转，平常状态保持静止。
 - Cursor 的 Total/分类明细只保留卡片级主 reset，分类行不重复显示同一个 7d 倒计时；DeepSeek 的余额卡以可用余额为唯一主视觉，状态、分析提示和余额构成作为无嵌套卡片的次级分组。
 - 主卡与独立窗口共享逻辑 body，不共享 chrome。浮窗使用 dark chrome + `LightBodySurface`，compact body 的品牌 CSS vars 必须来自 `brandThemes.ts`。

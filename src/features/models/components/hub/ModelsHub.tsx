@@ -7,15 +7,13 @@ import { getProviderToolBadges, useProvidersFlat } from "../../hooks/useProvider
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
 import { DeleteProviderDialog } from "./DeleteProviderDialog";
 import { isNativeOfficialProvider } from "../../lib/officialProviders";
-import { VariantB2b } from "./matrix/rich/VariantB2b";
+import { Button } from "@/components/ui/button";
+import { ClaudeWorkbench } from "./claude/ClaudeWorkbench";
+import { ClaudeProviderCreate } from "./claude/ClaudeProviderCreate";
 import type { ModelsNavBridge } from "../../lib/navBridge";
 import { useModelsData } from "../../hooks/useModelsData";
 
-/**
- * Production Models workbench: Provider × Agent matrix.
- * Create / Claude mapping stay as main-pane pages; provider edit uses the
- * production tabbed drawer; Official toggles live in Claude/Codex column headers.
- */
+/** Claude workspace with shared provider CRUD and complete deletion impact. */
 export function ModelsHub(nav: ModelsNavBridge) {
   const { t } = useTranslation();
   const data = useModelsData(nav);
@@ -25,7 +23,7 @@ export function ModelsHub(nav: ModelsNavBridge) {
     const overlay = data.overlay;
     if (overlay.type !== "edit") return null;
     const provider = data.providers.find((p) => p.id === overlay.providerId) ?? null;
-    // Official seeds are header switches, not editable gallery rows.
+    // Native sign-in is a connection mode, not an editable API provider.
     if (provider && isNativeOfficialProvider(provider)) return null;
     return provider;
   }, [data.overlay, data.providers]);
@@ -77,7 +75,27 @@ export function ModelsHub(nav: ModelsNavBridge) {
 
   return (
     <>
-      <VariantB2b data={data} />
+      {data.error ? (
+        <main className="ss-page-scroll p-8 text-sm">
+          <h1 className="mb-3 text-lg font-semibold">{t("models.claudeWorkbench.loadFailed")}</h1>
+          <p role="alert" className="mb-4 break-words text-destructive">
+            {String(data.error instanceof Error ? data.error.message : data.error)}
+          </p>
+          <Button onClick={() => void data.refresh()}>{t("models.claudeWorkbench.retryLoad")}</Button>
+        </main>
+      ) : (
+        <>
+          <div className={data.overlay.type === "create" ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+            <ClaudeWorkbench data={data} />
+          </div>
+          {data.overlay.type === "create" && (
+            <ClaudeProviderCreate
+              onClose={data.closeOverlay}
+              onCreated={(provider) => data.setOverlay({ type: "edit", providerId: provider.id })}
+            />
+          )}
+        </>
+      )}
 
       {editProvider ? (
         <ProviderEditorDrawer

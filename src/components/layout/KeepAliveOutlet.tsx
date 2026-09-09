@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { PageActivityContext } from "../../lib/pageActivity";
 import { cn } from "../../lib/utils";
 
 /**
@@ -9,8 +10,8 @@ import { cn } from "../../lib/utils";
  * a populated SkillGrid reads as "the app is slow". An LRU of hidden pages
  * makes back-navigation instant without keeping every route in memory.
  *
- * Hidden pages stay in the React tree so TanStack Query cache and local UI
- * state survive. They are `display: none`, so they do not layout or paint.
+ * Hidden pages retain state and query observers. The activity context lets
+ * portalled modals deactivate too, beyond the DOM display:none boundary.
  * Do not put drill-in pages (publisher detail) here — their identity is the
  * selected record, not the route name.
  */
@@ -42,14 +43,15 @@ export function KeepAliveOutlet({
       {cached.map((id) => {
         const shown = id === active;
         return (
-          <div
-            key={id}
-            hidden={!shown}
-            aria-hidden={!shown}
-            className={cn("min-h-0 min-w-0 flex-1 flex-col overflow-hidden", shown ? "flex" : "hidden")}
-          >
-            {render(id)}
-          </div>
+          <PageActivityContext.Provider key={id} value={shown}>
+            <div
+              hidden={!shown}
+              aria-hidden={!shown}
+              className={cn("min-h-0 min-w-0 flex-1 flex-col overflow-hidden", shown ? "flex" : "hidden")}
+            >
+              {render(id)}
+            </div>
+          </PageActivityContext.Provider>
         );
       })}
       {keepActive ? null : render(active)}

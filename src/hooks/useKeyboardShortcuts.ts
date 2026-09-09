@@ -33,6 +33,8 @@ export function useKeyboardShortcuts({
       // ── ⌘K / Ctrl+K → Command Palette ──
       if (meta && e.key === "k") {
         e.preventDefault();
+        // The command palette is non-modal and cannot take focus above a modal.
+        if (document.querySelector('[aria-modal="true"]')) return;
         onToggleCommandPalette();
         return;
       }

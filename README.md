@@ -63,9 +63,9 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 
 ### Models 与 AI
 
-- Provider gallery、模型目录、连接诊断、余额查询和 Agent binding 集中在一个工作台。
-- 按 Agent 能力支持 single-provider 或 multi-provider binding。
-- Oh My Pi（`omp`）额外支持**模型角色**：把 `default`（正常编码）、`smol`（廉价子代理 fan-out）、`slow`（深度推理）、`plan`（规划模式）等角色分别指到不同 Provider 和模型，可选推理强度，直接写入 omp 的 `modelRoles`，无需手写 YAML。
+- Claude 工作台按连接方式组织配置：先选择官方登录或 API 连接，显式应用后再编辑模型角色；供应商编辑、模型目录与诊断保留在配置抽屉。
+- 工作台聚焦 Claude Code 客户端；可见入口与既有绑定的保留规则见 [Models 工作台](./docs/features/models/README.md#models-工作台)。
+- Claude Code CLI 支持按角色配置模型并写入原生配置，角色与回落规则见 [Models 角色路由](./docs/features/models/README.md#角色路由跨-agent)。
 - Tool sync 只修改 SkillStar 管理的字段，保留用户已有配置并在写入前备份。
 - 内置摘要共享 Models provider 配置，并以流式事件报告 route/fallback。
 

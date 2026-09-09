@@ -1,5 +1,5 @@
 import { Boxes, ChevronLeft, ChevronRight, PackageSearch, SlidersHorizontal } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { Button } from "../../../components/ui/button";
@@ -92,15 +92,6 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
   const closeInstall = () => {
     if (!saving) setInstallId(null);
   };
-
-  useEffect(() => {
-    if (installId == null) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeInstall();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [installId, saving]);
 
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>

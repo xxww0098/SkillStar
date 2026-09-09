@@ -19,7 +19,7 @@
 - **能力位语义**：`Tri::Unknown` 是「需要检测」，**不是**「不支持」。只有探测明确返回 `No` 才允许禁用绑定入口。迁移期一律写 `Unknown`。
 - **Official = `Credential::ExternalCli`**：不再靠 id 白名单分支。`claude-official` / `codex-official` 两个固定 id 保留（改 id 会让用户的原生登录绑定失效）。
 - **角色路由归 `AgentBinding.roles`**：`provider.meta.claude_*_model` 与 `binding.settings.roles` 都迁到这里。键是开放 map，规范键为 `default` / `fast` / `plan` / `vision` / `subagent`，其余（含 OMP 的 `slow`、`designer`）原样保留为 extra 角色。
-- **Claude Desktop 降级为 planned**：`claude-desktop` 的 binding 在迁移时被丢弃并列进迁移报告，不自动搬到 `claude-code`（那是替用户做决定）。它此前写的只是 SkillStar 自造的标记文件，对 Claude Desktop 不产生实际效果——迁移报告必须诚实说明这一点。**退出条件：若 6 个月内（即 2027-02-15 前）仍无可用的原生写盘路径，从 `PLANNED_AGENTS` 中彻底删除。**
+- **Desktop 能力以原生写盘效果判断**，不是注册表是否有行：当前 writer 仍可能写 SkillStar marker；工作台的只读边界见 [Models 工作台](#models-工作台)。迁移报告不能把 marker 描述为已生效的原生配置，也不得擅自将 Desktop 绑定搬到 CLI。
 - **磁盘格式已切换**：`model_providers.json` 现在以 v4 写盘（`version: 4`，`providers` + `bindings`）。启动入口是 `load_store_and_repair`：读→（必要时）迁移→落盘 catalog 缓存→修复已写坏的 Agent 配置→再次写回 store。`get_providers_flat` 是唯一调用它的命令，其余命令走不做修复的 `load_store`。
 - **v3 reader 拒绝未来版本**：`migrate_store_if_needed` 的 v1 分支是「排除法」到达的，而 v1 结构每个字段都有 serde 默认值——所以一个 v4 文件会被**成功**解析成四个空桶，然后覆盖用户的真实配置。现在遇到高于 `FLAT_STORE_VERSION` 的版本直接报错并保留原文件。
 - **IPC 线上形状仍是 v3**：store 与所有 writer 都是 v4，但渲染进程读到的仍是 v3 形状，翻译集中在 `src-tauri/src/commands/models_commands/compat.rs` 一处。写入是**打补丁**而非重建：v3 表达不了的 `caps` / `headers` / key 故障转移链 / `ext` 因此不会在每次保存时被清空。前端 IA 重写时删除该模块，明文 key 也随之停止过界。
@@ -46,7 +46,7 @@
 - tool-sync 只改自己管理的字段，保留用户已有配置；写入前备份并使用原子替换。
 - JSON 型 multi Agent（OpenCode / Pi）的写盘共享 `multi_provider` 内部骨架（备份 → retain 托管键 → 写块 → active 指针），各自只提供 build_block 与指针落点；Codex（TOML + auth.json 副通道）独立维护，理由见 decisions.md D-012。
 - 所有测试设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录，绝不写真实 Agent 配置。
-- Claude CLI（`claude-code`）与 Claude Desktop（`claude-desktop`）是**独立绑定**：各自有 `tool_activations` 条目、Official 开关和角色映射状态；共用同一条 Claude Official 种子 Provider（不拆 `claude-desktop-official`）。CLI 写 `~/.claude/settings.json`；Desktop 目前写 SkillStar 绑定标记 `~/.claude-desktop/skillstar-binding.json`（原生 Desktop 配置投影后续接入）。Codex CLI、桌面体验和官方编辑器扩展仍共用一份 Codex binding。
+- Claude CLI 与 Desktop 在 store 内保持独立绑定，共用 Claude Official 种子。CLI writer 写原生 settings；Desktop writer 的 marker 不代表原生配置支持，工作台写入保护见 [Models 工作台](#models-工作台)。Codex CLI、桌面体验和官方编辑器扩展仍共用一份 Codex binding。
 - **Codex 只写 `wire_api = "responses"`**：`CodexSettings` 不再有 `wire_api` 字段，provider 行也不再有 `codex_wire_api`。没有 `/v1/responses` 端点的 host **整条跳过**，不写入 `config.toml`；`base_url` 取 responses 端点而非 chat 端点。根因：Codex ≥0.95 的 `WireApi` 枚举只剩 `Responses`，而 SkillStar 对任何非 `api.openai.com` 的 base URL 都写 `"chat"`；该值反序列化失败会让**整个 `config.toml` 解析不了**，Codex 起不来——不是单个 provider 失效。自检：`grep 'wire_api' ~/.codex/config.toml`，出现 `"chat"` 即为受影响。（errors.md 的正式条目归后续工作包。）
 - **迁移会修复已写坏的磁盘配置**：`tool_sync::repair_agent_configs` 在迁移那一次运行时删掉不可写的 Codex 条目（store 与 `config.toml` 两侧）、清掉 Claude Desktop 标记文件，再重投影其余绑定。被删的条目带 provider 名与模型进 `MigrationReport::codex_dropped`，UI 必须解释而不是静默。单条清理用 `unsync_codex_entry`，不是整体 unsync——修一条坏绑定不该丢掉两条能用的。
 - Pi 是 multi Agent：绑定写 `~/.pi/agent/models.json` 的 `providers.skillstar_*` 块（`openai-completions`，模型条目只写 `id`，其余交给 Pi 默认值），激活条目同时把 `~/.pi/agent/settings.json` 的 `defaultProvider`/`defaultModel` 指过去；停用只清理托管块，且仅当 default 指针指向托管块时才连带清除。
@@ -79,10 +79,10 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 #### OMP 模型角色
 
-OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/config.yml` 的 `modelRoles`。规则如下（角色与 thinking 等级清单的 SSOT 是 `tool_sync::agents` 的 `OMP_ROLES` 与 `tool_sync::types` 的 `OMP_THINKING_LEVELS`，前端 `lib/ompRoles.ts` 只决定展示顺序、分组与 i18n，两侧由一致性测试锁定）：
+OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/config.yml` 的 `modelRoles`。规则如下（角色与 thinking 等级清单的 SSOT 是 `tool_sync::agents` 的 `OMP_ROLES` 与 `tool_sync::types` 的 `OMP_THINKING_LEVELS`；后端一致性测试锁定声明与实际投影）：
 
 - 角色分配存在 **binding 级一等字段** `AgentBinding.roles`（`BTreeMap<String, ModelRef>`），不是 entry 级 `BindingEntry.settings`——一个角色可以指向任意已绑定 provider，不必是 active 的那个。写入命令是 `update_agent_settings`。
-- **角色名要在落盘时翻译回 OMP 的词汇**：store 存规范键（`smol` 迁移后叫 `fast`，`task` 叫 `subagent`），OMP 不认识这两个名字。writer 查注册表的 `RoleDef.agent_key` 译回去；注册表未声明的自定义角色原样透传（`modelRoles` 是开放 map）。注册表与迁移的 `migrate::omp_role_key` 由 `registry_agent_keys_match_the_migration_table` 锁定，前端一侧由 `ompRoles.test.ts` 锁定——**前端也必须按规范键读写**，否则迁移过的用户会看到角色「消失」同时旁边多出一条重复角色。写入顺序按 OMP 的角色名排序，避免内部改名让 YAML 无故重排。
+- **角色名要在落盘时翻译回 OMP 的词汇**：store 存规范键（`smol` 迁移后叫 `fast`，`task` 叫 `subagent`），OMP 不认识这两个名字。writer 查注册表的 `RoleDef.agent_key` 译回去；注册表未声明的自定义角色原样透传（`modelRoles` 是开放 map）。注册表与迁移的 `migrate::omp_role_key` 由 `registry_agent_keys_match_the_migration_table` 锁定，任何角色调用方也必须按规范键读写，否则迁移过的用户会看到角色「消失」同时旁边多出一条重复角色。写入顺序按 OMP 的角色名排序，避免内部改名让 YAML 无故重排。
 - 每个已分配角色写成 `modelRoles.<role> = "skillstar_<id8>/<model>[:thinking]"`。未分配的角色**不写**：OMP 自己会让 `smol`/`slow`/`designer` 回落到 `default`，留空是安全的。
 - `default` 未显式分配时由 binding 的 active 条目兜底，等同于角色功能引入前的行为。
 - 角色指向未绑定、或没有 OpenAI base URL（因此没进 models.yml）、或没选模型的 provider 时跳过，不写悬空指针。角色名含 `/`、空白或以 `@` 开头（与 OMP 的 `@role` 别名语法冲突）同样跳过。**每一种跳过都进 `dropped_roles`**，角色行标黄给出原因——v3 这里是三个裸 `continue`，前端无从知道。
@@ -97,26 +97,26 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - `ensure_official_providers` 在缺失时插入种子行；已存在同 `id`/`preset_id` 则跳过（不覆盖用户改名）。`get_providers_flat` 会调用它并在变更时写盘。
 - `create_provider_from_preset` 对这两个种子保留稳定 id 并写 `Credential::ExternalCli`；`create_provider` 不再改写调用方给的 id（v3 会覆盖成 UUID，这正是固定 slug 需要白名单的原因），重复 id 直接报错。
 - 激活时跳过「必须有 anthropic/openai URL」校验。
-- Claude Official 种子可分别绑定到 `claude-code` 或 `claude-desktop`：激活 CLI 时清除 SkillStar 托管 env（`ANTHROPIC_*`），让 Claude 走浏览器/客户端原生登录；不写第三方 Base URL/Key。两条绑定共用同一 Official 种子 id（不拆 `claude-desktop-official`），但开关互不影响。
+- Claude Official 激活 CLI 时清除 SkillStar 托管的连接与角色 env 键，让 Claude 使用原生登录；不写第三方 Base URL/Key，不启动登录、不验证账号，也不清除用户自有的其它鉴权设置。Desktop 的 marker 不具备同等语义，界面不提供其激活操作。
 - Codex Official 绑定 `codex`：`bind_provider` 强制 `auth_mode = oauth`，不写 `OPENAI_API_KEY`、不触碰用户 ChatGPT token；清除指向 SkillStar 托管表的 `model_provider`/`model` 指针。
 - 停用 Official 与普通 unbind 一致（清 binding；Claude 不额外清用户自有配置）。
-- Official **不是**矩阵交叉引用行：前端 `matrixProviders` 过滤种子行；Claude CLI、Claude Desktop、Codex 列表头各自提供「切回官方」开关（分别走 `claude-code` / `claude-desktop` / `codex` binding）。仅当 store 缺失时客户端注入同 id 种子作 activate fallback。开关走生产用的 `bind_provider` / `unbind_agent`。创建流程的 preset 列表不展示这两个原生 Official 预设。
+- Official 是连接方式，不是可创建/编辑的 API 供应商：原生种子从供应商选择与 Recent 中排除。使用原生登录通过 `bind_provider` 选择后端种子，保持它的真实 id 与 ExternalCli 凭据；不能用空 API Key 新建行冒充原生种子。
 - 本轮不做 proxy takeover /「官方账号路由」例外。
 
 ## Models 工作台
 
-- `pages/Models.tsx` 只组合一个 `ModelsHub`，不恢复旧的多子页信息架构。
-- 生产主界面是 **Provider × Agent 矩阵**（原 D1 IA）：行是第三方 Provider，列是 Agent（Claude CLI / Desktop 分列且**独立绑定**）；顶部 icon carousel 控制可见列。
-- Claude / Codex 列表头提供 Official（原生登录）开关；矩阵单元格负责第三方 Bind / 模型选择 / Claude mapping。
-- 侧栏「添加 Provider」与 Recent 只服务第三方 Provider；Official 种子不进 Recent。
-- Provider 编辑使用既有 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。创建是主栏表单，创建后打开 editor drawer。
-- Claude mapping UI **真实持久化**：每次改动整体提交 `{ roles }` 给 `update_agent_settings`，与 OMP 面板同一条链路；解绑/绑定走真实 `bind_provider` / `unbind_agent`。角色行由 `list_agent_descriptors` 驱动，因此原型期那个 `fable` 行消失了——Claude Code 没有 `ANTHROPIC_DEFAULT_FABLE_MODEL`，那一行永远不可能写入。「一键设置」把当前/默认模型广播到全部**已声明**角色；「获取模型列表」走 `fetch_provider_model_catalog`。
-- **Claude 的三档模型来自 binding 角色**：`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` 现在读 `roles["fast"]` / `roles["sonnet"]` / `roles["opus"]`，不再读 `provider.meta`。值的存放位置变了，写到磁盘上的三个 env key 一字未变——由 golden 对照测试锁定。`CLAUDE_CODE_SUBAGENT_MODEL` 是新增的第四个键，仅在用户分配了 `subagent` 角色时出现，因此不影响既有 golden。
-- OMP 列的单元格打开 `OmpRolePanel`（Radix Popover），单元格显示已配置的主要角色数。面板**真实持久化**：每次改动整体提交 `{ roles }` 给 `update_agent_settings`，乐观更新与 toast 由 api 层负责。provider 下拉只列已绑定到 OMP 且有 OpenAI base URL 的 Provider（其余会被写盘逻辑跳过），每行展示 `previewRoleValue()` 的实际写入值、回落目标与上次写盘的跳过原因，thinking 下拉按模型的 `reasoning` 能力收窄，底部给出等价 `omp --model/--smol/--slow/--plan` 命令行。文案全部走 i18n `models.ompRoles.*` / `models.roles.*` / `models.roleDrops.*`。
-- 不再有 `?variant=` 原型开关：DEV-only 的 D2 / D3 交替 IA 岛已随 Models 重设计 WP-0 删除，`#models` 只有一条渲染路径。
-- 生产组件在 `components/hub/`（入口 `ModelsHub.tsx`，矩阵在 `hub/matrix/`）；数据聚合在 `hooks/useModelsData.ts`，nav 桥接类型在 `lib/navBridge.ts`。
+- `pages/Models.tsx` 只组合一个 `ModelsHub`。生产界面是 **Claude Code 专用工作台**，不再保留 Provider × Agent 矩阵、列显隐 carousel 或通用 Agent 设置原型。客户端标签与顺序以 [`claudeClients.ts`](../../../src/features/models/lib/claudeClients.ts) 及测试为准。
+- 默认打开 CLI；客户端切换只改变查看对象，不触发绑定或修改用户文件。CLI 用「官方登录 / API 连接」选择连接方式，选中供应商只预览，必须显式点击应用才绑定。原生登录不代表 SkillStar 已验证订阅或登录状态。
+- **Desktop 是只读说明入口**：当前后端仍注册 Desktop，并可能对自造 marker 写入返回 success，但这不等于原生 Desktop 配置生效。界面显式禁止 Desktop 的绑定、官方切换和模型映射写入，标注原生配置尚未接入；既有 Desktop 状态不显示为已同步，也不自动迁移到 CLI。
+- CLI 的 API 连接优先展示 Anthropic 端点和凭据状态；没有 Anthropic 端点的旧供应商仍可查看、编辑，但不能应用到 CLI。所有 Provider、其他 Agent 的绑定、后端 writer 和诊断能力保留，界面重构不做数据清理。
+- 主区域提供连接来源、当前绑定与模型映射。切换提交期间禁用重复操作；失败明确展示，不能把本地选择或乐观更新当作写盘成功。已保存绑定仍可重新应用，因为上一次落盘可能失败。读取失败提供重试，不伪装成空列表。
+- 角色映射以内联面板呈现；有未确认草稿时锁定客户端/连接切换，保存确认或明确放弃草稿后解锁，避免标签的 mousedown 卸载先于输入 blur 保存。角色与 env key 从 `list_agent_descriptors` 获取；加载或空角色描述不伪造可写角色。「统一使用一个模型」仅作用于已声明角色。修改经 `update_agent_settings` 持久化，成功提示必须等待实际成功结果；跳过原因继续来自后端。
+- 供应商创建是 Claude 专用表单：名称、Anthropic Base URL、API Key 为主，默认模型与模型目录地址可选；密钥默认隐藏，URL 在提交前验证。保存只创建连接，不自动绑定；随后打开已有编辑抽屉。
+- Provider 编辑继续复用 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。Anthropic 端点常显且优先，OpenAI 兼容端点与目录地址放入可展开的附加设置，旧字段与元数据继续以 patch 保留。
+- 侧栏添加与 Recent 快捷入口继续打开创建/编辑；Official 种子不进 Recent。删除仍须确认并列出全部受影响 Agent，包括当前工作台不展示的既有绑定。
+- 生产组件位于 `components/hub/claude/`，数据和导航桥接由 `hooks/useModelsData.ts` 与 `lib/navBridge.ts` 提供。旧矩阵与 OMP 专属前端面板删除；OMP 的 store 与后端写盘契约不变。App AI 的完整设置保留在 Settings，不再保留工作台内无效的原型页。
 - `ProviderConfigPrimitives.tsx` 是 Models 表单视觉 SSOT：标准控件 40px、dense 控件 36px，并统一 border、focus、disabled 和 invalid 状态。
-- 删除必须确认并展示会断开的 Agent。
+
 
 ## 前端状态与诊断
 

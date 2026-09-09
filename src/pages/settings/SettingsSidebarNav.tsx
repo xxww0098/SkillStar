@@ -127,7 +127,10 @@ export function SettingsSidebarNav() {
   };
 
   return (
-    <nav className="hidden lg:flex z-20 flex-col items-center gap-1.5 rounded-xl border border-border bg-card px-1.5 py-3">
+    // Icon-only at lg (900–1280px windows cannot fit labels next to the card);
+    // icon + text from xl up so near-named sections (proxy / mirrors / doctor)
+    // are readable without hovering every icon.
+    <nav className="hidden lg:flex z-20 flex-col items-stretch gap-1.5 rounded-xl border border-border bg-card px-1.5 py-3 lg:w-12 xl:w-44">
       {SETTINGS_SECTIONS.map((section) => {
         const isActive = activeId === section.id;
         const Icon = section.icon;
@@ -144,13 +147,18 @@ export function SettingsSidebarNav() {
             title={t(section.labelKey)}
             aria-label={t(section.labelKey)}
             aria-current={isActive ? "true" : undefined}
-            className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl focus-ring ${
+            className={`flex h-9 cursor-pointer items-center gap-2.5 justify-center rounded-xl focus-ring xl:justify-start xl:px-3 ${
               isActive
                 ? "bg-primary/15 text-primary"
                 : "text-muted-foreground/70 hover:bg-muted/50 hover:text-foreground"
             }`}
           >
-            <Icon className={`h-[18px] w-[18px] ${nudgeClass}`} strokeWidth={isActive ? 2.2 : 1.7} aria-hidden />
+            <Icon
+              className={`h-[18px] w-[18px] shrink-0 ${nudgeClass}`}
+              strokeWidth={isActive ? 2.2 : 1.7}
+              aria-hidden
+            />
+            <span className="hidden min-w-0 truncate text-xs font-medium xl:inline">{t(section.labelKey)}</span>
           </button>
         );
       })}
