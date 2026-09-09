@@ -186,6 +186,12 @@ pub fn patrol_state_path() -> PathBuf {
     state_dir().join("patrol.json")
 }
 
+/// `state/team.json` — local team intelligence (learnings, usage, recall, friction).
+/// Rebuildable. Distinct from the deleted `learning/` tutorial tree (D-053).
+pub fn team_store_path() -> PathBuf {
+    state_dir().join("team.json")
+}
+
 /// `state/github_mirror_health.json` — GitHub accelerator circuit-breaker state.
 pub fn github_mirror_health_path() -> PathBuf {
     state_dir().join("github_mirror_health.json")
@@ -278,6 +284,10 @@ mod tests {
         assert_eq!(
             app_instances_config_path(),
             temp.path().join("config/app_instances.json")
+        );
+        assert_eq!(
+            crate::infra::paths::team_store_path(),
+            temp.path().join("state/team.json")
         );
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");

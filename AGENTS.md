@@ -82,6 +82,7 @@ CI 由 `.github/workflows/ci.yml`、`windows-ci.yml` 和 `release.yml` 负责。
 - [Models](./docs/features/models/README.md)
 - [Usage](./docs/features/usage/README.md)
 - [Sync](./docs/features/sync/README.md)
+- [Team](./docs/features/team/README.md)
 - [Platform](./docs/features/platform/README.md)
 
 ## Agent skills
