@@ -50,6 +50,7 @@ flowchart LR
 | Skill 安装来源、Git tree 与完整内容 baseline | `~/.skillstar/hub/lock.json` | `skillstar-skills::lockfile` 持久化；`skillstar-skills::skill_update` 独占更新事务 |
 | Project 技能 manifest | `~/.skillstar/state/projects/` | `skillstar-skills`；共享项目路径只记录一个 Agent owner |
 | 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；批量 refresh、patrol 和 update 完成都写穿它，UI 与事件只是投影 |
+| 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `skillstar-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
 | Models provider 与工具同步状态 | `~/.skillstar/config/model_providers.json`（v4：`providers` + `bindings`）及 Agent 配置文件 | `skillstar-models` |
 | 迁移前的 provider store 快照 | `~/.skillstar/config/model_providers.v3.json` | `skillstar-models::providers::store_v4`；**不进 rolling 清理**，它是迁移报告「撤销」按钮的依据 |

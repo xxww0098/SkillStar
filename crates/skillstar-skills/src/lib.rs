@@ -19,6 +19,7 @@
 //! | [`agents`] | Agent spec, registry, custom profiles, activation prefs |
 //! | [`github_auth`] | GitHub App device flow, token store, API credential |
 //! | [`validation`] / [`discovery`] / [`plugin_manifest`] | Frontmatter install gate (via `skill-spec`), repo scan, plugin manifests; pack-root shims |
+//! | [`team`] | Local team intelligence: BM25 recall, friction notes, skill health, digest |
 //! | library modules | install, update, bundle, local, repo scan, groups |
 
 pub mod agents;
@@ -34,6 +35,7 @@ mod pack_layout;
 mod plugin_manifest;
 pub mod skill_mutation;
 pub mod source_resolver;
+pub mod team;
 
 pub mod installed_skill;
 pub mod local_identity;

@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod install;
 mod manage;
+mod team;
 
 pub use commands::*;
 pub use install::cmd_install;
@@ -113,6 +114,78 @@ pub enum Commands {
     Publish,
     /// Force launch GUI mode
     Gui,
+    /// Team intelligence: recall, health, friction notes, digest
+    Team {
+        #[command(subcommand)]
+        command: TeamCommand,
+    },
+}
+
+/// Subcommands of `skillstar team`.
+#[derive(Subcommand)]
+pub enum TeamCommand {
+    /// Search installed skills and local notes (BM25 + neighbor boost)
+    Recall {
+        /// Keywords describing the current task
+        query: String,
+        /// Max number of hits
+        #[arg(long, short = 'n', default_value_t = 12)]
+        limit: u32,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show skill health (usage × freshness × recall)
+    Health {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize coverage, silent skills, friction, and recent notes
+    Digest {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save a friction-triggered note (local; not a tutorial)
+    Share {
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        body: String,
+        /// Optional related installed skill
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long, default_value_t = 0.7)]
+        confidence: f32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List saved team notes
+    Notes {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record session friction (interrupts, rejects, retries, corrections)
+    Friction {
+        #[arg(long, default_value_t = 0)]
+        interrupts: u32,
+        #[arg(long, default_value_t = 0)]
+        rejects: u32,
+        #[arg(long, default_value_t = 0)]
+        retries: u32,
+        #[arg(long, default_value_t = 0)]
+        corrections: u32,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record that an installed skill was used
+    Used {
+        /// Installed skill name
+        name: String,
+    },
 }
 
 /// Options passed to the install handler.
@@ -186,6 +259,36 @@ pub fn run(args: Vec<String>, migrate_and_run: fn()) {
         Commands::Init { name } => cmd_init(name.as_deref()),
         Commands::Publish => cmd_publish(),
         Commands::Gui => println!("Launching SkillStar GUI..."),
+        Commands::Team { command } => match command {
+            TeamCommand::Recall { query, limit, json } => team::cmd_recall(&query, limit, json),
+            TeamCommand::Health { json } => team::cmd_health(json),
+            TeamCommand::Digest { json } => team::cmd_digest(json),
+            TeamCommand::Share {
+                title,
+                body,
+                skill,
+                tags,
+                confidence,
+                json,
+            } => team::cmd_share(&title, &body, skill.as_deref(), &tags, confidence, json),
+            TeamCommand::Notes { json } => team::cmd_notes(json),
+            TeamCommand::Friction {
+                interrupts,
+                rejects,
+                retries,
+                corrections,
+                task,
+                json,
+            } => team::cmd_friction(
+                interrupts,
+                rejects,
+                retries,
+                corrections,
+                task.as_deref(),
+                json,
+            ),
+            TeamCommand::Used { name } => team::cmd_used(&name),
+        },
     }
 }
 
@@ -207,6 +310,7 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "init"
             | "create"
             | "publish"
+            | "team"
             | "help"
             | "-h"
             | "--help"
@@ -319,6 +423,7 @@ mod mode_tests {
             "init",
             "create",
             "publish",
+            "team",
             "help",
             "-h",
             "--help",

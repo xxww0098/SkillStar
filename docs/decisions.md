@@ -505,6 +505,15 @@
 - 后果：获得——规范解析可独立测试、独立跟随上游，产品 crate 不再编译这份纯 YAML 逻辑的反向依赖。承担——多一个 workspace member；产品策略（何为阻塞、安装错误文案）必须留在 adapter，不能渗进叶子。Deletion test：删掉 `skill-spec` 只会把 frontmatter 解析搬回 `skillstar-skills`，不会拆散安装/发现/打包；它能独立存在是因为上游规范节奏与极小依赖集，而不是因为产品编排需要它。
 - 证据：`crates/skill-spec/`、`crates/skillstar-skills/src/validation.rs`、`scripts/internal/check_workspace_deps.sh`、[boundaries.md](./boundaries.md) 协议叶子规则。
 
+## D-056：团队智能留在 skillstar-skills 私有 module
+
+- 日期：2026-09-09
+- 状态：accepted
+- 背景：teamai-cli 的产品是 Execution × Context × Improvement 闭环。SkillStar 已覆盖 Execution（install / deploy / channels / patrol）。缺口是对本机已安装 Skill 的检索、摩擦沉淀和健康度，而不是 Marketplace FTS，也不是已按 [D-053](#d-053移除学习功能与-skillstar-learning) 删除的教程/Guide/ACP 学习域。新开 crate 通不过 D-002 的 deletion test：变更节奏与 `skillstar-skills` 的内容/安装语料绑定，依赖集也不独立。
+- 决策：团队智能作为 `skillstar-skills::team` 的私有 module + 窄 facade。语料只读已安装 `SKILL.md` 与本地 notes；持久化仅为 `state/team.json`（路径由 core 解析）。CLI 为 `skillstar team …`。不新增 crate，不复活 `skillstar-learning`，不读写 `~/.skillstar/learning/`，本切片不加 Tauri command / GUI。`skillstar find` 继续只搜 Marketplace。
+- 后果：获得——Context/Improvement 的第一刀可在现有 crate 内测试与发布，且不会把教程域带回来。承担——GUI 与频道推送/晋升为 Skill 仍是后续切片；本机 notes 不跨设备。
+- 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
+
 ## 新增记录格式
 
 

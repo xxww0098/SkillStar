@@ -157,6 +157,20 @@ skillstar remove <name> [name...]
 skillstar remove --all
 ```
 
+### 团队智能（本机 Context / Improvement）
+
+检索已安装 Skill 与本地摩擦笔记，不是 Marketplace 搜索，也不是已移除的教程功能。
+
+```bash
+skillstar team recall "pull request tests"
+skillstar team health
+skillstar team digest
+skillstar team friction --interrupts 2 --retries 8 --task "Fix hook injection"
+skillstar team share --title "Skipped CI on merge" --body "Always require a green check." --skill pr-review
+skillstar team notes
+skillstar team used pr-review
+```
+
 ### 创建与发布
 
 ```bash
