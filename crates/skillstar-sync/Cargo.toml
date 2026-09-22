@@ -23,9 +23,11 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "io-util"] }
 tracing = { workspace = true }
 toml = { workspace = true }
-# keyring v4 default (`v1`) bundles the native store for each desktop OS
-# Credentials never touch the TOML (keyring).
-keyring = { workspace = true }
+aes-gcm.workspace = true
+base64.workspace = true
+machine-uid.workspace = true
+rand.workspace = true
+sha2.workspace = true
 # SSH (former skillstar-ssh)
 dirs = { workspace = true }
 russh = { version = "0.61", default-features = false, features = ["ring", "rsa"] }

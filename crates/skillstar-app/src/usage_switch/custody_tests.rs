@@ -238,6 +238,7 @@ fn subscription(id: &str, catalog_id: &str) -> Subscription {
         oauth_account_id: None,
         oauth_region: None,
         requires_reauth: false,
+        provider_state_encrypted: None,
         cookie_jar_encrypted: None,
         cookie_session_expires_at: None,
         manual_quota: None,
@@ -647,6 +648,17 @@ async fn cursor_without_local_state_reports_missing_instead_of_trusting_the_pin(
         reconcile_cli_accounts().await.unwrap().get("cursor"),
         Some(&CliAccountState::Missing)
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn catalogs_without_a_switch_adapter_are_absent_from_reconcile() {
+    let _sb = sandbox().await;
+    assert!(reconcile_cli_account("deepseek").await.unwrap().is_none());
+    assert!(reconcile_cli_account("anthropic").await.unwrap().is_none());
+    let states = reconcile_cli_accounts().await.unwrap();
+    assert!(!states.contains_key("deepseek"));
+    assert!(!states.contains_key("anthropic"));
+    assert!(!states.contains_key("glm"));
 }
 
 // ── Windows: a copy is not a symlink, and must not be described as one ────

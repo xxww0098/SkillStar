@@ -1,7 +1,9 @@
 import type { DesktopAppId } from "../types";
 import { GROK_BOT_FILTER } from "../types";
 
-/** Quota catalog ids that expose instance actions. Not `xai` / `anthropic`. */
+/** Quota catalog ids that expose instance actions. Not `xai` / `anthropic`.
+ * Pending isolation candidates stay out until a report marks them Verified.
+ */
 export const INSTANCE_CATALOG_IDS = ["cursor", "antigravity"] as const;
 
 export function desktopAppIdForCatalog(catalogId: string): DesktopAppId | null {

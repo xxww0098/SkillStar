@@ -78,6 +78,21 @@ export function canonicalizeAntigravityModelName(raw: string): string {
 const CATEGORY_KEYS: Record<string, string> = {
   "Auto + Composer": "usage.categoryAutoComposer",
   API: "usage.categoryApi",
+  "Inline Suggestions": "usage.copilotInlineSuggestions",
+  "Chat messages": "usage.copilotChatMessages",
+  "Premium requests": "usage.copilotPremiumRequests",
+  "User Prompt credits": "usage.windsurfPromptCredits",
+  "Add-on prompt credits": "usage.windsurfAddonCredits",
+  Daily: "usage.windsurfDaily",
+  Weekly: "usage.windsurfWeekly",
+  Credits: "usage.kiroCredits",
+  "Free trial": "usage.kiroFreeTrial",
+  Usage: "usage.codebuddyUsage",
+  "Add-on": "usage.codebuddyAddon",
+  Basic: "usage.codebuddyBasic",
+  Pro: "usage.codebuddyPro",
+  Enterprise: "usage.codebuddyEnterprise",
+  Activity: "usage.codebuddyActivity",
 };
 
 const WINDOW_KEYS: Record<string, string> = {
@@ -90,7 +105,16 @@ const WINDOW_KEYS: Record<string, string> = {
   "Token Plan Credits": "usage.windowTokenPlanCredits",
   模型额度: "usage.windowModelQuota",
   "Model quota": "usage.windowModelQuota",
+  Copilot: "usage.windowCopilot",
+  Credits: "usage.kiroCredits",
+  "Free trial": "usage.kiroFreeTrial",
   本月: "usage.defaultPeriod",
+  Usage: "usage.codebuddyUsage",
+  "Add-on": "usage.codebuddyAddon",
+  Basic: "usage.codebuddyBasic",
+  Pro: "usage.codebuddyPro",
+  Enterprise: "usage.codebuddyEnterprise",
+  Activity: "usage.codebuddyActivity",
 };
 
 export function localizeCategoryLabel(label: string, t: TFunction): string {
@@ -136,6 +160,8 @@ export function authModeLabel(mode: AuthMode, t: TFunction): string {
       return t("usage.authBadgeCookie");
     case "manual":
       return t("usage.authBadgeManual");
+    case "token-import":
+      return t("usage.authBadgeTokenImport");
   }
 }
 

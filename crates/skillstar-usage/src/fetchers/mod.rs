@@ -10,6 +10,8 @@
 pub mod api_key;
 pub mod cookie;
 pub mod oauth;
+/// Device-proof signer. Quota, login, and import live in [`oauth::trae`].
+pub(crate) mod trae;
 
 use chrono::Utc;
 
@@ -21,7 +23,7 @@ pub async fn refresh(subscription: &mut Subscription) -> UsageResult<Subscriptio
     use crate::catalog::AuthMode;
     match subscription.auth_mode {
         AuthMode::ApiKey => api_key::dispatch(subscription).await,
-        AuthMode::OAuth => oauth::dispatch(subscription).await,
+        AuthMode::OAuth | AuthMode::TokenImport => oauth::dispatch(subscription).await,
         AuthMode::Cookie => cookie::dispatch(subscription).await,
         AuthMode::Manual => Ok(SubscriptionUsage {
             subscription_id: subscription.id.clone(),
@@ -61,4 +63,30 @@ pub(crate) fn decrypt_required(cipher: &Option<String>, field_label: &str) -> Us
         return Err(UsageError::AuthRequired);
     }
     Ok(pt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::AuthMode;
+
+    #[tokio::test]
+    async fn token_import_refresh_uses_the_oauth_dispatcher() {
+        let mut sub =
+            oauth::common::SubscriptionBuilder::new("cursor", "imported", "USD", "at", None)
+                .build();
+        // OpenCode's OAuth arm returns a fixed error and never touches the network.
+        // API-key dispatch would refuse a missing key first; cookie dispatch would
+        // refuse a missing jar; manual dispatch would succeed.
+        sub.catalog_id = "opencode".into();
+        sub.auth_mode = AuthMode::TokenImport;
+
+        let error = refresh(&mut sub)
+            .await
+            .expect_err("opencode oauth is unavailable");
+        assert!(
+            error.to_string().contains("OpenCode 官方 OAuth token"),
+            "{error}"
+        );
+    }
 }

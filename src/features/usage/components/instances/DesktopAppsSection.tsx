@@ -6,18 +6,26 @@ import { cn } from "@/lib/utils";
 import type { DesktopAppId } from "../../types";
 import { AppInstancesPanel } from "./AppInstancesPanel";
 
-const APP_META: Record<DesktopAppId, { catalogId: string; brand: string; labelKey: string }> = {
+const VERIFIED_APP_META = {
   cursor: { catalogId: "cursor", brand: "00E5BC", labelKey: "usage.desktopAppCursor" },
   "grok-bot": { catalogId: "grok-bot", brand: "18181B", labelKey: "usage.grokBotDesktop" },
   antigravity: { catalogId: "antigravity", brand: "4285F4", labelKey: "usage.desktopAppAntigravity" },
-};
+} as const;
 
 export function DesktopAppsSection({ appIds }: { appIds: DesktopAppId[] }) {
   const { t } = useTranslation();
   const single = appIds.length === 1;
   const [open, setOpen] = useState<Record<string, boolean>>(() => Object.fromEntries(appIds.map((id) => [id, single])));
 
-  const items = useMemo(() => appIds.map((id) => ({ id, ...APP_META[id] })), [appIds]);
+  const items = useMemo(
+    () =>
+      appIds.flatMap((id) => {
+        if (!(id in VERIFIED_APP_META)) return [];
+        const meta = VERIFIED_APP_META[id as keyof typeof VERIFIED_APP_META];
+        return [{ id, ...meta }];
+      }),
+    [appIds],
+  );
 
   return (
     <section className="mb-4 rounded-2xl border border-border/70 bg-card/60 px-3 py-3">

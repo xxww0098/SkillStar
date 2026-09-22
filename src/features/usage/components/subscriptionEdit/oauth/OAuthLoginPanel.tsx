@@ -1,11 +1,14 @@
 import { motion } from "framer-motion";
-import { Check, Copy, ExternalLink, Loader2 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { Copy, ExternalLink, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import type { CatalogEntry, OAuthStart } from "../../../types";
+import { Textarea } from "@/components/ui/textarea";
+import { openExternalUrl } from "@/lib/externalOpen";
+import { copyToClipboard } from "@/lib/utils";
+import type { CatalogEntry, OAuthFlow, OAuthStart } from "../../../types";
 
 interface OAuthLoginPanelProps {
   selectedEntry: CatalogEntry;
@@ -25,48 +28,21 @@ interface OAuthLoginPanelProps {
   onCancelOAuth: () => void;
 }
 
-type StepState = "upcoming" | "active" | "done";
+type OAuthFlowKind = "local-callback" | "remote-poll" | "scheme-paste" | "immediate";
 
-function formatCountdown(secs: number): string {
-  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+/** Before a start exists there is no flow yet, so the idle panel stays local. */
+function oauthFlowKind(flow: OAuthFlow | null | undefined): OAuthFlowKind {
+  if (flow == null) return "local-callback";
+  if (typeof flow === "string") return flow;
+  return "scheme-paste";
 }
 
-function OAuthStep({
-  index,
-  state,
-  label,
-  children,
-}: {
-  index: number;
-  state: StepState;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <li className="flex gap-2.5">
-      <span
-        className={cn(
-          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold transition-colors",
-          state === "done" && "border-transparent bg-foreground/85 text-background",
-          state === "active" && "border-foreground/35 text-foreground",
-          state === "upcoming" && "border-border text-muted-foreground",
-        )}
-      >
-        {state === "done" ? <Check className="h-3 w-3" /> : index}
-      </span>
-      <div className="min-w-0 flex-1 space-y-2">
-        <p
-          className={cn("text-xs leading-relaxed", state === "upcoming" ? "text-muted-foreground" : "text-foreground")}
-        >
-          {label}
-        </p>
-        {children}
-      </div>
-    </li>
-  );
+function schemePrefix(flow: OAuthFlow | null | undefined): string | null {
+  if (flow == null || typeof flow === "string") return null;
+  return flow["scheme-paste"].scheme_prefix;
 }
 
-/** OAuth login panel: guided steps — generate link, open page, paste callback fallback. */
+/** OAuth login panel: start button, then the body for this login's flow. */
 export function OAuthLoginPanel({
   selectedEntry,
   submitting,
@@ -85,123 +61,263 @@ export function OAuthLoginPanel({
   onCancelOAuth,
 }: OAuthLoginPanelProps) {
   const { t } = useTranslation();
+  const kind = oauthFlowKind(oauthStart?.flow);
+  // Adoption already resolved the pending login; the parent is closing.
+  if (kind === "immediate") return null;
+
   const callbackDisabled = !oauthPendingId || oauthSubmittingCallback;
-  const provider = selectedEntry.display_name;
-  const [remainingSecs, setRemainingSecs] = useState<number | null>(null);
-
-  useEffect(() => {
-    const expiresIn = oauthStart?.expires_in_secs;
-    if (!expiresIn) {
-      setRemainingSecs(null);
-      return;
-    }
-    const deadline = Date.now() + expiresIn * 1000;
-    const tick = () => setRemainingSecs(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [oauthStart]);
-
+  const prefix = schemePrefix(oauthStart?.flow);
   return (
-    <section className="rounded-2xl border border-border bg-muted/40 px-4 py-4">
-      <header className="space-y-0.5">
-        <p className="text-[13px] font-semibold text-foreground">{t("usage.oauthPanelTitle", { provider })}</p>
-        <p className="text-[11px] leading-relaxed text-muted-foreground">{t("usage.oauthPanelDesc", { provider })}</p>
-      </header>
+    <div className="space-y-3 rounded-2xl border border-border bg-muted/40 p-3.5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-foreground">{t("usage.oauthPanelTitle")}</p>
+          <p className="mt-1 max-w-[62ch] text-[11px] leading-relaxed text-foreground/70">
+            {kind === "remote-poll"
+              ? t("usage.oauthRemotePollDesc")
+              : kind === "scheme-paste"
+                ? t("usage.oauthSchemeDesc", { prefix: prefix ?? "" })
+                : t("usage.oauthPanelDesc", { provider: selectedEntry.display_name })}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={onStartOAuth}
+          disabled={submitting || !!oauthPendingId}
+          className="shrink-0"
+        >
+          {submitting && oauthIsActiveMode ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ExternalLink className="h-3.5 w-3.5" />
+          )}
+          {oauthPendingId ? t("usage.btnWaitingLogin") : t("usage.oauthStartLogin")}
+        </Button>
+      </div>
 
-      <ol className="mt-3.5 list-none space-y-3.5">
-        <OAuthStep index={1} state={oauthStart ? "done" : "active"} label={t("usage.oauthStepGenerate", { provider })}>
+      {kind === "remote-poll" && oauthStart ? (
+        <RemotePollBody start={oauthStart} />
+      ) : kind === "scheme-paste" ? (
+        <SchemePasteBody
+          prefix={prefix}
+          authUrl={oauthStart?.auth_url ?? null}
+          value={oauthCallbackInput}
+          onChange={setOauthCallbackInput}
+          disabled={callbackDisabled}
+          submitting={oauthSubmittingCallback}
+          onSubmit={onSubmitCallback}
+          onCopy={onCopyAuthLink}
+          onOpen={onOpenOAuthLink}
+        />
+      ) : (
+        <>
           {oauthStart ? (
-            <div className="flex items-center gap-1 rounded-lg border border-border/70 bg-background/70 py-1 pl-2.5 pr-1">
-              <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border bg-background/70 p-3">
+              <p className="text-[11px] font-semibold text-foreground/75">{t("usage.oauthAuthLink")}</p>
+              <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
                 {oauthStart.auth_url}
-              </code>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={onCopyAuthLink}
-                title={t("usage.oauthCopyLink")}
-                aria-label={t("usage.oauthCopyLink")}
-              >
-                <Copy />
-              </Button>
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button type="button" size="xs" variant="outline" onClick={onCopyAuthLink}>
+                  <Copy className="h-3 w-3" />
+                  {t("usage.oauthCopyLink")}
+                </Button>
+                <Button type="button" size="xs" variant="outline" onClick={onOpenOAuthLink}>
+                  <ExternalLink className="h-3 w-3" />
+                  {t("usage.oauthOpenLink")}
+                </Button>
+              </div>
             </div>
           ) : (
-            <Button type="button" size="sm" onClick={onStartOAuth} disabled={submitting}>
-              {submitting && oauthIsActiveMode ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <ExternalLink className="h-3.5 w-3.5" />
-              )}
-              {t("usage.oauthStartLogin")}
-            </Button>
+            <p className="rounded-xl border border-dashed border-border/80 bg-muted/50 px-3 py-2.5 text-[11px] leading-relaxed text-foreground/60">
+              {t("usage.oauthLinkPlaceholder")}
+            </p>
           )}
-        </OAuthStep>
 
-        <OAuthStep index={2} state={oauthStart ? "active" : "upcoming"} label={t("usage.oauthStepAuthorize")}>
-          <Button type="button" variant="outline" size="sm" onClick={onOpenOAuthLink} disabled={!oauthStart}>
-            {t("usage.oauthOpenLink")}
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Button>
-        </OAuthStep>
-
-        <OAuthStep index={3} state={oauthPendingId ? "active" : "upcoming"} label={t("usage.oauthStepFallback")}>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              value={oauthCallbackInput}
-              onChange={(e) => setOauthCallbackInput(e.target.value)}
-              placeholder={t("usage.oauthCallbackPlaceholder")}
-              disabled={callbackDisabled}
-              className="h-8 rounded-lg border-input-border bg-input text-xs text-foreground placeholder:text-foreground/45 disabled:opacity-100 disabled:bg-muted/50 disabled:text-foreground/55 disabled:placeholder:text-foreground/40"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onSubmitCallback}
-              disabled={callbackDisabled || !oauthCallbackInput.trim()}
-              className="shrink-0 disabled:opacity-100 disabled:border-border disabled:bg-muted/40 disabled:text-foreground/50"
-            >
-              {oauthSubmittingCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {t("usage.oauthSubmitCallback")}
-            </Button>
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold text-foreground">{t("usage.oauthCallbackLabel")}</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                value={oauthCallbackInput}
+                onChange={(e) => setOauthCallbackInput(e.target.value)}
+                placeholder={t("usage.oauthCallbackPlaceholder")}
+                disabled={callbackDisabled}
+                className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground placeholder:text-foreground/45 disabled:opacity-100 disabled:bg-muted/50 disabled:text-foreground/55 disabled:placeholder:text-foreground/40"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onSubmitCallback}
+                disabled={callbackDisabled || !oauthCallbackInput.trim()}
+                className="shrink-0 disabled:opacity-100 disabled:border-border disabled:bg-muted/40 disabled:text-foreground/50"
+              >
+                {oauthSubmittingCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t("usage.oauthSubmitCallback")}
+              </Button>
+            </div>
+            <p className="text-[10px] leading-relaxed text-foreground/60">{t("usage.oauthCallbackHint")}</p>
           </div>
-          <p className="text-[10px] leading-relaxed text-muted-foreground/80">{t("usage.oauthCallbackHint")}</p>
-        </OAuthStep>
-      </ol>
+        </>
+      )}
 
       {oauthStatus && (
-        <p className="mt-3.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <div className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-[10px] text-primary">
           <motion.span
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/70"
-            animate={reduceMotion ? undefined : { opacity: [0.35, 1, 0.35] }}
-            transition={reduceMotion ? undefined : { duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+            className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-primary/15 to-transparent"
+            animate={reduceMotion ? undefined : { x: ["-120%", "320%"] }}
+            transition={reduceMotion ? undefined : { duration: 1.7, repeat: Infinity, ease: "linear" }}
           />
-          <span className="min-w-0">
-            {oauthStatus} · {t("usage.oauthKeepOpen")}
-            {remainingSecs != null && (
-              <span className="font-mono tabular-nums">
-                {" "}
-                · {t("usage.oauthExpiresIn", { time: formatCountdown(remainingSecs) })}
-              </span>
-            )}
-          </span>
-        </p>
-      )}
-
-      {oauthPendingId && (
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-          <p className="text-[10px] leading-relaxed text-muted-foreground/80">{t("usage.oauthWaitingHint")}</p>
-          <button
-            type="button"
-            className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:underline underline-offset-2"
-            onClick={onCancelOAuth}
-          >
-            {t("usage.cancelOAuth")}
-          </button>
+          <Loader2 className="relative h-3.5 w-3.5 animate-spin" />
+          <div className="relative min-w-0 flex-1">
+            <p className="font-semibold">{oauthStatus}</p>
+            <p className="mt-0.5 text-[9px] text-primary/75">{t("usage.oauthWaitingHint")}</p>
+          </div>
+          {oauthPendingId && (
+            <button
+              type="button"
+              className="relative shrink-0 rounded-full px-2 py-1 underline hover:bg-primary/10"
+              onClick={onCancelOAuth}
+            >
+              {t("usage.cancelOAuth")}
+            </button>
+          )}
         </div>
       )}
-    </section>
+    </div>
+  );
+}
+
+function RemotePollBody({ start }: { start: OAuthStart }) {
+  const { t } = useTranslation();
+  const link = start.verification_uri || start.auth_url;
+  const code = start.user_code;
+  return (
+    <div className="space-y-3 rounded-xl border border-dashed border-border bg-background/70 p-3">
+      {code ? (
+        <div className="space-y-2 text-center">
+          <p className="text-[11px] font-semibold text-foreground/75">{t("usage.oauthUserCodeLabel")}</p>
+          <p className="font-mono text-2xl font-semibold tracking-[0.25em] text-foreground">{code}</p>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              void copyToClipboard(code).then((copied) => {
+                if (copied) toast.success(t("usage.oauthUserCodeCopied"));
+                else toast.error(t("common.copyFailed", { defaultValue: "Copy failed" }));
+              });
+            }}
+          >
+            <Copy className="h-3 w-3" />
+            {t("usage.oauthCopyUserCode")}
+          </Button>
+        </div>
+      ) : null}
+      {link ? (
+        <Button type="button" size="xs" variant="outline" onClick={() => void openExternalUrl(link)}>
+          <ExternalLink className="h-3 w-3" />
+          {t("usage.oauthOpenVerification")}
+        </Button>
+      ) : null}
+      {start.interval_secs != null && start.interval_secs > 0 ? (
+        <PollCountdown key={start.interval_secs} seconds={start.interval_secs} />
+      ) : null}
+    </div>
+  );
+}
+
+function PollCountdown({ seconds }: { seconds: number }) {
+  const { t } = useTranslation();
+  const [left, setLeft] = useState(seconds);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setLeft((current) => (current <= 1 ? seconds : current - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [seconds]);
+  return (
+    <p className="text-center text-[11px] text-foreground/70">{t("usage.oauthPollCountdown", { seconds: left })}</p>
+  );
+}
+
+function SchemePasteBody({
+  prefix,
+  authUrl,
+  value,
+  onChange,
+  disabled,
+  submitting,
+  onSubmit,
+  onCopy,
+  onOpen,
+}: {
+  prefix: string | null;
+  authUrl: string | null;
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+  submitting: boolean;
+  onSubmit: () => void;
+  onCopy: () => void;
+  onOpen: () => void;
+}) {
+  const { t } = useTranslation();
+  const trimmed = value.trim();
+  const mismatch = trimmed.length > 0 && !!prefix && !trimmed.startsWith(prefix);
+  return (
+    <div className="space-y-1.5">
+      {authUrl ? (
+        <div className="rounded-xl border border-dashed border-border bg-background/70 p-3">
+          <p className="text-[11px] font-semibold text-foreground/75">{t("usage.oauthAuthLink")}</p>
+          <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+            {authUrl}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button type="button" size="xs" variant="outline" onClick={onCopy}>
+              <Copy className="h-3 w-3" />
+              {t("usage.oauthCopyLink")}
+            </Button>
+            <Button type="button" size="xs" variant="outline" onClick={onOpen}>
+              <ExternalLink className="h-3 w-3" />
+              {t("usage.oauthOpenLink")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <p className="text-[11px] font-semibold text-foreground">{t("usage.oauthSchemeLabel")}</p>
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={t("usage.oauthSchemePlaceholder", { prefix: prefix ?? "" })}
+        disabled={disabled}
+        aria-invalid={mismatch || undefined}
+        className="min-h-20 rounded-xl text-xs"
+      />
+      {mismatch ? (
+        <p role="alert" className="text-[10px] leading-relaxed text-destructive">
+          {t("usage.oauthSchemePrefixMismatch", { prefix })}
+        </p>
+      ) : (
+        <p className="text-[10px] leading-relaxed text-foreground/60">
+          {t("usage.oauthSchemeHint", { prefix: prefix ?? "" })}
+        </p>
+      )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          if (mismatch || !trimmed) return;
+          onSubmit();
+        }}
+        disabled={disabled || !trimmed || mismatch}
+        className="shrink-0 disabled:opacity-100 disabled:border-border disabled:bg-muted/40 disabled:text-foreground/50"
+      >
+        {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        {t("usage.oauthSubmitScheme")}
+      </Button>
+    </div>
   );
 }

@@ -7,7 +7,8 @@ import type { SwitchOutcome } from "./SwitchOutcome";
 
 export type Subscription = { id: string, catalog_id: string, display_name: string, auth_mode: AuthMode, plan_tier: string | null, monthly_price: number | null, currency: string, billing_cycle: BillingCycle, start_date: number, renew_date: number, auto_renew: boolean, 
 /**
- * `true` when ApiKey/OAuth credentials are present (without revealing them).
+ * `true` when a credential is stored (API key, OAuth token, cookie jar,
+ * or provider-private state) without revealing the secret.
  */
 has_credential: boolean, 
 /**

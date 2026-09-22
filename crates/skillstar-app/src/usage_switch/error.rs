@@ -256,7 +256,7 @@ pub(super) enum MaterializeError {
 ///
 /// Off macOS no target has a second store, so nothing constructs these — the
 /// enum stays in the signature so the trait has one shape on every platform.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ExternalStoreError {
     #[error("无法定位 Codex home 目录")]

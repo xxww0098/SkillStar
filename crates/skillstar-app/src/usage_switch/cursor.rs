@@ -11,9 +11,46 @@ use skillstar_usage::oauth::token_refresh;
 use skillstar_usage::subscription::Subscription;
 use skillstar_usage::{UsageError, UsageResult, storage, tool_paths, vscdb};
 
+use super::ide::IdeCredentialAdapter;
 use super::{CliAccountState, SwitchOutcome};
 
 pub(super) const CATALOG_ID: &str = "cursor";
+
+pub(super) struct Adapter;
+
+impl IdeCredentialAdapter for Adapter {
+    fn catalog_id(&self) -> &'static str {
+        CATALOG_ID
+    }
+
+    fn available(&self) -> bool {
+        tool_paths::cursor_state_db_path().is_some()
+    }
+
+    fn activate(&self, sub_id: &str) -> UsageResult<(Subscription, SwitchOutcome)> {
+        activate(sub_id)
+    }
+
+    fn sync(&self, sub: &Subscription) -> UsageResult<SwitchOutcome> {
+        sync(sub)
+    }
+
+    fn reconcile(&self) -> UsageResult<Option<CliAccountState>> {
+        if !self.available() {
+            return Ok(None);
+        }
+        reconcile().map(Some)
+    }
+
+    fn adopt_before_refresh(&self, sub: &mut Subscription) -> UsageResult<()> {
+        adopt_active_session(sub)
+    }
+
+    fn forget(&self, _sub_id: &str) -> UsageResult<()> {
+        // No per-account snapshot. Deleting the card must not log the IDE out.
+        Ok(())
+    }
+}
 
 pub(super) fn activate(subscription_id: &str) -> UsageResult<(Subscription, SwitchOutcome)> {
     let subscription = storage::get_subscription(subscription_id)?;

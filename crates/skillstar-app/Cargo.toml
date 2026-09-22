@@ -25,6 +25,7 @@ dirs.workspace = true
 futures.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha1 = { workspace = true }
 sha2 = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
 skillstar-marketplace = { path = "../skillstar-marketplace" }

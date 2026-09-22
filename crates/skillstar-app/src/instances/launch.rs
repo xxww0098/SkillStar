@@ -13,8 +13,13 @@ pub fn start_macos_app(
     if !cfg!(target_os = "macos") {
         return Err(InstanceError::Platform);
     }
+    let mut argv = open_argv(app, user_data_dir).ok_or_else(|| {
+        InstanceError::UnsupportedApp(format!(
+            "{} 的隔离方式是环境变量，启动器尚未接入。",
+            app.display_name()
+        ))
+    })?;
     std::fs::create_dir_all(user_data_dir)?;
-    let mut argv = open_argv(app, user_data_dir);
     argv.extend(extra_args.iter().cloned());
     let program = argv
         .first()

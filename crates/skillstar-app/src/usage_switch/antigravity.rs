@@ -13,9 +13,46 @@ use skillstar_usage::oauth::token_refresh;
 use skillstar_usage::subscription::Subscription;
 use skillstar_usage::{UsageError, UsageResult, storage, tool_paths, vscdb};
 
+use super::ide::IdeCredentialAdapter;
 use super::{CliAccountState, SwitchOutcome};
 
 pub(super) const CATALOG_ID: &str = "antigravity";
+
+pub(super) struct Adapter;
+
+impl IdeCredentialAdapter for Adapter {
+    fn catalog_id(&self) -> &'static str {
+        CATALOG_ID
+    }
+
+    fn available(&self) -> bool {
+        tool_paths::antigravity_state_db_path().is_some()
+    }
+
+    fn activate(&self, sub_id: &str) -> UsageResult<(Subscription, SwitchOutcome)> {
+        activate(sub_id)
+    }
+
+    fn sync(&self, sub: &Subscription) -> UsageResult<SwitchOutcome> {
+        sync(sub)
+    }
+
+    fn reconcile(&self) -> UsageResult<Option<CliAccountState>> {
+        if !self.available() {
+            return Ok(None);
+        }
+        reconcile().map(Some)
+    }
+
+    fn adopt_before_refresh(&self, sub: &mut Subscription) -> UsageResult<()> {
+        adopt_active_session(sub)
+    }
+
+    fn forget(&self, _sub_id: &str) -> UsageResult<()> {
+        // No per-account snapshot. Deleting the card must not log the IDE out.
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LiveSession {
@@ -123,30 +160,6 @@ fn write_subscription(subscription: &Subscription) -> UsageResult<SwitchOutcome>
                 .then_some(subscription.display_name.trim())
         });
 
-    #[cfg(target_os = "macos")]
-    if !skillstar_usage::tool_paths::is_tool_sync_sandboxed()
-        && (read_system_session()?.is_some() || should_prefer_system_store(&path))
-    {
-        write_system_credential(
-            &access_token,
-            &refresh_token,
-            subscription
-                .access_token_expires_at
-                .or_else(|| token_refresh::jwt_exp(&access_token))
-                .unwrap_or_default(),
-        )?;
-        if read_system_session()?.is_none_or(|session| session.refresh_token != refresh_token) {
-            return Err(UsageError::Other(
-                "Antigravity macOS Keychain 回读校验失败，切换未生效".into(),
-            ));
-        }
-        return Ok(SwitchOutcome::direct_ok(
-            CATALOG_ID,
-            &PathBuf::from("macOS Keychain: gemini / antigravity"),
-            true,
-        ));
-    }
-
     vscdb::write_antigravity_oauth_token(
         &path,
         &access_token,
@@ -158,20 +171,6 @@ fn write_subscription(subscription: &Subscription) -> UsageResult<SwitchOutcome>
         email,
     )?;
     Ok(SwitchOutcome::direct_ok(CATALOG_ID, &path, false))
-}
-
-#[cfg(target_os = "macos")]
-fn should_prefer_system_store(state_db_path: &std::path::Path) -> bool {
-    if let Some(prefers_system) = tool_paths::antigravity_prefers_system_credentials() {
-        return prefers_system;
-    }
-    if !state_db_path.exists() {
-        return true;
-    }
-    vscdb::read_antigravity_refresh_token(state_db_path)
-        .ok()
-        .flatten()
-        .is_none()
 }
 
 fn secret(value: Option<&str>, name: &str) -> UsageResult<String> {
@@ -303,56 +302,4 @@ fn read_system_session() -> UsageResult<Option<LiveSession>> {
         expires_at,
         email,
     }))
-}
-
-#[cfg(target_os = "macos")]
-fn write_system_credential(
-    access_token: &str,
-    refresh_token: &str,
-    expires_at: i64,
-) -> UsageResult<()> {
-    let expiry = chrono::DateTime::from_timestamp(expires_at, 0)
-        .unwrap_or_else(chrono::Utc::now)
-        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-    let payload = serde_json::json!({
-        "token": {
-            "access_token": access_token,
-            "token_type": "Bearer",
-            "refresh_token": refresh_token,
-            "expiry": expiry,
-        },
-        "auth_method": "consumer",
-    });
-    let payload = serde_json::to_string(&payload).map_err(|error| {
-        UsageError::Other(format!("序列化 Antigravity Keychain 凭据失败：{error}"))
-    })?;
-    let encoded = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        payload.as_bytes(),
-    );
-    let value = format!("go-keyring-base64:{encoded}");
-    let output = std::process::Command::new("/usr/bin/security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            "gemini",
-            "-a",
-            "antigravity",
-            "-w",
-            &value,
-            "-A",
-        ])
-        .output()
-        .map_err(|error| {
-            UsageError::Other(format!("写入 Antigravity macOS Keychain 失败：{error}"))
-        })?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(UsageError::Other(format!(
-            "写入 Antigravity macOS Keychain 失败：{}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
-    }
 }

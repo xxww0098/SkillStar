@@ -159,9 +159,15 @@ pub fn profiles_config_path() -> PathBuf {
 }
 
 /// `config/ssh_hosts.toml` — SSH remote host definitions (non-sensitive metadata only;
-/// passphrases/passwords live in the system keyring, keyed by host id).
+/// passphrases/passwords live in state/ssh_credentials.json, keyed by host id).
 pub fn ssh_hosts_config_path() -> PathBuf {
     config_dir().join("ssh_hosts.toml")
+}
+
+/// `state/ssh_credentials.json` — encrypted SSH passphrases/passwords.
+/// Tokens are AES-256-GCM sealed JSON on disk (mode 0600). Not the OS keychain.
+pub fn ssh_credentials_path() -> PathBuf {
+    state_dir().join("ssh_credentials.json")
 }
 
 /// `config/ssh_known_hosts.json` — accepted SSH host-key fingerprints (TOFU store).

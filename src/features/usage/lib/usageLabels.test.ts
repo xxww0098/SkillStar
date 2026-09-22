@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TFunction } from "i18next";
 import {
+  authModeLabel,
   formatAntigravityQuotaLabel,
   isAbsoluteQuotaWindow,
   isBreakdownQuotaWindow,
@@ -17,6 +18,12 @@ const testT = ((key: string) =>
     "usage.antigravityWeeklyLimit": "周额度",
     "usage.antigravityFiveHourLimit": "5 小时额度",
   })[key] ?? key) as TFunction;
+
+describe("authModeLabel", () => {
+  it("maps token-import onto its badge key", () => {
+    expect(authModeLabel("token-import", testT)).toBe("usage.authBadgeTokenImport");
+  });
+});
 
 describe("subscriptionCardTitle", () => {
   it("strips catalog · prefix and legacy Grok · names", () => {

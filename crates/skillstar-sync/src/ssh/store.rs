@@ -21,9 +21,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ssh::types::{KnownHost, SshHostDef};
 
-/// Service name used for every keyring entry. The account name is the host `id`.
-const KEYRING_SERVICE: &str = "skillstar-ssh";
-
 // ── Host metadata persistence ───────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -62,52 +59,177 @@ pub fn save_hosts(hosts: &[SshHostDef]) -> Result<()> {
     Ok(())
 }
 
-// ── Credential storage (keyring abstraction) ────────────────────────
+// ── Credential storage (encrypted local JSON) ────────────────────────
+
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+
+const KEY_NAMESPACE: &[u8] = b"skillstar-ssh-credentials";
+const CREDENTIAL_SCHEMA_VERSION: u32 = 1;
+
+fn encryption_key() -> [u8; 32] {
+    let uid = machine_uid::get().unwrap_or_else(|_| "skillstar-fallback-id-123".into());
+    let mut hash = Sha256::new();
+    hash.update(KEY_NAMESPACE);
+    hash.update(uid.as_bytes());
+    hash.finalize().into()
+}
+
+fn seal(plaintext: &str) -> Result<String> {
+    if plaintext.is_empty() {
+        return Ok(String::new());
+    }
+    let key = encryption_key();
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("cipher init: {e}"))?;
+    let mut nonce_bytes = [0u8; 12];
+    for byte in &mut nonce_bytes {
+        *byte = rand::random::<u8>();
+    }
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext.as_bytes())
+        .map_err(|e| anyhow::anyhow!("encrypt: {e}"))?;
+    let mut combined = nonce_bytes.to_vec();
+    combined.extend_from_slice(&ciphertext);
+    Ok(BASE64.encode(combined))
+}
+
+fn open(encoded: &str) -> Result<String> {
+    if encoded.is_empty() {
+        return Ok(String::new());
+    }
+    let combined = BASE64.decode(encoded)
+        .map_err(|e| anyhow::anyhow!("base64 decode: {e}"))?;
+    if combined.len() < 28 {
+        return Err(anyhow::anyhow!("ciphertext too short"));
+    }
+    let key = encryption_key();
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("cipher init: {e}"))?;
+    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("decrypt: {e}"))?;
+    String::from_utf8(plaintext).map_err(|e| anyhow::anyhow!("utf8: {e}"))
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct SshCredentialsBlob {
+    schema_version: u32,
+    secrets: HashMap<String, String>,
+}
 
 /// Abstraction over secret storage so logic can be unit-tested without a
-/// real OS keyring. Mirrors the `PrefsStore` pattern in `profile_storage.rs`.
+/// real on-disk store. Mirrors the `PrefsStore` pattern in `profile_storage.rs`.
 pub trait SecretStore {
     fn get_secret(&self, host_id: &str) -> Result<Option<String>>;
     fn set_secret(&self, host_id: &str, value: &str) -> Result<()>;
     fn delete_secret(&self, host_id: &str) -> Result<()>;
 }
 
-/// Production secret store backed by the OS keyring.
-///
-/// On headless Linux without a Secret Service (D-Bus) the keyring calls will
-/// error; callers should surface that to the UI rather than crashing.
-pub struct KeyringSecretStore;
+/// Production secret store backed by local AES-256-GCM sealed JSON on disk (mode 0600).
+/// Never enters the OS keychain.
+#[derive(Clone)]
+pub struct EncryptedJsonSecretStore {
+    path: PathBuf,
+}
 
-impl SecretStore for KeyringSecretStore {
+impl Default for EncryptedJsonSecretStore {
+    fn default() -> Self {
+        Self {
+            path: skillstar_core::infra::paths::ssh_credentials_path(),
+        }
+    }
+}
+
+impl EncryptedJsonSecretStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[cfg(test)]
+    pub fn at(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn read_blob(&self) -> Result<SshCredentialsBlob> {
+        if !self.path.exists() {
+            return Ok(SshCredentialsBlob {
+                schema_version: CREDENTIAL_SCHEMA_VERSION,
+                secrets: HashMap::new(),
+            });
+        }
+        let bytes = std::fs::read(&self.path).context("read ssh_credentials.json")?;
+        if bytes.is_empty() {
+            return Ok(SshCredentialsBlob {
+                schema_version: CREDENTIAL_SCHEMA_VERSION,
+                secrets: HashMap::new(),
+            });
+        }
+        serde_json::from_slice(&bytes).context("parse ssh_credentials.json")
+    }
+
+    fn write_blob(&self, blob: &SshCredentialsBlob) -> Result<()> {
+        let content = serde_json::to_vec_pretty(blob).context("serialize ssh_credentials.json")?;
+        skillstar_core::infra::fs_ops::atomic_write(&self.path, &content)
+            .context("persist ssh_credentials.json")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
+    }
+}
+
+impl SecretStore for EncryptedJsonSecretStore {
     fn get_secret(&self, host_id: &str) -> Result<Option<String>> {
-        match keyring::Entry::new(KEYRING_SERVICE, host_id) {
-            Ok(entry) => match entry.get_password() {
-                Ok(pw) => Ok(Some(pw)),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(err) => Err(anyhow::anyhow!(err).context("keyring get_password")),
-            },
-            Err(err) => Err(anyhow::anyhow!(err).context("keyring entry new")),
+        let blob = self.read_blob()?;
+        match blob.secrets.get(host_id) {
+            Some(encrypted) => Ok(Some(open(encrypted)?)),
+            None => Ok(None),
         }
     }
 
     fn set_secret(&self, host_id: &str, value: &str) -> Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, host_id)
-            .map_err(|e| anyhow::anyhow!(e).context("keyring entry new"))?;
-        entry
-            .set_password(value)
-            .map_err(|e| anyhow::anyhow!(e).context("keyring set_password"))?;
-        Ok(())
+        let mut blob = self.read_blob()?;
+        let sealed = seal(value)?;
+        blob.secrets.insert(host_id.to_string(), sealed);
+        self.write_blob(&blob)
     }
 
     fn delete_secret(&self, host_id: &str) -> Result<()> {
-        match keyring::Entry::new(KEYRING_SERVICE, host_id) {
-            Ok(entry) => match entry.delete_credential() {
-                Ok(()) => Ok(()),
-                Err(keyring::Error::NoEntry) => Ok(()),
-                Err(err) => Err(anyhow::anyhow!(err).context("keyring delete_credential")),
-            },
-            Err(err) => Err(anyhow::anyhow!(err).context("keyring entry new")),
+        let mut blob = self.read_blob()?;
+        if blob.secrets.remove(host_id).is_some() {
+            self.write_blob(&blob)?;
         }
+        Ok(())
+    }
+}
+
+/// Backwards compatibility unit struct for callers that expect KeyringSecretStore as a value or type.
+/// Completely delegates to EncryptedJsonSecretStore — never touches OS keyring.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KeyringSecretStore;
+
+impl SecretStore for KeyringSecretStore {
+    fn get_secret(&self, host_id: &str) -> Result<Option<String>> {
+        EncryptedJsonSecretStore::default().get_secret(host_id)
+    }
+
+    fn set_secret(&self, host_id: &str, value: &str) -> Result<()> {
+        EncryptedJsonSecretStore::default().set_secret(host_id, value)
+    }
+
+    fn delete_secret(&self, host_id: &str) -> Result<()> {
+        EncryptedJsonSecretStore::default().delete_secret(host_id)
     }
 }
 
@@ -435,5 +557,28 @@ mod tests {
         assert!(load_known_hosts().is_empty());
         accept_host_key("ssh_2", "h2:22", "SHA256:bbb").unwrap();
         assert_eq!(known_fingerprint("ssh_2"), Some("SHA256:bbb".into()));
+    }
+
+    #[test]
+    fn encrypted_json_secret_store_roundtrip() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ssh_credentials.json");
+        let store = EncryptedJsonSecretStore::at(path.clone());
+
+        assert_eq!(store.get_secret("host_1").unwrap(), None);
+        store.set_secret("host_1", "super_secret_pw").unwrap();
+        assert_eq!(
+            store.get_secret("host_1").unwrap(),
+            Some("super_secret_pw".into())
+        );
+
+        // Verify the raw file does not contain the plaintext password
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("super_secret_pw"));
+        assert!(raw.contains("schema_version"));
+
+        // Delete secret
+        store.delete_secret("host_1").unwrap();
+        assert_eq!(store.get_secret("host_1").unwrap(), None);
     }
 }

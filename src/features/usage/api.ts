@@ -39,6 +39,13 @@ export const usageApi = {
   cancelOAuthLogin: (pendingId: string) => invoke<void>("cancel_oauth_login", { pendingId }),
   importSubscriptionFromLocal: (catalogId: string) =>
     invoke<Subscription>("import_subscription_from_local", { catalogId }),
+  /** Opaque paste. Not an API key; `targetSubscriptionId` replaces that row. */
+  importSubscriptionToken: (catalogId: string, payload: string, targetSubscriptionId?: string | null) =>
+    invoke<Subscription>("import_subscription_token", {
+      catalogId,
+      payload,
+      targetSubscriptionId: targetSubscriptionId ?? null,
+    }),
   getSubscriptionApiKey: (id: string) => invoke<string | null>("get_subscription_api_key", { id }),
 
   // ── Multi-account: active-per-catalog (Phase 7) ──────────────────

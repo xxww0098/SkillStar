@@ -77,10 +77,10 @@ describe("SubscriptionEditDialog — OAuth steps", () => {
 
   it("shows the guided steps with the browser step disabled before the link exists", () => {
     renderDialog();
-    expect(screen.getByText("usage.oauthStepGenerate")).toBeTruthy();
-    expect(screen.getByText("usage.oauthStepAuthorize")).toBeTruthy();
-    expect(screen.getByText("usage.oauthStepFallback")).toBeTruthy();
-    expect(screen.getByText("usage.oauthOpenLink").closest("button")?.disabled).toBe(true);
+    expect(screen.getByText("usage.oauthPanelTitle")).toBeTruthy();
+    expect(screen.getByText("usage.oauthLinkPlaceholder")).toBeTruthy();
+    expect(screen.getByText("usage.oauthStartLogin")).toBeTruthy();
+    expect(screen.getByText("usage.oauthSubmitCallback").closest("button")?.disabled).toBe(true);
   });
 
   it("reveals the auth link and waiting status after starting", async () => {
@@ -95,11 +95,8 @@ describe("SubscriptionEditDialog — OAuth steps", () => {
 
     await waitFor(() => expect(screen.getByText("https://auth.example/authorize?state=x")).toBeTruthy());
     expect(screen.getByText("usage.oauthOpenLink").closest("button")?.disabled).toBe(false);
-    expect(screen.getByText("usage.oauthWaiting · usage.oauthKeepOpen")).toBeTruthy();
-    expect(screen.getByText(/oauthExpiresIn/)).toBeTruthy();
+    expect(screen.getByText("usage.btnWaitingLogin")).toBeTruthy();
     expect(screen.getByText("usage.cancelOAuth")).toBeTruthy();
-    // Step 1 is done — the generate button is replaced by the link chip.
-    expect(screen.queryByText("usage.oauthStartLogin")).toBeNull();
     expect(awaitOAuthCompletion).toHaveBeenCalledWith("p-1");
   });
 

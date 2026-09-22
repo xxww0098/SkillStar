@@ -140,6 +140,78 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("ollama"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "github-copilot",
+        display_name: "GitHub Copilot",
+        catalog_id: Some("github-copilot"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "windsurf",
+        display_name: "Windsurf",
+        catalog_id: Some("windsurf"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "kiro",
+        display_name: "Kiro",
+        catalog_id: Some("kiro"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "qoder",
+        display_name: "Qoder",
+        catalog_id: Some("qoder"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "codebuddy",
+        display_name: "CodeBuddy",
+        catalog_id: Some("codebuddy"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "codebuddy-cn",
+        display_name: "CodeBuddy CN",
+        catalog_id: Some("codebuddy-cn"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae",
+        display_name: "Trae",
+        catalog_id: Some("trae"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae-solo",
+        display_name: "TRAE SOLO",
+        catalog_id: Some("trae-solo"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae-cn",
+        display_name: "Trae CN",
+        catalog_id: Some("trae-cn"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae-solo-cn",
+        display_name: "TRAE SOLO CN",
+        catalog_id: Some("trae-solo-cn"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "zed",
+        display_name: "Zed",
+        catalog_id: Some("zed"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "zcode",
+        display_name: "ZCode",
+        catalog_id: Some("zcode"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.
@@ -212,6 +284,48 @@ mod tests {
                 spec.catalog_id
             );
         }
+    }
+
+    #[test]
+    fn trae_identities_are_subscription_only() {
+        for id in ["trae", "trae-solo", "trae-cn", "trae-solo-cn"] {
+            let identity = identity_for_catalog(id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(identity.canonical_id, id);
+            assert!(identity.preset_ids.is_empty(), "{id}");
+        }
+        assert_ne!(
+            identity_for_catalog("trae").unwrap().display_name,
+            identity_for_catalog("trae-cn").unwrap().display_name
+        );
+    }
+
+    #[test]
+    fn zed_identity_is_subscription_only() {
+        let identity = identity_for_catalog("zed").expect("zed");
+        assert_eq!(identity.canonical_id, "zed");
+        assert_eq!(identity.display_name, "Zed");
+        assert!(identity.preset_ids.is_empty());
+    }
+
+    #[test]
+    fn zcode_identity_is_subscription_only() {
+        let identity = identity_for_catalog("zcode").expect("zcode");
+        assert_eq!(identity.canonical_id, "zcode");
+        assert_eq!(identity.display_name, "ZCode");
+        assert!(identity.preset_ids.is_empty());
+    }
+
+    #[test]
+    fn codebuddy_identities_are_subscription_only() {
+        for id in ["codebuddy", "codebuddy-cn"] {
+            let identity = identity_for_catalog(id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(identity.canonical_id, id);
+            assert!(identity.preset_ids.is_empty(), "{id}");
+        }
+        assert_ne!(
+            identity_for_catalog("codebuddy").unwrap().display_name,
+            identity_for_catalog("codebuddy-cn").unwrap().display_name
+        );
     }
 
     #[test]

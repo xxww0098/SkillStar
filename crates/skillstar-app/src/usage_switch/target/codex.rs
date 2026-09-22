@@ -165,15 +165,7 @@ impl CliCredentialTarget for CodexTarget {
     }
 
     fn publish_external(&self, live: &Path, root: &Value) -> Result<bool, ExternalStoreError> {
-        #[cfg(target_os = "macos")]
-        {
-            let home = live.parent().ok_or(ExternalStoreError::MissingCodexHome)?;
-            super::super::keychain::write_merged(home, root)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (live, root);
-            Ok(false)
-        }
+        let _ = (live, root);
+        Ok(false)
     }
 }

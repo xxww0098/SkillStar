@@ -24,7 +24,9 @@ import { ApiKeyFields } from "./subscriptionEdit/api/ApiKeyFields";
 import { AutoImportBanner } from "./subscriptionEdit/AutoImportBanner";
 import { CookieFields } from "./subscriptionEdit/cookie/CookieFields";
 import { Field, parseDateInput, toDateInput } from "./subscriptionEdit/fields";
+import { KiroLoginLegPicker, type KiroLoginLeg } from "./subscriptionEdit/oauth/KiroLoginLeg";
 import { OAuthLoginPanel } from "./subscriptionEdit/oauth/OAuthLoginPanel";
+import { TokenImportFields } from "./subscriptionEdit/token/TokenImportFields";
 
 interface SubscriptionEditDialogProps {
   open: boolean;
@@ -65,9 +67,11 @@ export function SubscriptionEditDialog({
   const [apiKey, setApiKey] = useState("");
   const [platformToken, setPlatformToken] = useState("");
   const [cookieHeader, setCookieHeader] = useState("");
+  const [tokenImport, setTokenImport] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [showPlatformToken, setShowPlatformToken] = useState(false);
   const [region, setRegion] = useState("cn");
+  const [kiroLeg, setKiroLeg] = useState<KiroLoginLeg>("portal");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [oauthStart, setOauthStart] = useState<OAuthStart | null>(null);
@@ -105,6 +109,7 @@ export function SubscriptionEditDialog({
       setApiKey("");
       setPlatformToken("");
       setCookieHeader("");
+      setTokenImport("");
       setRegion(editing.oauth_region ?? "cn");
       setNote(editing.note ?? "");
     } else {
@@ -125,6 +130,7 @@ export function SubscriptionEditDialog({
       setApiKey("");
       setPlatformToken("");
       setCookieHeader("");
+      setTokenImport("");
       setRegion(preselectedEntry?.regions[0] ?? "cn");
       setNote("");
     }
@@ -135,6 +141,7 @@ export function SubscriptionEditDialog({
     setOauthStatus(null);
     setOauthCallbackInput("");
     setOauthSubmittingCallback(false);
+    setKiroLeg("portal");
     oauthCancelledRef.current = null;
   }, [open, editing, preselectCatalogId, t]);
 
@@ -215,7 +222,7 @@ export function SubscriptionEditDialog({
     setScanningLocal(true);
     let successCount = 0;
 
-    // 并发扫描四大支持本地导入的服务
+    // 并发扫描支持本地导入的服务
     const importPromises = LOCAL_IMPORT_CATALOG_IDS.map(async (id) => {
       try {
         const sub = await usageApi.importSubscriptionFromLocal(id);
@@ -274,6 +281,23 @@ export function SubscriptionEditDialog({
     }
     setSubmitting(true);
     try {
+      if (authMode === "token-import") {
+        const pasted = tokenImport.trim();
+        if (!pasted) {
+          toast.error(t("usage.tokenImportRequired"));
+          return;
+        }
+        const saved = await usageApi.importSubscriptionToken(catalogId, pasted, isCreate ? undefined : editing?.id);
+        if (isCreate) {
+          onCreated(saved);
+          toast.success(t("usage.toastAdded"));
+        } else {
+          onUpdated(saved);
+          toast.success(t("usage.toastUpdated"));
+        }
+        onClose();
+        return;
+      }
       const payload = buildPayload();
       const apiKeyPayload = authMode === "api-key" && apiKey.trim() ? apiKey.trim() : undefined;
       const platformTokenPayload =
@@ -396,13 +420,16 @@ export function SubscriptionEditDialog({
     try {
       const start = await usageApi.startOAuthLogin(
         catalogId,
-        selectedEntry?.regions.length ? region : undefined,
+        catalogId === "kiro" ? kiroLeg : selectedEntry?.regions.length ? region : undefined,
         isCreate ? undefined : editing.id,
       );
       oauthCancelledRef.current = null;
       setOauthStart(start);
       setOauthPendingId(start.pending_id);
       setOauthStatus(t("usage.oauthWaiting"));
+      if (typeof start.flow === "object" && start.flow && "scheme-paste" in start.flow && start.auth_url) {
+        void openExternalUrl(start.auth_url);
+      }
       void waitForOAuthCompletion(start.pending_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -591,6 +618,10 @@ export function SubscriptionEditDialog({
           </Field>
         ) : null}
 
+        {authMode === "o-auth" && catalogId === "kiro" ? (
+          <KiroLoginLegPicker value={kiroLeg} onChange={setKiroLeg} />
+        ) : null}
+
         {authMode === "o-auth" && selectedEntry && (
           <OAuthLoginPanel
             selectedEntry={selectedEntry}
@@ -638,6 +669,15 @@ export function SubscriptionEditDialog({
                 selectedEntry={selectedEntry}
                 cookieHeader={cookieHeader}
                 setCookieHeader={setCookieHeader}
+              />
+            )}
+
+            {authMode === "token-import" && (
+              <TokenImportFields
+                catalogId={selectedEntry.id}
+                providerName={selectedEntry.display_name}
+                token={tokenImport}
+                setToken={setTokenImport}
               />
             )}
 

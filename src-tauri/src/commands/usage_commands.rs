@@ -124,6 +124,19 @@ pub async fn import_subscription_from_local(
     Ok(dto)
 }
 
+/// `payload` is the raw paste. It is not part of a DTO and must not be logged.
+#[tauri::command]
+pub async fn import_subscription_token(
+    app: AppHandle,
+    catalog_id: String,
+    payload: String,
+    target_subscription_id: Option<String>,
+) -> Result<SubscriptionDto, AppError> {
+    let dto = usage::import_subscription_token(catalog_id, payload, target_subscription_id).await?;
+    let _ = crate::core::app_shell::refresh_tray_and_dock_menu(&app);
+    Ok(dto)
+}
+
 #[tauri::command]
 pub async fn await_oauth_completion(
     app: AppHandle,

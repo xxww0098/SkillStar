@@ -13,13 +13,18 @@ import type { AuthMode } from "../types";
  * catalogs impossible to bind — the dialog fell back to `"o-auth"` and pointed
  * a cookie-only provider at `start_oauth_login`.
  *
+ * `token-import` is selectable so a catalog can offer pasted credentials.
+ * No entry lists it yet; the import command, not this filter, writes the row.
+ *
  * `manual` stays filtered until a manual-quota form exists; a catalog that
  * offers only `manual` therefore yields an empty list, and the caller's
  * `?? "o-auth"` fallback keeps that visible as a broken flow rather than
  * silently pretending a form is there.
  */
 export function selectableAuthModes(modes: AuthMode[]): AuthMode[] {
-  return modes.filter((mode) => mode === "o-auth" || mode === "api-key" || mode === "cookie");
+  return modes.filter(
+    (mode) => mode === "o-auth" || mode === "api-key" || mode === "cookie" || mode === "token-import",
+  );
 }
 
 /** Whether this mode's credential is a pasted browser `Cookie:` header. */

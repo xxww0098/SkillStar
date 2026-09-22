@@ -15,7 +15,7 @@
 ## SSH 凭证与 Host Key
 
 - 非敏感 host metadata 写 `~/.skillstar/config/ssh_hosts.toml`。
-- 密码和 passphrase 存系统 keyring，兼容服务名固定为 `skillstar-ssh`；不能改成模块路径字符串，否则已有凭证不可见。
+- 密码和 passphrase 采用本地 AES-256-GCM 加密 JSON 存储（落盘在 `~/.skillstar/state/ssh_credentials.json`，权限 0600，密钥派生自 machine-id），不写入系统 Keychain / Keyring。
 - 连接分为 dial/handshake → host-key gate → authenticate。未信任或 mismatch 主机（包括连接测试流程）不得收到认证材料；测试流程在密钥接受前只返回指纹与延迟，接受密钥后重试才发送密码/私钥。
 - 已接受 fingerprint 存 `ssh_known_hosts.json`；mismatch fail closed。
 - 系统 `~/.ssh/config` host 只读发现，导入后才写 SkillStar store。

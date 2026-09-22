@@ -11,17 +11,52 @@
 
 mod start_info;
 
+use crate::UsageResult;
+use crate::subscription::{Subscription, SubscriptionUsage};
+
 pub mod anthropic;
 pub mod antigravity;
 pub mod codex;
 pub(crate) mod common;
 pub mod cursor;
+// Local import only. `cursor.rs` stays untouched.
+pub mod codebuddy;
+pub(crate) mod cursor_import;
+pub mod github_copilot;
+pub mod kiro;
+pub mod qoder;
+pub mod trae;
 pub mod xai;
+// registration lands with the catalog row
+pub mod windsurf;
+pub mod zcode;
+pub mod zed;
+/// Callback RSA decrypt. Login uses it; it is not a fetcher.
+pub(crate) mod zed_token;
 
-pub use start_info::OAuthStartInfo;
+pub use start_info::{OAuthFlow, OAuthStartInfo};
 
-use crate::UsageResult;
-use crate::subscription::{Subscription, SubscriptionUsage};
+/// Pasted-callback rewrite, keyed by catalog id. No provider registers one
+/// in this slice; a missing entry is the identity function.
+type NormalizeCallbackInput = fn(&str) -> UsageResult<String>;
+
+const CALLBACK_NORMALIZERS: &[(&str, NormalizeCallbackInput)] =
+    &[("github-copilot", github_copilot::normalize_callback_input)];
+
+pub(crate) fn normalize_callback_input(catalog_id: &str, input: &str) -> UsageResult<String> {
+    if let Some((_, normalize)) = CALLBACK_NORMALIZERS
+        .iter()
+        .find(|(id, _)| *id == catalog_id)
+    {
+        return normalize(input);
+    }
+    Ok(input.to_string())
+}
+
+/// App entry for a pasted OAuth value. Branches on the pending session's flow.
+pub async fn submit_callback(pending_id: &str, input: &str) -> UsageResult<()> {
+    crate::oauth::manual_callback::deliver_manual_input(pending_id, input).await
+}
 
 /// Dispatch by `catalog_id`. Called from `fetchers::refresh` for OAuth subs.
 pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
@@ -31,6 +66,17 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "antigravity" => antigravity::fetch(subscription).await,
         "xai" => xai::fetch(subscription).await,
         "anthropic" => anthropic::fetch(subscription).await,
+        "github-copilot" => github_copilot::fetch(subscription).await,
+        "windsurf" => windsurf::fetch(subscription).await,
+        "kiro" => kiro::fetch(subscription).await,
+        "qoder" => qoder::fetch(subscription).await,
+        "codebuddy" | "codebuddy-cn" => codebuddy::fetch(subscription).await,
+        "trae" => trae::fetch(subscription).await,
+        "trae-solo" => trae::fetch(subscription).await,
+        "trae-cn" => trae::fetch(subscription).await,
+        "trae-solo-cn" => trae::fetch(subscription).await,
+        "zed" => zed::fetch(subscription).await,
+        "zcode" => zcode::fetch(subscription).await,
         // OpenCode is Cookie/Manual only (`catalog.rs`). Its OAuth fetcher was
         // 265 lines that never issued a request — it only ever returned this
         // sentence. Legacy rows saved before the catalog narrowed still land
@@ -66,6 +112,19 @@ pub async fn start_login(
         // Not a browser flow: Claude Code owns the credential, so this adopts
         // the local store and resolves the pending login immediately.
         "anthropic" => anthropic::start_login(region, target_subscription_id).await,
+        "github-copilot" => github_copilot::start_login(region, target_subscription_id).await,
+        "windsurf" => windsurf::start_login(region, target_subscription_id).await,
+        "kiro" => kiro::start_login(region, target_subscription_id).await,
+        "qoder" => qoder::start_login(region, target_subscription_id).await,
+        "codebuddy" | "codebuddy-cn" => {
+            codebuddy::start_login(catalog_id, region, target_subscription_id).await
+        }
+        "trae" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "trae-solo" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "trae-cn" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "trae-solo-cn" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "zed" => zed::start_login(region, target_subscription_id).await,
+        "zcode" => zcode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }
 }
@@ -93,5 +152,19 @@ mod tests {
                 entry.id
             );
         }
+    }
+
+    #[test]
+    fn normalize_callback_input_is_identity_until_a_provider_registers() {
+        let pasted = "http://127.0.0.1:9/callback?code=abc";
+        assert_eq!(normalize_callback_input("copilot", pasted).unwrap(), pasted);
+        assert_eq!(normalize_callback_input("codex", "abc").unwrap(), "abc");
+        let vscode = "https://vscode.dev/redirect?code=abc&state=http%3A%2F%2F127.0.0.1%3A9%2Fcallback%3Fnonce%3Dn";
+        let normalized = normalize_callback_input("github-copilot", vscode).unwrap();
+        assert!(
+            normalized.starts_with("http://127.0.0.1:9/callback?"),
+            "{normalized}"
+        );
+        assert_ne!(normalized, vscode);
     }
 }

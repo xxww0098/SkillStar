@@ -515,6 +515,7 @@
 - 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ## D-057：MCP 是配置页，不是指挥中心
 
 - 日期：2026-09-10
@@ -604,6 +605,60 @@
 - 决策：`skillstar-app` 用 `ort` 的 CPU Execution Provider 和 `tokenizers` 加载 Laya。默认目录是 `data_root()/models/laya`（`~/.skillstar/models/laya/`），`SKILLSTAR_LAYA_ONNX` 整目录覆盖。每个候选是一次 noul，输入布局跟 receptron/laya 的 `build_sequence`。至多 12 个，不增删候选，分数不进 `plan_hash`。含汉字的任务只接受 multilingual 导出。没有 `language` 字段时，用 tokenizer 特殊符号区分英文 ModernBERT 和 mmBERT；对不上就不加载。加载失败保持 BM25。应用不下载权重，PyTorch 不进依赖。
 - 后果：获得——英文 `receptron/laya-onnx` 可以在 CPU 上改变候选顺序。承担——这份英文包遇到中文任务仍是 BM25；中文优选要用户自行导出 multilingual，放到 `models/laya`，或用 `SKILLSTAR_LAYA_ONNX` 指过去。
 - 证据：`crates/skillstar-app/src/project_skills_mcp/ort_cpu.rs`、`crates/skillstar-app/src/project_skills_mcp/laya_pack.rs`、`crates/skillstar-app/tests/fixtures/laya-ort-reference.json`。
+
+## D-067：Provider 私有状态用通用加密 blob
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：新 provider 的刷新上下文（Kiro IDC 的 client secret、Trae 设备密钥、Windsurf apiKey）形状各不相同。把它们塞进 `platform_token_encrypted` 会改变 DeepSeek 平台 token 的含义。
+- 决策：`Subscription.provider_state_encrypted` 保存 AES-GCM 的版本化 JSON。DTO 只通过 `has_credential` 感知它。各 provider 自己定义明文形状。
+- 后果：获得——加 provider 不必改订阅表。承担——blob 没有统一 schema，读错版本必须由该 provider 报错。
+- 证据：`crates/skillstar-usage/src/subscription.rs`、`storage.rs` 的窄 patch、`specs/usage-cockpit-parity/choices.md`。
+
+## D-068：OAuth 完成方式是显式四态
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：本地回调、服务端轮询、自定义 scheme 粘贴和本机采纳不能再靠 catalog id 在前端分支。
+- 决策：`OAuthStartInfo.flow` 为 `LocalCallback` / `RemotePoll` / `SchemePaste` / `Immediate`。前端只按 flow 渲染。pending 登录不落盘。
+- 后果：获得——新登录形态不用改面板分发。承担——进程重启会丢掉未完成的登录。
+- 证据：`crates/skillstar-usage/src/fetchers/oauth/start_info.rs`、`src/features/usage/components/subscriptionEdit/oauth/OAuthLoginPanel.tsx`。
+
+## D-069：IDE 切号走适配器注册表
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：Antigravity 和 Cursor 的写回是两段硬编码。后续 IDE 若再加 if，切号顺序会分叉。
+- 决策：`usage_switch::ide::IdeCredentialAdapter` 注册表负责备份、写入、回读、最后才 pin。CLI 软链目标保持原样。OAuth 完成后重写本机存储的范围是「有 IDE 适配器，或 catalog 为 xai」。
+- 后果：获得——新 IDE 只加一个适配器。承担——适配器文件容易变长，必须按 provider 拆开。
+- 证据：`crates/skillstar-app/src/usage_switch/ide.rs`。
+
+## D-070：多开入口只放实机验证过的应用
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：新 IDE 大多是 Chromium，看起来能用 `--user-data-dir`。没有逐个启动并核对登录态隔离之前，登记成可多开会让用户切到一份坏的 profile。
+- 决策：Windsurf、Kiro、Qoder、CodeBuddy、CodeBuddy CN、ZCode 和四个 Trae 只登记为 Pending，不进 `INSTANCE_CATALOG_IDS`。Zed 和 GitHub Copilot 结构性 Blocked：Zed 没有独立数据目录且钥匙串是全局的；Copilot 没有独立应用。Claude Desktop 维持原有不支持。
+- 后果：获得——界面不会提供未验证的多开。承担——这些应用的多开要等一次实机记录才能打开。
+- 证据：`crates/skillstar-app/src/instances/apps.rs`、`src/features/usage/lib/desktopApps.ts`。
+
+## D-071：不做 Antigravity 语言服务唤醒网关
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：参照实现用本地 TLS 网关冒充官方语言服务，发合成 Cascade 消息，把 5 小时或每周配额窗口提前重置。这是第一次主动消耗上游额度，而不只是读配额或写本机凭据。
+- 决策：不实现唤醒网关，也不做直连探活的替代路径。用量监控不依赖它。若以后要做，另立 spec，且不得复用 `usage_switch` 的 pin 语义。
+- 后果：获得——避开服务条款和风控风险，也少掉约两千行进程与证书代码。承担——配额窗口仍按服务端自己的节奏重置。
+- 证据：`specs/usage-cockpit-parity/slices/27-wakeup-decision.md`。
+
+## D-072：密钥纯本地加密 JSON 存储，彻底禁用系统 Keychain 写入
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：原系统中 SSH 密码与部分 IDE/CLI（如 Zed 的 internet-password、Antigravity 与 Codex 的 generic-password）会向系统 Keychain / Keyring 写入凭据。用户明确要求所有凭据必须完全保存在本地加密 JSON 中，严禁写入 macOS Keychain 或系统钥匙串。
+- 决策：① 移除根依赖 `keyring`。② SSH 凭据由 `EncryptedJsonSecretStore`（落盘在 `state/ssh_credentials.json`，权限 0600，AES-256-GCM sealed，派生自 machine-id）完全接管，保留 `KeyringSecretStore` 作为向后兼容单元结构体但仅转发到本地加密存储。③ 彻底移除所有向 macOS Keychain 的写操作：Antigravity 切号仅写入本地 SQLite `state.vscdb`；Codex `publish_external` / `write_merged` 静默忽略不写钥匙串；Zed 禁用钥匙串写回（切号适配器标记为不可用），`keychain_cli` 的 `add_internet_password` 与 `delete_internet_password` 明确拒绝写入。
+- 后果：获得——所有敏感密钥与凭据纯净保留在用户应用本地加密文件内，无系统钥匙串提权弹窗、无外溢、可审计、与平台钥匙串彻底解耦。承担——Zed 无法通过写钥匙串实现外部 IDE 自动切号（Zed 保持仅本地导入与用量监控）。
+- 证据：`crates/skillstar-sync/src/ssh/store.rs`、`crates/skillstar-app/src/usage_switch/{antigravity.rs,keychain.rs,zed.rs}`、`crates/skillstar-usage/src/tool_store/keychain_cli.rs`。
 
 ## 新增记录格式
 

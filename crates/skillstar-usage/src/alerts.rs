@@ -143,6 +143,7 @@ mod tests {
             oauth_account_id: None,
             oauth_region: None,
             requires_reauth: false,
+            provider_state_encrypted: None,
             cookie_jar_encrypted: None,
             cookie_session_expires_at: None,
             manual_quota: None,

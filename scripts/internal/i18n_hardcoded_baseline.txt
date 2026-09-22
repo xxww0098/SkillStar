@@ -21,6 +21,10 @@
 # mirrors six more `catalog.rs` fields (display_name / description / warning).
 # Those strings live in Rust and reach the UI through the Tauri DTO, never
 # through i18n; the fixture is only what the browser sees with no backend.
+# Updated 2026-09-22: devMock/usageData.ts 14 -> 18. The four Trae catalog rows
+# (trae / trae-solo / trae-cn / trae-solo-cn) each carry `catalog.rs`
+# TRAE_LOCAL_IMPORT_WARNING; the fixture mirrors that Rust-owned field per row,
+# same reason as above.
 src/components/layout/CommandPalette.tsx:9
 src/components/shared/ProviderBrandIcon.tsx:3
 src/features/usage/components/SubscriptionEditDialog.tsx:3
@@ -31,4 +35,4 @@ src/lib/ipc/devMock/mcpData.ts:3
 src/lib/ipc/devMock/models.ts:1
 src/lib/ipc/devMock/modelsData.ts:1
 src/lib/ipc/devMock/skillsData.ts:4
-src/lib/ipc/devMock/usageData.ts:14
+src/lib/ipc/devMock/usageData.ts:18

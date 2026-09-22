@@ -182,11 +182,18 @@ pub async fn start_login(
     })
     .await??;
 
-    let pending_id = pending_state::register(CATALOG_ID, None, ACCOUNT_URL.to_string());
+    let pending_id = pending_state::register_with_flow(
+        CATALOG_ID,
+        None,
+        ACCOUNT_URL.to_string(),
+        super::OAuthFlow::Immediate,
+    );
     if let Some(tx) = pending_state::take_sender(&pending_id) {
         let _ = tx.send(Ok(subscription));
     }
-    Ok(super::OAuthStartInfo::browser(
+    // Already resolved above. `Immediate` tells the dialog not to render a
+    // paste step while `await_oauth_completion` collects the subscription.
+    Ok(super::OAuthStartInfo::immediate(
         ACCOUNT_URL.to_string(),
         pending_id,
     ))
