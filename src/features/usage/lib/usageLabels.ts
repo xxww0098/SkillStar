@@ -78,6 +78,9 @@ export function canonicalizeAntigravityModelName(raw: string): string {
 const CATEGORY_KEYS: Record<string, string> = {
   "Auto + Composer": "usage.categoryAutoComposer",
   API: "usage.categoryApi",
+  "Inline Suggestions": "usage.copilotInlineSuggestions",
+  "Chat messages": "usage.copilotChatMessages",
+  "Premium requests": "usage.copilotPremiumRequests",
 };
 
 const WINDOW_KEYS: Record<string, string> = {
@@ -90,6 +93,7 @@ const WINDOW_KEYS: Record<string, string> = {
   "Token Plan Credits": "usage.windowTokenPlanCredits",
   模型额度: "usage.windowModelQuota",
   "Model quota": "usage.windowModelQuota",
+  Copilot: "usage.windowCopilot",
   本月: "usage.defaultPeriod",
 };
 

@@ -21,6 +21,7 @@ pub(crate) mod common;
 pub mod cursor;
 // Local import only. `cursor.rs` stays untouched.
 pub(crate) mod cursor_import;
+pub mod github_copilot;
 pub mod xai;
 
 // Zed callback RSA only. Not registered in `dispatch`.
@@ -33,7 +34,8 @@ pub use start_info::{OAuthFlow, OAuthStartInfo};
 /// in this slice; a missing entry is the identity function.
 type NormalizeCallbackInput = fn(&str) -> UsageResult<String>;
 
-const CALLBACK_NORMALIZERS: &[(&str, NormalizeCallbackInput)] = &[];
+const CALLBACK_NORMALIZERS: &[(&str, NormalizeCallbackInput)] =
+    &[("github-copilot", github_copilot::normalize_callback_input)];
 
 pub(crate) fn normalize_callback_input(catalog_id: &str, input: &str) -> UsageResult<String> {
     if let Some((_, normalize)) = CALLBACK_NORMALIZERS
@@ -58,6 +60,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "antigravity" => antigravity::fetch(subscription).await,
         "xai" => xai::fetch(subscription).await,
         "anthropic" => anthropic::fetch(subscription).await,
+        "github-copilot" => github_copilot::fetch(subscription).await,
         // OpenCode is Cookie/Manual only (`catalog.rs`). Its OAuth fetcher was
         // 265 lines that never issued a request — it only ever returned this
         // sentence. Legacy rows saved before the catalog narrowed still land
@@ -93,6 +96,7 @@ pub async fn start_login(
         // Not a browser flow: Claude Code owns the credential, so this adopts
         // the local store and resolves the pending login immediately.
         "anthropic" => anthropic::start_login(region, target_subscription_id).await,
+        "github-copilot" => github_copilot::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }
 }
@@ -123,10 +127,16 @@ mod tests {
     }
 
     #[test]
-    fn normalize_callback_input_defaults_to_identity() {
+    fn normalize_callback_input_is_identity_until_a_provider_registers() {
         let pasted = "http://127.0.0.1:9/callback?code=abc";
         assert_eq!(normalize_callback_input("copilot", pasted).unwrap(), pasted);
         assert_eq!(normalize_callback_input("codex", "abc").unwrap(), "abc");
-        assert!(CALLBACK_NORMALIZERS.is_empty());
+        let vscode = "https://vscode.dev/redirect?code=abc&state=http%3A%2F%2F127.0.0.1%3A9%2Fcallback%3Fnonce%3Dn";
+        let normalized = normalize_callback_input("github-copilot", vscode).unwrap();
+        assert!(
+            normalized.starts_with("http://127.0.0.1:9/callback?"),
+            "{normalized}"
+        );
+        assert_ne!(normalized, vscode);
     }
 }

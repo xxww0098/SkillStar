@@ -35,6 +35,8 @@ const THEMES: Record<string, BrandTheme> = {
   "grok-bot": { header: ["#1A1A1A", "#000000"], bar: ["#3F3F46", "#18181B"], fg: "#ffffff", glow: "#52525B" },
   // Anthropic terracotta ("crail"); the deeper stop keeps white header text at AA.
   anthropic: { header: ["#A8412A", "#D97757"], bar: ["#D97757", "#C15F3C"], fg: "#ffffff", glow: "#D97757" },
+  // GitHub ink. The bar stays on Copilot purple/blue so a near-black brand still reads.
+  "github-copilot": { header: ["#24292F", "#0D1117"], bar: ["#8250DF", "#0969DA"], fg: "#ffffff", glow: "#8250DF" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

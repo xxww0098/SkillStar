@@ -1,8 +1,7 @@
 //! Paste-a-token import.
 //!
-//! No provider is registered yet, so every catalog fails closed. Slice 09 adds
-//! github-copilot by inserting one [`TOKEN_IMPORTERS`] row. The paste is an
-//! opaque string: it is not logged, not emitted, and not copied onto a DTO.
+//! [`TOKEN_IMPORTERS`] is the only production registry. The paste is an opaque
+//! string: it is not logged, not emitted, and not copied onto a DTO.
 
 use crate::catalog::AuthMode;
 use crate::crypto;
@@ -32,8 +31,11 @@ struct TokenImporter {
     import_from_token: ImportFromToken,
 }
 
-/// Production importers. Empty until a provider lands `import_from_token`.
-const TOKEN_IMPORTERS: &[TokenImporter] = &[];
+/// Production importers. One row per catalog that accepts a pasted credential.
+const TOKEN_IMPORTERS: &[TokenImporter] = &[TokenImporter {
+    catalog_id: "github-copilot",
+    import_from_token: crate::fetchers::oauth::github_copilot::import_from_token,
+}];
 
 pub fn token_import_supported(catalog_id: &str) -> bool {
     importer_for(catalog_id).is_some()
@@ -352,12 +354,14 @@ mod tests {
     }
 
     #[test]
-    fn no_production_catalog_accepts_token_import_yet() {
+    fn token_import_support_matches_the_catalog_auth_mode() {
         let _env = EnvGuard::hold();
         for entry in catalog() {
-            assert!(!token_import_supported(entry.id), "{}", entry.id);
+            let listed = entry.auth_modes.contains(&AuthMode::TokenImport);
+            assert_eq!(token_import_supported(entry.id), listed, "{}", entry.id);
         }
-        assert!(!token_import_supported("github-copilot"));
+        assert!(token_import_supported("github-copilot"));
+        assert!(!token_import_supported("cursor"));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -371,10 +375,16 @@ mod tests {
             .expect_err("cursor has no token importer");
         assert!(err.to_string().contains("不支持"), "{err}");
 
-        let err = import_subscription_from_token("github-copilot", PASTE.to_string(), None)
+        let err = import_subscription_from_token("not-a-provider", PASTE.to_string(), None)
             .await
             .expect_err("unregistered catalog");
         assert!(err.to_string().contains("不支持"), "{err}");
+
+        let err = import_subscription_from_token("github-copilot", PASTE.to_string(), None)
+            .await
+            .expect_err("random paste is not a github token");
+        assert!(err.to_string().contains("无法识别"), "{err}");
+        assert!(!err.to_string().contains(PASTE), "{err}");
 
         let stored = storage::get_subscription("keep-me").unwrap();
         assert_eq!(stored.note, seeded.note);

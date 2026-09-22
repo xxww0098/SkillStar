@@ -158,6 +158,16 @@ pub fn catalog() -> Vec<CatalogEntry> {
             ),
             regions: NO_REGIONS,
         },
+        entry(
+            "github-copilot",
+            "GitHub Copilot",
+            "Suggestions & chat",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "24292F",
+            "USD",
+            "https://github.com/settings/copilot",
+        ),
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -258,8 +268,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_12_entries() {
-        assert_eq!(catalog().len(), 12);
+    fn catalog_has_13_entries() {
+        assert_eq!(catalog().len(), 13);
     }
 
     #[test]
@@ -278,7 +288,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 5);
+        assert_eq!(oauth, 6);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -314,6 +324,21 @@ mod tests {
             OAUTH_TOKEN_IMPORT,
             &[AuthMode::OAuth, AuthMode::TokenImport]
         );
+    }
+
+    #[test]
+    fn github_copilot_is_oauth_and_token_import() {
+        let entry = find("github-copilot").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.brand_color, "24292F");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(
+            entry.subscription_url,
+            "https://github.com/settings/copilot"
+        );
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
     }
 
     #[test]

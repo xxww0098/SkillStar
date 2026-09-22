@@ -4,6 +4,7 @@ import {
   CodexColor,
   CursorMono,
   DeepSeekColor,
+  GithubCopilotMono,
   GrokMono,
   KimiMono,
   type LobeIconComponent,
@@ -31,6 +32,7 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   xai: GrokMono,
   "grok-bot": GrokMono,
   anthropic: ClaudeColor,
+  "github-copilot": GithubCopilotMono,
   // api-key
   deepseek: DeepSeekColor,
   glm: ZhipuColor,
