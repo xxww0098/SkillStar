@@ -109,3 +109,12 @@
 - **短文本用英文。** 结构化字段才是契约。句子可以以后改。
 - **`schemars` 作为 `skillstar-app` 的直接依赖，版本 1.2.1，与 rmcp 相同。** `JsonSchema` 派生宏按 crate 名找 `schemars`，只靠 rmcp 的 re-export 编不过。没有再次 `cargo add rmcp`，`transport-async-rw` 保留。
 - **推荐结果里的计划包含确认所需的差异，不包含技能正文或内容哈希。** `plan_id` 和 `plan_hash` 都在。应用参数只有 `plan_id` 和 `idempotency_key`。
+
+## 14 elicitation
+
+### 已定，按这个做
+
+- **能力判断用 `Peer::supported_elicitation_modes`，发信用 `elicit_with_timeout`。** 测试里的 initialize 显式带 `capabilities.elicitation.form`。rmcp 会把空的 elicitation 对象也当成 form，本档不依赖那种兼容。
+- **表单字段是 `plan_hash`、`root`、`will_register`、`owner_id`、`affected_agents`、`changes`。** 每一项都必须和当前计划一致。技能清单放在 `changes` 文本里，因为 elicitation schema 只允许原始类型。说明文字在 `message`。
+- **确认发生在项目写锁之外。** 用户拒绝、取消或 120 秒超时都不写批准。接受后才 `record_from_elicitation`，然后调用领域 apply。
+- **协商下来的协议仍是 `2025-11-25`。** 因此 SEP-2260 对 `2026-07-28` 的严格请求关联不会拦住这次 `elicitation/create`。请求仍在处理工具调用的任务里发出。

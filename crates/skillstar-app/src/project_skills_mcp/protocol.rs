@@ -1,7 +1,10 @@
 //! Tool arguments for the project-skills stdio server.
 //!
-//! Approval is not a parameter. This module calls recommend, inspect, and
-//! apply; it does not record approval.
+//! Approval is not a tool parameter. This module calls recommend, inspect,
+//! and apply. Form elicitation is the only path that records an elicitation
+//! approval, and only after the client returns the current plan.
+
+use std::time::Duration;
 
 use chrono::Utc;
 use rmcp::ServerHandler;
@@ -9,13 +12,15 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::schemars::JsonSchema;
-use rmcp::{tool, tool_handler, tool_router};
+use rmcp::service::{ElicitationError, ElicitationMode, ServiceError};
+use rmcp::{Peer, RoleServer, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use skillstar_skills::projects::{ProjectDeployMode, SkillDiskKind};
 
 use super::apply::{self, ApplyOutcome, Receipt};
+use super::approval;
 use super::inspect::{self, LoadHint, RuntimeVisibility};
-use super::plan::PlanAction;
+use super::plan::{self, DeploymentPlan, PlanAction};
 use super::ranker::PassthroughReranker;
 use super::recommend::{self, RecommendRequest, Selection};
 
@@ -62,9 +67,10 @@ impl ProjectSkillsMcp {
     )]
     async fn apply_project_skills(
         &self,
+        peer: Peer<RoleServer>,
         Parameters(args): Parameters<ApplyArgs>,
     ) -> CallToolResult {
-        run_apply(args)
+        run_apply(peer, args).await
     }
 }
 
@@ -271,7 +277,121 @@ fn run_get(args: GetArgs) -> CallToolResult {
     )
 }
 
-fn run_apply(args: ApplyArgs) -> CallToolResult {
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+struct PlanAcceptance {
+    plan_hash: String,
+    root: String,
+    will_register: bool,
+    owner_id: String,
+    affected_agents: String,
+    changes: String,
+}
+
+rmcp::elicit_safe!(PlanAcceptance);
+
+async fn run_apply(peer: Peer<RoleServer>, args: ApplyArgs) -> CallToolResult {
+    if peer
+        .supported_elicitation_modes()
+        .contains(&ElicitationMode::Form)
+    {
+        return run_apply_with_elicitation(peer, args).await;
+    }
+    run_apply_direct(args)
+}
+
+async fn run_apply_with_elicitation(peer: Peer<RoleServer>, args: ApplyArgs) -> CallToolResult {
+    if !apply::valid_key(&args.idempotency_key) {
+        return CallToolResult::error(vec![ContentBlock::text(
+            "idempotency key must match [A-Za-z0-9_-]{1,64}",
+        )]);
+    }
+    let plan = match plan::load_plan(&args.plan_id, Utc::now()) {
+        Ok(plan) => plan,
+        Err(err) => return failed(err),
+    };
+    let expected = plan_acceptance(&plan);
+    let accepted = match peer
+        .elicit_with_timeout::<PlanAcceptance>(
+            confirmation_message(&expected),
+            Some(Duration::from_secs(120)),
+        )
+        .await
+    {
+        Ok(Some(accepted)) => accepted,
+        Ok(None) => return declined(),
+        Err(err) if elicitation_refused(&err) => return declined(),
+        Err(err) => {
+            return CallToolResult::error(vec![ContentBlock::text(err.to_string())]);
+        }
+    };
+    if accepted != expected {
+        return CallToolResult::error(vec![ContentBlock::text(
+            "elicitation acceptance does not match the plan",
+        )]);
+    }
+    if let Err(err) = approval::record_from_elicitation(&plan.plan_id, &plan.plan_hash) {
+        return failed(err);
+    }
+    run_apply_direct(args)
+}
+
+fn plan_acceptance(plan: &DeploymentPlan) -> PlanAcceptance {
+    PlanAcceptance {
+        changes: plan
+            .skills
+            .iter()
+            .map(|skill| {
+                let action = match skill.action {
+                    PlanAction::Create => "create",
+                    PlanAction::Already => "already",
+                };
+                let path =
+                    format!("{}/{}/SKILL.md", plan.physical_rel, skill.name).replace('\\', "/");
+                format!("{action} {path}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        affected_agents: plan.affected_agents.join(", "),
+        plan_hash: plan.plan_hash.clone(),
+        root: plan.root.clone(),
+        will_register: plan.will_register,
+        owner_id: plan.owner_id.clone(),
+    }
+}
+
+fn confirmation_message(acceptance: &PlanAcceptance) -> String {
+    format!(
+        "Confirm this project skill deployment.\nroot: {root}\nwill_register: {will}\nowner: {owner}\naffected_agents: {affected}\nchanges:\n{changes}\nplan_hash: {hash}\nSubmit these values unchanged.",
+        root = acceptance.root,
+        will = acceptance.will_register,
+        owner = acceptance.owner_id,
+        affected = acceptance.affected_agents,
+        changes = acceptance.changes,
+        hash = acceptance.plan_hash,
+    )
+}
+
+fn elicitation_refused(err: &ElicitationError) -> bool {
+    matches!(
+        err,
+        ElicitationError::UserDeclined
+            | ElicitationError::UserCancelled
+            | ElicitationError::NoContent
+            | ElicitationError::Service(ServiceError::Timeout { .. })
+    )
+}
+
+fn declined() -> CallToolResult {
+    respond(
+        "Declined. Nothing was written.",
+        &ApplyToolResult {
+            outcome: "declined",
+            receipt: None,
+        },
+    )
+}
+
+fn run_apply_direct(args: ApplyArgs) -> CallToolResult {
     let outcome =
         match apply::apply_project_skills(&args.plan_id, &args.idempotency_key, Utc::now()) {
             Ok(outcome) => outcome,
@@ -332,3 +452,7 @@ fn failed(err: anyhow::Error) -> CallToolResult {
 #[cfg(test)]
 #[path = "protocol_tests.rs"]
 mod project_skills_mcp_protocol_tests;
+
+#[cfg(test)]
+#[path = "elicitation_tests.rs"]
+mod project_skills_mcp_elicitation_tests;

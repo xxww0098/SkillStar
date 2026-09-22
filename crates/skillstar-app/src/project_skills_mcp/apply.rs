@@ -223,7 +223,7 @@ fn outcome_from_receipt(receipt: Receipt) -> ApplyOutcome {
     }
 }
 
-fn valid_key(key: &str) -> bool {
+pub(crate) fn valid_key(key: &str) -> bool {
     (1..=64).contains(&key.len())
         && key
             .chars()

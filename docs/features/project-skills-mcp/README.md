@@ -18,7 +18,11 @@ Windows release 仍使用 `windows_subsystem = "windows"`，不分配控制台�
 
 每次调用同时返回结构化结果和一段短文本。字段以结构化结果为准。结果不包含技能正文，也不包含 Hub 绝对路径。Server capabilities 启用 tools，不启用 roots 或 resources。
 
-客户端还没有 elicitation 时，应用只认已经写好的 SkillStar 批准。没有这份批准时，结果是 `approval_required`，项目树和项目索引都不改。
+客户端在 `initialize` 里声明 `capabilities.elicitation.form` 时，`apply_project_skills` 先发送 form 模式的 `elicitation/create`。用户交回的 `plan_hash`、项目根、是否注册、owner、受影响 Agent 和变更列表必须与当前计划一致，然后才写入 elicitation 批准并调用领域 apply。拒绝、取消或超时不写批准，也不改项目。已经存在的 SkillStar 批准不能跳过这次确认，也不能被这次接受覆盖。
+
+没有 form 能力时不发送 elicitation。应用只认已经写好的 SkillStar 批准。没有这份批准时，结果是 `approval_required`，项目树和项目索引都不改。
+
+确认发生在项目写锁之外。
 
 ## 应用
 
