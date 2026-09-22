@@ -200,6 +200,12 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("trae-solo-cn"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "zed",
+        display_name: "Zed",
+        catalog_id: Some("zed"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.
@@ -285,6 +291,14 @@ mod tests {
             identity_for_catalog("trae").unwrap().display_name,
             identity_for_catalog("trae-cn").unwrap().display_name
         );
+    }
+
+    #[test]
+    fn zed_identity_is_subscription_only() {
+        let identity = identity_for_catalog("zed").expect("zed");
+        assert_eq!(identity.canonical_id, "zed");
+        assert_eq!(identity.display_name, "Zed");
+        assert!(identity.preset_ids.is_empty());
     }
 
     #[test]

@@ -121,6 +121,15 @@ fn import_trae_solo_cn() -> LocalImportFuture {
     import_trae_kind(crate::trae_platform::TraePlatformKind::TraeSoloCn)
 }
 
+fn import_zed() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::zed::import_from_local()?;
+        let sub = crate::fetchers::oauth::zed::oauth_row_from_imported(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("Zed 订阅保存失败：{err}")))
+    })
+}
+
 fn import_codebuddy_cn() -> LocalImportFuture {
     Box::pin(async {
         let imported = crate::fetchers::oauth::codebuddy::import_from_local_cn()?;
@@ -179,6 +188,10 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
         catalog_id: "trae-solo-cn",
         import_from_local: import_trae_solo_cn,
     },
+    LocalImporter {
+        catalog_id: "zed",
+        import_from_local: import_zed,
+    },
 ];
 
 fn importer_for(catalog_id: &str) -> Option<fn() -> LocalImportFuture> {
@@ -199,6 +212,21 @@ fn supported_catalogs() -> String {
 /// Catalog ids that support `import_subscription_from_local`.
 pub fn local_import_supported(catalog_id: &str) -> bool {
     importer_for(catalog_id).is_some()
+}
+
+/// Whether a local import can succeed on this OS.
+///
+/// Zed's credential is a macOS internet-password. Other importers stay
+/// available wherever they are registered; the read itself still reports a
+/// missing file.
+pub fn local_import_available(catalog_id: &str) -> bool {
+    if !local_import_supported(catalog_id) {
+        return false;
+    }
+    if catalog_id == "zed" {
+        return cfg!(target_os = "macos");
+    }
+    true
 }
 
 /// Import the CLI/IDE's own credentials as a new subscription.
@@ -381,6 +409,14 @@ mod tests {
             msg.contains("access_token"),
             "error should mention access_token, got: {msg}"
         );
+    }
+
+    #[test]
+    fn zed_local_import_is_registered_and_macos_only() {
+        assert!(local_import_supported("zed"));
+        assert_eq!(local_import_available("zed"), cfg!(target_os = "macos"));
+        assert!(local_import_available("codex"));
+        assert!(!local_import_available("not-a-provider"));
     }
 
     #[tokio::test]
