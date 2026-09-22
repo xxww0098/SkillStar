@@ -102,6 +102,12 @@ xAI 完成登录时仍要求 `auth_mode == OAuth`。这个 provider 没有 token
 
 判定：就这么做。四种面板有组件测试。这轮没有截图终审。
 
+### OAuth 完成后只重写 IDE 和 xAI 的本机凭据
+
+已置顶的卡在登录完成时，原先只有 xAI 和 Antigravity 会再写一次本机文件。注册表落地时一度改成「凡是能切号的都重写」，那样 Codex 和 OpenCode 也会被再写一遍，但它们的登录过程自己已经写过 CLI 文件。收成：有 IDE 适配器（Antigravity、Cursor），或者 catalog 是 `xai`。
+
+判定：就这么做。Cursor 是规格要的新适配器。xAI 保留旧行为，因为同一次登录可能把这张卡改绑到另一个账号。
+
 ### Zed 私钥用 PKCS#1 DER
 
 回调解密先试 OAEP-SHA256，再退到 PKCS#1 v1.5。密文同时接受标准 base64 和 URL-safe。本机没有对测试 service 跑 `security` 写回。

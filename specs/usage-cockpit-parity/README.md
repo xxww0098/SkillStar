@@ -1,15 +1,15 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（7/27：01–03、05–08）
+状态：active（8/27：01–08）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
 你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。
 
-- **当前进度**：01、02、03、05、06、07、08 完成。决定见 `choices.md`。四个 spike 只证明了本地往返；真钥匙串、Windsurf 重启、ExchangeToken、ZCode app 都还没验，所以不降级。
-- **下一个拾取点**：`slices/04-ide-adapter-registry.md`。它改 `usage_switch`、`local_import`、`service.rs` 和订阅对话框。做完再开 provider。
-- **顺序**：04 → 09–23（各 provider 的 (a) 片可并行，(b) 片用已经落地的 spike）。24 等全部 (b) 片。
+- **当前进度**：01–08 完成。决定见 `choices.md`。四个 spike 只证明了本地往返；真钥匙串、Windsurf 重启、ExchangeToken、ZCode app 都还没验，所以不降级。
+- **下一个拾取点**：`slices/09-github-copilot.md`。之后各 provider 的 (a) 片可并行，但都要改 `catalog.rs`、`identity.rs`、`fetchers/oauth/mod.rs`、`token_import.rs`、i18n 和 devMock。并行时只有一个 agent 改这些共享文件，其它 agent 只加自己的 fetcher 文件。
+- **顺序**：09，然后 10/12/14/16/18/20/22 的 (a)，各自的 (b) 紧跟。24 等全部 (b)。
 - **每次切片收尾**：更新本节的进度与下一个拾取点，把静默决定补进 `choices.md`。
 
 ## 目标
