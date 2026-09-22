@@ -56,6 +56,7 @@ export const LOCAL_IMPORT_CATALOG_IDS = [
   "codex",
   "antigravity",
   "cursor",
+  "windsurf",
   "kiro",
   "qoder",
   "codebuddy",

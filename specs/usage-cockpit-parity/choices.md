@@ -102,6 +102,18 @@ xAI 完成登录时仍要求 `auth_mode == OAuth`。这个 provider 没有 token
 
 判定：就这么做。四种面板有组件测试。这轮没有截图终审。
 
+### 新应用先不提供多开
+
+没有逐个启动官方应用并核对登录态隔离。这些应用在实例表里是 Pending，选择器里不出现。Zed 和 GitHub Copilot 是结构性不支持。Cursor、Grok Bot、Antigravity 维持原来的已验证集合。
+
+判定：就这么做。实机通过后再把对应应用改成 Verified。
+
+### 不做配额唤醒网关
+
+向 Antigravity 语言服务发合成消息来提前重置配额窗口，和读配额、写本机凭据不是一类事。默认不做，也不做直连探活的半截替代。
+
+判定：不做。要改这个决定就另立 spec。
+
 ### Windsurf 没有自定义 scheme
 
 cockpit 里没有 `windsurf://`。登录用本地回调。共享 loopback 只认 `code`，所以 implicit 的 `access_token` 由 Windsurf 模块自己的监听器收。`provider_state` 是明文 JSON，里面是 apiKey，必要时还有 apiServerUrl 和 auth1Token。`auth1_` 不跑 Devin 交换。本机导入不刷新配额，只把行存下来。

@@ -674,6 +674,7 @@ export function SubscriptionEditDialog({
 
             {authMode === "token-import" && (
               <TokenImportFields
+                catalogId={selectedEntry.id}
                 providerName={selectedEntry.display_name}
                 token={tokenImport}
                 setToken={setTokenImport}

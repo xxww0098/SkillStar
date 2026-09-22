@@ -1470,6 +1470,7 @@
     "authBadgeTokenImport": "令牌导入",
     "fieldTokenImport": "令牌或凭据 JSON",
     "tokenImportHint": "粘贴 {{provider}} 的令牌或凭据 JSON。只用于导入，不会当成 API Key 保存。",
+    "tokenImportTraeHint": "{{provider}} 的刷新令牌和设备绑定在一起。粘贴经常失败，优先用本机导入。",
     "tokenImportPlaceholder": "粘贴令牌或 JSON",
     "tokenImportRequired": "请先粘贴令牌",
     "quotaUsedOfTotal": "{{used}} / {{total}}",

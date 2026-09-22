@@ -2,6 +2,13 @@
 
 状态：active
 
+## 2026-09-22 - 新 IDE 的本地写回还没有被官方应用重启确认
+
+- Symptom: Safe Storage、byte_crypto、RSA 回调和 `enc:v1` 的本地往返测试通过，但 Windsurf、Kiro、Qoder、CodeBuddy、Trae、Zed、ZCode 的官方应用还没有在重启后认过这次写回。
+- Root cause: 实现时没有使用真实账号、真实钥匙串或真实应用数据目录。测试被 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱挡住。
+- Fix: 不把这些应用标成多开 Verified，也不因为缺一次人工记录就降级已测过的本地读写。配额解析缺字段就省略窗口，不补 0。私有接口形状变了必须返回明确错误。
+- Self-check: 各 provider 的 fetcher 测试，以及 `src/features/usage/lib/desktopApps.test.ts` 里「Pending 不进多开入口」。
+
 ## 2026-09-08 - Provider 的空凭据投影不能作为编辑补丁回传
 
 - Symptom: 只改供应商名称，也可能把环境变量或文件来源的凭据变成空凭据。

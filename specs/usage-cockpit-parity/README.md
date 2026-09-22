@@ -1,16 +1,15 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（23/27：01–23）
+状态：closed（27/27）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
-你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交。集成树在 `/Users/xxww/.grok/worktrees/usage-cockpit-parity`。
+没有下一片。分支是 `feat/usage-cockpit-parity`，集成树在 `/Users/xxww/.grok/worktrees/usage-cockpit-parity`。主工作区 `main` 的无关未提交改动不要混进来。
 
-- **当前进度**：01–23 完成。各 provider 的配额、登录和切号都在分支上。Zed 切号没有写真钥匙串。决定见 `choices.md`。真账号和官方 app 重启都还没验，所以不降级，也不要把任何新 app 标成实例隔离 Verified。
-- **下一个拾取点**：`slices/24-instance-isolation-gate.md`。只登记 Pending / 结构性 Blocked（Zed、Copilot）。没有真机启动记录就不得标 Verified，UI 不出多开入口。
-- **然后**：25 前端收尾、26 文档、27 唤醒决策。27 的默认是不做 Antigravity LS 唤醒网关（ToS），记到 `docs/decisions.md`，不要写网关代码。
-- **每次切片收尾**：更新本节，把静默决定补进 `choices.md`。
+- **完成**：01–27。决定见 `choices.md` 和 `docs/decisions.md` 的 D-057 至 D-061。
+- **没有做的实机事**：真实账号登录、官方应用重启认写回、新 IDE 的多开隔离。这些应用保持 Pending 或 Blocked，不降级已测过的本地读写。
+- **唤醒网关**：不做。要做就另立 spec。
 
 ## 目标
 

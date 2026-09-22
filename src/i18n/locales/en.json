@@ -1470,6 +1470,7 @@
     "authBadgeTokenImport": "Token import",
     "fieldTokenImport": "Token or credential JSON",
     "tokenImportHint": "Paste a {{provider}} token or credential JSON. It is sent only to import and is not stored as an API key.",
+    "tokenImportTraeHint": "{{provider}} refresh tokens are bound to a device. Pasting often fails; import from the local app instead.",
     "tokenImportPlaceholder": "Paste a token or JSON",
     "tokenImportRequired": "Paste a token first",
     "quotaUsedOfTotal": "{{used}} / {{total}}",

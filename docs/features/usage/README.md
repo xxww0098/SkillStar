@@ -8,16 +8,17 @@
 
 - `skillstar-usage` 拥有 catalog、OAuth/API-key/Cookie fetcher、token 加密、subscription storage 和 refresh guard。
 - subscription/usage snapshot 位于 `~/.skillstar/config/usage/`。catalog 和条目数量以 `crates/skillstar-usage/src/catalog.rs` 及其测试为准。
-- Auth 模式含 `AuthMode::Cookie`（用户粘贴浏览器 `Cookie:`）；fetcher 入口在 `fetchers/cookie/`，解析见 `cookie_jar.rs`。前端能驱动哪些 auth 模式由 `src/features/usage/lib/authModes.ts` 的 `selectableAuthModes` 单独回答——它是**表单能力**声明，不是后端枚举的镜像，所以不放在 `types.ts`。目前 Cookie 放行、Manual 仍无表单。
+- Auth 模式含 `AuthMode::Cookie`（用户粘贴浏览器 `Cookie:`）和 `AuthMode::TokenImport`（粘贴裸 token 或凭据 JSON）。Cookie 入口在 `fetchers/cookie/`，解析见 `cookie_jar.rs`。TokenImport 不走创建表单，只走 `import_subscription_token`。前端能驱动哪些 auth 模式由 `src/features/usage/lib/authModes.ts` 的 `selectableAuthModes` 单独回答——它是**表单能力**声明，不是后端枚举的镜像，所以不放在 `types.ts`。目前 Cookie 和 TokenImport 放行、Manual 仍无表单。
+- Provider 私有刷新上下文放在 `Subscription.provider_state_encrypted`（AES-GCM 的版本化 JSON）。它不进 DTO，也不放宽 `platform_token_encrypted`（那仍是 DeepSeek 平台 token）。refresh 的窄 patch 会轮换这个字段。
 - 不支持的旧 auth-mode 行在 load migration 中清理；文档不保留已删除 catalog 清单。
 - 远程请求统一使用 `skillstar_core::infra::http_client::probe_http_client`。
 - 除非用户明确要求，不修改完成态的 `fetchers/oauth/cursor.rs`。
 
 ## OAuth 与刷新
 
-- OAuth 启动返回 auth URL 和 pending id；前端展示后轮询/回调完成。所有 provider 都走浏览器跳转，没有 device code 流（`OAuthStartInfo::browser` 是唯一构造函数）。
+- OAuth 启动返回 `OAuthStartInfo.flow`，前端按 flow 渲染，不按 catalog id 分支。四态是 `LocalCallback`（loopback，粘贴回调可 HTTP 重放）、`RemotePoll`（后端轮询，没有粘贴框）、`SchemePaste`（自定义 scheme，进程内解析，不发 HTTP）和 `Immediate`（就地采纳本机凭据，例如 Claude 和 Trae）。pending 登录仍是进程内存态，重启后作废。
 - 编辑既有 subscription 发起 OAuth 时，pending state 带原 subscription id；**每个 OAuth catalog 都必须把它传到 finalize**，成功后原位替换并保留用户 metadata/sort order，不新增重复卡片。用户自定义的卡片标题优先于登录带回的邮箱，只有占位标题会被升级。
-- 所有 OAuth token 交换与刷新走 `oauth::token_endpoint::post_token`，fetcher 不自建 token POST 与错误映射。
+- 标准 form-grant token 交换走 `oauth::token_endpoint::post_token`。非标准 token 腿（例如 Kiro IDC、CodeBuddy `X-Refresh-Token`、Trae `ExchangeToken`、ZCode JSON）留在各自 fetcher，但错误分类必须与 `post_token` 同一张表。
 - **不是每个 OAuth catalog 都有 token 交换腿。** `anthropic` 全程只读 Claude Code 自己的登录态，从不 POST token、从不写回凭证，因此 `token_endpoint` 不在它的路径上（见下节）。
 - refresh 只用窄 patch 更新 fetcher-owned runtime 字段，不能用网络请求开始时的旧整行覆盖用户刚修改的 metadata 或凭证。
 - OAuth finalize 与 `local_import` 都在对应 catalog 的 `refresh_guard` 锁内完成写入，和 refresh 同属一个 serialization domain。
@@ -74,7 +75,10 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - `skillstar-app::usage_switch` 是唯一跨 Usage/Models 的账号激活 facade；Tauri command 不直接理解 provider 凭证文件 schema。
 - 快照落点 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json`，权限 0600，走后端解析真实数据目录（`SKILLSTAR_DATA_DIR` 等覆盖继续生效）。**一份快照是整个 CLI 凭证文件**，不是其中一个账号的片段 —— 软链只能整文件替身。
 - live 路径必须是 CLI 自己读的那个文件，并尊重上游 env 覆盖：`CODEX_HOME`、`GROK_HOME`、`XDG_DATA_HOME`（OpenCode 用 `$XDG_DATA_HOME/opencode/auth.json`，不是 config 目录）。`SKILLSTAR_TOOL_SYNC_HOME` 沙箱优先级最高，测试不得逃逸。
-- 支持哪些 catalog 由切换适配器推导，不是 UI 手抄白名单：CLI 账号走 `usage_switch::target_for`，Antigravity 和 Cursor 走独立的 IDE 凭证适配器。Antigravity 的“当前账号”优先读取 macOS Keychain 的 `gemini` / `antigravity` 条目；没有该条目时读取 `state.vscdb` 中 `antigravityUnifiedStateSync.oauthToken`。Cursor 的当前账号读取其 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken` 和 `cursorAuth/cachedEmail`，都不是 Usage 的 active pin。
+- 支持哪些 catalog 由切换适配器推导，不是 UI 手抄白名单：CLI 账号走 `usage_switch::target_for`，IDE 账号走 `usage_switch::ide` 的 `IdeCredentialAdapter` 注册表。Antigravity 和 Cursor 是最初的两个实现；其后的 IDE 只加注册表项，不改切号顺序。Antigravity 的“当前账号”优先读取 macOS Keychain 的 `gemini` / `antigravity` 条目；没有该条目时读取 `state.vscdb` 中 `antigravityUnifiedStateSync.oauthToken`。Cursor 的当前账号读取其 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken` 和 `cursorAuth/cachedEmail`，都不是 Usage 的 active pin。
+- 已登录且这张卡本来就是 pin 时，OAuth 完成会重写本机存储的范围是：有 IDE 适配器，或者 catalog 是 `xai`。Codex 和 OpenCode 的登录路径自己写 CLI 文件，不在完成时再写一遍。
+- 本地路径、`state.vscdb` 通用写、原子 JSON 和 macOS internet-password 在 `skillstar-usage` 的 `tool_paths` / `tool_store`。测试必须走 `SKILLSTAR_TOOL_SYNC_HOME`，不得碰真实 `$HOME` 或登录钥匙串。
+- 各 provider 的私有协议（Copilot 的 `token` scheme、Windsurf Connect-RPC、Kiro 双登录腿、Trae 设备签名、Zed 非 Bearer 授权、ZCode `enc:v1`、CodeBuddy 业务 `code`）以对应 fetcher 和其测试为准，不在这里抄字段表。缺字段省略窗口，不补成 0。
 - Antigravity 切换顺序：取得 catalog 锁 → 读取并解密目标账号 → 写入并验证 macOS Keychain（当前桌面版本）或生成官方 Unified OAuth protobuf、在 SQLite 事务内写入 `state.vscdb`（旧版/其它平台）→ 回读并校验 refresh token → 最后才落 active pin。目标存储不存在、无法写入或回读不一致时，pin 保持旧值并明确显示“切换未生效”。
 - Antigravity OAuth 登录完成后，如果目标卡原本就是 active，会立即按同一适配器把新凭证投影回 IDE；普通刷新也会把 active 卡的 token rotation 投影回 IDE，避免 Usage 与 IDE 分叉。
 - Cursor 切换顺序：取得 catalog 锁 → 解密目标 access/refresh token → 在 SQLite 事务内同时写入 `cursorAuth/*` 和 Cursor 镜像 key → 回读 access/refresh/email 校验 → 最后才落 active pin。Cursor 缺少本地 `state.vscdb` 或凭证不完整时不会只改 pin，而是明确返回“切换未生效”。Cursor 本地导入也读取同一组 key；一次 OAuth 会话读取在同一 SQLite 连接和查询中取得四个字段，避免跨连接快照。

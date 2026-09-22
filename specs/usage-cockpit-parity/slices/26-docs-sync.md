@@ -26,3 +26,7 @@
 ## 必须保持绿
 
 - 同一事实只有一个 SSOT；历史稿不混入。
+
+## 结果
+
+更新了 `docs/features/usage/README.md`、`docs/decisions.md`（D-057 至 D-061）、`docs/errors.md`、`docs/boundaries.md` 和根 `README.md`。没有手抄 catalog 数量。没有跑 `graft build`。

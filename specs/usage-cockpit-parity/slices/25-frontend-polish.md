@@ -39,3 +39,7 @@
 ## 会改变本片的人类反馈
 
 - 卡片密度/徽标样式偏好。
+
+## 结果
+
+Windsurf 补进 `LOCAL_IMPORT_CATALOG_IDS`。Trae 的令牌粘贴提示改成优先本机导入。ZCode 的 scheme 面板本来就写明浏览器打不开链接是正常的。Zed 没有 lobe 图标，继续用字母 Z。多开入口仍只有 Cursor 和 Antigravity；Pending 应用不出现。没有做全页截图终审。

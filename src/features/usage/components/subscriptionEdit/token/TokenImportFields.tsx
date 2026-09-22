@@ -3,6 +3,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "../fields";
 
 interface TokenImportFieldsProps {
+  catalogId: string;
   providerName: string;
   token: string;
   setToken: (value: string) => void;
@@ -12,11 +13,14 @@ interface TokenImportFieldsProps {
  * Token-import paste. The value is sent only to `import_subscription_token`.
  * It is not an API key and is not kept in a DTO.
  */
-export function TokenImportFields({ providerName, token, setToken }: TokenImportFieldsProps) {
+export function TokenImportFields({ catalogId, providerName, token, setToken }: TokenImportFieldsProps) {
   const { t } = useTranslation();
+  const hint = catalogId.startsWith("trae")
+    ? t("usage.tokenImportTraeHint", { provider: providerName })
+    : t("usage.tokenImportHint", { provider: providerName });
 
   return (
-    <Field label={t("usage.fieldTokenImport")} hint={t("usage.tokenImportHint", { provider: providerName })}>
+    <Field label={t("usage.fieldTokenImport")} hint={hint}>
       <Textarea
         value={token}
         onChange={(event) => setToken(event.target.value)}
