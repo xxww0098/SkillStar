@@ -32,6 +32,10 @@ Windows release 仍使用 `windows_subsystem = "windows"`，不分配控制台�
 
 Projects 页在选中项目且存在未过期计划时，在列表上方展示规范路径、是否注册、owner、受影响 Agent 和每一项操作。批准按钮调用 `approve_project_skill_plan`，只写 SkillStar 批准，不部署。没有计划时不显示这块区域。
 
+## 重排
+
+推荐的默认顺序仍是已安装技能的 BM25。`ort` 只启用 CPU Execution Provider，三平台用同一条 `Session` 构建。`SKILLSTAR_LAYA_ONNX` 未指向含 `laya.onnx` 的目录，或这份文件打不开时，顺序保持直通，推荐仍然成功。PyTorch 只用于另行导出 ONNX，应用依赖里没有它。Laya 权重不进仓库，也不进安装包。
+
 ## 应用
 
 `apply_project_skills` 在项目写锁里核对计划、批准和幂等回执，然后调用严格启用。没有批准时返回 `ApprovalRequired`，不改项目树和项目索引。回执只在每一项都是链接意义上的 applied 或 already 时写入 `state/project-skill-receipts/<idempotency_key>.json`。回执里的 `runtime_visibility` 是 `unverified`。

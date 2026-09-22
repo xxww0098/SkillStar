@@ -42,6 +42,8 @@ base64.workspace = true
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-async-rw"] }
 tracing-subscriber.workspace = true
 schemars = { workspace = true }
+ort = { workspace = true, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "api-27", "tls-rustls"] }
+ndarray = { workspace = true }
 
 [dev-dependencies]
 rusqlite = { workspace = true }

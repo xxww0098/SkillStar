@@ -134,3 +134,11 @@
 - **批准区放在项目列表上方，通栏。** 没有未过期计划时不渲染。窄宽度下差异按字符换行，技能名和操作仍可读。
 - **桌面命令只调用计划读取和 `record_from_skillstar`。** 新命令在 `commands/project_host.rs`，不进 `mcp_commands.rs`。
 - **浏览器开发用的假数据会返回一份示例计划。** 生产命令只返回磁盘上未过期、且根目录对得上的计划。
+
+## 17 ort CPU
+
+### 已定，按这个做
+
+- **`ort` 关掉默认 feature，只留 CPU 运行所需的部分。** 启用 `std`、`ndarray`、`download-binaries`、`copy-dylibs`、`api-27`、`tls-rustls`。没有 `cuda`、`coreml`、`directml`、`tensorrt`。下载预编译库必须选一个 TLS，这里用 rustls。
+- **`Session` 只注册 `CPUExecutionProvider`。** 三平台同一条构建代码。
+- **没有 `laya.onnx` 时重排等于直通，推荐仍然成功。** 这张随测试提交的身份图只证明 CPU 能加载，不是 Laya。PyTorch 不进应用依赖。
