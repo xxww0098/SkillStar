@@ -52,7 +52,15 @@ export type { OAuthFlow } from "@/types/generated/OAuthFlow";
 export type { OAuthStart } from "@/types/generated/OAuthStart";
 
 /** Catalog ids that support `import_subscription_from_local`. */
-export const LOCAL_IMPORT_CATALOG_IDS = ["codex", "antigravity", "cursor", "kiro", "qoder"] as const;
+export const LOCAL_IMPORT_CATALOG_IDS = [
+  "codex",
+  "antigravity",
+  "cursor",
+  "kiro",
+  "qoder",
+  "codebuddy",
+  "codebuddy-cn",
+] as const;
 
 /** Backend broadcast when a catalog's active account changes. */
 export const USAGE_ACTIVE_CHANGED_EVENT = "usage://active-changed";

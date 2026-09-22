@@ -198,6 +198,26 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "USD",
             "https://qoder.com",
         ),
+        entry(
+            "codebuddy",
+            "CodeBuddy",
+            "CodeBuddy IDE",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "6C4DFF",
+            "USD",
+            "https://www.codebuddy.ai",
+        ),
+        entry(
+            "codebuddy-cn",
+            "CodeBuddy CN",
+            "CodeBuddy CN",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "6C4DFF",
+            "USD",
+            "https://www.codebuddy.cn",
+        ),
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -298,8 +318,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_16_entries() {
-        assert_eq!(catalog().len(), 16);
+    fn catalog_has_18_entries() {
+        assert_eq!(catalog().len(), 18);
     }
 
     #[test]
@@ -318,7 +338,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 9);
+        assert_eq!(oauth, 11);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -383,6 +403,41 @@ mod tests {
         assert_eq!(entry.subscription_url, "https://qoder.com");
         assert!(entry.regions.is_empty());
         assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn codebuddy_and_cn_are_distinct_oauth_rows() {
+        for (id, name, url, region_note) in [
+            (
+                "codebuddy",
+                "CodeBuddy",
+                "https://www.codebuddy.ai",
+                "global",
+            ),
+            (
+                "codebuddy-cn",
+                "CodeBuddy CN",
+                "https://www.codebuddy.cn",
+                "cn",
+            ),
+        ] {
+            let entry = find(id).expect(id);
+            assert_eq!(entry.tier, CatalogTier::OAuth);
+            assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+            assert_eq!(entry.display_name, name);
+            assert_eq!(entry.brand_color, "6C4DFF");
+            assert_eq!(entry.default_currency, "USD");
+            assert_eq!(entry.subscription_url, url);
+            assert!(
+                entry.regions.is_empty(),
+                "{region_note} is fixed on the row"
+            );
+            assert!(entry.warning.is_none());
+        }
+        assert_ne!(
+            find("codebuddy").unwrap().id,
+            find("codebuddy-cn").unwrap().id
+        );
     }
 
     #[test]

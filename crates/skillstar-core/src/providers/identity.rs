@@ -164,6 +164,18 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("qoder"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "codebuddy",
+        display_name: "CodeBuddy",
+        catalog_id: Some("codebuddy"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "codebuddy-cn",
+        display_name: "CodeBuddy CN",
+        catalog_id: Some("codebuddy-cn"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.
@@ -236,6 +248,19 @@ mod tests {
                 spec.catalog_id
             );
         }
+    }
+
+    #[test]
+    fn codebuddy_identities_are_subscription_only() {
+        for id in ["codebuddy", "codebuddy-cn"] {
+            let identity = identity_for_catalog(id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(identity.canonical_id, id);
+            assert!(identity.preset_ids.is_empty(), "{id}");
+        }
+        assert_ne!(
+            identity_for_catalog("codebuddy").unwrap().display_name,
+            identity_for_catalog("codebuddy-cn").unwrap().display_name
+        );
     }
 
     #[test]

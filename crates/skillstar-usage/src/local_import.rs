@@ -60,6 +60,24 @@ fn import_qoder() -> LocalImportFuture {
     })
 }
 
+fn import_codebuddy() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::codebuddy::import_from_local()?;
+        let sub = crate::fetchers::oauth::codebuddy::oauth_row_from_imported(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("CodeBuddy 订阅保存失败：{err}")))
+    })
+}
+
+fn import_codebuddy_cn() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::codebuddy::import_from_local_cn()?;
+        let sub = crate::fetchers::oauth::codebuddy::oauth_row_from_imported_cn(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("CodeBuddy CN 订阅保存失败：{err}")))
+    })
+}
+
 const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "codex",
@@ -84,6 +102,14 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "qoder",
         import_from_local: import_qoder,
+    },
+    LocalImporter {
+        catalog_id: "codebuddy",
+        import_from_local: import_codebuddy,
+    },
+    LocalImporter {
+        catalog_id: "codebuddy-cn",
+        import_from_local: import_codebuddy_cn,
     },
 ];
 

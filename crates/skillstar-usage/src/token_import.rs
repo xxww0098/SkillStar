@@ -50,6 +50,14 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
         catalog_id: "qoder",
         import_from_token: crate::fetchers::oauth::qoder::import_from_token,
     },
+    TokenImporter {
+        catalog_id: "codebuddy",
+        import_from_token: crate::fetchers::oauth::codebuddy::import_from_token,
+    },
+    TokenImporter {
+        catalog_id: "codebuddy-cn",
+        import_from_token: crate::fetchers::oauth::codebuddy::import_from_token_cn,
+    },
 ];
 
 pub fn token_import_supported(catalog_id: &str) -> bool {
