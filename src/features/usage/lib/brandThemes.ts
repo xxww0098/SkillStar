@@ -49,6 +49,9 @@ const THEMES: Record<string, BrandTheme> = {
   "trae-solo": { header: ["#111827", "#0F172A"], bar: ["#12B886", "#34D399"], fg: "#ffffff", glow: "#12B886" },
   "trae-cn": { header: ["#14532D", "#166534"], bar: ["#22C55E", "#12B886"], fg: "#ffffff", glow: "#22C55E" },
   "trae-solo-cn": { header: ["#3B0764", "#6D28D9"], bar: ["#A78BFA", "#12B886"], fg: "#ffffff", glow: "#6D28D9" },
+  // No Zed glyph in lobe.ts; ProviderLogo falls back to the letter Z.
+  // `#2E6BE6` is the catalog brand (cockpit has no hex).
+  zed: { header: ["#0B1F6E", "#2E6BE6"], bar: ["#2E6BE6", "#60A5FA"], fg: "#ffffff", glow: "#2E6BE6" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

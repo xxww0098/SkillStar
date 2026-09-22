@@ -1,8 +1,10 @@
 //! Local HTTP listener for OAuth `redirect_uri` callbacks.
 //!
-//! Spawns `tiny_http` on `127.0.0.1:{port}`, waits for a single GET to
-//! a local callback carrying `code` and `state`, validates `state`, and
-//! returns every query parameter. Callers that only need the grant read `code`.
+//! Spawns `tiny_http` on `127.0.0.1:{port}` and returns the callback query.
+//!
+//! [`wait`] still requires `code` plus a matching `state`. Zed's native
+//! sign-in has neither; [`wait_for_keys`] finishes when the named keys are
+//! present. A query that lacks those keys does not end the wait.
 //!
 //! Codex uses fixed ports with `/cancel` shutdown (mirrors the official CLI).
 //! Antigravity and other providers may bind arbitrary ports.
@@ -84,8 +86,16 @@ pub fn start_session(
         let addr = format!("127.0.0.1:{}", bind_port);
         match Server::http(&addr) {
             Ok(server) => {
+                // Port 0 is assigned by the OS. The sign-in URL and cancel
+                // must use that port, not the requested 0.
+                let port = server
+                    .server_addr()
+                    .to_ip()
+                    .map(|addr| addr.port())
+                    .filter(|port| *port != 0)
+                    .unwrap_or(bind_port);
                 return Ok(CallbackSession {
-                    port: bind_port,
+                    port,
                     cancelled: Arc::new(AtomicBool::new(false)),
                     server: Arc::new(server),
                 });
@@ -174,11 +184,36 @@ pub async fn wait(
     expected_state: String,
     timeout: Option<Duration>,
 ) -> UsageResult<CallbackParams> {
+    wait_accept(session, Accept::CodeAndState(expected_state), timeout).await
+}
+
+/// Zed native sign-in. Succeeds when every key is present and non-empty.
+/// No `code` and no `state`. A provider `error` ends the wait; a query that
+/// simply lacks the keys does not.
+pub async fn wait_for_keys(
+    session: CallbackSession,
+    required_keys: &[&str],
+    timeout: Option<Duration>,
+) -> UsageResult<CallbackParams> {
+    let keys = required_keys.iter().map(|key| (*key).to_string()).collect();
+    wait_accept(session, Accept::RequiredKeys(keys), timeout).await
+}
+
+#[derive(Clone)]
+enum Accept {
+    CodeAndState(String),
+    RequiredKeys(Vec<String>),
+}
+
+async fn wait_accept(
+    session: CallbackSession,
+    accept: Accept,
+    timeout: Option<Duration>,
+) -> UsageResult<CallbackParams> {
     let timeout = timeout.unwrap_or(Duration::from_secs(300));
     let (tx, rx) = oneshot::channel::<UsageResult<CallbackParams>>();
     let server = session.server.clone();
     let cancelled = session.cancelled.clone();
-    let state = expected_state.clone();
 
     let join = task::spawn_blocking(move || {
         let deadline = Instant::now() + timeout;
@@ -200,7 +235,7 @@ pub async fn wait(
             match server.recv_timeout(poll_for) {
                 Ok(Some(request)) => {
                     let url = request.url().to_string();
-                    let outcome = handle_request(&url, &state);
+                    let outcome = classify_request(&url, &accept);
                     respond(request, &outcome);
                     match outcome {
                         RequestOutcome::Params(params) => {
@@ -212,6 +247,12 @@ pub async fn wait(
                         RequestOutcome::Cancelled => {
                             if let Some(tx) = tx.take() {
                                 let _ = tx.send(Err(UsageError::Other("用户取消登录".into())));
+                            }
+                            break;
+                        }
+                        RequestOutcome::ProviderError(message) => {
+                            if let Some(tx) = tx.take() {
+                                let _ = tx.send(Err(UsageError::Other(message)));
                             }
                             break;
                         }
@@ -257,11 +298,18 @@ enum RequestOutcome {
     /// A real OAuth redirect that failed validation (`error=` from the
     /// provider, missing `code`/`state`, or state mismatch).
     Failed,
+    /// Keyed callback (Zed) reported `error` or a blank required value.
+    /// Unlike [`RequestOutcome::Failed`], this ends the wait.
+    ProviderError(String),
     /// Not an OAuth redirect at all (no query string — favicon.ico, probes).
     Ignored,
 }
 
 fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
+    classify_request(url, &Accept::CodeAndState(expected_state.to_string()))
+}
+
+fn classify_request(url: &str, accept: &Accept) -> RequestOutcome {
     let path = url.split('?').next().unwrap_or(url);
     if path == "/cancel" {
         return RequestOutcome::Cancelled;
@@ -269,9 +317,16 @@ fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
     if !url.contains('?') {
         return RequestOutcome::Ignored;
     }
-    match parse_callback(url, expected_state) {
-        Ok(params) => RequestOutcome::Params(params),
-        Err(_) => RequestOutcome::Failed,
+    match accept {
+        Accept::CodeAndState(state) => match parse_callback(url, state) {
+            Ok(params) => RequestOutcome::Params(params),
+            Err(_) => RequestOutcome::Failed,
+        },
+        Accept::RequiredKeys(keys) => match parse_required_keys(url, keys) {
+            KeyParse::Ready(params) => RequestOutcome::Params(params),
+            KeyParse::Provider(message) => RequestOutcome::ProviderError(message),
+            KeyParse::Incomplete => RequestOutcome::Failed,
+        },
     }
 }
 
@@ -279,7 +334,7 @@ fn respond(request: tiny_http::Request, outcome: &RequestOutcome) {
     let (status, body): (u16, &str) = match outcome {
         RequestOutcome::Params(_) => (200, SUCCESS_HTML),
         RequestOutcome::Cancelled => (200, CANCELLED_HTML),
-        RequestOutcome::Failed => (200, FAILURE_HTML),
+        RequestOutcome::Failed | RequestOutcome::ProviderError(_) => (200, FAILURE_HTML),
         RequestOutcome::Ignored => (404, NOT_FOUND_HTML),
     };
     let resp = Response::new(
@@ -334,6 +389,56 @@ fn parse_callback(url: &str, expected_state: &str) -> UsageResult<CallbackParams
         ));
     }
     Ok(params)
+}
+
+enum KeyParse {
+    Ready(CallbackParams),
+    /// `error=` or a required key that arrived blank. Ends the wait.
+    Provider(String),
+    /// Required key absent. Keep waiting.
+    Incomplete,
+}
+
+fn parse_required_keys(url: &str, required: &[String]) -> KeyParse {
+    let Some(q_idx) = url.find('?') else {
+        return KeyParse::Incomplete;
+    };
+    let query = &url[q_idx + 1..];
+    let mut params = HashMap::new();
+    let mut error = None;
+    for part in query.split('&') {
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        let decoded = percent_decode(value).unwrap_or_else(|| value.to_string());
+        match key {
+            "error" => error = Some(decoded),
+            "error_description" if error.is_none() => error = Some(decoded),
+            "error_description" => {}
+            _ => {
+                params.insert(key.to_string(), decoded);
+            }
+        }
+    }
+    if let Some(err) = error.filter(|value| !value.trim().is_empty()) {
+        return KeyParse::Provider(format!("OAuth 错误：{err}"));
+    }
+    if required.is_empty() {
+        return KeyParse::Incomplete;
+    }
+    for key in required {
+        match params.get(key).map(|value| value.trim()) {
+            Some(value) if !value.is_empty() => {}
+            Some(_) => return KeyParse::Provider(format!("回调缺少 {key}")),
+            None => return KeyParse::Incomplete,
+        }
+    }
+    for key in required {
+        if let Some(value) = params.get_mut(key) {
+            *value = value.trim().to_string();
+        }
+    }
+    KeyParse::Ready(params)
 }
 
 fn percent_decode(s: &str) -> Option<String> {
@@ -464,7 +569,104 @@ mod tests {
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("取消"));
 
+        // The original session still owns the listener. Port 0 used to hide
+        // that, because a second bind of 0 always succeeded.
+        drop(session);
         let rebound = start_session(port, None);
         assert!(rebound.is_ok(), "port should be reusable after cancel");
+    }
+
+    #[test]
+    fn zed_callback_without_code_is_not_an_authorization_code() {
+        let err = parse_callback("/?user_id=u&access_token=cipher", "state")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("code"), "{err}");
+    }
+
+    #[test]
+    fn zed_callback_keys_are_accepted_without_code_or_state() {
+        let parsed = parse_required_keys(
+            "/?user_id=user-1&access_token=cipher%2Bvalue&extra=1",
+            &["user_id".into(), "access_token".into()],
+        );
+        let KeyParse::Ready(params) = parsed else {
+            panic!("expected params");
+        };
+        assert_eq!(params.get("user_id").map(String::as_str), Some("user-1"));
+        assert_eq!(
+            params.get("access_token").map(String::as_str),
+            Some("cipher+value")
+        );
+        assert_eq!(params.get("extra").map(String::as_str), Some("1"));
+        assert!(params.get("code").is_none());
+    }
+
+    #[test]
+    fn zed_callback_error_ends_as_provider_error() {
+        let parsed = parse_required_keys(
+            "/?error=access_denied&error_description=no",
+            &["user_id".into(), "access_token".into()],
+        );
+        let KeyParse::Provider(message) = parsed else {
+            panic!("expected provider error");
+        };
+        assert!(message.contains("access_denied"), "{message}");
+    }
+
+    #[test]
+    fn zed_callback_missing_key_stays_incomplete() {
+        assert!(matches!(
+            parse_required_keys(
+                "/?user_id=user-1",
+                &["user_id".into(), "access_token".into()]
+            ),
+            KeyParse::Incomplete
+        ));
+    }
+
+    #[tokio::test]
+    async fn wait_for_keys_returns_user_id_and_ciphertext() {
+        let session = start_session(0, None).expect("bind");
+        let port = session.port;
+        let task = tokio::spawn(async move {
+            wait_for_keys(
+                session,
+                &["user_id", "access_token"],
+                Some(Duration::from_secs(5)),
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let response = reqwest::get(format!(
+            "http://127.0.0.1:{port}/?user_id=user-1&access_token=cipher"
+        ))
+        .await
+        .expect("callback");
+        assert!(response.status().is_success());
+        let params = task.await.expect("join").expect("keys");
+        assert_eq!(params.get("user_id").map(String::as_str), Some("user-1"));
+        assert_eq!(
+            params.get("access_token").map(String::as_str),
+            Some("cipher")
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_keys_provider_error_does_not_hang() {
+        let session = start_session(0, None).expect("bind");
+        let port = session.port;
+        let task = tokio::spawn(async move {
+            wait_for_keys(
+                session,
+                &["user_id", "access_token"],
+                Some(Duration::from_secs(5)),
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let _ = reqwest::get(format!("http://127.0.0.1:{port}/?error=access_denied")).await;
+        let message = task.await.expect("join").expect_err("error").to_string();
+        assert!(message.contains("access_denied"), "{message}");
     }
 }

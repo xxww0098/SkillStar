@@ -22,6 +22,38 @@ pub(crate) struct InternetPassword {
     pub password: String,
 }
 
+/// Account label from `security find-internet-password -s <server>` with no
+/// `-a`. Zed's item is stored under the user id, which the caller does not
+/// know yet. Sandbox refuses before `security` is spawned.
+pub(crate) fn find_internet_password_account(server: &str) -> UsageResult<Option<String>> {
+    ensure_keychain_allowed()?;
+    if server.trim().is_empty() {
+        return Err(UsageError::Other(
+            "internet-password 的 server 不能为空".into(),
+        ));
+    }
+    let meta = spawn_security(&["find-internet-password", "-s", server])?;
+    if !meta.status.success() {
+        let stderr = String::from_utf8_lossy(&meta.stderr);
+        if stderr.contains("could not be found") {
+            return Ok(None);
+        }
+        return Err(UsageError::Other(format!(
+            "读取 internet-password 失败：status={} stderr={}",
+            meta.status,
+            stderr.trim()
+        )));
+    }
+    let meta_text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&meta.stdout),
+        String::from_utf8_lossy(&meta.stderr)
+    );
+    parse_internet_password_account(&meta_text)
+        .map(Some)
+        .ok_or_else(|| UsageError::Other("解析 internet-password 账号失败".into()))
+}
+
 pub(crate) fn find_internet_password(
     server: &str,
     account: &str,
@@ -222,6 +254,7 @@ mod tests {
         let _guard = EnvGuard::sandbox(dir.path());
         assert!(crate::tool_paths::is_tool_sync_sandboxed());
         for error in [
+            find_internet_password_account("https://zed.dev").expect_err("account"),
             find_internet_password("https://zed.dev", "user-1").expect_err("find"),
             add_internet_password("https://zed.dev", "user-1", "secret").expect_err("add"),
             delete_internet_password("https://zed.dev").expect_err("delete"),

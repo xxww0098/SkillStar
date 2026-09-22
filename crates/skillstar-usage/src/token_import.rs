@@ -74,6 +74,10 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
         catalog_id: "trae-solo-cn",
         import_from_token: crate::fetchers::oauth::trae::import_from_token_solo_cn,
     },
+    TokenImporter {
+        catalog_id: "zed",
+        import_from_token: crate::fetchers::oauth::zed::import_from_token,
+    },
 ];
 
 pub fn token_import_supported(catalog_id: &str) -> bool {

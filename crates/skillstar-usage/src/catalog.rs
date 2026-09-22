@@ -265,6 +265,18 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "6D28D9",
             "https://www.trae.cn",
         ),
+        // No Zed mark in lobe.ts. The card uses the letter fallback.
+        // `#2E6BE6` is a stable blue; cockpit does not publish a hex.
+        entry(
+            "zed",
+            "Zed",
+            "Zed Editor",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "2E6BE6",
+            "USD",
+            "https://zed.dev/account",
+        ),
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -365,8 +377,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_22_entries() {
-        assert_eq!(catalog().len(), 22);
+    fn catalog_has_23_entries() {
+        assert_eq!(catalog().len(), 23);
     }
 
     #[test]
@@ -385,7 +397,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 15);
+        assert_eq!(oauth, 16);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -511,6 +523,20 @@ mod tests {
         for id in ids {
             assert!(seen.insert(id), "{id}");
         }
+    }
+
+    #[test]
+    fn zed_is_oauth_and_token_import() {
+        let entry = find("zed").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "Zed");
+        assert_eq!(entry.description, "Zed Editor");
+        assert_eq!(entry.brand_color, "2E6BE6");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://zed.dev/account");
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
     }
 
     #[test]

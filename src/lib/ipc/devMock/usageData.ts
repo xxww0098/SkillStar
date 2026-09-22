@@ -194,6 +194,18 @@ export const USAGE_CATALOG = [
     regions: [],
   },
   {
+    id: "zed",
+    display_name: "Zed",
+    description: "Zed Editor",
+    tier: "o-auth",
+    auth_modes: ["o-auth", "token-import"],
+    brand_color: "2E6BE6",
+    default_currency: "USD",
+    subscription_url: "https://zed.dev/account",
+    warning: null,
+    regions: [],
+  },
+  {
     id: "deepseek",
     display_name: "DeepSeek",
     description: "API Key 余额",
