@@ -55,3 +55,22 @@ Blocked 的 app 不出入口。
 ## 会改变本片的人类反馈
 
 - 是否投入做 VS Code profile 注入（copilot 多开的唯一路径）。
+
+## 结果
+
+| app | 状态 |
+| --- | --- |
+| Windsurf | Pending |
+| Kiro | Pending |
+| Qoder | Pending |
+| CodeBuddy | Pending |
+| CodeBuddy CN | Pending |
+| ZCode | Pending |
+| Trae | Pending |
+| TRAE SOLO | Pending |
+| Trae CN | Pending |
+| TRAE SOLO CN | Pending |
+| Zed | Blocked |
+| github-copilot | Blocked |
+
+没有做实机隔离验证，也没有启动任何桌面应用。Pending 只是按 cockpit 源码登记的启动形状，不是 Verified。Zed 与 Claude Desktop 一样走 `UnsupportedApp`，不进实例选择器。没有加 VS Code profile 注入。

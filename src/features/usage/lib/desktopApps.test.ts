@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { desktopAppIdForCatalog, desktopAppsForFilter, isGrokBotFilter } from "./desktopApps";
+import { INSTANCE_CATALOG_IDS, desktopAppIdForCatalog, desktopAppsForFilter, isGrokBotFilter } from "./desktopApps";
 
 describe("desktopAppIdForCatalog", () => {
   it("maps Cursor and Antigravity quota cards to desktop apps", () => {
@@ -19,5 +19,27 @@ describe("desktopAppsForFilter", () => {
     expect(desktopAppsForFilter("xai")).toBeNull();
     expect(isGrokBotFilter("xai")).toBe(false);
     expect(desktopAppsForFilter("grok-bot")).toEqual(["grok-bot"]);
+  });
+
+  it("does not list pending or blocked apps", () => {
+    expect(INSTANCE_CATALOG_IDS).toEqual(["cursor", "antigravity"]);
+    expect(desktopAppsForFilter("__all__")).toEqual(["cursor", "grok-bot", "antigravity"]);
+    for (const id of [
+      "windsurf",
+      "kiro",
+      "qoder",
+      "codebuddy",
+      "codebuddy-cn",
+      "zcode",
+      "trae",
+      "trae-solo",
+      "trae-cn",
+      "trae-solo-cn",
+      "zed",
+      "github-copilot",
+    ]) {
+      expect(desktopAppIdForCatalog(id)).toBeNull();
+      expect(desktopAppsForFilter(id)).toBeNull();
+    }
   });
 });

@@ -178,10 +178,16 @@ fn write_json(path: &Path, value: &Value) {
 }
 
 #[test]
-fn zcode_is_switchable_and_not_an_instance() {
+fn zcode_is_switchable_and_instance_launch_stays_pending() {
     assert!(crate::usage_switch::supports_switch(CATALOG_ID));
     assert!(super::Adapter.available());
-    assert!(crate::instances::DesktopAppId::parse("zcode").is_err());
+    let app = crate::instances::DesktopAppId::parse("zcode").unwrap();
+    assert_eq!(app.as_str(), "zcode");
+    assert!(
+        crate::instances::list_desktop_apps()
+            .iter()
+            .all(|row| row.id != app)
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
