@@ -113,6 +113,7 @@ flowchart LR
 - 该进程只广告 `protocol` 里的项目技能工具。批准不是工具参数。不启用 roots，不提供资源，技能正文不进结果。
 - 项目写入先拿技能 update 锁、再拿 `state/project-write.lock`。已经持有项目锁时不再拿 update 锁。
 - Windows release 不改 `windows_subsystem`，不调用 `AllocConsole`。父进程接上的管道就是传输。
+- 可选 Laya 重排在第一次 `recommend_project_skills` 时加载，不在 `initialize`。模型目录由 `SKILLSTAR_LAYA_ONNX` 指向，不属于 SkillStar 数据目录。只使用 CPU Execution Provider。
 
 ### 跨进程与凭证事务
 

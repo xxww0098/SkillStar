@@ -523,6 +523,15 @@
 - 后果：获得——外部 MCP 安装流程不被项目技能协议类型污染；CLI 与将来的桌面批准可以调用同一套领域函数。承担——stdio 传输和工具 schema 的演进跟 `rmcp` 走，不跟 marketplace 的 server.json 走。
 - 证据：`crates/skillstar-app/src/project_skills_mcp/`、[docs/features/project-skills-mcp/README.md](./features/project-skills-mcp/README.md)、[boundaries.md](./boundaries.md) 的项目技能 MCP 接缝。
 
+## D-058：Laya 重排只在本机 CPU 上跑，失败则回到 BM25
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：项目技能推荐需要可选的本地优选。Laya 的发布形态是 ONNX。Windows、macOS、Linux 没有同一个 GPU Execution Provider。官方 `laya_config.json` 不写语种，而中文任务不能拿英文权重来打分。
+- 决策：`skillstar-app` 用 `ort` 的 CPU Execution Provider 和 `tokenizers` 加载 `SKILLSTAR_LAYA_ONNX`。每个候选是一次 noul，输入布局跟 receptron/laya 的 `build_sequence`。至多 12 个，不增删候选，分数不进 `plan_hash`。含汉字的任务只接受 multilingual 导出。没有 `language` 字段时，用 tokenizer 特殊符号区分英文 ModernBERT 和 mmBERT；对不上就不加载。加载失败保持 BM25。应用不下载权重，PyTorch 不进依赖。
+- 后果：获得——英文 `receptron/laya-onnx` 可以在 CPU 上改变候选顺序。承担——指向英文包时，中文任务仍是 BM25；中文优选要用户自行导出 multilingual，再把同一个环境变量指过去。
+- 证据：`crates/skillstar-app/src/project_skills_mcp/ort_cpu.rs`、`crates/skillstar-app/src/project_skills_mcp/laya_pack.rs`、`crates/skillstar-app/tests/fixtures/laya-ort-reference.json`。
+
 ## 新增记录格式
 
 

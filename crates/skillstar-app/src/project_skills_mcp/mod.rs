@@ -8,6 +8,7 @@ pub mod approval;
 pub mod cli_approve;
 pub mod host;
 pub mod inspect;
+mod laya_pack;
 pub mod ort_cpu;
 pub mod plan;
 pub mod protocol;

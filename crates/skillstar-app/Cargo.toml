@@ -44,6 +44,7 @@ tracing-subscriber.workspace = true
 schemars = { workspace = true }
 ort = { workspace = true, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "api-27", "tls-rustls"] }
 ndarray = { workspace = true }
+tokenizers = { workspace = true, features = ["fancy-regex"] }
 
 [dev-dependencies]
 rusqlite = { workspace = true }

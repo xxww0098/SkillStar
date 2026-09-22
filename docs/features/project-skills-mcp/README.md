@@ -34,7 +34,9 @@ Projects 页在选中项目且存在未过期计划时，在列表上方展示�
 
 ## 重排
 
-推荐的默认顺序仍是已安装技能的 BM25。`ort` 只启用 CPU Execution Provider，三平台用同一条 `Session` 构建。`SKILLSTAR_LAYA_ONNX` 未指向含 `laya.onnx` 的目录，或这份文件打不开时，顺序保持直通，推荐仍然成功。PyTorch 只用于另行导出 ONNX，应用依赖里没有它。Laya 权重不进仓库，也不进安装包。
+推荐的默认顺序是已安装技能的 BM25。`SKILLSTAR_LAYA_ONNX` 指向含 `laya.onnx`、`laya.onnx.data`、`laya_config.json` 和 `tokenizer/` 的目录时，第一次推荐在 CPU 上加载 Laya。每个候选单独问一次该技能是否适用于这次任务，只用名称和 frontmatter 描述，不送 `SKILL.md` 正文。至多打分 12 个，按 true 的概率从高到低排；平分保持 BM25 原序，低分也不删候选。
+
+含汉字的任务只有 multilingual 导出才打分。Hugging Face `receptron/laya-onnx` 是英文包。`laya_config.json` 可以用 `language` 写成 `en` 或 `multilingual`；没有这个字段时，用 tokenizer 的特殊符号区分。看不出语种、文件缺失或 Session 失败都保持 BM25，推荐仍然成功。分数不进入 `plan_hash`。模型不进仓库和安装包，应用也不下载。PyTorch 只用于另行导出，不进应用依赖。`ort` 只注册 CPU Execution Provider。
 
 ## 应用
 

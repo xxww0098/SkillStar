@@ -62,8 +62,10 @@ pub fn recommend_project_skills(
     let search_text = search_text(&request);
     let hits = search_installed_skills(&search_text, 12)?;
     let ranked = reranker.rerank(
+        &search_text,
         hits.into_iter()
             .map(|hit| RankedCandidate {
+                description: description_excerpt(&hit.id),
                 name: hit.id,
                 score: hit.score,
             })
@@ -72,7 +74,7 @@ pub fn recommend_project_skills(
     let candidates = ranked
         .iter()
         .map(|hit| Candidate {
-            description: description_excerpt(&hit.name),
+            description: hit.description.clone(),
             name: hit.name.clone(),
             score: hit.score,
         })
@@ -163,7 +165,7 @@ pub fn recommend_project_skills(
         owner_id: owner.owner_id.unwrap_or_else(|| profile.id.clone()),
         affected_agents: owner.readers,
         scores: Vec::new(),
-        reranker: reranker.name().to_string(),
+        reranker: reranker.name_for(&search_text).to_string(),
     };
     let plan = create_plan(draft, now)?;
     Ok(Recommendation {

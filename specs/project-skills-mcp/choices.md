@@ -142,3 +142,13 @@
 - **`ort` 关掉默认 feature，只留 CPU 运行所需的部分。** 启用 `std`、`ndarray`、`download-binaries`、`copy-dylibs`、`api-27`、`tls-rustls`。没有 `cuda`、`coreml`、`directml`、`tensorrt`。下载预编译库必须选一个 TLS，这里用 rustls。
 - **`Session` 只注册 `CPUExecutionProvider`。** 三平台同一条构建代码。
 - **没有 `laya.onnx` 时重排等于直通，推荐仍然成功。** 这张随测试提交的身份图只证明 CPU 能加载，不是 Laya。PyTorch 不进应用依赖。
+
+## 18 Laya 图
+
+### 已定，按这个做
+
+- **每个技能单独问一次 noul，不把多个技能名塞进同一次 choice。** 问题是英文模板，技能名和 frontmatter 描述写在问题里，任务文本是 state。不送 `SKILL.md` 正文。
+- **输入布局抄上游 `rl_common.build_sequence`。** 图的五个输入名和 dtype 保持导出时的样子。分数是 true 的概率。平分用稳定排序，保留 BM25 原来的先后。
+- **官方 `laya_config.json` 没有语种字段。** 有 `language` 时只认 `en` / `english` 和 `multilingual`。没有这个字段时，`[CLS]` `[SEP]` `[MASK]` `[PAD]` 算英文，`<bos>` `<eos>` `<mask>` `<pad>` 算 multilingual。两边都对不上就不加载。任务里有汉字时，只有 multilingual 才打分。
+- **图打不开，或任何一条序列装不进长度上限时，这一次推荐整表回到 BM25。** 不把概率和 BM25 分数混在一张表里。同一个目录加载失败后，这个进程不再重试。计划上的 reranker 名在加载失败后写成 `passthrough`。
+- **对照值是 Python ONNX Runtime CPU 对一条冻住的英文 token 向量的 logits。** 阈值 `1e-4`。约 1.6GB 的权重留在本机缓存，不进 git，应用也不下载。

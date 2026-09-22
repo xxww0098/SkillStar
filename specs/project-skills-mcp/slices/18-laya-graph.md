@@ -1,6 +1,6 @@
-# 18 — Laya 图（休眠）
+# 18 — Laya 图
 
-不要在 01 到 17 做完之前开工。不要在 `SKILLSTAR_LAYA_ONNX` 未指向本机目录时开工。缺模型不是失败，回到 17 的直通即可。
+状态：已落地（2026-09-22）。缺模型不是失败，回到 17 的直通。
 
 ## 契约
 
@@ -19,10 +19,10 @@
 ## 人可以运行
 
 ```bash
-SKILLSTAR_LAYA_ONNX=/path/to/export cargo test -p skillstar-app -- --ignored laya_graph_
+SKILLSTAR_LAYA_ONNX=/path/to/export cargo test -p skillstar-app --lib -- --ignored laya_
 ```
 
-没有这个环境变量时，忽略测试不要让 `cargo test` 失败。
+过滤器用 `laya_`，因为 logits 测试的名字是 `laya_logits_…`，`laya_graph_` 盖不住它。没有这个环境变量时，忽略测试不要让 `cargo test` 失败。
 
 ## 验证
 

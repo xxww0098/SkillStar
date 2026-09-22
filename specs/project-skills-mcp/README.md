@@ -1,14 +1,14 @@
 # 项目技能 MCP
 
-状态：17 已落地。18 休眠。最后更新：2026-09-22。
+状态：18 已落地。最后更新：2026-09-22。
 
 ## Next Agent Prompt
 
-你正在实现 SkillStar 的项目技能 MCP。不要从聊天记录恢复上下文，以本目录为准。
+你正在收尾 SkillStar 的项目技能 MCP。不要从聊天记录恢复上下文，以本目录为准。
 
-17 已完成。18 处于休眠：环境变量 `SKILLSTAR_LAYA_ONNX` 没有指向本机导出目录，不要开工。01 到 17 是完整的 BM25 加 CPU 运行时方案。
+01–18 已落地。Laya 在第一次推荐时用 CPU 对至多 12 个候选做 noul 重排；未设置 `SKILLSTAR_LAYA_ONNX`、语种不符或加载失败时仍是 BM25。中文任务只接受 multilingual 导出，英文 `receptron/laya-onnx` 不能冒充。下一步是整份规格收尾：按最终代码重写 `choices.md`，再归档。不要 push。
 
-已落地：01–16；17 ort CPU（身份图在 CPU 上跑通，缺 `laya.onnx` 时推荐顺序不变且成功）。`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
+`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
 
 全局决定已经写在下面，不要重开。切片里标成「可改」的才是实现自由。做完一档之前，运行该档写明的测试。文档和代码同一档一起改，不留「待补」。
 
@@ -33,7 +33,7 @@
 - [x] 15 CLI 批准 — [slices/15-cli-approve.md](slices/15-cli-approve.md)
 - [x] 16 桌面批准 — [slices/16-gui-approve.md](slices/16-gui-approve.md)
 - [x] 17 ort CPU — [slices/17-ort-cpu.md](slices/17-ort-cpu.md)
-- [ ] 18 Laya 图（休眠）— [slices/18-laya-graph.md](slices/18-laya-graph.md)
+- [x] 18 Laya 图 — [slices/18-laya-graph.md](slices/18-laya-graph.md)
 
 ## 目标
 
@@ -63,7 +63,7 @@
 05 + 06 ─► 07 计划 ──► 12 应用 ──► 13
 08 批准 ──► 12
 08 + 07 ─► 15 CLI 批准 ──► 16 桌面批准
-10 的重排接口 ──► 17 ort CPU ──► 18 Laya 图（休眠）
+10 的重排接口 ──► 17 ort CPU ──► 18 Laya 图
 ```
 
 01、02、03、04、06、08 没有相互依赖，仍按编号做，避免两档同时改公共入口。
