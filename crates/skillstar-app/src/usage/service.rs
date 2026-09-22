@@ -688,15 +688,14 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     pending_state::remove(&pending_id);
     let mut sub = result.map_err(map_err)?;
     let mut switch_result = None;
-    if crate::usage_switch::supports_switch(&sub.catalog_id)
+    if crate::usage_switch::oauth_completion_rewrites_live_store(&sub.catalog_id)
         && storage::get_active_subscription(&sub.catalog_id)
             .map_err(map_err)?
             .as_deref()
             == Some(sub.id.as_str())
     {
-        // OAuth can rotate the active row. Re-activate when a switch adapter
-        // exists and this row is already the pin, so the UI cannot say
-        // "active" while the live store still has the previous token.
+        // OAuth can rotate the pinned row. IDE adapters and xAI rewrite the
+        // live store so the UI cannot say "active" over the previous token.
         let activation = crate::usage_switch::activate_subscription(&sub.id)
             .await
             .map_err(map_err)?;

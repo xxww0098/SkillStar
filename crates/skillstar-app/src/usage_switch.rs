@@ -211,6 +211,15 @@ pub fn supports_cli_switch(catalog_id: &str) -> bool {
     supports_switch(catalog_id)
 }
 
+/// OAuth completion rewrites the live store only when this pinned row has an
+/// IDE adapter, or when it is xAI. xAI is a CLI target, but a finished login
+/// can rebind the same card to a different subject, so the pinned Grok CLI
+/// file has to be rewritten too. Codex and OpenCode stay out: their login
+/// paths already write the CLI file themselves.
+pub fn oauth_completion_rewrites_live_store(catalog_id: &str) -> bool {
+    catalog_id == "xai" || ide::ide_adapter_for(catalog_id).is_some()
+}
+
 /// Result returned by the activation facade.
 #[derive(Debug, Clone)]
 pub struct ActivationResult {
@@ -574,10 +583,14 @@ mod tests {
             assert!(supports_switch(catalog), "{catalog}");
             assert!(supports_cli_switch(catalog), "{catalog}");
             assert!(target_for(catalog).is_none(), "{catalog}");
+            assert!(oauth_completion_rewrites_live_store(catalog), "{catalog}");
             let adapter = ide::ide_adapter_for(catalog).unwrap();
             assert_eq!(adapter.catalog_id(), catalog);
             assert!(adapter.available(), "{catalog}");
         }
+        assert!(oauth_completion_rewrites_live_store("xai"));
+        assert!(!oauth_completion_rewrites_live_store("codex"));
+        assert!(!oauth_completion_rewrites_live_store("opencode"));
 
         let mut ide_ids: Vec<_> = ide::adapters()
             .iter()
