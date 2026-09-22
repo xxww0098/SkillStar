@@ -14,6 +14,7 @@ import {
   MinimaxColor,
   OllamaMono,
   QoderColor,
+  TraeColor,
   ZhipuColor,
 } from "@/components/ui/icons/lobe";
 import { LobeIcon } from "@/components/ui/icons/LobeIcon";
@@ -39,6 +40,10 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   "github-copilot": GithubCopilotMono,
   codebuddy: CodeBuddyColor,
   "codebuddy-cn": CodeBuddyColor,
+  trae: TraeColor,
+  "trae-solo": TraeColor,
+  "trae-cn": TraeColor,
+  "trae-solo-cn": TraeColor,
   kiro: KiroColor,
   qoder: QoderColor,
   windsurf: WindsurfMono,

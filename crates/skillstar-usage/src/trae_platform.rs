@@ -101,6 +101,69 @@ impl TraePlatformKind {
             GLOBAL_REGION_HOSTS
         }
     }
+
+    /// Cockpit `auth_client_id`. Solo products share one id; CN does not change it.
+    pub const fn auth_client_id(self) -> &'static str {
+        if self.is_solo() {
+            SOLO_AUTH_CLIENT_ID
+        } else {
+            TRAE_AUTH_CLIENT_ID
+        }
+    }
+
+    pub const fn auth_domain(self) -> &'static str {
+        if self.is_cn() {
+            CN_AUTH_DOMAIN
+        } else {
+            GLOBAL_AUTH_DOMAIN
+        }
+    }
+
+    /// Single account-API origin when a row has no stored `loginHost`.
+    ///
+    /// ExchangeToken spends a one-time refresh token, so this is not
+    /// [`Self::region_hosts`] and must not be fanned out.
+    pub const fn default_login_host(self) -> &'static str {
+        if self.is_cn() {
+            CN_DEFAULT_LOGIN_HOST
+        } else {
+            GLOBAL_DEFAULT_LOGIN_HOST
+        }
+    }
+
+    /// Product site for the renew button. Not a login URL.
+    pub const fn product_home(self) -> &'static str {
+        if self.is_cn() {
+            "https://www.trae.cn"
+        } else {
+            "https://www.trae.ai"
+        }
+    }
+
+    pub const fn pay_status_paths(self) -> &'static [&'static str] {
+        if self.is_cn() {
+            CN_PAY_STATUS_PATHS
+        } else {
+            GLOBAL_PAY_STATUS_PATHS
+        }
+    }
+
+    pub const fn ent_usage_paths(self) -> &'static [&'static str] {
+        if self.is_cn() {
+            CN_ENT_USAGE_PATHS
+        } else {
+            GLOBAL_ENT_USAGE_PATHS
+        }
+    }
+
+    /// CN-only fallback when `ide_user_ent_usage` has no pack list. Empty elsewhere.
+    pub const fn current_entitlement_paths(self) -> &'static [&'static str] {
+        if self.is_cn() {
+            CN_CURRENT_ENTITLEMENT_PATHS
+        } else {
+            NO_PATHS
+        }
+    }
 }
 
 const GLOBAL_REGION_HOSTS: &[&str] = &[
@@ -118,6 +181,25 @@ const CN_REGION_HOSTS: &[&str] = &[
     "https://api.trae.com.cn",
     "https://www.trae.cn",
 ];
+
+const TRAE_AUTH_CLIENT_ID: &str = "ono9krqynydwx5";
+const SOLO_AUTH_CLIENT_ID: &str = "en1oxy7wnw8j9n";
+const GLOBAL_AUTH_DOMAIN: &str = "www.trae.ai";
+const CN_AUTH_DOMAIN: &str = "www.trae.cn";
+const GLOBAL_DEFAULT_LOGIN_HOST: &str = "https://grow-normal.trae.ai";
+const CN_DEFAULT_LOGIN_HOST: &str = "https://api.trae.cn";
+const NO_PATHS: &[&str] = &[];
+const GLOBAL_PAY_STATUS_PATHS: &[&str] = &["/trae/api/v1/pay/ide_user_pay_status"];
+const CN_PAY_STATUS_PATHS: &[&str] = &[
+    "/trae/api/v2/pay/ide_user_pay_status",
+    "/trae/api/v1/pay/ide_user_pay_status",
+];
+const GLOBAL_ENT_USAGE_PATHS: &[&str] = &["/trae/api/v1/pay/ide_user_ent_usage"];
+const CN_ENT_USAGE_PATHS: &[&str] = &[
+    "/trae/api/v2/pay/ide_user_ent_usage",
+    "/trae/api/v1/pay/ide_user_ent_usage",
+];
+const CN_CURRENT_ENTITLEMENT_PATHS: &[&str] = &["/trae/api/v2/pay/user_current_entitlement_list"];
 
 #[cfg(test)]
 mod tests {
@@ -211,6 +293,61 @@ mod tests {
             CN_REGION_HOSTS
                 .iter()
                 .all(|host| !host.contains("trae.ai") && !host.contains("marscode.com"))
+        );
+        for kind in TraePlatformKind::ALL {
+            assert!(
+                kind.region_hosts().contains(&kind.default_login_host()),
+                "{}",
+                kind.catalog_id()
+            );
+            assert!(
+                kind.region_hosts().contains(&kind.product_home()),
+                "{}",
+                kind.catalog_id()
+            );
+            assert!(kind.auth_domain().starts_with("www."));
+            assert!(!kind.pay_status_paths().is_empty());
+            assert!(!kind.ent_usage_paths().is_empty());
+        }
+        assert_eq!(TraePlatformKind::Trae.auth_client_id(), TRAE_AUTH_CLIENT_ID);
+        assert_eq!(
+            TraePlatformKind::TraeCn.auth_client_id(),
+            TRAE_AUTH_CLIENT_ID
+        );
+        assert_eq!(
+            TraePlatformKind::TraeSolo.auth_client_id(),
+            SOLO_AUTH_CLIENT_ID
+        );
+        assert_eq!(
+            TraePlatformKind::TraeSoloCn.auth_client_id(),
+            SOLO_AUTH_CLIENT_ID
+        );
+        assert_eq!(TraePlatformKind::Trae.auth_domain(), "www.trae.ai");
+        assert_eq!(TraePlatformKind::TraeCn.auth_domain(), "www.trae.cn");
+        assert_eq!(
+            TraePlatformKind::Trae.default_login_host(),
+            "https://grow-normal.trae.ai"
+        );
+        assert_eq!(
+            TraePlatformKind::TraeCn.default_login_host(),
+            "https://api.trae.cn"
+        );
+        assert_eq!(
+            TraePlatformKind::Trae.pay_status_paths(),
+            &["/trae/api/v1/pay/ide_user_pay_status"]
+        );
+        assert_eq!(
+            TraePlatformKind::TraeCn.pay_status_paths()[0],
+            "/trae/api/v2/pay/ide_user_pay_status"
+        );
+        assert!(
+            TraePlatformKind::Trae
+                .current_entitlement_paths()
+                .is_empty()
+        );
+        assert_eq!(
+            TraePlatformKind::TraeCn.current_entitlement_paths(),
+            &["/trae/api/v2/pay/user_current_entitlement_list"]
         );
     }
 

@@ -89,6 +89,31 @@ const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 /// Browser OAuth and pasted-token rows share refresh dispatch and in-place re-authorization.
 pub(crate) const OAUTH_TOKEN_IMPORT: &[AuthMode] = &[AuthMode::OAuth, AuthMode::TokenImport];
 
+/// Trae has no browser leg. A bare refresh token is bound to the device key
+/// from the original login, so the dialog points at local `storage.json`.
+const TRAE_LOCAL_IMPORT_WARNING: &str = "没有浏览器登录。设备密钥和这次登录绑在一起，裸 refresh token 若被服务端校验设备会失败。请优先用本机导入读取 storage.json。";
+
+fn trae_entry(
+    id: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+    brand_color: &'static str,
+    subscription_url: &'static str,
+) -> CatalogEntry {
+    let mut row = entry(
+        id,
+        display_name,
+        description,
+        CatalogTier::OAuth,
+        OAUTH_TOKEN_IMPORT,
+        brand_color,
+        "USD",
+        subscription_url,
+    );
+    row.warning = Some(TRAE_LOCAL_IMPORT_WARNING);
+    row
+}
+
 /// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
     vec![
@@ -218,6 +243,28 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "USD",
             "https://www.codebuddy.cn",
         ),
+        trae_entry("trae", "Trae", "Trae IDE", "12B886", "https://www.trae.ai"),
+        trae_entry(
+            "trae-solo",
+            "TRAE SOLO",
+            "TRAE SOLO",
+            "111827",
+            "https://www.trae.ai",
+        ),
+        trae_entry(
+            "trae-cn",
+            "Trae CN",
+            "Trae CN",
+            "166534",
+            "https://www.trae.cn",
+        ),
+        trae_entry(
+            "trae-solo-cn",
+            "TRAE SOLO CN",
+            "TRAE SOLO CN",
+            "6D28D9",
+            "https://www.trae.cn",
+        ),
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -318,8 +365,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_18_entries() {
-        assert_eq!(catalog().len(), 18);
+    fn catalog_has_22_entries() {
+        assert_eq!(catalog().len(), 22);
     }
 
     #[test]
@@ -338,7 +385,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 11);
+        assert_eq!(oauth, 15);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -438,6 +485,32 @@ mod tests {
             find("codebuddy").unwrap().id,
             find("codebuddy-cn").unwrap().id
         );
+    }
+
+    #[test]
+    fn trae_four_catalogs_share_oauth_and_token_import() {
+        for (id, name, url) in [
+            ("trae", "Trae", "https://www.trae.ai"),
+            ("trae-solo", "TRAE SOLO", "https://www.trae.ai"),
+            ("trae-cn", "Trae CN", "https://www.trae.cn"),
+            ("trae-solo-cn", "TRAE SOLO CN", "https://www.trae.cn"),
+        ] {
+            let entry = find(id).expect(id);
+            assert_eq!(entry.tier, CatalogTier::OAuth);
+            assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+            assert_eq!(entry.display_name, name);
+            assert_eq!(entry.default_currency, "USD");
+            assert_eq!(entry.subscription_url, url);
+            assert!(entry.regions.is_empty());
+            let warning = entry.warning.expect("local import warning");
+            assert!(warning.contains("本机导入"), "{warning}");
+            assert!(warning.contains("没有浏览器登录"), "{warning}");
+        }
+        let ids = ["trae", "trae-solo", "trae-cn", "trae-solo-cn"];
+        let mut seen = std::collections::HashSet::new();
+        for id in ids {
+            assert!(seen.insert(id), "{id}");
+        }
     }
 
     #[test]

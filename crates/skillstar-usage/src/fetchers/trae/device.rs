@@ -9,8 +9,6 @@
 //! Message bytes are exactly
 //! `{method}\n{path}\n{client_id}\n{refresh_token}\n{ts}\n{nonce}`.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use ring::rand::SystemRandom;
 use ring::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, KeyPair};

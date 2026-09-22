@@ -38,6 +38,13 @@ export function mockOAuthStart(args: Record<string, unknown> = {}): OAuthStart {
       interval_secs: 1,
     };
   }
+  if (typeof catalog === "string" && (catalog === "trae" || catalog.startsWith("trae-")) && args.flow == null) {
+    return {
+      ...base,
+      auth_url: catalog.endsWith("cn") ? "https://www.trae.cn" : "https://www.trae.ai",
+      flow: "immediate",
+    };
+  }
   if ((catalog === "codebuddy" || catalog === "codebuddy-cn") && args.flow == null) {
     return {
       ...base,

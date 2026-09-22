@@ -1,4 +1,3 @@
-//! Trae device-proof spike. Not a quota fetcher and not registered in
-//! [`super::refresh`].
+//! P-256 device proof used by [`super::oauth::trae`].
 
-mod device;
+pub(crate) mod device;

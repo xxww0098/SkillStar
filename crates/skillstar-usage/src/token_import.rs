@@ -58,6 +58,22 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
         catalog_id: "codebuddy-cn",
         import_from_token: crate::fetchers::oauth::codebuddy::import_from_token_cn,
     },
+    TokenImporter {
+        catalog_id: "trae",
+        import_from_token: crate::fetchers::oauth::trae::import_from_token,
+    },
+    TokenImporter {
+        catalog_id: "trae-solo",
+        import_from_token: crate::fetchers::oauth::trae::import_from_token_solo,
+    },
+    TokenImporter {
+        catalog_id: "trae-cn",
+        import_from_token: crate::fetchers::oauth::trae::import_from_token_cn,
+    },
+    TokenImporter {
+        catalog_id: "trae-solo-cn",
+        import_from_token: crate::fetchers::oauth::trae::import_from_token_solo_cn,
+    },
 ];
 
 pub fn token_import_supported(catalog_id: &str) -> bool {

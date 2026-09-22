@@ -25,6 +25,7 @@ pub(crate) mod cursor_import;
 pub mod github_copilot;
 pub mod kiro;
 pub mod qoder;
+pub mod trae;
 pub mod xai;
 // registration lands with the catalog row
 pub mod windsurf;
@@ -70,6 +71,10 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "kiro" => kiro::fetch(subscription).await,
         "qoder" => qoder::fetch(subscription).await,
         "codebuddy" | "codebuddy-cn" => codebuddy::fetch(subscription).await,
+        "trae" => trae::fetch(subscription).await,
+        "trae-solo" => trae::fetch(subscription).await,
+        "trae-cn" => trae::fetch(subscription).await,
+        "trae-solo-cn" => trae::fetch(subscription).await,
         // OpenCode is Cookie/Manual only (`catalog.rs`). Its OAuth fetcher was
         // 265 lines that never issued a request — it only ever returned this
         // sentence. Legacy rows saved before the catalog narrowed still land
@@ -112,6 +117,10 @@ pub async fn start_login(
         "codebuddy" | "codebuddy-cn" => {
             codebuddy::start_login(catalog_id, region, target_subscription_id).await
         }
+        "trae" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "trae-solo" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "trae-cn" => trae::start_login(catalog_id, region, target_subscription_id).await,
+        "trae-solo-cn" => trae::start_login(catalog_id, region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }
 }
