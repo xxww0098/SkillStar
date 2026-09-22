@@ -14,28 +14,31 @@
 //! only reads skill locations from the manifest.
 
 use serde::Deserialize;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// Conventional `./`-prefix requirement for manifest paths.
 fn is_valid_relative_path(path: &str) -> bool {
     path.starts_with("./")
 }
 
-/// Resolve `target` against `base` and require the result to stay inside
-/// `base`. Rejects `..` escapes and absolute paths.
-fn contained_join(base: &Path, target: &str) -> Option<PathBuf> {
+/// Join a `./`-prefixed `target` onto a repo-relative `base`, rejecting
+/// `..` escapes so the result always stays inside the repository.
+fn safe_relative_child(base: &str, target: &str) -> Option<String> {
     if !is_valid_relative_path(target) {
         return None;
     }
-    let joined = base.join(target.trim_start_matches("./"));
-    let remainder = joined.strip_prefix(base).ok()?;
-    if remainder
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return None;
+    let mut parts: Vec<&str> = Vec::new();
+    if !base.is_empty() {
+        parts.push(base);
     }
-    Some(joined)
+    for segment in target.trim_start_matches("./").split('/') {
+        match segment {
+            "" | "." => continue,
+            ".." => return None,
+            other => parts.push(other),
+        }
+    }
+    Some(parts.join("/"))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -90,37 +93,53 @@ where
 /// finds the skill's own `SKILL.md` as a direct child — the same semantics
 /// `npx skills` applies to manifest-declared paths.
 pub fn declared_skill_dirs(repo_dir: &Path) -> Vec<PathBuf> {
+    let marketplace = std::fs::read_to_string(repo_dir.join(".claude-plugin/marketplace.json")).ok();
+    let plugin = std::fs::read_to_string(repo_dir.join(".claude-plugin/plugin.json")).ok();
+    declared_skill_dir_strings(marketplace.as_deref(), plugin.as_deref())
+        .into_iter()
+        .map(|dir| repo_dir.join(dir))
+        .collect()
+}
+
+/// Repo-relative declared skill container dirs, from manifest file contents.
+///
+/// Same semantics as [`declared_skill_dirs`], but content-driven so callers
+/// that hold a treeless partial clone can read the manifests as blobs before
+/// any directory has been materialized.
+pub fn declared_skill_dir_strings(
+    marketplace_json: Option<&str>,
+    plugin_json: Option<&str>,
+) -> Vec<String> {
     let mut dirs = Vec::new();
 
-    let add_plugin_skills = |dirs: &mut Vec<PathBuf>, plugin_base: &Path, skills: &[String]| {
-        if !plugin_base.starts_with(repo_dir) {
-            return;
-        }
+    let add_plugin_skills = |dirs: &mut Vec<String>, base: &str, skills: &[String]| {
         for skill_path in skills {
-            let Some(skill_dir) = contained_join(plugin_base, skill_path) else {
-                continue;
-            };
-            // Add the parent of the declared skill path so a depth-1 scan of
-            // that parent finds the skill's SKILL.md as a direct child.
-            if let Some(parent) = skill_dir.parent()
-                && parent.starts_with(repo_dir)
+            if let Some(child) = safe_relative_child(base, skill_path)
+                && let Some((parent, _)) = child.rsplit_once('/')
             {
-                dirs.push(parent.to_path_buf());
+                // Parent of the declared skill path so a depth-1 scan of that
+                // parent finds the skill's SKILL.md as a direct child.
+                dirs.push(parent.to_string());
             }
         }
         // Conventional per-plugin skills/ directory is always discoverable.
-        dirs.push(plugin_base.join("skills"));
+        if base.is_empty() {
+            dirs.push("skills".to_string());
+        } else {
+            dirs.push(format!("{base}/skills"));
+        }
     };
 
     // marketplace.json — multi-plugin catalog.
-    if let Ok(content) = std::fs::read_to_string(repo_dir.join(".claude-plugin/marketplace.json"))
-        && let Ok(manifest) = serde_json::from_str::<MarketplaceManifest>(&content)
+    if let Some(content) = marketplace_json
+        && let Ok(manifest) = serde_json::from_str::<MarketplaceManifest>(content)
     {
         let plugin_root = manifest
             .metadata
             .plugin_root
             .as_deref()
-            .filter(|root| is_valid_relative_path(root));
+            .filter(|root| is_valid_relative_path(root))
+            .and_then(|root| safe_relative_child("", root));
         for plugin in manifest.plugins {
             // Remote sources (object with `source`/`repo`) are skipped;
             // only local string paths are honored.
@@ -130,12 +149,10 @@ pub fn declared_skill_dirs(repo_dir: &Path) -> Vec<PathBuf> {
             if !is_valid_relative_path(source) {
                 continue;
             }
-            let base = match plugin_root {
-                Some(root) => contained_join(repo_dir, root).map(|root_dir| {
-                    contained_join(&root_dir, source)
-                        .unwrap_or_else(|| root_dir.join(source.trim_start_matches("./")))
-                }),
-                None => contained_join(repo_dir, source),
+            let base = match plugin_root.as_deref() {
+                Some(root) => safe_relative_child(root, source)
+                    .or_else(|| Some(format!("{root}/{}", source.trim_start_matches("./")))),
+                None => safe_relative_child("", source),
             };
             if let Some(base) = base {
                 add_plugin_skills(&mut dirs, &base, &plugin.skills);
@@ -144,10 +161,10 @@ pub fn declared_skill_dirs(repo_dir: &Path) -> Vec<PathBuf> {
     }
 
     // plugin.json — single plugin at the repo root.
-    if let Ok(content) = std::fs::read_to_string(repo_dir.join(".claude-plugin/plugin.json"))
+    if let Some(content) = plugin_json
         && let Ok(manifest) = serde_json::from_str::<PluginManifest>(&content)
     {
-        add_plugin_skills(&mut dirs, repo_dir, &manifest.skills);
+        add_plugin_skills(&mut dirs, "", &manifest.skills);
     }
 
     dirs
@@ -244,5 +261,29 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let dirs = declared_skill_dirs(repo.path());
         assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn string_version_matches_disk_version_shape() {
+        let marketplace = r#"{
+          "metadata": { "pluginRoot": "./plugins" },
+          "plugins": [
+            { "name": "review", "source": "./review", "skills": ["./skills/review"] },
+            { "name": "remote", "source": { "source": "github.com/org/repo", "repo": "x" } }
+          ]
+        }"#;
+        let dirs = declared_skill_dir_strings(Some(marketplace), None);
+        assert!(dirs.contains(&"plugins/review/skills".to_string()));
+        // Remote sources never contribute.
+        assert!(!dirs.iter().any(|dir| dir.contains("github.com")));
+
+        let plugin = r#"{ "skills": ["./skills/alpha", "../outside"] }"#;
+        let dirs = declared_skill_dir_strings(None, Some(plugin));
+        assert_eq!(
+            dirs,
+            vec!["skills".to_string(), "skills".to_string()]
+        );
+
+        assert!(declared_skill_dir_strings(None, None).is_empty());
     }
 }

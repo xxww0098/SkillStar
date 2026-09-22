@@ -1,8 +1,10 @@
 //! Per-tool config paths, installed detection, and live config readers/writers.
 
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Map, Value};
+use anyhow::{Context, Result, bail};
+use serde_json::{Map, Value, json};
+use skillstar_core::infra::fs_ops::atomic_write;
 use std::path::{Path, PathBuf};
+use toml_edit::{DocumentMut, Item};
 
 use crate::tool_sync::{
     create_rolling_backup, resolve_opencode_config_path, resolve_zcode_config_path,
@@ -75,6 +77,42 @@ pub fn resolve_grok_config_path() -> Result<PathBuf> {
     Ok(home.join(".grok").join("config.toml"))
 }
 
+/// DeepSeek Harness MCP patch: `$DSH_HOME/cordis.patch.yml`, else `~/.dsh/cordis.patch.yml`.
+///
+/// This is the home-level user patch layer, applied to every profile. SkillStar
+/// does not write `profiles/<name>/cordis.patch.yml` because it has no DSH
+/// profile picker; user-scope MCP is the same contract as every other target.
+///
+/// `DSH_HOME` is ignored inside the tool-sync sandbox so a developer export
+/// cannot punch a unit test through to the real DSH home (same rule as
+/// `HERMES_HOME` / `CODEX_HOME`).
+pub fn resolve_deepseek_config_path() -> Result<PathBuf> {
+    Ok(deepseek_home()?.join("cordis.patch.yml"))
+}
+
+fn deepseek_home() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    // Unit tests may run without the tool-sync sandbox exported, so test
+    // builds ignore `DSH_HOME` unconditionally (same rule as `HERMES_HOME`).
+    let sandboxed = std::env::var_os(crate::tool_sync::TOOL_SYNC_HOME_ENV)
+        .filter(|value| !value.is_empty())
+        .is_some();
+    if sandboxed || cfg!(test) {
+        return Ok(home.join(".dsh"));
+    }
+    if let Ok(dir) = std::env::var("DSH_HOME") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            return Ok(PathBuf::from(dir));
+        }
+    }
+    Ok(home.join(".dsh"))
+}
+
+pub(crate) fn installed_deepseek(home: &Path) -> bool {
+    home.join(".dsh").exists() || skillstar_core::infra::path_env::binary_on_enriched_path("dsh")
+}
+
 /// `~/.kiro/settings/mcp.json` — Kiro's user-scope MCP servers (top-level `mcpServers`).
 pub fn resolve_kiro_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
@@ -85,6 +123,31 @@ pub fn resolve_kiro_config_path() -> Result<PathBuf> {
 pub fn resolve_cursor_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".cursor").join("mcp.json"))
+}
+
+/// `~/.workbuddy/mcp.json` — WorkBuddy's user-scope MCP servers (top-level `mcpServers`).
+///
+/// Official docs also mention a project-level `<project>/.workbuddy/mcp.json`.
+/// SkillStar never writes project-scoped MCP config.
+pub fn resolve_workbuddy_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".workbuddy").join("mcp.json"))
+}
+
+/// `~/.config/devin/mcp_config.json` — Devin's user-scope MCP servers
+/// (top-level `mcpServers`).
+///
+/// The file is shared by the `devin` CLI and Devin Desktop's *Devin Local*
+/// agent; Desktop's legacy Cascade surface keeps the Windsurf-lineage
+/// `~/.codeium/windsurf/mcp_config.json` and is therefore the separate
+/// `windsurf` target, not this one. Releases before v3000.3 kept
+/// `mcpServers` inside `~/.config/devin/config.json` and migrate it into this
+/// dedicated file on startup, so SkillStar only ever writes the dedicated one.
+/// Devin also documents project-scoped `.devin/mcp_config.json`; SkillStar
+/// writes no project-scoped MCP config.
+pub fn resolve_devin_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".config").join("devin").join("mcp_config.json"))
 }
 
 /// `~/.copilot/mcp-config.json` — the home-anchored, portable VS Code / Copilot
@@ -409,14 +472,6 @@ pub(crate) fn restore_from_backup(path: &Path, backup: Option<&Path>) -> Result<
     }
 }
 
-fn ensure_parent(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-    Ok(())
-}
-
 /// Read a JSON config file as an object map — **fail-closed**.
 ///
 /// A missing (or empty) file is legitimate: there is nothing to merge into, so
@@ -456,11 +511,17 @@ fn read_json_object_strict(path: &Path) -> Result<Map<String, Value>> {
     })
 }
 
-/// Read a TOML config file as a table — **fail-closed**, mirroring
-/// [`read_json_object_strict`].
-fn read_toml_table_strict(path: &Path) -> Result<toml::Table> {
+/// Read a TOML config file as a **format-preserving** document —
+/// **fail-closed**, mirroring [`read_json_object_strict`].
+///
+/// `toml_edit` and not the `toml` data model on purpose: these are
+/// user-authored files, and `toml::Table` can carry neither comments nor key
+/// order, so merging through it silently deletes every comment in
+/// `~/.codex/config.toml`. The entry's own shape is still built with `toml`
+/// (see [`toml_table_to_item`]).
+fn read_toml_document_strict(path: &Path) -> Result<DocumentMut> {
     if !path.exists() {
-        return Ok(toml::Table::new());
+        return Ok(DocumentMut::new());
     }
     let content = std::fs::read_to_string(path).with_context(|| {
         format!(
@@ -469,12 +530,27 @@ fn read_toml_table_strict(path: &Path) -> Result<toml::Table> {
         )
     })?;
     let content = content.trim_start_matches('\u{FEFF}');
-    toml::from_str::<toml::Table>(content).with_context(|| {
+    content.parse::<DocumentMut>().with_context(|| {
         format!(
             "Invalid TOML in {}. Refusing to overwrite it — fix or move the file, then retry.",
             path.display()
         )
     })
+}
+
+/// Convert one entry's plain `toml::Table` into a `toml_edit` item.
+///
+/// The per-tool builders (`specs::codex_toml_table` / `grok_toml_table`) keep
+/// the `toml` data model — their field shape is pinned by `tests.rs` and needs
+/// nothing format-preserving. Rendering that table with `toml` and parsing the
+/// result back as `toml_edit` keeps an entry's own bytes identical to what the
+/// previous writer emitted, so only the *surrounding* file changes.
+fn toml_table_to_item(table: &toml::Table) -> Result<Item> {
+    let text = toml::to_string_pretty(table).context("Failed to serialize TOML table")?;
+    let doc = text
+        .parse::<DocumentMut>()
+        .context("Failed to re-parse a serialized TOML table")?;
+    Ok(Item::Table(doc.as_table().clone()))
 }
 
 /// Top-level key holding the server map in the community JSON format.
@@ -517,19 +593,28 @@ pub(crate) fn json_named_map_upsert(
 ///
 /// Fail-closed: a file that exists but cannot be read or parsed is left
 /// byte-for-byte intact instead of being replaced by a freshly serialized `{}`.
+///
+/// **Nothing to remove means nothing is written.** Rewriting re-serializes the
+/// whole file (see [`write_json_pretty`]), so an absent entry would still cost
+/// the user the file's key order. This is not a rare path: every create and
+/// update runs it for every *disabled* target, and a full sync runs it once per
+/// disabled tool — one install used to reorder every Agent config on the machine.
 pub(crate) fn json_named_map_remove(path: &Path, root_key: &str, name: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
     let mut root = read_json_object_strict(path)?;
-    if let Some(servers) = root.get_mut(root_key) {
-        let servers = servers.as_object_mut().with_context(|| {
-            format!(
-                "Expected `{root_key}` to be a JSON object in {}. Refusing to overwrite the existing value.",
-                path.display()
-            )
-        })?;
-        servers.remove(name);
+    let Some(servers) = root.get_mut(root_key) else {
+        return Ok(());
+    };
+    let servers = servers.as_object_mut().with_context(|| {
+        format!(
+            "Expected `{root_key}` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    if servers.remove(name).is_none() {
+        return Ok(());
     }
     write_json_pretty(path, &Value::Object(root))
 }
@@ -552,10 +637,9 @@ pub(crate) fn json_mcpservers_remove_strict(path: &Path, name: &str) -> Result<(
 }
 
 fn write_json_pretty(path: &Path, value: &Value) -> Result<()> {
-    ensure_parent(path)?;
     let out = serde_json::to_string_pretty(value).context("Failed to serialize JSON config")?;
-    std::fs::write(path, out).with_context(|| format!("Failed to write {}", path.display()))?;
-    Ok(())
+    atomic_write(path, out.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))
 }
 
 /// Upsert `mcp.<name>` in opencode.json (preserves `$schema`).
@@ -581,52 +665,67 @@ pub(crate) fn opencode_remove(path: &Path, name: &str) -> Result<()> {
         return Ok(());
     }
     let mut root = read_json_object_strict(path)?;
-    if let Some(mcp) = root.get_mut("mcp") {
-        let map = mcp.as_object_mut().with_context(|| {
-            format!(
-                "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
-                path.display()
-            )
-        })?;
-        map.remove(name);
+    let Some(mcp) = root.get_mut("mcp") else {
+        return Ok(());
+    };
+    let map = mcp.as_object_mut().with_context(|| {
+        format!(
+            "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    if map.remove(name).is_none() {
+        return Ok(());
     }
     write_json_pretty(path, &Value::Object(root))
 }
 
-/// Upsert `[mcp_servers.<name>]` in Codex config.toml.
+/// Upsert `[mcp_servers.<name>]` in Codex config.toml, leaving the rest of
+/// the document — comments and key order included — exactly as it was.
 pub(crate) fn codex_upsert(path: &Path, name: &str, table: toml::Table) -> Result<()> {
-    let mut root = read_toml_table_strict(path)?;
-    let mcp_servers = root
-        .entry("mcp_servers".to_string())
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-    let map = mcp_servers.as_table_mut().with_context(|| {
+    let mut doc = read_toml_document_strict(path)?;
+    let item = toml_table_to_item(&table)?;
+    let mcp_servers = doc
+        .as_table_mut()
+        .entry("mcp_servers")
+        .or_insert_with(|| Item::Table(toml_edit::Table::new()));
+    // `as_table_like_mut` accepts both `[mcp_servers.x]` and a hand-written
+    // inline `mcp_servers = { x = { … } }`: refusing the inline spelling would
+    // fail an install over formatting the user is entitled to use.
+    let map = mcp_servers.as_table_like_mut().with_context(|| {
         format!(
             "Expected `mcp_servers` to be a TOML table in {}. Refusing to overwrite the existing value.",
             path.display()
         )
     })?;
-    map.insert(name.to_string(), toml::Value::Table(table));
-    write_toml_pretty(path, &root)
+    map.insert(name, item);
+    write_toml_document(path, &doc)
 }
 
 pub(crate) fn codex_remove(path: &Path, name: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let mut root = read_toml_table_strict(path)?;
-    if let Some(mcp_servers) = root.get_mut("mcp_servers") {
-        let map = mcp_servers.as_table_mut().with_context(|| {
+    let mut doc = read_toml_document_strict(path)?;
+    let (removed, now_empty) = {
+        let Some(mcp_servers) = doc.as_table_mut().get_mut("mcp_servers") else {
+            return Ok(());
+        };
+        let map = mcp_servers.as_table_like_mut().with_context(|| {
             format!(
                 "Expected `mcp_servers` to be a TOML table in {}. Refusing to overwrite the existing value.",
                 path.display()
             )
         })?;
-        map.remove(name);
-        if map.is_empty() {
-            root.remove("mcp_servers");
-        }
+        (map.remove(name).is_some(), map.is_empty())
+    };
+    if !removed {
+        return Ok(());
     }
-    write_toml_pretty(path, &root)
+    if now_empty {
+        doc.as_table_mut().remove("mcp_servers");
+    }
+    write_toml_document(path, &doc)
 }
 fn ensure_mcp_servers_map(root: &mut Map<String, Value>) -> Result<Map<String, Value>> {
     let mcp_val = root
@@ -676,22 +775,26 @@ pub(crate) fn zcode_cli_remove(path: &Path, name: &str) -> Result<()> {
         return Ok(());
     }
     let mut root = read_json_object_strict(path)?;
-    if let Some(mcp) = root.get_mut("mcp") {
-        let mcp = mcp.as_object_mut().with_context(|| {
-            format!(
-                "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
-                path.display()
-            )
-        })?;
-        if let Some(servers) = mcp.get_mut("servers") {
-            let servers = servers.as_object_mut().with_context(|| {
-                format!(
-                    "Expected `mcp.servers` to be a JSON object in {}. Refusing to overwrite the existing value.",
-                    path.display()
-                )
-            })?;
-            servers.remove(name);
-        }
+    let Some(mcp) = root.get_mut("mcp") else {
+        return Ok(());
+    };
+    let mcp = mcp.as_object_mut().with_context(|| {
+        format!(
+            "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    let Some(servers) = mcp.get_mut("servers") else {
+        return Ok(());
+    };
+    let servers = servers.as_object_mut().with_context(|| {
+        format!(
+            "Expected `mcp.servers` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    if servers.remove(name).is_none() {
+        return Ok(());
     }
     write_json_pretty(path, &Value::Object(root))
 }
@@ -705,9 +808,7 @@ pub(crate) fn zcode_v2_opencode_mcp_remove(name: &str) -> Result<()> {
     opencode_remove(&path, name)
 }
 
-fn write_toml_pretty(path: &Path, table: &toml::Table) -> Result<()> {
-    ensure_parent(path)?;
-    let out = toml::to_string_pretty(table).context("Failed to serialize TOML config")?;
-    std::fs::write(path, out).with_context(|| format!("Failed to write {}", path.display()))?;
-    Ok(())
+fn write_toml_document(path: &Path, doc: &DocumentMut) -> Result<()> {
+    atomic_write(path, doc.to_string().as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))
 }

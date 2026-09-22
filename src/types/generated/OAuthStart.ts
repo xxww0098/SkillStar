@@ -3,4 +3,9 @@
 /**
  * Returned by `start_oauth_login`.
  */
-export type OAuthStart = { pending_id: string, auth_url: string, };
+export type OAuthStart = { pending_id: string, auth_url: string, 
+/**
+ * Seconds until the login session's browser-side wait expires; the dialog
+ * counts this down. Absent for flows that resolve immediately.
+ */
+expires_in_secs?: number | null, };

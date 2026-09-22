@@ -71,6 +71,7 @@ const KNOWN_PACK_HARNESS: &[(&str, &str)] = &[
     ("copilot", ".github"),
     ("crush", ".crush"),
     ("cursor", ".cursor"),
+    ("devin", ".devin"),
     ("deepseek", ".dsh"),
     ("factory-droid", ".factory"),
     ("gemini-cli", ".gemini"),
@@ -87,6 +88,7 @@ const KNOWN_PACK_HARNESS: &[(&str, &str)] = &[
     ("roo", ".roo"),
     ("trae", ".trae"),
     ("windsurf", ".windsurf"),
+    ("workbuddy", ".workbuddy"),
 ];
 
 /// Pack-relative prefix for a target agent (`".cursor"`, `".dsh"`, …).
@@ -246,6 +248,12 @@ mod tests {
         assert_eq!(
             pack_harness_prefix("antigravity", None, None).as_deref(),
             Some(".agent")
+        );
+        // Devin's global skills dir sits under the shared `~/.config`, so the
+        // hidden-parent fallback alone cannot name its pack folder.
+        assert_eq!(
+            pack_harness_prefix("devin", Some("~/.config/devin/skills"), None).as_deref(),
+            Some(".devin")
         );
     }
 

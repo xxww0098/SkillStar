@@ -69,3 +69,13 @@ test_parse
 
 # Sisyphus planning workspace
 .sisyphus/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# Agent/IDE local caches
+.amp/
+.serena/
+.workbuddy/
+.zcode/
+.ignore

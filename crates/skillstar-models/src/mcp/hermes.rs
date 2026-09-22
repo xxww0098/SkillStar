@@ -5,12 +5,13 @@
 //! when `platform_toolsets.cli` lists `mcp-<name>`. Both keys are touched on
 //! write; a parse failure is refused rather than rewritten.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_yaml::{Mapping, Value};
+use skillstar_core::infra::fs_ops::atomic_write;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use super::{blank_entry, McpServerEntry};
+use super::{McpServerEntry, blank_entry};
 
 const MCP_SERVERS: &str = "mcp_servers";
 const PLATFORM_TOOLSETS: &str = "platform_toolsets";
@@ -118,16 +119,25 @@ pub(crate) fn hermes_remove(path: &Path, name: &str) -> Result<()> {
         return Ok(());
     }
     let mut root = read_yaml_mapping_strict(path)?;
-    if let Some(servers) = root.get_mut(Value::String(MCP_SERVERS.into())) {
-        let map = servers.as_mapping_mut().with_context(|| {
-            format!(
-                "Expected `{MCP_SERVERS}` to be a YAML mapping in {}. Refusing to overwrite the existing value.",
-                path.display()
-            )
-        })?;
-        map.remove(Value::String(name.into()));
+    let removed_server = match root.get_mut(Value::String(MCP_SERVERS.into())) {
+        Some(servers) => {
+            let map = servers.as_mapping_mut().with_context(|| {
+                format!(
+                    "Expected `{MCP_SERVERS}` to be a YAML mapping in {}. Refusing to overwrite the existing value.",
+                    path.display()
+                )
+            })?;
+            map.remove(Value::String(name.into())).is_some()
+        }
+        None => false,
+    };
+    let removed_token = remove_cli_toolset(&mut root, name);
+    // **Nothing to remove means nothing is written.** A rewrite re-serializes
+    // the whole document (see [`write_yaml`]) and drops its comments, so an
+    // absent server must not cost the user the rest of the file's formatting.
+    if !removed_server && !removed_token {
+        return Ok(());
     }
-    remove_cli_toolset(&mut root, name);
     write_yaml(path, &Value::Mapping(root))
 }
 
@@ -189,21 +199,25 @@ fn upsert_cli_toolset(root: &mut Mapping, name: &str) {
     list.push(yaml_str(&token));
 }
 
-fn remove_cli_toolset(root: &mut Mapping, name: &str) {
+/// Returns whether the token was actually there — the caller uses that to
+/// decide whether the document needs rewriting at all.
+fn remove_cli_toolset(root: &mut Mapping, name: &str) -> bool {
     let token = format!("mcp-{name}");
     let Some(toolsets) = root.get_mut(Value::String(PLATFORM_TOOLSETS.into())) else {
-        return;
+        return false;
     };
     let Some(map) = toolsets.as_mapping_mut() else {
-        return;
+        return false;
     };
     let Some(cli) = map.get_mut(Value::String(CLI.into())) else {
-        return;
+        return false;
     };
     let Some(list) = cli.as_sequence_mut() else {
-        return;
+        return false;
     };
+    let before = list.len();
     list.retain(|item| item.as_str() != Some(token.as_str()));
+    list.len() != before
 }
 
 fn read_yaml_mapping_strict(path: &Path) -> Result<Mapping> {
@@ -237,13 +251,9 @@ fn parse_mapping(content: &str) -> Result<Mapping> {
 }
 
 fn write_yaml(path: &Path, value: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
     let out = serde_yaml::to_string(value).context("Failed to serialize YAML config")?;
-    std::fs::write(path, out).with_context(|| format!("Failed to write {}", path.display()))?;
-    Ok(())
+    atomic_write(path, out.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))
 }
 
 fn yaml_str(s: &str) -> Value {

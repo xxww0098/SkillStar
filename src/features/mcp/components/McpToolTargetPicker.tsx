@@ -4,6 +4,7 @@ import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { agentIconCls, cn } from "../../../lib/utils";
 import type { McpToolId } from "../../../types";
 import type { McpAgentTarget } from "../lib/agentTargets";
+import { MCP_NOTE_CLS } from "./McpFormField";
 
 interface McpToolTargetPickerProps {
   /** Settings-enabled MCP agents only — one chip per enabled profile. */
@@ -25,11 +26,13 @@ export function McpToolTargetPicker({ targets, enabled, onToggle, noteFor }: Mcp
   const { t } = useTranslation();
 
   if (targets.length === 0) {
-    return <p className="text-caption">{t("mcp.noEnabledAgents")}</p>;
+    // Sits under the "enabled tools" label, so it takes the note scale (11px):
+    // `text-caption` would render this explanation larger than the label above.
+    return <p className={cn(MCP_NOTE_CLS, "text-muted-foreground")}>{t("mcp.noEnabledAgents")}</p>;
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-1.5">
       {targets.map(({ toolId, profile }) => {
         const on = enabled[toolId] ?? false;
         const note = noteFor?.(toolId) ?? null;
@@ -43,36 +46,41 @@ export function McpToolTargetPicker({ targets, enabled, onToggle, noteFor }: Mcp
             title={note ? `${label} ${note}` : label}
             onClick={() => onToggle(toolId, !on)}
             className={cn(
-              "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+              "group flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
               on
-                ? "border-primary/45 bg-primary/10 text-foreground shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.12)]"
-                : "border-border/70 bg-background/40 text-muted-foreground hover:border-border hover:bg-muted/35 hover:text-foreground",
+                ? "border-primary/55 bg-primary/[0.08] text-foreground ring-1 ring-primary/25 shadow-2xs"
+                : "border-border/60 bg-background/50 text-muted-foreground hover:border-border hover:bg-muted/30 hover:text-foreground hover:shadow-2xs",
             )}
           >
             <span
               className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-                on ? "bg-primary/15" : "bg-muted/60",
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-150",
+                on ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground group-hover:bg-muted/80",
               )}
             >
-              <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "h-5 w-5"), !on && "opacity-80")} />
+              <AgentIcon
+                profile={profile}
+                className={cn(agentIconCls(profile.icon, "h-3.5 w-3.5"), !on && "opacity-80")}
+              />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium tracking-tight text-foreground">{label}</span>
+              <span className="block truncate text-xs font-medium tracking-tight text-foreground">{label}</span>
               {note ? (
-                <span className="mt-0.5 block truncate text-micro font-normal tracking-normal text-muted-foreground">
+                <span className="block truncate text-[10px] font-normal tracking-normal text-muted-foreground">
                   {note}
                 </span>
               ) : null}
             </span>
             <span
               className={cn(
-                "flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors duration-150",
-                on ? "bg-primary text-primary-foreground" : "bg-muted/80 text-transparent",
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-all duration-150",
+                on
+                  ? "bg-primary text-primary-foreground shadow-2xs scale-100"
+                  : "border border-border/80 bg-background/50 text-transparent scale-90",
               )}
               aria-hidden
             >
-              <Check className="h-3 w-3" strokeWidth={2.6} />
+              <Check className="h-2.5 w-2.5" strokeWidth={2.8} />
             </span>
           </button>
         );

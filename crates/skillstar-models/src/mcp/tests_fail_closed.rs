@@ -354,7 +354,7 @@ fn merging_presets_falls_back_to_the_builtin_catalog_when_curated_is_empty() {
     let merged = merge_mcp_presets(Vec::new(), get_mcp_presets());
     assert_eq!(merged.len(), get_mcp_presets().len());
     assert!(
-        merged.len() >= 10,
-        "the built-in floor must stay substantial"
+        merged.len() >= 8,
+        "the built-in floor is the recommended shortlist, not a directory"
     );
 }

@@ -5,6 +5,7 @@
  */
 import type { AgentCommands } from "./agents";
 import type { AiCommands } from "./ai";
+import type { DecisionCommands } from "./decision";
 import type { GitHubCommands } from "./github";
 import type { MarketplaceCommands } from "./marketplace";
 import type { McpCommands } from "./mcp";
@@ -19,6 +20,7 @@ import type { InstanceCommands } from "./instances";
 import type { SystemCommands } from "./system";
 
 export type TauriCommands = SkillCommands &
+  DecisionCommands &
   AgentCommands &
   ProjectCommands &
   MarketplaceCommands &
@@ -36,6 +38,7 @@ export type TauriCommands = SkillCommands &
 export type {
   AgentCommands,
   AiCommands,
+  DecisionCommands,
   GitHubCommands,
   InstanceCommands,
   MarketplaceCommands,

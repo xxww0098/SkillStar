@@ -38,7 +38,9 @@ fn cleanup_legacy_builtin_mirrors(agent_id: &str, home: &Path) {
             continue;
         }
         for parts in *dirs {
-            let legacy_dir = parts.iter().fold(home.to_path_buf(), |p, part| p.join(part));
+            let legacy_dir = parts
+                .iter()
+                .fold(home.to_path_buf(), |p, part| p.join(part));
             if !legacy_dir.exists() {
                 continue;
             }

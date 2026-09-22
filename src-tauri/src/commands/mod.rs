@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod ai;
+pub mod decision;
 pub mod github;
 pub mod instances;
 pub mod marketplace;

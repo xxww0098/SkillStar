@@ -6,9 +6,9 @@ use skillstar_core::infra::error::AppError;
 use std::cmp::Reverse;
 use uuid::Uuid;
 
+use super::FRICTION_THRESHOLD;
 use super::recall::installed_skill_names;
 use super::store::{self, UsageEvent};
-use super::FRICTION_THRESHOLD;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Learning {

@@ -1,5 +1,6 @@
 import {
   Activity,
+  BrainCircuit,
   EyeOff,
   Globe,
   HardDrive,
@@ -23,6 +24,7 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
   { id: "settings-marketplace-mirror", labelKey: "settings.marketplaceMirror", icon: Store },
   { id: "settings-network-doctor", labelKey: "settings.networkDoctor", icon: Activity },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
+  { id: "settings-decision", labelKey: "settings.decisionModel", icon: BrainCircuit },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },
   { id: "settings-appearance", labelKey: "settings.backgroundStyle", icon: Paintbrush },
   { id: "settings-language", labelKey: "settings.language", icon: LanguagesIcon },

@@ -19,6 +19,7 @@ export const MCP_TOOL_LABELS: Record<McpToolId, string> = {
   "claude-desktop-chat": "Claude Desktop",
   codex: "Codex",
   grok: "Grok",
+  deepseek: "DeepSeek Harness",
   hermes: "Hermes Agent",
   opencode: "OpenCode",
   zcode: "ZCode",
@@ -30,6 +31,8 @@ export const MCP_TOOL_LABELS: Record<McpToolId, string> = {
   "gemini-cli": "Gemini CLI",
   antigravity: "Antigravity",
   zed: "Zed",
+  workbuddy: "WorkBuddy",
+  devin: "Devin",
 };
 
 /** Optional entry fields whose projection is tool-specific. */
@@ -42,19 +45,21 @@ export const MCP_OPTIONAL_FIELDS: readonly McpOptionalField[] = ["autoApprove", 
  * dropped by that tool's writer — which is exactly the thing the form has to
  * stop hiding (audit D.3-6).
  *
- * Evidence, one entry per row (`crates/skillstar-models/src/mcp/specs.rs`):
+ * Evidence, one entry per row (`crates/skillstar-models/src/mcp/specs.rs`,
+ * plus `dsh.rs` for DeepSeek Harness):
  * - `autoApprove`: Kiro `autoApprove` (`kiro_spec`), Cline `autoApprove`
  *   (`cline_spec`). Gemini's `trust: true` is deliberately never projected, so
  *   Gemini CLI does **not** count.
  * - `disabledTools`: Kiro `disabledTools`, Codex `disabled_tools`, Gemini CLI
  *   `excludeTools`.
  * - `timeout`: OpenCode `timeout` (ms), Cline `timeout` (ms), Gemini CLI
- *   `timeout` (ms), Codex `tool_timeout_sec` (whole seconds).
+ *   `timeout` (ms), Codex `tool_timeout_sec` (whole seconds), DeepSeek Harness
+ *   `toolCallTimeoutMs` (ms).
  */
 const SUPPORTED_BY_FIELD: Record<McpOptionalField, readonly McpToolId[]> = {
   autoApprove: ["kiro", "cline"],
   disabledTools: ["kiro", "codex", "gemini-cli"],
-  timeout: ["opencode", "codex", "cline", "gemini-cli"],
+  timeout: ["opencode", "codex", "cline", "gemini-cli", "deepseek"],
 };
 
 export function mcpToolsSupporting(field: McpOptionalField): readonly McpToolId[] {

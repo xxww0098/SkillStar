@@ -264,7 +264,14 @@ async fn production_installer_verifies_the_exact_release_checkout() {
     ));
     std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
     let clone = skillstar_core::infra::path_env::command_with_path("git")
-        .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", "-q"])
+        .args([
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "clone",
+            "-q",
+        ])
         .arg(&origin)
         .arg(&cache)
         .status()

@@ -37,7 +37,7 @@
 
 ## 查询 API
 
-- `query_mcp_servers_local(&McpServerQuery) -> LocalFirstResult<McpServerPage>` 是浏览路径的唯一入口：支持 search（FTS）、publisher、kind、runtime、license、status、recommended、latest、stars 区间、排序方向与 limit/offset。
+- `query_mcp_servers_local(&McpServerQuery) -> LocalFirstResult<McpServerPage>` 是浏览路径的唯一入口：支持 search（FTS）、publisher、kind、runtime、license、status、recommended、latest、stars 区间、排序方向与 limit/offset。未加 scope 时默认仍是 curated ∪ registry（CLI / 兼容）；Official 页只读 curated 行；GitHub 发布者钻入只读远端 registry。按发布者查询时永远只读那一个分桶。
 - `McpServerPage` 同时返回 `total`，所以「显示 60 / 共 21363」不需要第二次往返。
 - 全量未分页的 `list_mcp_servers_local` 只适用于小的 publisher 分桶。合并后的 catalog 是两万量级，把它整体推过 IPC 再在渲染进程里内存过滤会直接卡死界面。
 - 排序键是枚举映射到固定的 `ORDER BY` 片段，所有值绑定为参数；调用方永远碰不到 SQL 文本。
@@ -133,7 +133,7 @@
 
 - Rust 侧 MCP 工具事实（label、配置路径、安装探测、wire-format 的计数/读取/写入/移除 dispatch）的 SSOT 是 `skillstar_models::mcp` 的 `McpToolSpec` 注册表；新增工具只加一行 spec（新 wire format 才需要新的 spec builder）。隐藏的 legacy cleanup id 刻意不进注册表。
 - `MCP_TOOL_IDS` 在前端有三份人工同步的镜像：`src/types/mcp.ts`、`src/features/mcp/lib/toolRegistry.ts` 的 `MCP_TOOL_LABELS`（原先在 `McpServerForm`）、`src/features/mcp/lib/agentTargets.ts` 的 `MCP_TOOL_BY_AGENT_ID`。Rust 侧的常量是 SSOT，四份必须同一次变更内落地；前两份由 `toolRegistry.test.ts` 钉住，第三份由 `agentTargets.test.ts` 钉住。
-- `MCP_TOOL_BY_AGENT_ID` 有几条需要解释的行：`github-copilot -> vscode`（`vscode` 目标写的就是 `~/.copilot/mcp-config.json`，与该 profile 同一配置根）；`gemini-cli -> gemini-cli` 与 `antigravity -> antigravity` 两侧各自同名，但配对不是自动的——两者都落在 `~/.gemini` 下，产品不同、写入的文件也不同（`settings.json` vs `config/mcp_config.json`），互不顶替。`hermes -> hermes` 写入 YAML（`$HERMES_HOME/config.yaml`），不是 JSON。
+- `MCP_TOOL_BY_AGENT_ID` 有几条需要解释的行：`github-copilot -> vscode`（`vscode` 目标写的就是 `~/.copilot/mcp-config.json`，与该 profile 同一配置根）；`gemini-cli -> gemini-cli` 与 `antigravity -> antigravity` 两侧各自同名，但配对不是自动的——两者都落在 `~/.gemini` 下，产品不同、写入的文件也不同（`settings.json` vs `config/mcp_config.json`），互不顶替。`hermes -> hermes` 写入 YAML（`$HERMES_HOME/config.yaml`），不是 JSON。`deepseek -> deepseek` 写入 `$DSH_HOME/cordis.patch.yml`（home 级 Cordis patch：每条 server 是一条 `@deepseek-ai/dsh-mcp-client` insert），同样不是 JSON `mcpServers`。只写这一层，不写 `profiles/<name>/cordis.patch.yml`——SkillStar 没有 DSH profile 选择器，user-scope 与其他 target 一致。DSH 没有 SSE transport，SSE 条目写成 `streamable-http`，读回是 `http`。`workbuddy -> workbuddy` 写入 `~/.workbuddy/mcp.json`（文档示例无 `type`，与 Chat / Antigravity 同 dialect）；官方项目级 `.workbuddy/mcp.json` 不写。`devin -> devin` 写入 `~/.config/devin/mcp_config.json`（文档示例无 `type`）：这份文件同时服务 Devin CLI 与 Devin Desktop 的 Devin Local agent。Windsurf 品牌已并入 Devin Desktop，但它的 legacy Cascade 仍读 `~/.codeium/windsurf/mcp_config.json`，那依旧是 `windsurf` 行；同属 Cognition 不代表可以互相顶替。Devin 的 `transport` / `oauthClientId` / `disabled` 三个键都不投影：前两个不是 SkillStar 持有的数据，`disabled` 是用户自己的开关（与 Cline 同规则）。v3000.3 之前 `mcpServers` 在 `~/.config/devin/config.json` 里，CLI 启动时自行迁移，SkillStar 只写专用文件；官方项目级 `.devin/mcp_config.json` 不写。
 - **不是每个 MCP target 都该有 Agent profile。** `claude-desktop-chat` 没有映射行是决定而非遗漏：Claude Desktop 是聊天 App，没有可验证的 skills 目录，为了换一个 MCP 开关而在 Skills 注册表里编一个 skills 根目录是本末倒置。没有 profile 只意味着拿不到 Agent rail 上的 per-server 开关；目标本身照样可写——新建/编辑表单和工具视图直接枚举 `MCP_TOOL_IDS`，不走这张映射表，`mcpToolIdsWithoutAgentProfile` 会把它如实列为「无 profile 可达」。工具状态卡上的提示保持一句话（未绑定 + 表单可写），不在每张卡重复整段解释。
 - MCP store 与 Marketplace snapshot 是不同数据源：市场只负责发现，安装后进入 Models MCP store。
 - create/update/delete/rename 通过统一 store facade 编排各 Agent projector；部分失败要返回每个目标结果，不静默吞掉。
@@ -141,6 +141,16 @@
 - 所有 live config 与 store 的读取都 fail closed：文件不存在（或为空）才视为空配置并继续写；存在但读不出、解析失败或目标键类型不对，一律返回错误且原文件一字不动。这些文件承载 SkillStar 之外的用户配置，而写入是整文件替换，宽松解析等于静默清空。
 - `mcp_servers.json` 解析失败时把原文件另存为 `mcp_servers.json.corrupt.<epoch_ms>`（同内容只留一份）后报错；写入前对已存在的 store 做一次 rolling backup，与工具配置写入使用同一个 `create_rolling_backup`。
 - MCP 可操作 target 遵循 [Skills 的本机 Agent 可见性规则](../skills/README.md#agent-注册手动启用与项目检测)，只与 MCP 支持映射取交集；不再用实际 tool probe 隐藏用户已手动启用的 Agent。同步时若目标配置不可写，按目标返回明确失败。
+
+### 写入的无损边界（改这一层前必读）
+
+写入是**整文件替换**：读整份文件 → 只改自己那个键 → 重新序列化后整文件写回。「无损」因此必须分两层讲，见 [decisions.md D-062](../../decisions.md#d-062mcp-工具配置写入以没得删就不落盘--原子替换--按格式分档保真为契约)。
+
+- **语义无损**：只增删自己管的那个 key（`mcpServers.<name>` / `servers.<name>` / `context_servers.<name>` / `mcp.<name>` / `mcp_servers.<name>`），其他顶层键、别人的 server、以及目标文件的其余内容原样保留；删除只删那一个 key。
+- **没得删就不落盘**：目标文件里本来没有这个 server 时，remove 直接返回、**不重写文件**。这是正确性要求而不是优化——`sync_server_public_tools` 对每个**未启用**的 target 都会调 remove，早先的实现让「装一个 server」把机器上每个 Agent 的配置文件都重新序列化了一遍（键序被重排，并且每个 no-op 都生成一份 backup，把 rolling backup 的最近 5 份里真正有用的那几份挤掉）。回归测试见 `mcp::tests_lossless`。
+- **原子替换**：所有 live config writer 走 `skillstar_core::infra::fs_ops::atomic_write`（同目录 tmp + fsync + rename，保留原文件权限），不再是裸 `std::fs::write` 整文件覆盖。写一半被杀不会留下截断的配置；写入失败的回滚仍由 `guarded_write` 的 rolling backup 负责。
+- **保真度按格式分档**：TOML（`codex` / `grok`）走 `toml_edit` 文档模型，**注释、空行与键序都保留**；YAML（`hermes` / `deepseek`）键序保留（`serde_yaml::Mapping` 底层是 `IndexMap`）但**注释与锚点丢失**；JSON 目标**键序会被重排**（`serde_json::Map` 默认是 `BTreeMap`，未开 `preserve_order`）。
+- 因此对外只能说「不破坏配置语义、不丢别人的键、不留半写状态」，**不能说逐字节保留**：JSON 键序与 YAML 注释这两档做不到。JSON 对象无序，键序变化不影响任何客户端解析；这也是不开全局 `serde_json/preserve_order` 的取舍——它会让 `tool_sync` 的逐字节基线（[D-039](../../decisions.md#d-039写盘行为的对照基线是旧代码实际跑出的字节不是手写期望值)）整体失效，收益仅是排版。
 
 ## 墓碑与它的公开后继：distinct id + subsumption
 
@@ -171,34 +181,39 @@ Claude 有**两个表面，两个 target**，因为它们读不同的文件、�
 ## Marketplace 接缝
 
 - curated rows 与远端 catalog snapshot 合并，远端刷新不得覆盖或删除 curated rows。
-- Publisher 顺序、source id 和 server 清单以 `skillstar-marketplace` seed/query 代码为准，不在文档复制枚举。
+- 分桶（shelf）顺序、source id 和 server 清单以 `skillstar-marketplace` seed/query 代码为准，不在文档复制枚举。
 - curated 行与 registry 行列对称，从而复用同一条查询和同一条安装路径。
+- 商店**精选（curated）就是推荐短名单**：只收常用工具型 MCP（编程 + 设计创作），每条都标 `recommended`（因此全部同时落在添加弹窗的推荐芯片上），按 `source` 分桶到「核心工具 / 文档与上下文 / 浏览器与调试 / 创作工具」四个货架。其余一切 MCP——数据库、云与集群、issue 跟踪、抓取、文档转换、通用基础能力等——发现路径是商店的「完整目录」，不是精选。
+- curated 目录是**一张数据表**：`seeds/catalog.rs` 的 `catalog()` 是唯一清单，`seeds/helpers.rs` 的 builder 把每行 spec 展开成 typed `McpRegistryServer` + package/remote 摘要 + raw JSON。加一条 server 只加一行 spec，不再为每个发布者开一个文件——发布者文件会让「同一件事散在多处」复发。
+- 精选里**不放「纯 OCI（docker）包 + 容器内必填环境变量」的条目**：计划器把 docker 命令行渲染成 `run -i --rm <image>`，而必填环境变量落进 entry 的 `env`——那是 docker CLI 自己的进程环境，不会变成容器的 `-e`，`TFSDK_*` / `GRAFANA_*` 这类变量因此到不了容器。Terraform、Grafana 这类 server 只走「完整目录」。要收它们，得先让安装计划把容器环境变量转发成 `-e KEY=VALUE` 并排在 image 之前。
 
-## 指挥中心（Fleet | Catalog）
+## 配置页（配置 | 商店）
 
-MCP 页面是该域的唯一入口，但不再把四个表面画成同等权重的 tab。主分段是 **机群（Fleet）** 与 **目录（Catalog）**；**工具** 与 **目录源** 是次级，因为它们回答的是「投影写到了哪」和「目录从哪来」，不是每天的安装/运行工作台。这是吸收 Hermes Agent v0.21 指挥中心的产品形状，同时守住 SkillStar 自己的约束（见 [D-052](../../decisions.md#d-052mcp-指挥中心是-skillstar-原生形态只吸收-hermes-021-的平台能力)）：
+MCP 页面是该域的唯一入口，也只有两个视图：**配置**是已装服务器与它们的工具投递，**商店**是把它加进来的地方。Agent 配置与目录源是检查器，从对应视图的工具栏打开，不是对等 tab。页面形状见 [D-059](../../decisions.md#d-059mcp-配置页只留配置与商店)（取代 [D-057](../../decisions.md#d-057mcp-是配置页不是指挥中心)）；平台能力（粘贴解析、探测上限、深链确认、禁止 21k 同页堆叠）见 [D-052](../../decisions.md#d-052mcp-指挥中心是-skillstar-原生形态只吸收-hermes-021-的平台能力)：
 
-- catalog 是两万量级，**禁止**把已装列表和全量目录堆在同一条滚动里。浏览目录仍然走分页查询，不得拉全量进渲染进程。
-- 机群页顶部是紧凑的「粘贴即解析」条（也可把文本拖进页面）：用户可以丢进社区 `mcpServers` JSON、Streamable HTTP URL、`npx`/`uvx`/`docker` 命令行，或 `skillstar://mcp` 深链。解析在 `skillstar_models::mcp::parse_pasted_mcp`，命令适配器只是把它露出来。条会先预览推断出的名字和命令/URL，**解析结果不是安装。** 目录命中打开现有 `McpInstallWizard`；其余命中预填现有新建表单。两条路都要用户确认后才写 store。
-- 机群在指挥中心**首次挂载**时对已装列表做一次顺序健康探测，上限 8，不在 window focus / 缓存过期时重跑。超过上限的 server 仍可在编辑悬浮窗里按需探测。`401 + WWW-Authenticate` 继续是 `authorization-required`，机群条把它显示成可点的「需要登录」筛选芯片而不是红叉；健康 / 需登录 / 异常芯片会过滤列表。
+- 远端 registry 是两万量级，**禁止**把已装列表和全量目录堆在同一条滚动里。商店的「完整目录」范围和 GitHub bucket 一样走分页查询，不得拉全量进渲染进程。
+- 添加服务器只有**一个**入口：配置页工具栏的「添加服务器」打开一个弹窗，弹窗内用模式切换承载四条来源——推荐（curated 芯片）、手动填写、粘贴解析、从工具导入。粘贴解析在 `skillstar_models::mcp::parse_pasted_mcp`，弹窗只预览推断出的名字和命令/URL，**解析结果不是安装**；目录命中打开现有 `McpInstallWizard`，其余命中预填新建表单。两条路都要用户确认后才写 store。深链到达时配置页切到「配置」视图，并把文本直接送进弹窗的「粘贴」模式。
+- 「从工具导入」读各 Agent 活配置（`import_from_tool`），与粘贴解析互补：前者有磁盘上的权威文件，后者接受用户随手丢来的片段。
+- 配置页**首次挂载**时对已装列表做一次顺序健康探测，上限 8，不在 window focus / 缓存过期时重跑。健康只作为**卡片上的状态点**呈现，再探一次在编辑悬浮窗的探测面板里——页面上没有健康汇总条，也没有按健康筛选的芯片。`401 + WWW-Authenticate` 继续是 `authorization-required`，面板把它显示成需要登录而不是红叉。
 - `skillstar://mcp?url=` / `?catalog=` / `?config=` / `?command=` 会唤醒应用并打开对应的确认 UI。深链不得绕过安装确认。后端本来就把 `query` 放进 `skillstar://deep-link` 事件；前端必须读它，而不能只按 host 跳到 MCP 页。
-- 「从工具导入」仍然是读各 Agent 活配置的那条路（`import_from_tool`），与粘贴解析互补：前者有磁盘上的权威文件，后者接受用户随手丢来的片段。
+- 商店的**范围**是「精选 | 完整目录」：精选读 curated 行，完整目录 scoped 到 `github` bucket。发布者是范围而不是页面——不再有发布者 grid，也没有发布者详情子页。
 
 ## 前端职责
 
-- preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。机群和目录工具栏的推荐悬浮框复用同一批 preset，已安装的按 name 隐藏。这整段编排（初始化快照 → 列 curated → 过滤 recommended → 映射 → 合并去重）在 `skillstar_app::mcp::presets`，命令层只是适配器；快照 runtime 的装配（db 路径、data root、已装技能 loader）仍属宿主胶水（GUI 在 `src-tauri/src/core/marketplace_snapshot`，CLI 在 `skillstar_app::cli`）。
-- preset 芯片有两条安装路径，按 `McpPreset.catalogId` 这个显式标记分流，不靠「先试着解析目录行、解析不到再回退」：带 `catalogId` 的 curated 芯片打开安装向导（`McpInstallWizard`，与市场 tab 同一个入口，因而同样有运行时形态选择、密钥掩码密码框、必填标注和完整命令确认）；不带的内置 preset 没有目录行，继续预填新建表单。curated preset 的 id 本来就是目录行 id，所以芯片可以直接把它交给向导。
-- MCP 页面是 MCP 域的唯一入口。主分段是 **机群（Fleet）** 与 **目录（Catalog）**，次级是 **工具** 与 **目录源**；四者仍共用同一批 hook。机群页（`McpManager`）承载已装列表、粘贴解析条、机群健康条和新建/安装/编辑居中悬浮窗；目录页仍是 `McpMarketPage` 的全目录分页浏览。市场、工具、目录源三项此前完全没有 UI。
-- Marketplace MCP tab 保留 Publisher grid 入口；`McpPublisherDetail` 现在只是一层 hero，主体复用同一个 `McpMarketPage`，只是带上 `publisherId`。发布者页不再自己拉全量再内存过滤。
-- Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。Settings 关掉但这条 server 仍写入的 target 留在轮播里，SVG 进停用态（灰度、不可点），让启停可被卡片感知；工具栏筛选仍只列当前启用的 profile。新建/安装/编辑表单的启用工具列表与默认勾选都跟随当前 Settings 已启用的 Agent（`selectMcpAgentTargets`）：启用几个就渲染几个。没有 Agent profile 的 target（如 `claude-desktop-chat`）不进这张表，仍可在工具视图里看到。
+- preset 芯片区的数据是「curated `recommended` 行」与「内置 preset 目录」的合并去重（按 id 和大小写不敏感的 name，curated 在前），不是二选一；snapshot DB 缺失或损坏时仍要保底返回内置目录。芯片只出现在添加弹窗的「推荐」模式，商店页不再放第二份推荐条。这整段编排（初始化快照 → 列 curated → 过滤 recommended → 映射 → 合并去重）在 `skillstar_app::mcp::presets`，命令层只是适配器；快照 runtime 的装配（db 路径、data root、已装技能 loader）仍属宿主胶水（GUI 在 `src-tauri/src/core/marketplace_snapshot`，CLI 在 `skillstar_app::cli`）。
+- preset 芯片有两条安装路径，按 `McpPreset.catalogId` 这个显式标记分流，不靠「先试着解析目录行、解析不到再回退」：带 `catalogId` 的 curated 芯片打开安装向导（`McpInstallWizard`，与目录安装同一个入口，因而同样有运行时形态选择、密钥掩码密码框、必填标注和完整命令确认）；不带的内置 preset 没有目录行，继续预填新建表单。curated preset 的 id 本来就是目录行 id，所以芯片可以直接把它交给向导。
+- MCP 页面是 MCP 域的唯一入口，形状是配置页：**配置** 与 **商店**。配置（`McpManager`）承载已装列表、搜索与按 Agent 筛选，以及新建/安装/编辑的居中悬浮窗；添加只有工具栏一个入口，弹窗内分「推荐 / 手动 / 粘贴 / 导入」四种来源（`McpAddDialog`）。商店（`McpMarketPage`）是搜索 + 精选安装卡片，范围在「精选 | 完整目录」之间切换：精选按 `source` 货架分区渲染（节标题 + 卡片网格），完整目录是平铺卡片网格并带筛选面板——筛选只出现在完整目录（精选是固定短名单，kind/许可证/stars 筛选对它无意义），且切换范围时清掉除搜索词外的所有 narrowing，避免一个 scope 里设的筛选静默带进另一个。Marketplace 不再放 MCP 胶囊。Agent 配置检查器（`McpToolStatusPanel`）列出每个 target 的配置路径、是否检测到、live 文件里的 server 数，以及复制路径/打开目录；目录源检查器管理启用源。两者都不是对等 tab。
+- Agent rail 复用 `AgentTargetCarousel`，显示名和图标来自 Settings profile，而不是 MCP 自己维护 SVG registry。已装卡片轮播和工具栏筛选是同一批目标：Settings 已启用 profile 与静态 MCP 能力映射的交集（`selectMcpAgentTargets`）。关掉的 profile 不占轮播位，即使这条 server 仍写入对应配置。新建/安装/编辑表单的启用工具列表与默认勾选走同一集合：启用几个就渲染几个。卡片底栏把剩余宽度交给轨道，图标间距固定；放不下时横向滚动，不靠裁切藏掉目标。没有 Agent profile 的 target（如 `claude-desktop-chat`）不进这张表，仍可在 Agent 配置检查器里看到。
 - 商店浏览必须走分页查询命令并展示 `total`；不得再拉全量后在内存里过滤。筛选、排序、分页全部编译进一次 `query_mcp_market_servers_local`，渲染进程不做二次过滤。
 - 弃用条目默认不出现在浏览结果里（前端默认 `statuses: ["active"]`），需要显式打开开关才列出，且始终带弃用标记。后端默认「列出但警告」不变——这是 UI 的取舍，不是契约变化。
-- 市场卡片展示名称、描述、安装/更新动作、弃用/被取代例外和 stars；kind 用图标表达，推荐用标题旁的标记。runtime、版本、仓库和详情留在详情抽屉与安装向导，不在卡片页脚重复。安装向导是居中悬浮窗。
-- 机群采用与技能卡一致的卡片网格形态（`McpFleetCard` + `ss-cards-grid`）：每张卡片包含身份与传输图标、健康状态点与状态说明、描述或命令预览，右上角独立探测操作，底部页脚包含能力/成本（健康、工具数、schema token）与负责多目标投影的 Agent rail。YOLO 与待更新作为例外保留。目录浏览继续用卡片。
+- 市场卡片展示名称、描述、安装/更新动作、弃用/被取代例外和 stars；推荐用标题旁的标记。图标按条目身份解析：curated 行用 `lib/curatedShelves.ts` 的服务图标表（该表是 `seeds/catalog` id 的展示层镜像），registry 行用 publisher 声明的 `iconUrl`，加载失败或缺失时兜底为 kind 图标。runtime、版本、仓库和详情留在详情抽屉与安装向导，不在卡片页脚重复。安装向导是居中悬浮窗。
+- 商店的页面级状态——加载、空态、`remote_error` 重试、分页——全部由 `McpMarketPage` 持有；`McpMarketBrowser` 只把当前页条目渲染成卡片网格与详情抽屉，本身不带空态/加载态。两份空态并存时只有父组件那份可达，浏览器里的 `remote_error` 重试入口因此永远显示不出来——页面状态只有一处 SSOT。
+- 卡片网格的列数统一由 `hooks/useCardGrid.ts` 的 `useCardGridColumns` 计算（读容器宽度 + 迟滞，避免侧栏动画时列数抖动）；`.ss-cards-grid` 只管 gap 与屏外 `content-visibility`，轨道列表仍由调用方给。已装列表与商店共用这一个 hook，不再各抄一份。
+- 已装列表采用与技能卡一致的卡片网格形态（`McpFleetCard` + `ss-cards-grid`）：每张卡片包含身份与传输图标、健康状态点与状态说明、描述或命令预览，底部页脚只放负责多目标投影的 Agent rail。卡片上没有探测按钮——探测在编辑悬浮窗的探测面板里。工具数和 schema token 是探测成本，只出现在那个面板，不在卡片上再写一遍；状态文案已经在标题旁，页脚不再重复。没有启用中的 Agent 时不画空页脚。YOLO 与待更新作为例外保留。商店精选继续用卡片。
 - 三态标记（已安装 / 有更新 / 已弃用）以来源指纹判定：`McpServerEntry.registryName` 对 `McpMarketEntry.namespace`。按 `name` 的字符串比对只作为老条目（无指纹）的兜底，且**永远不判定"有更新"**——那份版本号不一定来自这一行。
 - 安装向导必须展示完整命令预览与运行时候选；secret 字段必须掩码，且不得回显进日志。用户填写的参数会改变命令行，因此确认步骤显示的是 `mcp_market_install_preview` 按最终值渲染出的那一条——前端不持有任何参数拼装、模板替换或命令行渲染逻辑，只做掩码与即时的必填/格式/可选值校验（纯函数，即时反馈不该走一趟 IPC；后端的校验才是权威）。预览按 300ms 去抖调用，在途期间提交按钮禁用，避免批准一条过期的命令。向导提交的是答案 + 已确认的那条字符串，不是自己拼出来的 entry；提交时传的运行时形态是安装计划**选定**的那个（`selectedRuntimeId`），不是选择器的临时状态——`null` 会让后端回落到排序推荐，可能是另一种形态。本地（stdio）安装必须勾选确认框才能提交；远端形态零本地执行，不要求这次勾选。字段级校验**不禁用提交按钮**：禁用只会说「不行」而不说哪一项不行。带着错误提交会就地标出出错的字段并且什么都不发出去。
 - 同步结果必须逐 target 展示成功/跳过/失败/已回滚/回滚失败，并给出错误原文、配置路径与备份路径；失败项可单条重试（`set_mcp_tool_enabled`）或整条重投（`sync_mcp_server`，`force`）。批次一致性（applied / rolledBack / drifted）由前端按同一语义从结果数组重算。
-- `autoApprove` / `disabledTools` / `timeout` 只有部分 target 会写入，表单必须按**当前选中的 target**说明谁会写、谁会忽略。这张表在 `lib/toolRegistry.ts`，SSOT 仍是 `specs.rs` 的各个 writer，两边必须同一次变更内落地。
+- `autoApprove` / `disabledTools` / `timeout` 只有部分 target 会写入，表单必须按**当前选中的 target**说明谁会写、谁会忽略。这张表在 `lib/toolRegistry.ts`（`SUPPORTED_BY_FIELD`），SSOT 仍是 `specs.rs` 的各个 writer，两边必须同一次变更内落地。字段下方的支持提示**从这张表派生**（`mcpSupportLabels` + `splitTargetsByFieldSupport`），不再往 i18n 里手抄一份工具清单——那份副本已经漏过 DeepSeek Harness。提示分三种：无人写入（琥珀，只给结论 + 支持集）、全部写入（绿）、部分写入（灰，忽略项超过两个就压成"其余 N 个"，因为选中的 target 就是上面的芯片）。列表分隔符按语言取「、」或 `, `。抽屉内的字号只有一个层级：字段标签 12px > 提示/注释 11px，等宽字段 11.5px；注释不得大于它所解释的字段标签。
 - 工具未检测提示（target 选择器里那句 `notDetectedSuffix`）由 `useMcpToolStatuses` 返回的 `noteForTool` 派生；已安装页与市场页都用它，不各写一份。
 - `KEY=VALUE` 解析在 `lib/kv.ts`：只 trim key，值默认 trim，但**加引号即逐字保留**。旧实现无条件 trim 值，会静默改写带首尾空格的密钥。
 

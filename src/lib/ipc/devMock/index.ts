@@ -20,6 +20,7 @@
  */
 
 import { APP_SHELL_HANDLERS } from "./appShell";
+import { DECISION_HANDLERS } from "./decision";
 import { GITHUB_HANDLERS } from "./github";
 import { MARKETPLACE_HANDLERS } from "./marketplace";
 import { MCP_HANDLERS } from "./mcp";
@@ -33,6 +34,7 @@ import { USAGE_HANDLERS } from "./usage";
 
 const HANDLERS = mergeHandlerFragments([
   APP_SHELL_HANDLERS,
+  DECISION_HANDLERS,
   SKILLS_HANDLERS,
   MARKETPLACE_HANDLERS,
   MCP_HANDLERS,

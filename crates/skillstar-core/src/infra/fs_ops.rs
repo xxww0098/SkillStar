@@ -511,7 +511,10 @@ mod tests {
         let canonical = canonicalize_existing_prefix(&missing);
         assert_eq!(
             canonical,
-            std::fs::canonicalize(&existing).unwrap().join("skills").join("alpha")
+            std::fs::canonicalize(&existing)
+                .unwrap()
+                .join("skills")
+                .join("alpha")
         );
     }
 

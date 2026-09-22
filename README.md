@@ -157,6 +157,38 @@ skillstar remove <name> [name...]
 skillstar remove --all
 ```
 
+### 本地决策模型（AgentJev-0.6B）
+
+本地跑的系统一（System One）决策模型：给一段状态（diff、日志、工单、JSON）和若干结构化问题，一次前向返回每个选项的校准概率，不生成任何文本。权重 1.2 GB，首次使用需下载。
+
+```bash
+skillstar decide --status                       # 看 checkpoint 是否就绪
+skillstar decide --download                     # 下载 1.2 GB 权重（支持断点续传）
+skillstar decide --verify                       # 逐个核对固定 SHA-256
+skillstar decide --file decision.json           # 跑一次决策
+cat decision.json | skillstar decide -f - --json
+```
+
+`decision.json` 就是 `agentjev.decision.v1` 契约，例如：
+
+```json
+{
+  "state": "Repo diff: renames a public helper and updates 12 call sites.",
+  "questions": [
+    { "id": "needs_review", "type": "boolean",
+      "question": "Does this change need a human review before merge?" },
+    { "id": "risk", "type": "choice",
+      "question": "How risky is merging this without review?",
+      "options": ["mechanical rename", "public API touched", "irreversible"] },
+    { "id": "confidence", "type": "score",
+      "question": "How confident is the author?",
+      "levels": ["guessing", "fairly confident", "certain, verified"] }
+  ]
+}
+```
+
+镜像与目录可用 `SKILLSTAR_HF_ENDPOINT`（如 `https://hf-mirror.com`）和 `SKILLSTAR_DECISION_MODEL_DIR` 覆盖；`--device` / `--dtype` 可切换 Metal/CPU 与精度。图形界面里的同一能力在 设置 → 本地决策模型。
+
 ### 团队智能（本机 Context / Improvement）
 
 检索已安装 Skill 与本地摩擦笔记，不是 Marketplace 搜索，也不是已移除的教程功能。

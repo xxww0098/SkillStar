@@ -64,7 +64,6 @@ fn with_package_arguments(name: &str, args: Vec<McpArgument>) -> McpRegistryServ
     s
 }
 
-
 /// The regression this seam exists for.
 ///
 /// The renderer used to receive `args` already flattened and splice each answer
@@ -321,7 +320,11 @@ fn header_answers_land_on_the_remote_and_url_variables_are_substituted() {
     );
 
     assert_eq!(
-        preview.entry.headers.get("Authorization").map(String::as_str),
+        preview
+            .entry
+            .headers
+            .get("Authorization")
+            .map(String::as_str),
         Some("Bearer abc123")
     );
     assert!(
@@ -377,13 +380,20 @@ fn an_untouched_form_previews_exactly_what_the_plan_showed() {
 fn the_plan_draft_and_the_first_preview_agree_on_blank_environment_rows() {
     let mut s = server("blank-env");
     let mut pkg = package("npm", "npx", "@acme/x");
-    pkg.environment_variables = vec![env("OPTIONAL", McpInput::default()), env("TOKEN", secret_input())];
+    pkg.environment_variables = vec![
+        env("OPTIONAL", McpInput::default()),
+        env("TOKEN", secret_input()),
+    ];
     s.packages = vec![pkg];
 
     let plan = build_install_plan_with(&s, None, &mut everything_installed);
     let preview = preview_install(&s, plan.selected_runtime_id.as_deref(), &[]);
 
-    assert!(plan.draft.env.is_empty(), "blank env rows must not flash: {:?}", plan.draft.env);
+    assert!(
+        plan.draft.env.is_empty(),
+        "blank env rows must not flash: {:?}",
+        plan.draft.env
+    );
     assert_eq!(plan.draft.env, preview.entry.env);
 }
 
@@ -447,9 +457,12 @@ fn prepare_refuses_a_command_that_no_longer_matches_the_approved_one() {
 
     // What the user looked at was `--port 9999`; the form now derives the
     // publisher's default instead.
-    let approved =
-        preview_install(&s, Some("package:0"), &[answer(McpInstallInputScope::PackageArgument, 0, "9999")])
-            .approval_target;
+    let approved = preview_install(
+        &s,
+        Some("package:0"),
+        &[answer(McpInstallInputScope::PackageArgument, 0, "9999")],
+    )
+    .approval_target;
 
     let rejection = prepare_install(
         &s,
@@ -536,9 +549,12 @@ fn prepare_compares_the_resolved_url_for_a_remote_shape() {
     .expect("a remote install confirms its url, not a command");
     assert_eq!(entry.url.as_deref(), Some("https://eu.acme.dev/mcp"));
 
-    let elsewhere =
-        preview_install(&s, Some("remote:0"), &[answer(McpInstallInputScope::UrlVariable, 0, "us")])
-            .approval_target;
+    let elsewhere = preview_install(
+        &s,
+        Some("remote:0"),
+        &[answer(McpInstallInputScope::UrlVariable, 0, "us")],
+    )
+    .approval_target;
     assert_eq!(
         prepare_install(
             &s,
@@ -587,7 +603,11 @@ fn prepare_refuses_an_environment_variable_the_registry_added_after_approval() {
         "the scenario only bites when the command line is unchanged"
     );
     assert_eq!(
-        resynced_preview.entry.env.get("HTTP_PROXY").map(String::as_str),
+        resynced_preview
+            .entry
+            .env
+            .get("HTTP_PROXY")
+            .map(String::as_str),
         Some("http://evil.example"),
         "the injected value must actually reach the entry, or the test proves nothing"
     );

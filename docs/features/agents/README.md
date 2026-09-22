@@ -175,6 +175,36 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
   角色词表、回落语义、写盘跳过回报与能力裁剪见
   [models/README.md](../models/README.md#角色路由跨-agent)，不在此重复。
 
+### WorkBuddy 注册说明
+
+WorkBuddy 是腾讯的办公 Agent，技能目录与 CodeBuddy 同构（`~/.workbuddy/skills` /
+`.workbuddy/skills`），但产品与配置根都独立，不能共用 `codebuddy` 那一行。它还不在
+`vercel-labs/skills` 上游清单里，所以落在 `BUILTIN_AGENT_DEFS` 的 extension 区。
+Lobe Icons 没有对应品牌字形，图标走通用 `LobeHubMono`。
+
+轴①与 MCP 写入都已接入：MCP 目标写用户级 `~/.workbuddy/mcp.json`（顶层 `mcpServers`，
+文档示例无 `type` 键，因此 dialect 是 `PlainNoType`）。官方还有项目级
+`<project>/.workbuddy/mcp.json`，SkillStar 按既有密钥策略不写任何项目级 MCP 配置。
+WorkBuddy 没有 Models 工具同步。
+
+### Devin 注册说明
+
+Devin 是 Cognition 的软件工程 Agent，`devin` 行与 `vercel-labs/skills` 上游逐字一致：显示名
+`Devin for Terminal`，全局 `~/.config/devin/skills`，项目 `.devin/skills`（上游 id 就在
+`UPSTREAM_AGENT_IDS` 内，不是 extension 区）。图标走 Lobe Icons 的品牌字形 `DevinColor`。
+
+轴①与 MCP 写入都已接入。MCP 是独立于 profile 的目标（`McpToolSpec` 一行），写用户级
+`~/.config/devin/mcp_config.json`（顶层 `mcpServers`，文档示例无 `type`）：这份文件同时被
+Devin CLI 与 Devin Desktop 的 Devin Local agent 读取。Windsurf 已改名 Devin Desktop，但它的
+legacy Cascade 仍读 `~/.codeium/windsurf/mcp_config.json`，依旧归既有的 `windsurf` 目标——
+同属 Cognition 不代表两个 profile 可以互相顶替。v3000.3 之前 `mcpServers` 位于
+`~/.config/devin/config.json`，CLI 启动时自行迁移，SkillStar 只写专用文件；官方项目级
+`.devin/mcp_config.json` 按既有密钥策略不写。
+
+Devin **没有 Models 工具同步**：模型由 Cognition 托管，`~/.config/devin/config.json` 的
+`agent.model` 只在自家模型名之间选择，没有 base URL / API Key 之类的自带 provider 配置，
+因此不注册 `tool_sync::agents` 的 `AgentSpec`。Usage 订阅同理由公开 API 决定，未接入。
+
 ## 轴②：Models 工具同步（可选）
 
 仅当该 Agent 有自己的磁盘配置文件、且希望在 Models 工作台一键写入

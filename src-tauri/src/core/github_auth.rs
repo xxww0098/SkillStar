@@ -10,10 +10,10 @@ use skillstar_channels::shared_channels::{
 use skillstar_git::transport::{
     GitAuthMaterial, GitOperationProgress, GitOperationSession, GitProgressSink,
 };
+use skillstar_skills::git_skill::GitSkillFacade;
 use skillstar_skills::github_auth::{
     FileCredentialStore, GitHubAuthError, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
-use skillstar_skills::git_skill::GitSkillFacade;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};

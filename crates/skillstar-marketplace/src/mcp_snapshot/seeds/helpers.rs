@@ -1,170 +1,352 @@
-//! Shared builders / raw JSON templates for curated MCP seed factories.
+//! Builders for the curated MCP seed catalog.
+//!
+//! Every catalog row is declared once as a [`CuratedSpec`] and expanded by
+//! [`build`] into the three shapes the snapshot stores: the typed
+//! [`McpRegistryServer`] the store queries and renders, the package / remote
+//! summaries the install wizard reads, and the `raw_server_json` provenance
+//! blob.
+//!
+//! Writing those three out by hand at every call site is how this catalog
+//! drifted. `xapi` was seeded without its `mcp <url>` arguments in the typed
+//! package summary (only the hand-written JSON carried them, and the install
+//! path reads the typed fields), and several rows pointed at packages upstream
+//! had already archived — `@modelcontextprotocol/server-git`,
+//! `server-fetch` and `server-brave-search` all moved to other registries or
+//! other publishers. One declaration, one expansion, no second copy to go
+//! stale.
+
+use serde_json::{Map, Value, json};
 
 use crate::mcp_models::{
-    McpRegistryPackageSummary, McpRegistryRemoteSummary, McpRegistryServer, McpServerKind,
+    McpArgument, McpInput, McpKeyValueInput, McpRegistryPackageSummary, McpRegistryRemoteSummary,
+    McpRegistryServer, McpServerKind,
 };
 
-// ── Additional curated publishers ───────────────────────────────────────
-// Each factory mirrors the BigModel pattern: a `make` closure builds a
-// `McpRegistryServer` with a `raw_server_json` in the GitHub registry
-// server.json shape, so `registry_to_entry` installs them unchanged.
+/// Which registry a stdio server's package lives in. This fixes both the
+/// `registry_type` we publish and the launcher the install wizard runs it
+/// with, so the two can never disagree.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Registry {
+    /// npm — launched as `npx -y <pkg>`.
+    Npm,
+    /// PyPI — launched as `uvx <pkg>`.
+    Pypi,
+}
 
-/// Build a stdio (npx) curated server. The `raw` must carry a `packages`
-/// entry with `registry_type: "npm"` + `runtime_hint: "npx"`.
-// Plain positional args mirror the curated-seed call sites below (20+
-// call sites); a builder/struct would churn all of them for no behavior
-// change, so the arg count is accepted here.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn make_stdio_curated(
-    id: &str,
-    name: &str,
-    description: &str,
-    raw: &str,
-    source: &str,
-    repo_url: &str,
-    npm_identifier: &str,
-    required_env: &[&str],
-) -> McpRegistryServer {
+impl Registry {
+    fn registry_type(self) -> &'static str {
+        match self {
+            Registry::Npm => "npm",
+            Registry::Pypi => "pypi",
+        }
+    }
+
+    fn runtime_hint(self) -> &'static str {
+        match self {
+            Registry::Npm => "npx",
+            Registry::Pypi => "uvx",
+        }
+    }
+}
+
+/// One input a curated server reads from its environment.
+pub(super) struct EnvVar {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub default: Option<&'static str>,
+    /// Secrets are never shipped in the payload, so the install form always
+    /// asks for them and the field renders masked.
+    pub secret: bool,
+    pub required: bool,
+}
+
+// No catalog row carries env vars today, so these constructors have no
+// caller — they stay because they are the DSL's vocabulary for the next
+// env-bearing curated row, not because deleting them is hard.
+#[allow(dead_code)]
+impl EnvVar {
+    /// A credential the user must paste before the server can do anything.
+    pub(super) const fn token(name: &'static str, description: &'static str) -> Self {
+        Self {
+            name,
+            description,
+            default: None,
+            secret: true,
+            required: true,
+        }
+    }
+
+    /// A non-secret value with no usable default — a host, a username.
+    pub(super) const fn required(name: &'static str, description: &'static str) -> Self {
+        Self {
+            name,
+            description,
+            default: None,
+            secret: false,
+            required: true,
+        }
+    }
+}
+
+/// How a curated server is reached.
+#[derive(Clone, Copy)]
+pub(super) enum Launch {
+    /// A package from a language registry, launched over stdio.
+    Stdio {
+        registry: Registry,
+        identifier: &'static str,
+        /// Named launcher options placed *before* the identifier — `(flag,
+        /// value)` pairs. uvx's `--from <source>` is the canonical case: it
+        /// selects the package when the executable's name differs from it
+        /// (`uvx --from git+… serena` runs `serena` out of the repo, not a
+        /// `serena` PyPI package).
+        runtime_args: &'static [(&'static str, &'static str)],
+        /// Arguments the package needs *after* its identifier — a subcommand,
+        /// a mode flag. `npx -y <pkg> serve --mcp` is `args: &["serve",
+        /// "--mcp"]`.
+        args: &'static [&'static str],
+    },
+    /// A hosted streamable-http endpoint.
+    ///
+    /// `auth_header` is the header a publisher expects a bearer token in. An
+    /// empty string means the endpoint authenticates with OAuth (or not at
+    /// all), so the wizard asks for nothing up front and the first connection
+    /// goes through the OAuth flow instead.
+    Remote {
+        url: &'static str,
+        auth_header: &'static str,
+    },
+}
+
+/// One curated catalog row.
+pub(super) struct CuratedSpec {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// Publisher bucket. Also the value the `source` column is grouped by.
+    pub source: &'static str,
+    pub description: &'static str,
+    pub homepage: &'static str,
+    pub launch: Launch,
+    pub env: &'static [EnvVar],
+    /// Rows flagged here surface as the add-dialog's recommended chips. The
+    /// rest of the catalog stays behind the store's own list.
+    pub recommended: bool,
+}
+
+/// Expand one spec into the stored row.
+pub(super) fn build(spec: &CuratedSpec) -> McpRegistryServer {
+    let (kind, runtimes, packages, remotes) = match spec.launch {
+        Launch::Stdio {
+            registry,
+            identifier,
+            runtime_args,
+            args,
+        } => (
+            McpServerKind::Stdio,
+            vec![registry.runtime_hint().to_string()],
+            vec![package_summary(registry, identifier, runtime_args, args, spec.env)],
+            Vec::new(),
+        ),
+        Launch::Remote { url, auth_header } => (
+            McpServerKind::Remote,
+            Vec::new(),
+            Vec::new(),
+            vec![remote_summary(url, auth_header)],
+        ),
+    };
+
     McpRegistryServer {
-        id: id.to_string(),
-        name: name.to_string(),
-        namespace: id.to_string(),
-        description: description.to_string(),
-        repo_url: repo_url.to_string(),
-        stars: 0,
-        license: None,
-        version: None,
-        kind: McpServerKind::Stdio,
-        runtimes: vec!["npx".to_string()],
-        readme: Some(format!("# {name}\n\n{description}")),
-        updated_at: None,
-        packages: vec![McpRegistryPackageSummary {
-            runtime: "npx".to_string(),
-            identifier: npm_identifier.to_string(),
-            version: None,
-            required_env: required_env.iter().map(|s| s.to_string()).collect(),
-            registry_type: Some("npm".to_string()),
-            runtime_hint: Some("npx".to_string()),
-            ..Default::default()
-        }],
-        remotes: Vec::new(),
-        raw_server_json: raw.to_string(),
-        recommended: false,
-        source: Some(source.to_string()),
+        id: spec.id.to_string(),
+        name: spec.name.to_string(),
+        namespace: spec.id.to_string(),
+        description: spec.description.to_string(),
+        repo_url: spec.homepage.to_string(),
+        kind,
+        runtimes,
+        readme: Some(format!("# {}\n\n{}", spec.name, spec.description)),
+        packages,
+        remotes,
+        raw_server_json: raw_server_json(spec),
+        recommended: spec.recommended,
+        source: Some(spec.source.to_string()),
         ..Default::default()
     }
 }
 
-/// Build a remote (streamable-http) curated server. The `raw` must carry a
-/// `remotes` entry with `transport_type: "streamable-http"`.
-// Plain positional args mirror the curated-seed call sites below; see
-// `make_stdio_curated` for why a struct/builder isn't worth the churn here.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn make_remote_curated(
-    id: &str,
-    name: &str,
-    description: &str,
-    raw: &str,
-    source: &str,
-    repo_url: &str,
-    url: &str,
-    auth_header: &str,
-) -> McpRegistryServer {
-    McpRegistryServer {
-        id: id.to_string(),
-        name: name.to_string(),
-        namespace: id.to_string(),
-        description: description.to_string(),
-        repo_url: repo_url.to_string(),
-        stars: 0,
-        license: None,
-        version: None,
-        kind: McpServerKind::Remote,
-        runtimes: Vec::new(),
-        readme: Some(format!("# {name}\n\n{description}")),
-        updated_at: None,
-        packages: Vec::new(),
-        remotes: vec![McpRegistryRemoteSummary {
-            transport: "http".to_string(),
-            url: url.to_string(),
-            required_headers: vec![auth_header.to_string()],
-            transport_type: Some("streamable-http".to_string()),
-            ..Default::default()
-        }],
-        raw_server_json: raw.to_string(),
-        recommended: false,
-        source: Some(source.to_string()),
+fn package_summary(
+    registry: Registry,
+    identifier: &str,
+    runtime_args: &[(&str, &str)],
+    args: &[&str],
+    env: &[EnvVar],
+) -> McpRegistryPackageSummary {
+    McpRegistryPackageSummary {
+        runtime: registry.runtime_hint().to_string(),
+        identifier: identifier.to_string(),
+        required_env: env
+            .iter()
+            .filter(|var| var.required || var.secret)
+            .map(|var| var.name.to_string())
+            .collect(),
+        registry_type: Some(registry.registry_type().to_string()),
+        runtime_hint: Some(registry.runtime_hint().to_string()),
+        runtime_arguments: runtime_args
+            .iter()
+            .map(|(name, value)| named(name, value))
+            .collect(),
+        package_arguments: args.iter().map(|arg| positional(arg)).collect(),
+        environment_variables: env.iter().map(key_value).collect(),
         ..Default::default()
     }
 }
 
-/// Raw JSON template for a stdio npx server with optional env vars.
-pub(super) fn stdio_npx_raw(
-    id: &str,
-    name: &str,
-    description: &str,
-    npm_pkg: &str,
-    repo_url: &str,
-    env_vars: &[(&str, Option<&str>, bool)], // (name, default, is_required_secret)
-) -> String {
-    let envs: Vec<String> = env_vars
-        .iter()
-        .map(|(n, def, secret)| {
-            let def_clause = def
-                .map(|d| format!(", \"default\": \"{d}\""))
-                .unwrap_or_default();
-            format!(
-                "{{ \"name\": \"{n}\", \"is_secret\": {secret}, \"is_required\": {secret}{def_clause} }}",
-                secret = secret,
-            )
-        })
-        .collect();
-    format!(
-        r##"{{
-        "id": "{id}",
-        "name": "{name}",
-        "description": "{description}",
-        "packages": [
-            {{
-                "registry_type": "npm",
-                "identifier": "{npm_pkg}",
-                "runtime_hint": "npx",
-                "environment_variables": [{envs}]
-            }}
-        ],
-        "remotes": [],
-        "repository": {{ "url": "{repo_url}", "source": "github" }}
-    }}"##,
-        envs = envs.join(", "),
-    )
+fn remote_summary(url: &str, auth_header: &str) -> McpRegistryRemoteSummary {
+    let headers: Vec<McpKeyValueInput> = if auth_header.is_empty() {
+        Vec::new()
+    } else {
+        vec![McpKeyValueInput {
+            name: auth_header.to_string(),
+            input: McpInput {
+                description: Some(format!(
+                    "Paste the full header value, including the scheme: `Bearer <token>`."
+                )),
+                is_required: true,
+                is_secret: true,
+                placeholder: Some("Bearer <token>".to_string()),
+                ..Default::default()
+            },
+        }]
+    };
+
+    McpRegistryRemoteSummary {
+        transport: "http".to_string(),
+        url: url.to_string(),
+        required_headers: headers.iter().map(|header| header.name.clone()).collect(),
+        transport_type: Some("streamable-http".to_string()),
+        headers,
+        ..Default::default()
+    }
 }
 
-/// Raw JSON template for a remote streamable-http server with a bearer header.
-pub(super) fn remote_http_raw(
-    id: &str,
-    name: &str,
-    description: &str,
-    url: &str,
-    repo_url: &str,
-    header_name: &str,
-    token_env: &str,
-) -> String {
-    format!(
-        r##"{{
-        "id": "{id}",
-        "name": "{name}",
-        "description": "{description}",
-        "packages": [],
-        "remotes": [
-            {{
-                "transport_type": "streamable-http",
-                "url": "{url}",
-                "headers": [
-                    {{ "name": "{header_name}", "value": "Bearer {{{token_env}}}", "is_secret": true, "is_required": true }}
-                ]
-            }}
-        ],
-        "repository": {{ "url": "{repo_url}", "source": "github" }}
-    }}"##
-    )
+fn positional(value: &str) -> McpArgument {
+    McpArgument {
+        input: McpInput {
+            value: Some(value.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn named(name: &str, value: &str) -> McpArgument {
+    McpArgument {
+        kind: crate::mcp_models::McpArgumentKind::Named,
+        name: Some(name.to_string()),
+        input: McpInput {
+            value: Some(value.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn key_value(var: &EnvVar) -> McpKeyValueInput {
+    McpKeyValueInput {
+        name: var.name.to_string(),
+        input: McpInput {
+            description: Some(var.description.to_string()),
+            is_required: var.required,
+            is_secret: var.secret,
+            default: var.default.map(str::to_string),
+            ..Default::default()
+        },
+    }
+}
+
+/// The `server.json`-shaped provenance blob, derived from the same spec that
+/// builds the typed row.
+fn raw_server_json(spec: &CuratedSpec) -> String {
+    let mut packages: Vec<Value> = Vec::new();
+    let mut remotes: Vec<Value> = Vec::new();
+
+    match spec.launch {
+        Launch::Stdio {
+            registry,
+            identifier,
+            runtime_args,
+            args,
+        } => {
+            let mut package = Map::new();
+            package.insert("registry_type".to_string(), json!(registry.registry_type()));
+            package.insert("identifier".to_string(), json!(identifier));
+            package.insert("runtime_hint".to_string(), json!(registry.runtime_hint()));
+            if !runtime_args.is_empty() {
+                package.insert(
+                    "runtime_arguments".to_string(),
+                    Value::Array(
+                        runtime_args
+                            .iter()
+                            .map(|(name, value)| json!({ "type": "named", "name": name, "value": value }))
+                            .collect(),
+                    ),
+                );
+            }
+            if !args.is_empty() {
+                package.insert("package_arguments".to_string(), json!(args));
+            }
+            if !spec.env.is_empty() {
+                package.insert(
+                    "environment_variables".to_string(),
+                    Value::Array(
+                        spec.env
+                            .iter()
+                            .map(|var| {
+                                let mut entry = Map::new();
+                                entry.insert("name".to_string(), json!(var.name));
+                                entry.insert("description".to_string(), json!(var.description));
+                                if let Some(default) = var.default {
+                                    entry.insert("default".to_string(), json!(default));
+                                }
+                                if var.required {
+                                    entry.insert("is_required".to_string(), json!(true));
+                                }
+                                if var.secret {
+                                    entry.insert("is_secret".to_string(), json!(true));
+                                }
+                                Value::Object(entry)
+                            })
+                            .collect(),
+                    ),
+                );
+            }
+            packages.push(Value::Object(package));
+        }
+        Launch::Remote { url, auth_header } => {
+            let mut remote = Map::new();
+            remote.insert("transport_type".to_string(), json!("streamable-http"));
+            remote.insert("url".to_string(), json!(url));
+            if !auth_header.is_empty() {
+                remote.insert(
+                    "headers".to_string(),
+                    json!([{
+                        "name": auth_header,
+                        "value": "Bearer {token}",
+                        "is_secret": true,
+                        "is_required": true,
+                    }]),
+                );
+            }
+            remotes.push(Value::Object(remote));
+        }
+    }
+
+    json!({
+        "id": spec.id,
+        "name": spec.name,
+        "description": spec.description,
+        "packages": packages,
+        "remotes": remotes,
+        "repository": { "url": spec.homepage, "source": "github" },
+    })
+    .to_string()
 }

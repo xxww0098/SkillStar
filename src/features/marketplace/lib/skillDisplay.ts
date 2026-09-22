@@ -1,8 +1,6 @@
 import type { Skill, SortOption } from "../../../types";
 
 export interface DisplaySkillsInput {
-  /** Whether the currently active tab is the MCP-only tab (no skills shown there). */
-  isMcpTab: boolean;
   /** Search/AI-search results, when a query is active. */
   results: { skills: Skill[] } | null;
   /** Leaderboard skills for the active (non-official) tab. */
@@ -30,7 +28,6 @@ export interface DisplaySkillsInput {
  * that file's git history for the original inline version.
  */
 export function computeDisplaySkills({
-  isMcpTab,
   results,
   leaderboard,
   sortBy,
@@ -40,8 +37,6 @@ export function computeDisplaySkills({
   aiActiveKeywords,
   aiKeywordSkillMap,
 }: DisplaySkillsInput): Skill[] {
-  if (isMcpTab) return [];
-
   let skills: Skill[] = [];
   const isAiMode = Boolean(aiKeywords && results);
   const isSearchMode = Boolean(searchQuery.trim() && results) || isAiMode;

@@ -59,6 +59,10 @@ export interface McpMarketQueryInput {
   offset: number;
   /** Scope to one publisher bucket (`"github"` = the remote registry table). */
   publisherId?: string | null;
+  /** Remote registry rows only. Curated servers live on Official. */
+  registryOnly?: boolean;
+  /** Official tab: curated rows only. Ignored when `publisherId` is set. */
+  curatedOnly?: boolean;
 }
 
 /** Statuses to request for a given "include deprecated" choice. */
@@ -78,11 +82,16 @@ export function buildMcpServerQuery({
   limit,
   offset,
   publisherId,
+  registryOnly,
+  curatedOnly,
 }: McpMarketQueryInput): Partial<McpServerQuery> {
   const query: Partial<McpServerQuery> = { limit, offset };
   const search = filters.search.trim();
   if (search) query.search = search;
   if (publisherId) query.publisherId = publisherId;
+  // Publisher scope already selects a table; the flags only apply unscoped.
+  if (!publisherId && curatedOnly) query.curatedOnly = true;
+  else if (!publisherId && registryOnly) query.registryOnly = true;
   if (filters.kinds.length > 0) query.kinds = [...filters.kinds];
   if (filters.runtimes.length > 0) query.runtimes = [...filters.runtimes];
   if (filters.licenses.length > 0) query.licenses = [...filters.licenses];

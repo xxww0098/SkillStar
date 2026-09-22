@@ -15,7 +15,7 @@ use skillstar_marketplace::{
 
 use super::draft::{registry_to_entry_for, sanitize_key};
 use super::install::{McpInstallInputScope, McpSecretStorage, build_install_plan_with};
-use super::presets::{curated_server_to_preset, load_curated_servers, list_mcp_presets_with};
+use super::presets::{curated_server_to_preset, list_mcp_presets_with, load_curated_servers};
 use super::runtime::{McpRuntimeShape, select_runtime_with};
 
 mod install_preview_tests;
@@ -832,7 +832,6 @@ fn a_structurally_unusable_shape_is_never_prefilled_from() {
     assert_eq!(plan.selected_runtime_id.as_deref(), Some("package:1"));
     assert_eq!(plan.draft.command.as_deref(), Some("npx"));
 }
-
 
 // ---------------------------------------------------------------------------
 // Preset mapping

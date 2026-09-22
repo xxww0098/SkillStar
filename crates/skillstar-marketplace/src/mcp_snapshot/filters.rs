@@ -67,8 +67,20 @@ pub struct McpServerQuery {
     /// FTS search terms. Empty/whitespace behaves like no search.
     pub search: Option<String>,
     /// `"github"` reads the remote registry table; any other value reads the
-    /// curated bucket with that `source`; `None` reads both.
+    /// curated bucket with that `source`; `None` is the unscoped catalog.
+    /// Unscoped reads both tables unless `registry_only` / `curated_only`
+    /// narrows it. A publisher id always wins over those flags.
     pub publisher_id: Option<String>,
+    /// Unscoped remote-registry browse. Curated servers live on Official;
+    /// GitHub publisher drill-in uses `publisher_id = "github"` instead.
+    /// A bare unscoped UI query still sends this so curated rows cannot
+    /// mix into the 21k grid. Mutually exclusive with `curated_only`; if a
+    /// caller sets both, `curated_only` wins (see `build_inner`'s arm order).
+    pub registry_only: bool,
+    /// Unscoped Official browse: curated rows only. Does not apply when
+    /// `publisher_id` is set. Mutually exclusive with `registry_only`; if a
+    /// caller sets both, this flag wins (see `build_inner`'s arm order).
+    pub curated_only: bool,
     pub kinds: Vec<McpServerKind>,
     /// Runner commands (`npx`, `uvx`, `docker`, …). A row matches when any of
     /// its runtimes is listed.

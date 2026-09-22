@@ -636,6 +636,7 @@ pub async fn start_oauth_login(
     Ok(OAuthStartDto {
         pending_id: info.pending_id,
         auth_url: info.auth_url,
+        expires_in_secs: info.expires_in_secs,
     })
 }
 

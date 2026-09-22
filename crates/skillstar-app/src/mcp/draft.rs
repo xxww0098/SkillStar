@@ -162,7 +162,10 @@ fn key_values(
 /// boolean switch (`--verbose`) and is emitted alone.
 fn takes_a_value(arg: &McpArgument) -> bool {
     arg.input.default.as_deref().is_some_and(|d| !d.is_empty())
-        || arg.value_hint.as_deref().is_some_and(|h| !h.trim().is_empty())
+        || arg
+            .value_hint
+            .as_deref()
+            .is_some_and(|h| !h.trim().is_empty())
         || !arg.input.choices.is_empty()
 }
 

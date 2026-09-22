@@ -13,7 +13,6 @@
 use chrono::Utc;
 use serde::Deserialize;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use super::common::SubscriptionBuilder;
 use crate::crypto;
@@ -139,7 +138,7 @@ async fn drive_login(
     redirect_uri: String,
     target_subscription_id: Option<String>,
 ) -> UsageResult<Subscription> {
-    let code = local_server::wait(session, state, Some(Duration::from_secs(300))).await?;
+    let code = local_server::wait(session, state, None).await?;
     let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
     // Hold the catalog lock across the whole write so a queued Codex refresh
     // cannot patch stale credentials over the pair we just minted.

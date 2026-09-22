@@ -24,6 +24,7 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "claude-desktop-chat",
     "codex",
     "grok",
+    "deepseek",
     "hermes",
     "opencode",
     "zcode",
@@ -35,6 +36,8 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "gemini-cli",
     "antigravity",
     "zed",
+    "workbuddy",
+    "devin",
 ];
 
 /// Legacy Desktop Chat projection retained only so existing SkillStar-managed

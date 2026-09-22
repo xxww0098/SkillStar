@@ -153,7 +153,13 @@ pub fn clone_or_fetch_repo_at_in_session(
             return Err(git_ops::WorktreeDirty.into());
         }
 
-        git_ops::checkout_in_session(&repo_dir, &["reset", "--hard", "origin/HEAD"], session)
+        // Tolerant tip resolution: tarball-built caches have no origin/HEAD
+        // until git learns it from a later fetch, but FETCH_HEAD always names
+        // what this fetch just retrieved.
+        let reset_target = git_ops::rev_parse(&repo_dir, "origin/HEAD")
+            .or_else(|_| git_ops::rev_parse(&repo_dir, "FETCH_HEAD"))
+            .context("Failed to resolve the fetched tip of the cached repository")?;
+        git_ops::checkout_in_session(&repo_dir, &["reset", "--hard", &reset_target], session)
             .context("Failed to reset cached repository")?;
 
         // The reset just moved the files of every other Skill installed from
@@ -165,19 +171,23 @@ pub fn clone_or_fetch_repo_at_in_session(
         crate::skill_update::refresh_baselines_after_checkout_reset(&repo_dir)
             .context("Failed to refresh content baselines after resetting the cached repository")?;
 
-        if is_sparse_checkout(&repo_dir)
-            && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir)
-        {
-            if dirs.is_empty() {
-                let _ = git_ops::checkout_in_session(
-                    &repo_dir,
-                    &["sparse-checkout", "disable"],
-                    session,
-                );
-                let _ = git_ops::checkout_in_session(&repo_dir, &["checkout"], session);
-            } else {
-                let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-                let _ = git_ops::apply_sparse_checkout_in_session(&repo_dir, &dir_refs, session);
+        if is_sparse_checkout(&repo_dir) {
+            // Re-plan from the tree: duplicate harness copies stay deferred,
+            // while every installed skill's source folder must re-materialize
+            // or the reset would leave its hub link dangling.
+            let installed = super::ops::installed_source_folders(&repo_dir).unwrap_or_default();
+            if let Ok(plan) = super::inventory::load_or_plan(&repo_dir, session, &installed) {
+                if plan.sparse_dirs.is_empty() {
+                    let _ = git_ops::checkout_in_session(
+                        &repo_dir,
+                        &["sparse-checkout", "disable"],
+                        session,
+                    );
+                    let _ = git_ops::checkout_in_session(&repo_dir, &["checkout"], session);
+                } else {
+                    let dir_refs: Vec<&str> = plan.sparse_dirs.iter().map(String::as_str).collect();
+                    let _ = git_ops::apply_sparse_checkout_in_session(&repo_dir, &dir_refs, session);
+                }
             }
         }
 
@@ -194,8 +204,58 @@ pub fn clone_or_fetch_repo_at_in_session(
         match clone_sparse_with_skills(repo_url, &repo_dir, session) {
             Ok(()) => Ok(repo_dir),
             Err(sparse_err) => {
-                warn!(target: "repo_scanner", error = %sparse_err, "sparse clone failed, falling back to shallow");
+                warn!(target: "repo_scanner", error = %sparse_err, "sparse clone failed");
+                // The treeless clone often survives the failure (it usually
+                // breaks at blob materialization); its tree metadata tells the
+                // tarball path which directories to extract. Read it before
+                // removing the entry.
+                let plan = super::inventory::load_or_plan(&repo_dir, session, &[])
+                    .ok()
+                    .filter(|plan| !plan.sparse_dirs.is_empty());
                 let _ = std::fs::remove_dir_all(&repo_dir);
+
+                // Plain HTTPS through the anonymous mirror chain — one GET
+                // instead of the smart-protocol round-trips that just failed.
+                // Never a full-repo download: only the planned skill dirs.
+                if let Some(plan) = plan
+                    .filter(|_| crate::tarball_fetch::supports_tarball(repo_url))
+                    .clone()
+                {
+                    match crate::tarball_fetch::rebuild_cache_from_tarball(
+                        repo_url,
+                        git_ref,
+                        &repo_dir,
+                        &plan.sparse_dirs,
+                    ) {
+                        Ok(()) => {
+                            // The synthetic tree only knows the extracted
+                            // directories; adopt the real plan so deferred
+                            // copies stay on-demand-materializable.
+                            super::inventory::adopt_plan_for_synthetic_repo(&repo_dir, &plan);
+                            warn!(
+                                target: "repo_scanner",
+                                url = repo_url,
+                                dirs = plan.sparse_dirs.len(),
+                                "repo cache rebuilt from the codeload tarball fallback"
+                            );
+                            return Ok(repo_dir);
+                        }
+                        Err(tarball_err) => {
+                            warn!(
+                                target: "repo_scanner",
+                                error = %tarball_err,
+                                "tarball fallback failed, trying a full shallow clone"
+                            );
+                        }
+                    }
+                }
+
+                // Last resort, loudly: this downloads the entire repository.
+                warn!(
+                    target: "repo_scanner",
+                    url = repo_url,
+                    "falling back to a FULL shallow clone of the repository"
+                );
                 git_ops::clone_repo_shallow_in_session(repo_url, &repo_dir, session)
                     .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
                 Ok(repo_dir)
@@ -270,9 +330,16 @@ fn ensure_installed_checkout_is_clean(repo_dir: &Path) -> Result<()> {
                 entry.name
             );
         }
-        let current = crate::content::snapshot(name)
-            .with_context(|| format!("Failed to inspect local changes for '{name}'"))?;
-        if current.content_hash != baseline {
+        // Stat fast path: when the fingerprint of the last trusted snapshot
+        // still matches, no byte needs to be re-read for this proof.
+        let current_hash = if crate::content_stats::baseline_unchanged(name, baseline) {
+            baseline.to_string()
+        } else {
+            crate::content::snapshot(name)
+                .with_context(|| format!("Failed to inspect local changes for '{name}'"))?
+                .content_hash
+        };
+        if current_hash != baseline {
             anyhow::bail!(
                 "Skill '{}' has local changes; preserve them as a local copy or explicitly discard them before refreshing this repository",
                 entry.name
@@ -370,106 +437,19 @@ fn clone_sparse_with_skills(
 ) -> Result<()> {
     git_ops::clone_repo_sparse_in_session(repo_url, dest, session)?;
 
-    let skill_dirs = discover_skill_dirs_from_tree(dest)?;
-
-    if skill_dirs.is_empty() {
+    // A fresh cache entry has no installed skills linking into it yet, so the
+    // plan only collapses duplicate copies of the same identity.
+    let plan = super::inventory::load_or_plan(dest, session, &[])?;
+    if plan.sparse_dirs.is_empty() {
         let _ = git_ops::checkout_in_session(dest, &["sparse-checkout", "disable"], session);
         let _ = git_ops::checkout_in_session(dest, &["checkout"], session);
         return Ok(());
     }
 
-    let dir_refs: Vec<&str> = skill_dirs.iter().map(|s| s.as_str()).collect();
+    let dir_refs: Vec<&str> = plan.sparse_dirs.iter().map(String::as_str).collect();
     git_ops::apply_sparse_checkout_in_session(dest, &dir_refs, session)?;
 
     Ok(())
-}
-
-pub(super) fn discover_skill_dirs_from_tree(repo_dir: &Path) -> Result<Vec<String>> {
-    let all_paths = git_ops::list_tree_paths(repo_dir)?;
-    Ok(derive_sparse_skill_dirs(&all_paths))
-}
-
-fn derive_sparse_skill_dirs(all_paths: &[String]) -> Vec<String> {
-    // Keep every nested SKILL.md parent. Deduping by basename dropped
-    // `.agents/skills/impeccable` when `.agent/skills/impeccable` was also
-    // present (equal source_priority, tree order kept `.agent`). A root
-    // SKILL.md used to force a full checkout; if nested copies exist, the
-    // root file is a shim — materialize the nested folders instead.
-    let mut skill_dirs: Vec<String> = all_paths
-        .iter()
-        .filter(|p| p.ends_with("/SKILL.md") || *p == "SKILL.md")
-        .filter_map(|p| {
-            let parent = Path::new(p).parent()?;
-            let parent_str = parent.to_string_lossy().to_string();
-            if parent_str.is_empty() {
-                None
-            } else {
-                Some(parent_str)
-            }
-        })
-        .collect();
-
-    if skill_dirs.is_empty() {
-        return Vec::new();
-    }
-
-    skill_dirs.sort();
-    skill_dirs.dedup();
-    compact_to_common_parents(&skill_dirs)
-}
-
-fn compact_to_common_parents(dirs: &[String]) -> Vec<String> {
-    if dirs.is_empty() {
-        return Vec::new();
-    }
-
-    let mut parent_counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let mut parent_to_dirs: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-
-    for dir in dirs {
-        if let Some(parent) = Path::new(dir).parent() {
-            let parent_str = parent.to_string_lossy().to_string();
-            *parent_counts.entry(parent_str.clone()).or_insert(0) += 1;
-            parent_to_dirs
-                .entry(parent_str)
-                .or_default()
-                .push(dir.clone());
-        }
-    }
-
-    let mut result = Vec::new();
-    let mut handled = std::collections::HashSet::new();
-
-    for dir in dirs {
-        if handled.contains(dir) {
-            continue;
-        }
-        if let Some(parent) = Path::new(dir).parent() {
-            let parent_str = parent.to_string_lossy().to_string();
-            if parent_counts.get(&parent_str).copied().unwrap_or(0) >= 2 {
-                if !handled.contains(&parent_str) {
-                    result.push(parent_str.clone());
-                    if let Some(children) = parent_to_dirs.get(&parent_str) {
-                        for child in children {
-                            handled.insert(child.clone());
-                        }
-                    }
-                    handled.insert(parent_str);
-                }
-            } else {
-                result.push(dir.clone());
-                handled.insert(dir.clone());
-            }
-        } else {
-            result.push(dir.clone());
-            handled.insert(dir.clone());
-        }
-    }
-
-    result.sort();
-    result
 }
 
 pub(super) fn is_sparse_checkout(repo_dir: &Path) -> bool {
@@ -485,10 +465,7 @@ pub(super) fn is_sparse_checkout(repo_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        cache_dir_name, clone_or_fetch_repo_in_session, compact_to_common_parents,
-        ensure_installed_checkout_is_clean,
-    };
+    use super::{cache_dir_name, clone_or_fetch_repo_in_session, ensure_installed_checkout_is_clean};
     use crate::git::transport::{GitAuthMaterial, GitOperationSession, NoopGitProgressSink};
     use std::sync::Arc;
 
@@ -616,14 +593,14 @@ mod tests {
             "source/skills/animate".to_string(),
             "source/skills/bolder".to_string(),
         ];
-        let compacted = compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
         assert_eq!(compacted, vec!["source/skills"]);
     }
 
     #[test]
     fn compact_parents_preserves_singles() {
         let dirs = vec!["custom/my-skill".to_string()];
-        let compacted = compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
         assert_eq!(compacted, vec!["custom/my-skill"]);
     }
 
@@ -634,52 +611,14 @@ mod tests {
             "source/skills/adapt".to_string(),
             "source/skills/animate".to_string(),
         ];
-        let compacted = compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
         assert_eq!(compacted, vec!["custom/lone-skill", "source/skills"]);
     }
 
     #[test]
     fn compact_parents_empty() {
         let dirs: Vec<String> = Vec::new();
-        let compacted = compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
         assert!(compacted.is_empty());
-    }
-
-    #[test]
-    fn sparse_keeps_agent_and_agents_copies() {
-        let dirs = super::derive_sparse_skill_dirs(&[
-            ".agent/skills/impeccable/SKILL.md".to_string(),
-            ".agents/skills/impeccable/SKILL.md".to_string(),
-            ".cursor/skills/impeccable/SKILL.md".to_string(),
-        ]);
-        assert!(dirs.iter().any(|d| d.contains(".agent")), "{dirs:?}");
-        assert!(dirs.iter().any(|d| d.contains(".agents")), "{dirs:?}");
-        assert!(dirs.iter().any(|d| d.contains(".cursor")), "{dirs:?}");
-    }
-
-    #[test]
-    fn sparse_ignores_root_shim_and_keeps_nested_harness_folders() {
-        let dirs = super::derive_sparse_skill_dirs(&[
-            "SKILL.md".to_string(),
-            ".cursor/skills/rust/SKILL.md".to_string(),
-            ".dsh/skills/rust/SKILL.md".to_string(),
-            "skills/rust/SKILL.md".to_string(),
-        ]);
-        assert!(
-            !dirs.is_empty(),
-            "root SKILL.md must not force a full checkout when nested copies exist"
-        );
-        assert!(
-            dirs.iter()
-                .any(|d| d.contains("skills") || d.contains(".cursor") || d.contains(".dsh")),
-            "{dirs:?}"
-        );
-    }
-
-    #[test]
-    fn sparse_root_only_skill_still_full_checkouts() {
-        let dirs =
-            super::derive_sparse_skill_dirs(&["SKILL.md".to_string(), "README.md".to_string()]);
-        assert!(dirs.is_empty());
     }
 }

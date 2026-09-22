@@ -12,26 +12,26 @@ fn replace_then_load_and_search_roundtrip() {
     replace_servers(&conn, &servers).unwrap();
     assert_eq!(count_servers(&conn).unwrap(), 2);
 
-    // curated recommendations lead, then registry rows ordered by stars desc.
-    // AdsPower is recommended → first; then the 4 BigModel curated rows
-    // (priority 0..3); then registry rows by stars.
+    // Curated recommendations lead (`is_recommended DESC`), then the rest of
+    // the curated catalog in seed order (`priority ASC`), then registry rows
+    // by stars desc.
     let cards = load_cards(&conn).unwrap();
-    assert_eq!(cards[0].name, "adspower-local-api");
+    assert_eq!(cards[0].name, "filesystem");
     assert!(cards[0].recommended);
-    // All curated servers sit before the registry rows: 1 adspower +
-    // 4 bigmodel + 4 anthropic + 2 microsoft + 3 saas + 2 cn-ai +
-    // 3 cloudflare + 1 brave + 2 google + 1 supabase + 2 x = 25.
+    // All 13 curated servers (the recommended shortlist) sit before the
+    // registry rows.
     let registry_start = cards
         .iter()
         .position(|c| c.id == "1")
         .expect("registry filesystem card present");
-    assert_eq!(registry_start, 25);
+    assert_eq!(registry_start, 13);
     assert_eq!(cards[registry_start].name, "filesystem");
     assert_eq!(cards[registry_start + 1].name, "postgres");
     assert_eq!(cards[registry_start].kind, McpServerKind::Stdio);
 
-    // FTS search — "postgres" also matches the Supabase curated server
-    // ("Postgres 数据库"), so filter to just the registry hit by id.
+    // FTS search — "postgres" matches only the registry fixture now that no
+    // curated row mentions it; find it by id anyway so a future curated hit
+    // can't break the assertion.
     let hits = search_cards(&conn, "postgres", 10).unwrap();
     let pg_registry = hits
         .iter()
@@ -49,15 +49,61 @@ fn replace_then_load_and_search_roundtrip() {
     assert_eq!(full.raw_server_json, "{\"name\":\"acme/filesystem\"}");
     assert_eq!(full.to_detail().entry.name, "filesystem");
 
-    let curated = load_full_server(&conn, "adspower-local-api")
-        .unwrap()
-        .unwrap();
+    // A curated stdio row carries both the launcher and the extra arguments
+    // the package needs after its identifier.
+    let codegraph = load_full_server(&conn, "codegraph").unwrap().unwrap();
+    assert_eq!(codegraph.packages[0].identifier, "@colbymchenry/codegraph");
+    assert_eq!(codegraph.packages[0].runtime, "npx");
+    let extra_args: Vec<&str> = codegraph.packages[0]
+        .package_arguments
+        .iter()
+        .filter_map(|arg| arg.input.value.as_deref())
+        .collect();
+    assert_eq!(extra_args, ["serve", "--mcp"]);
+
+    // serena is the row that needs a *runtime* argument: `uvx --from <source>`
+    // selects the git source because the executable (`serena`) is not the
+    // package name, then `start-mcp-server` runs as its subcommand.
+    let serena = load_full_server(&conn, "serena").unwrap().unwrap();
+    assert_eq!(serena.packages[0].runtime, "uvx");
+    assert_eq!(serena.packages[0].identifier, "serena");
+    let from = &serena.packages[0].runtime_arguments[0];
+    assert_eq!(from.name.as_deref(), Some("--from"));
+    assert_eq!(
+        from.input.value.as_deref(),
+        Some("git+https://github.com/oraios/serena")
+    );
+    let serena_args: Vec<&str> = serena.packages[0]
+        .package_arguments
+        .iter()
+        .filter_map(|arg| arg.input.value.as_deref())
+        .collect();
+    assert_eq!(serena_args, ["start-mcp-server", "--project-from-cwd"]);
+
+    // A PyPI-backed row must launch through uvx, not npx — `git` is one of the
+    // three rows that used to point at an archived npm package.
+    let git = load_full_server(&conn, "git").unwrap().unwrap();
+    assert_eq!(git.packages[0].runtime, "uvx");
+    assert_eq!(git.packages[0].identifier, "mcp-server-git");
+
+    let curated = load_full_server(&conn, "context7").unwrap().unwrap();
     assert!(curated.recommended);
-    assert_eq!(curated.packages[0].identifier, "local-api-mcp-typescript");
-    // AdsPower is now its own publisher bucket.
+    assert_eq!(curated.packages[0].identifier, "@upstash/context7-mcp");
     assert_eq!(
         curated.to_detail().entry.source.as_deref(),
-        Some("adspower")
+        Some("context")
+    );
+
+    // A token-bearing remote asks for its header; an OAuth remote asks for
+    // nothing up front and lets the first connection drive the auth flow.
+    let github = load_full_server(&conn, "github").unwrap().unwrap();
+    assert_eq!(github.remotes[0].url, "https://api.githubcopilot.com/mcp/");
+    assert_eq!(github.remotes[0].required_headers, ["Authorization"]);
+    let deepwiki = load_full_server(&conn, "deepwiki").unwrap().unwrap();
+    assert_eq!(deepwiki.remotes[0].url, "https://mcp.deepwiki.com/mcp");
+    assert!(
+        deepwiki.remotes[0].required_headers.is_empty(),
+        "an OAuth remote must not pre-ask for a header"
     );
 }
 
@@ -170,39 +216,23 @@ fn publishers_aggregate_curated_sources_and_github() {
     // Curated seeds are written by `create_mcp_registry_tables`.
     let publishers = load_publishers(&conn).unwrap();
 
-    // 11 curated publishers + GitHub (0 registry rows seeded yet) = 12.
-    assert_eq!(publishers.len(), 12);
-    // CURATED_ORDER dictates grid order; GitHub always last.
-    assert_eq!(publishers[0].id, "adspower");
-    assert_eq!(publishers[0].name, "AdsPower");
-    assert_eq!(publishers[0].server_count, 1);
-    assert_eq!(publishers[1].id, "bigmodel");
-    assert_eq!(publishers[1].name, "BigModel");
+    // 4 curated shelves + GitHub (0 registry rows seeded yet) = 5.
+    assert_eq!(publishers.len(), 5);
+    // CURATED_ORDER dictates summary order; GitHub always last.
+    assert_eq!(publishers[0].id, "core");
+    assert_eq!(publishers[0].name, "Core");
+    assert_eq!(publishers[0].server_count, 3);
+    assert_eq!(publishers[1].id, "context");
+    assert_eq!(publishers[1].name, "Context");
     assert_eq!(publishers[1].server_count, 4);
-    assert_eq!(publishers[2].id, "anthropic");
-    assert_eq!(publishers[2].name, "Anthropic");
-    assert_eq!(publishers[2].server_count, 4);
-    assert_eq!(publishers[3].id, "microsoft");
-    assert_eq!(publishers[3].name, "Microsoft");
-    assert_eq!(publishers[3].server_count, 2);
-    assert_eq!(publishers[4].id, "saas");
-    assert_eq!(publishers[4].server_count, 3);
-    assert_eq!(publishers[5].id, "cn-ai");
-    assert_eq!(publishers[5].server_count, 2);
-    assert_eq!(publishers[6].id, "cloudflare");
-    assert_eq!(publishers[6].name, "Cloudflare");
-    assert_eq!(publishers[6].server_count, 3);
-    assert_eq!(publishers[7].id, "brave");
-    assert_eq!(publishers[7].server_count, 1);
-    assert_eq!(publishers[8].id, "google");
-    assert_eq!(publishers[8].server_count, 2);
-    assert_eq!(publishers[9].id, "supabase");
-    assert_eq!(publishers[9].server_count, 1);
-    assert_eq!(publishers[10].id, "x");
-    assert_eq!(publishers[10].name, "X");
-    assert_eq!(publishers[10].server_count, 2);
-    assert_eq!(publishers[11].id, "github");
-    assert_eq!(publishers[11].server_count, 0);
+    assert_eq!(publishers[2].id, "browser");
+    assert_eq!(publishers[2].name, "Browser");
+    assert_eq!(publishers[2].server_count, 2);
+    assert_eq!(publishers[3].id, "creative");
+    assert_eq!(publishers[3].name, "Creative");
+    assert_eq!(publishers[3].server_count, 4);
+    assert_eq!(publishers[4].id, "github");
+    assert_eq!(publishers[4].server_count, 0);
 
     // After we add registry rows, GitHub's count climbs.
     replace_servers(
@@ -219,6 +249,77 @@ fn publishers_aggregate_curated_sources_and_github() {
 }
 
 #[test]
+fn seed_drops_curated_rows_that_left_the_code_registry() {
+    let conn = test_conn();
+    conn.execute(
+        "INSERT INTO mcp_curated_server (id, name, namespace, fetched_at, source)
+         VALUES ('orphan-mcp', 'orphan', 'orphan', '2026-01-01T00:00:00Z', 'bigmodel')",
+        [],
+    )
+    .unwrap();
+    super::super::seeding::seed_default_curated_mcp_servers(&conn).unwrap();
+    assert!(load_full_server(&conn, "orphan-mcp").unwrap().is_none());
+    assert!(
+        load_cards_by_publisher(&conn, "bigmodel")
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        load_publishers(&conn)
+            .unwrap()
+            .iter()
+            .all(|publisher| publisher.id != "bigmodel")
+    );
+}
+
+#[test]
+fn prune_retired_curated_rows_respects_keep_list() {
+    let conn = test_conn();
+
+    // An empty keep-list wipes the entire curated catalog (table and FTS).
+    super::super::seeding::prune_retired_curated_rows(&conn, &[]).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM mcp_curated_server", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "empty keep-list must wipe curated rows"
+    );
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM mcp_curated_server_fts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "empty keep-list must wipe curated FTS rows"
+    );
+
+    // Reseed, then keep only one real seed id: every other curated row and its
+    // FTS row must be pruned, leaving exactly the kept server.
+    super::super::seeding::seed_default_curated_mcp_servers(&conn).unwrap();
+    let keep = "context7".to_string();
+    super::super::seeding::prune_retired_curated_rows(&conn, &[keep.clone()]).unwrap();
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM mcp_curated_server", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap();
+    assert_eq!(remaining, 1, "only the kept id should survive");
+    assert_eq!(
+        conn.query_row("SELECT id FROM mcp_curated_server", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        keep,
+        "the surviving row is the kept id"
+    );
+    let fts_remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM mcp_curated_server_fts", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap();
+    assert_eq!(fts_remaining, 1, "its FTS row must survive too");
+}
+
+#[test]
 fn publisher_cards_split_curated_and_registry() {
     let conn = test_conn();
     replace_servers(
@@ -227,86 +328,46 @@ fn publisher_cards_split_curated_and_registry() {
     )
     .unwrap();
 
-    // Curated publisher returns only its bucket.
-    let adspower = load_cards_by_publisher(&conn, "adspower").unwrap();
-    assert_eq!(adspower.len(), 1);
-    assert_eq!(adspower[0].id, "adspower-local-api");
-    assert_eq!(adspower[0].source.as_deref(), Some("adspower"));
-
-    let bigmodel = load_cards_by_publisher(&conn, "bigmodel").unwrap();
-    assert_eq!(bigmodel.len(), 4);
-    // Ordered by priority (seed order): vision, search, reader, zread.
-    assert_eq!(bigmodel[0].id, "bigmodel-vision");
-    assert_eq!(bigmodel[1].id, "bigmodel-search");
-    assert_eq!(bigmodel[2].id, "bigmodel-reader");
-    assert_eq!(bigmodel[3].id, "bigmodel-zread");
-    assert_eq!(bigmodel[0].kind, McpServerKind::Stdio);
-    assert_eq!(bigmodel[1].kind, McpServerKind::Remote);
-    // BigModel remote servers carry their endpoint URL on the detail row.
-    let vision_full = load_full_server(&conn, "bigmodel-vision").unwrap().unwrap();
-    assert_eq!(vision_full.packages[0].identifier, "@z_ai/mcp-server");
-    assert!(
-        vision_full.packages[0]
-            .required_env
-            .iter()
-            .any(|e| e == "Z_AI_API_KEY")
-    );
-    let search_full = load_full_server(&conn, "bigmodel-search").unwrap().unwrap();
-    assert_eq!(search_full.remotes.len(), 1);
+    // A curated shelf returns only its own rows, in catalog order.
+    let core = load_cards_by_publisher(&conn, "core").unwrap();
+    assert_eq!(core.len(), 3);
+    assert_eq!(core[0].id, "filesystem");
+    assert_eq!(core[0].source.as_deref(), Some("core"));
+    // The shelf mixes local and hosted shapes: filesystem/git are stdio,
+    // github is a remote.
     assert_eq!(
-        search_full.remotes[0].url,
-        "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp"
+        core.iter().filter(|c| c.kind == McpServerKind::Stdio).count(),
+        2
     );
-    assert!(
-        search_full.remotes[0]
-            .required_headers
+    assert_eq!(
+        core.iter().filter(|c| c.kind == McpServerKind::Remote).count(),
+        1
+    );
+
+    let context = load_cards_by_publisher(&conn, "context").unwrap();
+    assert_eq!(context.len(), 4);
+    assert_eq!(context[0].id, "context7");
+
+    // GitHub's remote row must ask for its Authorization header — a token,
+    // marked secret so the install form masks it.
+    let github_row = load_full_server(&conn, "github").unwrap().unwrap();
+    assert_eq!(github_row.remotes[0].required_headers, ["Authorization"]);
+    assert!(github_row.remotes[0].headers[0].input.is_secret);
+
+    let browser = load_cards_by_publisher(&conn, "browser").unwrap();
+    assert_eq!(browser.len(), 2);
+    assert!(browser.iter().all(|c| c.kind == McpServerKind::Stdio));
+
+    let creative = load_cards_by_publisher(&conn, "creative").unwrap();
+    assert_eq!(creative.len(), 4);
+    assert_eq!(creative[0].id, "figma");
+    assert_eq!(
+        creative
             .iter()
-            .any(|h| h == "Authorization")
+            .filter(|c| c.kind == McpServerKind::Remote)
+            .count(),
+        2
     );
-
-    // New curated publishers are filtered by their source bucket too.
-    let anthropic = load_cards_by_publisher(&conn, "anthropic").unwrap();
-    assert_eq!(anthropic.len(), 4);
-    assert_eq!(anthropic[0].id, "anthropic-filesystem");
-    assert!(
-        anthropic
-            .iter()
-            .all(|c| c.source.as_deref() == Some("anthropic"))
-    );
-
-    let microsoft = load_cards_by_publisher(&conn, "microsoft").unwrap();
-    assert_eq!(microsoft.len(), 2);
-
-    let saas = load_cards_by_publisher(&conn, "saas").unwrap();
-    assert_eq!(saas.len(), 3);
-    // All SaaS entries are remote streamable-http.
-    assert!(saas.iter().all(|c| c.kind == McpServerKind::Remote));
-
-    let cn_ai = load_cards_by_publisher(&conn, "cn-ai").unwrap();
-    assert_eq!(cn_ai.len(), 2);
-    // Firecrawl requires an API key env var.
-    let fc = load_full_server(&conn, "extra-firecrawl").unwrap().unwrap();
-    assert!(
-        fc.packages[0]
-            .required_env
-            .iter()
-            .any(|e| e == "FIRECRAWL_API_KEY")
-    );
-
-    // Second batch of curated publishers.
-    let cloudflare = load_cards_by_publisher(&conn, "cloudflare").unwrap();
-    assert_eq!(cloudflare.len(), 3);
-    assert!(cloudflare.iter().all(|c| c.kind == McpServerKind::Remote));
-
-    let brave = load_cards_by_publisher(&conn, "brave").unwrap();
-    assert_eq!(brave.len(), 1);
-    assert_eq!(brave[0].kind, McpServerKind::Stdio);
-
-    let google = load_cards_by_publisher(&conn, "google").unwrap();
-    assert_eq!(google.len(), 2);
-
-    let supabase = load_cards_by_publisher(&conn, "supabase").unwrap();
-    assert_eq!(supabase.len(), 1);
 
     // GitHub publisher returns registry rows, excluding curated ids.
     let github = load_cards_by_publisher(&conn, "github").unwrap();

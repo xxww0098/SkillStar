@@ -154,9 +154,7 @@ async fn drive_login(
     redirect_uri: String,
     target_subscription_id: Option<String>,
 ) -> UsageResult<Subscription> {
-    let code =
-        local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
-            .await?;
+    let code = local_server::wait_for_callback(CALLBACK_PORT, state, None).await?;
     let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
     crate::refresh_guard::with_catalog_lock("xai", || async {
         finalize(tokens, target_subscription_id.as_deref()).await

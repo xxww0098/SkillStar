@@ -10,17 +10,26 @@ import type { AgentProfile, McpToolId } from "../../../types";
  * vocabularies are deliberately separate — an Agent can exist without an MCP
  * projection and vice versa — so this table is the seam, not a rename.
  *
- * Two entries are worth spelling out because the ids do not match:
+ * A few entries are worth spelling out:
  *
  * - `github-copilot -> vscode`. The `vscode` MCP target writes
  *   `~/.copilot/mcp-config.json` (`skillstar_models::mcp::tools`), and the
  *   `github-copilot` profile's skills root is `~/.copilot/skills`. Same product,
  *   same config root, so the Copilot profile is the one that legitimately owns
- *   this target's on/off state.
+ *   this target's on/off state. The ids do not match.
  * - `gemini-cli -> gemini-cli` and `antigravity -> antigravity`. Same
  *   `~/.gemini` prefix, different products and different files
  *   (`settings.json` vs `config/mcp_config.json`). Neither profile stands in
  *   for the other.
+ * - `deepseek -> deepseek` writes `$DSH_HOME/cordis.patch.yml` (home-level
+ *   Cordis inserts of `@deepseek-ai/dsh-mcp-client`), not JSON `mcpServers`.
+ *   `hermes -> hermes` is the other YAML target (`$HERMES_HOME/config.yaml`).
+ * - `devin -> devin` writes `~/.config/devin/mcp_config.json`, the Devin CLI
+ *   file that Devin Desktop's Devin Local agent also reads. Windsurf was
+ *   rebranded to Devin Desktop, but its legacy Cascade surface keeps
+ *   `~/.codeium/windsurf/mcp_config.json`, which stays the `windsurf`
+ *   profile's target — the two Devin surfaces are separate files, so neither
+ *   profile may stand in for the other.
  *
  * `claude-desktop-chat` has **no** row, and that is a decision rather than an
  * omission: Claude Desktop is a chat app with no verified filesystem skills
@@ -34,6 +43,7 @@ const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   claude: "claude-code",
   codex: "codex",
   grok: "grok",
+  deepseek: "deepseek",
   hermes: "hermes",
   opencode: "opencode",
   zcode: "zcode",
@@ -45,6 +55,8 @@ const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   "gemini-cli": "gemini-cli",
   antigravity: "antigravity",
   zed: "zed",
+  workbuddy: "workbuddy",
+  devin: "devin",
 };
 
 const AGENT_ID_BY_MCP_TOOL: Partial<Record<McpToolId, string>> = Object.fromEntries(

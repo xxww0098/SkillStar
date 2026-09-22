@@ -132,51 +132,21 @@ fn remote_preset(
     }
 }
 
-/// Built-in recommended MCP presets — single source of truth for the UI's
-/// one-click "add a recommended server" list. Kept accurate to each server's
-/// real runtime (npx / uvx) and official package / endpoint.
+/// Built-in recommended MCP presets — the always-available floor the UI shows
+/// when the marketplace snapshot is missing or unreadable.
+///
+/// Scope: byte-for-byte the same ids the marketplace's curated catalog
+/// carries — the curated list *is* the recommended shortlist, so the add
+/// dialog offers one consistent set whether or not the snapshot DB resolved.
+/// Keep an id here byte-identical to its curated twin: the merge dedupes on
+/// id and name, so a drifted id shows the server twice.
+///
+/// Kept accurate to each server's real runtime: `git` ships on PyPI and runs
+/// under `uvx`, the TypeScript ones under `npx`.
 pub fn get_mcp_presets() -> Vec<McpPreset> {
     let mcp_servers_repo = "https://github.com/modelcontextprotocol/servers";
     vec![
-        // ── Computer Use / OS Automation ────────────────────────────────
-        stdio_preset(
-            "cua-driver",
-            "Cua Driver — 跨平台 Computer-Use 驱动层，支持应用控制、窗口感知、AX 元素树、屏幕截图、键鼠操作与浏览器自动化（56 项工具）。",
-            "https://cua.ai",
-            "cua-driver",
-            &["mcp"],
-            &[],
-            &["computer-use", "automation", "desktop", "os"],
-        ),
-        // ── Browser / automation ────────────────────────────────────────
-        stdio_preset(
-            "adspower-local-api",
-            "AdsPower 浏览器 Local API — 通过 MCP 控制指纹浏览器 / 自动化。",
-            "https://github.com/AdsPower/adspower-browser",
-            "npx",
-            &["-y", "local-api-mcp-typescript"],
-            &[("PORT", "50325", false), ("API_KEY", "", true)],
-            &["browser", "automation"],
-        ),
-        stdio_preset(
-            "playwright",
-            "微软官方 Playwright MCP — 浏览器自动化，AI 可打开网页、点击、填表、截图。",
-            "https://github.com/microsoft/playwright-mcp",
-            "npx",
-            &["-y", "@playwright/mcp@latest"],
-            &[],
-            &["browser", "automation", "testing"],
-        ),
-        stdio_preset(
-            "chrome-devtools",
-            "Chrome 官方 DevTools MCP — 驱动 Chrome 调试、抓取性能/网络、检查 DOM 与控制台。",
-            "https://github.com/ChromeDevTools/chrome-devtools-mcp",
-            "npx",
-            &["-y", "chrome-devtools-mcp@latest"],
-            &[],
-            &["browser", "debug"],
-        ),
-        // ── Official reference servers (Anthropic / modelcontextprotocol) ─
+        // ── Core: files, version control, code hosting ──────────────────
         stdio_preset(
             "filesystem",
             "官方文件系统 MCP — 读写本地文件与目录（需在 args 末尾追加允许访问的目录）。",
@@ -184,34 +154,7 @@ pub fn get_mcp_presets() -> Vec<McpPreset> {
             "npx",
             &["-y", "@modelcontextprotocol/server-filesystem"],
             &[],
-            &["files", "official"],
-        ),
-        stdio_preset(
-            "memory",
-            "官方记忆 MCP — 基于知识图谱的持久化记忆，跨会话存取实体与关系。",
-            mcp_servers_repo,
-            "npx",
-            &["-y", "@modelcontextprotocol/server-memory"],
-            &[],
-            &["memory", "official"],
-        ),
-        stdio_preset(
-            "sequential-thinking",
-            "官方思维链 MCP — 通过结构化、可回溯的思维序列进行动态反思式问题求解。",
-            mcp_servers_repo,
-            "npx",
-            &["-y", "@modelcontextprotocol/server-sequential-thinking"],
-            &[],
-            &["reasoning", "official"],
-        ),
-        stdio_preset(
-            "fetch",
-            "官方抓取 MCP — 获取 URL 内容并转为 Markdown，供模型读取网页/文档（uvx 运行）。",
-            mcp_servers_repo,
-            "uvx",
-            &["mcp-server-fetch"],
-            &[],
-            &["web", "official"],
+            &["files", "core", "recommended"],
         ),
         stdio_preset(
             "git",
@@ -220,18 +163,36 @@ pub fn get_mcp_presets() -> Vec<McpPreset> {
             "uvx",
             &["mcp-server-git"],
             &[],
-            &["git", "official"],
+            &["git", "core", "recommended"],
         ),
+        remote_preset(
+            "github",
+            "GitHub 官方远程 MCP — 仓库、issue、PR、代码搜索等（Authorization 填 Bearer <PAT>）。",
+            "https://github.com/github/github-mcp-server",
+            "http",
+            "https://api.githubcopilot.com/mcp/",
+            &["Authorization"],
+            &["git", "github", "core", "recommended"],
+        ),
+        // ── Context: docs and code grounding ────────────────────────────
         stdio_preset(
-            "time",
-            "官方时间 MCP — 当前时间查询与时区转换（uvx 运行）。",
-            mcp_servers_repo,
-            "uvx",
-            &["mcp-server-time"],
+            "context7",
+            "Context7 MCP — 为 AI 提供最新版库/框架文档上下文，避免使用过时 API。",
+            "https://github.com/upstash/context7",
+            "npx",
+            &["-y", "@upstash/context7-mcp"],
             &[],
-            &["time", "official"],
+            &["docs", "context", "recommended"],
         ),
-        // ── Code intelligence ───────────────────────────────────────────
+        remote_preset(
+            "deepwiki",
+            "DeepWiki MCP — 读取任意公开 GitHub 仓库的 AI 文档并回答仓库内问题（无需鉴权）。",
+            "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+            "http",
+            "https://mcp.deepwiki.com/mcp",
+            &[],
+            &["docs", "repo", "context", "recommended"],
+        ),
         // Official MCP wire-up is `codegraph serve --mcp`. The npm bin is the
         // same CLI, so npx is the one-click path (no prior global install).
         // Each project still needs `codegraph init` before the graph has data.
@@ -242,83 +203,83 @@ pub fn get_mcp_presets() -> Vec<McpPreset> {
             "npx",
             &["-y", "@colbymchenry/codegraph", "serve", "--mcp"],
             &[],
-            &["code", "graph", "local"],
+            &["code", "graph", "local", "context", "recommended"],
         ),
-        // ── Docs / search / crawl ───────────────────────────────────────
+        // Serena's executable (`serena`) is not its package name, so uvx needs
+        // `--from <source>` before it; `--project-from-cwd` binds the server to
+        // whichever directory the launching tool runs it from.
         stdio_preset(
-            "context7",
-            "Context7 MCP — 为 AI 提供最新版库/框架文档上下文，避免使用过时 API。",
-            "https://github.com/upstash/context7",
-            "npx",
-            &["-y", "@upstash/context7-mcp"],
+            "serena",
+            "Serena — 基于 LSP 的语义代码工具：符号查找、引用分析与精准编辑，适合在大型仓库里做「改代码」而非「读代码」。",
+            "https://github.com/oraios/serena",
+            "uvx",
+            &[
+                "--from",
+                "git+https://github.com/oraios/serena",
+                "serena",
+                "start-mcp-server",
+                "--project-from-cwd",
+            ],
             &[],
-            &["docs", "context"],
+            &["code", "lsp", "semantic", "context", "recommended"],
         ),
+        // ── Browser: web verification & debugging ───────────────────────
         stdio_preset(
-            "brave-search",
-            "Brave 官方搜索 MCP — 通过 Brave Search API 提供 Web 搜索与本地商户搜索能力。",
-            "https://github.com/brave/brave-search-mcp-server",
+            "playwright",
+            "微软官方 Playwright MCP — 浏览器自动化，AI 可打开网页、点击、填表、截图。",
+            "https://github.com/microsoft/playwright-mcp",
             "npx",
-            &["-y", "@brave/brave-search-mcp-server"],
-            &[("BRAVE_API_KEY", "", true)],
-            &["search", "web"],
-        ),
-        stdio_preset(
-            "firecrawl",
-            "Firecrawl MCP — 抓取/爬取任意网站转为干净的 Markdown，供 AI 读取与分析。",
-            "https://github.com/firecrawl/firecrawl-mcp-server",
-            "npx",
-            &["-y", "firecrawl-mcp"],
-            &[("FIRECRAWL_API_KEY", "", true)],
-            &["web", "crawl"],
-        ),
-        // ── Data / SaaS ─────────────────────────────────────────────────
-        stdio_preset(
-            "supabase",
-            "Supabase 官方 MCP — 管理 Postgres 数据库、表结构、RLS 策略、Auth 用户与存储。",
-            "https://github.com/supabase/mcp-server-supabase",
-            "npx",
-            &["-y", "@supabase/mcp-server-supabase"],
-            &[("SUPABASE_ACCESS_TOKEN", "", true)],
-            &["database", "supabase"],
-        ),
-        // ── X (Twitter) ─────────────────────────────────────────────────
-        stdio_preset(
-            "xapi",
-            "X 官方 MCP — 通过 xurl 桥接 X API：发帖、搜索、用户/时间线、书签、趋势等（首次需浏览器 OAuth 登录，建议启动超时 ≥300s）。",
-            "https://docs.x.com/tools/mcp",
-            "npx",
-            &["-y", "@xdevplatform/xurl", "mcp", "https://api.x.com/mcp"],
-            &[("CLIENT_ID", "", true), ("CLIENT_SECRET", "", true)],
-            &["x", "social", "official"],
-        ),
-        remote_preset(
-            "x-docs",
-            "X 官方文档 MCP — search_x / get_page_x 工具，检索 X API 指南与示例（无需鉴权）。",
-            "https://docs.x.com/tools/mcp",
-            "http",
-            "https://docs.x.com/mcp",
+            &["-y", "@playwright/mcp@latest"],
             &[],
-            &["x", "docs", "official"],
+            &["browser", "automation", "testing", "recommended"],
         ),
-        // ── Remote (http) servers ───────────────────────────────────────
+        stdio_preset(
+            "chrome-devtools",
+            "Chrome 官方 DevTools MCP — 驱动 Chrome 调试、抓取性能/网络、检查 DOM 与控制台。",
+            "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+            "npx",
+            &["-y", "chrome-devtools-mcp@latest"],
+            &[],
+            &["browser", "debug", "recommended"],
+        ),
+        // ── Creative: design & content tools ────────────────────────────
         remote_preset(
-            "github",
-            "GitHub 官方远程 MCP — 仓库、issue、PR、代码搜索等（Authorization 填 Bearer <PAT>）。",
-            "https://github.com/github/github-mcp-server",
+            "figma",
+            "Figma 官方 MCP — 设计稿结构、组件与变量交给 agent，实现设计到代码（OAuth）。",
+            "https://www.figma.com/",
             "http",
-            "https://api.githubcopilot.com/mcp/",
-            &["Authorization"],
-            &["git", "github"],
+            "https://mcp.figma.com/mcp",
+            &[],
+            &["design", "figma", "creative", "recommended"],
+        ),
+        // blender-mcp runs under uvx; the Blender side needs the bundled
+        // addon installed and the app running for the socket to answer.
+        stdio_preset(
+            "blender",
+            "Blender MCP — 建模、材质、渲染与场景脚本驱动（需 Blender 运行 + 配套插件）。",
+            "https://github.com/ahujasid/blender-mcp",
+            "uvx",
+            &["blender-mcp"],
+            &[],
+            &["3d", "blender", "creative", "recommended"],
+        ),
+        stdio_preset(
+            "photoshop",
+            "Photoshop MCP — 文档操作、生成式填充与批处理配方，带独立 Web 面板。",
+            "https://github.com/alisaitteke/photoshop-mcp",
+            "npx",
+            &["-y", "@alisaitteke/photoshop-mcp"],
+            &[],
+            &["image", "photoshop", "creative", "recommended"],
         ),
         remote_preset(
-            "notion",
-            "Notion 官方远程 MCP — 管理笔记、数据库、页面，AI 可读写你的 Notion 工作区。",
-            "https://github.com/makenotion/notion-mcp-server",
+            "after-effects",
+            "After Effects 连接器（Oneprism）— 读取与改动真实合成：图层、关键帧、表达式（OAuth）。",
+            "https://oneprism.io",
             "http",
-            "https://mcp.notion.com/mcp",
-            &["Authorization"],
-            &["saas", "notion"],
+            "https://live.oneprism.io/after-effects",
+            &[],
+            &["video", "after-effects", "creative", "recommended"],
         ),
     ]
 }

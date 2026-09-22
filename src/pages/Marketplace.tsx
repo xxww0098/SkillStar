@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUp, Boxes, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowUp, Loader2, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DetailPanel } from "../components/layout/DetailPanel";
@@ -7,15 +7,12 @@ import { Toolbar } from "../components/layout/Toolbar";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import { McpPublishers } from "../features/mcp/components/McpPublishers";
-import { useMcpPublishers } from "../features/mcp/hooks/useMcpPublishers";
 import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
 import { SnapshotEmptyState, SnapshotErrorBanner } from "../features/marketplace/components/SnapshotState";
 import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
 import { useMarketplaceActions } from "../features/marketplace/hooks/useMarketplaceActions";
 import { computeDisplaySkills } from "../features/marketplace/lib/skillDisplay";
 import {
-  EMPTY_SNAPSHOT_STATE,
   isUnpopulatedSnapshot,
   type MarketplaceScope,
   snapshotStatusLabelKey,
@@ -26,35 +23,26 @@ import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { cn } from "../lib/utils";
-import type { McpPublisherSummary, OfficialPublisher, Skill, SortOption } from "../types";
+import type { OfficialPublisher, Skill, SortOption } from "../types";
 
-export type TabId = "all" | "trending" | "hot" | "official" | "mcp-official";
+export type TabId = "all" | "trending" | "hot" | "official";
 
-const skillTabIds: TabId[] = ["all", "trending", "hot", "official"];
-const mcpTabIds: TabId[] = ["mcp-official"];
-const tabIds: TabId[] = [...skillTabIds, ...mcpTabIds];
+const tabIds: TabId[] = ["all", "trending", "hot", "official"];
 
 const tabLabelKeys: Record<TabId, string> = {
   all: "marketplace.allTime",
   trending: "marketplace.trending",
   hot: "marketplace.hot",
   official: "marketplace.official",
-  "mcp-official": "marketplace.mcpOfficial",
 };
 
 interface MarketplaceProps {
   onNavigateToPublisher?: (publisher: OfficialPublisher) => void;
-  onNavigateToMcpPublisher?: (publisher: McpPublisherSummary) => void;
   activeTab?: TabId;
   onTabChange?: (tab: TabId) => void;
 }
 
-export function Marketplace({
-  onNavigateToPublisher,
-  onNavigateToMcpPublisher,
-  activeTab: controlledTab,
-  onTabChange,
-}: MarketplaceProps) {
+export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, onTabChange }: MarketplaceProps) {
   const { t } = useTranslation();
   const {
     results,
@@ -94,8 +82,6 @@ export function Marketplace({
   const [viewMode, setViewMode] = useViewMode("grid");
   const [internalTab, setInternalTab] = useState<TabId>("all");
   const activeTab = controlledTab ?? internalTab;
-  const isMcpTab = activeTab === "mcp-official";
-  const mcpPublishers = useMcpPublishers(isMcpTab);
   const setActiveTab = (tab: TabId) => {
     onTabChange?.(tab);
     setInternalTab(tab);
@@ -128,12 +114,10 @@ export function Marketplace({
   useEffect(() => {
     if (activeTab === "official") {
       fetchOfficialPublishers();
-    } else if (isMcpTab) {
-      return;
     } else {
       fetchLeaderboard(activeTab === "all" ? "all" : activeTab);
     }
-  }, [activeTab, fetchOfficialPublishers, fetchLeaderboard, isMcpTab]);
+  }, [activeTab, fetchOfficialPublishers, fetchLeaderboard]);
 
   // Search (debounced) — skip when AI search is active
   useEffect(() => {
@@ -148,7 +132,6 @@ export function Marketplace({
   const displaySkills = useMemo(
     () =>
       computeDisplaySkills({
-        isMcpTab,
         results,
         leaderboard,
         sortBy,
@@ -158,7 +141,7 @@ export function Marketplace({
         aiActiveKeywords,
         aiKeywordSkillMap,
       }),
-    [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap, isMcpTab],
+    [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap],
   );
 
   const spotlightItems = useMemo(
@@ -231,14 +214,14 @@ export function Marketplace({
     [clearAiSearch, notePendingSearchQuery],
   );
 
-  const totalCount = isMcpTab ? mcpPublishers.publishers.length : displaySkills.length;
+  const totalCount = displaySkills.length;
 
   // Which local-first dataset the current view actually renders. Snapshot
   // status/error are per-scope, so publishers can no longer describe (or fail
   // on behalf of) the skills tab.
   const snapshotScope: MarketplaceScope =
     activeTab === "official" ? "publishers" : searchQuery.trim() || aiKeywords ? "search" : "leaderboard";
-  const snapshot = isMcpTab ? EMPTY_SNAPSHOT_STATE : snapshots[snapshotScope];
+  const snapshot = snapshots[snapshotScope];
 
   // `search` recovers by re-running the online search against the query on
   // screen. Reaching this scope always means there is one: `aiKeywords` cannot
@@ -254,19 +237,16 @@ export function Marketplace({
   }, [retrySnapshot, searchOnline, searchQuery, snapshotScope]);
 
   const snapshotStatusKey = snapshotStatusLabelKey(snapshot.status);
-  const snapshotLabel = isMcpTab
-    ? null
-    : refreshing
-      ? t("marketplace.refreshingSnapshot", {
-          defaultValue: "Refreshing snapshot...",
-        })
-      : snapshotStatusKey
-        ? t(snapshotStatusKey)
-        : null;
-  const snapshotTitle = isMcpTab ? undefined : (snapshot.updatedAt ?? undefined);
+  const snapshotLabel = refreshing
+    ? t("marketplace.refreshingSnapshot", {
+        defaultValue: "Refreshing snapshot...",
+      })
+    : snapshotStatusKey
+      ? t(snapshotStatusKey)
+      : null;
+  const snapshotTitle = snapshot.updatedAt ?? undefined;
   const showOnlineSupplement =
     Boolean(searchQuery.trim()) &&
-    !isMcpTab &&
     !aiKeywords &&
     !loading &&
     !aiSearching &&
@@ -274,12 +254,11 @@ export function Marketplace({
     snapshot.status === "miss";
   // Align with the MCP browser: a seeding snapshot is a loading state, not an
   // empty market. Only take over the viewport while there is nothing to show.
-  const showSeedingLoader = !isMcpTab && snapshot.status === "seeding" && displaySkills.length === 0;
+  const showSeedingLoader = snapshot.status === "seeding" && displaySkills.length === 0;
 
   const renderTabButton = (id: TabId) => {
     const index = tabIds.indexOf(id);
     const isActive = activeTab === id;
-    const isMcp = mcpTabIds.includes(id);
 
     return (
       <button
@@ -304,21 +283,13 @@ export function Marketplace({
           document.getElementById(`tab-${nextId}`)?.focus();
         }}
         className={cn(
-          "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs transition-all duration-150 cursor-pointer focus-ring select-none",
+          "inline-flex h-7 items-center rounded-full px-2.5 text-xs transition-all duration-150 cursor-pointer focus-ring select-none",
           isActive
             ? "bg-primary text-primary-foreground font-semibold shadow-xs ring-1 ring-inset ring-primary/40 dark:bg-primary dark:text-primary-foreground"
             : "text-muted-foreground font-medium hover:text-foreground hover:bg-sidebar-hover/80",
-          isMcp && !isActive && "ring-1 ring-inset ring-border/60 hover:ring-primary/40",
         )}
       >
-        {id === "mcp-official" ? (
-          <>
-            <Boxes className="h-3.5 w-3.5" />
-            <span>{t(tabLabelKeys[id])}</span>
-          </>
-        ) : (
-          <span>{t(tabLabelKeys[id])}</span>
-        )}
+        {t(tabLabelKeys[id])}
       </button>
     );
   };
@@ -336,38 +307,20 @@ export function Marketplace({
           onSortChange={setSortBy}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          onAiSearch={isMcpTab ? undefined : handleAiSearch}
-          aiSearching={isMcpTab ? false : aiSearching}
-          hideSortControls={isMcpTab}
+          onAiSearch={handleAiSearch}
+          aiSearching={aiSearching}
           filtersLead={
             <div className="flex min-w-0 items-center gap-2 shrink-0" role="tablist" aria-label={t("sidebar.market")}>
               <div
-                className="flex min-w-max items-center gap-1 rounded-full border border-border/80 bg-background/50 p-0.5 h-8 shadow-2xs"
+                className="flex min-w-max items-center gap-0.5 rounded-full border border-border/80 bg-background/50 p-0.5 h-8 shadow-2xs"
                 role="presentation"
               >
-                <span className="shrink-0 px-2 text-[11px] font-semibold text-foreground/80">
-                  {t("marketplace.skillGroup")}
-                </span>
-                <div className="flex items-center gap-0.5">{skillTabIds.map((id) => renderTabButton(id))}</div>
-              </div>
-
-              <div
-                className="flex min-w-max items-center gap-1 rounded-full border border-border/80 bg-background/60 p-0.5 h-8 shadow-2xs"
-                role="presentation"
-              >
-                <span className="shrink-0 px-2 text-[11px] font-semibold text-foreground/80">
-                  {t("marketplace.mcpSourceGithub")}
-                </span>
-                <div className="flex items-center gap-0.5">{mcpTabIds.map((id) => renderTabButton(id))}</div>
+                {tabIds.map((id) => renderTabButton(id))}
               </div>
             </div>
           }
           countText={
-            isMcpTab ? (
-              <span>{t("marketplace.mcpPublishersCount", { count: totalCount })}</span>
-            ) : activeTab !== "official" ? (
-              <span>{t("marketplace.skillsCount", { count: totalCount })}</span>
-            ) : null
+            activeTab !== "official" ? <span>{t("marketplace.skillsCount", { count: totalCount })}</span> : null
           }
           actionsLead={
             (installStatus || snapshotLabel) && (
@@ -392,7 +345,7 @@ export function Marketplace({
           }
         />
 
-        {!isMcpTab && snapshot.error && (
+        {snapshot.error && (
           <SnapshotErrorBanner error={snapshot.error} refreshing={refreshing} onRetry={handleSnapshotRetry} />
         )}
 
@@ -458,9 +411,7 @@ export function Marketplace({
             setShowBackToTop(target.scrollTop > 300);
           }}
         >
-          {isMcpTab ? (
-            <McpPublishers publishers={mcpPublishers.publishers} onPublisherClick={onNavigateToMcpPublisher} />
-          ) : activeTab === "official" ? (
+          {activeTab === "official" ? (
             publishers.length === 0 && isUnpopulatedSnapshot(snapshot.status) ? (
               <SnapshotEmptyState status={snapshot.status} refreshing={refreshing} onRetry={handleSnapshotRetry} />
             ) : (

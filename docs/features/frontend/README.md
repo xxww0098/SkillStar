@@ -18,9 +18,9 @@
 ## 桌面性能
 
 - Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
-- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
+- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。`Activity` 不是 DOM Element，不能作为 `Dialog.Portal` asChild 的直接子节点——Presence 会对其调用 `getComputedStyle`，WKWebView 会抛错。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
 - 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
-- MCP 目录搜索对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
+- MCP 远端 registry 搜索（GitHub 发布者钻入）对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
 - `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
 
 `scripts/internal/check_feature_imports.sh` 阻止新增跨 feature 深层导入，但允许从目标 feature 根 `index.ts` 导入。存量基线只能减少；跨域协作优先由 page 组合，确需依赖时只消费目标 feature 的公开入口；若组件确实无业务语义且通用，应先提升到 shared/lib，再改调用方。
@@ -61,7 +61,7 @@
 - Marketplace 与 MCP 共用的 Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；两个 feature 都只能依赖该 shared interface。
 - 动态颜色无法用 utility 表达时才使用 inline style。
 - 侧边栏导航的选中态由带 `layoutId` 的 motion 元素承载，切换时弹簧滑动；收起态改为静态高亮，不做滑动。新增导航区沿用这条约定，不要再写第三种选中态实现。
-- Skill 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。MCP 机群是指挥中心密集列表（状态点 + 能力/成本行 + Agent rail），不套用技能卡网格；MCP 目录浏览仍用卡片。
+- Skill 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。MCP 已装卡片沿用同一网格：状态点与状态说明在标题行，页脚只放 Agent rail；工具数和 schema token 不进卡片。MCP 目录浏览仍用卡片。
 - 卡片列表（`.ss-cards-grid` / `.ss-cards-list`）第 13 项起由 CSS `content-visibility: auto` 跳过屏幕外的样式、布局和绘制；卡片高度由内容决定，`SkillGrid` 量出首张卡片写入 `--ss-card-h` 供 `contain-intrinsic-size` 占位。新增卡片列表沿用这两个类，不要自己写 JS 虚拟滚动。
 
 ## Agent 手动激活投影
@@ -76,6 +76,7 @@
 - Skills、Deck 和 MCP 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播轨道占满卡片底栏可用宽度，图标之间保持固定间距、不随剩余空间拉开；滚动箭头贴在轨道最左/最右，超出可视宽度时横向滚动，不固定可见个数。轮播只展示 Settings 已启用的 Agent；未启用的 profile 不占轮播位，即使资源仍挂着。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
 - MCP 等能力消费者可以叠加静态能力映射，但不得再用本机安装探测隐藏用户已手动启用的 Agent；执行时的真实失败由对应 mutation 显式反馈。
 - Claude Settings profile `claude` 映射到唯一能力 id `claude-code`；不要生成第二张 Claude 卡。
+- 工具栏 `AgentFilterPill` 的条目是 `{ id, profile }`：`id` 是消费方筛选值（Skills 是 Agent profile id，MCP 是 tool id），品牌图标与显示名只能取自 `profile`。用 `id` 解析图标会让两个词汇表拼写不同的 id（`claude-code` / `vscode`）静默退回通用字标。
 - SSH 远端 Agent 由远端 discovery 决定，不复用本机 rail。
 
 ## 桌面交互
@@ -85,6 +86,7 @@
 - tray 与 Settings 的后台运行开关消费同一状态和事件；动作标签必须反映 Start/Stop 当前状态。
 - GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态（含「等待授权」和「登录已失效」），点击打开设备授权面板。关闭面板不取消进行中的设备流。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
 - Marketplace、Models、Usage 等跨页面 request 使用带 nonce 的显式导航事件，避免用不可观察的模块变量传递。
+- Overlay titlebar 下，顶栏空白只有**被点中的那个**带 `data-tauri-drag-region` 的元素才能拖窗口（bare 属性不向子树继承）。沿用 `PageToolbar` 的 `flex-1` filler 吃掉中间松弛；新的顶栏 chrome（分段条、自定义 header）同样必须给空白处一段 filler，不要只把属性放在外层容器上。按钮和输入框不要标该属性。
 
 ## 生成类型
 

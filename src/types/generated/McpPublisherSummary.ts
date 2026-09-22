@@ -3,8 +3,8 @@
 /**
  * One official MCP publisher shown on the marketplace grid.
  *
- * The `id` doubles as the curated `source` bucket (`"adspower"` / `"bigmodel"`)
- * or the special `"github"` publisher which maps to the full
+ * The `id` doubles as the curated `source` bucket (`"official"` /
+ * `"database"`) or the special `"github"` publisher which maps to the full
  * `mcp_registry_server` table.
  */
 export type McpPublisherSummary = { 
@@ -13,7 +13,7 @@ export type McpPublisherSummary = {
  */
 id: string, 
 /**
- * Display name (e.g. "AdsPower", "BigModel", "GitHub").
+ * Display name (e.g. "AdsPower", "Anthropic", "GitHub").
  */
 name: string, 
 /**

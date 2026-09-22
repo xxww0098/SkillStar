@@ -32,10 +32,12 @@ SkillStar/
 │   ├── skillstar-channels/      # 共享频道与 patrol
 │   ├── skillstar-marketplace/   # 本地市场快照、FTS 与 MCP catalog
 │   ├── skillstar-models/        # Provider store、AI、MCP store、tool sync
+│   ├── skillstar-decision/      # 本地 AgentJev-0.6B 决策模型：权重、tokenizer、candle 前向
 │   ├── skillstar-usage/         # 订阅、OAuth 和配额
 │   ├── skillstar-sync/          # SSH 远端技能传输
 │   └── skillstar-app/           # 跨域 use case 与共享 CLI 解析
 ├── docs/                        # 宪章、功能活文档和冻结历史
+├── specs/                       # 多切片实施计划（write-spec 产物）；不承载运行时契约，落地后以 docs/ 为准
 ├── scripts/internal/            # CI 棘轮和一致性检查
 ├── scripts/release/             # 发布辅助脚本
 ├── public/                      # 静态资源与架构图（Agent 图标来自 @lobehub/icons）
@@ -54,6 +56,7 @@ SkillStar/
 | `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、统一 `GitSkillFacade`、GitHub 仓库管理（`git::gh_manager` 编排 + `git::gh_rest` 发布 REST）、项目 manifest、deployment；SKILL.md 安装门禁适配（`validation::ensure_installable`，解析委托 `skill-spec`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub API 更新检测快速路径（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝；Agent spec/registry/custom profile 与 profile storage（`agents`）；GitHub App 设备授权、token 生命周期、凭据存储与网关（`github_auth`）；本机团队智能（`team`：installed-skill BM25 recall、friction notes、skill health、digest） | Marketplace 搜索、Usage、Models，或拆出叶子的业务编排；不再拥有 SKILL.md frontmatter 解析实现；不拥有已删除的 Learn/教程域 |
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场；MCP 多源 catalog（源注册表、用户自定义源持久化、跨源抓取合并、`server.json` 解析、参数化卡片查询）与 curated 数据 | 技能安装实现、MCP 本地配置、registry→store 的映射 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store 与 per-tool 投影、双纪元健康探测 | Usage 订阅、Marketplace 快照或 catalog 形态选择 |
+| `skillstar-decision` | 本地 AgentJev-0.6B 决策模型：checkpoint 的文件规格/下载/校验、`agentjev.decision.v1` 请求校验与答案整形、Qwen3-0.6B 主干与候选集合头的前向（共享前缀 KV 复用）；workspace 内唯一允许引入 ML 运行时（candle / tokenizers）的 crate | Provider store、tool sync、App AI 的 chat/summarize 路径、任何 Tauri 类型；不拥有业务闸门/路由的判定策略（由调用方决定阈值与后果） |
 | `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排、桌面应用多开 |
 | `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
 | `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；桌面应用多开（Cursor / Grok Bot / Antigravity 的独立 Chromium profile） | Tauri command 宏或窗口对象 |
@@ -71,6 +74,7 @@ flowchart LR
   channels["skillstar-channels"]
   market["skillstar-marketplace"]
   models["skillstar-models"]
+  decision["skillstar-decision"]
   usage["skillstar-usage"]
   sync["skillstar-sync"]
   app["skillstar-app"]
@@ -78,6 +82,7 @@ flowchart LR
 
   market --> core
   models --> core
+  decision --> core
   skills --> spec
   skills --> core
   skills --> git
@@ -93,6 +98,7 @@ flowchart LR
   app --> channels
   app --> market
   app --> models
+  app --> decision
   app --> usage
   tauri --> app
   tauri --> core
@@ -101,6 +107,7 @@ flowchart LR
   tauri --> channels
   tauri --> market
   tauri --> models
+  tauri --> decision
   tauri --> usage
   tauri --> sync
 ```
@@ -108,6 +115,7 @@ flowchart LR
 - `skillstar-models::providers` 的模块归属：`provider.rs` / `credential.rs` / `binding.rs` / `catalog.rs` / `roles.rs` 是 v4 域类型（`roles.rs` 拥有跨 Agent 的角色词表、`RoleDef` 注册表行类型与写盘跳过原因，因此 `tool_sync` 的 Agent 注册表依赖 `providers`，而不是反过来）；`crud_v4.rs` 拥有 v4 的 provider 行与绑定命令；`migrate/` 拥有 v3→v4 纯函数与迁移报告；`store_v4.rs` 拥有 v4 读写与备份/校验外壳；`catalog_cache.rs` 拥有 provider 自身模型目录的磁盘缓存（`<data_root>/cache/model_catalog/`，一 provider 一文件）；`types.rs` 降级为只供迁移读的 v1/v2/v3 历史形状，新代码不得引用。前端 DTO 投影（剥离明文凭据）在 `skillstar-app/src/models/dto.rs`，Agent 注册表的声明面投影（`AgentDescriptorDto`，剥离函数指针）在 `skillstar-app/src/models/agents.rs`，都不在域 crate。
 - `skillstar-models::tool_sync` 只接受 v4 类型：writer 签名是 `(&AgentBinding, &[Provider])`，`view.rs` 是把 v4 可选端点与 `Credential` 投影成 writer 需要的平字符串的**唯一**地方。`migrate_configs.rs` 拥有「迁移那一次运行修复已写坏的 Agent 配置文件」这条接缝——它是 `providers` 与 `tool_sync` 之间唯一一处由 store 侧调用写盘侧的方向。
 - `src-tauri/src/commands/models_commands/compat.rs` 是 v4 域类型与仍为 v3 形状的 IPC 之间的唯一翻译层，随前端 IA 重写一并删除。除它以外，命令层不得出现 v3 类型。
+- `skillstar-decision` 独立成 crate 的理由是**依赖集合**，不是域边界：`candle-core` / `candle-nn` / `tokenizers` 只被它使用，放进 `skillstar-models` 会让没有任何张量需求的 Provider/CRUD/tool-sync 路径一起编译 ML 运行时（根 `Cargo.toml` 的 workspace 依赖表因此不收这三个版本，由该 crate 自己固定）。它只依赖 `skillstar-core`（HTTP client、路径、错误），不允许依赖任何产品域；Metal 支持按 `target_os = "macos"` 在该 crate 的 manifest 内开启，不通过 feature 向上传染。
 
 禁止：
 

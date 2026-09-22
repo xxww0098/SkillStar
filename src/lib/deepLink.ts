@@ -33,7 +33,7 @@ export function deepLinkNavTarget(host: string | null, path: string): DeepLinkTa
   }
 }
 
-/** Request-nonce payload asking the MCP command center to open a confirm UI. */
+/** Request-nonce payload asking the MCP page to open a confirm UI. */
 export interface McpImportRequest {
   nonce: number;
   /** Full `skillstar://` URL when the OS supplied one. */

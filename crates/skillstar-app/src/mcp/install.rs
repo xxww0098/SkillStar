@@ -33,10 +33,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use skillstar_marketplace::{McpInput, McpInputVariable, McpRegistryServer};
-use skillstar_models::mcp::{MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime};
+use skillstar_models::mcp::{
+    MCP_TOOL_IDS, McpServerEntry, resolve_mcp_config_path, resolve_runtime,
+};
 use ts_rs::TS;
 
-use super::draft::{Answers, prefill, registry_to_entry_answered, registry_to_entry_for, sanitize_key};
+use super::draft::{
+    Answers, prefill, registry_to_entry_answered, registry_to_entry_for, sanitize_key,
+};
 use super::runtime::{
     CandidateOrigin, McpRuntimeSelection, parse_candidate_id, select_runtime, select_runtime_with,
 };

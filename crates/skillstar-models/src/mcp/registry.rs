@@ -8,8 +8,8 @@
 //! `specs.rs` when the wire format is new).
 //!
 //! This is a wider, independent domain table from `tool_sync::agents`
-//! (`AgentSpec`): MCP additionally targets grok / hermes / zcode / kiro /
-//! cursor / antigravity, and the hidden legacy `claude-desktop` / `gemini`
+//! (`AgentSpec`): MCP additionally targets grok / deepseek / hermes / zcode /
+//! kiro / cursor / antigravity, and the hidden legacy `claude-desktop` / `gemini`
 //! cleanup ids deliberately stay outside it (not public targets — their live
 //! successors are the distinct ids `claude-desktop-chat` and `gemini-cli`).
 
@@ -82,6 +82,16 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         read_servers: read_toml_mcp_servers_entries,
         upsert: |path, entry| codex_upsert(path, &entry.name, grok_toml_table(entry)),
         remove: codex_remove,
+    },
+    McpToolSpec {
+        id: "deepseek",
+        label: "DeepSeek Harness",
+        resolve_config_path: resolve_deepseek_config_path,
+        installed: installed_deepseek,
+        count_live: count_dsh_mcp,
+        read_servers: read_dsh_entries,
+        upsert: |path, entry| dsh_upsert(path, entry),
+        remove: dsh_remove,
     },
     McpToolSpec {
         id: "hermes",
@@ -206,6 +216,26 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
             json_named_map_upsert(path, ZED_SERVERS_KEY, &entry.name, zed_spec(entry))
         },
         remove: |path, name| json_named_map_remove(path, ZED_SERVERS_KEY, name),
+    },
+    McpToolSpec {
+        id: "workbuddy",
+        label: "WorkBuddy",
+        resolve_config_path: resolve_workbuddy_config_path,
+        installed: |home| home.join(".workbuddy").exists(),
+        count_live: count_json_mcpservers,
+        read_servers: read_workbuddy_entries,
+        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, workbuddy_spec(entry)),
+        remove: json_mcpservers_remove,
+    },
+    McpToolSpec {
+        id: "devin",
+        label: "Devin",
+        resolve_config_path: resolve_devin_config_path,
+        installed: |home| home.join(".config").join("devin").exists(),
+        count_live: count_json_mcpservers,
+        read_servers: read_devin_entries,
+        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, devin_spec(entry)),
+        remove: json_mcpservers_remove,
     },
 ];
 

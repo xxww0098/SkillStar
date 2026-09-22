@@ -35,11 +35,12 @@ pub async fn install_skill(
     url: String,
     name: Option<String>,
     agent_id: Option<String>,
+    session_id: Option<String>,
     app: AppHandle,
     auth_state: State<'_, GitHubAuthState>,
 ) -> Result<Skill, AppError> {
     let facade = auth_state
-        .begin_git_operation(app, None)
+        .begin_git_operation(app, session_id)
         .map_err(|error| AppError::Git(error.to_string()))?;
     let session_id = facade.session().id().to_string();
     let result = tokio::task::spawn_blocking(move || {
@@ -50,6 +51,9 @@ pub async fn install_skill(
             None => facade.install_skill(url, name)?,
         };
         if let Some(id) = agent_id.as_deref() {
+            facade
+                .session()
+                .emit_stage(skillstar_skills::git::transport::InstallStage::Deploying, &skill.git_url, Some(&skill.name));
             let ids = vec![id.to_string()];
             let deploy = skillstar_app::global_deploy::deploy_to_selected_global_agents(
                 std::slice::from_ref(&skill.name),

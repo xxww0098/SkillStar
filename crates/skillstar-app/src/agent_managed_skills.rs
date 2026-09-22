@@ -90,9 +90,9 @@ fn global_profile(agent_id: &str) -> Result<AgentProfile> {
 fn state_for_profile(profile: &AgentProfile) -> Result<AgentManagedSkillsState> {
     Ok(AgentManagedSkillsState {
         active_skill_names: normalized_names(deployment::list_linked_skills(&profile.id)?),
-        suspended_skill_names: normalized_names(skillstar_skills::agents::suspended_global_skill_names(
-            &profile.global_skills_dir,
-        )),
+        suspended_skill_names: normalized_names(
+            skillstar_skills::agents::suspended_global_skill_names(&profile.global_skills_dir),
+        ),
     })
 }
 

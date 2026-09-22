@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod detect;
+pub(crate) mod inventory;
 pub mod maintenance;
 pub mod ops;
 pub mod scan;

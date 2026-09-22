@@ -125,7 +125,7 @@ fn filters_by_kind_status_license_runtime_and_stars() {
     )
     .unwrap();
     assert!(recommended.items.iter().all(|c| c.recommended));
-    assert_eq!(recommended.items[0].id, "adspower-local-api");
+    assert_eq!(recommended.items[0].id, "filesystem");
 }
 
 #[test]
@@ -234,6 +234,107 @@ fn search_combines_with_filters_and_keeps_rank_order() {
     // Legacy `search_cards` keeps behaving like the old hardcoded query.
     let legacy = search_cards(&conn, "legacy", 10).unwrap();
     assert_eq!(legacy.len(), 1);
+}
+
+/// Catalog browse must not surface SkillStar-curated rows — those live on
+/// the Official publishers surface. The default unscoped query still unions
+/// both tables so CLI/search callers that want "everything" keep working.
+#[test]
+fn registry_only_unscoped_query_drops_curated_rows() {
+    let conn = seeded();
+    let page = query_cards(
+        &conn,
+        &McpServerQuery {
+            registry_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        page.items.iter().all(|card| card.source.is_none()),
+        "catalog rows must come from the registry table"
+    );
+    assert!(
+        !page.items.iter().any(|card| card.id == "context7"),
+        "curated rows must not appear in the catalog"
+    );
+    let ids: Vec<&str> = page.items.iter().map(|card| card.id.as_str()).collect();
+    assert_eq!(ids, vec!["d1", "d3", "d2"]);
+}
+
+#[test]
+fn curated_only_unscoped_query_drops_registry_rows() {
+    let conn = seeded();
+    let page = query_cards(
+        &conn,
+        &McpServerQuery {
+            curated_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        page.items.iter().all(|card| card.source.is_some()),
+        "official rows must come from the curated table"
+    );
+    assert!(
+        page.items.iter().any(|card| card.id == "context7"),
+        "curated dev-tool rows belong on Official"
+    );
+    assert!(
+        !page.items.iter().any(|card| card.id == "d1"),
+        "registry fixtures must not leak into Official"
+    );
+}
+
+#[test]
+fn publisher_scope_wins_over_registry_only_flag() {
+    let conn = seeded();
+    let page = query_cards(
+        &conn,
+        &McpServerQuery {
+            publisher_id: Some("context".into()),
+            registry_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(page.items.len(), 4);
+    assert_eq!(page.items[0].id, "context7");
+}
+
+/// Both unscoped flags set at once: the documented priority applies and
+/// `curated_only` wins. The result must be identical to a curated-only query —
+/// every row from the curated table, no registry fixtures like "d1".
+#[test]
+fn curated_only_wins_when_both_flags_set() {
+    let conn = seeded();
+    let both = query_cards(
+        &conn,
+        &McpServerQuery {
+            curated_only: true,
+            registry_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let curated = query_cards(
+        &conn,
+        &McpServerQuery {
+            curated_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(both.items, curated.items);
+    assert!(
+        both.items.iter().all(|card| card.source.is_some()),
+        "curated_only must win: all rows come from the curated table"
+    );
+    assert!(
+        !both.items.iter().any(|card| card.id == "d1"),
+        "registry fixtures must not appear when curated_only wins"
+    );
 }
 
 /// Filter values are bound, never interpolated — a quote in a license name

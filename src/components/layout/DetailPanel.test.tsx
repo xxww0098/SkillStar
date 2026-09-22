@@ -55,6 +55,13 @@ const SKILL: Skill = {
 
 describe("DetailPanel", () => {
   it("keeps the new selection's description and reader when an old read finishes late", async () => {
+    // `SkillReader` is a `React.lazy` chunk that drags in the whole Markdown
+    // and highlighting pipeline. Under a full-suite run, evaluating that module
+    // graph can outlast any sane async-util ceiling, so the Suspense boundary
+    // below would race the loader and time out. Warm it first: the boundary
+    // then resolves from cache and the assertion tests behaviour, not load.
+    await import("../shared/SkillReader");
+
     let resolveOld!: (value: DetailResult) => void;
     const oldRead = new Promise<DetailResult>((resolve) => {
       resolveOld = resolve;
@@ -132,6 +139,30 @@ describe("DetailPanel", () => {
     expect(screen.getByRole("button", { name: "卸载" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("reinstalls a hub skill from the drawer and closes when the overlay is clicked", async () => {
+    const onClose = vi.fn();
+    const onReinstall = vi.fn();
+
+    await act(async () => {
+      render(
+        <DetailPanel
+          skill={SKILL}
+          onClose={onClose}
+          onInstall={vi.fn()}
+          onUpdate={vi.fn()}
+          onUninstall={vi.fn()}
+          onReinstall={onReinstall}
+        />,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "重新安装" }));
+    expect(onReinstall).toHaveBeenCalledWith(SKILL.git_url, SKILL.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭抽屉" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

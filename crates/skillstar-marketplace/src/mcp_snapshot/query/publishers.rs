@@ -1,4 +1,4 @@
-//! Publisher grid aggregation.
+//! Publisher summary aggregation.
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -6,58 +6,35 @@ use tracing::warn;
 
 use crate::mcp_models::McpPublisherSummary;
 
-/// Known curated sources in priority order so the grid is stable regardless of
-/// insertion order. Each maps to display name + landing page.
+/// Display name and landing page for each curated `source` bucket, in the
+/// order the summary lists them.
 ///
-/// Removing an entry hides that bucket's rows from the grid without deleting
-/// them (the seed keeps writing them) — a removal must ship with a
-/// `DELETE FROM mcp_curated_server WHERE source = ?` migration.
-const CURATED_ORDER: [(&str, &str, &str); 11] = [
+/// A bucket is the shelf a curated row sits on (`core` / `context` /
+/// `browser` / `creative`), not the company that publishes it — the store
+/// groups its cards by the same value. This is presentation only: a bucket's
+/// *rows* come from the curated catalog (`mcp_snapshot::seeds`), and
+/// `seed_default_curated_mcp_servers` deletes any curated row whose id left
+/// that catalog — so a bucket with no catalog rows is skipped here rather
+/// than hidden by it. Renaming a bucket therefore means editing the catalog
+/// rows, not this table.
+const CURATED_ORDER: [(&str, &str, &str); 4] = [
     // (source id, display name, url)
     (
-        "adspower",
-        "AdsPower",
-        "https://github.com/AdsPower/adspower-browser",
-    ),
-    (
-        "bigmodel",
-        "BigModel",
-        "https://docs.bigmodel.cn/cn/coding-plan/mcp/",
-    ),
-    (
-        "anthropic",
-        "Anthropic",
+        "core",
+        "Core",
         "https://github.com/modelcontextprotocol/servers",
     ),
+    ("context", "Context", "https://github.com/upstash/context7"),
     (
-        "microsoft",
-        "Microsoft",
+        "browser",
+        "Browser",
         "https://github.com/microsoft/playwright-mcp",
     ),
-    ("saas", "SaaS", "https://modelcontextprotocol.io"),
-    ("cn-ai", "Dev Tools", "https://github.com/upstash/context7"),
-    (
-        "cloudflare",
-        "Cloudflare",
-        "https://github.com/cloudflare/mcp-server-cloudflare",
-    ),
-    (
-        "brave",
-        "Brave",
-        "https://github.com/brave/brave-search-mcp",
-    ),
-    ("google", "Google", "https://developers.google.com/mcp"),
-    (
-        "supabase",
-        "Supabase",
-        "https://github.com/supabase/mcp-server-supabase",
-    ),
-    ("x", "X", "https://docs.x.com/tools/mcp"),
+    ("creative", "Creative", "https://www.figma.com/"),
 ];
 
-/// Aggregated official MCP publishers (curated `source` buckets + GitHub).
-/// Curated rows are grouped by `source`; GitHub is one publisher backed by the
-/// full `mcp_registry_server` table.
+/// Aggregated curated shelves (curated `source` buckets) plus GitHub, which is
+/// one publisher backed by the full `mcp_registry_server` table.
 pub(crate) fn load_publishers(conn: &Connection) -> Result<Vec<McpPublisherSummary>> {
     let mut curated_counts: std::collections::HashMap<String, i64> =
         std::collections::HashMap::new();

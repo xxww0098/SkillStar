@@ -83,7 +83,6 @@ describe("McpFleetCard", () => {
   it("renders identity, transport, description, and agent targets", () => {
     const onOpen = vi.fn();
     const onToggleTool = vi.fn();
-    const onProbe = vi.fn();
 
     render(
       <McpFleetCard
@@ -96,7 +95,6 @@ describe("McpFleetCard", () => {
         }}
         onOpen={onOpen}
         onToggleTool={onToggleTool}
-        onProbe={onProbe}
       />,
     );
 
@@ -104,16 +102,14 @@ describe("McpFleetCard", () => {
     expect(screen.getByText("codegraph")).toBeInTheDocument();
     expect(screen.getByText(/stdio/i)).toBeInTheDocument();
     expect(screen.getByText("Codebase graph exploration")).toBeInTheDocument();
+    expect(screen.getByText("健康")).toBeInTheDocument();
 
-    // Tools count and schema tokens in footer
-    expect(screen.getByText(/2 个工具/i)).toBeInTheDocument();
-    expect(screen.getByText(/~428 tok/i)).toBeInTheDocument();
+    // Tool counts, schema tokens, and a second status line stay off the card.
+    expect(screen.queryByText(/2 个工具/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/~428 tok/i)).not.toBeInTheDocument();
 
-    // Click probe button
-    const probeBtn = screen.getByTitle("立即检查");
-    fireEvent.click(probeBtn);
-    expect(onProbe).toHaveBeenCalledTimes(1);
-    expect(onOpen).not.toHaveBeenCalled();
+    // No probe button: probing lives in the editor's probe panel.
+    expect(screen.queryByTitle("立即检查")).not.toBeInTheDocument();
 
     // Toggle agent
     const cursorBtn = screen.getByLabelText(/Cursor/i);
@@ -139,6 +135,69 @@ describe("McpFleetCard", () => {
 
     expect(screen.getByText("有更新")).toBeInTheDocument();
     expect(screen.getByText("YOLO")).toBeInTheDocument();
+  });
+
+  it("renders only Settings-enabled Agents on the rail", () => {
+    const targets: McpAgentTarget[] = [
+      {
+        toolId: "claude-code",
+        profile: mockProfile({ id: "claude", display_name: "Claude Code", icon: "claude", enabled: true }),
+      },
+      {
+        toolId: "cursor",
+        profile: mockProfile({ id: "cursor", display_name: "Cursor", icon: "cursor", enabled: false }),
+      },
+      {
+        toolId: "grok",
+        profile: mockProfile({ id: "grok", display_name: "Grok", icon: "grok", enabled: true }),
+      },
+    ];
+
+    render(<McpFleetCard server={testServer()} agentTargets={targets} onOpen={vi.fn()} onToggleTool={vi.fn()} />);
+
+    expect(screen.getByLabelText(/Claude Code/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Grok/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Cursor/i)).not.toBeInTheDocument();
+  });
+
+  it("lets the agent rail fill leftover footer width instead of packing against the right edge", () => {
+    const { container } = render(
+      <McpFleetCard server={testServer()} agentTargets={mockTargets} onOpen={vi.fn()} onToggleTool={vi.fn()} />,
+    );
+
+    const rail = container.querySelector(".hscroll-row-wrapper");
+    expect(rail?.parentElement).toHaveClass("flex-1");
+    expect(rail?.parentElement).toHaveClass("overflow-hidden");
+    expect(rail?.parentElement).not.toHaveClass("justify-end");
+  });
+
+  it("shows unreachable status once, in the header, not again in the footer", () => {
+    render(
+      <McpFleetCard
+        server={testServer()}
+        agentTargets={mockTargets}
+        probe={{
+          report: mockReport({ status: "unreachable", tools: [], schemaTokens: undefined }),
+          error: "connection refused",
+          pending: false,
+        }}
+        onOpen={vi.fn()}
+        onToggleTool={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("无法连接")).toHaveLength(1);
+    expect(screen.queryByText(/个工具/)).not.toBeInTheDocument();
+  });
+
+  it("omits the footer when no Settings-enabled Agent is on the rail", () => {
+    const { container } = render(
+      <McpFleetCard server={testServer()} agentTargets={[]} onOpen={vi.fn()} onToggleTool={vi.fn()} />,
+    );
+
+    expect(container.querySelector(".hscroll-row-wrapper")).not.toBeInTheDocument();
+    expect(screen.queryByText(/个工具/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/tok/i)).not.toBeInTheDocument();
   });
 
   it("falls back to command line when server description is empty", () => {

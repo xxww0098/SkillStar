@@ -115,25 +115,6 @@ export function RemoteSkillsContent({
     [visibleRemote, profiles],
   );
 
-  const spotlightItems = useMemo(
-    () =>
-      allSkills.map((s) => ({
-        id: s.path,
-        title: s.name,
-        subtitle: s.path,
-        meta: s.agent,
-      })),
-    [allSkills],
-  );
-
-  const handleSpotlightSelect = useCallback(
-    (id: string) => {
-      const skill = allSkills.find((s) => s.path === id);
-      if (skill) setDrawerSkill(skill);
-    },
-    [allSkills],
-  );
-
   const remoteAgentProfiles = useMemo(
     () => agents.map((a) => remoteAgentProfile(a.agent, profiles)),
     [agents, profiles],
@@ -235,8 +216,6 @@ export function RemoteSkillsContent({
           }
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          searchItems={spotlightItems}
-          onSearchSelect={handleSpotlightSelect}
           sortBy="updated"
           onSortChange={() => {}}
           viewMode={viewMode}

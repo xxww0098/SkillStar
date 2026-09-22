@@ -47,7 +47,6 @@ export function useMcpSources(enabled = true) {
       queryClient.setQueryData(mcpKeys.sources(), next);
       queryClient.invalidateQueries({ queryKey: mcpKeys.market() });
       queryClient.invalidateQueries({ queryKey: mcpKeys.sourceSyncStates() });
-      queryClient.invalidateQueries({ queryKey: mcpKeys.publishers() });
     },
     [queryClient],
   );

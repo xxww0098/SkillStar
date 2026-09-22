@@ -13,15 +13,12 @@ import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdater } from "./hooks/useUpdater";
 import { deepLinkNavTarget, mcpImportQuery } from "./lib/deepLink";
 import { looksLikeShareCode } from "./lib/shareCode";
-import type { McpPublisherSummary, NavPage, OfficialPublisher } from "./types";
+import type { NavPage, OfficialPublisher } from "./types";
 
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
 const PublisherDetailPage = lazy(() =>
   import("./pages/PublisherDetail").then((mod) => ({ default: mod.PublisherDetail })),
-);
-const McpPublisherDetailPage = lazy(() =>
-  import("./pages/McpPublisherDetail").then((mod) => ({ default: mod.McpPublisherDetail })),
 );
 const SkillCardsPage = lazy(() => import("./pages/SkillCards").then((mod) => ({ default: mod.SkillCards })));
 const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ default: mod.Projects })));
@@ -194,10 +191,6 @@ function AppContent() {
     (pub_: OfficialPublisher) => nav.setSubPage({ type: "publisher-detail", publisher: pub_ }),
     [nav],
   );
-  const handleNavigateToMcpPublisher = useCallback(
-    (pub_: McpPublisherSummary) => nav.setSubPage({ type: "mcp-publisher-detail", publisher: pub_ }),
-    [nav],
-  );
   const handleClearPreSelectedCards = useCallback(() => nav.setSkillCardsPreSelectedSkills(null), [nav]);
   const handleNavigateToProjects = useCallback(
     (skills?: string[]) => {
@@ -207,25 +200,13 @@ function AppContent() {
   );
   const handleClearPreSelectedProjects = useCallback(() => nav.setProjectsPreSelectedSkills(null), [nav]);
 
-  const skillsOutletId =
-    nav.subPage?.type === "publisher-detail"
-      ? "publisher-detail"
-      : nav.subPage?.type === "mcp-publisher-detail"
-        ? "mcp-publisher-detail"
-        : nav.activePage;
+  const skillsOutletId = nav.subPage?.type === "publisher-detail" ? "publisher-detail" : nav.activePage;
 
   const renderSkillsPage = (id: string) => {
     if (id === "publisher-detail" && nav.subPage?.type === "publisher-detail") {
       return (
         <div className="flex min-w-0 flex-1 overflow-hidden">
           <PublisherDetailPage publisher={nav.subPage.publisher} onBack={handlePublisherBack} />
-        </div>
-      );
-    }
-    if (id === "mcp-publisher-detail" && nav.subPage?.type === "mcp-publisher-detail") {
-      return (
-        <div className="flex min-w-0 flex-1 overflow-hidden">
-          <McpPublisherDetailPage publisher={nav.subPage.publisher} onBack={handlePublisherBack} />
         </div>
       );
     }
@@ -247,7 +228,6 @@ function AppContent() {
             activeTab={nav.marketplaceTab}
             onTabChange={nav.setMarketplaceTab}
             onNavigateToPublisher={handleNavigateToPublisher}
-            onNavigateToMcpPublisher={handleNavigateToMcpPublisher}
           />
         );
       case "skill-cards":

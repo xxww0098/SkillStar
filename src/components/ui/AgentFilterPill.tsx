@@ -4,8 +4,19 @@ import { agentIconCls, cn } from "../../lib/utils";
 import { AgentIcon } from "./AgentIcon";
 import { HScrollRow } from "./HScrollRow";
 
-/** Minimal shape needed to render a filterable icon entry. */
-export type AgentFilterItem = Pick<AgentProfile, "id" | "icon" | "display_name">;
+/** One filterable entry: the consumer's filter value plus the Agent it paints. */
+export interface AgentFilterItem {
+  /** Consumer-owned filter value: an Agent profile id (Skills) or an MCP tool id. */
+  id: string;
+  /**
+   * Agent whose brand glyph and display name paint the entry. Deliberately
+   * separate from `id`: the value vocabulary belongs to the consumer, so MCP
+   * filters by `McpToolId` (`claude-code`) while the Agent profile id is
+   * `claude`. Resolving the glyph from `id` silently falls back to the generic
+   * LobeHub glyph for every id the two vocabularies spell differently.
+   */
+  profile: Pick<AgentProfile, "id" | "icon" | "display_name">;
+}
 
 interface AgentFilterPillProps {
   /** Icon entries rendered after the "All" button. */
@@ -66,7 +77,7 @@ export function AgentFilterPill({ items, value, onChange, allLabel, maxVisible =
               key={item.id}
               type="button"
               onClick={() => onChange(isActive ? null : item.id)}
-              title={item.display_name}
+              title={item.profile.display_name}
               aria-pressed={isActive}
               className={cn(
                 "relative h-full w-7 shrink-0 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
@@ -80,9 +91,9 @@ export function AgentFilterPill({ items, value, onChange, allLabel, maxVisible =
                 )}
               />
               <AgentIcon
-                profile={item}
+                profile={item.profile}
                 className={cn(
-                  agentIconCls(item.icon),
+                  agentIconCls(item.profile.icon),
                   "transition duration-200",
                   isActive ? "drop-shadow-sm scale-[1.1]" : "opacity-60 hover:opacity-90 grayscale-0",
                 )}

@@ -11,9 +11,11 @@ import {
   useState,
 } from "react";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
+import { installSkillWithProgress } from "../../../lib/installProgress";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import type {
+  InstallStage,
   LocalDivergenceResolution,
   RepoNewSkill,
   Skill,
@@ -24,6 +26,7 @@ import type {
   UpstreamChange,
 } from "../../../types";
 import i18n from "../../../i18n";
+import { needsAttention } from "../lib/pendingUpdates";
 import { useLocalDivergenceResolver } from "./useLocalDivergenceResolver";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
@@ -264,8 +267,17 @@ function useSkillsState() {
   );
 
   const installMutation = useMutation({
-    mutationFn: ({ url, name, agentId }: { url: string; name?: string; agentId?: string }) =>
-      tauriInvoke("install_skill", { url, name, agentId }),
+    mutationFn: ({
+      url,
+      name,
+      agentId,
+      onStage,
+    }: {
+      url: string;
+      name?: string;
+      agentId?: string;
+      onStage?: (stage: InstallStage, skill: string | undefined) => void;
+    }) => installSkillWithProgress({ url, name, agentId }, onStage),
     onSuccess: (skill) => {
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.some((item) => item.name === skill.name)) {
@@ -273,7 +285,9 @@ function useSkillsState() {
         }
         return [...prev, skill];
       });
-      void refetchUpdates();
+      // Deferred: the upstream check hits the network per repository and must
+      // not chain into the install interaction's perceived latency.
+      window.setTimeout(() => void refetchUpdates(), 1500);
     },
   });
 
@@ -304,7 +318,12 @@ function useSkillsState() {
   const uninstallSkillMutate = uninstallMutation.mutateAsync;
 
   const installSkill = useCallback(
-    async (url: string, name?: string, agentId?: string) => {
+    async (
+      url: string,
+      name?: string,
+      agentId?: string,
+      onStage?: (stage: InstallStage, skill: string | undefined) => void,
+    ) => {
       const toggleKey = name && agentId ? `${name}::${agentId}` : null;
       if (toggleKey) {
         if (pendingAgentToggleRef.current.has(toggleKey)) {
@@ -316,7 +335,7 @@ function useSkillsState() {
         setIsTogglingAgent(true);
       }
       try {
-        return await installSkillMutate({ url, name, agentId });
+        return await installSkillMutate({ url, name, agentId, onStage });
       } catch (e) {
         throw new Error(String(e));
       } finally {
@@ -328,6 +347,33 @@ function useSkillsState() {
       }
     },
     [installSkillMutate, queryClient],
+  );
+
+  /** Re-scan a repository and reinstall one Skill identity. Missing identity is fail-closed. */
+  const reinstallSkill = useCallback(
+    async (url: string, name: string) => {
+      const scan = await tauriInvoke("scan_github_repo", {
+        url,
+        fullDepth: true,
+      });
+      const target = scan.skills.find((skill) => skill.id === name);
+      if (!target) {
+        throw new Error(i18n.t("mySkills.reinstallSkillMissing", { name }));
+      }
+
+      const installed = await tauriInvoke("install_from_scan", {
+        repoUrl: scan.source_url,
+        source: scan.source,
+        skills: [{ id: target.id, folder_path: target.folder_path }],
+      });
+
+      queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, (prev = []) =>
+        prev.filter((skill) => skill.skill_id !== name || skill.repo_source !== scan.source),
+      );
+      await refresh(false, true);
+      return installed;
+    },
+    [queryClient, refresh],
   );
 
   /** Re-scan one repository at full depth and reinstall every discovered Skill. */
@@ -708,6 +754,7 @@ function useSkillsState() {
       pendingUpdateNames,
       refresh,
       installSkill,
+      reinstallSkill,
       reinstallRepoSkills,
       uninstallSkill,
       updateSkill,
@@ -736,6 +783,7 @@ function useSkillsState() {
       pendingUpdateNames,
       refresh,
       installSkill,
+      reinstallSkill,
       reinstallRepoSkills,
       uninstallSkill,
       updateSkill,
@@ -775,11 +823,12 @@ export function useSkills() {
 
 /** Sidebar chrome only needs two numbers; keep App off the full skills list.
  *  The amber count is "needs attention": content updates plus Skills their
- *  source removed or renamed. The toolbar's "update N" stays content-only. */
+ *  source removed or renamed — the same predicate as the toolbar's attention
+ *  filter, so the badge never promises skills the filter cannot show. */
 export function useSkillBadgeCounts() {
   const { ghostSkills, skills } = useSkills();
   return {
     ghostSkillCount: ghostSkills.length,
-    pendingUpdatesCount: skills.filter((skill) => skill.update_available || skill.upstream_change).length,
+    pendingUpdatesCount: skills.filter(needsAttention).length,
   };
 }

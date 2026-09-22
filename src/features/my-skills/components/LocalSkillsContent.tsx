@@ -2,7 +2,6 @@ import { motion } from "framer-motion";
 import { Globe, Layers } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "../../../lib/utils";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
@@ -15,7 +14,7 @@ import { Toolbar } from "../../../components/layout/Toolbar";
 import type { RepoNewSkill, Skill, SkillUpdateRunReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
-import { hasPendingUpdate } from "../lib/pendingUpdates";
+import { hasPendingUpdate, needsAttention } from "../lib/pendingUpdates";
 import { syntheticSkillFromGhost } from "../lib/ghostSkill";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
@@ -62,6 +61,7 @@ export function LocalSkillsContent({
     loading,
     refresh,
     installSkill,
+    reinstallSkill,
     reinstallRepoSkills,
     uninstallSkill,
     runSkillUpdate,
@@ -108,6 +108,7 @@ export function LocalSkillsContent({
   const [onlyUpdatesFilter, setOnlyUpdatesFilter] = useState(false);
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
   const [reinstallingRepoSource, setReinstallingRepoSource] = useState<string | null>(null);
+  const [reinstallingName, setReinstallingName] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
 
@@ -139,25 +140,6 @@ export function LocalSkillsContent({
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [skills]);
-
-  /** Full skill universe for Spotlight (client-side title/description/source match). */
-  const spotlightItems = useMemo(
-    () =>
-      skills.map((skill) => ({
-        id: skill.name,
-        title: skill.name,
-        subtitle: skill.localized_description || skill.description || undefined,
-        meta: skill.source,
-      })),
-    [skills],
-  );
-
-  const handleSpotlightSelect = useCallback(
-    (id: string) => {
-      if (skills.some((skill) => skill.name === id)) setSelection({ kind: "installed", name: id });
-    },
-    [skills],
-  );
 
   const handleGhostClick = useCallback((ghost: RepoNewSkill) => {
     setSelection((current) =>
@@ -213,7 +195,8 @@ export function LocalSkillsContent({
         (skill) =>
           skill.name.toLowerCase().includes(normalizedQuery) ||
           skill.description.toLowerCase().includes(normalizedQuery) ||
-          (skill.localized_description && skill.localized_description.toLowerCase().includes(normalizedQuery)),
+          (skill.localized_description && skill.localized_description.toLowerCase().includes(normalizedQuery)) ||
+          (skill.source && skill.source.toLowerCase().includes(normalizedQuery)),
       );
     }
 
@@ -239,15 +222,18 @@ export function LocalSkillsContent({
     return visibleSkills;
   }, [skills, searchQuery, agentFilter, profiles, sourceFilter, repoFilter]);
 
-  /** The chip counts what the updates filter would actually show, so it can
-   *  never claim updates the active search has already filtered away. The
-   *  "update all" CTA stays deliberately filter-independent (see
+  /** The attention filter covers everything the sidebar badge counts — content
+   *  updates plus removed / renamed upstreams — so the chip can never show 0
+   *  while the badge promises attention. Removed and renamed skills carry
+   *  their own migrate / resolve actions on the card. The "update all" CTA
+   *  stays deliberately content-only and filter-independent (see
    *  docs/features/skills/README.md), so it reads the unfiltered list. */
-  const pendingUpdateSkills = useMemo(() => scopedSkills.filter(hasPendingUpdate), [scopedSkills]);
+  const attentionSkills = useMemo(() => scopedSkills.filter(needsAttention), [scopedSkills]);
+  const allAttentionSkills = useMemo(() => skills.filter(needsAttention), [skills]);
   const allPendingUpdates = useMemo(() => skills.filter(hasPendingUpdate), [skills]);
 
   const filteredSkills = useMemo(() => {
-    const visibleSkills = [...(onlyUpdatesFilter ? pendingUpdateSkills : scopedSkills)];
+    const visibleSkills = [...(onlyUpdatesFilter ? attentionSkills : scopedSkills)];
 
     visibleSkills.sort((a, b) => {
       switch (sortBy) {
@@ -263,7 +249,7 @@ export function LocalSkillsContent({
     });
 
     return visibleSkills;
-  }, [scopedSkills, pendingUpdateSkills, onlyUpdatesFilter, sortBy]);
+  }, [scopedSkills, attentionSkills, onlyUpdatesFilter, sortBy]);
 
   // Stable Settings-backed target list for filters, cards, selection actions,
   // and project deployment. Persisted `enabled` alone is insufficient because
@@ -288,6 +274,19 @@ export function LocalSkillsContent({
       }
     },
     [installSkill, t],
+  );
+
+  const handleInstallGhost = useCallback(
+    async (ghost: RepoNewSkill) => {
+      try {
+        await installGhostSkill(ghost);
+      } catch (e) {
+        if (import.meta.env.DEV) console.error("[LocalSkills] installGhostSkill failed:", e);
+        toast.error(String(e) ? `${t("mySkills.installFailed")}: ${String(e)}` : t("mySkills.installFailed"));
+        throw e;
+      }
+    },
+    [installGhostSkill, t],
   );
 
   const handleUpdate = useCallback(
@@ -458,6 +457,28 @@ export function LocalSkillsContent({
       openUninstallDialog(names, source);
     },
     [openUninstallDialog, repoFilter, skills],
+  );
+
+  /** Reinstall the open Skill only — identity fail-closed, never the whole repo. */
+  const handleReinstall = useCallback(
+    async (url: string, name: string) => {
+      if (reinstallingName) return;
+      if (!url.trim()) {
+        toast.error(t("mySkills.reinstallRepoSourceMissing", { source: name }));
+        return;
+      }
+      setReinstallingName(name);
+      try {
+        await reinstallSkill(url, name);
+        toast.success(t("mySkills.reinstallSuccess", { name }));
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        toast.error(reason || t("mySkills.reinstallFailed"));
+      } finally {
+        setReinstallingName(null);
+      }
+    },
+    [reinstallSkill, reinstallingName, t],
   );
 
   /** Reinstall every Skill found in exactly one GitHub repository source. */
@@ -708,7 +729,14 @@ export function LocalSkillsContent({
   }, [hasSelection, t]);
 
   const getEmptyMessage = () => {
-    if (onlyUpdatesFilter) return t("toolbar.noPendingUpdates");
+    if (onlyUpdatesFilter) {
+      // Attention exists but the active search/source filters hide all of it —
+      // say where it went instead of claiming there is nothing to do.
+      if (attentionSkills.length === 0 && allAttentionSkills.length > 0) {
+        return t("toolbar.attentionOutsideFilters", { count: allAttentionSkills.length });
+      }
+      return t("toolbar.noPendingUpdates");
+    }
     if (skills.length === 0) return t("emptyState.mySkillsDesc");
     return t("mySkills.noMatching");
   };
@@ -732,14 +760,7 @@ export function LocalSkillsContent({
 
   return (
     <>
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col overflow-hidden transition-[padding] duration-300 ease-out",
-          // Make room for the detail drawer instead of letting it cover the
-          // rightmost grid column (drawer is w-full max-w-md = 448px).
-          selectedSkill && "lg:pr-[448px]",
-        )}
-      >
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Toolbar
           titleNode={
             <div className="flex flex-wrap items-center gap-3">
@@ -749,8 +770,6 @@ export function LocalSkillsContent({
           }
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          searchItems={spotlightItems}
-          onSearchSelect={handleSpotlightSelect}
           sortBy={sortBy}
           onSortChange={setSortBy}
           viewMode={viewMode}
@@ -783,7 +802,8 @@ export function LocalSkillsContent({
           reinstallingRepoSource={reinstallingRepoSource}
           onRemoveRepoSource={handleRemoveRepoSource}
           pendingUpdateCount={allPendingUpdates.length}
-          filteredUpdateCount={pendingUpdateSkills.length}
+          attentionCount={allAttentionSkills.length}
+          filteredAttentionCount={attentionSkills.length}
           onlyUpdatesFilter={onlyUpdatesFilter}
           onOnlyUpdatesFilterChange={setOnlyUpdatesFilter}
         />
@@ -862,7 +882,7 @@ export function LocalSkillsContent({
                   ? ghostSkills
                   : undefined
               }
-              onInstallGhost={installGhostSkill}
+              onInstallGhost={handleInstallGhost}
               onDismissGhost={dismissGhostSkill}
               onDismissGhostRepo={dismissGhostRepo}
               onGhostClick={handleGhostClick}
@@ -880,6 +900,8 @@ export function LocalSkillsContent({
         onUpdate={handleUpdate}
         onUninstall={handleUninstall}
         uninstalling={uninstalling && selectedSkill != null && pendingUninstallNames.includes(selectedSkill.name)}
+        onReinstall={handleReinstall}
+        reinstalling={selectedSkill != null && reinstallingName === selectedSkill.name}
         onResolveRemoved={handleResolveRemoved}
         onMigrate={handleDrawerMigrate}
         migrating={drawerMigrationName != null && pendingMigrationNames.has(drawerMigrationName)}

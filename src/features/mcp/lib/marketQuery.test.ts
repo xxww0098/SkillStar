@@ -17,12 +17,36 @@ const filters = (patch: Partial<McpMarketFilterState> = {}): McpMarketFilterStat
 });
 
 describe("buildMcpServerQuery", () => {
-  it("sends only pagination and the status filter for a default state", () => {
-    expect(buildMcpServerQuery({ filters: filters(), limit: 60, offset: 0 })).toEqual({
+  it("sends registryOnly for an unscoped registry browse so curated rows stay on Official", () => {
+    expect(buildMcpServerQuery({ filters: filters(), limit: 60, offset: 0, registryOnly: true })).toEqual({
       limit: 60,
       offset: 0,
       statuses: ["active"],
+      registryOnly: true,
     });
+  });
+
+  it("sends curatedOnly for the Official grid and does not also set registryOnly", () => {
+    expect(buildMcpServerQuery({ filters: filters(), limit: 60, offset: 0, curatedOnly: true })).toEqual({
+      limit: 60,
+      offset: 0,
+      statuses: ["active"],
+      curatedOnly: true,
+    });
+  });
+
+  it("lets a publisher id win over the unscoped catalog flags", () => {
+    const query = buildMcpServerQuery({
+      filters: filters(),
+      limit: 10,
+      offset: 0,
+      publisherId: "context",
+      registryOnly: true,
+      curatedOnly: true,
+    });
+    expect(query.publisherId).toBe("context");
+    expect(query).not.toHaveProperty("registryOnly");
+    expect(query).not.toHaveProperty("curatedOnly");
   });
 
   it("always sends statuses explicitly, because the backend default includes deprecated", () => {

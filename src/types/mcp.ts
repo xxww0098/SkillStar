@@ -105,6 +105,7 @@ export const MCP_TOOL_IDS = [
   "claude-desktop-chat",
   "codex",
   "grok",
+  "deepseek",
   "hermes",
   "opencode",
   "zcode",
@@ -116,6 +117,8 @@ export const MCP_TOOL_IDS = [
   "gemini-cli",
   "antigravity",
   "zed",
+  "workbuddy",
+  "devin",
 ] as const;
 
 export type McpToolId = (typeof MCP_TOOL_IDS)[number];

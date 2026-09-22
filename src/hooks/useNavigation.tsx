@@ -8,7 +8,6 @@ import type { AppMode, ModelsNavPage, NavPage, SubPage } from "../types";
 const importMySkillsPage = () => import("../pages/MySkills");
 const importMarketplacePage = () => import("../pages/Marketplace");
 const importPublisherDetailPage = () => import("../pages/PublisherDetail");
-const importMcpPublisherDetailPage = () => import("../pages/McpPublisherDetail");
 const importSkillCardsPage = () => import("../pages/SkillCards");
 const importProjectsPage = () => import("../pages/Projects");
 const importMcpPage = () => import("../pages/Mcp");
@@ -38,7 +37,6 @@ const PAGE_IMPORTERS: Record<NavPage, () => Promise<unknown>> = {
   "my-skills": importMySkillsPage,
   marketplace: () => {
     void importPublisherDetailPage();
-    void importMcpPublisherDetailPage();
     return importMarketplacePage();
   },
   "skill-cards": importSkillCardsPage,

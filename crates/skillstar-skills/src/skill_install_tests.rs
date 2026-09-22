@@ -124,6 +124,17 @@ mod pipeline_local_source_tests {
         dir
     }
 
+    fn git_commit_all(repo: &std::path::Path, message: &str) {
+        for args in [vec!["add", "."], vec!["commit", "-m", message]] {
+            let status = skillstar_core::infra::path_env::command_with_path("git")
+                .current_dir(repo)
+                .args(&args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+    }
+
     /// Local path is step 1 of the same pipeline. An invalid root SKILL.md
     /// is still rejected and must not leave a hub entry.
     #[test]
@@ -242,5 +253,46 @@ mod pipeline_local_source_tests {
         let hub = skillstar_core::infra::paths::hub_skills_dir().join("rust");
         assert!(hub.join("SKILL.md").is_file());
         assert!(!hub.join(".cursor").exists());
+    }
+
+    /// Regression: the repo cache can lag upstream. A Skill added after the
+    /// first install must still install — the scan must fetch instead of
+    /// reporting the requested identity as deleted or renamed.
+    #[test]
+    fn pipeline_fetches_stale_cache_when_requested_skill_is_missing() {
+        let _sandbox = Sandbox::new();
+        let repo = init_repo();
+        let alpha = repo.path().join("skills/alpha");
+        std::fs::create_dir_all(&alpha).unwrap();
+        std::fs::write(
+            alpha.join("SKILL.md"),
+            "---\nname: alpha\ndescription: first skill\n---\n\n# alpha\n",
+        )
+        .unwrap();
+        git_commit_all(repo.path(), "alpha");
+
+        install_skill(
+            repo.path().to_string_lossy().to_string(),
+            Some("alpha".into()),
+        )
+        .expect("first install populates the repo cache");
+
+        let pr = repo.path().join("skills/in-progress/pr");
+        std::fs::create_dir_all(&pr).unwrap();
+        std::fs::write(
+            pr.join("SKILL.md"),
+            "---\nname: pr\ndescription: write a PR body\n---\n\n# pr\n",
+        )
+        .unwrap();
+        git_commit_all(repo.path(), "add pr");
+
+        let skill = install_skill(
+            repo.path().to_string_lossy().to_string(),
+            Some("pr".into()),
+        )
+        .expect("a skill added upstream after the cached clone must still install");
+        assert_eq!(skill.name, "pr");
+        let hub = skillstar_core::infra::paths::hub_skills_dir().join("pr");
+        assert!(hub.join("SKILL.md").is_file());
     }
 }

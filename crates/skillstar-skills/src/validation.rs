@@ -7,8 +7,8 @@
 use std::path::Path;
 
 pub use skill_spec::frontmatter::{
-    inspect_skill_frontmatter, inspect_skill_frontmatter_content, FrontmatterIssue,
-    FrontmatterReport, MAX_DESCRIPTION_CHARS, MAX_MANIFEST_BYTES, MAX_NAME_CHARS,
+    FrontmatterIssue, FrontmatterReport, MAX_DESCRIPTION_CHARS, MAX_MANIFEST_BYTES, MAX_NAME_CHARS,
+    inspect_skill_frontmatter, inspect_skill_frontmatter_content,
 };
 
 /// Blocking check used by the repo-install path and bundle export/import.

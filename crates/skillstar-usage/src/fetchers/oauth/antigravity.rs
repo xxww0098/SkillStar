@@ -3,7 +3,6 @@
 //! Google OAuth + Cloud Code Assist (`loadCodeAssist` + `fetchAvailableModels`).
 
 use chrono::Utc;
-use std::time::Duration;
 
 use super::common::SubscriptionBuilder;
 use crate::cloud_code::{self, LoadCodeAssistResult};
@@ -68,9 +67,7 @@ async fn drive_login(
     redirect_uri: String,
     target_subscription_id: Option<String>,
 ) -> UsageResult<Subscription> {
-    let code =
-        local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
-            .await?;
+    let code = local_server::wait_for_callback(CALLBACK_PORT, state, None).await?;
     let tokens = exchange_code(&code, &redirect_uri).await?;
     let access_token = tokens
         .access_token()

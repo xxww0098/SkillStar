@@ -55,9 +55,14 @@ export type GitTransportErrorCode =
 
 export type GitOperationPhase = "preparing" | "running" | "completed" | "failed" | "cancelled";
 
+/** Where an install pipeline currently is; attached to `running` progress events. */
+export type InstallStage = "resolving" | "fetching" | "discovering" | "materializing" | "deploying";
+
 /** Payload of the `skillstar://git-progress` event. It intentionally contains no URL credentials. */
 export interface GitOperationProgress {
   session_id: string;
   phase: GitOperationPhase;
   repository: string;
+  stage?: InstallStage;
+  skill?: string;
 }

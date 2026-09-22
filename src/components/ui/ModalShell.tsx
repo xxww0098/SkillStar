@@ -58,65 +58,71 @@ export function ModalShell({
       <AnimatePresence>
         {open && (
           <Dialog.Portal forceMount>
-            <Activity mode={pageActive ? "visible" : "hidden"}>
-              <Dialog.Overlay asChild>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
-                  className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
-                />
-              </Dialog.Overlay>
-              <Dialog.Content
-                asChild
-                role={role}
-                aria-modal={pageActive ? true : undefined}
-                aria-describedby={undefined}
-                onEscapeKeyDown={(event) => {
-                  // Page-level shortcuts must not receive Escape through a modal.
-                  event.stopPropagation();
-                  if (!dismissable) event.preventDefault();
-                }}
-                onPointerDownOutside={(event) => {
-                  if (!dismissable) event.preventDefault();
-                }}
-                onOpenAutoFocus={() => {
-                  returnFocusRef.current ??=
-                    document.activeElement instanceof HTMLElement ? document.activeElement : null;
-                }}
-                onCloseAutoFocus={(event) => {
-                  // Page deactivation preserves the opener without stealing the next page's focus.
-                  event.preventDefault();
-                  if (pageActiveRef.current) {
-                    returnFocusRef.current?.focus({ preventScroll: true });
-                    returnFocusRef.current = null;
-                  }
-                }}
-              >
-                <motion.div
-                  initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
-                  animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-                  exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
-                  transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
-                  className={cn("fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2", panelClassName)}
+            {/* Presence/asChild call getComputedStyle on this child. Activity is not an Element. */}
+            <div>
+              <Activity mode={pageActive ? "visible" : "hidden"}>
+                <Dialog.Overlay asChild>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
+                    className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+                  />
+                </Dialog.Overlay>
+                <Dialog.Content
+                  asChild
+                  role={role}
+                  aria-modal={pageActive ? true : undefined}
+                  aria-describedby={undefined}
+                  onEscapeKeyDown={(event) => {
+                    // Page-level shortcuts must not receive Escape through a modal.
+                    event.stopPropagation();
+                    if (!dismissable) event.preventDefault();
+                  }}
+                  onPointerDownOutside={(event) => {
+                    if (!dismissable) event.preventDefault();
+                  }}
+                  onOpenAutoFocus={() => {
+                    returnFocusRef.current ??=
+                      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                  }}
+                  onCloseAutoFocus={(event) => {
+                    // Page deactivation preserves the opener without stealing the next page's focus.
+                    event.preventDefault();
+                    if (pageActiveRef.current) {
+                      returnFocusRef.current?.focus({ preventScroll: true });
+                      returnFocusRef.current = null;
+                    }
+                  }}
                 >
-                  {/* The label reference must not duplicate the caller's accessible heading. */}
-                  <Dialog.Title hidden>{ariaLabel}</Dialog.Title>
-                  <div
-                    className={cn(variant === "subtle" ? "modal-surface-subtle" : "modal-surface", surfaceClassName)}
-                  >
-                    {variant === "default" && (
-                      <>
-                        <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-                        <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
-                      </>
+                  <motion.div
+                    initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
+                    animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+                    exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
+                    transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
+                    className={cn(
+                      "fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2",
+                      panelClassName,
                     )}
-                    <div className={cn("relative z-10", contentClassName)}>{children}</div>
-                  </div>
-                </motion.div>
-              </Dialog.Content>
-            </Activity>
+                  >
+                    {/* The label reference must not duplicate the caller's accessible heading. */}
+                    <Dialog.Title hidden>{ariaLabel}</Dialog.Title>
+                    <div
+                      className={cn(variant === "subtle" ? "modal-surface-subtle" : "modal-surface", surfaceClassName)}
+                    >
+                      {variant === "default" && (
+                        <>
+                          <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
+                          <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
+                        </>
+                      )}
+                      <div className={cn("relative z-10", contentClassName)}>{children}</div>
+                    </div>
+                  </motion.div>
+                </Dialog.Content>
+              </Activity>
+            </div>
           </Dialog.Portal>
         )}
       </AnimatePresence>

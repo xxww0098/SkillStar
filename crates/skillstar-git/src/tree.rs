@@ -13,6 +13,8 @@ const MAX_TREE_ENTRIES: usize = 100_000;
 pub struct GitTreeEntry {
     pub mode: String,
     pub kind: String,
+    /// Object id: blob hash for files, tree hash for directories.
+    pub sha: String,
     pub path: String,
 }
 
@@ -28,10 +30,30 @@ pub fn list_tree_paths_at(repo_path: &Path, revision: &str) -> Result<Vec<String
 }
 
 pub fn list_tree_entries_at(repo_path: &Path, revision: &str) -> Result<Vec<GitTreeEntry>> {
+    list_tree_entries_with_args(repo_path, revision, &["-r"])
+}
+
+/// Recursive tree entries including intermediate directory (`tree`) entries.
+///
+/// `-t` makes `ls-tree -r` also emit every subtree it walks, so callers can
+/// read each directory's tree hash without extra `rev-parse` round-trips.
+/// The extra entries are `kind == "tree"` and must be filtered out by callers
+/// that only want file paths.
+pub fn list_tree_entries_with_trees(repo_path: &Path, revision: &str) -> Result<Vec<GitTreeEntry>> {
+    list_tree_entries_with_args(repo_path, revision, &["-r", "-t"])
+}
+
+fn list_tree_entries_with_args(
+    repo_path: &Path,
+    revision: &str,
+    extra_args: &[&str],
+) -> Result<Vec<GitTreeEntry>> {
     let mut command = command_with_path("git");
     command
         .current_dir(repo_path)
-        .args(["ls-tree", "-r", "-z", revision])
+        .args(["ls-tree", "-z"])
+        .args(extra_args)
+        .arg(revision)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn().context("Failed to execute git ls-tree")?;
@@ -123,7 +145,7 @@ fn parse_tree_entry(record: &str) -> Result<GitTreeEntry> {
     let kind = header
         .next()
         .ok_or_else(|| anyhow!("git ls-tree entry has no type"))?;
-    let _object_id = header
+    let sha = header
         .next()
         .ok_or_else(|| anyhow!("git ls-tree entry has no object id"))?;
     if header.next().is_some() {
@@ -132,6 +154,7 @@ fn parse_tree_entry(record: &str) -> Result<GitTreeEntry> {
     Ok(GitTreeEntry {
         mode: mode.to_string(),
         kind: kind.to_string(),
+        sha: sha.to_string(),
         path: path.to_string(),
     })
 }
@@ -148,6 +171,7 @@ mod tests {
             GitTreeEntry {
                 mode: "100644".into(),
                 kind: "blob".into(),
+                sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 path: "SKILL.md".into(),
             }
         );
@@ -156,6 +180,12 @@ mod tests {
                 .unwrap()
                 .kind,
             "commit"
+        );
+        assert_eq!(
+            parse_tree_entry("040000 tree cccccccccccccccccccccccccccccccccccccccc\t.claude")
+                .unwrap()
+                .kind,
+            "tree"
         );
     }
 }

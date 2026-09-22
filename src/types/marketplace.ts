@@ -12,7 +12,6 @@
 //! `MarketplaceSkillDetails` below had been missing `security_audits` since the
 //! field was added on the Rust side.
 
-import type { McpPublisherSummary } from "./mcp";
 import type { Skill } from "./skill";
 
 export type { LocalFirstResult } from "./generated/LocalFirstResult";
@@ -68,18 +67,12 @@ export type ViewMode = "grid" | "list";
 
 export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "mcp" | "settings";
 
-/** Drill-down sub-page payloads; `mcp-publisher-detail` carries the generated `McpPublisherSummary` (see `./mcp`). */
+/** Drill-down sub-page payload. The MCP store no longer has one: its publishers are a scope, not a page. */
 
-export type SubPage =
-  | {
-      type: "publisher-detail";
-      publisher: OfficialPublisher;
-    }
-  | {
-      type: "mcp-publisher-detail";
-      publisher: McpPublisherSummary;
-    }
-  | null;
+export type SubPage = {
+  type: "publisher-detail";
+  publisher: OfficialPublisher;
+} | null;
 
 export interface DiscoveredSkill {
   id: string;

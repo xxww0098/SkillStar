@@ -1,8 +1,14 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { vi } from "vitest";
 // Initialize i18next (zh-CN, module side-effect) so components render real
 // strings in tests instead of raw translation keys.
 import "../i18n";
+
+// Under concurrent load (multiple test files in one vitest worker) some
+// deferred renders finish just past Testing Library's default 1000ms
+// async-util timeout. Bump it so flaky-but-correct late renders don't fail.
+configure({ asyncUtilTimeout: 5000 });
 
 // jsdom here does not expose Web Storage; many components persist UI state to
 // localStorage (view mode, My Skills scope, remote host selection). Provide an

@@ -378,6 +378,11 @@ pub struct MonthlySpendEntry {
 pub struct OAuthStartDto {
     pub pending_id: String,
     pub auth_url: String,
+    /// Seconds until the login session's browser-side wait expires; the dialog
+    /// counts this down. Absent for flows that resolve immediately.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub expires_in_secs: Option<u32>,
 }
 
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`

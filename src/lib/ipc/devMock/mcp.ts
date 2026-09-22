@@ -1,24 +1,26 @@
 /**
  * Dev-mock fragment: MCP — managed servers, tool sync statuses, presets, health
  * probes, catalog sources, and the MCP marketplace. Sample data lives in
- * ./mcpData.ts.
+ * ./mcpData.ts (store side) and ./mcpMarketData.ts (catalog side).
  */
 
 import {
-  MCP_MARKET,
-  MCP_MARKET_DETAILS,
   MCP_PRESETS,
   MCP_SOURCE_SYNC_STATES,
   MCP_SOURCES,
   MCP_STORE,
   MCP_TOOL_STATUSES,
+  mcpProbeReport,
+  parseMcpPaste,
+} from "./mcpData";
+import {
+  MCP_MARKET,
+  MCP_MARKET_DETAILS,
   mcpInstallOutcome,
   mcpInstallPlan,
   mcpInstallPreview,
   mcpMarketPage,
-  mcpProbeReport,
-  parseMcpPaste,
-} from "./mcpData";
+} from "./mcpMarketData";
 import { type DevMockHandlers, iso } from "./shared";
 
 const arg = (args: Record<string, unknown> | undefined, key: string) => String((args?.[key] as string) ?? "");
@@ -34,6 +36,20 @@ export const MCP_HANDLERS: DevMockHandlers = {
   parse_mcp_paste: (args) => parseMcpPaste(arg(args, "text")),
 
   // MCP marketplace
+  list_mcp_publishers_local: () => [
+    ...["core", "context", "browser"].map((shelf) => ({
+      id: shelf,
+      name: shelf[0].toUpperCase() + shelf.slice(1),
+      serverCount: MCP_MARKET.filter((m) => m.source === shelf).length,
+      url: "https://github.com/modelcontextprotocol/servers",
+    })),
+    {
+      id: "github",
+      name: "GitHub",
+      serverCount: MCP_MARKET.filter((m) => !m.source).length,
+      url: "https://github.com/modelcontextprotocol",
+    },
+  ],
   query_mcp_market_servers_local: (args) => ({
     data: mcpMarketPage((args?.query as Record<string, unknown>) ?? {}),
     snapshot_status: "fresh",

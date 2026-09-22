@@ -25,6 +25,7 @@
 pub mod agents;
 pub mod content;
 mod content_copy;
+mod content_stats;
 pub mod discovery;
 pub mod git;
 pub mod git_skill;
@@ -49,6 +50,7 @@ pub mod skill_install;
 #[cfg(test)]
 mod skill_install_removal_tests;
 pub mod skill_update;
+mod tarball_fetch;
 pub mod update_api;
 pub mod update_checker;
 pub mod update_state;

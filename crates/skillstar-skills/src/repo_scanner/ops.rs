@@ -5,7 +5,7 @@ use anyhow::{Context, Result, anyhow};
 use skillstar_core::infra::fs_ops;
 use std::path::Path;
 
-use super::cache::{discover_skill_dirs_from_tree, is_sparse_checkout};
+use super::cache::is_sparse_checkout;
 
 /// Pull a repo-cached skill's backing repository to the tracked ref and return
 /// the tree hash the skill now sits at.
@@ -41,25 +41,21 @@ pub fn pull_repo_skill_update_in_session(
     git_ops::checkout_in_session(&repo_root, &["reset", "--hard", reset_target], session)
         .context("Failed to execute git reset for repo-cached update")?;
 
-    if is_sparse_checkout(&repo_root)
-        && let Ok(mut dirs) = discover_skill_dirs_from_tree(&repo_root)
-    {
-        if dirs.is_empty() {
-            let _ =
-                git_ops::checkout_in_session(&repo_root, &["sparse-checkout", "disable"], session);
-            let _ = git_ops::checkout_in_session(&repo_root, &["checkout"], session);
-        } else {
-            // Discovery chooses one canonical provider path for each Skill
-            // name. That is right for a new install, but an existing install
-            // is bound to its lockfile source_folder. Keep every installed
-            // source materialized even when the remote adds a higher/equal
-            // priority duplicate path; otherwise its Hub link briefly dangles
-            // and the update is falsely reported as source removal.
-            dirs.extend(installed_source_folders);
-            dirs.sort();
-            dirs.dedup();
-            let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-            let _ = git_ops::apply_sparse_checkout_in_session(&repo_root, &dir_refs, session);
+    if is_sparse_checkout(&repo_root) {
+        // The plan keeps every installed source folder materialized (an
+        // existing install is bound to its lockfile source_folder even when
+        // the remote adds a higher-priority duplicate path) and leaves
+        // duplicate harness copies deferred.
+        if let Ok(plan) = super::inventory::load_or_plan(&repo_root, session, &installed_source_folders)
+        {
+            if plan.sparse_dirs.is_empty() {
+                let _ =
+                    git_ops::checkout_in_session(&repo_root, &["sparse-checkout", "disable"], session);
+                let _ = git_ops::checkout_in_session(&repo_root, &["checkout"], session);
+            } else {
+                let dir_refs: Vec<&str> = plan.sparse_dirs.iter().map(String::as_str).collect();
+                let _ = git_ops::apply_sparse_checkout_in_session(&repo_root, &dir_refs, session);
+            }
         }
     }
 
@@ -69,7 +65,7 @@ pub fn pull_repo_skill_update_in_session(
     }
 }
 
-fn installed_source_folders(repo_root: &Path) -> Result<Vec<String>> {
+pub(super) fn installed_source_folders(repo_root: &Path) -> Result<Vec<String>> {
     let canonical_repo = std::fs::canonicalize(repo_root)
         .with_context(|| format!("failed to resolve repo cache '{}'", repo_root.display()))?;
     let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())

@@ -104,6 +104,24 @@ fn build_inner(
             }
             curated_branch(ranked, Some(curated), params)
         }
+        // The two unscoped flags are mutually exclusive. Arm order *is* the
+        // priority and matches the contract documented on `McpServerQuery`:
+        // if both are set, `curated_only` wins. Do not reorder these arms.
+        // Official tab: SkillStar-curated rows, no remote registry.
+        None if query.curated_only => {
+            if let Some(expr) = match_expr {
+                params.push(SqlValue::Text(expr.to_string()));
+            }
+            curated_branch(ranked, None, params)
+        }
+        // Catalog tab: remote registries only. Curated servers belong
+        // under Official publishers, not the 21k browse grid.
+        None if query.registry_only => {
+            if let Some(expr) = match_expr {
+                params.push(SqlValue::Text(expr.to_string()));
+            }
+            registry_branch(ranked)
+        }
         None => {
             if let Some(expr) = match_expr {
                 params.push(SqlValue::Text(expr.to_string()));

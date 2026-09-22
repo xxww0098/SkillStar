@@ -226,7 +226,11 @@ fn advance_checkout_past_dropped_alpha(remote: &Path, cache: &Path) {
         "cache must sit on the drop-alpha commit, not a stale origin/HEAD"
     );
     assert!(
-        git_stdout(cache, &["ls-tree", "--name-only", "HEAD", "--", "skills/alpha"]).is_empty(),
+        git_stdout(
+            cache,
+            &["ls-tree", "--name-only", "HEAD", "--", "skills/alpha"]
+        )
+        .is_empty(),
         "the drop commit must not still ship skills/alpha"
     );
 
@@ -261,8 +265,7 @@ fn advance_checkout_past_dropped_alpha(remote: &Path, cache: &Path) {
         hub_alpha.display()
     );
     assert!(
-        skillstar_core::infra::fs_ops::is_link(&hub_alpha)
-            || hub_alpha.symlink_metadata().is_ok(),
+        skillstar_core::infra::fs_ops::is_link(&hub_alpha) || hub_alpha.symlink_metadata().is_ok(),
         "SourceMissing is a dangling managed link, not a missing hub row"
     );
 }

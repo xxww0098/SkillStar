@@ -110,11 +110,36 @@ pub enum GitOperationPhase {
     Cancelled,
 }
 
+/// Where an install/scan pipeline currently is, beyond git's coarse
+/// Preparing/Running phases. Emitted alongside `phase: Running` so existing
+/// listeners keep working and new ones can show a stage label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallStage {
+    /// Resolving the source and checking the local cache.
+    Resolving,
+    /// Cloning or fetching the repository.
+    Fetching,
+    /// Scanning the checkout for skills.
+    Discovering,
+    /// Writing hub links and lock entries.
+    Materializing,
+    /// Linking the skill into agent directories.
+    Deploying,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GitOperationProgress {
     pub session_id: String,
     pub phase: GitOperationPhase,
     pub repository: String,
+    /// Install-pipeline stage for `Running` events; absent for plain git
+    /// operations, so older listeners see an unchanged payload shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<InstallStage>,
+    /// Skill name the stage belongs to, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
 }
 
 pub trait GitProgressSink: Send + Sync {
@@ -175,6 +200,20 @@ impl GitOperationSession {
             session_id: self.id().to_string(),
             phase,
             repository: safe_repository_label(remote),
+            stage: None,
+            skill: None,
+        });
+    }
+
+    /// Emit an install-pipeline stage: a `Running` phase enriched with where
+    /// the pipeline is. `remote` doubles as the repository label.
+    pub fn emit_stage(&self, stage: InstallStage, remote: &str, skill: Option<&str>) {
+        self.progress.emit(GitOperationProgress {
+            session_id: self.id().to_string(),
+            phase: GitOperationPhase::Running,
+            repository: safe_repository_label(remote),
+            stage: Some(stage),
+            skill: skill.map(str::to_string),
         });
     }
 

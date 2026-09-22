@@ -4,7 +4,7 @@
 //! These all answer the same question from different angles — after something
 //! goes wrong, is the user's data still what it was?
 
-use super::tests_targets::{TempDir, SANDBOX_HOME_TEST_LOCK};
+use super::tests_targets::{SANDBOX_HOME_TEST_LOCK, TempDir};
 use super::*;
 use serde_json::Value;
 
@@ -538,6 +538,19 @@ fn the_hermes_config_path_resolves_inside_the_sandbox_home() {
     assert!(path.is_absolute(), "{path:?}");
     assert!(path.ends_with(".hermes/config.yaml"), "{path:?}");
     assert_eq!(path, resolve_mcp_config_path("hermes").unwrap());
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "{path:?} escaped the tool-sync sandbox"
+    );
+}
+
+/// DeepSeek Harness lives under `~/.dsh/cordis.patch.yml` inside the sandbox home.
+#[test]
+fn the_deepseek_config_path_resolves_inside_the_sandbox_home() {
+    let path = resolve_deepseek_config_path().unwrap();
+    assert!(path.is_absolute(), "{path:?}");
+    assert!(path.ends_with(".dsh/cordis.patch.yml"), "{path:?}");
+    assert_eq!(path, resolve_mcp_config_path("deepseek").unwrap());
     assert!(
         path.starts_with(std::env::temp_dir()),
         "{path:?} escaped the tool-sync sandbox"

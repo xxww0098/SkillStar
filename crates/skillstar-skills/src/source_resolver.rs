@@ -104,11 +104,13 @@ fn parse_local_source(
 ) -> Result<Source> {
     let path = if let Some(rest) = input.strip_prefix("file://") {
         let rest = rest.strip_prefix("//").unwrap_or(rest);
-        PathBuf::from(if rest.len() >= 2 && rest.as_bytes()[1] == b':' || rest.starts_with('/') {
-            rest.to_string()
-        } else {
-            format!("/{rest}")
-        })
+        PathBuf::from(
+            if rest.len() >= 2 && rest.as_bytes()[1] == b':' || rest.starts_with('/') {
+                rest.to_string()
+            } else {
+                format!("/{rest}")
+            },
+        )
     } else {
         PathBuf::from(input)
     };

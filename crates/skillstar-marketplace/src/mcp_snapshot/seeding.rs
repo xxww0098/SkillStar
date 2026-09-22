@@ -3,10 +3,11 @@
 //! Curated rows are *code as data*: `seeds::default_curated_mcp_servers()` is
 //! the source of truth and this upsert makes the table match it, so a curated
 //! row can be edited freely — only its `id` (primary key + publisher bucket)
-//! is a contract.
+//! is a contract. Rows whose ids have left the registry are deleted, including
+//! FTS, so a removed publisher cannot linger on Official.
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter};
 
 use super::{now_rfc3339, seeds};
 
@@ -70,6 +71,7 @@ pub(crate) fn seed_default_curated_mcp_servers(conn: &Connection) -> Result<()> 
             )
             .context("Failed to prepare curated MCP FTS insert")?;
         let fetched_at = now_rfc3339();
+        let seed_ids: Vec<String> = seeds.iter().map(|seed| seed.server.id.clone()).collect();
         for seed in seeds {
             let server = seed.server;
             let runtimes_json =
@@ -128,8 +130,38 @@ pub(crate) fn seed_default_curated_mcp_servers(conn: &Connection) -> Result<()> 
                 ])
                 .context("Failed to index curated MCP seed")?;
         }
+        prune_retired_curated_rows(&tx, &seed_ids)?;
     }
     tx.commit()
         .context("Failed to commit curated MCP seed transaction")?;
+    Ok(())
+}
+
+/// Delete every curated row whose id is no longer in `seed_ids`, plus its FTS
+/// row, so a removed publisher cannot linger on Official. When `seed_ids` is
+/// empty the curated tables are wiped entirely — the code registry dropped
+/// every curated entry. Ids are always bound, never interpolated into the SQL
+/// text, so an empty list cannot produce the invalid `id NOT IN ()`.
+pub(crate) fn prune_retired_curated_rows(conn: &Connection, seed_ids: &[String]) -> Result<()> {
+    if seed_ids.is_empty() {
+        conn.execute("DELETE FROM mcp_curated_server_fts", [])
+            .context("Failed to clear retired curated MCP FTS rows")?;
+        conn.execute("DELETE FROM mcp_curated_server", [])
+            .context("Failed to clear retired curated MCP rows")?;
+        return Ok(());
+    }
+    let placeholders = std::iter::repeat_n("?", seed_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    conn.execute(
+        &format!("DELETE FROM mcp_curated_server_fts WHERE id NOT IN ({placeholders})"),
+        params_from_iter(seed_ids.iter()),
+    )
+    .context("Failed to drop retired curated MCP FTS rows")?;
+    conn.execute(
+        &format!("DELETE FROM mcp_curated_server WHERE id NOT IN ({placeholders})"),
+        params_from_iter(seed_ids.iter()),
+    )
+    .context("Failed to drop retired curated MCP rows")?;
     Ok(())
 }

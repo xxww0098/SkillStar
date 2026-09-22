@@ -14,12 +14,13 @@ import {
 } from "lucide-react";
 
 import { Popover } from "radix-ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "../../lib/toast";
 import { cn } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
 import { AgentFilterPill } from "../ui/AgentFilterPill";
+import { SearchInput } from "../ui/SearchInput";
 import { ViewToggle } from "../ui/ViewToggle";
 import { PageToolbar } from "./PageToolbar";
 import { type SpotlightSearchItem, SpotlightSearch } from "./SpotlightSearch";
@@ -45,7 +46,8 @@ interface ToolbarProps {
   isRefreshing?: boolean;
   /** Optional count label shown in toolbar (e.g. "12 cards") */
   countText?: React.ReactNode;
-  /** Number of cards with available updates */
+  /** Number of cards with content updates — drives the "update all" CTA,
+   *  which never touches removed / renamed skills. */
   pendingUpdateCount?: number;
   /** Hide the "Stars" sort option */
   hideStarsSort?: boolean;
@@ -65,7 +67,10 @@ interface ToolbarProps {
   actionsLead?: React.ReactNode;
   /** Optional search placeholder override */
   searchPlaceholder?: string;
-  /** Candidates for Spotlight result list (filtered client-side by query). */
+  /** Candidates for Spotlight result list (filtered client-side by query).
+   *  Providing `onSearchSelect` switches the search slot into Spotlight mode
+   *  (compact trigger + ⌘F overlay); without it the slot is an always-visible
+   *  inline input like the MCP pages. */
   searchItems?: SpotlightSearchItem[];
   /** Open detail / focus a result selected from Spotlight. */
   onSearchSelect?: (id: string) => void;
@@ -91,10 +96,15 @@ interface ToolbarProps {
   onReinstallRepoSource?: (source: string) => void;
   /** Source currently being reinstalled, if any. */
   reinstallingRepoSource?: string | null;
-  /** Updatable skills inside the current search/source filters — the number on
-   *  the filter chip, so it can never promise more than the filter will show.
-   *  Falls back to `pendingUpdateCount` when the caller has no filters. */
-  filteredUpdateCount?: number;
+  /** Skills needing attention overall (content updates + removed / renamed
+   *  upstream) — the same predicate as the sidebar badge; drives this group's
+   *  visibility so the badge and the filter can never disagree. */
+  attentionCount?: number;
+  /** Skills needing attention inside the current search/source filters — the
+   *  number on the filter chip, so it can never promise more than the filter
+   *  will show. Falls back to `attentionCount`, then `pendingUpdateCount`
+   *  when the caller tracks nothing else. */
+  filteredAttentionCount?: number;
   /** Whether "only updates" filter is active */
   onlyUpdatesFilter?: boolean;
   /** Callback when "only updates" filter changes */
@@ -138,7 +148,8 @@ export function Toolbar({
   onRemoveRepoSource,
   onReinstallRepoSource,
   reinstallingRepoSource,
-  filteredUpdateCount,
+  attentionCount,
+  filteredAttentionCount,
   onlyUpdatesFilter,
   onOnlyUpdatesFilterChange,
 }: ToolbarProps) {
@@ -148,7 +159,8 @@ export function Toolbar({
 
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
   const hasPendingUpdates = (pendingUpdateCount ?? 0) > 0;
-  const chipUpdateCount = filteredUpdateCount ?? pendingUpdateCount ?? 0;
+  const hasAttention = (attentionCount ?? pendingUpdateCount ?? 0) > 0;
+  const chipAttentionCount = filteredAttentionCount ?? attentionCount ?? pendingUpdateCount ?? 0;
 
   const [cooldown, setCooldown] = useState(false);
   const [refreshState, setRefreshState] = useState<"idle" | "requested" | "refreshing">("idle");
@@ -208,7 +220,10 @@ export function Toolbar({
     setOriginOpen(false);
   };
 
-  // ⌘F / Ctrl+F opens Spotlight; bare `/` when not typing in an input.
+  // ⌘F / Ctrl+F opens Spotlight (spotlight mode) or focuses the inline filter;
+  // bare `/` does the same when not typing in an input.
+  const hasSpotlight = Boolean(onSearchSelect);
+  const inlineSearchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
@@ -217,21 +232,28 @@ export function Toolbar({
 
       if (meta && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        setSpotlightOpen(true);
+        if (hasSpotlight) {
+          setSpotlightOpen(true);
+        } else {
+          inlineSearchRef.current?.focus();
+          inlineSearchRef.current?.select();
+        }
         return;
       }
 
       if (!isInput && !meta && !e.altKey && e.key === "/") {
         e.preventDefault();
-        setSpotlightOpen(true);
+        if (hasSpotlight) setSpotlightOpen(true);
+        else inlineSearchRef.current?.focus();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [hasSpotlight]);
 
-  // ── Search slot: compact trigger + Spotlight overlay ──
-  const searchSlot = (
+  // ── Search slot: Spotlight trigger + overlay when the consumer wants
+  //    jump-to-detail, otherwise an always-visible inline filter ──
+  const searchSlot = hasSpotlight ? (
     <>
       <div className="flex items-center gap-1 shrink-0">
         <button
@@ -295,6 +317,16 @@ export function Toolbar({
         aiSearching={aiSearching}
       />
     </>
+  ) : (
+    <SearchInput
+      ref={inlineSearchRef}
+      containerClassName="w-64"
+      value={searchQuery}
+      onChange={(event) => onSearchChange(event.target.value)}
+      placeholder={searchPlaceholder ?? t("toolbar.searchPlaceholder")}
+      className="h-8 bg-sidebar/50 text-xs focus-visible:bg-background"
+      iconClassName="left-2.5"
+    />
   );
 
   // ── Filters slot ──
@@ -303,7 +335,11 @@ export function Toolbar({
       {filtersLead}
       {/* Agent filter */}
       {enabledProfiles.length > 0 && onAgentFilterChange && (
-        <AgentFilterPill items={enabledProfiles} value={agentFilter ?? null} onChange={onAgentFilterChange} />
+        <AgentFilterPill
+          items={enabledProfiles.map((profile) => ({ id: profile.id, profile }))}
+          value={agentFilter ?? null}
+          onChange={onAgentFilterChange}
+        />
       )}
 
       {/* Unified origin filter: source type (Hub / Local) + repo source, with count inlined */}
@@ -583,16 +619,19 @@ export function Toolbar({
         </div>
       )}
 
-      {/* Updates filter & action group */}
-      {(hasPendingUpdates || onlyUpdatesFilter) && (
-        <div className="flex items-center h-8 rounded-lg border border-amber-500/45 bg-background/70 backdrop-blur-md shadow-xs overflow-hidden shrink-0">
+      {/* Attention filter & update-all group — visible whenever anything needs
+          attention (updates, removed or renamed upstream), matching the sidebar
+          badge. Amber is the signal only (edge, icons, count); fills appear on
+          hover / when the filter is pressed. The CTA stays content-updates-only. */}
+      {(hasAttention || onlyUpdatesFilter) && (
+        <div className="flex items-center h-8 rounded-lg border border-amber-500/30 bg-background/60 backdrop-blur-md shadow-2xs overflow-hidden shrink-0">
           {/* Filter toggle */}
           {onOnlyUpdatesFilterChange ? (
             <button
               type="button"
               onClick={() => onOnlyUpdatesFilterChange(!onlyUpdatesFilter)}
               aria-pressed={onlyUpdatesFilter}
-              aria-label={t("toolbar.updateFilterLabel", { count: chipUpdateCount })}
+              aria-label={t("toolbar.updateFilterLabel", { count: chipAttentionCount })}
               title={
                 onlyUpdatesFilter
                   ? t("toolbar.showAllSkills", { defaultValue: "Show all skills" })
@@ -601,39 +640,46 @@ export function Toolbar({
               className={cn(
                 "flex items-center h-full gap-1.5 px-2.5 text-xs font-medium cursor-pointer transition-colors focus-ring whitespace-nowrap select-none",
                 onlyUpdatesFilter
-                  ? "bg-amber-500 text-amber-950 font-bold shadow-xs"
-                  : "bg-amber-500/15 text-amber-300 paper:text-amber-800 font-semibold hover:bg-amber-500/25",
+                  ? "bg-amber-500 text-amber-950 font-semibold"
+                  : "text-foreground/75 hover:bg-amber-500/10 hover:text-foreground",
               )}
             >
               <ListFilter
                 className={cn(
                   "w-3.5 h-3.5 shrink-0",
-                  onlyUpdatesFilter ? "text-amber-950" : "text-amber-400 paper:text-amber-700",
+                  onlyUpdatesFilter ? "text-amber-950" : "text-amber-500 paper:text-amber-600",
                 )}
               />
-              <span className="tabular-nums font-bold">{chipUpdateCount}</span>
-              {onlyUpdatesFilter && <X className="w-3 h-3 ml-0.5 opacity-85 hover:opacity-100" />}
+              <span
+                className={cn(
+                  "tabular-nums font-semibold",
+                  !onlyUpdatesFilter && "text-amber-500 paper:text-amber-600",
+                )}
+              >
+                {chipAttentionCount}
+              </span>
+              {onlyUpdatesFilter && <X className="w-3 h-3 ml-0.5 opacity-80" />}
             </button>
           ) : null}
 
           {/* Update all action */}
           {onUpdateAll && hasPendingUpdates && (
             <>
-              {onOnlyUpdatesFilterChange && <div className="w-px h-4 bg-amber-500/40 shrink-0" />}
+              {onOnlyUpdatesFilterChange && <div className="w-px h-4 bg-amber-500/25 shrink-0" />}
               <button
                 type="button"
                 onClick={onUpdateAll}
                 disabled={isUpdatingAll}
                 title={t("toolbar.updateAllAction", { defaultValue: "Update all" })}
                 className={cn(
-                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-semibold bg-amber-500/20 text-amber-200 paper:text-amber-900 hover:bg-amber-500/30 transition-colors cursor-pointer focus-ring whitespace-nowrap select-none",
+                  "flex items-center h-full gap-1.5 px-2.5 text-xs font-semibold text-amber-500 paper:text-amber-700 hover:bg-amber-500/15 transition-colors cursor-pointer focus-ring whitespace-nowrap select-none",
                   isUpdatingAll && "opacity-60 cursor-not-allowed",
                 )}
               >
                 {isUpdatingAll ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400 paper:text-amber-700" />
+                  <ArrowUpCircle className="w-3.5 h-3.5" />
                 )}
                 <span>{isUpdatingAll ? t("common.updating") : t("toolbar.updateAllAction")}</span>
               </button>

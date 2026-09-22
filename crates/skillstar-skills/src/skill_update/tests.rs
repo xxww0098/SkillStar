@@ -613,3 +613,34 @@ mod advanced;
 
 #[path = "tests/source_dropped.rs"]
 mod source_dropped;
+
+#[test]
+fn repo_cache_locks_are_independent_per_repository() {
+    let hub = TestHub::new();
+    let repo_a = acquire_repo_cache_lock("owner--repo-a").expect("repo A locks");
+    // A different repository's cache work must proceed while A is held —
+    // that independence is what keeps a slow fetch from serializing other
+    // installs.
+    let repo_b = acquire_repo_cache_lock("owner--repo-b").expect("repo B locks concurrently");
+    drop(repo_b);
+
+    // Relocking after release must work (the flock releases with the guard).
+    drop(repo_a);
+    let same_again = acquire_repo_cache_lock("owner--repo-a").expect("relock after release works");
+    drop(same_again);
+    drop(hub);
+}
+
+#[test]
+fn same_repo_cache_lock_blocks_until_released() {
+    let hub = TestHub::new();
+    let held = acquire_repo_cache_lock("owner--blocking").expect("initial lock");
+    let waiter = std::thread::spawn(|| {
+        acquire_repo_cache_lock("owner--blocking").expect("acquires after release");
+    });
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(!waiter.is_finished(), "second holder must block, not steal");
+    drop(held);
+    waiter.join().expect("waiter thread must finish");
+    drop(hub);
+}

@@ -86,7 +86,8 @@
       "!!**/.vscode",
       "!!.claude",
       "!!**/src/types/generated",
-      "!!**/tool_sync/tests/golden_v3"
+      "!!**/tool_sync/tests/golden_v3",
+      "!!**/graft"
     ]
   }
 }

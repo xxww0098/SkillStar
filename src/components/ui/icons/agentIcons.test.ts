@@ -78,6 +78,7 @@ const BUILTIN_AGENT_IDS = [
   "adal",
   "universal",
   "grok",
+  "workbuddy",
 ] as const;
 
 describe("Agent icon registry", () => {

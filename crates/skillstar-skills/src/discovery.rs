@@ -220,6 +220,7 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".cortex/skills",
     ".crush/skills",
     ".cursor/skills",
+    ".devin/skills",
     ".dsh/skills",
     ".factory/skills",
     ".github/skills",
@@ -243,6 +244,7 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".trae/skills",
     ".vibe/skills",
     ".windsurf/skills",
+    ".workbuddy/skills",
     ".zencoder/skills",
     ".adal/skills",
 ];

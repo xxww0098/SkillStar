@@ -19,26 +19,38 @@ const MARKET_STALE_TIME_MS = 60_000;
 const SEARCH_DEBOUNCE_MS = 200;
 
 export interface UseMcpMarketPageOptions {
-  /** Scope to one publisher bucket; omit for the whole merged catalog. */
+  /** Scope to one publisher bucket (`"github"` = the remote registry table). */
   publisherId?: string | null;
+  /**
+   * Curated store scope: curated rows only. An unscoped call without this flag
+   * still sends `registryOnly` so a bare browse cannot mix curated rows
+   * into the remote-registry table.
+   */
+  curatedOnly?: boolean;
   pageSize?: number;
   enabled?: boolean;
 }
 
 /**
- * Paginated, filtered, sorted browse over the merged MCP catalog.
+ * Paginated, filtered, sorted browse over the curated store or one publisher.
  *
- * The catalog is ~21k rows across all sources, so this is the only supported
- * browse path: every filter and the sort order compile into one
+ * The remote registry is ~21k rows, so this is the only supported browse
+ * path: every filter and the sort order compile into one
  * `query_mcp_market_servers_local` call, and the page carries the
  * pre-pagination `total` so "showing 1–60 of 21363" needs no second round trip.
- * The unpaginated `list_mcp_*` commands remain appropriate only for small
- * publisher buckets.
+ * The store's curated scope sends `curatedOnly`; its full-catalog scope passes
+ * `publisherId: "github"` (the remote-registry table). The unpaginated
+ * `list_mcp_*` commands remain appropriate only for small publisher buckets.
  *
  * `keepPreviousData` keeps the current page on screen while the next one
  * loads — paging through a catalog that blanks between pages reads as breakage.
  */
-export function useMcpMarketPage({ publisherId = null, pageSize, enabled = true }: UseMcpMarketPageOptions = {}) {
+export function useMcpMarketPage({
+  publisherId = null,
+  curatedOnly = false,
+  pageSize,
+  enabled = true,
+}: UseMcpMarketPageOptions = {}) {
   const limit = pageSize ?? DEFAULT_MCP_PAGE_SIZE;
   const [filters, setFilters] = useState<McpMarketFilterState>(DEFAULT_MCP_MARKET_FILTERS);
   const [offset, setOffset] = useState(0);
@@ -50,8 +62,16 @@ export function useMcpMarketPage({ publisherId = null, pageSize, enabled = true 
   );
 
   const query = useMemo(
-    () => buildMcpServerQuery({ filters: queryFilters, limit, offset, publisherId }),
-    [queryFilters, limit, offset, publisherId],
+    () =>
+      buildMcpServerQuery({
+        filters: queryFilters,
+        limit,
+        offset,
+        publisherId,
+        curatedOnly,
+        registryOnly: !publisherId && !curatedOnly,
+      }),
+    [queryFilters, limit, offset, publisherId, curatedOnly],
   );
 
   const pageQuery = useQuery<LocalFirstResult<McpServerPage>>({
@@ -87,7 +107,6 @@ export function useMcpMarketPage({ publisherId = null, pageSize, enabled = true 
       queryClient.invalidateQueries({ queryKey: mcpKeys.market() });
       queryClient.invalidateQueries({ queryKey: mcpKeys.sourceSyncStates() });
       queryClient.invalidateQueries({ queryKey: mcpKeys.marketSyncStates() });
-      queryClient.invalidateQueries({ queryKey: mcpKeys.publishers() });
     },
   });
 

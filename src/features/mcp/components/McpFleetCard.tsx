@@ -1,14 +1,13 @@
-import { ArrowUpCircle, Globe, RefreshCw, Terminal, Zap } from "lucide-react";
+import { ArrowUpCircle, Globe, Terminal, Zap } from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
-import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/utils";
 import type { McpServerEntry, McpToolId } from "../../../types";
 import type { McpProbeEntry } from "../hooks/useMcpProbe";
 import type { McpAgentTarget } from "../lib/agentTargets";
 import { MCP_FLEET_STATUS_DOT, type McpFleetStatus, mcpFleetStatus } from "../lib/fleetStatus";
-import { formatSchemaTokens, mcpServerCommandLine } from "../lib/pasteDraft";
+import { mcpServerCommandLine } from "../lib/pasteDraft";
 
 export interface McpFleetCardProps {
   server: McpServerEntry;
@@ -18,8 +17,6 @@ export interface McpFleetCardProps {
   probe?: McpProbeEntry;
   onOpen: () => void;
   onToggleTool: (toolId: McpToolId, enabled: boolean) => void;
-  onProbe?: () => void;
-  compact?: boolean;
 }
 
 function statusColorClass(status: McpFleetStatus): string {
@@ -39,24 +36,13 @@ function statusColorClass(status: McpFleetStatus): string {
   }
 }
 
-function McpFleetCardInner({
-  server,
-  agentTargets,
-  updateVersion,
-  probe,
-  onOpen,
-  onToggleTool,
-  onProbe,
-  compact,
-}: McpFleetCardProps) {
+function McpFleetCardInner({ server, agentTargets, updateVersion, probe, onOpen, onToggleTool }: McpFleetCardProps) {
   const { t } = useTranslation();
   const isRemote = server.transport === "http" || server.transport === "sse";
   const TransportIcon = isRemote ? Globe : Terminal;
   const status = mcpFleetStatus(probe ?? { report: null, error: null, pending: false });
   const summary = mcpServerCommandLine(server);
-  const probing = status === "probing";
-  const toolsCount = probe?.report?.tools?.length ?? 0;
-  const schemaTokens = probe?.report?.schemaTokens;
+  const hasAgentRail = agentTargets.some(({ profile }) => profile.enabled);
 
   return (
     <div
@@ -64,12 +50,11 @@ function McpFleetCardInner({
       className={cn(
         "group relative h-full flex flex-col justify-between overflow-hidden rounded-xl border border-border bg-card cursor-pointer transition-all duration-200",
         "hover:bg-card-hover hover:border-primary/40 hover:-translate-y-px hover:shadow-[0_8px_24px_-12px_var(--color-shadow)]",
-        compact && "p-2",
       )}
     >
       {/* Top Card Body */}
       <div className="p-3.5 pb-2.5 flex-1 flex flex-col gap-2">
-        {/* Header Row: Avatar + Title/Badges + Action Slot */}
+        {/* Header Row: Avatar + Title/Badges */}
         <div className="flex items-start gap-2.5 min-w-0">
           {/* Avatar with transport icon & status dot */}
           <div className="relative shrink-0 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 group-hover:border-primary/40 transition-colors">
@@ -132,25 +117,6 @@ function McpFleetCardInner({
               </span>
             </div>
           </div>
-
-          {/* Action Slot: Probe button */}
-          {onProbe ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0"
-              onClick={(event) => {
-                event.stopPropagation();
-                onProbe();
-              }}
-              disabled={probing}
-              aria-label={t("mcp.fleetProbeAria", { name: server.name })}
-              title={t("mcp.probeRun")}
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", probing && "animate-spin text-primary")} />
-            </Button>
-          ) : null}
         </div>
 
         {/* Description or command line preview */}
@@ -166,28 +132,10 @@ function McpFleetCardInner({
         </p>
       </div>
 
-      {/* Footer / Capability & Cost + Agent Target Rail */}
-      <div className="flex min-h-[42px] items-center justify-between gap-2 rounded-b-xl border-t border-border/40 bg-muted/30 px-3.5 py-2">
-        <div className="flex shrink-0 items-center gap-1.5 min-w-0 text-[11px] font-semibold text-muted-foreground tabular-nums">
-          {status === "ok" && (toolsCount > 0 || schemaTokens) ? (
-            <>
-              {toolsCount > 0 ? <span>{t("mcp.probeTools", { count: toolsCount })}</span> : null}
-              {toolsCount > 0 && schemaTokens ? <span>·</span> : null}
-              {schemaTokens ? (
-                <span>{t("mcp.cardSchemaTokens", { tokens: formatSchemaTokens(schemaTokens) })}</span>
-              ) : null}
-            </>
-          ) : status === "probing" ? (
-            <span className="text-primary text-[11px] font-medium">{t("mcp.probeRunning")}</span>
-          ) : status !== "ok" && status !== "unknown" ? (
-            <span className={cn("text-[11px] font-medium truncate max-w-[120px]", statusColorClass(status))}>
-              {t(`mcp.fleetStatus_${status}`)}
-            </span>
-          ) : null}
-        </div>
-
-        {agentTargets.length > 0 ? (
-          <div className="relative z-10 flex min-w-0 flex-1 items-center justify-end">
+      {/* Footer / Agent Target Rail */}
+      {hasAgentRail ? (
+        <div className="flex min-h-[42px] items-center rounded-b-xl border-t border-border/40 bg-muted/30 px-3.5 py-2">
+          <div className="relative z-10 flex min-w-0 flex-1 items-center overflow-hidden">
             <AgentTargetCarousel
               items={agentTargets.map(({ toolId, profile }) => {
                 const selected = server.enabled[toolId] ?? false;
@@ -203,8 +151,8 @@ function McpFleetCardInner({
               }}
             />
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

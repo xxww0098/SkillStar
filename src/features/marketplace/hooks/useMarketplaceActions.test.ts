@@ -81,6 +81,7 @@ describe("useMarketplaceActions", () => {
         "https://github.com/example/writing-plans",
         "writing-plans",
         "cursor",
+        expect.any(Function),
       );
     });
 
@@ -99,6 +100,7 @@ describe("useMarketplaceActions", () => {
         "https://github.com/example/writing-plans",
         "writing-plans",
         undefined,
+        expect.any(Function),
       );
 
       // installingNames add then remove (start + finally)
@@ -376,6 +378,7 @@ describe("useMarketplaceActions", () => {
         "https://github.com/example/writing-plans",
         "writing-plans",
         undefined,
+        expect.any(Function),
       );
     });
 

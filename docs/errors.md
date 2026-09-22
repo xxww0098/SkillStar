@@ -2,6 +2,27 @@
 
 状态：active
 
+## 2026-09-12 - MCP 筛选条的 Claude Code 图标退回通用 LobeHub 字标
+
+- Symptom: MCP 配置页工具栏的 Agent 筛选芯片里，Claude Code 和 VS Code 显示成灰色通用字标，而不是品牌图标；同一批目标在机群卡片底栏却正常。
+- Root cause: `AgentFilterPill` 的条目类型是 `Pick<AgentProfile, "id" | "icon" | "display_name">`，`AgentIcon` 按 `profile.id` 查 `agentIcons` 表；MCP 传进来的 `id` 是 `McpToolId`（`claude-code` / `vscode`），与 Agent profile id（`claude` / `github-copilot`）拼写不同的那两个目标查表落空，静默降级成 `LobeHubMono`。机群卡片走 `AgentTargetCarousel`，`id` 与 `profile` 本就分离，所以同一目标在那里正常。
+- Fix: 条目契约拆成消费方的筛选值 `id` 与品牌来源 `profile`（与 `AgentTargetCarouselItem` 同一形状；旧的 `{ id, icon, display_name }` 形状已无法通过类型检查）；Skills 工具栏传 `{ id: profile.id, profile }`，MCP 传 `{ id: toolId, profile }`。
+- Self-check: `bun run test src/components/ui/AgentFilterPill.test.tsx`；MCP 配置页筛选条上 Claude Code 与 VS Code 应显示各自品牌图标而不是通用字标。
+
+## 2026-09-09 - MCP 机群 Agent rail 被卡片 overflow 裁掉，看起来不像 Settings
+
+- Symptom: 机群卡片底栏红框里的 Agent 图标显示不全；工具栏只露出前几个，和设置里已启用的集合对不上。
+- Root cause: 轮播曾把 Settings 已关掉但仍写入的 target 留在行里占位；底栏左侧状态 `shrink-0`、轨道 `justify-end`，外层卡片又 `overflow-hidden`。横向滚动容器一旦被内容撑开，`scrollWidth === clientWidth`，箭头不出现，多出来的图标被圆角裁掉。工具栏 `AgentFilterPill` 默认最多露出 4 个，同一批目标在筛选条上再被截一层。
+- Fix: `AgentTargetCarousel` 只绘制 `profile.enabled` 的项；机群卡片和工具栏共用 `selectMcpAgentTargets`。底栏把剩余宽度交给轨道并 `overflow-hidden` 强制内层滚动；MCP 筛选条的可见个数跟随当前目标集，不再默认 cap 在 4。契约见 [Frontend](features/frontend/README.md#agent-手动激活投影) 与 [MCP](features/mcp/README.md#前端职责)。
+- Self-check: `bun run test src/components/shared/AgentTargetCarousel.test.tsx src/features/mcp/components/McpFleetCard.test.tsx`；设置里启用/关掉若干带 MCP 映射的 Agent 后，机群卡片与工具栏应是同一批图标，窄卡片悬停出现滚动箭头而不是缺图标。
+
+## 2026-09-09 - 保活弹窗不能把 React Activity 交给 Dialog.Portal asChild
+
+- Symptom: 在 MCP 机群点「添加」打开新建窗口时，WKWebView 整页落到错误边界：`getComputedStyle` 的参数不是 `Element`；组件栈是 `Activity` → Radix `SlotClone`。
+- Root cause: `Dialog.Portal` 对每个子节点做 Presence + `asChild`，ref 回调里无条件 `getComputedStyle(node)`。React `Activity` 不是宿主节点；保活为了停用隐藏页的焦点锁、又保留表单草稿，曾把它当作 Portal 的唯一子节点。jsdom 的 `getComputedStyle` 不按 WebKit 校验类型，所以单测原先绿着。
+- Fix: Portal 的 asChild 目标必须是宿主 Element；`Activity` 只包在这层节点里面。保活语义不变：页面不活跃时停用模态生命周期、保留子树。契约见 [Frontend](features/frontend/README.md#桌面性能)。
+- Self-check: `bun run test src/components/ui/ModalShell.test.tsx src/components/layout/KeepAliveOutlet.test.tsx`；在 MCP 机群打开新建窗口，确认表单而不是错误边界；切走再回来草稿还在。
+
 ## 2026-09-08 - Provider 的空凭据投影不能作为编辑补丁回传
 
 - Symptom: 只改供应商名称，也可能把环境变量或文件来源的凭据变成空凭据。
@@ -802,3 +823,10 @@
 - Root cause: 同一个仓库有两个写入方，互不校正。`publisher_repos:<publisher>` 读 `/official` 聚合载荷，把 `skill_count=11` 写进 `marketplace_repo`，并把内嵌的 11 条技能写进 `marketplace_repo_skill`；`repo_skills:<source>` 抓仓库页，把同一张技能表 delete+reinsert 成 3 条。卡片读的是 `marketplace_repo.skill_count` 这个缓存列，列表读的是技能行，于是 11 对 3 永久并存。更糟的是聚合页的 `totalInstalls` 几乎每次都变，指纹不同就整表重写，把过期的 11 条再灌回来，列表本身也在 11 和 3 之间来回翻。
 - Fix: 两处。① `load_publisher_repos_snapshot` 的技能数改为从 `marketplace_repo_skill` 行数推导，没有行才回退到存储列——卡片与列表共用一个事实。② 聚合内嵌技能抽成 `seed_repo_skills_from_official_in_tx`，只给 `repo_skills:<source>` 从未成功过的仓库做种子；仓库页一旦抓过就是该仓库的权威，聚合不再覆盖。前端在 `repo_skills` 同步成功后同时失效 `publisherRepos` 查询，否则卡片缓存仍是旧值。
 - Self-check: `snapshot/tests/part8.rs`——先种 3 条，模拟仓库页抓到 1 条并记成功，再跑一次种子必须仍是 1 条，且 `load_publisher_repos_snapshot` 对该仓库返回 1、对没有行的仓库返回存储列。更一般的教训：**一张表不能有两个不分先后的写入方**；任何"聚合页内嵌明细"都只配做种子，明细页一旦有自己的 scope 就要让位。
+
+## 2026-09-18 - "发现新技能"卡片的安装按钮静默失败：安装扫描用了过期缓存，错误又被前端吞掉
+
+- Symptom: 巡逻在 mattpocock/skills 上游发现新技能 `pr` 并显示 ghost 卡片，但点"安装"毫无反应——按钮转回可点状态，无 toast、无对话框，技能也没有装上。
+- Root cause: 两个缺陷叠加。① `install_from_source` → `scan_repo_preferring_local_cache_for_skill` 只要本地存在 repo cache 检出就直接扫描它，从不 fetch；而发现新技能的巡逻走的是网络路径看到了上游新增。本地检出停在旧提交，`choose_install_skills` 找不到 `pr`，返回"not found / may have been deleted or renamed"。② `GhostSkillCard` 的 `catch {}` 注释写着"Error handled by parent"，但父级 `installGhostSkill` 只是把错误继续抛出，没有任何 toast——整条 ghost 安装路径是唯一没有错误提示的安装入口。
+- Fix: `scan_repo_preferring_local_cache_for_skill` 新增 `required_skills` 参数（`install_from_source` 传入显式请求的技能名）：缓存扫描后若任一显式身份不可解析（`find_target_skill` 与 `nameless_root_skill` 双重判定），warn 并回退到 `fetch_repo_scanned_detailed_in_session` 拉最新再扫；无显式请求时保持纯缓存快路径。前端新增 `handleInstallGhost`，失败时 `toast.error` 显示原因，与 `handleInstall` 一致。
+- Self-check: `pipeline_fetches_stale_cache_when_requested_skill_is_missing` 回归测试——先装 alpha 建立缓存，上游再提交 pr，第二次安装必须成功而不是报"not found"；前端测试断言 ghost 安装 reject 时 `toast.error` 被调用且包含原因。

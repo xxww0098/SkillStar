@@ -3,11 +3,13 @@
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod decide;
 mod install;
 mod manage;
 mod team;
 
 pub use commands::*;
+pub use decide::{cmd_decide, DecideOpts};
 pub use install::cmd_install;
 pub use manage::{cmd_publish, cmd_remove, cmd_update};
 
@@ -118,6 +120,33 @@ pub enum Commands {
     Team {
         #[command(subcommand)]
         command: TeamCommand,
+    },
+    /// Local decision model (AgentJev-0.6B): answer typed questions about a state
+    Decide {
+        /// JSON payload file (`-` for stdin)
+        #[arg(long, short = 'f', conflicts_with_all = ["stdin", "download", "verify", "status"])]
+        file: Option<String>,
+        /// Read the payload from stdin
+        #[arg(long, conflicts_with_all = ["download", "verify", "status"])]
+        stdin: bool,
+        /// Download the checkpoint into the data directory, then exit
+        #[arg(long)]
+        download: bool,
+        /// Re-check every checkpoint digest, then exit
+        #[arg(long)]
+        verify: bool,
+        /// Print the checkpoint state, then exit
+        #[arg(long)]
+        status: bool,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+        /// Device: auto (Metal on macOS), cpu, or metal
+        #[arg(long, default_value = "auto")]
+        device: String,
+        /// Dtype: auto, f32, f16, or bf16
+        #[arg(long, default_value = "auto")]
+        dtype: String,
     },
 }
 
@@ -289,6 +318,25 @@ pub fn run(args: Vec<String>, migrate_and_run: fn()) {
             ),
             TeamCommand::Used { name } => team::cmd_used(&name),
         },
+        Commands::Decide {
+            file,
+            stdin,
+            download,
+            verify,
+            status,
+            json,
+            device,
+            dtype,
+        } => cmd_decide(DecideOpts {
+            file: file.as_deref(),
+            stdin,
+            download,
+            verify,
+            status,
+            json,
+            device: &device,
+            dtype: &dtype,
+        }),
     }
 }
 
@@ -311,6 +359,7 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "create"
             | "publish"
             | "team"
+            | "decide"
             | "help"
             | "-h"
             | "--help"
@@ -424,6 +473,7 @@ mod mode_tests {
             "create",
             "publish",
             "team",
+            "decide",
             "help",
             "-h",
             "--help",

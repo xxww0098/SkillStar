@@ -145,6 +145,7 @@ pub fn run() {
         ))
         .manage(core::app_shell::ExitControl::new())
         .manage(commands::updater::PendingUpdate::new())
+        .manage(commands::decision::DecisionState::new())
         .manage(commands::models_commands::ProvidersWriteLock::new())
         .manage(commands::mcp_commands::McpWriteLock::new())
         .setup(|app| {
@@ -360,6 +361,14 @@ pub fn run() {
             commands::projects::rebuild_project_skills_from_disk,
             commands::projects::import_project_skills,
             commands::projects::detect_project_agents,
+            commands::decision::decision_model_status,
+            commands::decision::decision_verify_model,
+            commands::decision::decision_download_model,
+            commands::decision::decision_cancel_download,
+            commands::decision::decision_engine_info,
+            commands::decision::decision_load_engine,
+            commands::decision::decision_unload_engine,
+            commands::decision::decision_evaluate,
             commands::ai::get_ai_config,
             commands::ai::save_ai_config,
             commands::ai::summarize::ai_summarize_skill,

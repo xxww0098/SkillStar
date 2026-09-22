@@ -137,10 +137,15 @@ pub fn request_cancel(port: u16) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Default bound on a browser login's wait for the local callback. Surfaced to
+/// the frontend via `OAuthStart.expires_in_secs` so the dialog can count down
+/// the session's real deadline instead of hardcoding a number.
+pub const DEFAULT_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Run an HTTP listener on `127.0.0.1:{port}` and wait for a callback that
 /// matches `expected_state`. Returns the `code` parameter.
 ///
-/// `timeout` defaults to 5 minutes if `None`.
+/// `timeout` defaults to [`DEFAULT_CALLBACK_TIMEOUT`] (5 minutes) if `None`.
 pub async fn wait_for_callback(
     port: u16,
     expected_state: String,
@@ -156,7 +161,7 @@ pub async fn wait(
     expected_state: String,
     timeout: Option<Duration>,
 ) -> UsageResult<String> {
-    let timeout = timeout.unwrap_or(Duration::from_secs(300));
+    let timeout = timeout.unwrap_or(DEFAULT_CALLBACK_TIMEOUT);
     let (tx, rx) = oneshot::channel::<UsageResult<String>>();
     let server = session.server.clone();
     let cancelled = session.cancelled.clone();

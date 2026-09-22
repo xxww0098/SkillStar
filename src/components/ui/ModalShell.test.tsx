@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { PageActivityContext } from "../../lib/pageActivity";
 import { ModalShell } from "./ModalShell";
 
 describe("ModalShell", () => {
@@ -133,5 +134,36 @@ describe("ModalShell", () => {
     );
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not call getComputedStyle on a non-Element when the page hides and returns", async () => {
+    // WKWebView throws if Presence's asChild ref is Activity (not an Element). jsdom is looser.
+    const original = window.getComputedStyle.bind(window);
+    window.getComputedStyle = ((elt: Element, pseudoElt?: string | null) => {
+      if (!(elt instanceof Element)) {
+        throw new TypeError("Argument 1 ('element') to Window.getComputedStyle must be an instance of Element");
+      }
+      return original(elt, pseudoElt);
+    }) as typeof window.getComputedStyle;
+    function Editor({ active }: { active: boolean }) {
+      return (
+        <PageActivityContext.Provider value={active}>
+          <ModalShell open onClose={vi.fn()} ariaLabel="Add server">
+            <input aria-label="Name" defaultValue="draft" />
+          </ModalShell>
+        </PageActivityContext.Provider>
+      );
+    }
+    try {
+      const { rerender } = render(<Editor active />);
+      expect(screen.getByRole("dialog", { name: "Add server" })).toBeInTheDocument();
+      rerender(<Editor active={false} />);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add server" })).not.toBeInTheDocument());
+      rerender(<Editor active />);
+      expect(await screen.findByRole("dialog", { name: "Add server" })).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("draft");
+    } finally {
+      window.getComputedStyle = original;
+    }
   });
 });

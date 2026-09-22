@@ -107,8 +107,11 @@ describe("selectMcpAgentTargets", () => {
     expect(selectMcpAgentTargets([profile("gemini-cli")]).map(({ toolId }) => toolId)).toEqual(["gemini-cli"]);
   });
 
-  it("routes the hermes target through its own profile", () => {
+  it("routes the hermes, deepseek, workbuddy and devin targets through their own profiles", () => {
     expect(selectMcpAgentTargets([profile("hermes")]).map(({ toolId }) => toolId)).toEqual(["hermes"]);
+    expect(selectMcpAgentTargets([profile("deepseek")]).map(({ toolId }) => toolId)).toEqual(["deepseek"]);
+    expect(selectMcpAgentTargets([profile("workbuddy")]).map(({ toolId }) => toolId)).toEqual(["workbuddy"]);
+    expect(selectMcpAgentTargets([profile("devin")]).map(({ toolId }) => toolId)).toEqual(["devin"]);
   });
 
   it("omits a Settings-disabled Agent from the card rail even when the server still writes it", () => {

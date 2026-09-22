@@ -1,4 +1,4 @@
-import { Database, FolderOpen, Globe, Plus, Trash2 } from "lucide-react";
+import { FolderOpen, Globe, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
@@ -157,16 +157,14 @@ export function McpSourcesPanel({ className }: McpSourcesPanelProps) {
 
   return (
     <section className={cn("space-y-3", className)}>
-      <div className="flex items-center gap-2 px-1">
-        <Database className="h-3.5 w-3.5 text-primary" />
-        <h2 className="text-sm font-semibold text-foreground">{t("mcp.sourcesTitle")}</h2>
+      <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">{t("mcp.sourcesCount", { count: sources.length })}</span>
         <div className="ml-auto">
           <AddSourceForm onAdd={addSource} busy={mutating} />
         </div>
       </div>
 
-      <p className="px-1 text-[11px] leading-relaxed text-muted-foreground">{t("mcp.sourcesIntro")}</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{t("mcp.sourcesIntro")}</p>
 
       <ul className="space-y-2">
         {sources.map((source) => {

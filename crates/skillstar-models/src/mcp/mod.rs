@@ -22,6 +22,7 @@
 //! | `claude-desktop-chat` | OS config dir `Claude/claude_desktop_config.json` | `mcpServers.<name>`, **no `type`** |
 //! | `codex`          | `~/.codex/config.toml`                 | `[mcp_servers.<name>]` TOML table |
 //! | `grok`           | `~/.grok/config.toml`                  | `[mcp_servers.<name>]` TOML (`headers` for HTTP) |
+//! | `deepseek`       | `~/.dsh/cordis.patch.yml` (or `$DSH_HOME`) | Cordis YAML `insert` of `@deepseek-ai/dsh-mcp-client` (no `type`; SSE → `streamable-http`) |
 //! | `hermes`         | `~/.hermes/config.yaml` (or `$HERMES_HOME`) | YAML `mcp_servers.<name>` + `platform_toolsets.cli` `mcp-<name>` |
 //! | `opencode`       | `~/.config/opencode/opencode.json`     | `mcp.<name>` (`local`/`remote` form) |
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
@@ -33,6 +34,8 @@
 //! | `gemini-cli`     | `~/.gemini/settings.json`              | `mcpServers.<name>`, no `type`: `url` = SSE, **`httpUrl`** = HTTP |
 //! | `antigravity`    | `~/.gemini/config/mcp_config.json` (legacy `~/.gemini/antigravity/mcp_config.json`) | `mcpServers.<name>`, **no `type`** (the IDE rejects `type: stdio`) |
 //! | `zed`            | `~/.config/zed/settings.json`          | **`context_servers`**`.<name>`, no `type` |
+//! | `workbuddy`      | `~/.workbuddy/mcp.json`                | `mcpServers.<name>`, **no `type`** (documented command/args/env; `url` = remote) |
+//! | `devin`          | `~/.config/devin/mcp_config.json`      | `mcpServers.<name>`, **no `type`** (Devin CLI + Desktop Devin Local; legacy Cascade stays on `windsurf`) |
 //!
 //! The bolded cells are the ones that make a config silently ignored rather
 //! than rejected when written in another client's spelling; `specs.rs` encodes
@@ -112,8 +115,8 @@ pub use validate::*;
 mod specs;
 pub(crate) use specs::{
     antigravity_spec, claude_code_spec, claude_desktop_chat_spec, cline_spec, codex_toml_table,
-    cursor_spec, gemini_cli_spec, grok_toml_table, kiro_spec, opencode_spec, vscode_spec,
-    windsurf_spec, zcode_cli_spec, zed_spec,
+    cursor_spec, devin_spec, gemini_cli_spec, grok_toml_table, kiro_spec, opencode_spec,
+    vscode_spec, windsurf_spec, workbuddy_spec, zcode_cli_spec, zed_spec,
 };
 
 // ---------------------------------------------------------------------------
@@ -156,6 +159,13 @@ pub(crate) use hermes::{
 };
 
 // ---------------------------------------------------------------------------
+// DeepSeek Harness YAML live config (home-level cordis.patch.yml inserts)
+// ---------------------------------------------------------------------------
+
+mod dsh;
+pub(crate) use dsh::{count_dsh_mcp, dsh_remove, dsh_upsert, read_dsh_entries};
+
+// ---------------------------------------------------------------------------
 // Post-install health check (dual-epoch probe)
 // ---------------------------------------------------------------------------
 
@@ -177,3 +187,6 @@ mod tests_targets;
 
 #[cfg(test)]
 mod tests_integrity;
+
+#[cfg(test)]
+mod tests_lossless;

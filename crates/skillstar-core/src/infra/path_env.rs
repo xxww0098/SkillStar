@@ -393,10 +393,7 @@ mod tests {
             "command_with_path must ignore host GIT_DIR; stderr={}",
             String::from_utf8_lossy(&isolated.stderr)
         );
-        assert_eq!(
-            String::from_utf8_lossy(&isolated.stdout).trim(),
-            "true"
-        );
+        assert_eq!(String::from_utf8_lossy(&isolated.stdout).trim(), "true");
         assert!(
             !inherited.status.success(),
             "control: a raw Command must still inherit GIT_DIR and fail against the bogus path"

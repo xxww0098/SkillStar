@@ -205,6 +205,87 @@ describe("useSkills", () => {
     expect(installed).toEqual(INITIAL_SKILLS.map((skill) => skill.name));
   });
 
+  it("reinstalls only the requested skill identity from a multi-skill repository", async () => {
+    const source = "jackwener/opencli";
+    const sourceUrl = "https://github.com/jackwener/opencli.git";
+    const targets = INITIAL_SKILLS.map((skill) => ({
+      id: skill.name,
+      folder_path: `skills/${skill.name}`,
+      description: skill.description,
+      already_installed: true,
+    }));
+
+    mockedInvoke.mockImplementation(async (command, args) => {
+      switch (command) {
+        case "list_skills":
+          return INITIAL_SKILLS;
+        case "refresh_skill_updates":
+        case "check_new_repo_skills":
+          return [];
+        case "migrate_local_skills":
+          return 0;
+        case "scan_github_repo":
+          expect(args).toEqual({ url: sourceUrl, fullDepth: true });
+          return { source, source_url: sourceUrl, skills: targets };
+        case "install_from_scan":
+          expect(args).toEqual({
+            repoUrl: sourceUrl,
+            source,
+            skills: [{ id: "opencli-search", folder_path: "skills/opencli-search" }],
+          });
+          return ["opencli-search"];
+        default:
+          return undefined;
+      }
+    });
+
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let installed: string[] | undefined;
+    await act(async () => {
+      installed = await result.current.reinstallSkill(sourceUrl, "opencli-search");
+    });
+
+    expect(installed).toEqual(["opencli-search"]);
+  });
+
+  it("fails closed when the source repository no longer contains that skill identity", async () => {
+    const sourceUrl = "https://github.com/jackwener/opencli.git";
+    mockedInvoke.mockImplementation(async (command) => {
+      switch (command) {
+        case "list_skills":
+          return INITIAL_SKILLS;
+        case "refresh_skill_updates":
+        case "check_new_repo_skills":
+          return [];
+        case "migrate_local_skills":
+          return 0;
+        case "scan_github_repo":
+          return {
+            source: "jackwener/opencli",
+            source_url: sourceUrl,
+            skills: [
+              {
+                id: "opencli-repair",
+                folder_path: "skills/opencli-repair",
+                description: "Repair adapters",
+                already_installed: true,
+              },
+            ],
+          };
+        default:
+          throw new Error(`Unexpected IPC: ${command}`);
+      }
+    });
+
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await expect(result.current.reinstallSkill(sourceUrl, "opencli-search")).rejects.toThrow(/opencli-search/);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("install_from_scan", expect.anything());
+  });
+
   it("keeps a divergent card unchanged until the user resolves the blocked update", async () => {
     mockedInvoke.mockImplementation(async (command) => {
       switch (command) {
@@ -701,6 +782,7 @@ describe("useSkills", () => {
           url: INITIAL_SKILLS[0].git_url,
           name: "opencli-repair",
           agentId: "cursor",
+          sessionId: expect.any(String),
         });
         return gate;
       }

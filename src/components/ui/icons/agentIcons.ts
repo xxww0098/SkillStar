@@ -110,6 +110,7 @@ export const AGENT_ICON_BY_ID: Record<string, LobeIconComponent> = {
   "trae-cn": TraeColor,
   warp: LobeHubMono,
   windsurf: WindsurfMono,
+  workbuddy: LobeHubMono,
   zed: LobeHubMono,
   zcode: ZAIMono,
   zencoder: ZencoderColor,

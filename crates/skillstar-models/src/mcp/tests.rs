@@ -498,7 +498,10 @@ fn malformed_desktop_chat_config_keeps_update_and_delete_store_evidence() {
 #[test]
 fn mcp_presets_catalog_is_well_formed() {
     let presets = get_mcp_presets();
-    assert!(presets.len() >= 10, "preset catalog should be substantial");
+    assert!(
+        presets.len() >= 13,
+        "the built-in floor is the recommended shortlist, not a directory"
+    );
 
     let mut seen = std::collections::HashSet::new();
     for p in &presets {
@@ -541,14 +544,40 @@ fn mcp_presets_catalog_is_well_formed() {
         "https://github.com/colbymchenry/codegraph"
     );
 
-    let cua_driver = presets
+    // The remote presets exercise the other half of the catalog: they carry no
+    // command, and a preset with a required header must pre-seed that header as
+    // a blank field so the form shows it. `deepwiki` is the auth-free remote,
+    // `github` the one that needs a token.
+    let deepwiki = presets
         .iter()
-        .find(|p| p.id == "cua-driver")
-        .expect("Cua Driver must be a built-in MCP preset");
-    assert_eq!(cua_driver.command.as_deref(), Some("cua-driver"));
-    assert_eq!(cua_driver.args, ["mcp"]);
-    assert_eq!(cua_driver.transport, "stdio");
-    assert_eq!(cua_driver.homepage, "https://cua.ai");
+        .find(|p| p.id == "deepwiki")
+        .expect("DeepWiki must be a built-in MCP preset");
+    assert_eq!(deepwiki.transport, "http");
+    assert_eq!(
+        deepwiki.url.as_deref(),
+        Some("https://mcp.deepwiki.com/mcp")
+    );
+    assert!(deepwiki.command.is_none());
+    assert!(deepwiki.headers.is_empty());
+
+    let github = presets
+        .iter()
+        .find(|p| p.id == "github")
+        .expect("GitHub must be a built-in MCP preset");
+    assert_eq!(github.transport, "http");
+    assert_eq!(
+        github.url.as_deref(),
+        Some("https://api.githubcopilot.com/mcp/")
+    );
+    assert!(github.command.is_none());
+    assert!(
+        github.headers.contains_key("Authorization"),
+        "a remote preset that requires a header must pre-seed it as a blank field"
+    );
+    assert_eq!(
+        github.headers.get("Authorization").map(String::as_str),
+        Some("")
+    );
 }
 
 #[test]
@@ -785,7 +814,10 @@ fn create_and_sync_projects_nothing_when_the_store_cannot_be_written() {
     let mut store = McpStore::default();
     assert!(create_server_and_sync(&mut store, &store_path, entry).is_err());
 
-    assert!(store.servers.is_empty(), "the store must not have committed");
+    assert!(
+        store.servers.is_empty(),
+        "the store must not have committed"
+    );
     assert_eq!(std::fs::read_to_string(&codex_path).unwrap(), codex_before);
 
     std::fs::remove_file(codex_path).ok();

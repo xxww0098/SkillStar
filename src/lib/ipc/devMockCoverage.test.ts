@@ -198,7 +198,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "install_from_share_code",
   "install_skill",
   "list_linked_skills",
-  "list_mcp_publishers_local",
   "migrate_local_skills",
   "open_external_url",
   "open_folder",

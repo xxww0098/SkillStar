@@ -64,8 +64,8 @@ const fn unsupported() -> GlobalDirDef {
 // The three legacy SkillStar ids (`claude`, `kiro`, `hermes`) retain
 // their persisted identity. CLI/API normalization accepts the corresponding
 // upstream ids. Every other row uses the upstream id verbatim. `grok`,
-// `omp`, `gemini-cli` and `deepseek` are SkillStar extensions kept
-// after the synchronized upstream block.
+// `omp`, `gemini-cli`, `deepseek` and `workbuddy` are SkillStar extensions
+// kept after the synchronized upstream block.
 const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "aider-desk",
@@ -459,6 +459,15 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         "DeepSeek Harness",
         env_or_home("DSH_HOME", &[".dsh"], &["skills"]),
         ".dsh/skills",
+    ),
+    // WorkBuddy (Tencent) — not yet in vercel-labs/skills main. Global
+    // ~/.workbuddy/skills, project .workbuddy/skills. MCP is a separate
+    // target writing ~/.workbuddy/mcp.json.
+    (
+        "workbuddy",
+        "WorkBuddy",
+        home(&[".workbuddy", "skills"]),
+        ".workbuddy/skills",
     ),
 ];
 

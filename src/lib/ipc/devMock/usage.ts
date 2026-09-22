@@ -24,6 +24,18 @@ export const USAGE_HANDLERS: DevMockHandlers = {
   }),
   get_subscription_alerts: () => USAGE_ALERTS,
   get_usage_summary: () => USAGE_SUMMARY,
+  // OAuth flow: start returns a realistic auth URL + pending id; await stays
+  // pending so the waiting state is previewable in browser dev. Cancel/submit
+  // no-op (the dialog resets itself on cancel regardless of the pending await).
+  start_oauth_login: (args) => ({
+    pending_id: `mock-oauth-${String(args?.catalogId ?? "provider")}`,
+    auth_url:
+      "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_devmock&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid%20profile&state=devmock",
+    expires_in_secs: 300,
+  }),
+  await_oauth_completion: () => new Promise(() => {}),
+  submit_oauth_callback: () => undefined,
+  cancel_oauth_login: () => undefined,
   // Returns full Subscription list (backend shape). Optional catalogId is
   // accepted for API parity; mock still returns every sample row.
   refresh_all_subscriptions: (_args?: Record<string, unknown>) => USAGE_SUBSCRIPTIONS,

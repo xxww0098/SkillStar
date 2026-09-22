@@ -23,7 +23,6 @@ function skill(overrides: Partial<Skill> = {}): Skill {
 /** Builds the full input set for `computeDisplaySkills`, with sane leaderboard-mode defaults. */
 function buildInput(overrides: Partial<DisplaySkillsInput> = {}): DisplaySkillsInput {
   return {
-    isMcpTab: false,
     results: null,
     leaderboard: [],
     sortBy: "stars-desc",
@@ -37,15 +36,6 @@ function buildInput(overrides: Partial<DisplaySkillsInput> = {}): DisplaySkillsI
 }
 
 describe("computeDisplaySkills", () => {
-  it("returns an empty list for the MCP tab regardless of other inputs", () => {
-    const input = buildInput({
-      isMcpTab: true,
-      leaderboard: [skill({ name: "a" }), skill({ name: "b" })],
-    });
-
-    expect(computeDisplaySkills(input)).toEqual([]);
-  });
-
   it("shows the leaderboard when not in search mode and the tab is not official", () => {
     const a = skill({ name: "a", rank: 1 });
     const b = skill({ name: "b", rank: 2 });

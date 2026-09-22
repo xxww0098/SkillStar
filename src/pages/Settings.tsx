@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast as sonnerToast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { AiProviderSection } from "../features/models/components/settings/AiProviderSection";
+import { DecisionModelSection } from "../features/models/components/settings/DecisionModelSection";
 import { DevModeBanner } from "../features/settings/components/DevModeBanner";
 import { globalSkillsTargetKey } from "../features/settings/lib/agentSkillSync";
 import { GlobalSkillsTargetReadGuard } from "../features/settings/lib/globalSkillsTargetReadGuard";
@@ -860,6 +861,10 @@ export function Settings({
                   onConfigChange={handleAiConfigChange}
                   onTestConnection={handleAiTestConnection}
                 />
+              </section>
+
+              <section id="settings-decision" className="scroll-mt-3">
+                <DecisionModelSection />
               </section>
 
               <section id="settings-background" className="scroll-mt-3">

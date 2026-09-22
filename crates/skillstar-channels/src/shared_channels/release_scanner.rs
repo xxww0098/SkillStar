@@ -395,8 +395,7 @@ mod tests {
         assert_eq!(snapshot.skills[0].content_root, "skills/writer");
         assert_eq!(snapshot.skills[0].content_hash, expected);
         assert_eq!(
-            expected,
-            "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7",
+            expected, "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7",
             "LF-pinned fixture must keep the shared content-hash algorithm"
         );
     }

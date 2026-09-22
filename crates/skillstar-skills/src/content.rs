@@ -208,13 +208,17 @@ fn snapshot_resolved_root(
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
 
     let content_hash = snapshot_hash(&files);
-    Ok(SkillSnapshot {
+    let snapshot = SkillSnapshot {
         name: name.to_string(),
         root,
         content_hash,
         files,
         total_bytes,
-    })
+    };
+    // Fingerprint the trusted snapshot so the pre-fetch cleanliness proof can
+    // later answer with `stat` calls instead of re-reading every byte.
+    crate::content_stats::record(name, &snapshot);
+    Ok(snapshot)
 }
 
 pub fn validate_skill_name(name: &str) -> Result<(), AppError> {

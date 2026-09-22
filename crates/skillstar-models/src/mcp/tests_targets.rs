@@ -52,13 +52,17 @@ fn remote_format_has_type_key(tool_id: &str) -> bool {
         // `claude-code` above on purpose — the two Claude surfaces document
         // opposite rules, and writing Code's `type` into Chat's file would
         // hand that client a key it does not read. Antigravity rejects
-        // `type: stdio`. Hermes YAML has no type key either.
+        // `type: stdio`. Hermes and DeepSeek YAML have no type key either
+        // (DSH spells the transport as `transport: streamable-http`).
         "grok"
+        | "deepseek"
         | "hermes"
         | "windsurf"
         | "gemini-cli"
         | "antigravity"
         | "zed"
+        | "workbuddy"
+        | "devin"
         | "claude-desktop-chat" => false,
         other => panic!(
             "tool '{other}' is in the registry but not in the wire-type policy table — decide whether a remote entry in its format carries a `type` key and record it here"
@@ -80,11 +84,14 @@ fn stdio_type_token(tool_id: &str) -> Option<&'static str> {
         // only — a local server is identified by having a `command`.
         "cline" => None,
         "grok"
+        | "deepseek"
         | "hermes"
         | "windsurf"
         | "gemini-cli"
         | "antigravity"
         | "zed"
+        | "workbuddy"
+        | "devin"
         | "claude-desktop-chat" => None,
         other => {
             panic!("tool '{other}' is in the registry but not in the stdio wire-type policy table")
@@ -119,6 +126,32 @@ fn project(spec: &McpToolSpec, entry: &McpServerEntry, dir: &TempDir) -> Value {
             .and_then(|m| m.get(&entry.name))
             .unwrap_or_else(|| panic!("{}: server missing from YAML {content}", spec.id));
         return serde_json::to_value(entry).unwrap();
+    }
+    if spec.id == "deepseek" {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+        let want_id = format!("mcp-{}", entry.name);
+        for op in yaml.as_sequence().unwrap_or(&Vec::new()) {
+            let Some(insert) = op.get("insert").and_then(serde_yaml::Value::as_sequence) else {
+                continue;
+            };
+            for row in insert {
+                let id = row
+                    .get("id")
+                    .and_then(serde_yaml::Value::as_str)
+                    .unwrap_or("");
+                let server_name = row
+                    .get("config")
+                    .and_then(|c| c.get("serverName"))
+                    .and_then(serde_yaml::Value::as_str);
+                if id == want_id || server_name == Some(entry.name.as_str()) {
+                    let config = row.get("config").unwrap_or_else(|| {
+                        panic!("{}: plugin row has no config: {content}", spec.id)
+                    });
+                    return serde_json::to_value(config).unwrap();
+                }
+            }
+        }
+        panic!("{}: server missing from YAML {content}", spec.id);
     }
     let root: Value = serde_json::from_str(&content).unwrap();
     for key in [MCP_SERVERS_KEY, VSCODE_SERVERS_KEY, ZED_SERVERS_KEY, "mcp"] {
@@ -338,6 +371,56 @@ fn zed_omits_type_and_signals_remote_with_url() {
     assert!(local.get("type").is_none(), "{local}");
 }
 
+/// WorkBuddy's documented mcp.json is command/args/env (or url) with no `type`.
+#[test]
+fn workbuddy_omits_type_and_writes_community_mcpservers() {
+    let local = workbuddy_spec(&stdio("local"));
+    assert_eq!(local["command"], "npx");
+    assert_eq!(local["args"][1], "example-mcp");
+    assert_eq!(local["env"]["API_KEY"], "secret");
+    assert!(local.get("type").is_none(), "{local}");
+
+    let remote = workbuddy_spec(&http("remote"));
+    assert_eq!(remote["url"], "https://example.com/mcp");
+    assert_eq!(remote["headers"]["Authorization"], "Bearer xxx");
+    assert!(remote.get("type").is_none(), "{remote}");
+    assert!(remote.get("serverUrl").is_none(), "{remote}");
+    assert!(remote.get("httpUrl").is_none(), "{remote}");
+
+    let p = resolve_mcp_config_path("workbuddy").unwrap();
+    assert!(
+        p.ends_with(".workbuddy/mcp.json"),
+        "unexpected workbuddy path: {}",
+        p.display()
+    );
+}
+
+/// Devin's documented `mcp_config.json` is command/args/env (or url) with no
+/// `type`, and it lives in the CLI's XDG-style config dir rather than a dotdir
+/// at the home root.
+#[test]
+fn devin_omits_type_and_writes_the_cli_config_dir() {
+    let local = devin_spec(&stdio("local"));
+    assert_eq!(local["command"], "npx");
+    assert_eq!(local["args"][1], "example-mcp");
+    assert_eq!(local["env"]["API_KEY"], "secret");
+    assert!(local.get("type").is_none(), "{local}");
+
+    let remote = devin_spec(&http("remote"));
+    assert_eq!(remote["url"], "https://example.com/mcp");
+    assert_eq!(remote["headers"]["Authorization"], "Bearer xxx");
+    assert!(remote.get("type").is_none(), "{remote}");
+    assert!(remote.get("serverUrl").is_none(), "{remote}");
+    assert!(remote.get("httpUrl").is_none(), "{remote}");
+
+    let p = resolve_mcp_config_path("devin").unwrap();
+    assert!(
+        p.ends_with(".config/devin/mcp_config.json"),
+        "unexpected devin path: {}",
+        p.display()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Round trips
 // ---------------------------------------------------------------------------
@@ -357,11 +440,22 @@ fn round_trip_preserves(tool_id: &str, transport: &str) -> bool {
         // OpenCode collapses both remote transports into one `remote` form, so
         // an http entry returns as sse (audit B.7-b, tracked separately).
         ("opencode", "http") => false,
-        // Windsurf, Zed, Claude Desktop Chat, Antigravity and Hermes have no
-        // `type` key: a URL is a URL. SSE is written faithfully but reads
-        // back as http, because the file genuinely does not record which one
-        // it was.
-        ("windsurf" | "zed" | "claude-desktop-chat" | "antigravity" | "hermes", "sse") => false,
+        // Windsurf, Zed, Claude Desktop Chat, Antigravity, Hermes, DeepSeek,
+        // WorkBuddy and Devin have no SSE token: a URL is a URL (DSH only
+        // documents `streamable-http`; Devin documents `transport` but treats it
+        // as an override, defaulting to Streamable HTTP with SSE fallback).
+        // SSE is written faithfully but reads back as http.
+        (
+            "windsurf"
+            | "zed"
+            | "claude-desktop-chat"
+            | "antigravity"
+            | "hermes"
+            | "deepseek"
+            | "workbuddy"
+            | "devin",
+            "sse",
+        ) => false,
         _ => true,
     }
 }

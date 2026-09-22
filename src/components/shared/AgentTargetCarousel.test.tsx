@@ -73,11 +73,12 @@ describe("AgentTargetCarousel", () => {
     // scroll arrows pin to its far edges) while the icons keep their fixed
     // spacing — start-anchored, never spread apart.
     expect(rail).toHaveClass("flex-1");
+    expect(rail).toHaveClass("w-full");
     expect(rail).toHaveClass("gap-1.5");
     expect(rail).not.toHaveClass("justify-between");
   });
 
-  it("keeps a Settings-disabled Agent as a stopped SVG instead of dropping it", () => {
+  it("omits a Settings-disabled Agent instead of occupying a rail slot", () => {
     const onToggle = vi.fn();
     render(
       <AgentTargetCarousel
@@ -90,9 +91,16 @@ describe("AgentTargetCarousel", () => {
     );
 
     expect(screen.getByRole("button", { name: "Toggle ready" })).toBeInTheDocument();
-    const stopped = screen.getByRole("button", { name: /disabled/i });
-    expect(stopped).toBeDisabled();
-    fireEvent.click(stopped);
-    expect(onToggle).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /disabled/i })).not.toBeInTheDocument();
+  });
+
+  it("renders nothing when every Agent is Settings-disabled", () => {
+    const { container } = render(
+      <AgentTargetCarousel
+        items={[item("disabled", true, { profile: { ...item("disabled", true).profile, enabled: false } })]}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
   });
 });

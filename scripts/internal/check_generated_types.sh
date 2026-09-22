@@ -4,7 +4,7 @@
 # `src/types/generated/*.ts` is produced by ts-rs from five crates
 # (`bun run types:gen`, i.e. `cargo test -p skillstar-models
 # -p skillstar-marketplace -p skillstar-usage -p skillstar-app -p skillstar
-# export_bindings`).
+# -p skillstar-decision export_bindings`).
 # The source files below are the ones that currently carry `#[derive(TS)]`;
 # the list is a navigation aid, not an SSOT — the authority is the derives
 # themselves, and this script fails on any drift regardless of what is listed
@@ -37,6 +37,9 @@
 #   - `src-tauri/src/commands/mcp_commands.rs` (McpServerWithSync — the
 #     Tauri-command-layer DTO wrapping a synced server; package name is
 #     `skillstar`, not `src-tauri`, since that's what its Cargo.toml declares)
+#   - `crates/skillstar-decision/` (the local decision model's checkpoint
+#     status, download progress, engine info and typed answers; `src/types/
+#     decision.ts` re-exports them and hand-mirrors nothing)
 # Nothing enforces that a developer who edits a `#[derive(TS)]` struct
 # actually reruns and commits the generator, so this script regenerates into
 # a scratch directory and diffs it against the committed output. Any
@@ -78,7 +81,7 @@ trap 'rm -rf "$SCRATCH_DIR"' EXIT
 # absolute path sidesteps that entirely. (See .cargo/config.toml for the
 # same concern affecting the committed, non-override TS_RS_EXPORT_DIR.)
 echo "regenerating TS bindings into scratch dir..."
-if ! TS_RS_EXPORT_DIR="$SCRATCH_DIR" cargo test -p skillstar-models -p skillstar-marketplace -p skillstar-usage -p skillstar-app -p skillstar export_bindings --quiet 2>&1; then
+if ! TS_RS_EXPORT_DIR="$SCRATCH_DIR" cargo test -p skillstar-models -p skillstar-marketplace -p skillstar-usage -p skillstar-app -p skillstar -p skillstar-decision export_bindings --quiet 2>&1; then
   echo "✗ ts-rs export_bindings tests failed to run — cannot verify freshness."
   exit 1
 fi

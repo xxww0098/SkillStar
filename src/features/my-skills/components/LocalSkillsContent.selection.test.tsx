@@ -196,6 +196,7 @@ describe("LocalSkillsContent selection and migration", () => {
     fireEvent.click(screen.getByRole("button", { name: /全部更新/ }));
     await finishUpdate();
     expect(drawer().getByRole("heading", { name: UPDATABLE.name })).toBeInTheDocument();
+    expect(drawer().getByRole("button", { name: "重新安装" })).toBeInTheDocument();
     expect(drawer().getByText("After update")).toBeInTheDocument();
     expect(drawer().queryByText("Before update")).not.toBeInTheDocument();
   });

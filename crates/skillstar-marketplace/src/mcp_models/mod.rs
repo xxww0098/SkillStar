@@ -232,8 +232,8 @@ pub struct McpMarketServerDetail {
 
 /// One official MCP publisher shown on the marketplace grid.
 ///
-/// The `id` doubles as the curated `source` bucket (`"adspower"` / `"bigmodel"`)
-/// or the special `"github"` publisher which maps to the full
+/// The `id` doubles as the curated `source` bucket (`"official"` /
+/// `"database"`) or the special `"github"` publisher which maps to the full
 /// `mcp_registry_server` table.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -241,7 +241,7 @@ pub struct McpMarketServerDetail {
 pub struct McpPublisherSummary {
     /// Publisher id — also the curated `source` value, or `"github"`.
     pub id: String,
-    /// Display name (e.g. "AdsPower", "BigModel", "GitHub").
+    /// Display name (e.g. "AdsPower", "Anthropic", "GitHub").
     pub name: String,
     /// Number of MCP servers offered by this publisher.
     pub server_count: u32,

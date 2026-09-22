@@ -123,7 +123,7 @@ export function HScrollRow({
         onScroll={updateArrows}
         style={fixedWidth && targetW ? { width: `${targetW}px` } : targetW ? { maxWidth: `${targetW}px` } : undefined}
         className={cn(
-          "flex items-center overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
+          "flex min-w-0 items-center overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
           className,
         )}
       >

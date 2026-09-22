@@ -1,40 +1,144 @@
-import { CircleSlash, FolderOpen, RefreshCw, Wrench } from "lucide-react";
+import { Check, CircleSlash, Copy, ExternalLink, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { StatusChip } from "../../../components/ui/StatusChip";
-import { cn } from "../../../lib/utils";
+import { LobeIcon } from "../../../components/ui/icons/LobeIcon";
+import { getAgentIcon } from "../../../components/ui/icons/agentIcons";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
+import { tauriInvoke } from "../../../lib/ipc";
+import { toast } from "../../../lib/toast";
+import { cn, copyToClipboard } from "../../../lib/utils";
 import { MCP_TOOL_IDS } from "../../../types";
-import { mcpToolIdsWithoutAgentProfile } from "../lib/agentTargets";
-import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
+import { mcpIconAgentIdForTool, mcpToolIdsWithoutAgentProfile } from "../lib/agentTargets";
+import { useMcpToolStatuses, type McpToolStatusRow } from "../hooks/useMcpToolStatuses";
 import { MCP_TOOL_LABELS } from "../lib/toolRegistry";
 
-/**
- * Where every MCP config target lives, and what is in it.
- *
- * `mcp_tool_statuses` has always returned `installed`, `configPath` and
- * `serverCount`; the app read them once inside the bulk import and discarded
- * them (audit D.3-7). That left the two questions a user actually asks — "did
- * SkillStar write anything for Cursor?" and "which file do I look at?" —
- * answerable only by guessing.
- *
- * `serverCount` counts what is in the *live* file, SkillStar-managed or not, so
- * a tool the user configured by hand shows a non-zero count with no entries in
- * the SkillStar store. That is the honest number: it is what the agent will
- * load.
- */
+function formatDisplayPath(path: string): string {
+  if (!path) return "";
+  return path.replace(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, "~");
+}
+
+function getDirectoryPath(filePath: string): string {
+  if (!filePath) return "";
+  const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return lastSlash > 0 ? filePath.slice(0, lastSlash) : filePath;
+}
+
+function McpToolStatusItem({ status, unreachable }: { status: McpToolStatusRow; unreachable: boolean }) {
+  const { t } = useTranslation();
+  const [hasCopied, setHasCopied] = useState(false);
+  const BrandIcon = getAgentIcon(mcpIconAgentIdForTool(status.toolId));
+  const displayName = status.label || MCP_TOOL_LABELS[status.toolId];
+
+  const handleCopy = async () => {
+    if (!status.configPath) return;
+    const ok = await copyToClipboard(status.configPath);
+    if (ok) {
+      setHasCopied(true);
+      toast.success(t("mcp.toolPathCopied"));
+      setTimeout(() => setHasCopied(false), 2000);
+    }
+  };
+
+  const handleOpenFolder = async () => {
+    if (!status.configPath) return;
+    const dir = getDirectoryPath(status.configPath);
+    try {
+      await tauriInvoke("open_folder", { path: dir || status.configPath });
+    } catch (err) {
+      if (import.meta.env.DEV) console.error("Failed to open folder:", err);
+      toast.error(String(err));
+    }
+  };
+
+  return (
+    <li
+      className={cn(
+        "rounded-xl border px-3.5 py-2.5",
+        status.installed ? "border-border/70 bg-background/50" : "border-border/40 bg-background/25",
+      )}
+    >
+      <div className="flex items-center gap-2.5">
+        <LobeIcon
+          icon={BrandIcon}
+          size={18}
+          className={cn("shrink-0", status.installed ? "text-foreground" : "text-muted-foreground")}
+        />
+        <span
+          className={cn(
+            "w-36 shrink-0 truncate text-[13px] font-semibold tracking-tight",
+            status.installed ? "text-foreground" : "text-muted-foreground",
+          )}
+          title={displayName}
+        >
+          {displayName}
+        </span>
+        <StatusChip size="sm" tone={status.installed ? "success" : "muted"} className="shrink-0 whitespace-nowrap">
+          {status.installed ? t("mcp.toolInstalled") : t("mcp.toolNotInstalled")}
+        </StatusChip>
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          {t("mcp.toolServerCount", { count: status.serverCount })}
+        </span>
+      </div>
+
+      <div className="mt-1 flex items-center gap-1 pl-7">
+        <p
+          className="min-w-0 flex-1 truncate font-mono text-[11px] leading-5 text-muted-foreground"
+          title={status.configPath || undefined}
+        >
+          {formatDisplayPath(status.configPath) || t("mcp.toolConfigPathUnknown")}
+        </p>
+        {status.configPath ? (
+          <button
+            type="button"
+            onClick={() => void handleCopy()}
+            title={t("mcp.toolCopyPath")}
+            aria-label={t("mcp.toolCopyPath")}
+            className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground focus-ring"
+          >
+            {hasCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
+        {status.installed && status.configPath ? (
+          <button
+            type="button"
+            onClick={() => void handleOpenFolder()}
+            title={t("mcp.toolOpenFolder")}
+            aria-label={t("mcp.toolOpenFolder")}
+            className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground focus-ring"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+
+      {unreachable ? (
+        <p className="mt-1.5 flex items-start gap-1.5 pl-7 text-[11px] leading-relaxed text-muted-foreground/80">
+          <CircleSlash className="mt-0.5 h-3 w-3 shrink-0" />
+          {t("mcp.toolNoAgentProfile")}
+        </p>
+      ) : null}
+    </li>
+  );
+}
 
 interface McpToolStatusPanelProps {
   className?: string;
 }
 
+/**
+ * Where every MCP config target lives, and what is in it.
+ *
+ * `serverCount` is what is in the live file, SkillStar-managed or not — that
+ * is what the agent will load. This panel is an inspector, not a workbench.
+ */
 export function McpToolStatusPanel({ className }: McpToolStatusPanelProps) {
   const { t } = useTranslation();
   const { profiles } = useAgentProfiles();
   const { statuses, installedCount, isLoading, isFetching, refetch } = useMcpToolStatuses();
-
-  const unreachable = mcpToolIdsWithoutAgentProfile(MCP_TOOL_IDS, profiles);
+  const unreachable = useMemo(() => new Set(mcpToolIdsWithoutAgentProfile(MCP_TOOL_IDS, profiles)), [profiles]);
 
   if (isLoading) {
     return (
@@ -45,11 +149,9 @@ export function McpToolStatusPanel({ className }: McpToolStatusPanelProps) {
   }
 
   return (
-    <section className={cn("space-y-3", className)}>
-      <div className="flex items-center gap-2 px-1">
-        <Wrench className="h-3.5 w-3.5 text-primary" />
-        <h2 className="text-sm font-semibold text-foreground">{t("mcp.toolStatusTitle")}</h2>
-        <span className="text-xs text-muted-foreground">
+    <div className={cn("space-y-3", className)}>
+      <div className="flex items-center gap-2">
+        <span className="text-xs tabular-nums text-muted-foreground">
           {t("mcp.toolStatusInstalledCount", { installed: installedCount, total: statuses.length })}
         </span>
         <Button
@@ -65,41 +167,11 @@ export function McpToolStatusPanel({ className }: McpToolStatusPanelProps) {
         </Button>
       </div>
 
-      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
+      <ul className="space-y-2">
         {statuses.map((status) => (
-          <div
-            key={status.toolId}
-            className={cn(
-              "rounded-xl border px-3 py-2.5",
-              status.installed ? "border-border/70 bg-background/50" : "border-border/40 bg-background/25",
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-foreground">
-                {status.label || MCP_TOOL_LABELS[status.toolId]}
-              </span>
-              <StatusChip size="sm" tone={status.installed ? "success" : "muted"}>
-                {status.installed ? t("mcp.toolInstalled") : t("mcp.toolNotInstalled")}
-              </StatusChip>
-              <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
-                {t("mcp.toolServerCount", { count: status.serverCount })}
-              </span>
-            </div>
-
-            <p className="mt-1.5 flex items-start gap-1.5 break-all font-mono text-[11px] text-muted-foreground">
-              <FolderOpen className="mt-0.5 h-3 w-3 shrink-0" />
-              {status.configPath || t("mcp.toolConfigPathUnknown")}
-            </p>
-
-            {unreachable.includes(status.toolId) ? (
-              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground/80">
-                <CircleSlash className="mt-0.5 h-3 w-3 shrink-0" />
-                {t("mcp.toolNoAgentProfile")}
-              </p>
-            ) : null}
-          </div>
+          <McpToolStatusItem key={status.toolId} status={status} unreachable={unreachable.has(status.toolId)} />
         ))}
-      </div>
-    </section>
+      </ul>
+    </div>
   );
 }

@@ -26,7 +26,8 @@ pub(crate) enum JsonReadDialect {
     ServerUrlNoType,
     /// No `type`; `httpUrl` means Streamable HTTP, `url` means SSE.
     GeminiUrlKeys,
-    /// No `type`; a `url` means remote, otherwise stdio. Zed, Antigravity.
+    /// No `type`; a `url` means remote, otherwise stdio. Zed, Antigravity,
+    /// Claude Desktop Chat, WorkBuddy, Devin.
     PlainNoType,
 }
 
@@ -331,6 +332,16 @@ pub(crate) fn read_antigravity_entries(content: &str) -> Result<Vec<McpServerEnt
 /// Zed's top-level `context_servers` map.
 pub(crate) fn read_zed_entries(content: &str) -> Result<Vec<McpServerEntry>> {
     read_json_named_map_entries(content, ZED_SERVERS_KEY, JsonReadDialect::PlainNoType)
+}
+
+/// WorkBuddy's `mcpServers` map (no `type`: a `url` means remote).
+pub(crate) fn read_workbuddy_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::PlainNoType)
+}
+
+/// Devin's `mcpServers` map (no `type`: a `url` means remote).
+pub(crate) fn read_devin_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::PlainNoType)
 }
 
 fn entry_from_codex_table(name: &str, tbl: &toml::Table) -> Option<McpServerEntry> {

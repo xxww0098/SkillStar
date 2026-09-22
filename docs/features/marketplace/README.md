@@ -71,13 +71,14 @@
 
 - GitHub repo import 分为 scan 和 install 两阶段，扫描本身不改变安装状态。
 - Marketplace 只返回可安装描述；repo cache、root-first discovery 和实际 install 属于 Skills 域。
+- Marketplace 卡片安装向 `install_skill` 传 `sessionId` 并订阅 `skillstar://git-progress`，按 `stage` 字段显示阶段文案（解析来源 / 获取仓库 / 扫描技能 / 写入本地 / 部署）替代裸 spinner；事件载荷与 Skills 域安装管线共用（见 [skills/README](../skills/README.md)）。
 - Publisher 与 curated source 的完整清单以 seed/registry 代码和测试为准，文档不复制数量或排序。
 
 ## 前端信息架构
 
-- Marketplace 是统一发现入口，但 Skills 与 MCP 在左侧 category rail 中保持清晰分组。
-- skill tab 进入技能列表；MCP 官方入口先显示 Publisher grid，再进入 Publisher detail。两组 tab 的胶囊文案不重复：skill 组内的「官方」是官方发布者入口，MCP 组内的叫「官方服务器」，避免两个相邻胶囊同名不同义。
-- Publisher drill-down 复用主市场的 grid/list 和 toolbar 交互，不创建第二套 fetch 逻辑。
+- Marketplace 只做技能发现：总排行 / 趋势 / 热门 / 官方技能发布者。不要再在工具栏放 MCP 胶囊。
+- MCP 商店在 MCP 页面内（见 [MCP](../mcp/README.md)）；侧栏「市场」不承载 MCP 发现。MCP 没有发布者 grid——发布者是商店内的一个范围，不是一个页面。
+- 技能 Publisher drill-down 复用主市场的 grid/list 和 toolbar 交互，不创建第二套 fetch 逻辑。
 - installed MCP 管理不放 Marketplace，而在 MCP 页面处理。
 
 ## 验证

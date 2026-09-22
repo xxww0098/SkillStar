@@ -10,7 +10,8 @@ use tracing::{debug, warn};
 
 use crate::transport::{self, GitOperationSession};
 pub use crate::tree::{
-    GitTreeEntry, list_tree_entries_at, list_tree_paths, list_tree_paths_at, revision_contains_path,
+    GitTreeEntry, list_tree_entries_at, list_tree_entries_with_trees, list_tree_paths,
+    list_tree_paths_at, revision_contains_path,
 };
 
 /// Git `file://` URL for a local path.
@@ -259,7 +260,30 @@ pub fn apply_sparse_checkout_in_session(
             || err_lower.contains("fatal:");
 
         if is_hard_failure {
-            return Err(anyhow!("git checkout failed (blob fetch): {}", err.trim()));
+            // The failure is usually the *mirror* choking on lazy blob batches
+            // (ghproxy-style accelerators commonly break partial-clone on-demand
+            // fetches), not GitHub itself. The promisor remote is resolved from
+            // origin per invocation, so one direct retry — mirror rewrite
+            // disabled — frequently materializes what the mirror could not.
+            warn!(
+                target: "git_ops",
+                error = err.trim(),
+                "sparse checkout blob fetch failed; retrying once without a mirror"
+            );
+            if let Err(direct_error) = transport::execute_remote_git(
+                Some(repo_path),
+                &["checkout"],
+                &remote,
+                session,
+                false,
+            ) {
+                return Err(anyhow!(
+                    "git checkout failed (blob fetch, retried direct): {} / direct attempt: {}",
+                    err.trim(),
+                    direct_error
+                ));
+            }
+            return Ok(());
         }
 
         // Truly non-fatal: minor warnings, modified-file notices, etc.
@@ -267,6 +291,30 @@ pub fn apply_sparse_checkout_in_session(
     }
 
     Ok(())
+}
+
+/// Materialize additional directories in an existing cone-mode sparse checkout.
+///
+/// Reads the current sparse paths, unions them with `dirs`, and re-applies
+/// the set — the portable equivalent of `git sparse-checkout add` built from
+/// primitives every supported git already has. The trailing checkout lazily
+/// fetches only the new directories' blobs.
+pub fn add_sparse_checkout_dirs_in_session(
+    repo_path: &Path,
+    dirs: &[String],
+    session: &GitOperationSession,
+) -> Result<()> {
+    if dirs.is_empty() {
+        return Ok(());
+    }
+    let mut merged = sparse_checkout_paths(repo_path).unwrap_or_default();
+    for dir in dirs {
+        if !merged.contains(dir) {
+            merged.push(dir.clone());
+        }
+    }
+    let refs: Vec<&str> = merged.iter().map(String::as_str).collect();
+    apply_sparse_checkout_in_session(repo_path, &refs, session)
 }
 
 /// Ensure repository worktree files are present.

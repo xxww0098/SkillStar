@@ -1,6 +1,6 @@
 //! Per-tool wire-format spec generation (canonical JSON, OpenCode, Codex TOML).
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 use super::*;
@@ -32,8 +32,8 @@ pub(crate) enum JsonDialect {
     /// present (research §5.3 #7).
     GeminiUrlKeys,
     /// No `type` key; `command` means local, `url` means remote — Zed,
-    /// Claude Desktop Chat, and Antigravity (research §5.1). Antigravity
-    /// rejects `type: "stdio"` and hides the server from its UI.
+    /// Claude Desktop Chat, Antigravity, and WorkBuddy (research §5.1).
+    /// Antigravity rejects `type: "stdio"` and hides the server from its UI.
     ///
     /// Note this is the *opposite* rule from [`Self::Typed`], which Claude
     /// **Code** uses: there a `url` without a `type` is a hard configuration
@@ -307,6 +307,28 @@ pub(crate) fn gemini_cli_spec(entry: &McpServerEntry) -> Value {
 /// unusual part is the root key (`context_servers`, not `mcpServers` —
 /// research §5.3 #9), owned by the writer in `tools.rs`.
 pub(crate) fn zed_spec(entry: &McpServerEntry) -> Value {
+    json_spec(entry, JsonDialect::PlainNoType)
+}
+
+/// WorkBuddy value (`~/.workbuddy/mcp.json` → `mcpServers.<name>`).
+///
+/// Documented entries are `command`/`args`/`env` (stdio) or `url` (remote)
+/// with **no `type` key**. Extra `type` tokens have made other clients hide
+/// the server (Antigravity), so this target uses [`JsonDialect::PlainNoType`]
+/// rather than the community typed shape. SkillStar never writes the
+/// project-level `<project>/.workbuddy/mcp.json`.
+pub(crate) fn workbuddy_spec(entry: &McpServerEntry) -> Value {
+    json_spec(entry, JsonDialect::PlainNoType)
+}
+
+/// Devin value (`~/.config/devin/mcp_config.json` → `mcpServers.<name>`).
+///
+/// Documented entries are `command`/`args`/`env` (stdio) or `url` (remote,
+/// Streamable HTTP with an automatic SSE fallback) with **no `type` key**.
+/// Devin's `transport`, `oauthClientId` and `disabled` keys are not projected:
+/// the first two are not data SkillStar holds, and `disabled` is the user's own
+/// toggle (same rule as Cline's `disabled`).
+pub(crate) fn devin_spec(entry: &McpServerEntry) -> Value {
     json_spec(entry, JsonDialect::PlainNoType)
 }
 

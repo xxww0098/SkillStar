@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../../lib/utils";
 import type { McpPreset } from "../../../types";
+import { CURATED_MCP_PRESENTATION } from "../lib/curatedShelves";
 
 interface McpRecommendedPresetsProps {
   presets: readonly McpPreset[];
@@ -63,6 +64,11 @@ export function McpRecommendedPresets({
       <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-1">
         {available.map((preset) => {
           const isSelected = selectedPresetId === preset.id;
+          // Preset ids are byte-identical to curated catalog ids, so the same
+          // service glyph the store card shows resolves here too; a non-catalog
+          // built-in preset simply keeps the plain chip.
+          const presentation = CURATED_MCP_PRESENTATION[preset.id];
+          const PresetIcon = presentation?.icon;
           return (
             <button
               key={preset.id}
@@ -77,6 +83,9 @@ export function McpRecommendedPresets({
                   : "border-border/60 bg-background/80 text-foreground/90 hover:border-primary/40 hover:bg-muted/50 hover:text-foreground",
               )}
             >
+              {PresetIcon ? (
+                <PresetIcon className={cn("h-3 w-3 shrink-0", isSelected ? "text-primary" : presentation.iconClass)} />
+              ) : null}
               <span className="font-medium">{preset.name}</span>
               {preset.transport ? (
                 <span

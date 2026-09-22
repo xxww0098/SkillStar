@@ -5,16 +5,16 @@ import { McpRecommendedPresets } from "./McpRecommendedPresets";
 
 const MOCK_PRESETS: McpPreset[] = [
   {
-    id: "cua-driver",
-    name: "cua-driver",
-    description: "Cua Driver - Computer Use",
-    homepage: "https://cua.ai",
+    id: "context7",
+    name: "context7",
+    description: "Up-to-date library and framework docs",
+    homepage: "https://github.com/upstash/context7",
     transport: "stdio",
-    command: "cua-driver",
-    args: ["mcp"],
+    command: "npx",
+    args: ["-y", "@upstash/context7-mcp"],
     env: {},
     headers: {},
-    tags: ["computer-use"],
+    tags: ["docs", "context"],
     requiredEnv: [],
   },
   {
@@ -48,7 +48,7 @@ const MOCK_PRESETS: McpPreset[] = [
 
 describe("McpRecommendedPresets", () => {
   it("renders nothing when all presets are already installed", () => {
-    const installed = new Set(["cua-driver", "playwright", "github"]);
+    const installed = new Set(["context7", "playwright", "github"]);
     const { container } = render(
       <McpRecommendedPresets presets={MOCK_PRESETS} installedNames={installed} onPick={vi.fn()} />,
     );
@@ -56,10 +56,10 @@ describe("McpRecommendedPresets", () => {
   });
 
   it("filters out installed presets and displays available ones", () => {
-    const installed = new Set(["cua-driver"]);
+    const installed = new Set(["context7"]);
     render(<McpRecommendedPresets presets={MOCK_PRESETS} installedNames={installed} onPick={vi.fn()} />);
 
-    expect(screen.queryByText("cua-driver")).toBeNull();
+    expect(screen.queryByText("context7")).toBeNull();
     expect(screen.getByText("playwright")).toBeInTheDocument();
     expect(screen.getByText("github")).toBeInTheDocument();
   });

@@ -27,6 +27,11 @@ dirs = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 toml = { workspace = true }
+# Format-preserving TOML editing for the live Codex/Grok config files: the
+# plain `toml` data model cannot carry comments, so a merge through it deletes
+# every comment in `~/.codex/config.toml`. Single-crate dependency, hence the
+# explicit version rather than a `[workspace.dependencies]` row.
+toml_edit = "0.25.15"
 skillstar-core = { path = "../skillstar-core" }
 ts-rs = { workspace = true, features = ["serde-compat"] }
 

@@ -1,66 +1,82 @@
-import { Boxes, ChevronLeft, ChevronRight, PackageSearch, SlidersHorizontal } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Boxes, ChevronLeft, ChevronRight, Database, PackageSearch, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PageToolbar } from "../../../components/layout/PageToolbar";
 import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
-import { cn } from "../../../lib/utils";
+import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { toast } from "../../../lib/toast";
-import type { McpInstallOutcome, ViewMode } from "../../../types";
+import { cn } from "../../../lib/utils";
+import type { McpInstallOutcome } from "../../../types";
 import { useMcpMarketPage } from "../hooks/useMcpMarketPage";
-import { useMcpPresets } from "../hooks/useMcpPresets";
 import { type McpMarketInstallSubmission, useMcpServers } from "../hooks/useMcpServers";
 import { useMcpSources } from "../hooks/useMcpSources";
-import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
 import { mcpEnabledMapFromProfiles, selectMcpAgentTargets } from "../lib/agentTargets";
+import { groupMcpMarketShelves } from "../lib/curatedShelves";
 import { buildInstalledIndex } from "../lib/installState";
-import { hasActiveMcpNarrowing } from "../lib/marketQuery";
+import { DEFAULT_MCP_MARKET_FILTERS, hasActiveMcpNarrowing } from "../lib/marketQuery";
 import { failedMcpSyncCount } from "../lib/syncResults";
 import { McpCatalogHealthBanner } from "./McpCatalogHealthBanner";
-import { McpRecommendedStrip } from "./McpRecommendedStrip";
 import { McpInstallWizard } from "./McpInstallWizard";
 import { McpMarketBrowser } from "./McpMarketBrowser";
 import { McpMarketFilters } from "./McpMarketFilters";
 
 /**
- * Global MCP catalog browse.
+ * MCP store — what you can get, and how to get it.
  *
- * The catalog is the merge of every enabled source — currently ~21k servers —
- * so this page never holds it in memory: search, every filter, the sort order
- * and the page window all compile into one backend query, and the row count
- * shown ("1–60 of 21363") is the backend's pre-pagination total. Previously the
- * only way in was per publisher, with a three-field substring match over an
- * already-fetched array while the snapshot's FTS index went unused
- * (audit D.3-1/2/3).
+ * The store used to open on a publisher grid that existed only to drill into
+ * one publisher's bucket, which made a two-click trip out of a one-click
+ * question and put a whole extra navigation layer in front of the servers.
+ * Publishers are now a scope, not a page: *Curated* is the recommended
+ * shortlist we seed — rendered as labeled shelves (`core` / `context` /
+ * `browser`) — and *Full catalog* is the ~21k-row remote registry (`github`),
+ * the flat filterable grid.
+ *
+ * The remote registry is never held in memory: search, every filter, the sort
+ * order and the page window all compile into one backend query, and the row
+ * count shown ("1–60 of 21363") is the backend's pre-pagination total.
+ *
+ * This page owns every page-level state — loading, empty, remote-error with its
+ * retry, pagination — so `McpMarketBrowser` stays a pure card renderer.
  */
 
+type StoreScope = "curated" | "registry";
+
+const SCOPES: Array<{ id: StoreScope; label: string }> = [
+  { id: "curated", label: "mcp.scopeCurated" },
+  { id: "registry", label: "mcp.scopeRegistry" },
+];
+
 interface McpMarketPageProps {
-  /** Scope to one publisher bucket; omit for the whole merged catalog. */
-  publisherId?: string | null;
-  className?: string;
+  /** View switch when this page is the MCP store surface. */
+  title?: ReactNode;
+  /** Open the catalog-source inspector. */
+  onOpenSources?: () => void;
 }
 
-export function McpMarketPage({ publisherId = null, className }: McpMarketPageProps) {
+export function McpMarketPage({ title, onOpenSources }: McpMarketPageProps) {
   const { t } = useTranslation();
+  const [scope, setScope] = useState<StoreScope>("curated");
   const [showFilters, setShowFilters] = useState(false);
   const [installId, setInstallId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [viewMode] = useState<ViewMode>("grid");
 
-  const market = useMcpMarketPage({ publisherId });
+  const browsingRegistry = scope === "registry";
+  const market = useMcpMarketPage({
+    curatedOnly: !browsingRegistry,
+    publisherId: browsingRegistry ? "github" : null,
+  });
   const { servers, installFromMarket } = useMcpServers();
-  const { presets } = useMcpPresets();
   const { profiles } = useAgentProfiles();
   const { health } = useMcpSources();
   const { noteForTool } = useMcpToolStatuses();
 
   const installedIndex = useMemo(() => buildInstalledIndex(servers), [servers]);
   const agentTargets = useMemo(() => selectMcpAgentTargets(profiles), [profiles]);
-  const installedNames = useMemo(() => new Set(servers.map((server) => server.name.trim().toLowerCase())), [servers]);
-  const catalogPresets = useMemo(() => presets.filter((preset) => preset.catalogId), [presets]);
 
   /**
    * A refused install is not an error: the wizard keeps the drawer open and
@@ -88,55 +104,115 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
 
   const { window: pageWindow } = market;
   const narrowed = hasActiveMcpNarrowing(market.filters);
+  const remoteError = market.snapshotStatus === "remote_error";
+  const searchPlaceholder = t(browsingRegistry ? "mcp.marketSearchPlaceholder" : "mcp.officialSearchPlaceholder");
 
   const closeInstall = () => {
     if (!saving) setInstallId(null);
   };
 
+  /**
+   * Curated is an eight-row shortlist — the filter panel (kind / license /
+   * stars) exists for the ~21k registry, so it hides there. Switching scope
+   * also drops any narrowing but the search text: a filter set in one scope
+   * that silently follows into the other would read as missing rows.
+   */
+  const handleScopeChange = (next: StoreScope) => {
+    if (next === scope) return;
+    setScope(next);
+    setShowFilters(false);
+    market.setFilters((prev) => ({ ...DEFAULT_MCP_MARKET_FILTERS, search: prev.search }));
+  };
+
+  const sections = useMemo(
+    () => (browsingRegistry ? undefined : groupMcpMarketShelves(market.items)),
+    [browsingRegistry, market.items],
+  );
+
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>
-      <div className="flex items-center gap-2 border-b border-border/60 px-6 py-2.5">
-        <SearchInput
-          containerClassName="w-72"
-          value={market.filters.search}
-          onChange={(event) => market.setFilters((prev) => ({ ...prev, search: event.target.value }))}
-          placeholder={t("mcp.marketSearchPlaceholder")}
-          className="h-8 bg-sidebar/50 text-xs focus-visible:bg-background"
-          iconClassName="left-2.5"
-        />
-        <Button
-          type="button"
-          variant={showFilters ? "default" : "outline"}
-          size="sm"
-          className="h-8 gap-1.5"
-          onClick={() => setShowFilters((prev) => !prev)}
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          {t("mcp.filtersTitle")}
-        </Button>
-        {publisherId ? null : (
-          <McpRecommendedStrip
-            presets={catalogPresets}
-            installedNames={installedNames}
-            onPick={(preset) => {
-              if (preset.catalogId) setInstallId(preset.catalogId);
-            }}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <PageToolbar
+        title={title}
+        search={
+          <SearchInput
+            containerClassName="w-72"
+            value={market.filters.search}
+            onChange={(event) => market.setFilters((prev) => ({ ...prev, search: event.target.value }))}
+            placeholder={searchPlaceholder}
+            className="h-8 bg-sidebar/50 text-xs focus-visible:bg-background"
+            iconClassName="left-2.5"
           />
-        )}
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          {pageWindow.total > 0
-            ? t("mcp.showingRange", { from: pageWindow.from, to: pageWindow.to, total: pageWindow.total })
-            : t("mcp.showingNone")}
-        </span>
-      </div>
+        }
+        filters={
+          <>
+            <div
+              role="group"
+              aria-label={t("mcp.storeScope")}
+              className="flex h-8 items-center rounded-lg border border-border/70 bg-sidebar/30 p-0.5"
+            >
+              {SCOPES.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={scope === id}
+                  onClick={() => handleScopeChange(id)}
+                  className={cn(
+                    "inline-flex h-full cursor-pointer items-center rounded-md px-2.5 text-xs transition-colors duration-150 focus-ring select-none",
+                    scope === id
+                      ? "bg-accent font-semibold text-accent-foreground"
+                      : "font-medium text-muted-foreground hover:bg-sidebar-hover hover:text-foreground",
+                  )}
+                >
+                  {t(label)}
+                </button>
+              ))}
+            </div>
+            {browsingRegistry ? (
+              <Button
+                type="button"
+                variant={showFilters ? "default" : "outline"}
+                size="sm"
+                className="h-8 gap-1.5"
+                onClick={() => setShowFilters((prev) => !prev)}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {t("mcp.filtersTitle")}
+              </Button>
+            ) : null}
+          </>
+        }
+        actions={
+          <>
+            {onOpenSources ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={onOpenSources}
+                title={t("mcp.sourcesTitle")}
+                aria-label={t("mcp.sourcesTitle")}
+              >
+                <Database className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {pageWindow.total > 0
+                ? t("mcp.showingRange", { from: pageWindow.from, to: pageWindow.to, total: pageWindow.total })
+                : t("mcp.showingNone")}
+            </span>
+          </>
+        }
+      />
 
       <main className="ss-page-scroll">
         <div className="ss-page-stack">
-          <McpCatalogHealthBanner
-            health={health}
-            onRefresh={() => void market.refresh()}
-            refreshing={market.refreshing}
-          />
+          {browsingRegistry ? (
+            <McpCatalogHealthBanner
+              health={health}
+              onRefresh={() => void market.refresh()}
+              refreshing={market.refreshing}
+            />
+          ) : null}
 
           {showFilters ? (
             <McpMarketFilters
@@ -146,7 +222,7 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
             />
           ) : null}
 
-          {market.isLoading ? (
+          {market.isLoading || (market.snapshotStatus === "seeding" && market.items.length === 0) ? (
             <div className="flex items-center justify-center py-20">
               <LoadingLogo size="lg" label={t("mcp.marketLoading")} />
             </div>
@@ -154,9 +230,25 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
             <EmptyState
               icon={<Boxes className="h-6 w-6 text-muted-foreground" />}
               title={narrowed ? t("mcp.marketNoMatches") : t("mcp.marketEmptyTitle")}
-              description={narrowed ? t("mcp.marketNoMatchesDescription") : t("mcp.marketEmptyDescription")}
+              description={
+                remoteError
+                  ? t("mcp.marketRemoteErrorDescription")
+                  : narrowed
+                    ? t("mcp.marketNoMatchesDescription")
+                    : t(browsingRegistry ? "mcp.marketEmptyDescription" : "mcp.officialEmptyDescription")
+              }
               action={
-                narrowed ? (
+                remoteError ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => void market.refresh()}
+                    disabled={market.refreshing}
+                    className="gap-1.5"
+                  >
+                    <RefreshCw className={market.refreshing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                    {t("common.retry")}
+                  </Button>
+                ) : narrowed ? (
                   <Button variant="outline" onClick={market.resetFilters}>
                     {t("mcp.filtersClearAll")}
                   </Button>
@@ -169,42 +261,39 @@ export function McpMarketPage({ publisherId = null, className }: McpMarketPagePr
               <McpMarketBrowser
                 installedIndex={installedIndex}
                 entries={market.items}
-                status={market.snapshotStatus}
-                isLoading={false}
-                query={market.filters.search}
-                refreshing={market.refreshing}
-                viewMode={viewMode}
-                onRefresh={() => void market.refresh()}
+                sections={sections}
                 onInstall={setInstallId}
               />
 
-              <div className="flex items-center justify-center gap-3 pb-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1"
-                  onClick={market.prevPage}
-                  disabled={!pageWindow.hasPrev || market.isFetching}
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  {t("mcp.pagePrev")}
-                </Button>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {t("mcp.pageOf", { page: pageWindow.pageIndex + 1, pages: pageWindow.pageCount })}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1"
-                  onClick={market.nextPage}
-                  disabled={!pageWindow.hasNext || market.isFetching}
-                >
-                  {t("mcp.pageNext")}
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+              {pageWindow.pageCount > 1 ? (
+                <div className="flex items-center justify-center gap-3 pb-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1"
+                    onClick={market.prevPage}
+                    disabled={!pageWindow.hasPrev || market.isFetching}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    {t("mcp.pagePrev")}
+                  </Button>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {t("mcp.pageOf", { page: pageWindow.pageIndex + 1, pages: pageWindow.pageCount })}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1"
+                    onClick={market.nextPage}
+                    disabled={!pageWindow.hasNext || market.isFetching}
+                  >
+                    {t("mcp.pageNext")}
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : null}
             </>
           )}
         </div>

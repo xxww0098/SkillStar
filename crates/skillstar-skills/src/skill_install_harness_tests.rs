@@ -735,3 +735,131 @@ fn install_pipeline_table_chooses_harness_or_fallback_folder() {
         );
     }
 }
+
+/// The impeccable shape without a harness request: the identity collapses to
+/// the `.agents` representative, duplicate harness copies stay deferred in
+/// the inventory sidecar, and heavy non-skill content never materializes in
+/// the cache checkout. A later harness install materializes its copy on
+/// demand.
+#[test]
+fn pack_collapses_duplicate_copies_and_heavy_content() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[
+        (".agents/skills/impeccable", "impeccable", "agents copy"),
+        (".claude/skills/impeccable", "impeccable", "agents copy"),
+        (".cursor/skills/impeccable", "impeccable", "cursor copy"),
+    ]);
+    std::fs::create_dir_all(remote.path().join("crates/engine/src")).unwrap();
+    std::fs::write(
+        remote.path().join("crates/engine/src/lib.rs"),
+        "pub fn heavy() {}",
+    )
+    .unwrap();
+    std::fs::write(remote.path().join("package.json"), "{}").unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "heavy"]);
+    let url = "https://github.com/pbakaus/impeccable.git";
+    sandbox.map_github_url(url, remote.path());
+
+    let installed = install_skills_batch_in_session(
+        url,
+        &["impeccable".to_string()],
+        None,
+        &GitOperationSession::public(),
+    )
+    .expect("plain install");
+    assert_eq!(installed.len(), 1);
+    assert_eq!(
+        lock_source_folder("impeccable").as_deref(),
+        Some(".agents/skills/impeccable")
+    );
+    let hub = skillstar_core::infra::paths::hub_skills_dir().join("impeccable");
+    assert_eq!(payload_at(&hub), "agents copy");
+
+    let repo_dir = skillstar_core::infra::paths::repos_cache_dir()
+        .join(repo_scanner::cache_key_for("pbakaus/impeccable", None).unwrap());
+    assert!(
+        repo_dir.join(".agents/skills/impeccable/SKILL.md").is_file(),
+        "representative must be materialized"
+    );
+    assert!(
+        repo_dir.join(".cursor/skills/impeccable/SKILL.md").is_file(),
+        "content-divergent copy always materializes (its identity may differ)"
+    );
+    assert!(
+        !repo_dir.join(".claude/skills/impeccable").exists(),
+        "byte-identical duplicate copy must stay deferred"
+    );
+    assert!(
+        !repo_dir.join("crates").exists(),
+        "heavy non-skill directories must never materialize (root files like \
+         package.json are always present in cone-mode sparse checkouts)"
+    );
+
+    // The deferred identical copy comes back on demand for its harness.
+    let retargeted = install_skills_batch_in_session(
+        url,
+        &["impeccable".to_string()],
+        Some("claude"),
+        &GitOperationSession::public(),
+    )
+    .expect("claude retarget");
+    assert_eq!(retargeted.len(), 1);
+    assert_eq!(
+        lock_source_folder("impeccable").as_deref(),
+        Some(".claude/skills/impeccable")
+    );
+    assert_eq!(payload_at(&hub), "agents copy");
+    assert!(repo_dir.join(".claude/skills/impeccable/SKILL.md").is_file());
+}
+
+#[derive(Default)]
+struct RecordingSink(std::sync::Mutex<Vec<String>>);
+
+impl crate::git::transport::GitProgressSink for RecordingSink {
+    fn emit(&self, progress: crate::git::transport::GitOperationProgress) {
+        if let Some(stage) = progress.stage {
+            self.0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(format!("{stage:?}"));
+        }
+    }
+}
+
+/// A fresh install walks the pipeline stages in order on its session's
+/// progress channel, so the UI can replace the bare spinner with a label.
+#[test]
+fn fresh_install_emits_stage_progress_in_order() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[("skills/alpha", "alpha", "alpha payload")]);
+    let url = "https://github.com/acme/plain-skills.git";
+    sandbox.map_github_url(url, remote.path());
+
+    let sink = std::sync::Arc::new(RecordingSink::default());
+    let session = GitOperationSession::new(
+        "stage-sequence-test",
+        crate::git::transport::GitAuthMaterial::missing(),
+        sink.clone(),
+    );
+    let installed = install_skills_batch_in_session(
+        url,
+        &["alpha".to_string()],
+        None,
+        &session,
+    )
+    .expect("install");
+    assert_eq!(installed.len(), 1);
+
+    let stages = sink.0.lock().unwrap().clone();
+    assert_eq!(
+        stages,
+        vec![
+            "Resolving".to_string(),
+            "Fetching".to_string(),
+            "Discovering".to_string(),
+            "Materializing".to_string(),
+        ],
+        "fresh install must emit the four in-crate stages in order"
+    );
+}

@@ -34,7 +34,7 @@ describe("optional field support", () => {
   it("mirrors the writers in specs.rs", () => {
     expect([...mcpToolsSupporting("autoApprove")]).toEqual(["kiro", "cline"]);
     expect([...mcpToolsSupporting("disabledTools")]).toEqual(["kiro", "codex", "gemini-cli"]);
-    expect([...mcpToolsSupporting("timeout")]).toEqual(["opencode", "codex", "cline", "gemini-cli"]);
+    expect([...mcpToolsSupporting("timeout")]).toEqual(["opencode", "codex", "cline", "gemini-cli", "deepseek"]);
   });
 
   it("keeps both Claude targets out of every optional field", () => {

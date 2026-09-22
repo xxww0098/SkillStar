@@ -23,7 +23,9 @@ use tauri::State;
 use tracing::{debug, error};
 use ts_rs::TS;
 
-use skillstar_app::mcp::{McpInstallAnswer, McpInstallPlan, McpInstallPreview, McpInstallRejection};
+use skillstar_app::mcp::{
+    McpInstallAnswer, McpInstallPlan, McpInstallPreview, McpInstallRejection,
+};
 
 use super::mcp_commands::{McpServerWithSync, McpWriteLock};
 

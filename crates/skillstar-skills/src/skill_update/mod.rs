@@ -19,7 +19,10 @@ use crate::{
 };
 use divergence::SourceRemovedStop;
 use plan::{SiblingState, UpdatePlan};
-pub use transaction::acquire_update_transaction_lock;
+pub use transaction::{
+    acquire_lockfile_write_lock, acquire_repo_cache_lock, acquire_update_transaction_lock,
+    RepoCacheGuard,
+};
 
 #[cfg(test)]
 use divergence::same_physical_path;
@@ -532,6 +535,10 @@ pub fn refresh_baselines_after_checkout_reset(repo_dir: &Path) -> Result<Vec<Str
         .with_context(|| format!("failed to resolve repo cache '{}'", repo_dir.display()))?;
     let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
 
+    // The in-process mutex plus a cross-process file lock: this runs inside
+    // repo-cache phases that no longer hold the global transaction lock, so a
+    // second process must not interleave its own read-modify-write here.
+    let _file_lock = transaction::acquire_lockfile_write_lock()?;
     let _lock = lockfile::get_mutex()
         .lock()
         .map_err(|_| anyhow::anyhow!("lockfile mutex poisoned"))?;

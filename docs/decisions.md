@@ -474,7 +474,7 @@
 - 日期：2026-09-02
 - 状态：accepted
 - 背景：Hermes Agent v0.21（Pantheon）把 MCP 做成单一桌面指挥中心：已安装机群与目录同页、粘贴即导入、后台健康/重新授权、机群 schema token 加 30 天用量、`hermes://` 深链需确认。SkillStar 已有约两万行 FTS catalog、双纪元探测、CursorJack 级命令确认、多 Agent 投影，以及只按 host 跳到 `#mcp`、丢掉 query 的 `skillstar://` 深链。把 Hermes 的单页堆叠搬过来会卡死界面；编造 30 天用量则不诚实——SkillStar 不是 Agent 运行时，看不到调用次数。
-- 决策：① 主分段是 **Fleet | Catalog**；Tools / Sources 是次级。禁止把两万行目录堆在机群下面一次滚完。② 「粘贴即解析」落在 `skillstar_models::mcp::parse_pasted_mcp`：社区 `mcpServers` JSON、URL、`npx`/`uvx`/`docker` 命令行、`skillstar://mcp?url|catalog|config|command`。解析只返回草稿，**永不自动写入 store**；UI 必须走现有新建表单或市场安装向导的确认路径。③ 机群 schema 成本用 `tools/list` 里 `tools` 数组的紧凑 JSON 字节数，`schema_tokens = ceil(bytes / 4)`。不引入 tiktoken，不展示 30 天用量。④ 指挥中心挂载后对可见机群做一次顺序探测，上限 8，不在 window focus 上跑。`401 + WWW-Authenticate` 仍是 `authorization-required`，不是失败。⑤ `skillstar://mcp` 的 query 打开确认 UI；跳过确认即失败。不新增 crate，不抄 Hermes 页面。
+- 决策：① 页面 IA 由 [D-059](#d-059mcp-配置页只留配置与商店) 取代（D-057 指定的「已安装 | 目录」随之作废）：MCP 是配置页（配置 | 商店），不是四 tab 指挥中心。禁止把两万行目录堆在已装列表下面一次滚完；商店是搜索 + 筛选 + 精选安装卡片，发布者是商店内的「精选 | 完整目录」范围而不是页面，完整目录走分页查询。② 「粘贴即解析」落在 `skillstar_models::mcp::parse_pasted_mcp`：社区 `mcpServers` JSON、URL、`npx`/`uvx`/`docker` 命令行、`skillstar://mcp?url|catalog|config|command`。解析只返回草稿，**永不自动写入 store**；UI 必须走现有新建表单或市场安装向导的确认路径。③ 已装列表的 schema 成本用 `tools/list` 里 `tools` 数组的紧凑 JSON 字节数，`schema_tokens = ceil(bytes / 4)`。不引入 tiktoken，不展示 30 天用量。④ 配置页首次挂载时对已装列表做一次顺序探测，上限 8，不在 window focus 上跑。`401 + WWW-Authenticate` 仍是 `authorization-required`，不是失败。⑤ `skillstar://mcp` 的 query 打开确认 UI；跳过确认即失败。不新增 crate，不抄 Hermes 页面。Marketplace 不再放 MCP 发现入口。
 - 后果：获得——粘贴/深链与市场安装共用同一条确认边界，机群能看到真实的 schema 体积和需要重新授权的 server。承担——超过 8 个已装 server 不会在后台全部探测；token 数字是字节估算不是模型 tokenizer；catalog 深链仍依赖本地快照里真有那一行。
 - 证据：`docs/features/mcp/README.md`、`crates/skillstar-models/src/mcp/import_paste.rs`、`crates/skillstar-models/src/mcp/probe/`、`src/pages/Mcp.tsx`、`src/lib/deepLink.ts`、issue [#79](https://github.com/xxww0098/SkillStar/issues/79)。
 
@@ -513,6 +513,78 @@
 - 决策：团队智能作为 `skillstar-skills::team` 的私有 module + 窄 facade。语料只读已安装 `SKILL.md` 与本地 notes；持久化仅为 `state/team.json`（路径由 core 解析）。CLI 为 `skillstar team …`。不新增 crate，不复活 `skillstar-learning`，不读写 `~/.skillstar/learning/`，本切片不加 Tauri command / GUI。`skillstar find` 继续只搜 Marketplace。
 - 后果：获得——Context/Improvement 的第一刀可在现有 crate 内测试与发布，且不会把教程域带回来。承担——GUI 与频道推送/晋升为 Skill 仍是后续切片；本机 notes 不跨设备。
 - 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
+
+## D-057：MCP 是配置页，不是指挥中心
+
+- 日期：2026-09-10
+- 状态：superseded by [D-059](#d-059mcp-配置页只留配置与商店)
+- 背景：[D-052](#d-052mcp-指挥中心是-skillstar-原生形态只吸收-hermes-021-的平台能力) 吸收了 Hermes 0.21 的平台能力（粘贴解析、探测上限、深链确认、禁止 21k 同页堆叠），但把 MCP 画成 **Fleet | Official** 主分段外加 Tools / Sources 次级 tab。四个入口对一个配置域过重：已装列表才是每天的工作台，目录是添加路径，投影目标和目录源是检查器。工具状态再做成带指标条和筛选的迷你仪表盘，是同一错误的第二次。
+- 决策：MCP 页面是配置页。默认表面是已安装服务器；**目录**是第二个视图（curated publisher grid + 精选卡片，GitHub 钻入仍分页）。Agent 配置与目录源从工具栏打开为检查器，不是对等 tab。推荐芯片只出现在添加表单，目录页不再放第二份推荐条。D-052 的粘贴解析、探测上限、深链确认、Marketplace 不再放 MCP 发现入口，全部保留。
+- 后果：获得——侧栏 MCP 不再假装指挥中心，检查器按需出现。承担——目录源和投影状态要多点一次工具栏图标。
+- 证据：`src/pages/Mcp.tsx`、[docs/features/mcp/README.md](./features/mcp/README.md)。
+
+## D-058：curated 发布者的退役由代码注册表驱动清理
+
+- 日期：2026-09-11
+- 状态：accepted
+- 背景：curated MCP 行是 *code as data*，`seeds::default_curated_mcp_servers()` 是唯一真相，`mcp_curated_server` 由 seeding 对齐。此前 `CURATED_ORDER` 的注释宣称「从顺序表移除一个条目只会把它从 grid 隐藏，行还在库里」，于是每次下线都必须自带一条手写 `DELETE` 迁移——两份真相，必然漂移。同时 [D-057](#d-057mcp-是配置页不是指挥中心) 之后 Official 页面直接读 curated 行，「去掉一个发布者」不再等于「从 grid 隐藏」。本次下线智谱（BigModel）是该场景第一次真实发生。
+- 决策：curated 行的生命周期完全由代码注册表决定。seeding 每次运行都把 id 已不在注册表里的行连同其 FTS 行一起删除（`prune_retired_curated_rows`），不再要求手写迁移；`CURATED_ORDER` 只负责展示顺序与显示名，不再充当隐藏开关。下线一个发布者 = 从注册表与顺序表同时移除。
+- 后果：获得——新增或退役发布者只有一处改动，Official 不会留下孤儿卡片。承担——已装过该发布者服务器的用户，store 条目保留（仍可正常使用、编辑与投影），但目录行消失，因此三态标记只会显示「已安装、无更新」，既不会被判成「有更新」也不会被判成「已弃用」；这是刻意的，没有目录行就没有可比较的来源指纹。要恢复该发布者时重新加回注册表即可，旧 store 条目会重新匹配上。
+- 证据：`crates/skillstar-marketplace/src/mcp_snapshot/seeds/mod.rs`、`crates/skillstar-marketplace/src/mcp_snapshot/query/publishers.rs`、`crates/skillstar-marketplace/src/mcp_snapshot/seeding.rs`。
+
+## D-059：MCP 配置页只留配置与商店
+
+- 日期：2026-09-11
+- 状态：accepted
+- 背景：[D-057](#d-057mcp-是配置页不是指挥中心) 把四个 tab 收敛成「已安装 | 目录」，方向对，但只搬走了导航，没搬走仪表盘：已装页仍在列表之上压着健康汇总条（全部 / 健康 / 需登录 / 异常芯片 + schema token + 探测上限）、工具栏计数徽章、更新可用徽章、未检查更新文本、常驻的粘贴大文本框和整页拖拽遮罩，每张卡片还各有一个独立探测按钮；添加服务器有四个入口（工具栏按钮、常驻粘贴条、从工具导入按钮、表单里的推荐芯片）；商店页顶部是一整块发布者网格，而它唯一的用途是钻入某一个发布者。这些都是「把运行观测塞进配置页」，不是「配置」也不是「商店」。
+- 决策：配置页只有两个视图，每个视图只答一个问题。**配置** = 已装列表 + 搜索 + 按 Agent 筛选 + 新建/安装/编辑悬浮窗；健康只作为卡片上的状态点，再探一次在编辑悬浮窗的探测面板里——页面不再有健康汇总条、计数/更新徽章、常驻粘贴条、整页拖拽遮罩或每卡探测按钮。**商店** = 搜索 + 筛选 + 精选安装卡片 + 「精选 | 完整目录」范围切换；发布者从页面降级为范围，发布者 grid 与发布者详情子页删除。添加服务器收敛为**一个**入口：工具栏按钮打开一个弹窗，弹窗内用模式切换承载「推荐 / 手动填写 / 粘贴解析 / 从工具导入」四条来源。D-052 的粘贴解析、探测上限（8）、深链确认、禁止 21k 同页堆叠全部保留——只是换了承载面。
+- 后果：获得——一个配置域不再自带仪表盘，工具栏的 4 个动作收敛为 3 个（工具检查器 / 同步 / 添加），添加路径从四个入口变成一条，商店少一层导航。承担——列表上不再一眼看到「几个健康、几个需登录」，要读卡片状态点或打开某张卡片；商店不再有发布者 hero，进完整目录要多点一次范围切换。
+- 证据：`src/pages/Mcp.tsx`、`src/features/mcp/components/McpManager.tsx`、`src/features/mcp/components/McpAddDialog.tsx`、`src/features/mcp/components/McpMarketPage.tsx`、[docs/features/mcp/README.md](./features/mcp/README.md)。
+
+## D-060：MCP 商店精选收敛为编程向白名单
+
+- 日期：2026-09-11
+- 状态：accepted
+- 背景：curated 种子层此前散在 `mod.rs` 内联的发布者小节、`publishers.rs` 的 9 个 `*_curated_servers()` 和一个单独的 `bigmodel.rs` 里，共 21 行，把编程工具和指纹浏览器（AdsPower）、桌面自动化（Cua Driver）、社交发帖（X）、笔记（Notion）、设计、支付、地图、云盘、流量分析混在同一屏；内置推荐芯片（19 项）又把同一片混杂复制了第二份。其中三个种子标识符（`@modelcontextprotocol/server-git`、`server-fetch`、`server-brave-search`）早已被上游归档，装上去就是死的。商店首屏本应是「我们为写代码背书的东西」，混杂之后用户读不出「官方推荐」和「恰好热门」的区别，这个承诺就失效了。
+- 决策：精选是**编程向白名单**，不是「好用的 MCP 合集」。只收写代码与调试会用到的能力（版本控制、代码/文档检索、数据库、容器与云、可观测性），加上通用基础能力（文件系统、网页抓取、记忆、顺序思考、时间）；指纹浏览器、桌面自动化、社交、笔记、设计、支付、地图、云盘、流量分析一律不进精选，它们的发现路径是商店的「完整目录」。判断标准是「它是否让写代码更容易」。落地：种子层从散在 `mod.rs` / `publishers.rs` / `bigmodel.rs` 的发布者小节收敛为**一张 `catalog()` 数据表** + 一个 builder（加一条 server = 加一行 spec）；内置 preset 目录收敛为与 curated `recommended` 集合逐字节对齐的 12 项；被下线的条目（adspower / cua-driver / notion / x / supabase 等）不写删除迁移——[D-058](#d-058curated-发布者的退役由代码注册表驱动清理) 的 `prune_retired_curated_rows` 已让 curated 行的生命周期完全由代码注册表决定。所有收录条目的运行时标识符都对着官方 MCP Registry 与 PyPI 重新核实过（不再沿用归档包的旧名）。
+- 后果：获得——商店首屏每一张卡都能回答「它为什么在编程场景里」；内置兜底目录与 curated `recommended` 不再各自漂移（曾经的 drift 是同一 server 出现两次）；加/删/改条目都是一处改动。承担——想装非编程 MCP 的用户要多点一次「完整目录」；`import_paste.rs` 仍保留 `cua-driver` 作为粘贴命令行识别的一个已知 launcher，因为粘贴导入是通用能力而不是商店条目（该分支确认无用可另行删除）；「纯 docker 包 + 容器内必填环境变量」的 server 暂时进不了精选，原因是安装计划器的 docker 环境变量转发缺陷，不是产品取舍（见 [MCP README](./features/mcp/README.md#marketplace-接缝)）。
+- 证据：`crates/skillstar-marketplace/src/mcp_snapshot/seeds/catalog.rs`、`crates/skillstar-marketplace/src/mcp_snapshot/seeds/helpers.rs`、`crates/skillstar-marketplace/src/mcp_snapshot/query/publishers.rs`、`crates/skillstar-models/src/mcp/presets.rs`、[docs/features/mcp/README.md](./features/mcp/README.md)。
+
+## D-061：精选收敛为推荐短名单
+
+- 日期：2026-09-12
+- 状态：accepted
+- 背景：[D-060](#d-060mcp-商店精选收敛为编程向白名单) 把精选收敛成编程向白名单后还剩 29 行、八个发布者桶——数据库、云与集群、issue 跟踪、抓取、文档转换混在首屏，「推荐」标记只落在 8 条上。用户读这屏时的真实问题是「我装哪几个」，一个比芯片区大四倍的网格把答案稀释了；同时发布者分桶（谁做的）不是用户筛选心智（干什么用）。
+- 决策：精选即推荐短名单——只保留常用工具型 MCP（编程 + 设计创作；条目数随 `catalog()` 注册表走，文档不钉数量），每条都 `recommended`，`source` 从发布者桶改为功能货架（`core` / `context` / `browser` / `creative`），商店精选页按货架分区渲染。内置 preset 兜底目录保持与精选逐字节对齐。被下线的条目不写迁移，`prune_retired_curated_rows`（[D-058](#d-058curated-发布者的退役由代码注册表驱动清理)）照旧清理；它们的发现路径是「完整目录」。筛选面板只对完整目录暴露（短名单上 kind/许可证/stars 筛选无意义），切换范围时清掉除搜索词外的 narrowing。D-060 的「一张 `catalog()` 数据表」机制不变。
+- 后果：获得——商店首屏就是完整答案（核心 / 上下文 / 浏览器 / 创作四段），卡片按服务身份出图标；精选与推荐芯片是同一份清单，不再各自解释「为什么推荐」。承担——精选覆盖变窄，数据库、云等场景要切完整目录；`source` 值从发布者语义改为货架语义，旧安装条目指纹里的 `source_id` 保留旧桶名（仅作信息字段，不影响判定）。
+- 证据：`crates/skillstar-marketplace/src/mcp_snapshot/seeds/catalog.rs`、`crates/skillstar-marketplace/src/mcp_snapshot/query/publishers.rs`、`crates/skillstar-models/src/mcp/presets.rs`、`src/features/mcp/lib/curatedShelves.ts`、`src/features/mcp/components/McpMarketBrowser.tsx`、`src/features/mcp/components/McpMarketCard.tsx`、[docs/features/mcp/README.md](./features/mcp/README.md)。
+
+## D-062：MCP 工具配置写入以「没得删就不落盘 + 原子替换 + 按格式分档保真」为契约
+
+- 日期：2026-09-12
+- 状态：accepted
+- 背景：MCP 的每个 target 都有自己的配置文件（`~/.claude.json`、`~/.codex/config.toml`、`~/.gemini/settings.json` …），里面绝大部分内容与 SkillStar 无关，而写入实现是「读整份 → 改自己那个键 → 整份写回」。三个具体问题：① `sync_server_public_tools` 对每个未启用的 target 也调 remove，remove 又无条件写回，于是「装一个 server」会把机器上所有 Agent 配置文件重新序列化一遍并各生成一份 backup；② 写入用裸 `std::fs::write` 覆盖，进程被杀会留下截断配置，而回滚只在 write 返回 `Err` 时执行；③ Codex/Grok 的 TOML 走 `toml::Table` 值模型，合并一次就删光用户写在该文件里的全部注释。
+- 决策：写入契约收口为三条。**没得删就不落盘**——目标文件里没有这个 key 时 remove 立即返回，不重写、不备份；**原子替换**——所有 live config writer 复用 `skillstar_core::infra::fs_ops::atomic_write`（同目录 tmp + fsync + rename + 保留原权限），rollback 语义不变；**保真度按格式分档**——TOML 换 `toml_edit` 文档模型保留注释/空行/键序，YAML 与 JSON 保持值模型（YAML 键序保留、注释丢失；JSON 键序重排）。**不开** `serde_json/preserve_order`：它是全局序列化语义变更，会让 `tool_sync` 的逐字节基线失效，换来的只是 JSON 键序这一项排版收益。
+- 后果：获得——常规路径（另一个 target 上的开关翻转、同步时的未启用 target）不再触碰无关文件；崩溃不会留下截断配置；Codex/Grok 用户手写的注释不再被一次安装删除。承担——JSON 目标的键序仍会在真正发生增删时被重排（不改变语义，也不影响任何客户端解析），YAML 注释仍会丢；`skillstar-models` 新增 `toml_edit` 依赖（单 crate 使用，按根 Cargo.toml 约定不进 workspace 表）；两个格式各有独立 writer，新增 target 时必须先决定它属于哪一档。
+- 证据：`crates/skillstar-models/src/mcp/tools.rs`、`crates/skillstar-models/src/mcp/hermes.rs`、`crates/skillstar-models/src/mcp/dsh.rs`、`crates/skillstar-models/src/mcp/tests_lossless.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`、[docs/features/mcp/README.md](./features/mcp/README.md)。
+
+## D-063：代表副本唯一物化与永不整仓下载
+
+- 日期：2026-09-21
+- 状态：accepted
+- 背景：分发型仓库（如 `pbakaus/impeccable`）把同一技能镜像进十几个 harness 目录，还携带 Rust/Node 工程等重型非技能内容。旧管线把**每个**含 `SKILL.md` 的目录都加入稀疏检出，逐副本懒取 blob；blob 物化一旦在镜像上失败（HTTP/2 framing 等），回退是**删掉部分克隆、整仓浅克隆**——等于把整个 monorepo 全量下载。加上全局事务锁串行一切安装、marketplace 安装无进度反馈，用户感知就是"卡死"。
+- 决策：四条。**tree-SHA inventory**——treeless partial clone 的 `git ls-tree -t` 免费携带每目录 tree SHA，相同 SHA 即逐字节相同副本；每个 identity 只物化一个代表目录（manifest 声明 > `skills/<name>` > `.agents/skills/<name>` > 已安装 source_folder > 字典序），相同 SHA 的重复副本记入 `.git/skillstar-inventory.json` deferred 集合按需增量物化，**内容不同的副本一律物化**（frontmatter 可能是另一个 identity）。**永不整仓下载**——checkout blob 硬失败先去 mirror 直连重试一次，克隆整体失败改走 codeload `tar.gz` 单次 HTTPS（匿名 mirror 链）选择性解压 + 本地合成 commit 构建 cache（`skillstar.transport=tarball` 标记），完整浅克隆仅作最后手段。**锁粒度**——网络/发现阶段只持每仓库 cache 锁（`state/repo-locks/`），hub 提交才持全局短锁，锁序恒为 repo → global；baseline 刷新用 `state/lockfile.lock` 跨进程互斥。**基线 stat 短路**——fetch 前的 cleanliness 证明用上次可信快照的 mtime/size 指纹（`state/snapshot-stats/`）代替全字节重读，指纹失配即回退全量快照，fail-closed 语义不变。
+- 后果：获得——impeccable 形态的安装从"物化 15+ 副本、失败即全量下载 monorepo"变为"物化 1 份代表副本、镜像协议坏了走单次 HTTPS"；不同仓库安装互不排队；安装阶段可见。承担——相同 SHA 副本的 harness 切换多一次增量物化；tarball cache 无真实 git 历史，更新走重下归档；mtime/size 指纹理论上可被刻意保时间的编辑绕过（与 make/git 同级信任，且有全量快照兜底）。
+- 证据：`crates/skillstar-skills/src/repo_scanner/inventory.rs`、`crates/skillstar-skills/src/tarball_fetch.rs`、`crates/skillstar-skills/src/content_stats.rs`、`crates/skillstar-skills/src/skill_update/transaction.rs`、`crates/skillstar-git/src/ops.rs`、`crates/skillstar-git/src/tree.rs`、`crates/skillstar-skills/src/repo_scanner/cache.rs`、`crates/skillstar-skills/src/skill_install.rs`、[docs/features/skills/README.md](./features/skills/README.md)。
+
+## D-064：本地决策模型用 candle 直读 safetensors，不引入 ONNX 或 Python
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：要把 AgentJev-0.6B（Qwen3-0.6B 主干 + 置换等变候选头）放进桌面应用本地跑，候选实现有三条：Python sidecar 复用官方 `jev_service`（数值最保真，但用户机器要装 Python+torch，约 3 GB，Tauri 还要管子进程生命周期）；ONNX Runtime + 预导出产物（ORT 不认 safetensors，而官方主干是**微调过**的权重，不能用 HF 上现成的 Qwen3 ONNX；产图要么依赖 Python 导出并托管一个 1.2–2.4 GB 产物，要么在 Rust 里手搭 28 层 GQA/RoPE/KV 图，且 CPU EP 对 bf16/fp16 支持差，最后还要多带一个 `onnxruntime` dylib）；candle 原生（`candle-transformers 0.11` 自带 `qwen3.rs`，`Model::forward(input, offset)` + KV cache 正好是共享前缀语义，权重前缀只差一层重映射）。
+- 决策：用 candle 直接读官方 bf16 safetensors，独立成 `skillstar-decision` crate（依赖集合不同：`candle-core` / `candle-nn` / `tokenizers` 只有它用，版本不进根 workspace 表）。共享前缀复用自己实现——candle 的 `ConcatKvCache` 只追加、不能回退到前缀，分支会读到兄弟候选，因此主干前向由本 crate 拥有：KV 是调用方传入的普通 `Vec<Kv>`，前缀只读不写。默认设备/精度为「macOS 走 Metal，其余走 CPU」+ f32；`candle_nn::ops::softmax_last_dim`（CustomOp，无 Metal 核）与 `rotary_emb::rope`（无 Metal 核）改用 `ops.rs` 里可移植算子表达的等价实现，避免逐算子 CPU 回退。正确性由 golden 测试锁定：官方 `jev_service`（torch CPU f32）在六个固定 payload 上产出的 token id、logits、校准概率与答案被固化进 fixture，Rust 侧必须复现。
+- 后果：获得——单二进制、无 Python、无中间产物，Metal 上比 CPU 快 4–6 倍（长状态 732 ms vs 4281 ms），数值与参考实现的最大概率偏差 5e-7（CPU）与 7.2e-7（Metal）。承担——workspace 首次引入张量运行时（编译时间与二进制体积增长，Metal 目标额外拉 `objc2-metal`/`candle-metal-kernels`）；主干前向由本仓库维护，模型升级需要重新对齐数值；`--dtype f16` 在 Metal 上仍会撞到缺失的算子核，因此默认是 f32（2.4 GB 常驻）；每个候选都要把前缀 KV 与候选 KV 拼接一次，宽候选集上还有可做的性能优化。
+- 证据：`crates/skillstar-decision/`（`backbone.rs`、`head.rs`、`ops.rs`、`engine.rs`、`model_files.rs`）、`crates/skillstar-decision/tests/golden.rs` 与 `tests/fixtures/agentjev_golden.json`、`src-tauri/src/commands/decision.rs`、`crates/skillstar-app/src/cli/decide.rs`、[docs/features/models/README.md](./features/models/README.md)、[docs/boundaries.md](./boundaries.md)。
 
 ## 新增记录格式
 

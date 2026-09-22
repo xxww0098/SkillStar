@@ -50,8 +50,9 @@ pub fn fetch_repo_scanned_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock repository scan: {error}"))?;
+    // Repo-cache lock only: a scan fetches and resets one checkout and never
+    // writes the hub, so a slow repository must not queue scans of others.
+    let _repo_guard = acquire_repo_lock_for_url(url)?;
     ensure_generic_repository_input_mutable(url)?;
     fetch_repo_scanned_detailed_in_session(url, full_depth, session)
         .map_err(|error| format!("{error:#}"))
@@ -62,8 +63,7 @@ pub fn fetch_repo_scanned_preferring_local_cache_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), AppError> {
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| AppError::Other(format!("Unable to lock repository scan: {error}")))?;
+    let _repo_guard = acquire_repo_lock_for_url(url).map_err(AppError::Other)?;
     ensure_generic_repository_input_mutable(url).map_err(AppError::from)?;
     scan_repo_preferring_local_cache_in_session(url, full_depth, session)
         .map_err(|error| AppError::Other(format!("{error:#}")))
@@ -77,6 +77,7 @@ pub fn fetch_repo_scanned_detailed_in_session(
     use anyhow::Context as _;
     let parsed = crate::source_resolver::Source::parse(url)
         .map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
+    session.emit_stage(crate::git::transport::InstallStage::Fetching, url, None);
     let repo_dir = repo_scanner::clone_or_fetch_repo_at_in_session(
         &parsed.repo_url,
         &parsed.short,
@@ -96,7 +97,7 @@ pub fn scan_repo_preferring_local_cache_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
-    scan_repo_preferring_local_cache_for_skill(url, full_depth, session, None)
+    scan_repo_preferring_local_cache_for_skill(url, full_depth, session, None, &[])
 }
 
 fn scan_repo_preferring_local_cache_for_skill(
@@ -104,13 +105,49 @@ fn scan_repo_preferring_local_cache_for_skill(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
     skill_name: Option<&str>,
+    required_skills: &[&str],
 ) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
     let parsed = crate::source_resolver::Source::parse(url)
         .map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
     if let Some(repo_dir) = repo_scanner::existing_hub_checkout(&parsed.repo_url, skill_name)
         .or_else(|| repo_scanner::existing_repo_cache_dir(&parsed.short, parsed.git_ref.as_deref()))
     {
-        return Ok(scan_parsed_checkout(&parsed, repo_dir, full_depth));
+        let cached = scan_parsed_checkout(&parsed, repo_dir.clone(), full_depth);
+        // A cached checkout can lag upstream: the patrol that surfaced a new
+        // Skill fetched remotely, while this scan reuses the stale clone. When
+        // an explicitly requested identity is missing locally, fetch once and
+        // rescan instead of reporting it as deleted or renamed.
+        let all_resolvable = required_skills.iter().all(|required| {
+            find_target_skill(&cached.3, Some(required), required).is_some()
+                || nameless_root_skill(&cached.3).is_some()
+        });
+        if all_resolvable {
+            return Ok(cached);
+        }
+        // The requested identity may exist only as a deferred duplicate copy
+        // that was never materialized; surface it before paying for a network
+        // fetch that cannot change the outcome.
+        let mut wanted: Vec<&str> = required_skills.to_vec();
+        if let Some(skill_name) = skill_name {
+            wanted.push(skill_name);
+        }
+        if repo_scanner::inventory::materialize_deferred_matching(
+            &repo_dir, session, &wanted, None,
+        ) {
+            let rescan = scan_parsed_checkout(&parsed, repo_dir, full_depth);
+            let all_resolvable = required_skills.iter().all(|required| {
+                find_target_skill(&rescan.3, Some(required), required).is_some()
+                    || nameless_root_skill(&rescan.3).is_some()
+            });
+            if all_resolvable {
+                return Ok(rescan);
+            }
+        }
+        warn!(
+            target: "install_skill",
+            skills = ?required_skills,
+            "requested skill missing from cached checkout; fetching latest"
+        );
     }
     fetch_repo_scanned_detailed_in_session(url, full_depth, session)
 }
@@ -302,7 +339,25 @@ fn choose_install_skills(
     repo_dir: &Path,
     requests: &[(Option<&str>, &str)],
     harness_prefix: Option<&str>,
+    session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<repo_scanner::DiscoveredSkill>, String> {
+    // Filesystem discovery cannot select a deferred duplicate copy. Only a
+    // harness request needs one surfaced — the plain path always resolves
+    // through the representative, and deferred copies are byte-identical to
+    // it, so materializing them would be a redundant download.
+    if harness_prefix.is_some() {
+        let wanted: Vec<&str> = requests
+            .iter()
+            .filter_map(|(requested, hint)| requested.or(Some(*hint)))
+            .collect();
+        repo_scanner::inventory::materialize_deferred_matching(
+            repo_dir,
+            session,
+            &wanted,
+            harness_prefix,
+        );
+    }
+
     let lock = lockfile::Lockfile::load(&lockfile::lockfile_path()).ok();
     let mut chosen: Vec<repo_scanner::DiscoveredSkill> = Vec::new();
     let mut missing = Vec::new();
@@ -452,8 +507,63 @@ fn materialize_chosen_skills(
     Ok(skills)
 }
 
+/// Per-repository cache lock for `url`, keyed by the same cache directory
+/// name the checkout lives under.
+fn acquire_repo_lock_for_url(
+    url: &str,
+) -> Result<crate::skill_update::RepoCacheGuard, String> {
+    let parsed = crate::source_resolver::Source::parse(url)
+        .map_err(|error| format!("Invalid source: {error}"))?;
+    let cache_key = repo_scanner::cache_key_for(&parsed.short, parsed.git_ref.as_deref())
+        .map_err(|error| error.to_string())?;
+    crate::skill_update::acquire_repo_cache_lock(&cache_key)
+        .map_err(|error| format!("Unable to lock the repository cache: {error}"))
+}
+
+/// What the network phase of an install resolved: the checkout to link from
+/// and the skill folders chosen out of it.
+struct PreparedInstall {
+    repo_url: String,
+    repo_dir: PathBuf,
+    chosen: Vec<repo_scanner::DiscoveredSkill>,
+}
+
+/// Resolve → discover → choose, under the repo cache lock only.
+///
+/// A slow fetch of one repository must not serialize installs of others, so
+/// the long network phase holds nothing global. The repo guard is dropped
+/// before any caller takes the transaction lock (lock order: repo, then
+/// global — never nested the other way).
+fn prepare_install_from_source(
+    url: &str,
+    requests: &[(Option<&str>, &str)],
+    session: &crate::git::transport::GitOperationSession,
+    harness_prefix: Option<&str>,
+) -> Result<PreparedInstall, String> {
+    use crate::git::transport::InstallStage;
+    let lookup = requests
+        .first()
+        .and_then(|(requested, hint)| requested.or(Some(*hint)));
+    let required: Vec<&str> = requests.iter().filter_map(|(name, _)| *name).collect();
+    session.emit_stage(InstallStage::Resolving, url, lookup);
+    let _repo_guard = acquire_repo_lock_for_url(url)?;
+    let (repo_url, _source, repo_dir, _scan) =
+        scan_repo_preferring_local_cache_for_skill(url, false, session, lookup, &required)
+            .map_err(|error| format!("{error:#}"))?;
+    session.emit_stage(InstallStage::Discovering, url, lookup);
+    let chosen = choose_install_skills(&repo_dir, requests, harness_prefix, session)?;
+    Ok(PreparedInstall {
+        repo_url,
+        repo_dir,
+        chosen,
+    })
+}
+
 /// Vercel-skills 5-step install: resolve → discover → hub link.
 /// Agent deploy / project-vs-global scope stay at the caller.
+///
+/// Phase 1 (network + discovery) runs under the per-repo cache lock; phase 2
+/// (hub links + lockfile writes) under the short global transaction lock.
 fn install_from_source(
     url: &str,
     requests: &[(Option<&str>, &str)],
@@ -462,18 +572,20 @@ fn install_from_source(
     except_agent_id: Option<&str>,
     reuse: ReuseMode,
 ) -> Result<Vec<Skill>, String> {
-    let lookup = requests
-        .first()
-        .and_then(|(requested, hint)| requested.or(Some(*hint)));
-    let (repo_url, _source, repo_dir, _scan) =
-        scan_repo_preferring_local_cache_for_skill(url, false, session, lookup)
-            .map_err(|error| format!("{error:#}"))?;
-    let chosen = choose_install_skills(&repo_dir, requests, harness_prefix)?;
+    let prepared = prepare_install_from_source(url, requests, session, harness_prefix)?;
+    session.emit_stage(
+        crate::git::transport::InstallStage::Materializing,
+        url,
+        requests.first().and_then(|(requested, hint)| requested.or(Some(*hint))),
+    );
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock Skill installation: {error}"))?;
+    crate::hub_entry::sweep_stale_staging(&paths::hub_skills_dir());
     materialize_chosen_skills(
         &paths::hub_skills_dir(),
-        &repo_url,
-        &repo_dir,
-        &chosen,
+        &prepared.repo_url,
+        &prepared.repo_dir,
+        &prepared.chosen,
         harness_prefix,
         except_agent_id,
         reuse,
@@ -525,27 +637,13 @@ pub fn install_skill_in_session(
     agent_id: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Skill, String> {
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock Skill installation: {error}"))?;
     let harness_prefix = match agent_id {
         Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
         None => None,
     };
-    install_skill_in_session_locked(url, name, session, harness_prefix.as_deref(), agent_id)
-}
-
-fn install_skill_in_session_locked(
-    url: String,
-    name: Option<String>,
-    session: &crate::git::transport::GitOperationSession,
-    harness_prefix: Option<&str>,
-    except_agent_id: Option<&str>,
-) -> Result<Skill, String> {
+    // Advisory pre-checks without the transaction lock; the authoritative
+    // collision rejection happens under the lock in `materialize_chosen_skills`.
     let skills_dir = paths::hub_skills_dir();
-    // Safe here because the caller holds the update transaction lock, so no
-    // other install or removal owns a live staging entry. Clearing residue up
-    // front keeps a crashed transaction from accumulating in the hub.
-    crate::hub_entry::sweep_stale_staging(&skills_dir);
     let name_hint = derive_name_hint(&url, name.as_deref());
     crate::content::validate_skill_name(&name_hint)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
@@ -568,8 +666,8 @@ fn install_skill_in_session_locked(
         &url,
         &[(name.as_deref(), name_hint.as_str())],
         session,
-        harness_prefix,
-        except_agent_id,
+        harness_prefix.as_deref(),
+        agent_id,
         ReuseMode::Report,
     )?;
     installed.pop().ok_or_else(|| {
@@ -595,8 +693,6 @@ pub fn install_skills_batch_in_session(
     agent_id: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<Skill>, String> {
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock Skill batch installation: {error}"))?;
     if names.is_empty() {
         return Ok(Vec::new());
     }
@@ -614,7 +710,6 @@ pub fn install_skills_batch_in_session(
                 .repo_url,
         )
         .map_err(|error| error.to_string())?;
-    crate::hub_entry::sweep_stale_staging(&paths::hub_skills_dir());
     let harness_prefix = match agent_id {
         Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
         None => None,

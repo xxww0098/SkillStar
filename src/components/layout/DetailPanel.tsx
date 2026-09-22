@@ -47,6 +47,7 @@ interface DetailPanelProps {
   onMigrate?: (name: string) => void;
   migrating?: boolean;
   onReinstall?: (url: string, name: string) => void;
+  reinstalling?: boolean;
   onReadContent?: (name: string) => Promise<SkillContent>;
   onSaveContent?: (name: string, content: string) => Promise<void>;
   onPublish?: (skillName: string) => void;
@@ -63,6 +64,7 @@ export function DetailPanel({
   onMigrate,
   migrating,
   onReinstall,
+  reinstalling,
   onReadContent,
   onSaveContent,
   onPublish,
@@ -253,6 +255,21 @@ export function DetailPanel({
             <SkillReader skillName={skill.name} content={skillDetails.readme} onClose={() => setReading(false)} />
           </Suspense>
         </motion.div>
+      )}
+
+      {skill && !editing && !reading && (
+        <motion.button
+          key="skill-detail-scrim"
+          type="button"
+          tabIndex={-1}
+          aria-label={t("detailPanel.dismissDrawer")}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: prefersReducedMotion ? 0.01 : 0.2 }}
+          onClick={onClose}
+          className="absolute inset-0 z-40 cursor-pointer border-0 bg-black/20 p-0 paper:bg-black/10"
+        />
       )}
 
       {skill && !editing && !reading && (
@@ -587,12 +604,13 @@ export function DetailPanel({
                 <div className="flex gap-2">
                   {onReinstall && skill.skill_type !== "local" && !upstreamChange && (
                     <Button
-                      variant="secondary"
+                      variant="outline"
                       className="flex-1"
+                      disabled={reinstalling || !skill.git_url}
                       onClick={() => onReinstall(skill.git_url, skill.name)}
                     >
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      {t("detailPanel.reinstall")}
+                      <RefreshCw className={`w-4 h-4 mr-2 ${reinstalling ? "animate-spin" : ""}`} />
+                      {reinstalling ? t("detailPanel.reinstalling") : t("detailPanel.reinstall")}
                     </Button>
                   )}
                   <Button

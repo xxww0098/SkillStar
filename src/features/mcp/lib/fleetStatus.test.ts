@@ -1,109 +1,44 @@
 import { describe, expect, it } from "vitest";
-import type { McpServerEntry } from "../../../types";
+import type { McpProbeReport } from "../../../types";
 import type { McpProbeEntry } from "../hooks/useMcpProbe";
-import { mcpFleetStatus, mcpFleetStatusMatches, summarizeMcpFleetHealth } from "./fleetStatus";
+import { mcpFleetStatus } from "./fleetStatus";
 
 function entry(partial: Partial<McpProbeEntry> = {}): McpProbeEntry {
   return { report: null, error: null, pending: false, ...partial };
 }
 
-function server(id: string): McpServerEntry {
+function report(status: McpProbeReport["status"]): McpProbeReport {
   return {
-    id,
-    name: id,
-    transport: "stdio",
-    args: [],
-    env: {},
-    headers: {},
-    tags: [],
-    enabled: {},
-    autoApproveAll: false,
-    sortIndex: 0,
-  } as McpServerEntry;
+    serverId: "a",
+    serverName: "a",
+    status,
+    cachePrivate: false,
+    checkedAt: 1,
+  };
 }
 
 describe("mcpFleetStatus", () => {
   it("treats authorization-required as sign-in, not error", () => {
-    const status = mcpFleetStatus(
-      entry({
-        report: {
-          serverId: "a",
-          serverName: "a",
-          status: "authorization-required",
-          cachePrivate: false,
-          checkedAt: 1,
-        },
-      }),
-    );
-    expect(status).toBe("needs-auth");
-    expect(mcpFleetStatusMatches(status, "auth")).toBe(true);
-    expect(mcpFleetStatusMatches(status, "attention")).toBe(false);
+    expect(mcpFleetStatus(entry({ report: report("authorization-required") }))).toBe("needs-auth");
   });
 
-  it("buckets unreachable and missing runtime as attention", () => {
-    expect(
-      mcpFleetStatusMatches(
-        mcpFleetStatus(
-          entry({
-            report: {
-              serverId: "a",
-              serverName: "a",
-              status: "unreachable",
-              cachePrivate: false,
-              checkedAt: 1,
-            },
-          }),
-        ),
-        "attention",
-      ),
-    ).toBe(true);
-    expect(
-      mcpFleetStatusMatches(
-        mcpFleetStatus(
-          entry({
-            report: {
-              serverId: "a",
-              serverName: "a",
-              status: "runtime-missing",
-              cachePrivate: false,
-              checkedAt: 1,
-            },
-          }),
-        ),
-        "attention",
-      ),
-    ).toBe(true);
+  it("maps unreachable and missing runtime", () => {
+    expect(mcpFleetStatus(entry({ report: report("unreachable") }))).toBe("error");
+    expect(mcpFleetStatus(entry({ report: report("runtime-missing") }))).toBe("runtime-missing");
+    expect(mcpFleetStatus(entry({ report: report("healthy") }))).toBe("ok");
   });
-});
 
-describe("summarizeMcpFleetHealth", () => {
-  it("sums schema tokens only from healthy probes and never labels auth as attention", () => {
-    const stats = summarizeMcpFleetHealth([server("a"), server("b")], (id) =>
-      id === "a"
-        ? entry({
-            report: {
-              serverId: "a",
-              serverName: "a",
-              status: "authorization-required",
-              cachePrivate: false,
-              checkedAt: 1,
-            },
-          })
-        : entry({
-            report: {
-              serverId: "b",
-              serverName: "b",
-              status: "healthy",
-              cachePrivate: false,
-              schemaTokens: 1200,
-              schemaBytes: 4800,
-              checkedAt: 1,
-            },
-          }),
-    );
-    expect(stats.auth).toBe(1);
-    expect(stats.healthy).toBe(1);
-    expect(stats.attention).toBe(0);
-    expect(stats.schemaTokens).toBe(1200);
+  it("reports probing while a probe is in flight", () => {
+    expect(mcpFleetStatus(entry({ pending: true }))).toBe("probing");
+  });
+
+  it("only reports error when the probe failed without a report to read", () => {
+    expect(mcpFleetStatus(entry({ error: "connection refused" }))).toBe("error");
+    // A report that arrived alongside an error is still the better answer.
+    expect(mcpFleetStatus(entry({ error: "connection refused", report: report("healthy") }))).toBe("ok");
+  });
+
+  it("falls back to unknown before anything has been probed", () => {
+    expect(mcpFleetStatus(entry())).toBe("unknown");
   });
 });

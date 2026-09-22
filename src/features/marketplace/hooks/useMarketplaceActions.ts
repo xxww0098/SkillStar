@@ -1,9 +1,14 @@
 import { useCallback } from "react";
+import type { InstallStage, Skill } from "../../../types";
 import { toast } from "../../../lib/toast";
-import type { Skill } from "../../../types";
 
 interface UseMarketplaceActionsParams {
-  installSkill: (url: string, name?: string, agentId?: string) => Promise<Skill>;
+  installSkill: (
+    url: string,
+    name?: string,
+    agentId?: string,
+    onStage?: (stage: InstallStage, skill: string | undefined) => void,
+  ) => Promise<Skill>;
   updateSkill: (name: string) => Promise<Skill>;
   uninstallSkill: (name: string) => Promise<unknown>;
   /** Page-owned: applies an optimistic patch to a skill across all marketplace state slices. */
@@ -15,6 +20,14 @@ interface UseMarketplaceActionsParams {
   setInstallStatus: (status: string | null) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }
+
+const STAGE_LABEL_KEYS: Record<InstallStage, string> = {
+  resolving: "marketplace.installStageResolving",
+  fetching: "marketplace.installStageFetching",
+  discovering: "marketplace.installStageDiscovering",
+  materializing: "marketplace.installStageMaterializing",
+  deploying: "marketplace.installStageDeploying",
+};
 
 /**
  * The four optimistic-update handlers for marketplace skill actions:
@@ -50,7 +63,16 @@ export function useMarketplaceActions({
       }
 
       try {
-        const skill = await installSkill(url, name, agentId);
+        // Live stage feedback instead of a bare spinner: the backend emits
+        // install stages on this session's progress events.
+        const skill = await installSkill(url, name, agentId, (stage) => {
+          setInstallStatus(
+            t(STAGE_LABEL_KEYS[stage], {
+              defaultValue: stage,
+              name,
+            }),
+          );
+        });
         patchSkill(name, (current) => ({
           ...current,
           installed: true,

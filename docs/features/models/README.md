@@ -137,6 +137,46 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - provider timeout 在 resolve 时应用，不写进旧 `ai.json` 兼容格式。
 - 流式 UX 的共享规范见 [../frontend/README.md](../frontend/README.md#tauri-事件与流式-ux)。
 
+## 本地决策模型（AgentJev-0.6B）
+
+这是 Models 域下的**本地推理能力**，不是另一个 App AI provider：App AI 生成文本（chat/summarize），决策模型不生成任何 token，只把一段状态和若干结构化问题映射成每个选项的校准概率。实现全部在 `skillstar-decision`；命令层只做 DTO/State/事件，域逻辑不回流到 `src-tauri`。
+
+### checkpoint 契约
+
+- 权重**不进仓库**。四个文件（`model.safetensors` 1.2 GB、`tokenizer.json`、`config.json`、`temperatures.json`）从 Hugging Face 的 pinned revision `b3bf6b6d…` 下载到 `<data_root>/models/agentjev-0.6b/`，`SKILLSTAR_DECISION_MODEL_DIR` 可整体改目录，`SKILLSTAR_HF_ENDPOINT` / `HF_ENDPOINT` 可改下载源（镜像如 `https://hf-mirror.com`）。
+- 每个文件带固定字节数与 SHA-256。中断的传输写 `<file>.part` 并用 Range 续传；下载完成后逐个核对摘要，失败删除临时文件。**加载时只核对大小**（重新哈希 1.2 GB 不该出现在启动路径上），完整校验由下载流程与显式「校验完整性」命令/`--verify` 负责。
+- 缺文件、长度不符、摘要不符一律 fail-closed：不加载、不用半份权重回答。
+
+### 引擎生命周期
+
+- 引擎在第一次提问时懒加载，之后常驻一个进程一份（`DecisionState` 持有 `Arc<DecisionEngine>`）；加载与推理都跑在阻塞线程上，前台命令不会把 async 运行时的工作线程占住。`decision_unload_engine` / 面板「释放内存」显式归还。
+- 默认设备是 macOS 上的 Metal、其余平台 CPU；默认精度 f32。**f32 是刻意选择**：candle 0.11 的 Metal 后端缺 `softmax-last-dim`、`rotary-emb` 等核，f16 会逐算子回退到 CPU——`ops.rs` 用可移植算子实现了等价数值，`--dtype f16` 仍可能撞到缺失核，因此不作为默认。
+- 共享前缀复用是自实现的：一个问题的 `[STATE][QUESTION]` 前缀只前向一次，每个候选作为分支读到前缀的 KV；兄弟候选之间互不可见，前缀张量只读。
+
+### 请求/答案契约（`agentjev.decision.v1`）
+
+- 三种原语：`boolean`（返回 true 的概率）、`choice`（2–255 个候选，返回选中项、top 概率与 margin）、`score`（2–10 个有序等级，返回 argmax 等级与期望分 `Σ i·Pᵢ`）。一次请求最多 32 个 state、128 个问题、1024 条候选路径；单条 `[STATE][QUESTION][CANDIDATE]` 路径最长 2048 token，**超出直接报错，绝不截断**。
+- 校验消息与官方 `jev_service` 的 `contract.py` 逐字一致（`prepare`/`answer` 是它的移植），因为 CLI 和界面都把这句原文展示给用户。
+- 概率是模型分布：`temperature` 来自 checkpoint 的 `temperatures.json`（按原语一个正标量）。README 与文档都不得把它描述成「动作成功率」——要那个语义得对每个动作问一个 boolean 并在自己的结果上校准。
+- 结构化 state/候选支持对象或数组，落成紧凑 JSON；对象形态的 key 在本实现里按字典序处理（serde_json map 语义），头的置换等变性保证答案按 key 不变，但**不要**依赖返回数组的下标顺序。
+
+### 三个入口
+
+- CLI：`skillstar decide --file payload.json`（`-` 读 stdin），`--json` 输出结构化结果，`--status` / `--verify` / `--download` 管理 checkpoint，`--device` / `--dtype` 覆盖运行时。
+- 设置页：`src/features/models/components/settings/DecisionModelSection.tsx`，经 `Settings` 的 `settings-decision` 区块渲染。显示目录/大小/下载源、下载进度（后端事件 `decision://download-progress`）、校验/加载/释放，以及一个试跑区（state + 问题 + 选项，输出每个候选的概率条与用量）。面板不伪造进度或成功：下载中的数字全部来自事件流。
+- 命令：`decision_model_status` / `decision_verify_model` / `decision_download_model` / `decision_cancel_download` / `decision_engine_info` / `decision_load_engine` / `decision_unload_engine` / `decision_evaluate`；DTO 由 ts-rs 生成到 `src/types/generated/Decision*.ts`，前端 `src/types/decision.ts` 只做再导出。
+
+### 测试
+
+- `cargo test -p skillstar-decision`（不需要权重）：契约校验/答案整形、温度范围、目录状态机、`Send + Sync` 断言。
+- golden 测试（默认 `#[ignore]`，需要 1.2 GB checkpoint）：`SKILLSTAR_DECISION_MODEL_DIR=<dir> cargo test -p skillstar-decision --profile release-fast --test golden -- --ignored --nocapture`。fixture 由官方 `jev_service`（torch CPU f32）在六个 payload 上产出，Rust 侧必须复现 token id、概率与赢家；默认设备一条单独断言 Metal/CPU 与参考一致。
+
+### 已知边界
+
+- 目前只做能力层，没有接进任何业务流（安装闸门、App AI 路由都未接线）；阈值与后果由未来的调用方决定，域 crate 不替业务做决定。
+- 宽候选集上每个候选都要拼接一次前缀 KV，长状态 + 255 选项仍有可做的性能优化。
+- 对象形态选项的字典序处理、以及 f16 在 Metal 上不可用，都是本实现的已知取舍，写在上面而不是事后解释。
+
 ## 类型生成
 
 Models/MCP 的跨 IPC 大结构使用 ts-rs。修改 Rust 类型后运行 `bun run types:gen`，禁止手改 `src/types/generated/`。是否把小型手写 mirror 转为生成类型，以实际维护收益和既有门槛为准，不在本文复制字段清单。
@@ -151,9 +191,11 @@ Models/MCP 的跨 IPC 大结构使用 ts-rs。修改 Rust 类型后运行 `bun r
 ## 验证
 
 ```bash
-cargo test -p skillstar-core -p skillstar-models
+cargo test -p skillstar-core -p skillstar-models -p skillstar-decision
 bun run test -- src/features/models
 bun run types:gen
 ```
+
+决策模型的数值改动必须跑上面那条 golden 命令（需要 checkpoint）；契约、温度与目录状态的改动只需 `cargo test -p skillstar-decision`。
 
 写盘行为改动必须跑 `tool_sync::tests::golden` —— 它的 fixture 是在 v3 代码上**实际跑出来**的输出，不是手写的期望值。Codex 之外的任何字节差异都是回归。
