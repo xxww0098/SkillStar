@@ -83,7 +83,7 @@ pub fn enable_project_skills_strict(
         content::validate_skill_name(name)?;
         items.push(StrictSkillReport {
             name: name.clone(),
-            status: classify(
+            status: classify_project_skill(
                 &binding.root,
                 &profile.project_skills_rel,
                 name,
@@ -134,7 +134,7 @@ pub fn enable_project_skills_strict(
     })
 }
 
-fn classify(
+pub fn classify_project_skill(
     root: &Path,
     rel: &str,
     name: &str,

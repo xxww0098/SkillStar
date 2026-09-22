@@ -243,7 +243,7 @@ fn corpus() -> Result<Vec<Doc>, AppError> {
     Ok(docs)
 }
 
-pub(crate) fn installed_skill_names() -> Vec<String> {
+pub fn installed_skill_names() -> Vec<String> {
     let mut names = std::collections::BTreeSet::new();
     for root in [
         skillstar_core::infra::paths::hub_skills_dir(),

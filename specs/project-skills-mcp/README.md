@@ -1,14 +1,14 @@
 # 项目技能 MCP
 
-状态：09 已落地。下一档是 10。最后更新：2026-09-22。
+状态：10 已落地。下一档是 11。最后更新：2026-09-22。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar 的项目技能 MCP。不要从聊天记录恢复上下文，以本目录为准。
 
-09 已完成。从 [slices/10-recommend.md](slices/10-recommend.md) 开始，做完一档再做下一档。不要并行改两档的行为。01 到 17 是默认阶梯。18 处于休眠：只有环境变量 `SKILLSTAR_LAYA_ONNX` 指向本机导出目录时才做，缺模型时不要开工，也不要把它算进 17 的完成条件。
+10 已完成。从 [slices/11-get-project-skills.md](slices/11-get-project-skills.md) 开始，做完一档再做下一档。不要并行改两档的行为。01 到 17 是默认阶梯。18 处于休眠：只有环境变量 `SKILLSTAR_LAYA_ONNX` 指向本机导出目录时才做，缺模型时不要开工，也不要把它算进 17 的完成条件。
 
-已落地：01 stdio；02 绑定；03 写锁；04 owner；05 事实；06 已安装检索；07 计划；08 批准；09 严格启用（预检失败零写入，只调用 `create_symlink`）。`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
+已落地：01–09；10 推荐（无 selection 不写计划、不注册；重排是 `PassthroughReranker`）。`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
 
 全局决定已经写在下面，不要重开。切片里标成「可改」的才是实现自由。做完一档之前，运行该档写明的测试。文档和代码同一档一起改，不留「待补」。
 
@@ -25,7 +25,7 @@
 - [x] 07 部署计划 — [slices/07-deployment-plan.md](slices/07-deployment-plan.md)
 - [x] 08 批准记录 — [slices/08-approval-record.md](slices/08-approval-record.md)
 - [x] 09 严格启用 — [slices/09-strict-enable.md](slices/09-strict-enable.md)
-- [ ] 10 推荐编排 — [slices/10-recommend.md](slices/10-recommend.md)
+- [x] 10 推荐编排 — [slices/10-recommend.md](slices/10-recommend.md)
 - [ ] 11 查询编排 — [slices/11-get-project-skills.md](slices/11-get-project-skills.md)
 - [ ] 12 应用编排 — [slices/12-apply.md](slices/12-apply.md)
 - [ ] 13 三个 MCP 工具 — [slices/13-protocol-tools.md](slices/13-protocol-tools.md)

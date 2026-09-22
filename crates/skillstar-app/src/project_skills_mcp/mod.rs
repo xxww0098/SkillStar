@@ -5,6 +5,8 @@
 
 pub mod approval;
 pub mod plan;
+pub mod ranker;
+pub mod recommend;
 mod stdio;
 
 pub use stdio::{is_mcp_invocation, serve, serve_with};

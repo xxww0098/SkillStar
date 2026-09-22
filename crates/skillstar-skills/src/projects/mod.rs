@@ -43,7 +43,8 @@ pub use refresh::refresh_stale_copies;
 pub use scan::{detect_project_agents, scan_project_skills};
 pub use store::{load_skills_list, save_skills_list};
 pub use strict::{
-    StrictEnableReport, StrictSkillReport, StrictSkillStatus, enable_project_skills_strict,
+    StrictEnableReport, StrictSkillReport, StrictSkillStatus, classify_project_skill,
+    enable_project_skills_strict,
 };
 pub use sync::{
     add_skills_to_project, add_skills_to_project_with_mode, full_sync,

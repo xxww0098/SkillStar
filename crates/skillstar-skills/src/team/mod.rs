@@ -21,7 +21,10 @@ pub use improve::{
     TeamDigest, digest, health, is_worth_documenting, list_learnings, record_friction,
     record_usage, score_friction, share_learning,
 };
-pub use recall::{InstalledSkillHit, RecallHit, RecallKind, recall, search_installed_skills};
+pub use recall::{
+    InstalledSkillHit, RecallHit, RecallKind, installed_skill_names, recall,
+    search_installed_skills,
+};
 
 pub const STORE_SCHEMA_VERSION: u32 = 1;
 pub const FRICTION_THRESHOLD: u32 = 3;
