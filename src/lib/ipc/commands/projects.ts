@@ -5,6 +5,7 @@ import type {
   ProjectDeployMode,
   ProjectEntry,
   ProjectScanResult,
+  ProjectSkillPlanDiff,
   SkillsList,
 } from "../../../types";
 
@@ -43,4 +44,10 @@ export interface ProjectCommands {
 
   /** Background maintenance: re-deploy copy-deployed skills whose source changed. */
   refresh_stale_project_copies: { args: { projectPath: string }; result: number };
+
+  list_pending_project_skill_plans: {
+    args: { projectPath: string };
+    result: ProjectSkillPlanDiff[];
+  };
+  approve_project_skill_plan: { args: { planId: string }; result: void };
 }

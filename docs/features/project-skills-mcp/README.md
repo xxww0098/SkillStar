@@ -28,6 +28,10 @@ Windows release 仍使用 `windows_subsystem = "windows"`，不分配控制台�
 
 `skillstar mcp approve <plan_id>` 走普通 CLI，不进入 serve 的 stdout。它打印与 form elicitation 相同的差异，再从 stdin 读一行。该行必须是 `approve <plan_hash>`。其他输入和非交互且没有管道输入时退出非 0，不写批准，也不创建项目链接。这份 SkillStar 批准不能让声明了 form elicitation 的客户端跳过确认。
 
+## 桌面批准
+
+Projects 页在选中项目且存在未过期计划时，在列表上方展示规范路径、是否注册、owner、受影响 Agent 和每一项操作。批准按钮调用 `approve_project_skill_plan`，只写 SkillStar 批准，不部署。没有计划时不显示这块区域。
+
 ## 应用
 
 `apply_project_skills` 在项目写锁里核对计划、批准和幂等回执，然后调用严格启用。没有批准时返回 `ApprovalRequired`，不改项目树和项目索引。回执只在每一项都是链接意义上的 applied 或 already 时写入 `state/project-skill-receipts/<idempotency_key>.json`。回执里的 `runtime_visibility` 是 `unverified`。

@@ -126,3 +126,11 @@
 - **只有 `mcp serve` 进入 stdio serve。** `mcp approve` 跳过 askpass，然后走普通 CLI。差异打在 CLI stdout，不进 serve。
 - **确认行去掉末尾换行后必须等于 `approve <plan_hash>`。** stdin 读到 EOF 且不是终端时，按非交互失败，不写批准。
 - **CLI 复用 elicitation 的同一段差异文本。** 不另写一套计划摘要。
+
+## 16 桌面批准
+
+### 已定，按这个做
+
+- **批准区放在项目列表上方，通栏。** 没有未过期计划时不渲染。窄宽度下差异按字符换行，技能名和操作仍可读。
+- **桌面命令只调用计划读取和 `record_from_skillstar`。** 新命令在 `commands/project_host.rs`，不进 `mcp_commands.rs`。
+- **浏览器开发用的假数据会返回一份示例计划。** 生产命令只返回磁盘上未过期、且根目录对得上的计划。

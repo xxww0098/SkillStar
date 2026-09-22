@@ -6,6 +6,7 @@
 pub mod apply;
 pub mod approval;
 pub mod cli_approve;
+pub mod host;
 pub mod inspect;
 pub mod plan;
 pub mod protocol;

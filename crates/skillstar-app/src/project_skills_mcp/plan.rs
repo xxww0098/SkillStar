@@ -140,6 +140,45 @@ pub fn load_plan(plan_id: &str, now: DateTime<Utc>) -> Result<DeploymentPlan> {
     Ok(plan)
 }
 
+/// Live, unexpired plans whose root is the same directory as `project_path`.
+pub fn pending_plans_for_root(
+    project_path: &str,
+    now: DateTime<Utc>,
+) -> Result<Vec<DeploymentPlan>> {
+    let dir = skillstar_core::infra::paths::state_dir().join("project-skill-plans");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut plans = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(plan_id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if plan_id.ends_with(".tmp") {
+            continue;
+        }
+        let Ok(plan) = load_plan(plan_id, now) else {
+            continue;
+        };
+        if same_directory(&plan.root, project_path) {
+            plans.push(plan);
+        }
+    }
+    plans.sort_by(|left, right| left.plan_id.cmp(&right.plan_id));
+    Ok(plans)
+}
+
+fn same_directory(plan_root: &str, project_path: &str) -> bool {
+    match (
+        std::fs::canonicalize(plan_root),
+        std::fs::canonicalize(project_path),
+    ) {
+        (Ok(plan), Ok(project)) => plan == project,
+        _ => plan_root == project_path,
+    }
+}
+
 fn plan_hash(
     root: &str,
     will_register: bool,
