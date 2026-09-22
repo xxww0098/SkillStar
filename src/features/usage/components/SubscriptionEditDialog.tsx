@@ -25,6 +25,7 @@ import { AutoImportBanner } from "./subscriptionEdit/AutoImportBanner";
 import { CookieFields } from "./subscriptionEdit/cookie/CookieFields";
 import { Field, parseDateInput, toDateInput } from "./subscriptionEdit/fields";
 import { OAuthLoginPanel } from "./subscriptionEdit/oauth/OAuthLoginPanel";
+import { TokenImportFields } from "./subscriptionEdit/token/TokenImportFields";
 
 interface SubscriptionEditDialogProps {
   open: boolean;
@@ -65,6 +66,7 @@ export function SubscriptionEditDialog({
   const [apiKey, setApiKey] = useState("");
   const [platformToken, setPlatformToken] = useState("");
   const [cookieHeader, setCookieHeader] = useState("");
+  const [tokenImport, setTokenImport] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [showPlatformToken, setShowPlatformToken] = useState(false);
   const [region, setRegion] = useState("cn");
@@ -105,6 +107,7 @@ export function SubscriptionEditDialog({
       setApiKey("");
       setPlatformToken("");
       setCookieHeader("");
+      setTokenImport("");
       setRegion(editing.oauth_region ?? "cn");
       setNote(editing.note ?? "");
     } else {
@@ -125,6 +128,7 @@ export function SubscriptionEditDialog({
       setApiKey("");
       setPlatformToken("");
       setCookieHeader("");
+      setTokenImport("");
       setRegion(preselectedEntry?.regions[0] ?? "cn");
       setNote("");
     }
@@ -274,6 +278,23 @@ export function SubscriptionEditDialog({
     }
     setSubmitting(true);
     try {
+      if (authMode === "token-import") {
+        const pasted = tokenImport.trim();
+        if (!pasted) {
+          toast.error(t("usage.tokenImportRequired"));
+          return;
+        }
+        const saved = await usageApi.importSubscriptionToken(catalogId, pasted, isCreate ? undefined : editing?.id);
+        if (isCreate) {
+          onCreated(saved);
+          toast.success(t("usage.toastAdded"));
+        } else {
+          onUpdated(saved);
+          toast.success(t("usage.toastUpdated"));
+        }
+        onClose();
+        return;
+      }
       const payload = buildPayload();
       const apiKeyPayload = authMode === "api-key" && apiKey.trim() ? apiKey.trim() : undefined;
       const platformTokenPayload =
@@ -638,6 +659,14 @@ export function SubscriptionEditDialog({
                 selectedEntry={selectedEntry}
                 cookieHeader={cookieHeader}
                 setCookieHeader={setCookieHeader}
+              />
+            )}
+
+            {authMode === "token-import" && (
+              <TokenImportFields
+                providerName={selectedEntry.display_name}
+                token={tokenImport}
+                setToken={setTokenImport}
               />
             )}
 

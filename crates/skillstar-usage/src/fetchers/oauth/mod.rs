@@ -19,6 +19,8 @@ pub mod antigravity;
 pub mod codex;
 pub(crate) mod common;
 pub mod cursor;
+// Local import only. `cursor.rs` stays untouched.
+pub(crate) mod cursor_import;
 pub mod xai;
 
 // Zed callback RSA only. Not registered in `dispatch`.

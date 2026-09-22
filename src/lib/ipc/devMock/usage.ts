@@ -119,6 +119,8 @@ export const USAGE_HANDLERS: DevMockHandlers = {
   await_oauth_completion: () => new Promise(() => {}),
   submit_oauth_callback: () => undefined,
   cancel_oauth_login: () => undefined,
+  // The paste stays in the request. The mock returns a card and does not echo it.
+  import_subscription_token: () => USAGE_SUBSCRIPTIONS[0],
 };
 
 const DEMO_INSTANCES = [

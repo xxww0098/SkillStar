@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use super::common::SubscriptionBuilder;
 use crate::crypto;
+use crate::local_import::upsert_oauth_subscription;
 use crate::oauth::local_server::{self, CallbackSession};
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_endpoint::{self, TokenResponse};
@@ -24,6 +25,7 @@ use crate::oauth::token_refresh;
 use crate::oauth_clients;
 use crate::storage;
 use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
+use crate::tool_paths::codex_auth_path;
 use crate::urlencode;
 use crate::{UsageError, UsageResult};
 
@@ -365,6 +367,62 @@ async fn fetch_with_token(
         api_keys: Vec::new(),
         deepseek_analytics: None,
     })
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct CodexAuthFile {
+    #[serde(default)]
+    tokens: Option<CodexAuthTokens>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct CodexAuthTokens {
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    id_token: Option<String>,
+}
+
+pub(crate) async fn import_from_local() -> UsageResult<Subscription> {
+    let path = codex_auth_path();
+    if !path.exists() {
+        return Err(UsageError::Other("未找到 ~/.codex/auth.json".into()));
+    }
+    let content = std::fs::read_to_string(&path).map_err(UsageError::Io)?;
+    let auth: CodexAuthFile = serde_json::from_str(&content).map_err(UsageError::Serde)?;
+
+    let tokens = auth.tokens.ok_or_else(|| {
+        UsageError::Other("auth.json 缺少 tokens，请先在 Codex CLI 完成 OAuth".into())
+    })?;
+    let access_token = tokens
+        .access_token
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| UsageError::Other("auth.json tokens 缺少 access_token".into()))?;
+
+    let display_name = tokens
+        .id_token
+        .as_deref()
+        .and_then(|jwt| token_refresh::jwt_string(jwt, &["email", "preferred_username"]))
+        .unwrap_or_else(|| "Codex".to_string());
+
+    let expires_at = tokens
+        .id_token
+        .as_deref()
+        .and_then(token_refresh::jwt_exp)
+        .or_else(|| token_refresh::jwt_exp(&access_token));
+
+    upsert_oauth_subscription(
+        "codex",
+        display_name,
+        access_token,
+        tokens.refresh_token,
+        expires_at,
+        "USD",
+        None,
+    )
+    .await
 }
 
 fn window(w: Option<&Window>, label: &str) -> Option<UsageWindow> {

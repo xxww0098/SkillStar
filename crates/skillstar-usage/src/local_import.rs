@@ -1,25 +1,71 @@
 //! Import OAuth subscriptions from well-known on-disk tool credentials.
+//!
+//! This module is the dispatch table and the catalog lock. Each provider's
+//! read lives next to its fetcher.
 
-use base64::{Engine as _, engine::general_purpose};
+use std::future::Future;
+use std::pin::Pin;
+
 use chrono::Utc;
-use serde::Deserialize;
 
 use crate::catalog::AuthMode;
-use crate::cloud_code;
 use crate::crypto;
-use crate::oauth::token_refresh;
-use crate::protobuf_oauth;
 use crate::storage;
 use crate::subscription::{BillingCycle, Subscription};
-use crate::tool_paths::{antigravity_state_db_path, codex_auth_path, cursor_state_db_path};
-use crate::vscdb;
 use crate::{UsageError, UsageResult};
 
-const ANTIGRAVITY_OAUTH_KEY: &str = "antigravityUnifiedStateSync.oauthToken";
+type LocalImportFuture = Pin<Box<dyn Future<Output = UsageResult<Subscription>> + Send>>;
+
+struct LocalImporter {
+    catalog_id: &'static str,
+    import_from_local: fn() -> LocalImportFuture,
+}
+
+fn import_codex() -> LocalImportFuture {
+    Box::pin(crate::fetchers::oauth::codex::import_from_local())
+}
+
+fn import_antigravity() -> LocalImportFuture {
+    Box::pin(crate::fetchers::oauth::antigravity::import_from_local())
+}
+
+fn import_cursor() -> LocalImportFuture {
+    Box::pin(crate::fetchers::oauth::cursor_import::import_from_local())
+}
+
+const LOCAL_IMPORTERS: &[LocalImporter] = &[
+    LocalImporter {
+        catalog_id: "codex",
+        import_from_local: import_codex,
+    },
+    LocalImporter {
+        catalog_id: "antigravity",
+        import_from_local: import_antigravity,
+    },
+    LocalImporter {
+        catalog_id: "cursor",
+        import_from_local: import_cursor,
+    },
+];
+
+fn importer_for(catalog_id: &str) -> Option<fn() -> LocalImportFuture> {
+    LOCAL_IMPORTERS
+        .iter()
+        .find(|importer| importer.catalog_id == catalog_id)
+        .map(|importer| importer.import_from_local)
+}
+
+fn supported_catalogs() -> String {
+    LOCAL_IMPORTERS
+        .iter()
+        .map(|importer| importer.catalog_id)
+        .collect::<Vec<_>>()
+        .join("、")
+}
 
 /// Catalog ids that support `import_subscription_from_local`.
 pub fn local_import_supported(catalog_id: &str) -> bool {
-    matches!(catalog_id, "codex" | "antigravity" | "cursor")
+    importer_for(catalog_id).is_some()
 }
 
 /// Import the CLI/IDE's own credentials as a new subscription.
@@ -29,222 +75,17 @@ pub fn local_import_supported(catalog_id: &str) -> bool {
 /// [`crate::refresh_guard`] exists to keep from interleaving with a concurrent
 /// refresh of the same vendor.
 pub async fn import_subscription_from_local(catalog_id: &str) -> UsageResult<Subscription> {
-    if !local_import_supported(catalog_id) {
+    let Some(import_from_local) = importer_for(catalog_id) else {
         return Err(UsageError::Other(format!(
-            "不支持从本地导入：{catalog_id}（支持 codex、antigravity、cursor）"
+            "不支持从本地导入：{catalog_id}（支持 {}）",
+            supported_catalogs()
         )));
-    }
-    crate::refresh_guard::with_catalog_lock(catalog_id, || async {
-        match catalog_id {
-            "codex" => import_codex_from_auth_json().await,
-            "antigravity" => import_antigravity_from_local_credentials().await,
-            "cursor" => import_cursor_from_local_credentials().await,
-            other => Err(UsageError::Other(format!(
-                "不支持从本地导入：{other}（支持 codex、antigravity、cursor）"
-            ))),
-        }
-    })
-    .await?
+    };
+    crate::refresh_guard::with_catalog_lock(catalog_id, || async move { import_from_local().await })
+        .await?
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct CodexAuthFile {
-    #[serde(default)]
-    tokens: Option<CodexAuthTokens>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct CodexAuthTokens {
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    id_token: Option<String>,
-}
-
-async fn import_codex_from_auth_json() -> UsageResult<Subscription> {
-    let path = codex_auth_path();
-    if !path.exists() {
-        return Err(UsageError::Other("未找到 ~/.codex/auth.json".into()));
-    }
-    let content = std::fs::read_to_string(&path).map_err(UsageError::Io)?;
-    let auth: CodexAuthFile = serde_json::from_str(&content).map_err(UsageError::Serde)?;
-
-    let tokens = auth.tokens.ok_or_else(|| {
-        UsageError::Other("auth.json 缺少 tokens，请先在 Codex CLI 完成 OAuth".into())
-    })?;
-    let access_token = tokens
-        .access_token
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| UsageError::Other("auth.json tokens 缺少 access_token".into()))?;
-
-    let display_name = tokens
-        .id_token
-        .as_deref()
-        .and_then(|jwt| token_refresh::jwt_string(jwt, &["email", "preferred_username"]))
-        .unwrap_or_else(|| "Codex".to_string());
-
-    let expires_at = tokens
-        .id_token
-        .as_deref()
-        .and_then(token_refresh::jwt_exp)
-        .or_else(|| token_refresh::jwt_exp(&access_token));
-
-    upsert_oauth_subscription(
-        "codex",
-        display_name,
-        access_token,
-        tokens.refresh_token,
-        expires_at,
-        "USD",
-        None,
-    )
-    .await
-}
-
-async fn import_antigravity_from_local_credentials() -> UsageResult<Subscription> {
-    #[cfg(target_os = "macos")]
-    if !crate::tool_paths::is_tool_sync_sandboxed()
-        && let Some((access_token, refresh_token, expires_at)) =
-            read_antigravity_system_credential()?
-    {
-        let display_name = token_refresh::jwt_string(&access_token, &["email"])
-            .unwrap_or_else(|| "Antigravity".to_string());
-        return upsert_oauth_subscription(
-            "antigravity",
-            display_name,
-            access_token,
-            Some(refresh_token),
-            expires_at,
-            "USD",
-            None,
-        )
-        .await;
-    }
-
-    let db_path = antigravity_state_db_path()
-        .ok_or_else(|| UsageError::Other("无法解析 Antigravity IDE 数据目录".into()))?;
-    if !db_path.exists() {
-        return Err(UsageError::Other(format!(
-            "未找到 Antigravity state.vscdb：{}",
-            db_path.display()
-        )));
-    }
-
-    let state_data = vscdb::read_item_string(&db_path, ANTIGRAVITY_OAUTH_KEY)?
-        .ok_or_else(|| UsageError::Other("Antigravity IDE 未登录（缺少 oauthToken）".into()))?;
-
-    let blob = general_purpose::STANDARD
-        .decode(state_data.trim())
-        .map_err(|e| UsageError::Other(format!("Antigravity OAuth Base64 解码失败：{e}")))?;
-
-    let refresh_token = protobuf_oauth::extract_refresh_token_from_unified_oauth_token(&blob)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| UsageError::Other("无法从 Antigravity 本地数据解析 refresh_token".into()))?;
-
-    let tokens = cloud_code::refresh_antigravity_access_token(&refresh_token).await?;
-    let access_token = tokens
-        .access_token
-        .ok_or_else(|| UsageError::Other("Google refresh 缺少 access_token".into()))?;
-    let expires_at = tokens
-        .expires_in
-        .map(|s| Utc::now().timestamp() + s)
-        .or_else(|| token_refresh::jwt_exp(&access_token));
-
-    let display_name = token_refresh::jwt_string(&access_token, &["email"])
-        .unwrap_or_else(|| "Antigravity".to_string());
-
-    upsert_oauth_subscription(
-        "antigravity",
-        display_name,
-        access_token,
-        tokens.refresh_token.or(Some(refresh_token)),
-        expires_at,
-        "USD",
-        None,
-    )
-    .await
-}
-
-async fn import_cursor_from_local_credentials() -> UsageResult<Subscription> {
-    let db_path = cursor_state_db_path()
-        .ok_or_else(|| UsageError::Other("无法解析 Cursor 数据目录".into()))?;
-    let session = vscdb::read_cursor_oauth_session(&db_path)?
-        .ok_or_else(|| UsageError::Other("Cursor 未登录（缺少 cursorAuth/accessToken）".into()))?;
-    let display_name = session
-        .email
-        .clone()
-        .or_else(|| session.auth_id.clone())
-        .unwrap_or_else(|| "Cursor".to_string());
-    let expires_at = token_refresh::jwt_exp(&session.access_token);
-    upsert_oauth_subscription(
-        "cursor",
-        display_name,
-        session.access_token,
-        session.refresh_token,
-        expires_at,
-        "USD",
-        session.auth_id,
-    )
-    .await
-}
-
-#[cfg(target_os = "macos")]
-fn read_antigravity_system_credential() -> UsageResult<Option<(String, String, Option<i64>)>> {
-    let output = std::process::Command::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "gemini",
-            "-a",
-            "antigravity",
-            "-w",
-        ])
-        .output()
-        .map_err(|error| {
-            UsageError::Other(format!("读取 Antigravity macOS Keychain 失败：{error}"))
-        })?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let encoded = raw
-        .strip_prefix("go-keyring-base64:")
-        .ok_or_else(|| UsageError::Other("Antigravity macOS Keychain 凭据格式无法识别".into()))?;
-    let payload = general_purpose::STANDARD.decode(encoded).map_err(|error| {
-        UsageError::Other(format!("解析 Antigravity macOS Keychain 失败：{error}"))
-    })?;
-    let value: serde_json::Value = serde_json::from_slice(&payload).map_err(|error| {
-        UsageError::Other(format!("解析 Antigravity Keychain JSON 失败：{error}"))
-    })?;
-    let token = value
-        .get("token")
-        .ok_or_else(|| UsageError::Other("Antigravity Keychain 缺少 token 对象".into()))?;
-    let access_token = token
-        .get("access_token")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| UsageError::Other("Antigravity Keychain 缺少 access_token".into()))?
-        .to_string();
-    let refresh_token = token
-        .get("refresh_token")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| UsageError::Other("Antigravity Keychain 缺少 refresh_token".into()))?
-        .to_string();
-    let expires_at = token
-        .get("expiry")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.timestamp())
-        .or_else(|| token_refresh::jwt_exp(&access_token));
-
-    Ok(Some((access_token, refresh_token, expires_at)))
-}
-
-async fn upsert_oauth_subscription(
+pub(crate) async fn upsert_oauth_subscription(
     catalog_id: &str,
     display_name: String,
     access_token: String,

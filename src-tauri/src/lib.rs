@@ -464,6 +464,7 @@ pub fn run() {
             commands::usage_commands::set_active_subscription,
             commands::usage_commands::clear_active_subscription,
             commands::usage_commands::import_subscription_from_local,
+            commands::usage_commands::import_subscription_token,
             commands::usage_commands::get_subscription_api_key,
             commands::usage_commands::switch_active_subscription_to_cli,
             commands::usage_commands::reconcile_cli_accounts,

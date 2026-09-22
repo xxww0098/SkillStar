@@ -10,7 +10,7 @@ use skillstar_usage::cookie_jar;
 use skillstar_usage::subscription::{BillingCycle, Subscription};
 use skillstar_usage::{UsageError, alerts, catalog, crypto, fetchers, storage};
 
-fn map_err(e: UsageError) -> AppError {
+pub(super) fn map_err(e: UsageError) -> AppError {
     let message = append_network_hint(e.to_string());
     AppError::Other(format!("Usage: {}", message))
 }
@@ -83,7 +83,7 @@ fn ensure_catalog(id: &str) -> Result<catalog::CatalogEntry, AppError> {
 }
 
 /// Stamp `is_active` on a DTO based on the active-per-catalog map.
-fn fill_active(
+pub(super) fn fill_active(
     mut dto: SubscriptionDto,
     active: &std::collections::HashMap<String, String>,
 ) -> SubscriptionDto {
@@ -688,15 +688,15 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     pending_state::remove(&pending_id);
     let mut sub = result.map_err(map_err)?;
     let mut switch_result = None;
-    if matches!(sub.catalog_id.as_str(), "xai" | "antigravity")
+    if crate::usage_switch::supports_switch(&sub.catalog_id)
         && storage::get_active_subscription(&sub.catalog_id)
             .map_err(map_err)?
             .as_deref()
             == Some(sub.id.as_str())
     {
-        // OAuth can rotate the active row's credentials or even bind its stable
-        // row id to a different xAI subject. Re-activate immediately so the UI
-        // cannot say "active" while auth.json still represents the old token.
+        // OAuth can rotate the active row. Re-activate when a switch adapter
+        // exists and this row is already the pin, so the UI cannot say
+        // "active" while the live store still has the previous token.
         let activation = crate::usage_switch::activate_subscription(&sub.id)
             .await
             .map_err(map_err)?;
