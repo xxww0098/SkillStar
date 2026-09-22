@@ -215,6 +215,8 @@ fn empty_row(id: &str) -> Subscription {
     }
 }
 
+/// Test fixture builder for a full Windsurf account row.
+#[allow(clippy::too_many_arguments)]
 fn save_account(
     id: &str,
     email: &str,
@@ -295,7 +297,7 @@ async fn switch_writes_auth_keys_and_keeps_the_usage_cache() {
     assert!(!result.switch_result.keychain_updated);
     let backup = result.switch_result.backup_path.expect("backup");
     assert!(Path::new(&backup).is_file(), "{backup}");
-    assert!(backup.starts_with(&sb.home.path().to_string_lossy().as_ref()));
+    assert!(backup.starts_with(sb.home.path().to_string_lossy().as_ref()));
     assert!(item(Path::new(&backup), AUTH_STATUS_KEY).is_none());
     assert_eq!(
         storage::get_active_subscription("windsurf")

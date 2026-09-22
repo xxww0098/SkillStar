@@ -210,7 +210,7 @@ fn snapshot_from(
     }
 }
 
-fn select_pack<'a>(kind: TraePlatformKind, usage: &'a Value) -> Option<&'a Value> {
+fn select_pack(kind: TraePlatformKind, usage: &Value) -> Option<&Value> {
     let packs = usage
         .get("user_entitlement_pack_list")
         .or_else(|| super::payload_root(usage).get("user_entitlement_pack_list"))

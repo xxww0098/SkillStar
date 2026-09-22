@@ -324,7 +324,7 @@ fn display_plan(raw: &str) -> String {
 }
 
 fn title_snake(raw: &str) -> String {
-    raw.split(|ch: char| ch == '_' || ch == '-')
+    raw.split(['_', '-'])
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();

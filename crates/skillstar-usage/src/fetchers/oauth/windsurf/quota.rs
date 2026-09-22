@@ -687,6 +687,7 @@ fn skip_field(data: &[u8], offset: usize, wire: u8) -> Result<usize, ()> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn encode_varint(mut value: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
     while value >= 0x80 {
@@ -697,12 +698,14 @@ pub(crate) fn encode_varint(mut value: u64) -> Vec<u8> {
     bytes
 }
 
+#[cfg(test)]
 pub(crate) fn field_varint(field: u32, value: u64) -> Vec<u8> {
     let mut bytes = encode_varint(u64::from(field) << 3);
     bytes.extend(encode_varint(value));
     bytes
 }
 
+#[cfg(test)]
 pub(crate) fn field_bytes(field: u32, value: &[u8]) -> Vec<u8> {
     let mut bytes = encode_varint((u64::from(field) << 3) | 2);
     bytes.extend(encode_varint(value.len() as u64));

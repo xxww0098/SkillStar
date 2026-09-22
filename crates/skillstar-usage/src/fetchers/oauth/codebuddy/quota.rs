@@ -501,6 +501,8 @@ fn window(label: &str, used: i64, total: Option<i64>, reset_at: Option<i64>) -> 
     }
 }
 
+/// One quota leg: caller, target and transport are all distinct inputs.
+#[allow(clippy::too_many_arguments)]
 async fn post_quota(
     client: &reqwest::Client,
     host: &Host,

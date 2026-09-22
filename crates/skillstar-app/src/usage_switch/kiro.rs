@@ -222,9 +222,7 @@ fn plan(subscription: &Subscription) -> UsageResult<Plan> {
     } else {
         None
     };
-    let profile = profile_path().and_then(|path| {
-        profile_document(&material, provider.as_deref()).map(|value| (path, value))
-    });
+    let profile = profile_path().zip(profile_document(&material, provider.as_deref()));
     let database = state_db_path().and_then(|path| {
         if !path.is_file() {
             return None;

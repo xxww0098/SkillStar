@@ -305,6 +305,7 @@ enum RequestOutcome {
     Ignored,
 }
 
+#[cfg(test)]
 fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
     classify_request(url, &Accept::CodeAndState(expected_state.to_string()))
 }
@@ -599,7 +600,7 @@ mod tests {
             Some("cipher+value")
         );
         assert_eq!(params.get("extra").map(String::as_str), Some("1"));
-        assert!(params.get("code").is_none());
+        assert!(!params.contains_key("code"));
     }
 
     #[test]

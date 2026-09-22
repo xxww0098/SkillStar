@@ -554,8 +554,7 @@ mod tests {
         )]);
         let begin = request_state(&client(), &state_err.base, "CodeBuddy auth/state")
             .await
-            .err()
-            .expect("state");
+            .expect_err("state");
         assert!(matches!(begin, UsageError::Fetcher(_)), "{begin:?}");
         assert!(!begin.is_transient());
     }

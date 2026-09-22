@@ -8,7 +8,10 @@
 //! The credential key is the OS home (or `SKILLSTAR_TOOL_SYNC_HOME` in tests),
 //! not `{dataBaseDir}/.zcode`. The file path still follows `zcode_home()`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+#[cfg(test)]
+use std::path::Path;
 
 use serde_json::{Map, Value};
 

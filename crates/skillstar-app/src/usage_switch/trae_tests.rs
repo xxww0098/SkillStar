@@ -582,7 +582,7 @@ async fn forget_removes_matching_auth_keys_and_leaves_the_rest() {
         forget_subscription_session(kind.catalog_id(), &account_id(kind, "bob")).unwrap();
         let root = read_json(path);
         assert!(root.get(super::DEFAULT_AUTH_KEY).is_none());
-        assert!(root.get(&device_key()).is_none());
+        assert!(root.get(device_key()).is_none());
         assert_eq!(root[super::USERTAG_KEY], "tag-keep");
         assert_eq!(root["iCubeServerData://icube.cloudide"], "server-keep");
         assert_eq!(root["iCubeEntitlementInfo://icube.cloudide"], "ent-keep");

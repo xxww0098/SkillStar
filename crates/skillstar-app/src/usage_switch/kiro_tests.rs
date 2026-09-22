@@ -215,6 +215,8 @@ fn empty_row(id: &str) -> Subscription {
     }
 }
 
+/// Test fixture builder for a full IDC account row.
+#[allow(clippy::too_many_arguments)]
 fn save_idc(
     id: &str,
     email: &str,

@@ -57,6 +57,7 @@ impl Endpoints {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn from_base(base: &str) -> Self {
         let base = base.trim_end_matches('/');
         Self::from_bases(base, base, base, base)

@@ -4,6 +4,7 @@
 //! This path does not read the system keychain or the real home.
 //! `SKILLSTAR_TOOL_SYNC_HOME` selects the database.
 
+#[cfg(test)]
 use std::path::Path;
 
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
@@ -269,6 +270,8 @@ fn imported_from_raw_token(
     ))
 }
 
+/// One imported row: every field is a distinct part of the token payload.
+#[allow(clippy::too_many_arguments)]
 fn token_row(
     host: &Host,
     access_token: String,

@@ -35,6 +35,7 @@ pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(1_500);
 pub(crate) const POLL_INTERVAL_SECS: u32 = 2;
 pub(crate) const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 
+#[cfg(test)]
 const ROUTES: &[&str] = &[
     AUTH_STATE_PATH,
     AUTH_TOKEN_PATH,

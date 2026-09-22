@@ -143,8 +143,8 @@ pub(super) async fn fetch_with(
             issued.expires_at.or(subscription.access_token_expires_at),
             &state,
         );
-        if let Some(user_id) = issued.user_id {
-            if subscription
+        if let Some(user_id) = issued.user_id
+            && subscription
                 .oauth_account_id
                 .as_deref()
                 .map(str::trim)
@@ -152,7 +152,6 @@ pub(super) async fn fetch_with(
             {
                 subscription.oauth_account_id = Some(user_id);
             }
-        }
         if let Some(region) = issued
             .login_region
             .as_deref()
@@ -179,8 +178,8 @@ fn usage_from_snapshot(
     subscription: &mut Subscription,
     snapshot: quota::QuotaSnapshot,
 ) -> SubscriptionUsage {
-    if let Some(user_id) = snapshot.user_id.clone() {
-        if subscription
+    if let Some(user_id) = snapshot.user_id.clone()
+        && subscription
             .oauth_account_id
             .as_deref()
             .map(str::trim)
@@ -188,7 +187,6 @@ fn usage_from_snapshot(
         {
             subscription.oauth_account_id = Some(user_id);
         }
-    }
     if let Some(region) = snapshot.login_region.clone() {
         subscription.oauth_region = Some(region);
     }

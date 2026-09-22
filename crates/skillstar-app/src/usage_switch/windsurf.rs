@@ -924,15 +924,15 @@ fn missing_password() -> UsageError {
 fn host_key(password: &str) -> KeyMaterial {
     #[cfg(target_os = "macos")]
     {
-        return KeyMaterial::macos_v10(password);
+        KeyMaterial::macos_v10(password)
     }
     #[cfg(target_os = "linux")]
     {
-        return KeyMaterial::linux_v10(password);
+        KeyMaterial::linux_v10(password)
     }
     #[cfg(target_os = "windows")]
     {
-        return KeyMaterial::OsCryptKey(windows_os_crypt_key(password));
+        KeyMaterial::OsCryptKey(windows_os_crypt_key(password))
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {

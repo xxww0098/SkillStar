@@ -378,9 +378,9 @@ async fn switch_writes_only_its_own_secret_and_leaves_the_other_database() {
                 (spec.item_key, "stale-secret"),
             ],
         );
-        save_account(&spec, "ada", "ada@example.com", None, None, false);
+        save_account(spec, "ada", "ada@example.com", None, None, false);
         save_account(
-            &spec,
+            spec,
             "bob",
             "Bob",
             Some(&refresh_of(spec, "bob")),
