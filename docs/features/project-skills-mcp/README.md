@@ -18,7 +18,11 @@ Windows release 仍使用 `windows_subsystem = "windows"`，不分配控制台�
 
 每次调用同时返回结构化结果和一段短文本。字段以结构化结果为准。结果不包含技能正文，也不包含 Hub 绝对路径。Server capabilities 启用 tools，不启用 roots 或 resources。
 
-客户端在 `initialize` 里声明 `capabilities.elicitation.form` 时，`apply_project_skills` 先发送 form 模式的 `elicitation/create`。用户交回的 `plan_hash`、项目根、是否注册、owner、受影响 Agent 和变更列表必须与当前计划一致，然后才写入 elicitation 批准并调用领域 apply。拒绝、取消或超时不写批准，也不改项目。已经存在的 SkillStar 批准不能跳过这次确认，也不能被这次接受覆盖。
+服务器只接受 MCP `2026-07-28`。直接连到领域服务时，客户端先发 `server/discover`，之后每个请求在 `_meta` 里带 `io.modelcontextprotocol/protocolVersion` 和 `clientCapabilities`。`initialize` 会被拒绝。
+
+Grok 1.0.40 仍先发 `initialize`，请求版本是 `2025-11-25`。stdio 入口接住这次握手，响应里的 `protocolVersion` 固定为 `2026-07-28`，并把 Grok 当时声明的客户端能力补进后续每个请求的 `_meta`。领域服务看到的仍然只有 `2026-07-28`。
+
+客户端在该请求的 `clientCapabilities.elicitation.form` 里声明 form 能力时，`apply_project_skills` 先发送 form 模式的 `elicitation/create`。用户交回的 `plan_hash`、项目根、是否注册、owner、受影响 Agent 和变更列表必须与当前计划一致，然后才写入 elicitation 批准并调用领域 apply。拒绝、取消或超时不写批准，也不改项目。已经存在的 SkillStar 批准不能跳过这次确认，也不能被这次接受覆盖。
 
 没有 form 能力时不发送 elicitation。应用只认已经写好的 SkillStar 批准。没有这份批准时，结果是 `approval_required`，项目树和项目索引都不改。
 
@@ -34,7 +38,7 @@ Projects 页在选中项目且存在未过期计划时，在列表上方展示�
 
 ## 重排
 
-推荐的默认顺序是已安装技能的 BM25。`SKILLSTAR_LAYA_ONNX` 指向含 `laya.onnx`、`laya.onnx.data`、`laya_config.json` 和 `tokenizer/` 的目录时，第一次推荐在 CPU 上加载 Laya。每个候选单独问一次该技能是否适用于这次任务，只用名称和 frontmatter 描述，不送 `SKILL.md` 正文。至多打分 12 个，按 true 的概率从高到低排；平分保持 BM25 原序，低分也不删候选。
+推荐的默认顺序是已安装技能的 BM25。Laya 导出默认放在 `~/.skillstar/models/laya/`（随 `SKILLSTAR_DATA_DIR` 移动）。`SKILLSTAR_LAYA_ONNX` 可以改指向别的目录。目录里有 `laya.onnx`、`laya.onnx.data`、`laya_config.json` 和 `tokenizer/` 时，第一次推荐在 CPU 上加载 Laya。每个候选单独问一次该技能是否适用于这次任务，只用名称和 frontmatter 描述，不送 `SKILL.md` 正文。至多打分 12 个，按 true 的概率从高到低排；平分保持 BM25 原序，低分也不删候选。
 
 含汉字的任务只有 multilingual 导出才打分。Hugging Face `receptron/laya-onnx` 是英文包。`laya_config.json` 可以用 `language` 写成 `en` 或 `multilingual`；没有这个字段时，用 tokenizer 的特殊符号区分。看不出语种、文件缺失或 Session 失败都保持 BM25，推荐仍然成功。分数不进入 `plan_hash`。模型不进仓库和安装包，应用也不下载。PyTorch 只用于另行导出，不进应用依赖。`ort` 只注册 CPU Execution Provider。
 

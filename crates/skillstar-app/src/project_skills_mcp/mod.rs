@@ -14,6 +14,7 @@ pub mod plan;
 pub mod protocol;
 pub mod ranker;
 pub mod recommend;
+mod gateway;
 mod stdio;
 
 pub use cli_approve::run_approve;

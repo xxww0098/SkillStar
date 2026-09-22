@@ -47,11 +47,20 @@ pub(crate) struct PackedNoul {
 }
 
 pub(crate) fn configured_bundle_dir() -> Option<std::path::PathBuf> {
-    let dir = std::env::var_os("SKILLSTAR_LAYA_ONNX")?;
-    if dir.is_empty() {
+    if let Some(dir) = std::env::var_os("SKILLSTAR_LAYA_ONNX") {
+        if dir.is_empty() {
+            return None;
+        }
+        return Some(std::path::PathBuf::from(dir));
+    }
+    // Tests must not open the developer's real bundle just because it sits
+    // under ~/.skillstar. The app binary still defaults there.
+    #[cfg(test)]
+    {
         return None;
     }
-    Some(std::path::PathBuf::from(dir))
+    #[cfg(not(test))]
+    Some(skillstar_core::infra::paths::laya_model_dir())
 }
 
 pub(crate) fn bundle_is_complete(dir: &Path) -> bool {

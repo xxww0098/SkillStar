@@ -15,7 +15,7 @@
 ## 人可以运行
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
   | cargo run -p skillstar -- mcp serve --stdio
 ```
 
@@ -25,7 +25,8 @@ stdout 第一字节是 `{`。`RUST_LOG=trace` 与 `SKILLSTAR_GIT_ASKPASS_MODE=1`
 
 - `mcp_is_a_cli_subcommand_and_not_gui`
 - `serve_without_stdio_writes_only_stderr`
-- `serve_stdio_initialize_emits_only_jsonrpc`
+- `serve_stdio_discover_emits_only_jsonrpc`
+- `initialize_is_rejected`
 - `askpass_env_does_not_swallow_mcp`
 
 `cargo test -p skillstar-app mcp_stdio_` 与更新后的 `known_cli_subcommands_are_detected`。
@@ -53,5 +54,5 @@ Windows release 管道读不到响应，或任何启动日志出现在 stdout。
 ## 决定
 
 - `rmcp` 在本档加入，feature 用 13 档列出的集合，另加 `transport-async-rw`，测试用内存 duplex，不占用进程 stdout。
-- 客户端 `initialize` 请求 `2026-07-28` 时，rmcp 3.4 把该版本视为没有 initialize 握手，响应里的 `protocolVersion` 是 `2025-11-25`。探针只要求 stdout 第一字节是 `{`。
+- 服务器只接受 `2026-07-28`。探针先发 `server/discover`，`initialize` 得到 `-32022`。stdout 第一字节仍是 `{`。
 - Windows release 继承管道探针未跑。macOS debug 单测不能代替它。

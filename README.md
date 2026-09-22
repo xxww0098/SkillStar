@@ -173,7 +173,7 @@ skillstar team used pr-review
 
 ### 项目技能 MCP
 
-`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。可选的技能优选把 `SKILLSTAR_LAYA_ONNX` 指到本机 Laya 导出目录，第一次推荐时用 CPU 加载；没有这个目录或加载失败时，顺序仍是 BM25。应用不下载模型。
+`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。可选的技能优选读取 `~/.skillstar/models/laya/`，第一次推荐时用 CPU 加载；`SKILLSTAR_LAYA_ONNX` 可以改指向别的导出目录。目录不完整或加载失败时，顺序仍是 BM25。应用不下载模型。
 
 ```bash
 skillstar mcp serve --stdio

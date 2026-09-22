@@ -48,8 +48,11 @@ pub fn serve_with(args: &[String], stderr: &mut dyn Write) -> i32 {
             return 1;
         }
     };
-    // stdin()/stdout() must be created inside the runtime.
-    match runtime.block_on(async { serve_transport(rmcp::transport::stdio()).await }) {
+    // stdin()/stdout() must be created inside the runtime. Grok still
+    // opens with initialize; the gateway answers 2026-07-28 and forwards.
+    match runtime.block_on(async {
+        super::gateway::serve_gateway(tokio::io::stdin(), tokio::io::stdout()).await
+    }) {
         Ok(()) => 0,
         Err(err) => {
             let _ = writeln!(stderr, "{err:#}");

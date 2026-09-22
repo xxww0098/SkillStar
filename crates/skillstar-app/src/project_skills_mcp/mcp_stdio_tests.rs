@@ -26,7 +26,7 @@ fn serve_without_stdio_writes_only_stderr() {
 }
 
 #[test]
-fn serve_stdio_initialize_emits_only_jsonrpc() {
+fn serve_stdio_discover_emits_only_jsonrpc() {
     let _guard = futures::executor::block_on(ENV_LOCK.lock());
     let temp = tempfile::tempdir().expect("tempdir");
     let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
@@ -46,10 +46,10 @@ fn serve_stdio_initialize_emits_only_jsonrpc() {
             let (client, server) = tokio::io::duplex(64 * 1024);
             let server_task = tokio::spawn(super::stdio::serve_transport(server));
             let (client_read, mut client_write) = tokio::io::split(client);
-            let initialize = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}"#;
-            client_write.write_all(initialize.as_bytes()).await?;
+            let discover = r#"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"probe","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}"#;
+            client_write.write_all(discover.as_bytes()).await?;
             client_write.write_all(b"\n").await?;
-            let tools = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
+            let tools = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"probe","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}"#;
             client_write.write_all(tools.as_bytes()).await?;
             client_write.write_all(b"\n").await?;
             client_write.shutdown().await?;
@@ -83,10 +83,13 @@ fn serve_stdio_initialize_emits_only_jsonrpc() {
             "server must not emit requests: {frame}"
         );
     }
-    let init: serde_json::Value = serde_json::from_str(&frames[0]).unwrap();
-    assert_eq!(init["id"], 1);
-    assert!(init["result"]["protocolVersion"].is_string());
-    assert!(init["result"]["capabilities"].get("roots").is_none());
+    let discover: serde_json::Value = serde_json::from_str(&frames[0]).unwrap();
+    assert_eq!(discover["id"], 1);
+    assert_eq!(
+        discover["result"]["supportedVersions"],
+        serde_json::json!(["2026-07-28"])
+    );
+    assert!(discover["result"]["capabilities"].get("roots").is_none());
     let tools: serde_json::Value = serde_json::from_str(&frames[1]).unwrap();
     assert_eq!(tools["id"], 2);
     let mut names: Vec<&str> = tools["result"]["tools"]
@@ -103,6 +106,46 @@ fn serve_stdio_initialize_emits_only_jsonrpc() {
             "get_project_skills",
             "recommend_project_skills",
         ]
+    );
+}
+
+#[test]
+fn initialize_is_rejected() {
+    let _guard = futures::executor::block_on(ENV_LOCK.lock());
+    let temp = tempfile::tempdir().expect("tempdir");
+    let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
+    let previous_home = std::env::var_os("HOME");
+    unsafe {
+        std::env::set_var("SKILLSTAR_DATA_DIR", temp.path().join("data"));
+        std::env::set_var("HOME", temp.path().join("home"));
+    }
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(async {
+            let (client, server) = tokio::io::duplex(64 * 1024);
+            let server_task = tokio::spawn(super::stdio::serve_transport(server));
+            let (client_read, mut client_write) = tokio::io::split(client);
+            let initialize = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}"#;
+            client_write.write_all(initialize.as_bytes()).await?;
+            client_write.write_all(b"\n").await?;
+            client_write.shutdown().await?;
+            let mut lines = BufReader::new(client_read).lines();
+            let frame = lines.next_line().await?.expect("error frame");
+            let _ = server_task.await;
+            Ok::<_, anyhow::Error>(frame)
+        });
+    unsafe {
+        restore_env("SKILLSTAR_DATA_DIR", previous_data);
+        restore_env("HOME", previous_home);
+    }
+    let frame: serde_json::Value = serde_json::from_str(&result.expect("frame")).unwrap();
+    assert_eq!(frame["id"], 1);
+    assert_eq!(frame["error"]["code"], -32022);
+    assert_eq!(
+        frame["error"]["data"]["supported"],
+        serde_json::json!(["2026-07-28"])
     );
 }
 

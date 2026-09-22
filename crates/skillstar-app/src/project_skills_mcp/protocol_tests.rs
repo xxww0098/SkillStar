@@ -84,9 +84,16 @@ fn hub_skill(name: &str) {
 }
 
 fn exchange(requests: &[&str]) -> Vec<serde_json::Value> {
-    let initialize = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}"#;
-    let mut lines = vec![initialize.to_string()];
-    lines.extend(requests.iter().map(|line| (*line).to_string()));
+    let discover = stamp(
+        r#"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{}}"#,
+        &serde_json::json!({}),
+    );
+    let mut lines = vec![discover];
+    lines.extend(
+        requests
+            .iter()
+            .map(|line| stamp(line, &serde_json::json!({}))),
+    );
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -112,6 +119,27 @@ fn exchange(requests: &[&str]) -> Vec<serde_json::Value> {
             Ok::<_, anyhow::Error>(frames)
         })
         .expect("stdio session")
+}
+
+fn stamp(request: &str, capabilities: &serde_json::Value) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(request).expect("request json");
+    let params = value
+        .as_object_mut()
+        .expect("request")
+        .entry("params")
+        .or_insert_with(|| serde_json::json!({}));
+    if !params.is_object() {
+        *params = serde_json::json!({});
+    }
+    params.as_object_mut().expect("params").insert(
+        "_meta".to_string(),
+        serde_json::json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "probe", "version": "0"},
+            "io.modelcontextprotocol/clientCapabilities": capabilities,
+        }),
+    );
+    value.to_string()
 }
 
 fn tool_names(list: &serde_json::Value) -> Vec<String> {

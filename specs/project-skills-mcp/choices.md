@@ -9,7 +9,7 @@
 - **进程入口先看 `argv[1] == "mcp"`，再看 askpass。** 判断函数放在 `skillstar_app::project_skills_mcp::is_mcp_invocation`，`main` 第一件事调用它。这样单测能证明 askpass 环境变量不会吞掉 `mcp`，而不必先编出桌面二进制。
 - **依赖提前到本档。** 规格把 `cargo add rmcp` 写在 13 档，但 01 档要求 stdio 服务器就是 rmcp 3.4。版本在根 `Cargo.toml`，feature 用 13 档的列表。
 - **测试传输多开 `transport-async-rw`。** 规格点名的 feature 没有这项。进程内 duplex 需要它，它不是 HTTP、client 或硬件后端。生产路径仍是 `rmcp::transport::stdio`。
-- **`2026-07-28` 的 initialize 响应版本是 `2025-11-25`。** 这是 rmcp 的协商，不是我们改写的协议。stdout 仍然只有 JSON-RPC。
+- **服务器只公布 `2026-07-28`。** `initialize` 没有可回落的旧版本，直接返回 `-32022`。客户端用 `server/discover`，每个请求自带 `_meta`。stdout 仍然只有 JSON-RPC。
 
 ### 先这样，以后可改
 
@@ -114,10 +114,10 @@
 
 ### 已定，按这个做
 
-- **能力判断用 `Peer::supported_elicitation_modes`，发信用 `elicit_with_timeout`。** 测试里的 initialize 显式带 `capabilities.elicitation.form`。rmcp 会把空的 elicitation 对象也当成 form，本档不依赖那种兼容。
+- **能力判断用 `Peer::supported_elicitation_modes`，发信用 `elicit_with_timeout`。** `2026-07-28` 没有 initialize 会话，所以处理 `apply` 前先把本请求 `_meta` 里的 `clientCapabilities` 写进 peer。测试在该请求上显式带 `elicitation.form`。rmcp 会把空的 elicitation 对象也当成 form，本档不依赖那种兼容。
 - **表单字段是 `plan_hash`、`root`、`will_register`、`owner_id`、`affected_agents`、`changes`。** 每一项都必须和当前计划一致。技能清单放在 `changes` 文本里，因为 elicitation schema 只允许原始类型。说明文字在 `message`。
 - **确认发生在项目写锁之外。** 用户拒绝、取消或 120 秒超时都不写批准。接受后才 `record_from_elicitation`，然后调用领域 apply。
-- **协商下来的协议仍是 `2025-11-25`。** 因此 SEP-2260 对 `2026-07-28` 的严格请求关联不会拦住这次 `elicitation/create`。请求仍在处理工具调用的任务里发出。
+- **协议固定为 `2026-07-28`，`elicitation/create` 仍在处理这次 `tools/call` 时发出。** SEP-2260 的请求关联由这次工具调用本身满足。
 
 ## 15 CLI 批准
 
@@ -151,4 +151,5 @@
 - **输入布局抄上游 `rl_common.build_sequence`。** 图的五个输入名和 dtype 保持导出时的样子。分数是 true 的概率。平分用稳定排序，保留 BM25 原来的先后。
 - **官方 `laya_config.json` 没有语种字段。** 有 `language` 时只认 `en` / `english` 和 `multilingual`。没有这个字段时，`[CLS]` `[SEP]` `[MASK]` `[PAD]` 算英文，`<bos>` `<eos>` `<mask>` `<pad>` 算 multilingual。两边都对不上就不加载。任务里有汉字时，只有 multilingual 才打分。
 - **图打不开，或任何一条序列装不进长度上限时，这一次推荐整表回到 BM25。** 不把概率和 BM25 分数混在一张表里。同一个目录加载失败后，这个进程不再重试。计划上的 reranker 名在加载失败后写成 `passthrough`。
-- **对照值是 Python ONNX Runtime CPU 对一条冻住的英文 token 向量的 logits。** 阈值 `1e-4`。约 1.6GB 的权重留在本机缓存，不进 git，应用也不下载。
+- **对照值是 Python ONNX Runtime CPU 对一条冻住的英文 token 向量的 logits。** 阈值 `1e-4`。约 1.6GB 的权重不进 git，应用也不下载。
+- **本机导出默认放在 `~/.skillstar/models/laya/`。** `SKILLSTAR_DATA_DIR` 把这个目录一起搬走。`SKILLSTAR_LAYA_ONNX` 仍可指向别的导出。空的环境变量表示不用模型。

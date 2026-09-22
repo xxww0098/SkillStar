@@ -10,9 +10,12 @@ use chrono::Utc;
 use rmcp::ServerHandler;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
+use rmcp::model::{
+    CallToolResult, ClientConfig, ContentBlock, Implementation, ProtocolVersion,
+    ServerCapabilities, ServerConfig,
+};
 use rmcp::schemars::JsonSchema;
-use rmcp::service::{ElicitationError, ElicitationMode, ServiceError};
+use rmcp::service::{ElicitationError, ElicitationMode, RequestContext, ServiceError};
 use rmcp::{Peer, RoleServer, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use skillstar_skills::projects::{ProjectDeployMode, SkillDiskKind};
@@ -23,6 +26,8 @@ use super::inspect::{self, LoadHint, RuntimeVisibility};
 use super::ort_cpu::active_reranker;
 use super::plan::{self, DeploymentPlan, PlanAction};
 use super::recommend::{self, RecommendRequest, Selection};
+
+const SUPPORTED_PROTOCOL: &[ProtocolVersion] = &[ProtocolVersion::V_2026_07_28];
 
 #[derive(Clone)]
 pub(crate) struct ProjectSkillsMcp {
@@ -67,10 +72,11 @@ impl ProjectSkillsMcp {
     )]
     async fn apply_project_skills(
         &self,
-        peer: Peer<RoleServer>,
+        context: RequestContext<RoleServer>,
         Parameters(args): Parameters<ApplyArgs>,
     ) -> CallToolResult {
-        run_apply(peer, args).await
+        adopt_request_client(&context);
+        run_apply(context.peer.clone(), args).await
     }
 }
 
@@ -79,10 +85,32 @@ impl ServerHandler for ProjectSkillsMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("skillstar", env!("CARGO_PKG_VERSION")))
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_instructions(
                 "SkillStar project skills. Recommend, read, and apply project skill links. Approval is not a tool argument. This session does not verify that an agent loaded a skill.",
             )
     }
+
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        std::borrow::Cow::Borrowed(SUPPORTED_PROTOCOL)
+    }
+}
+
+/// `2026-07-28` has no initialize session. Form elicitation still reads the
+/// peer record, so copy this request's client capabilities there first.
+fn adopt_request_client(context: &RequestContext<RoleServer>) {
+    let Some(capabilities) = context.client_capabilities() else {
+        return;
+    };
+    let client_info = context
+        .client_info()
+        .unwrap_or_else(|| Implementation::new("client", "0"));
+    let version = context
+        .protocol_version()
+        .unwrap_or(ProtocolVersion::V_2026_07_28);
+    context
+        .peer
+        .set_peer_info(ClientConfig::new(capabilities, client_info).with_protocol_version(version));
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

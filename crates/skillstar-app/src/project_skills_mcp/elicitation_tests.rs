@@ -95,6 +95,27 @@ struct Reply {
     elicitations: Vec<serde_json::Value>,
 }
 
+fn stamp(request: &str, capabilities: &serde_json::Value) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(request).expect("request json");
+    let params = value
+        .as_object_mut()
+        .expect("request")
+        .entry("params")
+        .or_insert_with(|| serde_json::json!({}));
+    if !params.is_object() {
+        *params = serde_json::json!({});
+    }
+    params.as_object_mut().expect("params").insert(
+        "_meta".to_string(),
+        serde_json::json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "probe", "version": "0"},
+            "io.modelcontextprotocol/clientCapabilities": capabilities,
+        }),
+    );
+    value.to_string()
+}
+
 fn call_tool(capabilities: &str, request: &str, elicit: &Elicit) -> Reply {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -105,14 +126,19 @@ fn call_tool(capabilities: &str, request: &str, elicit: &Elicit) -> Reply {
             let server_task = tokio::spawn(super::super::stdio::serve_transport(server));
             let (read, mut write) = tokio::io::split(client);
             let mut lines = BufReader::new(read).lines();
-            let init = format!(
-                r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2026-07-28","capabilities":{capabilities},"clientInfo":{{"name":"probe","version":"0"}}}}}}"#
+            let capabilities: serde_json::Value =
+                serde_json::from_str(capabilities).expect("capabilities");
+            let discover = stamp(
+                r#"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{}}"#,
+                &capabilities,
             );
-            write.write_all(init.as_bytes()).await?;
+            write.write_all(discover.as_bytes()).await?;
             write.write_all(b"\n").await?;
             let mut elicitations = Vec::new();
-            let init_result = next_response(&mut lines, &mut write, 1, elicit, &mut elicitations).await?;
-            assert!(init_result.get("result").is_some(), "{init_result}");
+            let discover_result =
+                next_response(&mut lines, &mut write, 1, elicit, &mut elicitations).await?;
+            assert!(discover_result.get("result").is_some(), "{discover_result}");
+            let request = stamp(request, &capabilities);
             write.write_all(request.as_bytes()).await?;
             write.write_all(b"\n").await?;
             let tool = next_response(&mut lines, &mut write, 2, elicit, &mut elicitations).await?;

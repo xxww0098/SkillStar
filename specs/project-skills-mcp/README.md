@@ -8,7 +8,7 @@
 
 01–18 已落地。Laya 在第一次推荐时用 CPU 对至多 12 个候选做 noul 重排；未设置 `SKILLSTAR_LAYA_ONNX`、语种不符或加载失败时仍是 BM25。中文任务只接受 multilingual 导出，英文 `receptron/laya-onnx` 不能冒充。下一步是整份规格收尾：按最终代码重写 `choices.md`，再归档。不要 push。
 
-`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
+项目技能 MCP 只接受 `2026-07-28`。`initialize` 返回不支持的协议版本。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
 
 全局决定已经写在下面，不要重开。切片里标成「可改」的才是实现自由。做完一档之前，运行该档写明的测试。文档和代码同一档一起改，不留「待补」。
 

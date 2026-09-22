@@ -61,6 +61,7 @@ flowchart LR
 | GitHub 用户登录凭据 | `~/.skillstar/state/github_auth.json`（Unix `0600`） | `skillstar-skills::github_auth`；普通配置只保存非敏感共享频道状态 |
 | 共享频道订阅、发布目标与升级策略/状态 | `~/.skillstar/config/shared_channel_subscriptions.json` | `skillstar-channels::shared_channels`；只保存 repository ID、release target、所选 Skill、安装 baseline/provenance、逐 Skill 历史 pin、按频道自动升级偏好与最近逐项结果，不保存 GitHub 凭据 |
 | 项目技能计划、批准和回执 | `~/.skillstar/state/project-skill-plans/`、`project-skill-approvals/`、`project-skill-receipts/` | `skillstar-app::project_skills_mcp`。项目写入的跨进程锁是 `state/project-write.lock`，所有者是 `skillstar-skills::projects::write_lock` |
+| 可选 Laya ONNX 包 | `~/.skillstar/models/laya/` | `skillstar_core::infra::paths::laya_model_dir`。`SKILLSTAR_LAYA_ONNX` 整目录覆盖；`SKILLSTAR_DATA_DIR` 把默认位置一起搬走。应用不下载这份权重 |
 
 敏感凭证不得明文写入普通配置：SSH 兼容服务名保持 `skillstar-ssh`；Usage token 使用域内加密存储或系统凭证设施。具体行为见对应功能文档。
 
@@ -113,7 +114,7 @@ flowchart LR
 - 该进程只广告 `protocol` 里的项目技能工具。批准不是工具参数。不启用 roots，不提供资源，技能正文不进结果。
 - 项目写入先拿技能 update 锁、再拿 `state/project-write.lock`。已经持有项目锁时不再拿 update 锁。
 - Windows release 不改 `windows_subsystem`，不调用 `AllocConsole`。父进程接上的管道就是传输。
-- 可选 Laya 重排在第一次 `recommend_project_skills` 时加载，不在 `initialize`。模型目录由 `SKILLSTAR_LAYA_ONNX` 指向，不属于 SkillStar 数据目录。只使用 CPU Execution Provider。
+- 可选 Laya 重排在第一次 `recommend_project_skills` 时加载，不在 `server/discover`。默认目录是 `~/.skillstar/models/laya/`，`SKILLSTAR_LAYA_ONNX` 可以改指向别处。只使用 CPU Execution Provider。项目技能 MCP 只接受协议 `2026-07-28`。
 
 ### 跨进程与凭证事务
 
