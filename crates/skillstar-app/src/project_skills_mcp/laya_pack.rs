@@ -57,10 +57,12 @@ pub(crate) fn configured_bundle_dir() -> Option<std::path::PathBuf> {
     // under ~/.skillstar. The app binary still defaults there.
     #[cfg(test)]
     {
-        return None;
+        None
     }
     #[cfg(not(test))]
-    Some(skillstar_core::infra::paths::laya_model_dir())
+    {
+        Some(skillstar_core::infra::paths::laya_model_dir())
+    }
 }
 
 pub(crate) fn bundle_is_complete(dir: &Path) -> bool {
@@ -322,7 +324,7 @@ mod tests {
             mask_token: "[MASK]".into(),
         };
         let encode = |text: &str| Some(text.chars().map(|c| c as u32).collect());
-        let packed = build_noul(&encode, &special, "apply?", "task", 512, 192).unwrap();
+        let packed = build_noul(encode, &special, "apply?", "task", 512, 192).unwrap();
         assert_eq!(packed.ids[0], 1);
         assert_eq!(*packed.ids.last().unwrap(), 2);
         assert_eq!(packed.markers.len(), 2);

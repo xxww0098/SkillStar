@@ -185,6 +185,7 @@ fn score_candidates(
     Some(scores)
 }
 
+#[cfg(test)]
 fn logits_for_instruction(instruction: &str, task: &str) -> Option<(Vec<i64>, [i64; 2], Vec<f32>)> {
     let dir = configured_bundle_dir()?;
     let calibration = read_calibration(&dir)?;
@@ -198,7 +199,11 @@ fn logits_for_instruction(instruction: &str, task: &str) -> Option<(Vec<i64>, [i
         bundle.calibration.max_len,
         bundle.calibration.head_max_len,
     )?;
-    let logits = raw_noul_logits(&mut bundle.session, &[packed.clone()], bundle.special.pad)?;
+    let logits = raw_noul_logits(
+        &mut bundle.session,
+        std::slice::from_ref(&packed),
+        bundle.special.pad,
+    )?;
     Some((packed.ids, packed.markers, logits))
 }
 

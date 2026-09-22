@@ -199,10 +199,10 @@ fn validate(request: &RecommendRequest) -> Result<()> {
     {
         anyhow::bail!("focus_paths exceed 50 items or 200 characters");
     }
-    if let Some(selection) = &request.selection {
-        if selection.agent_id.is_empty() || selection.skill_names.len() > 8 {
-            anyhow::bail!("selection needs one agent and at most 8 skills");
-        }
+    if let Some(selection) = &request.selection
+        && (selection.agent_id.is_empty() || selection.skill_names.len() > 8)
+    {
+        anyhow::bail!("selection needs one agent and at most 8 skills");
     }
     Ok(())
 }

@@ -121,11 +121,11 @@ fn stamp(mut message: Value, capabilities: &Value, client_info: &Value) -> Value
         *params = json!({});
     }
     let mut meta = base_meta(capabilities.clone(), client_info.clone());
-    if let Some(existing) = params.get("_meta").and_then(Value::as_object) {
-        if let Some(target) = meta.as_object_mut() {
-            for (key, value) in existing {
-                target.insert(key.clone(), value.clone());
-            }
+    if let Some(existing) = params.get("_meta").and_then(Value::as_object)
+        && let Some(target) = meta.as_object_mut()
+    {
+        for (key, value) in existing {
+            target.insert(key.clone(), value.clone());
         }
     }
     meta["io.modelcontextprotocol/protocolVersion"] = json!(PROTOCOL);

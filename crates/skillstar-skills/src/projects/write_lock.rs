@@ -37,10 +37,8 @@ impl Drop for ProjectWriteGuard {
             depth.set(next);
             next == 0
         });
-        if release_file {
-            if let Some(file) = self.file.as_ref() {
-                let _ = file.unlock();
-            }
+        if release_file && let Some(file) = self.file.as_ref() {
+            let _ = file.unlock();
         }
     }
 }
@@ -227,7 +225,7 @@ mod project_write_lock_tests {
     fn project_write_lock_reenters_on_the_owner_thread() {
         let _env = EnvGuard::new("reenter");
         let _outer = lock_project_write().unwrap();
-        let _inner = with_project_write_lock(|| Ok(())).unwrap();
+        with_project_write_lock(|| Ok(())).unwrap();
         assert!(current_depth() >= 1);
         let _again = try_lock_project_write().unwrap();
         assert!(current_depth() >= 2);
