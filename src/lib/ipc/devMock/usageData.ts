@@ -106,6 +106,18 @@ export const USAGE_CATALOG = [
     regions: [],
   },
   {
+    id: "qoder",
+    display_name: "Qoder",
+    description: "Qoder IDE",
+    tier: "o-auth",
+    auth_modes: ["o-auth", "token-import"],
+    brand_color: "2ADB5C",
+    default_currency: "USD",
+    subscription_url: "https://qoder.com",
+    warning: null,
+    regions: [],
+  },
+  {
     id: "deepseek",
     display_name: "DeepSeek",
     description: "API Key 余额",

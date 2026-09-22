@@ -158,6 +158,12 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("kiro"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "qoder",
+        display_name: "Qoder",
+        catalog_id: Some("qoder"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.

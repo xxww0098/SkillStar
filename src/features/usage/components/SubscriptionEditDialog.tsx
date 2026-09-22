@@ -222,7 +222,7 @@ export function SubscriptionEditDialog({
     setScanningLocal(true);
     let successCount = 0;
 
-    // 并发扫描四大支持本地导入的服务
+    // 并发扫描支持本地导入的服务
     const importPromises = LOCAL_IMPORT_CATALOG_IDS.map(async (id) => {
       try {
         const sub = await usageApi.importSubscriptionFromLocal(id);
