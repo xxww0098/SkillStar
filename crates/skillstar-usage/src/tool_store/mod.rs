@@ -3,6 +3,7 @@
 
 pub mod atomic_json;
 pub mod byte_crypto;
+pub mod enc_v1;
 pub mod keychain_cli;
 pub mod safe_storage;
 pub mod vscdb_ext;
