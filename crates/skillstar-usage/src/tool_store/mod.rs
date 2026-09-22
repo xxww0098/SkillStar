@@ -3,4 +3,5 @@
 
 pub mod atomic_json;
 pub mod keychain_cli;
+pub mod safe_storage;
 pub mod vscdb_ext;
