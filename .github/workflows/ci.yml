@@ -230,13 +230,16 @@ jobs:
       #
       #   advisories  anyhow (unsound), quick-xml (2 vulns, via a plist
       #               1.8->1.10 bump) and a yanked crypto-bigint were fixed by
-      #               upgrading. The remaining 20 are allowlisted in deny.toml,
-      #               each with its own reason and re-evaluation trigger: 19
-      #               are `unmaintained` (Tauri's archived Linux GTK3 stack,
-      #               async-openai's backoff, tauri-utils' parsing helpers),
-      #               and the single live vulnerability is RUSTSEC-2023-0071
-      #               (rsa Marvin attack) reached via russh, which has no fixed
-      #               version upstream at all.
+      #               upgrading. The remaining 10 are allowlisted in deny.toml,
+      #               each with its own reason and re-evaluation trigger: 9
+      #               are `unmaintained` (what is left of Tauri's archived
+      #               Linux GTK3 stack, async-openai's backoff, tauri-utils'
+      #               parsing helpers), and the single live vulnerability is
+      #               RUSTSEC-2023-0071 (rsa Marvin attack) reached via russh,
+      #               which has no fixed version upstream at all. Ten gtk-rs
+      #               GTK3 entries were deleted on 2026-09-22: the advisory-db
+      #               withdrew them on 2026-08-14, and an ignore that matches
+      #               nothing (`advisory-not-detected`) fails the check.
       #   bans        ok. `cargo tree --duplicates` noise stays a warning here;
       #               duplicate-version findings are not build-breaking.
       #   sources     ok — crates.io only.
