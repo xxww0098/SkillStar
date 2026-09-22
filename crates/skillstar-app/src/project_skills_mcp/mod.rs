@@ -4,6 +4,7 @@
 //! process that agents launch with `skillstar mcp serve --stdio`.
 
 pub mod approval;
+pub mod inspect;
 pub mod plan;
 pub mod ranker;
 pub mod recommend;
