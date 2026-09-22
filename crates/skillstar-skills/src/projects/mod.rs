@@ -10,6 +10,7 @@
 //! `project_manifest::*` paths and signatures are stable for all consumers.
 
 mod binding;
+mod facts;
 mod helpers;
 mod import;
 mod index;
@@ -30,6 +31,9 @@ pub use types::{
 pub use types::{ensure_project_root_exists, prune_deploy_modes_for_agents};
 
 pub use binding::{ObservedProject, contained_child, observe_project, register_canonical_project};
+pub use facts::{
+    PhysicalSkillRow, ProjectSkillFacts, SkillDiskKind, SkillPresence, inspect_project_skills,
+};
 pub use import::import_scanned_skills;
 pub use index::{list_projects, register_project, remove_project, update_project_path};
 pub use owner::{SharedPathOwner, shared_path_owner};
