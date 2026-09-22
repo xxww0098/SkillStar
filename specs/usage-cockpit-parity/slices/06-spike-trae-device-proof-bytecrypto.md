@@ -44,3 +44,13 @@
 ## 必须保持绿
 
 - 纯新增；不动 `storage.json` 以外的任何文件族。
+
+## 结果
+
+本地密码学已证明。没有调用真实 `ExchangeToken`，没有网络。服务端是否接受这份 DeviceProof：**未验证**。不降级 Trae。kill-gate 保持打开，直到手上有真实 refresh token。
+
+- `tool_store::byte_crypto`：布局按 cockpit。6 字节头 + 32 字节随机密钥 + AES-128-CBC(SHA-512(明文) ‖ 明文)。密钥和 IV 来自 `SHA-512(SHA-512(随机密钥) ‖ salt)` 的前 32 字节。公开头 `[116, 99, 5, 16, 0, 0]` 和私有头都能往返。改密文最后一字节返回 `byte_crypto 完整性校验失败`（PKCS7 失败或 SHA-512 不一致都是这个错误）。`storage.json` 里的值是这段原始 blob 的标准 base64；本模块编解码的是 raw bytes。
+- 设备密钥：`ring` 0.17，生成和签名都用 `ECDSA_P256_SHA256_ASN1_SIGNING`。cockpit 生成用 FIXED、签名用 ASN.1，曲线相同；这里合成一个算法，避免 PKCS#8 算法标识对不上。PEM 是 `PRIVATE KEY` / `PUBLIC KEY`（PKCS#8 与 SPKI）。Rust 字段是 `private_pem` / `public_pem`，不是 JSON 的 `privateKeyPEM`。
+- `sign_device_proof` 返回 ASN.1 签名的标准 base64，对应 cockpit `DeviceProof.Signature`，不是整段 `{Signature, Timestamp, Nonce}` JSON。时间戳和 nonce 由调用方传入。
+- 消息字节：`POST\n<path>\n<clientId>\n<refreshToken>\n<ts>\n<nonce>`。固定 nonce `00112233445566778899aabbccddeeff`、ts `1700000000` 的签名能用公钥验过；改 client id 后验签失败。
+- 确定性：不是 RFC6979。`EcdsaKeyPair::sign` 把 `SystemRandom` 混进 nonce。本机对同一输入连签两次，签名不相等。测试只验签，不比较两次签名。
