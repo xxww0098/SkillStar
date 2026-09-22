@@ -10,6 +10,9 @@
 pub mod api_key;
 pub mod cookie;
 pub mod oauth;
+// Device proof only. The Trae quota fetcher is a later slice.
+#[allow(dead_code)]
+mod trae;
 
 use chrono::Utc;
 

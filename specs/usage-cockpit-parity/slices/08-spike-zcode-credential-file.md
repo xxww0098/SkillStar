@@ -42,3 +42,19 @@
 ## 必须保持绿
 
 - 测试全部走 `SKILLSTAR_TOOL_SYNC_HOME`/`SKILLSTAR_DATA_DIR` 沙箱；不读真实 `~/.zcode`。
+
+## 结果
+
+round-trip 已证明。没有打开真实 ZCode，也没有读 `~/.zcode`。官方 app 是否接受写回：**未验证**。不降级。
+
+规格把值写成 `enc:v1:` 后面两段 base64（nonce，以及 ciphertext‖tag）。cockpit `zcode_account.rs` 不是这样。本机用 Node 复解了它的固定向量，实际是三段 URL-safe base64、无 padding：
+
+`enc:v1:{nonce}.{tag}.{ciphertext}`
+
+nonce 12 字节。AES-256-GCM 的输出仍是 ciphertext‖tag，但 tag（最后 16 字节）单独成段，不跟 ciphertext 放进同一个 base64。固定向量 `enc:v1:AAECAwQFBgcICQoL.NTIF8rgqI66J7hvPIwTD8g.QTtgwDlfAEvz72ttQggYC2KZyVwLVA` 的密钥是 `SHA-256("zcode-credential-fallback:darwin:/Users/zcode-test:test-user")`，明文是 `official-fixture-token`。
+
+密钥：非空 `ZCODE_CREDENTIAL_SECRET` 优先，空字符串不算覆盖；否则 `zcode-credential-fallback:{platform}:{home}:{username}` 再 SHA-256。platform 跟 cockpit：`darwin` / `win32` / 其他用 `std::env::consts::OS`。
+
+没有 `enc:v1:` 前缀时返回格式错误。cockpit 会把原文原样返回；这里不这样做，避免写回时把明文再加密一遍还当成解密成功。
+
+路径是 `{zcode_home()}/v2/credentials.json`。`zcode_home()` 读 `setting.json`（不是 `settings.json`）的 `dataBaseDir`，根变成 `{dataBaseDir}/.zcode`。覆盖路径上的写回在临时目录完成：解密 → 改字段 → 加密 → `tool_store::atomic_json` → 再读。上一版字节由测试另存到旁边，没有新的备份框架。沙箱是 `SKILLSTAR_TOOL_SYNC_HOME`。

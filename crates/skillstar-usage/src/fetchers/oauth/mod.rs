@@ -21,6 +21,10 @@ pub(crate) mod common;
 pub mod cursor;
 pub mod xai;
 
+// Zed callback RSA only. Not registered in `dispatch`.
+#[allow(dead_code)]
+mod zed_token;
+
 pub use start_info::{OAuthFlow, OAuthStartInfo};
 
 /// Pasted-callback rewrite, keyed by catalog id. No provider registers one

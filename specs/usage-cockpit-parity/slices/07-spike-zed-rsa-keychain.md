@@ -39,3 +39,11 @@
 ## 必须保持绿
 
 - 不触碰 codex/anthropic 的 keychain 路径。
+
+## 结果
+
+RSA 用本地 RSA-2048 密钥证明了。OAEP-SHA256 先试，失败再回落 PKCS#1 v1.5；两种 padding 各有一条公钥加密→私钥解密向量。私钥是 PKCS#1 DER。密文接受 cockpit 的 URL-safe base64（无 padding），也接受带 padding 的标准 base64。没有连 zed.dev。
+
+钥匙串写回：**未验证，不是失败**。本机没有对测试 service 执行 `security add-internet-password`。`SKILLSTAR_TOOL_SYNC_HOME` 沙箱仍然在 spawn 之前拒绝。`find` 的 argv 含 `-a <account>` 和 `-s <server>`，这条测试不启动 `security`。非 macOS 的 `spawn_security` 仍直接报错。没有改 anthropic/codex 的 generic-password 路径。
+
+结构性结论（不需要实验）：zed 不进实例注册表。`https://zed.dev` 是全局钥匙串项，原生 Zed 没有 `--user-data-dir`。这是 `UnsupportedApp` 的理由，不是本 spike 的失败。

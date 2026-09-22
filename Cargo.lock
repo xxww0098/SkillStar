@@ -7153,16 +7153,22 @@ dependencies = [
 name = "skillstar-usage"
 version = "0.0.0"
 dependencies = [
+ "aes 0.8.4",
  "aes-gcm 0.10.3",
  "anyhow",
  "base64 0.22.1",
+ "cbc 0.1.2",
  "chrono",
  "machine-uid",
+ "pbkdf2",
  "rand 0.10.1",
  "reqwest 0.13.3",
+ "ring",
+ "rsa",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha1 0.11.0",
  "sha2 0.11.0",
  "skillstar-core",
  "tempfile",

@@ -71,3 +71,39 @@ xAI 完成登录时仍要求 `auth_mode == OAuth`。这个 provider 没有 token
 三平台都是 `~/.aws/sso/cache`。
 
 判定：就这么做。跟 cockpit 一致。
+
+### macOS Safe Storage 是 1003 轮，不是 1000
+
+规格写 1000。cockpit 和 Chromium 在 macOS 上是 PBKDF2-SHA1 1003 轮，盐 `saltysalt`，IV 是 16 个空格，前缀 `v10`。Linux 的 `peanuts` 和空口令是 1 轮。Windows 的 AES-256-GCM 磁盘前缀也是 `v10`，不是 `v11`。`v11` 只出现在 Linux 的 CBC。
+
+判定：跟 cockpit。规格数字是笔误。真钥匙串和 Windsurf 重启还没做，不据此降级。
+
+### ZCode 密文是三段，不是两段
+
+实际格式是 `enc:v1:{nonce}.{tag}.{ciphertext}`，URL-safe、无 padding。不是「nonce 加 ciphertext‖tag」两段。无前缀时直接报格式错误，不把原文原样返回。
+
+判定：跟 cockpit 源码。规格那句合并了 tag 和 ciphertext。
+
+### 设备签名不保证两次相同
+
+`ring` 的 P-256 签名不是 RFC6979，同一段消息连签两次结果不同。测试只做验签。返回值是 ASN.1 签名的标准 base64，不是整段 DeviceProof JSON。
+
+判定：就这么做。没打真的 ExchangeToken，Trae 不降级。
+
+### OAuth 回调参数是一张字符串表
+
+`local_server::wait` 返回 `HashMap<String, String>`。只收 query。fragment 仍由手动回调在重放前并进 query。没有 `code` 就继续等。`wait_for_callback` 仍返回 code 字符串，所以 `cursor.rs` 不用改。
+
+判定：就这么做。
+
+### 远程轮询分两种构造器
+
+`device()` 带用户码和验证地址。`remote_poll()` 没有用户码。`immediate()` 给 Claude 本机采纳。倒计时用 `interval_secs`，不是会话过期时间。
+
+判定：就这么做。四种面板有组件测试。这轮没有截图终审。
+
+### Zed 私钥用 PKCS#1 DER
+
+回调解密先试 OAEP-SHA256，再退到 PKCS#1 v1.5。密文同时接受标准 base64 和 URL-safe。本机没有对测试 service 跑 `security` 写回。
+
+判定：解密算法就这么做。钥匙串写回仍是未验证，不是失败。

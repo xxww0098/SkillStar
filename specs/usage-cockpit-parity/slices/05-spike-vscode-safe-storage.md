@@ -42,3 +42,21 @@
 ## 必须保持绿
 
 - 纯新增模块；不触碰任何既有读写路径。
+
+## 结果
+
+本机是 macOS。只证明了**注入密钥**下的加解密，没有读登录钥匙串，也没有对真实 Windsurf 写回后重启。官方 app 是否接受写回：**未验证**。不记为失败，也不按停机表降级。
+
+规格写「PBKDF2 1000 轮」和「Windows 的 v11 = AES-256-GCM」。对照 cockpit `vscode_inject.rs` 和 Chromium 后，这两条都不对，实现按参照实现：
+
+- macOS `v10`：PBKDF2-HMAC-SHA1(password, `saltysalt`, **1003** 轮) → AES-128-CBC，IV 为 16 个空格，PKCS7。`test-password` 的 1003 轮密钥与 1000 轮不同，测试锁了这一点。密钥由调用方注入，模块不调用 `security`。
+- Linux：同一条 CBC，**1** 轮。`peanuts` 和空口令的派生密钥与 cockpit 常量逐字节相同，前缀 `v10`。secret-tool 口令同样 1 轮，前缀 `v11`，仍然是 CBC，不是 GCM。测试不调用 `secret-tool`。
+- Windows GCM：规格把这条叫 v11。cockpit / Chromium 的实际前缀仍是 `v10`，后面 12 字节 nonce，再 AES-256-GCM（ciphertext‖tag）。已知向量用 Node `aes-256-gcm` 生成，解密通过。测试注入 32 字节 os_crypt key。
+- DPAPI：`unwrap_os_crypt_key_from_local_state` 只解析 Local State 的 `os_crypt.encrypted_key`。非 Windows 返回明确错误；本构建即使在 Windows 上也不链接 `CryptUnprotectData`。测试没有调用 DPAPI。
+- `state.vscdb` 里的值是原始 payload 的标准 base64，不是 cockpit Copilot 路径用的 Node `{"type":"Buffer","data":[...]}`。临时库上 `secret://` 解密→改→加密→写回→再解密通过，无关行保留。
+
+| 平台 | 结论 |
+| --- | --- |
+| macOS | 密码学可用（注入口令的 v10 CBC 往返，含固定向量）。真钥匙串与 Windsurf 重启未做。 |
+| Linux | 密码学可用（`peanuts` / `v11` CBC，注入口令）。未跑 secret-tool，未跑真实 app。 |
+| Windows | 密码学可用（注入 key 的 AES-256-GCM 往返）。DPAPI 解开未实现，不能从 Local State 得到 key。未跑真实 app。 |

@@ -1,15 +1,15 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（2/27，01 与 03 已落地）
+状态：active（7/27：01–03、05–08）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
 你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。
 
-- **当前进度**：01、03 完成。决定见 `choices.md`。
-- **下一个拾取点**：`slices/02-oauth-flow-contract.md` 与 `slices/05-spike-vscode-safe-storage.md` 起的四个 spike 可同时做。02 改 OAuth DTO、`service.rs` 和登录面板；05–08 改 `tool_store/` 与 `Cargo.toml`，彼此要串行。04 等 02，因为也改 `service.rs`。
-- **顺序**：02 → 04，同时 05 → 06 → 07 → 08；然后 09–23；24 等全部 (b) 片。
+- **当前进度**：01、02、03、05、06、07、08 完成。决定见 `choices.md`。四个 spike 只证明了本地往返；真钥匙串、Windsurf 重启、ExchangeToken、ZCode app 都还没验，所以不降级。
+- **下一个拾取点**：`slices/04-ide-adapter-registry.md`。它改 `usage_switch`、`local_import`、`service.rs` 和订阅对话框。做完再开 provider。
+- **顺序**：04 → 09–23（各 provider 的 (a) 片可并行，(b) 片用已经落地的 spike）。24 等全部 (b) 片。
 - **每次切片收尾**：更新本节的进度与下一个拾取点，把静默决定补进 `choices.md`。
 
 ## 目标
