@@ -1,10 +1,11 @@
 //! IDE credential adapters.
 //!
-//! Antigravity, Cursor, Windsurf, Kiro, Qoder, CodeBuddy, Trae, and Zed do not
-//! fit the CLI symlink model. Each adapter writes its own live store, reads it
-//! back, then pins. The registry is the only switch path that knows those
-//! catalogs. Zed's store is the macOS keychain and is unavailable off macOS
-//! or while tool-sync is sandboxed.
+//! Antigravity, Cursor, Windsurf, Kiro, Qoder, CodeBuddy, Trae, Zed, and ZCode
+//! do not fit the CLI symlink model. Each adapter writes its own live store,
+//! reads it back, then pins. The registry is the only switch path that knows
+//! those catalogs. Zed's store is the macOS keychain and is unavailable off
+//! macOS or while tool-sync is sandboxed. ZCode's store is `credentials.json`
+//! / `config.json` and stays available in that sandbox.
 
 use skillstar_usage::UsageResult;
 use skillstar_usage::subscription::Subscription;
@@ -17,7 +18,7 @@ pub(super) trait IdeCredentialAdapter: Send + Sync {
     /// The live store can be addressed. A missing login is still available:
     /// reconcile reports [`CliAccountState::Missing`] rather than omitting the
     /// catalog. Zed returns false off macOS and while
-    /// `SKILLSTAR_TOOL_SYNC_HOME` is set.
+    /// `SKILLSTAR_TOOL_SYNC_HOME` is set. ZCode stays true in that sandbox.
     fn available(&self) -> bool;
 
     fn activate(&self, sub_id: &str) -> UsageResult<(Subscription, SwitchOutcome)>;
@@ -44,6 +45,7 @@ const IDE_ADAPTERS: &[&'static dyn IdeCredentialAdapter] = &[
     &super::trae::CN,
     &super::trae::SOLO_CN,
     &super::zed::Adapter,
+    &super::zcode::Adapter,
 ];
 
 pub(super) fn adapters() -> &'static [&'static dyn IdeCredentialAdapter] {

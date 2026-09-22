@@ -37,11 +37,13 @@
 //! | `trae-cn` | Trae CN IDE | `storage.json` (same iCube auth keys) |
 //! | `trae-solo-cn` | TRAE SOLO CN IDE | `storage.json` (same iCube auth keys) |
 //! | `zed` | Zed | macOS keychain internet-password `https://zed.dev` |
+//! | `zcode` | ZCode | `credentials.json` (`enc:v1`) or `config.json` API key |
 //!
 //! CLI support is derived from [`target_for`]. Antigravity, Cursor, Windsurf,
-//! Kiro, Qoder, CodeBuddy, Trae, and Zed are [`ide::IdeCredentialAdapter`]s
+//! Kiro, Qoder, CodeBuddy, Trae, Zed, and ZCode are [`ide::IdeCredentialAdapter`]s
 //! because they do not fit the whole-file JSON/symlink model. Zed is absent
-//! from reconcile when it is not on macOS or tool-sync is sandboxed.
+//! from reconcile when it is not on macOS or tool-sync is sandboxed. ZCode
+//! stays available in that sandbox and writes under `SKILLSTAR_TOOL_SYNC_HOME`.
 //!
 //! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
 //! (subscriptions, crypto, storage) and `skillstar-models` (tool_sync path
@@ -60,6 +62,7 @@ mod qoder;
 mod target;
 mod trae;
 mod windsurf;
+mod zcode;
 mod zed;
 
 use std::collections::HashMap;
@@ -253,8 +256,8 @@ pub struct ActivationResult {
 /// lock stays.
 pub struct CliRefreshLease {
     target: Option<&'static dyn CliCredentialTarget>,
-    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy / Trae / Zed.
-    /// Those stores do not use the symlink file lease.
+    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy / Trae / Zed /
+    /// ZCode. Those stores do not use the symlink file lease.
     ide: Option<&'static dyn ide::IdeCredentialAdapter>,
     _lease: Option<CustodyLease>,
 }
@@ -609,6 +612,7 @@ mod tests {
             "trae-solo",
             "trae-solo-cn",
             "windsurf",
+            "zcode",
         ] {
             assert!(supports_switch(catalog), "{catalog}");
             assert!(supports_cli_switch(catalog), "{catalog}");
@@ -651,6 +655,7 @@ mod tests {
                 "trae-solo",
                 "trae-solo-cn",
                 "windsurf",
+                "zcode",
                 "zed",
             ]
         );
