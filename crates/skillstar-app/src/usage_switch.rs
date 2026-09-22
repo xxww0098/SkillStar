@@ -30,16 +30,19 @@
 //! | `windsurf` | Windsurf IDE | `state.vscdb`                             |
 //! | `kiro` | Kiro IDE | `~/.aws/sso/cache/kiro-auth-token.json` + `state.vscdb` |
 //! | `qoder` | Qoder IDE | `state.vscdb` (`secret://aicoding.auth.*`) |
+//! | `codebuddy` | CodeBuddy IDE | `state.vscdb` (`secret://` `planning-genie.new.accessToken`) |
+//! | `codebuddy-cn` | CodeBuddy CN IDE | `state.vscdb` (`secret://` `planning-genie.new.accessTokencn`) |
 //!
 //! CLI support is derived from [`target_for`]. Antigravity, Cursor, Windsurf,
-//! Kiro, and Qoder are [`ide::IdeCredentialAdapter`]s because they do not fit the
-//! whole-file JSON/symlink model.
+//! Kiro, Qoder, CodeBuddy, and CodeBuddy CN are [`ide::IdeCredentialAdapter`]s
+//! because they do not fit the whole-file JSON/symlink model.
 //!
 //! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
 //! (subscriptions, crypto, storage) and `skillstar-models` (tool_sync path
 //! resolution and rolling backups) without either depending on the other.
 
 mod antigravity;
+mod codebuddy;
 mod cursor;
 mod custody;
 mod error;
@@ -242,7 +245,7 @@ pub struct ActivationResult {
 /// lock stays.
 pub struct CliRefreshLease {
     target: Option<&'static dyn CliCredentialTarget>,
-    /// Antigravity / Cursor / Windsurf / Kiro / Qoder. Those stores do not use the symlink file lease.
+    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy. Those stores do not use the symlink file lease.
     ide: Option<&'static dyn ide::IdeCredentialAdapter>,
     _lease: Option<CustodyLease>,
 }
@@ -585,7 +588,15 @@ mod tests {
             assert_eq!(target_for(catalog).unwrap().catalog_id(), catalog);
             assert!(ide::ide_adapter_for(catalog).is_none(), "{catalog}");
         }
-        for catalog in ["antigravity", "cursor", "kiro", "qoder", "windsurf"] {
+        for catalog in [
+            "antigravity",
+            "codebuddy",
+            "codebuddy-cn",
+            "cursor",
+            "kiro",
+            "qoder",
+            "windsurf",
+        ] {
             assert!(supports_switch(catalog), "{catalog}");
             assert!(supports_cli_switch(catalog), "{catalog}");
             assert!(target_for(catalog).is_none(), "{catalog}");
@@ -605,7 +616,15 @@ mod tests {
         ide_ids.sort_unstable();
         assert_eq!(
             ide_ids,
-            ["antigravity", "cursor", "kiro", "qoder", "windsurf"]
+            [
+                "antigravity",
+                "codebuddy",
+                "codebuddy-cn",
+                "cursor",
+                "kiro",
+                "qoder",
+                "windsurf",
+            ]
         );
 
         for entry in skillstar_usage::catalog::catalog() {
@@ -640,6 +659,8 @@ mod tests {
         forget_subscription_session("antigravity", "missing").unwrap();
         forget_subscription_session("kiro", "missing").unwrap();
         forget_subscription_session("qoder", "missing").unwrap();
+        forget_subscription_session("codebuddy", "missing").unwrap();
+        forget_subscription_session("codebuddy-cn", "missing").unwrap();
         forget_subscription_session("deepseek", "missing").unwrap();
     }
 
