@@ -1,16 +1,16 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（10/27：01–10）
+状态：active（12/27：01–12）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
 你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。
 
-- **当前进度**：01–10 完成。GitHub Copilot 和 Windsurf 已进 catalog。决定见 `choices.md`。四个 spike 和这两家登录都只证明了本地测试；真账号、真钥匙串、Windsurf 重启都还没验，所以不降级。
-- **下一个拾取点**：`slices/11-windsurf-writeback-switch.md` 与 `slices/12-kiro-quota-login.md` 可同时做。11 改 IDE 适配器和 Windsurf 写回；12 只新增 `fetchers/oauth/kiro/`，不要改 catalog、identity、`oauth/mod.rs` 的 dispatch、`token_import.rs`、i18n、devMock。集成时再注册 Kiro。
-- **顺序**：剩下的 (a)/(b) 按 provider 成对推进。24 等全部 (b)。
-- **每次切片收尾**：更新本节的进度与下一个拾取点，把静默决定补进 `choices.md`。
+- **当前进度**：01–12 完成。Copilot、Windsurf（含切号）、Kiro 已进 catalog。决定见 `choices.md`。真账号、真钥匙串、官方 app 重启都还没验，所以不降级。
+- **下一个拾取点**：`slices/13-kiro-writeback-switch.md` 与 `slices/14-qoder-quota-login.md`。13 只加 Kiro 的 IDE adapter。14 新增 `fetchers/oauth/qoder/`，并自己注册 catalog / identity / dispatch / token import / local import / i18n / devMock（13 不碰这些文件）。
+- **还没做**：15–23，然后 24 实例隔离、25 前端收尾、26 文档、27 唤醒决策。
+- **每次切片收尾**：更新本节，把静默决定补进 `choices.md`。`usage_switch/windsurf.rs` 已有 987 行，下一次碰到它先拆，不要再往里堆。
 
 ## 目标
 
