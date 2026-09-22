@@ -23,6 +23,8 @@ pub mod cursor;
 pub(crate) mod cursor_import;
 pub mod github_copilot;
 pub mod xai;
+// registration lands with the catalog row
+pub mod windsurf;
 
 // Zed callback RSA only. Not registered in `dispatch`.
 #[allow(dead_code)]
