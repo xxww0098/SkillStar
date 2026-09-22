@@ -1,14 +1,14 @@
 # 项目技能 MCP
 
-状态：01 已落地。下一档是 02。最后更新：2026-09-22。
+状态：02 已落地。下一档是 03。最后更新：2026-09-22。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar 的项目技能 MCP。不要从聊天记录恢复上下文，以本目录为准。
 
-01 已完成。从 [slices/02-project-binding.md](slices/02-project-binding.md) 开始，做完一档再做下一档。不要并行改两档的行为。01 到 17 是默认阶梯。18 处于休眠：只有环境变量 `SKILLSTAR_LAYA_ONNX` 指向本机导出目录时才做，缺模型时不要开工，也不要把它算进 17 的完成条件。
+02 已完成。从 [slices/03-project-write-lock.md](slices/03-project-write-lock.md) 开始，做完一档再做下一档。不要并行改两档的行为。01 到 17 是默认阶梯。18 处于休眠：只有环境变量 `SKILLSTAR_LAYA_ONNX` 指向本机导出目录时才做，缺模型时不要开工，也不要把它算进 17 的完成条件。
 
-01 的进程规则已经在 `src-tauri/src/main.rs` 和 `skillstar_app::project_skills_mcp`。`rmcp` 3.4.0 已加在 workspace，feature 是 `server,macros,schemars,transport-io,elicitation,transport-async-rw`。客户端请求 `2026-07-28` 时，rmcp 的 initialize 握手会回落到 `2025-11-25`；不要为了回显 2026-07-28 去改协商。Windows release 继承管道探针还没跑。
+已落地：01 stdio 进程；02 `projects::binding`（observe 不写索引，规范注册不改旧 path）。`rmcp` 3.4.0 的 feature 是 `server,macros,schemars,transport-io,elicitation,transport-async-rw`。客户端请求 `2026-07-28` 时 initialize 回落到 `2025-11-25`。Windows release 继承管道探针还没跑。
 
 全局决定已经写在下面，不要重开。切片里标成「可改」的才是实现自由。做完一档之前，运行该档写明的测试。文档和代码同一档一起改，不留「待补」。
 
@@ -17,7 +17,7 @@
 ### TODO
 
 - [x] 01 stdio 进程入口 — [slices/01-stdio-process.md](slices/01-stdio-process.md)
-- [ ] 02 项目绑定 — [slices/02-project-binding.md](slices/02-project-binding.md)
+- [x] 02 项目绑定 — [slices/02-project-binding.md](slices/02-project-binding.md)
 - [ ] 03 项目写锁 — [slices/03-project-write-lock.md](slices/03-project-write-lock.md)
 - [ ] 04 共享路径 owner — [slices/04-shared-owner.md](slices/04-shared-owner.md)
 - [ ] 05 技能事实 — [slices/05-skill-facts.md](slices/05-skill-facts.md)

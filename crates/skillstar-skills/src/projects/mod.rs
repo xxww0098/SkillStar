@@ -9,6 +9,7 @@
 //! (reconstruct-from-disk), `refresh` (copy-deploy upkeep). The
 //! `project_manifest::*` paths and signatures are stable for all consumers.
 
+mod binding;
 mod helpers;
 mod import;
 mod index;
@@ -26,6 +27,7 @@ pub use types::{
 };
 pub use types::{ensure_project_root_exists, prune_deploy_modes_for_agents};
 
+pub use binding::{ObservedProject, contained_child, observe_project, register_canonical_project};
 pub use import::import_scanned_skills;
 pub use index::{list_projects, register_project, remove_project, update_project_path};
 pub use rebuild::rebuild_skills_list_from_disk;

@@ -14,3 +14,11 @@
 ### 先这样，以后可改
 
 - **Windows release 管道还没看过。** 当前机器是 macOS。失败时停在 01，不改 `windows_subsystem`。
+
+## 02 绑定
+
+### 已定，按这个做
+
+- **两条活记录落到同一规范路径时直接返回错误，`ObservedProject.ambiguous` 在成功结果里恒为 false。** 规格要求结构里有这个状态，也要求此时不写索引。错误字符串含 `ambiguous`，调用方不用再看那个布尔值。
+- **macOS 夹具优先用 `/tmp` 与 `/private/tmp`。** 这台机器上 `/tmp` 是符号链接。若某环境没有这种根，测试改在临时目录里造一条等价符号链接。比较的始终是 canonicalize 之后的路径。
+- **Windows 的越界夹具用已有的 `junction` 依赖造 junction，不新增 crate。** `\\?\` 前缀不单独比较；两边都先 canonicalize 再比。
