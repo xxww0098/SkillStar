@@ -28,6 +28,7 @@ fn stored(id: &str, catalog_id: &str) -> Subscription {
         oauth_account_id: None,
         oauth_region: None,
         requires_reauth: false,
+        provider_state_encrypted: None,
         cookie_jar_encrypted: None,
         cookie_session_expires_at: None,
         manual_quota: None,
@@ -316,6 +317,53 @@ async fn create_rejects_unknown_catalog_and_auth_mode_outside_whitelist() {
     let err = create_subscription(create_input("kimi", AuthMode::OAuth)).unwrap_err();
     assert!(err.to_string().contains("不支持"), "{err}");
     assert!(list_subscriptions().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn token_import_cannot_be_created_or_updated_without_the_import_command() {
+    let _lock = ENV_LOCK.lock().await;
+    let data_root = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::set(&[("SKILLSTAR_DATA_DIR", data_root.path())]);
+
+    let err = create_subscription(create_input("cursor", AuthMode::TokenImport)).unwrap_err();
+    assert!(
+        err.to_string().contains("import_subscription_token"),
+        "{err}"
+    );
+    assert!(list_subscriptions().unwrap().is_empty());
+
+    let mut row = stored("imported-1", "cursor");
+    row.auth_mode = AuthMode::TokenImport;
+    row.provider_state_encrypted = Some("cipher".into());
+    storage::upsert_subscription(row).unwrap();
+
+    let mut input = empty_update();
+    input.display_name = Some("renamed".into());
+    let err = update_subscription("imported-1".into(), input)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("import_subscription_token"),
+        "{err}"
+    );
+    let saved = storage::get_subscription("imported-1").unwrap();
+    assert_eq!(saved.display_name, "账号一");
+    assert_eq!(saved.provider_state_encrypted.as_deref(), Some("cipher"));
+}
+
+#[test]
+fn provider_state_counts_as_a_credential_and_stays_off_the_dto() {
+    let mut sub = stored("blob-1", "cursor");
+    sub.provider_state_encrypted = Some("cipher".into());
+    let dto = SubscriptionDto::from_parts(sub, None);
+    assert!(dto.has_credential);
+    let json = serde_json::to_value(&dto).unwrap();
+    assert!(json.get("provider_state_encrypted").is_none());
+    assert!(json.get("providerStateEncrypted").is_none());
+
+    let mut empty = stored("blob-2", "cursor");
+    empty.provider_state_encrypted = Some(String::new());
+    assert!(!SubscriptionDto::from_parts(empty, None).has_credential);
 }
 
 #[tokio::test(flavor = "current_thread")]

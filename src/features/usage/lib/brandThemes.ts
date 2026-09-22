@@ -35,6 +35,25 @@ const THEMES: Record<string, BrandTheme> = {
   "grok-bot": { header: ["#1A1A1A", "#000000"], bar: ["#3F3F46", "#18181B"], fg: "#ffffff", glow: "#52525B" },
   // Anthropic terracotta ("crail"); the deeper stop keeps white header text at AA.
   anthropic: { header: ["#A8412A", "#D97757"], bar: ["#D97757", "#C15F3C"], fg: "#ffffff", glow: "#D97757" },
+  // GitHub ink. The bar stays on Copilot purple/blue so a near-black brand still reads.
+  "github-copilot": { header: ["#24292F", "#0D1117"], bar: ["#8250DF", "#0969DA"], fg: "#ffffff", glow: "#8250DF" },
+  windsurf: { header: ["#09B6A2", "#04685C"], bar: ["#09B6A2", "#0E8F7E"], fg: "#ffffff", glow: "#09B6A2" },
+  kiro: { header: ["#0F766E", "#14B8A6"], bar: ["#14B8A6", "#0D9488"], fg: "#ffffff", glow: "#14B8A6" },
+  // Qoder icon green is #2ADB5C. The header stops stay darker so white type holds.
+  qoder: { header: ["#0B6B2A", "#1FA34A"], bar: ["#2ADB5C", "#16A34A"], fg: "#ffffff", glow: "#2ADB5C" },
+  // Lobe CodeBuddy: #6C4DFF → #2EA99D. CN uses the teal stop so the two cards differ.
+  codebuddy: { header: ["#3A2A99", "#6C4DFF"], bar: ["#6C4DFF", "#2EA99D"], fg: "#ffffff", glow: "#6C4DFF" },
+  "codebuddy-cn": { header: ["#145E57", "#2EA99D"], bar: ["#2EA99D", "#6C4DFF"], fg: "#ffffff", glow: "#2EA99D" },
+  // Trae green. Solo is ink, CN is a deeper green, SOLO CN is violet so the four cards differ.
+  trae: { header: ["#064E3B", "#12B886"], bar: ["#12B886", "#34D399"], fg: "#ffffff", glow: "#12B886" },
+  "trae-solo": { header: ["#111827", "#0F172A"], bar: ["#12B886", "#34D399"], fg: "#ffffff", glow: "#12B886" },
+  "trae-cn": { header: ["#14532D", "#166534"], bar: ["#22C55E", "#12B886"], fg: "#ffffff", glow: "#22C55E" },
+  "trae-solo-cn": { header: ["#3B0764", "#6D28D9"], bar: ["#A78BFA", "#12B886"], fg: "#ffffff", glow: "#6D28D9" },
+  // No Zed glyph in lobe.ts; ProviderLogo falls back to the letter Z.
+  // `#2E6BE6` is the catalog brand (cockpit has no hex).
+  zed: { header: ["#0B1F6E", "#2E6BE6"], bar: ["#2E6BE6", "#60A5FA"], fg: "#ffffff", glow: "#2E6BE6" },
+  // Lobe ZAI COLOR_PRIMARY is #000. Zinc bar stays visible on the black band.
+  zcode: { header: ["#18181B", "#000000"], bar: ["#A1A1AA", "#52525B"], fg: "#ffffff", glow: "#A1A1AA" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

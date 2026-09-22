@@ -69,6 +69,12 @@ pub struct Subscription {
     #[serde(default)]
     pub requires_reauth: bool,
 
+    /// Provider-private versioned JSON ciphertext (AES-GCM).
+    /// The plaintext shape belongs to the provider (`{"v":1,...}`).
+    /// Never copied into DTOs or logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state_encrypted: Option<String>,
+
     // -- Cookie mode --
     /// JSON-serialised Vec<CookieEntry> encrypted with AES-256-GCM.
     /// Cookies are parsed from the raw `Cookie:` header the user pastes.
@@ -434,6 +440,31 @@ mod tests {
         assert!(replaced.weekly.is_none());
         assert!(!replaced.has_quota_data());
         assert_eq!(replaced.subscription_id, "sub-1");
+    }
+
+    #[test]
+    fn old_rows_without_provider_state_deserialize_and_omit_the_field_when_empty() {
+        let raw = r#"{
+            "id":"row",
+            "catalog_id":"codex",
+            "display_name":"Codex",
+            "auth_mode":"o-auth",
+            "currency":"USD"
+        }"#;
+        let sub: Subscription = serde_json::from_str(raw).unwrap();
+        assert!(sub.provider_state_encrypted.is_none());
+        let value = serde_json::to_value(&sub).unwrap();
+        assert!(value.get("provider_state_encrypted").is_none());
+
+        let mut with_blob = sub;
+        with_blob.provider_state_encrypted = Some("cipher".into());
+        let value = serde_json::to_value(&with_blob).unwrap();
+        assert_eq!(value["provider_state_encrypted"], "cipher");
+        let roundtrip: Subscription = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            roundtrip.provider_state_encrypted.as_deref(),
+            Some("cipher")
+        );
     }
 
     #[test]

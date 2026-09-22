@@ -30,7 +30,10 @@ pub mod refresh_guard;
 pub mod request;
 pub mod storage;
 pub mod subscription;
+pub mod token_import;
 pub mod tool_paths;
+pub mod tool_store;
+pub mod trae_platform;
 pub mod urlencode;
 pub mod vscdb;
 

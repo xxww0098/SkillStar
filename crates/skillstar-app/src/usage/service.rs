@@ -10,7 +10,7 @@ use skillstar_usage::cookie_jar;
 use skillstar_usage::subscription::{BillingCycle, Subscription};
 use skillstar_usage::{UsageError, alerts, catalog, crypto, fetchers, storage};
 
-fn map_err(e: UsageError) -> AppError {
+pub(super) fn map_err(e: UsageError) -> AppError {
     let message = append_network_hint(e.to_string());
     AppError::Other(format!("Usage: {}", message))
 }
@@ -83,7 +83,7 @@ fn ensure_catalog(id: &str) -> Result<catalog::CatalogEntry, AppError> {
 }
 
 /// Stamp `is_active` on a DTO based on the active-per-catalog map.
-fn fill_active(
+pub(super) fn fill_active(
     mut dto: SubscriptionDto,
     active: &std::collections::HashMap<String, String>,
 ) -> SubscriptionDto {
@@ -114,8 +114,21 @@ pub fn list_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
         .collect())
 }
 
+/// Token-import rows are written only by `import_subscription_token`.
+/// The generic form would persist a card with no credential.
+fn reject_token_import_write(auth_mode: AuthMode) -> Result<(), AppError> {
+    if auth_mode != AuthMode::TokenImport {
+        return Ok(());
+    }
+    Err(AppError::Other(
+        "Usage: `token-import` 账号只能通过 `import_subscription_token` 导入，不能用创建或更新订阅写入"
+            .into(),
+    ))
+}
+
 pub fn create_subscription(input: CreateSubscriptionInput) -> Result<SubscriptionDto, AppError> {
     let entry = ensure_catalog(&input.catalog_id)?;
+    reject_token_import_write(input.auth_mode)?;
     // Validate auth_mode against catalog whitelist.
     if !entry.auth_modes.contains(&input.auth_mode) {
         return Err(AppError::Other(format!(
@@ -175,6 +188,7 @@ pub fn create_subscription(input: CreateSubscriptionInput) -> Result<Subscriptio
         oauth_account_id: None,
         oauth_region: input.oauth_region,
         requires_reauth: false,
+        provider_state_encrypted: None,
         cookie_jar_encrypted,
         cookie_session_expires_at: None,
         manual_quota: input.manual_quota,
@@ -213,6 +227,7 @@ fn update_subscription_locked(
     input: UpdateSubscriptionInput,
 ) -> Result<SubscriptionDto, AppError> {
     let mut sub = storage::get_subscription(&id).map_err(map_err)?;
+    reject_token_import_write(sub.auth_mode)?;
     if let Some(name) = input.display_name
         && !name.trim().is_empty()
     {
@@ -636,6 +651,10 @@ pub async fn start_oauth_login(
     Ok(OAuthStartDto {
         pending_id: info.pending_id,
         auth_url: info.auth_url,
+        flow: info.flow,
+        user_code: info.user_code,
+        verification_uri: info.verification_uri,
+        interval_secs: info.interval_secs,
     })
 }
 
@@ -669,15 +688,14 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     pending_state::remove(&pending_id);
     let mut sub = result.map_err(map_err)?;
     let mut switch_result = None;
-    if matches!(sub.catalog_id.as_str(), "xai" | "antigravity")
+    if crate::usage_switch::oauth_completion_rewrites_live_store(&sub.catalog_id)
         && storage::get_active_subscription(&sub.catalog_id)
             .map_err(map_err)?
             .as_deref()
             == Some(sub.id.as_str())
     {
-        // OAuth can rotate the active row's credentials or even bind its stable
-        // row id to a different xAI subject. Re-activate immediately so the UI
-        // cannot say "active" while auth.json still represents the old token.
+        // OAuth can rotate the pinned row. IDE adapters and xAI rewrite the
+        // live store so the UI cannot say "active" over the previous token.
         let activation = crate::usage_switch::activate_subscription(&sub.id)
             .await
             .map_err(map_err)?;
@@ -695,7 +713,7 @@ pub async fn submit_oauth_callback(
     pending_id: String,
     callback_input: String,
 ) -> Result<(), AppError> {
-    skillstar_usage::oauth::manual_callback::submit(&pending_id, &callback_input)
+    fetchers::oauth::submit_callback(&pending_id, &callback_input)
         .await
         .map_err(map_err)
 }

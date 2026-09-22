@@ -2,18 +2,23 @@
 //!
 //! Google OAuth + Cloud Code Assist (`loadCodeAssist` + `fetchAvailableModels`).
 
+use base64::{Engine as _, engine::general_purpose};
 use chrono::Utc;
 use std::time::Duration;
 
 use super::common::SubscriptionBuilder;
 use crate::cloud_code::{self, LoadCodeAssistResult};
 use crate::crypto;
+use crate::local_import::upsert_oauth_subscription;
 use crate::oauth::local_server;
 use crate::oauth::token_endpoint::{self, TokenResponse};
 use crate::oauth::token_refresh;
+use crate::protobuf_oauth;
 use crate::storage;
 use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
+use crate::tool_paths::antigravity_state_db_path;
 use crate::urlencode;
+use crate::vscdb;
 use crate::{UsageError, UsageResult};
 
 use crate::antigravity_oauth_config::antigravity_oauth_config;
@@ -373,6 +378,126 @@ fn usage_from_load(
         api_keys: Vec::new(),
         deepseek_analytics: None,
     }
+}
+
+const ANTIGRAVITY_OAUTH_KEY: &str = "antigravityUnifiedStateSync.oauthToken";
+
+pub(crate) async fn import_from_local() -> UsageResult<Subscription> {
+    #[cfg(target_os = "macos")]
+    if !crate::tool_paths::is_tool_sync_sandboxed()
+        && let Some((access_token, refresh_token, expires_at)) =
+            read_antigravity_system_credential()?
+    {
+        let display_name = token_refresh::jwt_string(&access_token, &["email"])
+            .unwrap_or_else(|| "Antigravity".to_string());
+        return upsert_oauth_subscription(
+            "antigravity",
+            display_name,
+            access_token,
+            Some(refresh_token),
+            expires_at,
+            "USD",
+            None,
+        )
+        .await;
+    }
+
+    let db_path = antigravity_state_db_path()
+        .ok_or_else(|| UsageError::Other("无法解析 Antigravity IDE 数据目录".into()))?;
+    if !db_path.exists() {
+        return Err(UsageError::Other(format!(
+            "未找到 Antigravity state.vscdb：{}",
+            db_path.display()
+        )));
+    }
+
+    let state_data = vscdb::read_item_string(&db_path, ANTIGRAVITY_OAUTH_KEY)?
+        .ok_or_else(|| UsageError::Other("Antigravity IDE 未登录（缺少 oauthToken）".into()))?;
+
+    let blob = general_purpose::STANDARD
+        .decode(state_data.trim())
+        .map_err(|e| UsageError::Other(format!("Antigravity OAuth Base64 解码失败：{e}")))?;
+
+    let refresh_token = protobuf_oauth::extract_refresh_token_from_unified_oauth_token(&blob)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| UsageError::Other("无法从 Antigravity 本地数据解析 refresh_token".into()))?;
+
+    let tokens = cloud_code::refresh_antigravity_access_token(&refresh_token).await?;
+    let access_token = tokens
+        .access_token
+        .ok_or_else(|| UsageError::Other("Google refresh 缺少 access_token".into()))?;
+    let expires_at = tokens
+        .expires_in
+        .map(|s| Utc::now().timestamp() + s)
+        .or_else(|| token_refresh::jwt_exp(&access_token));
+
+    let display_name = token_refresh::jwt_string(&access_token, &["email"])
+        .unwrap_or_else(|| "Antigravity".to_string());
+
+    upsert_oauth_subscription(
+        "antigravity",
+        display_name,
+        access_token,
+        tokens.refresh_token.or(Some(refresh_token)),
+        expires_at,
+        "USD",
+        None,
+    )
+    .await
+}
+
+#[cfg(target_os = "macos")]
+fn read_antigravity_system_credential() -> UsageResult<Option<(String, String, Option<i64>)>> {
+    let output = std::process::Command::new("/usr/bin/security")
+        .args([
+            "find-generic-password",
+            "-s",
+            "gemini",
+            "-a",
+            "antigravity",
+            "-w",
+        ])
+        .output()
+        .map_err(|error| {
+            UsageError::Other(format!("读取 Antigravity macOS Keychain 失败：{error}"))
+        })?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let encoded = raw
+        .strip_prefix("go-keyring-base64:")
+        .ok_or_else(|| UsageError::Other("Antigravity macOS Keychain 凭据格式无法识别".into()))?;
+    let payload = general_purpose::STANDARD.decode(encoded).map_err(|error| {
+        UsageError::Other(format!("解析 Antigravity macOS Keychain 失败：{error}"))
+    })?;
+    let value: serde_json::Value = serde_json::from_slice(&payload).map_err(|error| {
+        UsageError::Other(format!("解析 Antigravity Keychain JSON 失败：{error}"))
+    })?;
+    let token = value
+        .get("token")
+        .ok_or_else(|| UsageError::Other("Antigravity Keychain 缺少 token 对象".into()))?;
+    let access_token = token
+        .get("access_token")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| UsageError::Other("Antigravity Keychain 缺少 access_token".into()))?
+        .to_string();
+    let refresh_token = token
+        .get("refresh_token")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| UsageError::Other("Antigravity Keychain 缺少 refresh_token".into()))?
+        .to_string();
+    let expires_at = token
+        .get("expiry")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .or_else(|| token_refresh::jwt_exp(&access_token));
+
+    Ok(Some((access_token, refresh_token, expires_at)))
 }
 
 #[cfg(test)]

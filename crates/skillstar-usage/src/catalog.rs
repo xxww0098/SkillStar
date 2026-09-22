@@ -15,6 +15,8 @@ pub enum AuthMode {
     OAuth,
     Cookie,
     Manual,
+    /// Pasted credential. The generic create/update form must not write this mode.
+    TokenImport,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -84,6 +86,35 @@ const fn entry(
 const OAUTH_ONLY: &[AuthMode] = &[AuthMode::OAuth];
 const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey];
 const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
+/// Browser OAuth and pasted-token rows share refresh dispatch and in-place re-authorization.
+pub(crate) const OAUTH_TOKEN_IMPORT: &[AuthMode] = &[AuthMode::OAuth, AuthMode::TokenImport];
+/// ZCode's region control picks the upstream. Order is the dialog default.
+const ZCODE_UPSTREAMS: &[&str] = &["zai", "bigmodel"];
+
+/// Trae has no browser leg. A bare refresh token is bound to the device key
+/// from the original login, so the dialog points at local `storage.json`.
+const TRAE_LOCAL_IMPORT_WARNING: &str = "没有浏览器登录。设备密钥和这次登录绑在一起，裸 refresh token 若被服务端校验设备会失败。请优先用本机导入读取 storage.json。";
+
+fn trae_entry(
+    id: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+    brand_color: &'static str,
+    subscription_url: &'static str,
+) -> CatalogEntry {
+    let mut row = entry(
+        id,
+        display_name,
+        description,
+        CatalogTier::OAuth,
+        OAUTH_TOKEN_IMPORT,
+        brand_color,
+        "USD",
+        subscription_url,
+    );
+    row.warning = Some(TRAE_LOCAL_IMPORT_WARNING);
+    row
+}
 
 /// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
@@ -153,6 +184,115 @@ pub fn catalog() -> Vec<CatalogEntry> {
                  SkillStar 不会刷新或覆盖这份凭证。",
             ),
             regions: NO_REGIONS,
+        },
+        entry(
+            "github-copilot",
+            "GitHub Copilot",
+            "Suggestions & chat",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "24292F",
+            "USD",
+            "https://github.com/settings/copilot",
+        ),
+        entry(
+            "windsurf",
+            "Windsurf",
+            "Codeium Windsurf",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "09B6A2",
+            "USD",
+            "https://windsurf.com",
+        ),
+        entry(
+            "kiro",
+            "Kiro",
+            "Amazon Kiro",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "14B8A6",
+            "USD",
+            "https://app.kiro.dev/signin",
+        ),
+        entry(
+            "qoder",
+            "Qoder",
+            "Qoder IDE",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "2ADB5C",
+            "USD",
+            "https://qoder.com",
+        ),
+        entry(
+            "codebuddy",
+            "CodeBuddy",
+            "CodeBuddy IDE",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "6C4DFF",
+            "USD",
+            "https://www.codebuddy.ai",
+        ),
+        entry(
+            "codebuddy-cn",
+            "CodeBuddy CN",
+            "CodeBuddy CN",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "6C4DFF",
+            "USD",
+            "https://www.codebuddy.cn",
+        ),
+        trae_entry("trae", "Trae", "Trae IDE", "12B886", "https://www.trae.ai"),
+        trae_entry(
+            "trae-solo",
+            "TRAE SOLO",
+            "TRAE SOLO",
+            "111827",
+            "https://www.trae.ai",
+        ),
+        trae_entry(
+            "trae-cn",
+            "Trae CN",
+            "Trae CN",
+            "166534",
+            "https://www.trae.cn",
+        ),
+        trae_entry(
+            "trae-solo-cn",
+            "TRAE SOLO CN",
+            "TRAE SOLO CN",
+            "6D28D9",
+            "https://www.trae.cn",
+        ),
+        // No Zed mark in lobe.ts. The card uses the letter fallback.
+        // `#2E6BE6` is a stable blue; cockpit does not publish a hex.
+        entry(
+            "zed",
+            "Zed",
+            "Zed Editor",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "2E6BE6",
+            "USD",
+            "https://zed.dev/account",
+        ),
+        // Lobe ZAI `COLOR_PRIMARY` is `#000`. The card icon is that glyph.
+        {
+            let mut row = entry(
+                "zcode",
+                "ZCode",
+                "Z.ai / BigModel",
+                CatalogTier::OAuth,
+                OAUTH_TOKEN_IMPORT,
+                "000000",
+                "USD",
+                "https://zcode.z.ai",
+            );
+            row.regions = ZCODE_UPSTREAMS;
+            row
         },
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
@@ -254,8 +394,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_12_entries() {
-        assert_eq!(catalog().len(), 12);
+    fn catalog_has_24_entries() {
+        assert_eq!(catalog().len(), 24);
     }
 
     #[test]
@@ -274,7 +414,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 5);
+        assert_eq!(oauth, 17);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -283,8 +423,10 @@ mod tests {
     #[test]
     fn auto_fetch_providers_exclude_manual_auth() {
         for entry in catalog() {
-            let auto_fetch = entry.auth_modes.contains(&AuthMode::OAuth)
-                || entry.auth_modes.contains(&AuthMode::ApiKey);
+            let auto_fetch = entry
+                .auth_modes
+                .iter()
+                .any(|mode| OAUTH_TOKEN_IMPORT.contains(mode) || *mode == AuthMode::ApiKey);
             if auto_fetch {
                 assert!(
                     !entry.auth_modes.contains(&AuthMode::Manual),
@@ -298,6 +440,149 @@ mod tests {
     /// Every catalog id must resolve to exactly one canonical provider identity
     /// in `skillstar-core::providers`. This pins the usage-side half of the
     /// catalog↔preset id reconciliation so the two can never silently drift.
+    #[test]
+    fn token_import_is_kebab_case_and_shares_the_oauth_refresh_set() {
+        assert_eq!(
+            serde_json::to_string(&AuthMode::TokenImport).unwrap(),
+            "\"token-import\""
+        );
+        assert_eq!(
+            OAUTH_TOKEN_IMPORT,
+            &[AuthMode::OAuth, AuthMode::TokenImport]
+        );
+    }
+
+    #[test]
+    fn github_copilot_is_oauth_and_token_import() {
+        let entry = find("github-copilot").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.brand_color, "24292F");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(
+            entry.subscription_url,
+            "https://github.com/settings/copilot"
+        );
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn qoder_is_oauth_and_token_import() {
+        let entry = find("qoder").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "Qoder");
+        assert_eq!(entry.description, "Qoder IDE");
+        assert_eq!(entry.brand_color, "2ADB5C");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://qoder.com");
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn codebuddy_and_cn_are_distinct_oauth_rows() {
+        for (id, name, url, region_note) in [
+            (
+                "codebuddy",
+                "CodeBuddy",
+                "https://www.codebuddy.ai",
+                "global",
+            ),
+            (
+                "codebuddy-cn",
+                "CodeBuddy CN",
+                "https://www.codebuddy.cn",
+                "cn",
+            ),
+        ] {
+            let entry = find(id).expect(id);
+            assert_eq!(entry.tier, CatalogTier::OAuth);
+            assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+            assert_eq!(entry.display_name, name);
+            assert_eq!(entry.brand_color, "6C4DFF");
+            assert_eq!(entry.default_currency, "USD");
+            assert_eq!(entry.subscription_url, url);
+            assert!(
+                entry.regions.is_empty(),
+                "{region_note} is fixed on the row"
+            );
+            assert!(entry.warning.is_none());
+        }
+        assert_ne!(
+            find("codebuddy").unwrap().id,
+            find("codebuddy-cn").unwrap().id
+        );
+    }
+
+    #[test]
+    fn trae_four_catalogs_share_oauth_and_token_import() {
+        for (id, name, url) in [
+            ("trae", "Trae", "https://www.trae.ai"),
+            ("trae-solo", "TRAE SOLO", "https://www.trae.ai"),
+            ("trae-cn", "Trae CN", "https://www.trae.cn"),
+            ("trae-solo-cn", "TRAE SOLO CN", "https://www.trae.cn"),
+        ] {
+            let entry = find(id).expect(id);
+            assert_eq!(entry.tier, CatalogTier::OAuth);
+            assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+            assert_eq!(entry.display_name, name);
+            assert_eq!(entry.default_currency, "USD");
+            assert_eq!(entry.subscription_url, url);
+            assert!(entry.regions.is_empty());
+            let warning = entry.warning.expect("local import warning");
+            assert!(warning.contains("本机导入"), "{warning}");
+            assert!(warning.contains("没有浏览器登录"), "{warning}");
+        }
+        let ids = ["trae", "trae-solo", "trae-cn", "trae-solo-cn"];
+        let mut seen = std::collections::HashSet::new();
+        for id in ids {
+            assert!(seen.insert(id), "{id}");
+        }
+    }
+
+    #[test]
+    fn zed_is_oauth_and_token_import() {
+        let entry = find("zed").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "Zed");
+        assert_eq!(entry.description, "Zed Editor");
+        assert_eq!(entry.brand_color, "2E6BE6");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://zed.dev/account");
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn zcode_is_oauth_token_import_with_two_upstreams() {
+        let entry = find("zcode").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "ZCode");
+        assert_eq!(entry.description, "Z.ai / BigModel");
+        assert_eq!(entry.brand_color, "000000");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://zcode.z.ai");
+        assert_eq!(entry.regions, &["zai", "bigmodel"]);
+        assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn kiro_is_oauth_and_token_import() {
+        let entry = find("kiro").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "Kiro");
+        assert_eq!(entry.brand_color, "14B8A6");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://app.kiro.dev/signin");
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
+    }
+
     #[test]
     fn every_catalog_id_resolves_to_a_provider_identity() {
         for entry in catalog() {

@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use url::{Url, form_urlencoded};
 
+use crate::fetchers::oauth::{self, OAuthFlow};
 use crate::oauth::pending_state;
 use crate::{UsageError, UsageResult};
 
@@ -54,6 +55,37 @@ pub async fn submit(pending_id: &str, callback_input: &str) -> UsageResult<()> {
         "OAuth 回调提交失败: {}",
         last_error.unwrap_or_else(|| "未知错误".to_string())
     )))
+}
+
+/// Route a pasted value by the session's [`OAuthFlow`].
+///
+/// `LocalCallback` rewrites the paste through the provider's
+/// `normalize_callback_input` (identity when nobody registered one) and then
+/// replays it onto the loopback listener. `SchemePaste` only checks the
+/// prefix and hands the string to the in-process inbox.
+pub async fn deliver_manual_input(pending_id: &str, input: &str) -> UsageResult<()> {
+    let flow = pending_state::flow(pending_id)
+        .ok_or_else(|| UsageError::NotFound(pending_id.to_string()))?;
+    match flow {
+        OAuthFlow::LocalCallback => {
+            let catalog_id = pending_state::catalog_id(pending_id)
+                .ok_or_else(|| UsageError::NotFound(pending_id.to_string()))?;
+            let normalized = oauth::normalize_callback_input(&catalog_id, input)?;
+            submit(pending_id, &normalized).await
+        }
+        OAuthFlow::SchemePaste { scheme_prefix } => {
+            let trimmed = input.trim();
+            if scheme_prefix.is_empty() || !trimmed.starts_with(&scheme_prefix) {
+                return Err(UsageError::Other(format!(
+                    "回调格式不正确，必须以 {scheme_prefix} 开头"
+                )));
+            }
+            pending_state::send_manual_inbox(pending_id, trimmed.to_string())
+        }
+        OAuthFlow::RemotePoll | OAuthFlow::Immediate => {
+            Err(UsageError::Other("此登录无需手动回调".into()))
+        }
+    }
 }
 
 fn build_callback_url(auth_url: &str, callback_input: &str) -> UsageResult<Url> {
@@ -201,5 +233,105 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("没有 callback URL"));
+    }
+
+    #[test]
+    fn non_local_callback_host_is_rejected() {
+        let err = build_callback_url(
+            "https://auth.example/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A9%2Fcallback&state=s",
+            "http://evil.example/callback?code=abc",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("127.0.0.1/localhost"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn remote_poll_and_immediate_reject_manual_input() {
+        let remote = pending_state::register_with_flow(
+            "qoder",
+            None,
+            "https://auth.example/poll".into(),
+            OAuthFlow::RemotePoll,
+        );
+        let immediate = pending_state::register_with_flow(
+            "anthropic",
+            None,
+            "https://claude.ai".into(),
+            OAuthFlow::Immediate,
+        );
+
+        let remote_err = deliver_manual_input(&remote, "anything")
+            .await
+            .unwrap_err()
+            .to_string();
+        let immediate_err = deliver_manual_input(&immediate, "anything")
+            .await
+            .unwrap_err()
+            .to_string();
+        pending_state::remove(&remote);
+        pending_state::remove(&immediate);
+
+        assert_eq!(remote_err, "此登录无需手动回调");
+        assert_eq!(immediate_err, "此登录无需手动回调");
+    }
+
+    #[tokio::test]
+    async fn scheme_paste_rejects_a_bad_prefix_without_sending() {
+        let (id, mut inbox) =
+            pending_state::register_scheme_paste("zcode", None, "zcode://login".into(), "zcode://");
+
+        let err = deliver_manual_input(&id, "https://evil.example/callback")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("zcode://"), "{err}");
+        assert!(matches!(
+            inbox.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        pending_state::remove(&id);
+    }
+
+    #[tokio::test]
+    async fn scheme_paste_sends_a_trimmed_matching_url() {
+        let (id, mut inbox) =
+            pending_state::register_scheme_paste("zcode", None, "zcode://login".into(), "zcode://");
+
+        deliver_manual_input(&id, "  zcode://callback?code=1  ")
+            .await
+            .unwrap();
+
+        assert_eq!(inbox.try_recv().unwrap(), "zcode://callback?code=1");
+        pending_state::remove(&id);
+    }
+
+    #[tokio::test]
+    async fn local_callback_replays_onto_the_loopback_listener() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let redirect = format!("http://127.0.0.1:{port}/callback");
+        let auth = format!(
+            "https://auth.example/authorize?redirect_uri={}&state=s1",
+            crate::urlencode::encode(&redirect)
+        );
+        let pending_id = pending_state::register("codex", None, auth);
+        let listener = std::thread::spawn(move || {
+            let request = server
+                .recv_timeout(Duration::from_secs(5))
+                .expect("listener")
+                .expect("callback request");
+            let url = request.url().to_string();
+            let _ = request.respond(tiny_http::Response::from_string("ok"));
+            url
+        });
+
+        let result = deliver_manual_input(&pending_id, "abc123").await;
+        pending_state::remove(&pending_id);
+        let url = listener.join().expect("listener thread");
+        result.expect("local callback replay");
+        assert!(url.contains("code=abc123"), "{url}");
+        assert!(url.contains("state=s1"), "{url}");
     }
 }
