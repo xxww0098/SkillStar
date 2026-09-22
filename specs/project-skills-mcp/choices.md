@@ -30,3 +30,10 @@
 - **入口函数自己拿锁，不把函数体再缩进进闭包。** `with_project_write_lock` 和 `lock_project_write` 是同一把锁。长函数用守卫，避免把几百行包进一个闭包。
 - **第二把文件描述符上的 `try_lock` 失败，用来证明不是只靠进程内 mutex。** 同进程第二个线程也会失败。没有另起一个 Windows 进程；文件锁 API 就是 `File::try_lock`。
 - **`refresh_stale_copies_strict` 也走这把锁。** 规格点名的是公开的 `refresh_stale_copies`。严格变体写的是同一份清单和目录，所以锁在内部函数上。
+
+## 04 owner
+
+### 已定，按这个做
+
+- **DeepSeek 多读的目录记在 agent 定义旁的一张表里，不写进冻结的 8 字段 profile。** 表只有 `(deepseek, .agents/skills)`。披露名单会带上这张表，部署仍只写选中 Agent 自己的相对路径。
+- **没有现有 owner、选择的 Agent 又是空字符串时，函数返回 `owner_id: None`。** 宽松部署仍在调用前做自己的空列表回退，不把那个回退搬进这个函数。

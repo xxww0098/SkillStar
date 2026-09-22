@@ -432,15 +432,15 @@ pub fn add_skills_to_project_with_mode(
         }
 
         // A shared physical path has one manifest owner. Preserve an existing
-        // owner when possible; otherwise the first selected profile owns it.
-        let owner_id = profiles
-            .iter()
-            .find(|candidate| {
-                candidate.project_skills_rel == profile.project_skills_rel
-                    && skills_list.agents.contains_key(&candidate.id)
-            })
-            .map(|candidate| candidate.id.clone())
-            .unwrap_or_else(|| profile.id.clone());
+        // owner when possible; otherwise the selected profile owns it.
+        let owner_id = super::owner::shared_path_owner(
+            &profiles,
+            &skills_list,
+            &profile.project_skills_rel,
+            &profile.id,
+        )
+        .owner_id
+        .unwrap_or_else(|| profile.id.clone());
 
         let shared_agent_ids = profiles
             .iter()

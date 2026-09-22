@@ -462,6 +462,14 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     ),
 ];
 
+/// Agents that read a project skill directory besides their own
+/// `project_skills_rel`. Deployment still writes only the selected path.
+///
+/// DeepSeek's own directory is `.dsh/skills`, and it also reads `.agents/skills`.
+pub fn additional_project_skill_reads() -> &'static [(&'static str, &'static str)] {
+    &[("deepseek", ".agents/skills")]
+}
+
 /// Home-relative directories that must receive the same global deployments as
 /// an Agent's own `global_skills_dir`.
 ///
