@@ -46,6 +46,10 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
         catalog_id: "kiro",
         import_from_token: crate::fetchers::oauth::kiro::import_from_token,
     },
+    TokenImporter {
+        catalog_id: "qoder",
+        import_from_token: crate::fetchers::oauth::qoder::import_from_token,
+    },
 ];
 
 pub fn token_import_supported(catalog_id: &str) -> bool {

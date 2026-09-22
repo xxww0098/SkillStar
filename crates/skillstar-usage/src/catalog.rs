@@ -188,6 +188,16 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "USD",
             "https://app.kiro.dev/signin",
         ),
+        entry(
+            "qoder",
+            "Qoder",
+            "Qoder IDE",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "2ADB5C",
+            "USD",
+            "https://qoder.com",
+        ),
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -288,8 +298,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_15_entries() {
-        assert_eq!(catalog().len(), 15);
+    fn catalog_has_16_entries() {
+        assert_eq!(catalog().len(), 16);
     }
 
     #[test]
@@ -308,7 +318,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 8);
+        assert_eq!(oauth, 9);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -357,6 +367,20 @@ mod tests {
             entry.subscription_url,
             "https://github.com/settings/copilot"
         );
+        assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn qoder_is_oauth_and_token_import() {
+        let entry = find("qoder").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "Qoder");
+        assert_eq!(entry.description, "Qoder IDE");
+        assert_eq!(entry.brand_color, "2ADB5C");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://qoder.com");
         assert!(entry.regions.is_empty());
         assert!(entry.warning.is_none());
     }

@@ -39,6 +39,8 @@ const THEMES: Record<string, BrandTheme> = {
   "github-copilot": { header: ["#24292F", "#0D1117"], bar: ["#8250DF", "#0969DA"], fg: "#ffffff", glow: "#8250DF" },
   windsurf: { header: ["#09B6A2", "#04685C"], bar: ["#09B6A2", "#0E8F7E"], fg: "#ffffff", glow: "#09B6A2" },
   kiro: { header: ["#0F766E", "#14B8A6"], bar: ["#14B8A6", "#0D9488"], fg: "#ffffff", glow: "#14B8A6" },
+  // Qoder icon green is #2ADB5C. The header stops stay darker so white type holds.
+  qoder: { header: ["#0B6B2A", "#1FA34A"], bar: ["#2ADB5C", "#16A34A"], fg: "#ffffff", glow: "#2ADB5C" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

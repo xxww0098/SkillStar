@@ -25,6 +25,19 @@ export function mockOAuthStart(args: Record<string, unknown> = {}): OAuthStart {
     verification_uri: null,
     interval_secs: null,
   };
+  const catalog = args.catalogId ?? args.catalog_id;
+  // Qoder's real login is a remote poll with no user code. The default mock
+  // still shows a device code, which would mis-preview this catalog.
+  if (catalog === "qoder" && args.flow == null) {
+    return {
+      ...base,
+      auth_url: "https://qoder.com/device/selectAccounts",
+      flow: "remote-poll",
+      user_code: null,
+      verification_uri: null,
+      interval_secs: 1,
+    };
+  }
   if (requested === "remote-poll") {
     const verification =
       typeof args.verification_uri === "string" ? args.verification_uri : "https://example.test/device";

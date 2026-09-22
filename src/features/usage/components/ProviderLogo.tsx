@@ -12,6 +12,7 @@ import {
   type LobeIconComponent,
   MinimaxColor,
   OllamaMono,
+  QoderColor,
   ZhipuColor,
 } from "@/components/ui/icons/lobe";
 import { LobeIcon } from "@/components/ui/icons/LobeIcon";
@@ -36,6 +37,7 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   anthropic: ClaudeColor,
   "github-copilot": GithubCopilotMono,
   kiro: KiroColor,
+  qoder: QoderColor,
   windsurf: WindsurfMono,
   // api-key
   deepseek: DeepSeekColor,

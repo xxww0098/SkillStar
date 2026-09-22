@@ -51,6 +51,15 @@ fn import_kiro() -> LocalImportFuture {
     })
 }
 
+fn import_qoder() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::qoder::import_from_local()?;
+        let sub = crate::fetchers::oauth::qoder::oauth_row_from_imported(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("Qoder 订阅保存失败：{err}")))
+    })
+}
+
 const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "codex",
@@ -71,6 +80,10 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "kiro",
         import_from_local: import_kiro,
+    },
+    LocalImporter {
+        catalog_id: "qoder",
+        import_from_local: import_qoder,
     },
 ];
 
