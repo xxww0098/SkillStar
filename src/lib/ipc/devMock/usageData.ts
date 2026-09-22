@@ -94,6 +94,18 @@ export const USAGE_CATALOG = [
     regions: [],
   },
   {
+    id: "kiro",
+    display_name: "Kiro",
+    description: "Amazon Kiro",
+    tier: "o-auth",
+    auth_modes: ["o-auth", "token-import"],
+    brand_color: "14B8A6",
+    default_currency: "USD",
+    subscription_url: "https://app.kiro.dev/signin",
+    warning: null,
+    regions: [],
+  },
+  {
     id: "deepseek",
     display_name: "DeepSeek",
     description: "API Key 余额",

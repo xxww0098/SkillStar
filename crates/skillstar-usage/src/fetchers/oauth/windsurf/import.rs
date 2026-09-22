@@ -204,6 +204,7 @@ fn token_row(
         oauth_account_id: account_id,
         provider_state: state.to_json(),
         currency: None,
+        oauth_region: None,
     }
 }
 
@@ -413,6 +414,7 @@ fn local_to_imported(auth: LocalAuth) -> ImportedToken {
         }
         .to_json(),
         currency: None,
+        oauth_region: None,
     }
 }
 

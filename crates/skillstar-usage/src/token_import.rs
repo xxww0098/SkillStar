@@ -22,6 +22,7 @@ pub(crate) struct ImportedToken {
     pub oauth_account_id: Option<String>,
     pub provider_state: Option<String>,
     pub currency: Option<String>,
+    pub oauth_region: Option<String>,
 }
 
 type ImportFromToken = fn(&str) -> UsageResult<ImportedToken>;
@@ -40,6 +41,10 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
     TokenImporter {
         catalog_id: "windsurf",
         import_from_token: crate::fetchers::oauth::windsurf::import_from_token,
+    },
+    TokenImporter {
+        catalog_id: "kiro",
+        import_from_token: crate::fetchers::oauth::kiro::import_from_token,
     },
 ];
 
@@ -110,7 +115,11 @@ fn subscription_from_import(
     let provider_state = imported
         .provider_state
         .filter(|value| !value.trim().is_empty());
-    if imported.access_token.trim().is_empty() && provider_state.is_none() {
+    let has_refresh = imported
+        .refresh_token
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if imported.access_token.trim().is_empty() && provider_state.is_none() && !has_refresh {
         return Err(UsageError::Other("令牌导入没有可用凭据".into()));
     }
     let now = chrono::Utc::now().timestamp();
@@ -142,7 +151,7 @@ fn subscription_from_import(
         access_token_expires_at: imported.expires_at,
         id_token_encrypted: None,
         oauth_account_id: imported.oauth_account_id,
-        oauth_region: None,
+        oauth_region: imported.oauth_region,
         requires_reauth: false,
         provider_state_encrypted: provider_state.as_deref().map(crypto::encrypt),
         cookie_jar_encrypted: None,
@@ -316,6 +325,7 @@ mod tests {
             oauth_account_id: None,
             provider_state: None,
             currency: None,
+            oauth_region: None,
         })
     }
 

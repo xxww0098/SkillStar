@@ -42,6 +42,15 @@ fn import_windsurf() -> LocalImportFuture {
     })
 }
 
+fn import_kiro() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::kiro::import_from_local()?;
+        let sub = crate::fetchers::oauth::kiro::oauth_row_from_imported(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("Kiro 订阅保存失败：{err}")))
+    })
+}
+
 const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "codex",
@@ -58,6 +67,10 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "windsurf",
         import_from_local: import_windsurf,
+    },
+    LocalImporter {
+        catalog_id: "kiro",
+        import_from_local: import_kiro,
     },
 ];
 

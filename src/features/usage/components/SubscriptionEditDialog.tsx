@@ -24,6 +24,7 @@ import { ApiKeyFields } from "./subscriptionEdit/api/ApiKeyFields";
 import { AutoImportBanner } from "./subscriptionEdit/AutoImportBanner";
 import { CookieFields } from "./subscriptionEdit/cookie/CookieFields";
 import { Field, parseDateInput, toDateInput } from "./subscriptionEdit/fields";
+import { KiroLoginLegPicker, type KiroLoginLeg } from "./subscriptionEdit/oauth/KiroLoginLeg";
 import { OAuthLoginPanel } from "./subscriptionEdit/oauth/OAuthLoginPanel";
 import { TokenImportFields } from "./subscriptionEdit/token/TokenImportFields";
 
@@ -70,6 +71,7 @@ export function SubscriptionEditDialog({
   const [showKey, setShowKey] = useState(false);
   const [showPlatformToken, setShowPlatformToken] = useState(false);
   const [region, setRegion] = useState("cn");
+  const [kiroLeg, setKiroLeg] = useState<KiroLoginLeg>("portal");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [oauthStart, setOauthStart] = useState<OAuthStart | null>(null);
@@ -139,6 +141,7 @@ export function SubscriptionEditDialog({
     setOauthStatus(null);
     setOauthCallbackInput("");
     setOauthSubmittingCallback(false);
+    setKiroLeg("portal");
     oauthCancelledRef.current = null;
   }, [open, editing, preselectCatalogId, t]);
 
@@ -417,7 +420,7 @@ export function SubscriptionEditDialog({
     try {
       const start = await usageApi.startOAuthLogin(
         catalogId,
-        selectedEntry?.regions.length ? region : undefined,
+        catalogId === "kiro" ? kiroLeg : selectedEntry?.regions.length ? region : undefined,
         isCreate ? undefined : editing.id,
       );
       oauthCancelledRef.current = null;
@@ -610,6 +613,10 @@ export function SubscriptionEditDialog({
               ))}
             </div>
           </Field>
+        ) : null}
+
+        {authMode === "o-auth" && catalogId === "kiro" ? (
+          <KiroLoginLegPicker value={kiroLeg} onChange={setKiroLeg} />
         ) : null}
 
         {authMode === "o-auth" && selectedEntry && (

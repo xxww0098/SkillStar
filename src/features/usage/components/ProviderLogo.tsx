@@ -5,6 +5,7 @@ import {
   CursorMono,
   DeepSeekColor,
   GithubCopilotMono,
+  KiroColor,
   WindsurfMono,
   GrokMono,
   KimiMono,
@@ -34,6 +35,7 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   "grok-bot": GrokMono,
   anthropic: ClaudeColor,
   "github-copilot": GithubCopilotMono,
+  kiro: KiroColor,
   windsurf: WindsurfMono,
   // api-key
   deepseek: DeepSeekColor,
