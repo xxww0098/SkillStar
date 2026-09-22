@@ -18,6 +18,10 @@ pub(crate) mod common;
 pub mod cursor;
 pub mod xai;
 
+// Zed callback RSA only. Not registered in `dispatch`.
+#[allow(dead_code)]
+mod zed_token;
+
 pub use start_info::OAuthStartInfo;
 
 use crate::UsageResult;

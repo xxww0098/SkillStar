@@ -50,6 +50,7 @@ r2d2_sqlite = "0.34.0"
 rand = "0.10.0"
 regex = "1.12"
 ring = "0.17.14"
+rsa = "0.10.0-rc.18"
 # system-proxy: honor HTTP(S)_PROXY env vars and the macOS/Windows system proxy
 # when the in-app proxy is not configured; without it api.github.com is a dead
 # 10s timeout per repo on proxied networks while git (which reads its own proxy

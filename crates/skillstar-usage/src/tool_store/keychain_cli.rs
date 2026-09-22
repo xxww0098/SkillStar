@@ -33,7 +33,7 @@ pub(crate) fn find_internet_password(
             "internet-password 的 server 和 account 不能为空".into(),
         ));
     }
-    let meta = spawn_security(&["find-internet-password", "-a", account, "-s", server])?;
+    let meta = spawn_security(&find_internet_password_argv(account, server, false))?;
     if !meta.status.success() {
         let stderr = String::from_utf8_lossy(&meta.stderr);
         if stderr.contains("could not be found") {
@@ -46,8 +46,7 @@ pub(crate) fn find_internet_password(
         )));
     }
 
-    let password_output =
-        spawn_security(&["find-internet-password", "-a", account, "-s", server, "-w"])?;
+    let password_output = spawn_security(&find_internet_password_argv(account, server, true))?;
     if !password_output.status.success() {
         let stderr = String::from_utf8_lossy(&password_output.stderr);
         return Err(UsageError::Other(format!(
@@ -143,6 +142,20 @@ pub(crate) fn parse_internet_password_account(text: &str) -> Option<String> {
     None
 }
 
+/// `security find-internet-password` argv. `password_only` adds `-w`.
+/// Built here so tests can lock the flags without spawning `security`.
+pub(crate) fn find_internet_password_argv<'a>(
+    account: &'a str,
+    server: &'a str,
+    password_only: bool,
+) -> Vec<&'a str> {
+    let mut args = vec!["find-internet-password", "-a", account, "-s", server];
+    if password_only {
+        args.push("-w");
+    }
+    args
+}
+
 fn ensure_keychain_allowed() -> UsageResult<()> {
     if crate::tool_paths::is_tool_sync_sandboxed() {
         return Err(UsageError::Other(SANDBOX_ERROR.into()));
@@ -215,6 +228,33 @@ mod tests {
         ] {
             assert_eq!(error.to_string(), SANDBOX_ERROR);
         }
+    }
+
+    #[test]
+    fn find_argv_includes_account_and_server_without_spawning_security() {
+        assert_eq!(
+            find_internet_password_argv("user-1", "https://zed.dev", false).as_slice(),
+            [
+                "find-internet-password",
+                "-a",
+                "user-1",
+                "-s",
+                "https://zed.dev"
+            ]
+            .as_slice()
+        );
+        assert_eq!(
+            find_internet_password_argv("user-1", "https://zed.dev", true).as_slice(),
+            [
+                "find-internet-password",
+                "-a",
+                "user-1",
+                "-s",
+                "https://zed.dev",
+                "-w",
+            ]
+            .as_slice()
+        );
     }
 
     #[test]
