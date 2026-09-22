@@ -36,10 +36,12 @@
 //! | `trae-solo` | TRAE SOLO IDE | `storage.json` (same iCube auth keys) |
 //! | `trae-cn` | Trae CN IDE | `storage.json` (same iCube auth keys) |
 //! | `trae-solo-cn` | TRAE SOLO CN IDE | `storage.json` (same iCube auth keys) |
+//! | `zed` | Zed | macOS keychain internet-password `https://zed.dev` |
 //!
 //! CLI support is derived from [`target_for`]. Antigravity, Cursor, Windsurf,
-//! Kiro, Qoder, CodeBuddy, and Trae are [`ide::IdeCredentialAdapter`]s
-//! because they do not fit the whole-file JSON/symlink model.
+//! Kiro, Qoder, CodeBuddy, Trae, and Zed are [`ide::IdeCredentialAdapter`]s
+//! because they do not fit the whole-file JSON/symlink model. Zed is absent
+//! from reconcile when it is not on macOS or tool-sync is sandboxed.
 //!
 //! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
 //! (subscriptions, crypto, storage) and `skillstar-models` (tool_sync path
@@ -58,6 +60,7 @@ mod qoder;
 mod target;
 mod trae;
 mod windsurf;
+mod zed;
 
 use std::collections::HashMap;
 
@@ -250,7 +253,8 @@ pub struct ActivationResult {
 /// lock stays.
 pub struct CliRefreshLease {
     target: Option<&'static dyn CliCredentialTarget>,
-    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy / Trae. Those stores do not use the symlink file lease.
+    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy / Trae / Zed.
+    /// Those stores do not use the symlink file lease.
     ide: Option<&'static dyn ide::IdeCredentialAdapter>,
     _lease: Option<CustodyLease>,
 }
@@ -618,6 +622,16 @@ mod tests {
         assert!(!oauth_completion_rewrites_live_store("codex"));
         assert!(!oauth_completion_rewrites_live_store("opencode"));
 
+        assert!(supports_switch("zed"));
+        assert!(supports_cli_switch("zed"));
+        assert!(target_for("zed").is_none());
+        assert!(oauth_completion_rewrites_live_store("zed"));
+        let zed = ide::ide_adapter_for("zed").unwrap();
+        assert_eq!(zed.catalog_id(), "zed");
+        // `available()` is macOS-only and closed under the tool-sync sandbox,
+        // so it is not part of the always-true loop above. The env-sensitive
+        // assertion lives in `usage_switch::zed` under `ENV_LOCK`.
+
         let mut ide_ids: Vec<_> = ide::adapters()
             .iter()
             .map(|adapter| adapter.catalog_id())
@@ -637,6 +651,7 @@ mod tests {
                 "trae-solo",
                 "trae-solo-cn",
                 "windsurf",
+                "zed",
             ]
         );
 
