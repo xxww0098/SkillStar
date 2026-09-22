@@ -1,6 +1,6 @@
 //! IDE credential adapters.
 //!
-//! Antigravity, Cursor, Windsurf, and Kiro do not fit the CLI symlink model.
+//! Antigravity, Cursor, Windsurf, Kiro, and Qoder do not fit the CLI symlink model.
 //! Each adapter writes its own live store, reads it back, then pins. The
 //! registry is the only switch path that knows those catalogs.
 
@@ -32,6 +32,7 @@ const IDE_ADAPTERS: &[&'static dyn IdeCredentialAdapter] = &[
     &super::antigravity::Adapter,
     &super::cursor::Adapter,
     &super::kiro::Adapter,
+    &super::qoder::Adapter,
     &super::windsurf::Adapter,
 ];
 

@@ -29,9 +29,10 @@
 //! | `cursor` | Cursor IDE | `state.vscdb`                               |
 //! | `windsurf` | Windsurf IDE | `state.vscdb`                             |
 //! | `kiro` | Kiro IDE | `~/.aws/sso/cache/kiro-auth-token.json` + `state.vscdb` |
+//! | `qoder` | Qoder IDE | `state.vscdb` (`secret://aicoding.auth.*`) |
 //!
 //! CLI support is derived from [`target_for`]. Antigravity, Cursor, Windsurf,
-//! and Kiro are [`ide::IdeCredentialAdapter`]s because they do not fit the
+//! Kiro, and Qoder are [`ide::IdeCredentialAdapter`]s because they do not fit the
 //! whole-file JSON/symlink model.
 //!
 //! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
@@ -46,6 +47,7 @@ mod ide;
 #[cfg(target_os = "macos")]
 mod keychain;
 mod kiro;
+mod qoder;
 mod target;
 mod windsurf;
 
@@ -240,7 +242,7 @@ pub struct ActivationResult {
 /// lock stays.
 pub struct CliRefreshLease {
     target: Option<&'static dyn CliCredentialTarget>,
-    /// Antigravity / Cursor / Windsurf / Kiro. Those stores do not use the symlink file lease.
+    /// Antigravity / Cursor / Windsurf / Kiro / Qoder. Those stores do not use the symlink file lease.
     ide: Option<&'static dyn ide::IdeCredentialAdapter>,
     _lease: Option<CustodyLease>,
 }
@@ -583,7 +585,7 @@ mod tests {
             assert_eq!(target_for(catalog).unwrap().catalog_id(), catalog);
             assert!(ide::ide_adapter_for(catalog).is_none(), "{catalog}");
         }
-        for catalog in ["antigravity", "cursor", "kiro", "windsurf"] {
+        for catalog in ["antigravity", "cursor", "kiro", "qoder", "windsurf"] {
             assert!(supports_switch(catalog), "{catalog}");
             assert!(supports_cli_switch(catalog), "{catalog}");
             assert!(target_for(catalog).is_none(), "{catalog}");
@@ -601,7 +603,10 @@ mod tests {
             .map(|adapter| adapter.catalog_id())
             .collect();
         ide_ids.sort_unstable();
-        assert_eq!(ide_ids, ["antigravity", "cursor", "kiro", "windsurf"]);
+        assert_eq!(
+            ide_ids,
+            ["antigravity", "cursor", "kiro", "qoder", "windsurf"]
+        );
 
         for entry in skillstar_usage::catalog::catalog() {
             let cli = target_for(entry.id).is_some();
@@ -634,6 +639,7 @@ mod tests {
         forget_subscription_session("cursor", "missing").unwrap();
         forget_subscription_session("antigravity", "missing").unwrap();
         forget_subscription_session("kiro", "missing").unwrap();
+        forget_subscription_session("qoder", "missing").unwrap();
         forget_subscription_session("deepseek", "missing").unwrap();
     }
 
