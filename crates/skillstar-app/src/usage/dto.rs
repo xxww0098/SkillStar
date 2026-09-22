@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use skillstar_usage::catalog::{AuthMode, CatalogEntry, CatalogTier};
+use skillstar_usage::fetchers::oauth::OAuthFlow;
 use skillstar_usage::subscription::{
     AlertKind, AlertSeverity, BillingCycle, ManualQuota, Subscription, SubscriptionAlert,
     SubscriptionUsage,
@@ -378,11 +379,18 @@ pub struct MonthlySpendEntry {
 }
 
 /// Returned by `start_oauth_login`.
+///
+/// `flow` is how this login finishes. Browser providers are `LocalCallback`;
+/// adopting a local credential is `Immediate`.
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "OAuthStart.ts", rename = "OAuthStart")]
 pub struct OAuthStartDto {
     pub pending_id: String,
     pub auth_url: String,
+    pub flow: OAuthFlow,
+    pub user_code: Option<String>,
+    pub verification_uri: Option<String>,
+    pub interval_secs: Option<u32>,
 }
 
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`

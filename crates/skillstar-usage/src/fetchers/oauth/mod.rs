@@ -11,6 +11,9 @@
 
 mod start_info;
 
+use crate::UsageResult;
+use crate::subscription::{Subscription, SubscriptionUsage};
+
 pub mod anthropic;
 pub mod antigravity;
 pub mod codex;
@@ -18,10 +21,28 @@ pub(crate) mod common;
 pub mod cursor;
 pub mod xai;
 
-pub use start_info::OAuthStartInfo;
+pub use start_info::{OAuthFlow, OAuthStartInfo};
 
-use crate::UsageResult;
-use crate::subscription::{Subscription, SubscriptionUsage};
+/// Pasted-callback rewrite, keyed by catalog id. No provider registers one
+/// in this slice; a missing entry is the identity function.
+type NormalizeCallbackInput = fn(&str) -> UsageResult<String>;
+
+const CALLBACK_NORMALIZERS: &[(&str, NormalizeCallbackInput)] = &[];
+
+pub(crate) fn normalize_callback_input(catalog_id: &str, input: &str) -> UsageResult<String> {
+    if let Some((_, normalize)) = CALLBACK_NORMALIZERS
+        .iter()
+        .find(|(id, _)| *id == catalog_id)
+    {
+        return normalize(input);
+    }
+    Ok(input.to_string())
+}
+
+/// App entry for a pasted OAuth value. Branches on the pending session's flow.
+pub async fn submit_callback(pending_id: &str, input: &str) -> UsageResult<()> {
+    crate::oauth::manual_callback::deliver_manual_input(pending_id, input).await
+}
 
 /// Dispatch by `catalog_id`. Called from `fetchers::refresh` for OAuth subs.
 pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
@@ -93,5 +114,13 @@ mod tests {
                 entry.id
             );
         }
+    }
+
+    #[test]
+    fn normalize_callback_input_defaults_to_identity() {
+        let pasted = "http://127.0.0.1:9/callback?code=abc";
+        assert_eq!(normalize_callback_input("copilot", pasted).unwrap(), pasted);
+        assert_eq!(normalize_callback_input("codex", "abc").unwrap(), "abc");
+        assert!(CALLBACK_NORMALIZERS.is_empty());
     }
 }

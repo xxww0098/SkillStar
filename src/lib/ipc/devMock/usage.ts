@@ -4,8 +4,62 @@
  * src/features/usage/api.ts rather than declared in ../commands/*.ts.)
  */
 
+import type { OAuthFlow } from "@/types/generated/OAuthFlow";
+import type { OAuthStart } from "@/types/generated/OAuthStart";
+
 import type { DevMockHandlers } from "./shared";
 import { USAGE_ALERTS, USAGE_CATALOG, USAGE_SUBSCRIPTIONS, USAGE_SUMMARY } from "./usageData";
+
+/**
+ * Browser-dev `start_oauth_login`. Defaults to today's local-callback panel.
+ * Tests (and a manual preview) pass `flow` — `"remote-poll"`, `"scheme-paste"`,
+ * or `"immediate"` — without adding a catalog row. Optional `user_code`,
+ * `verification_uri`, `interval_secs`, and `scheme_prefix` fill the other shapes.
+ */
+export function mockOAuthStart(args: Record<string, unknown> = {}): OAuthStart {
+  const requested = args.flow ?? "local-callback";
+  const base = {
+    pending_id: typeof args.pending_id === "string" ? args.pending_id : "pending-demo",
+    auth_url: typeof args.auth_url === "string" ? args.auth_url : "https://example.test/oauth/authorize",
+    user_code: null,
+    verification_uri: null,
+    interval_secs: null,
+  };
+  if (requested === "remote-poll") {
+    const verification =
+      typeof args.verification_uri === "string" ? args.verification_uri : "https://example.test/device";
+    return {
+      ...base,
+      auth_url: verification,
+      flow: "remote-poll",
+      user_code: typeof args.user_code === "string" ? args.user_code : "ABCD-EFGH",
+      verification_uri: verification,
+      interval_secs: typeof args.interval_secs === "number" ? args.interval_secs : 5,
+    };
+  }
+  if (requested === "immediate") {
+    return { ...base, flow: "immediate" };
+  }
+  if (requested === "scheme-paste" || isSchemePaste(requested)) {
+    const prefix = schemePrefixFrom(requested, args);
+    return {
+      ...base,
+      auth_url: `${prefix}login`,
+      flow: { "scheme-paste": { scheme_prefix: prefix } },
+    };
+  }
+  return { ...base, flow: "local-callback" };
+}
+
+function isSchemePaste(flow: unknown): flow is OAuthFlow & object {
+  return typeof flow === "object" && flow !== null && "scheme-paste" in flow;
+}
+
+function schemePrefixFrom(flow: unknown, args: Record<string, unknown>): string {
+  if (typeof args.scheme_prefix === "string" && args.scheme_prefix.length > 0) return args.scheme_prefix;
+  if (isSchemePaste(flow)) return flow["scheme-paste"].scheme_prefix;
+  return "zcode://";
+}
 
 export const USAGE_HANDLERS: DevMockHandlers = {
   list_usage_catalog: () => USAGE_CATALOG,
@@ -59,6 +113,12 @@ export const USAGE_HANDLERS: DevMockHandlers = {
     return { ...row, running: false, pid: null };
   },
   delete_app_instance: () => undefined,
+  // Default shape keeps the current paste panel. `await` never resolves so the
+  // panel stays on screen in browser dev; cancel just resets the dialog.
+  start_oauth_login: (args) => mockOAuthStart(args),
+  await_oauth_completion: () => new Promise(() => {}),
+  submit_oauth_callback: () => undefined,
+  cancel_oauth_login: () => undefined,
 };
 
 const DEMO_INSTANCES = [

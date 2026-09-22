@@ -1,11 +1,13 @@
 //! Local HTTP listener for OAuth `redirect_uri` callbacks.
 //!
 //! Spawns `tiny_http` on `127.0.0.1:{port}`, waits for a single GET to
-//! a local callback carrying `code` and `state`, validates `state`, returns the code.
+//! a local callback carrying `code` and `state`, validates `state`, and
+//! returns every query parameter. Callers that only need the grant read `code`.
 //!
 //! Codex uses fixed ports with `/cancel` shutdown (mirrors the official CLI).
 //! Antigravity and other providers may bind arbitrary ports.
 
+use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
@@ -147,17 +149,33 @@ pub async fn wait_for_callback(
     timeout: Option<Duration>,
 ) -> UsageResult<String> {
     let session = start_session(port, None)?;
-    wait(session, expected_state, timeout).await
+    callback_code(&wait(session, expected_state, timeout).await?)
+}
+
+/// Decoded callback query. `code` is required for the listener to finish;
+/// other keys stay so a later provider can read them.
+pub type CallbackParams = HashMap<String, String>;
+
+/// `code` from a [`wait`] parameter map. Missing key is the same error the
+/// listener already uses, so a caller cannot treat a partial map as a grant.
+pub fn callback_code(params: &CallbackParams) -> UsageResult<String> {
+    params
+        .get("code")
+        .cloned()
+        .ok_or_else(|| UsageError::Other("回调缺少 code".into()))
 }
 
 /// Wait for OAuth callback on an already-bound [`CallbackSession`].
+///
+/// The map is the decoded query string. Success still requires `code`, a
+/// matching `state`, and no `error`, same as before; other keys are kept.
 pub async fn wait(
     session: CallbackSession,
     expected_state: String,
     timeout: Option<Duration>,
-) -> UsageResult<String> {
+) -> UsageResult<CallbackParams> {
     let timeout = timeout.unwrap_or(Duration::from_secs(300));
-    let (tx, rx) = oneshot::channel::<UsageResult<String>>();
+    let (tx, rx) = oneshot::channel::<UsageResult<CallbackParams>>();
     let server = session.server.clone();
     let cancelled = session.cancelled.clone();
     let state = expected_state.clone();
@@ -185,9 +203,9 @@ pub async fn wait(
                     let outcome = handle_request(&url, &state);
                     respond(request, &outcome);
                     match outcome {
-                        RequestOutcome::Code(code) => {
+                        RequestOutcome::Params(params) => {
                             if let Some(tx) = tx.take() {
-                                let _ = tx.send(Ok(code));
+                                let _ = tx.send(Ok(params));
                             }
                             break;
                         }
@@ -234,7 +252,7 @@ pub async fn wait(
 }
 
 enum RequestOutcome {
-    Code(String),
+    Params(HashMap<String, String>),
     Cancelled,
     /// A real OAuth redirect that failed validation (`error=` from the
     /// provider, missing `code`/`state`, or state mismatch).
@@ -252,14 +270,14 @@ fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
         return RequestOutcome::Ignored;
     }
     match parse_callback(url, expected_state) {
-        Ok(code) => RequestOutcome::Code(code),
+        Ok(params) => RequestOutcome::Params(params),
         Err(_) => RequestOutcome::Failed,
     }
 }
 
 fn respond(request: tiny_http::Request, outcome: &RequestOutcome) {
     let (status, body): (u16, &str) = match outcome {
-        RequestOutcome::Code(_) => (200, SUCCESS_HTML),
+        RequestOutcome::Params(_) => (200, SUCCESS_HTML),
         RequestOutcome::Cancelled => (200, CANCELLED_HTML),
         RequestOutcome::Failed => (200, FAILURE_HTML),
         RequestOutcome::Ignored => (404, NOT_FOUND_HTML),
@@ -274,15 +292,16 @@ fn respond(request: tiny_http::Request, outcome: &RequestOutcome) {
     let _ = request.respond(resp);
 }
 
-fn parse_callback(url: &str, expected_state: &str) -> UsageResult<String> {
+fn parse_callback(url: &str, expected_state: &str) -> UsageResult<CallbackParams> {
     // url looks like "/auth/callback?code=...&state=..."
+    // Fragments never arrive on this socket; manual paste merges them into
+    // the query before replaying.
     let q_idx = url
         .find('?')
         .ok_or_else(|| UsageError::Other("回调缺少查询参数".into()))?;
     let query = &url[q_idx + 1..];
 
-    let mut code = None;
-    let mut state = None;
+    let mut params = HashMap::new();
     let mut error = None;
     for part in query.split('&') {
         let (k, v) = match part.split_once('=') {
@@ -291,25 +310,30 @@ fn parse_callback(url: &str, expected_state: &str) -> UsageResult<String> {
         };
         let decoded = percent_decode(v).unwrap_or_else(|| v.to_string());
         match k {
-            "code" => code = Some(decoded),
-            "state" => state = Some(decoded),
             "error" => error = Some(decoded),
             "error_description" if error.is_none() => error = Some(decoded),
-            _ => {}
+            "error_description" => {}
+            _ => {
+                params.insert(k.to_string(), decoded);
+            }
         }
     }
 
     if let Some(err) = error {
         return Err(UsageError::Other(format!("OAuth 错误：{}", err)));
     }
-    let code = code.ok_or_else(|| UsageError::Other("回调缺少 code".into()))?;
-    let state = state.ok_or_else(|| UsageError::Other("回调缺少 state".into()))?;
+    if !params.contains_key("code") {
+        return Err(UsageError::Other("回调缺少 code".into()));
+    }
+    let state = params
+        .get("state")
+        .ok_or_else(|| UsageError::Other("回调缺少 state".into()))?;
     if state != expected_state {
         return Err(UsageError::Other(
             "OAuth state 不匹配，可能被 CSRF 攻击".into(),
         ));
     }
-    Ok(code)
+    Ok(params)
 }
 
 fn percent_decode(s: &str) -> Option<String> {
@@ -343,15 +367,36 @@ mod tests {
 
     #[test]
     fn parse_ok() {
-        let r = parse_callback("/auth/callback?code=abc&state=xyz", "xyz");
-        assert_eq!(r.unwrap(), "abc");
+        let r = parse_callback("/auth/callback?code=abc&state=xyz", "xyz").unwrap();
+        assert_eq!(r.get("code").map(String::as_str), Some("abc"));
+        assert_eq!(r.get("state").map(String::as_str), Some("xyz"));
+    }
+
+    #[test]
+    fn extra_query_params_are_kept_with_code() {
+        let params = parse_callback(
+            "/auth/callback?code=abc&state=xyz&user_id=u1&token=enc",
+            "xyz",
+        )
+        .unwrap();
+        assert_eq!(params.get("code").map(String::as_str), Some("abc"));
+        assert_eq!(params.get("user_id").map(String::as_str), Some("u1"));
+        assert_eq!(params.get("token").map(String::as_str), Some("enc"));
+    }
+
+    #[test]
+    fn missing_code_is_still_an_error() {
+        let err = parse_callback("/auth/callback?state=xyz&user_id=u1", "xyz")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("code"), "{err}");
     }
 
     #[test]
     fn callback_path_is_accepted() {
         assert!(matches!(
             handle_request("/callback?code=abc&state=xyz", "xyz"),
-            RequestOutcome::Code(code) if code == "abc"
+            RequestOutcome::Params(ref params) if params.get("code").map(String::as_str) == Some("abc")
         ));
     }
 

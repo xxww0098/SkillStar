@@ -8,12 +8,13 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
+use crate::fetchers::oauth::OAuthFlow;
 use crate::subscription::Subscription;
 use crate::{UsageError, UsageResult};
 
-/// A pending login waiting for the user to complete the browser flow.
+/// A pending login waiting for the user (or a remote poll) to finish.
 pub struct PendingLogin {
     pub catalog_id: String,
     pub region: Option<String>,
@@ -21,6 +22,10 @@ pub struct PendingLogin {
     pub auth_url: String,
     /// Local callback port when the OAuth flow binds one (Codex / Antigravity).
     pub callback_port: Option<u16>,
+    /// How a pasted value, if any, is delivered. Defaults to [`OAuthFlow::LocalCallback`].
+    pub flow: OAuthFlow,
+    /// SchemePaste delivery. `None` for every other flow.
+    pub manual_inbox_tx: Option<mpsc::UnboundedSender<String>>,
     pub started_at: Instant,
     /// Sender resolved when the OAuth completes (success or failure).
     pub completion: Option<oneshot::Sender<UsageResult<Subscription>>>,
@@ -45,6 +50,9 @@ fn lock_registry() -> std::sync::MutexGuard<'static, HashMap<String, PendingLogi
 
 /// Register a new pending login. Returns the generated pending_id and the
 /// auth_url the caller should open in a browser.
+///
+/// The session is [`OAuthFlow::LocalCallback`]. Callers that finish some other
+/// way use [`register_with_flow`] or [`register_scheme_paste`].
 pub fn register(catalog_id: &str, region: Option<&str>, auth_url: String) -> String {
     register_with_callback_port(catalog_id, region, auth_url, None)
 }
@@ -56,6 +64,62 @@ pub fn register_with_callback_port(
     auth_url: String,
     callback_port: Option<u16>,
 ) -> String {
+    insert(
+        catalog_id,
+        region,
+        auth_url,
+        callback_port,
+        OAuthFlow::LocalCallback,
+        None,
+    )
+}
+
+/// Register a non-scheme session (`RemotePoll`, `Immediate`, or an explicit
+/// `LocalCallback`). Scheme paste has to go through [`register_scheme_paste`]
+/// so the caller can hold the receiving end.
+pub fn register_with_flow(
+    catalog_id: &str,
+    region: Option<&str>,
+    auth_url: String,
+    flow: OAuthFlow,
+) -> String {
+    debug_assert!(
+        !matches!(flow, OAuthFlow::SchemePaste { .. }),
+        "SchemePaste sessions must use register_scheme_paste"
+    );
+    insert(catalog_id, region, auth_url, None, flow, None)
+}
+
+/// SchemePaste session. The receiver is what the provider task waits on;
+/// [`crate::oauth::manual_callback::deliver_manual_input`] sends the pasted URL.
+pub fn register_scheme_paste(
+    catalog_id: &str,
+    region: Option<&str>,
+    auth_url: String,
+    scheme_prefix: impl Into<String>,
+) -> (String, mpsc::UnboundedReceiver<String>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let pending_id = insert(
+        catalog_id,
+        region,
+        auth_url,
+        None,
+        OAuthFlow::SchemePaste {
+            scheme_prefix: scheme_prefix.into(),
+        },
+        Some(tx),
+    );
+    (pending_id, rx)
+}
+
+fn insert(
+    catalog_id: &str,
+    region: Option<&str>,
+    auth_url: String,
+    callback_port: Option<u16>,
+    flow: OAuthFlow,
+    manual_inbox_tx: Option<mpsc::UnboundedSender<String>>,
+) -> String {
     let pending_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
     lock_registry().insert(
@@ -66,6 +130,8 @@ pub fn register_with_callback_port(
             target_subscription_id: None,
             auth_url,
             callback_port,
+            flow,
+            manual_inbox_tx,
             started_at: Instant::now(),
             completion: Some(tx),
             receiver: Some(rx),
@@ -92,6 +158,32 @@ pub fn target_subscription_id(pending_id: &str) -> Option<String> {
 /// Look up the auth_url for a pending session.
 pub fn auth_url(pending_id: &str) -> Option<String> {
     lock_registry().get(pending_id).map(|p| p.auth_url.clone())
+}
+
+pub fn flow(pending_id: &str) -> Option<OAuthFlow> {
+    lock_registry().get(pending_id).map(|p| p.flow.clone())
+}
+
+pub fn catalog_id(pending_id: &str) -> Option<String> {
+    lock_registry()
+        .get(pending_id)
+        .map(|p| p.catalog_id.clone())
+}
+
+/// Hand one pasted scheme URL to the provider task waiting on this session.
+pub fn send_manual_inbox(pending_id: &str, input: String) -> UsageResult<()> {
+    let tx = {
+        let reg = lock_registry();
+        let pending = reg
+            .get(pending_id)
+            .ok_or_else(|| UsageError::NotFound(pending_id.to_string()))?;
+        pending
+            .manual_inbox_tx
+            .clone()
+            .ok_or_else(|| UsageError::Other("登录会话没有手动回调通道".into()))?
+    };
+    tx.send(input)
+        .map_err(|_| UsageError::Other("登录会话已结束".into()))
 }
 
 /// Take the receiver half; caller awaits this. Idempotent — second take returns None.
@@ -139,6 +231,7 @@ fn release_callback_listener(pending: &PendingLogin) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc::error::TryRecvError;
 
     #[test]
     fn stores_target_subscription_id_for_pending_login() {
@@ -154,5 +247,99 @@ mod tests {
         );
 
         remove(&pending_id);
+    }
+
+    #[test]
+    fn register_defaults_to_local_callback() {
+        let plain = register("codex", None, "https://auth.example/plain".into());
+        let with_port = register_with_callback_port(
+            "codex",
+            None,
+            "https://auth.example/port".into(),
+            Some(1455),
+        );
+
+        assert_eq!(flow(&plain), Some(OAuthFlow::LocalCallback));
+        assert_eq!(flow(&with_port), Some(OAuthFlow::LocalCallback));
+        assert_eq!(catalog_id(&plain).as_deref(), Some("codex"));
+
+        remove(&plain);
+        remove(&with_port);
+    }
+
+    #[test]
+    fn flow_round_trips() {
+        let remote = register_with_flow(
+            "qoder",
+            None,
+            "https://auth.example/poll".into(),
+            OAuthFlow::RemotePoll,
+        );
+        let immediate = register_with_flow(
+            "anthropic",
+            None,
+            "https://claude.ai".into(),
+            OAuthFlow::Immediate,
+        );
+        let (scheme, inbox) =
+            register_scheme_paste("zcode", None, "zcode://login".into(), "zcode://");
+
+        assert_eq!(flow(&remote), Some(OAuthFlow::RemotePoll));
+        assert_eq!(flow(&immediate), Some(OAuthFlow::Immediate));
+        assert_eq!(
+            flow(&scheme),
+            Some(OAuthFlow::SchemePaste {
+                scheme_prefix: "zcode://".into()
+            })
+        );
+        drop(inbox);
+
+        remove(&remote);
+        remove(&immediate);
+        remove(&scheme);
+    }
+
+    #[test]
+    fn manual_inbox_sends_and_receives() {
+        let (id, mut inbox) =
+            register_scheme_paste("zcode", None, "zcode://login".into(), "zcode://");
+
+        send_manual_inbox(&id, "zcode://callback?ok=1".into()).unwrap();
+
+        assert_eq!(inbox.try_recv().unwrap(), "zcode://callback?ok=1");
+        remove(&id);
+    }
+
+    #[test]
+    fn cancel_drops_the_session_and_inbox() {
+        let (id, mut inbox) =
+            register_scheme_paste("zcode", None, "zcode://login".into(), "zcode://");
+        let mut awaiter = take_receiver(&id).expect("awaiter");
+
+        cancel(&id).unwrap();
+
+        assert!(flow(&id).is_none());
+        assert!(matches!(inbox.try_recv(), Err(TryRecvError::Disconnected)));
+        match awaiter.try_recv() {
+            Ok(Err(err)) => assert!(err.to_string().contains("取消"), "{err}"),
+            other => panic!("cancel should wake the awaiter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_after_timeout_drops_the_session_and_inbox() {
+        // The listener reports timeout on the completion channel. The awaiter
+        // then `remove`s the session — that drop is what closes the inbox.
+        let (id, mut inbox) =
+            register_scheme_paste("zcode", None, "zcode://login".into(), "zcode://");
+        let sender = take_sender(&id).expect("completion sender");
+        sender
+            .send(Err(UsageError::Other("OAuth 回调超时".into())))
+            .unwrap();
+
+        remove(&id);
+
+        assert!(flow(&id).is_none());
+        assert!(matches!(inbox.try_recv(), Err(TryRecvError::Disconnected)));
     }
 }

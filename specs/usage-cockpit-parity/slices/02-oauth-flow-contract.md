@@ -51,3 +51,39 @@ OAuth 完成机制成为显式多态：`OAuthStartInfo.flow` 声明本次登录�
 ## 会改变本片的人类反馈
 
 - 若 device/poll 面板想要不同的 UX 结构（如二维码），在 review 截图时提。
+
+## 结果
+
+OAuth 完成方式变成显式四态。现有浏览器登录仍是 `LocalCallback`，行为不变；anthropic 采纳本机凭据标成 `Immediate`。没有 `expires_in_secs`。
+
+落地：
+
+- `OAuthFlow` 从 `start_info.rs` 用 ts-rs 导出。serde 外部标签 + kebab-case：`"local-callback"` / `"remote-poll"` / `"immediate"` 是字符串，`SchemePaste` 是 `{"scheme-paste":{"scheme_prefix":"..."}}`。
+- `OAuthStartInfo` 与 `OAuthStartDto` 增加 `flow`、`user_code`、`verification_uri`、`interval_secs`。`browser()` 仍是 LocalCallback。构造器：`device`、`remote_poll`、`scheme_paste`，另加 `immediate`。
+- `PendingLogin` 增加 `flow` 与 `manual_inbox_tx`。`register` / `register_with_callback_port` 签名不变，默认 LocalCallback。`register_scheme_paste` 把接收端交回调用方。`register_with_flow` 用于 RemotePoll / Immediate。
+- `local_server::wait` 返回 `CallbackParams`（`HashMap<String, String>` 的别名，避免 `Result<HashMap<String, String>>` 误伤错误字符串棘轮）。`wait_for_callback` 仍返回 `code` 字符串，xai / antigravity 不动。codex 从 map 读 `code`。未改 `cursor.rs`。
+- `deliver_manual_input` 按 flow 分流。LocalCallback 先过 `fetchers/oauth/mod.rs` 的 `normalize_callback_input`（空函数指针表，缺省恒等，本片没有 provider 登记）再走原来的 loopback 重放。SchemePaste 校验前缀后送 inbox。RemotePoll / Immediate 报「此登录无需手动回调」。非本机 host 仍拒绝。
+- `submit_oauth_callback` 改走 `fetchers::oauth::submit_callback`。
+- `OAuthLoginPanel` 按 `flow` 渲染：LocalCallback 保持原来三步；RemotePoll 是用户码、复制、验证页链接、`interval_secs` 倒计时、等待态，没有粘贴框；SchemePaste 是一个 URL 文本框，前缀不对就拒绝提交；Immediate 不渲染。
+- i18n 加在 `usage.oauth*`。devMock `start_oauth_login` 默认 `flow: "local-callback"`，并接受 `flow` 参数预览另外三态，不新增 catalog。
+
+测试：
+
+- `cargo test -p skillstar-usage --locked --lib -- oauth::`：107 passed（含 pending_state、local_server、manual_callback，以及 codex / xai / antigravity）。
+- `cargo test -p skillstar-app --locked --lib usage::`：36 passed。
+- `bun run types:gen` 与 `bash scripts/internal/check_generated_types.sh` 通过。生成物只有 `OAuthFlow.ts` 与 `OAuthStart.ts`。
+- `bun run test -- src/features/usage`：144 passed，其中面板四态 5 个。
+
+静默决定：
+
+- 参数 map 的具体类型是 `CallbackParams` = `HashMap<String, String>`，只收 query。fragment 仍由 `manual_callback` 在重放前并进 query；浏览器不会把 fragment 送到 loopback。
+- 监听成功仍要求 `code` + 匹配的 `state` + 没有 `error`。没有 `code` 的请求继续等，不结束本次登录。无 code 的 zed 回调留给后面的片放宽。
+- inbox 用规格点名的 `mpsc::UnboundedSender`，发送后不取走，改错的粘贴可以再发。zcode 只需要收一次。
+- `device()` 是带 user_code、verification_uri（同时写入 `auth_url`）和 interval 的 RemotePoll。`remote_poll()` 是没有用户码的 RemotePoll。
+- 规格的构造器列表没有 `immediate()`，但 anthropic 必须显式标 Immediate，所以加了。
+- 超时清理仍是 worker 把超时送进 completion、await 侧 `remove`。没有新的扫表。cancel 仍删会话、丢掉 inbox、叫醒等待方。
+- SchemePaste 先 trim 再对前缀做 `starts_with`，送出的是 trim 后的字符串。空前缀直接当格式错误。
+- start 之前 catalog 不声明 flow，空闲面板仍是现在的本地三步。start 返回后才按 flow 画。
+- 倒计时是轮询间隔 `interval_secs`，归零后按同一间隔重计，不是会话过期。
+- devMock 的 `await_oauth_completion` 不 resolve，浏览器预览里面板不会一闪就关。`submit_oauth_callback` / `cancel_oauth_login` 是空操作。
+- 四态由组件测试锁住。本轮没有跑截图终审。

@@ -651,6 +651,10 @@ pub async fn start_oauth_login(
     Ok(OAuthStartDto {
         pending_id: info.pending_id,
         auth_url: info.auth_url,
+        flow: info.flow,
+        user_code: info.user_code,
+        verification_uri: info.verification_uri,
+        interval_secs: info.interval_secs,
     })
 }
 
@@ -710,7 +714,7 @@ pub async fn submit_oauth_callback(
     pending_id: String,
     callback_input: String,
 ) -> Result<(), AppError> {
-    skillstar_usage::oauth::manual_callback::submit(&pending_id, &callback_input)
+    fetchers::oauth::submit_callback(&pending_id, &callback_input)
         .await
         .map_err(map_err)
 }

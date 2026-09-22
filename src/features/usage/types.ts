@@ -7,6 +7,7 @@
 // here; edit the Rust struct and regenerate.
 //
 //   - AuthMode, CatalogTier come from `skillstar_usage::catalog`.
+//   - OAuthFlow comes from `skillstar_usage::fetchers::oauth`.
 //   - BillingCycle, ManualQuota, SubscriptionUsage (and its UsageWindow /
 //     MonetaryBalance / CreditInfo / OpenCodeApiKey / DeepSeek* leaves),
 //     AlertSeverity, AlertKind come from `skillstar_usage::subscription`.
@@ -47,6 +48,7 @@ export type { UpdateSubscriptionInput } from "@/types/generated/UpdateSubscripti
 export type { SubscriptionAlert } from "@/types/generated/SubscriptionAlert";
 export type { MonthlySpendEntry } from "@/types/generated/MonthlySpendEntry";
 export type { UsageSummary } from "@/types/generated/UsageSummary";
+export type { OAuthFlow } from "@/types/generated/OAuthFlow";
 export type { OAuthStart } from "@/types/generated/OAuthStart";
 
 /** Catalog ids that support `import_subscription_from_local`. */
