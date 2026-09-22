@@ -8,7 +8,9 @@
 use anyhow::{Context, Result};
 use std::cell::Cell;
 use std::fs::{File, OpenOptions};
-use std::sync::{Mutex, MutexGuard, TryLockError};
+#[cfg(test)]
+use std::sync::TryLockError;
+use std::sync::{Mutex, MutexGuard};
 
 use skillstar_core::infra::paths as fs_paths;
 
@@ -73,6 +75,7 @@ pub(super) fn lock_project_write() -> Result<ProjectWriteGuard> {
     Ok(guard)
 }
 
+#[cfg(test)]
 pub(super) fn try_lock_project_write() -> Result<ProjectWriteGuard> {
     if current_depth() > 0 {
         DEPTH.with(|depth| depth.set(depth.get() + 1));
