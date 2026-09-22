@@ -203,6 +203,8 @@ fn token_row(
         provider_state: machine.to_json(),
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     }
 }
 

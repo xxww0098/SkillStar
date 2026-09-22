@@ -127,6 +127,8 @@ async fn finalize(
         provider_state: None,
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     };
     let mut sub = super::import::oauth_row_from_imported(imported)?;
     if let Some(existing) = reauth_target(CATALOG_ID, target_subscription_id) {

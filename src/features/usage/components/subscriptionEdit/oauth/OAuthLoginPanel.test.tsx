@@ -68,6 +68,7 @@ describe("OAuthLoginPanel flows", () => {
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "https://evil.example/callback" } });
 
+    expect(screen.getByText(/打不开/)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("地址必须以 zcode:// 开头");
     expect(screen.getByRole("button", { name: "提交 URL" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "提交 URL" }));

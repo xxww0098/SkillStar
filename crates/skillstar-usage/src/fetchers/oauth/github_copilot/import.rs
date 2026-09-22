@@ -32,6 +32,8 @@ pub(crate) fn import_from_token(payload: &str) -> UsageResult<ImportedToken> {
         provider_state: None,
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     })
 }
 

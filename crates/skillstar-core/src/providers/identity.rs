@@ -206,6 +206,12 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("zed"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "zcode",
+        display_name: "ZCode",
+        catalog_id: Some("zcode"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.
@@ -298,6 +304,14 @@ mod tests {
         let identity = identity_for_catalog("zed").expect("zed");
         assert_eq!(identity.canonical_id, "zed");
         assert_eq!(identity.display_name, "Zed");
+        assert!(identity.preset_ids.is_empty());
+    }
+
+    #[test]
+    fn zcode_identity_is_subscription_only() {
+        let identity = identity_for_catalog("zcode").expect("zcode");
+        assert_eq!(identity.canonical_id, "zcode");
+        assert_eq!(identity.display_name, "ZCode");
         assert!(identity.preset_ids.is_empty());
     }
 

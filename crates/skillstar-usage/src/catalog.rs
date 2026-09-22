@@ -88,6 +88,8 @@ const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey];
 const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 /// Browser OAuth and pasted-token rows share refresh dispatch and in-place re-authorization.
 pub(crate) const OAUTH_TOKEN_IMPORT: &[AuthMode] = &[AuthMode::OAuth, AuthMode::TokenImport];
+/// ZCode's region control picks the upstream. Order is the dialog default.
+const ZCODE_UPSTREAMS: &[&str] = &["zai", "bigmodel"];
 
 /// Trae has no browser leg. A bare refresh token is bound to the device key
 /// from the original login, so the dialog points at local `storage.json`.
@@ -277,6 +279,21 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "USD",
             "https://zed.dev/account",
         ),
+        // Lobe ZAI `COLOR_PRIMARY` is `#000`. The card icon is that glyph.
+        {
+            let mut row = entry(
+                "zcode",
+                "ZCode",
+                "Z.ai / BigModel",
+                CatalogTier::OAuth,
+                OAUTH_TOKEN_IMPORT,
+                "000000",
+                "USD",
+                "https://zcode.z.ai",
+            );
+            row.regions = ZCODE_UPSTREAMS;
+            row
+        },
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -377,8 +394,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_23_entries() {
-        assert_eq!(catalog().len(), 23);
+    fn catalog_has_24_entries() {
+        assert_eq!(catalog().len(), 24);
     }
 
     #[test]
@@ -397,7 +414,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 16);
+        assert_eq!(oauth, 17);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
@@ -536,6 +553,20 @@ mod tests {
         assert_eq!(entry.default_currency, "USD");
         assert_eq!(entry.subscription_url, "https://zed.dev/account");
         assert!(entry.regions.is_empty());
+        assert!(entry.warning.is_none());
+    }
+
+    #[test]
+    fn zcode_is_oauth_token_import_with_two_upstreams() {
+        let entry = find("zcode").expect("catalog row");
+        assert_eq!(entry.tier, CatalogTier::OAuth);
+        assert_eq!(entry.auth_modes, OAUTH_TOKEN_IMPORT);
+        assert_eq!(entry.display_name, "ZCode");
+        assert_eq!(entry.description, "Z.ai / BigModel");
+        assert_eq!(entry.brand_color, "000000");
+        assert_eq!(entry.default_currency, "USD");
+        assert_eq!(entry.subscription_url, "https://zcode.z.ai");
+        assert_eq!(entry.regions, &["zai", "bigmodel"]);
         assert!(entry.warning.is_none());
     }
 

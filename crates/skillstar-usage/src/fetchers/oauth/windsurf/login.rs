@@ -137,6 +137,8 @@ pub(crate) fn exchanged_to_imported(
         provider_state: state.to_json(),
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     }
 }
 

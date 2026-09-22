@@ -319,6 +319,8 @@ fn token_row(
         provider_state: state.to_json(),
         currency: None,
         oauth_region,
+        id_token: None,
+        api_key: None,
     }
 }
 

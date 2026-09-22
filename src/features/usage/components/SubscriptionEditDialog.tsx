@@ -427,6 +427,9 @@ export function SubscriptionEditDialog({
       setOauthStart(start);
       setOauthPendingId(start.pending_id);
       setOauthStatus(t("usage.oauthWaiting"));
+      if (typeof start.flow === "object" && start.flow && "scheme-paste" in start.flow && start.auth_url) {
+        void openExternalUrl(start.auth_url);
+      }
       void waitForOAuthCompletion(start.pending_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

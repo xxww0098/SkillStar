@@ -18,6 +18,8 @@ fn row(host: &Host, enterprise: Option<&str>) -> Subscription {
         provider_state: enterprise.map(str::to_string),
         currency: None,
         oauth_region: Some(host.oauth_region.to_string()),
+        id_token: None,
+        api_key: None,
     };
     super::super::import::oauth_row(host, imported).expect("row")
 }

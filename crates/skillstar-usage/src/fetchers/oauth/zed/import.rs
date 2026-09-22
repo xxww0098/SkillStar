@@ -61,6 +61,8 @@ pub(super) fn credentials_to_imported(user_id: String, access_token: String) -> 
         provider_state: None,
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     }
 }
 
