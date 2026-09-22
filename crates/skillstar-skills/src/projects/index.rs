@@ -8,6 +8,20 @@ use super::sync::full_sync;
 use super::types::{ProjectEntry, ProjectIndex, ensure_project_root_exists};
 use skillstar_core::infra::paths as fs_paths;
 
+pub(super) fn unique_project_name(index: &ProjectIndex, name: &str) -> String {
+    let mut candidate = name.to_string();
+    let mut counter = 1u32;
+    while index
+        .projects
+        .iter()
+        .any(|project| project.name == candidate)
+    {
+        counter += 1;
+        candidate = format!("{name}-{counter}");
+    }
+    candidate
+}
+
 pub(super) fn load_index() -> ProjectIndex {
     let path = fs_paths::projects_manifest_path();
     if !path.exists() {
@@ -19,7 +33,7 @@ pub(super) fn load_index() -> ProjectIndex {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-fn save_index(index: &ProjectIndex) -> Result<()> {
+pub(super) fn save_index(index: &ProjectIndex) -> Result<()> {
     let path = fs_paths::projects_manifest_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -49,15 +63,7 @@ pub fn register_project(project_path: &str) -> Result<ProjectEntry> {
         .unwrap_or_else(|| "unknown".to_string());
 
     // Handle duplicate names by appending a suffix
-    let unique_name = {
-        let mut candidate = name.clone();
-        let mut counter = 1u32;
-        while index.projects.iter().any(|p| p.name == candidate) {
-            counter += 1;
-            candidate = format!("{name}-{counter}");
-        }
-        candidate
-    };
+    let unique_name = unique_project_name(&index, &name);
 
     let entry = ProjectEntry {
         path: project_path.to_string(),
@@ -103,6 +109,7 @@ pub fn remove_project(name: &str) -> Result<()> {
 
 /// Update a project's local path and rebuild its symlinks.
 pub fn update_project_path(name: &str, new_path: &str) -> Result<u32> {
+    let _guard = super::write_lock::lock_project_write()?;
     // Validate before mutating the index so we don't persist a broken path.
     let _ = ensure_project_root_exists(new_path)?;
 

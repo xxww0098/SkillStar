@@ -14,6 +14,7 @@ pub fn load_skills_list(name: &str) -> Option<SkillsList> {
 
 /// Save a project's skill list.
 pub fn save_skills_list(name: &str, list: &SkillsList) -> Result<()> {
+    let _guard = super::write_lock::lock_project_write()?;
     let path = fs_paths::project_detail_dir(name).join("skills-list.json");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

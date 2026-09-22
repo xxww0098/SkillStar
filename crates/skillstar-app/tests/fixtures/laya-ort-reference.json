@@ -1,0 +1,11 @@
+{
+  "task": "The customer wants a refund for a duplicate invoice.",
+  "instruction": "Does the skill refund-helper apply to this task? Handle payment refunds, invoices, and duplicate charges.",
+  "input_ids": [
+    50281, 79, 3941, 1953, 27, 9876, 253, 10861, 23005, 14, 28316, 4647, 281, 436, 4836, 32, 34107, 7830, 1275, 41748,
+    13, 29838, 1271, 13, 285, 21036, 7260, 15, 50282, 50284, 3221, 27, 642, 13, 253, 3908, 1057, 417, 2186, 50284, 2032,
+    27, 4754, 13, 253, 3908, 6556, 50282, 510, 7731, 5605, 247, 23005, 323, 247, 21036, 45156, 15, 50282
+  ],
+  "marker_pos": [29, 39],
+  "logits": [-1.2259039878845215, 0.8844937682151794]
+}

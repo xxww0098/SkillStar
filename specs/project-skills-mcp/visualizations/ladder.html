@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>项目技能 MCP 阶梯</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #f6f4ef; color: #1c1915; }
+    h1 { font-size: 1.4rem; }
+    p { max-width: 42rem; line-height: 1.5; }
+    ol { list-style: none; padding: 0; max-width: 46rem; }
+    li { background: white; border: 1px solid #ddd6c8; border-radius: 8px; padding: 0.8rem 1rem; margin: 0.5rem 0; }
+    .id { font-variant-numeric: tabular-nums; color: #8a5a12; font-weight: 650; }
+    code { font-size: 0.92em; }
+  </style>
+</head>
+<body>
+  <h1>项目技能 MCP</h1>
+  <p>推荐、批准、启用、会话加载分开。推理只用 ort 的 CPU。模型不在时，17 以前的推荐已经可用。</p>
+  <ol>
+    <li><span class="id">01</span> stdio 进程。探针：把 initialize 送进 <code>skillstar mcp serve --stdio</code>。</li>
+    <li><span class="id">02</span> 项目绑定。规范路径，推荐不注册。</li>
+    <li><span class="id">03</span> 项目写锁。宽松部署的结果不变。</li>
+    <li><span class="id">04</span> 共享目录的一个 owner，并披露其他读者。</li>
+    <li><span class="id">05</span> 清单与磁盘的同一份事实。</li>
+    <li><span class="id">06</span> 已安装技能 BM25。不写 recall 事件。</li>
+    <li><span class="id">07</span> 只有显式选择才产生计划。</li>
+    <li><span class="id">08</span> 批准记录。工具参数写不进去。</li>
+    <li><span class="id">09</span> 严格 symlink 启用。失败不复制。</li>
+    <li><span class="id">10</span> 推荐编排。直通重排。</li>
+    <li><span class="id">11</span> 查询。运行时永远未验证。</li>
+    <li><span class="id">12</span> 应用。锁内核对计划、批准、幂等。</li>
+    <li><span class="id">13</span> 三个 MCP 工具。</li>
+    <li><span class="id">14</span> 有 elicitation 才在写入前向人确认。</li>
+    <li><span class="id">15</span> 终端批准。不部署。</li>
+    <li><span class="id">16</span> Projects 页批准。不部署。</li>
+    <li><span class="id">17</span> ort CPU。小图进仓库，Laya 权重不进。</li>
+    <li><span class="id">18</span> Laya 图。CPU 上按 noul 重排，失败则回到 BM25。</li>
+  </ol>
+</body>
+</html>

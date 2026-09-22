@@ -514,6 +514,24 @@
 - 后果：获得——Context/Improvement 的第一刀可在现有 crate 内测试与发布，且不会把教程域带回来。承担——GUI 与频道推送/晋升为 Skill 仍是后续切片；本机 notes 不跨设备。
 - 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
 
+## D-057：SkillStar 作为 MCP 服务时不进入外部 MCP catalog
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：开发 Agent 需要本机 stdio 调用 SkillStar 来推荐并启用项目技能。外部 MCP 的 store、安装计划和 marketplace 模型已经由 `skillstar_models::mcp`、`skillstar_marketplace` 和 `skillstar_app::mcp` 分三层持有。把本机服务塞进其中任一层会让「SkillStar 调用别人」和「别人调用 SkillStar」共用一套类型。
+- 决策：本机服务留在 `skillstar_app::project_skills_mcp`。进程入口是 `skillstar mcp serve --stdio`，stdout 只有 JSON-RPC。工具参数在 `protocol`，不接收批准字段。`rmcp` 只加入 `skillstar-app`，不新增 crate。项目部署仍由 `skillstar-skills::projects` 执行，并持有 `state/project-write.lock`。
+- 后果：获得——外部 MCP 安装流程不被项目技能协议类型污染；CLI 与将来的桌面批准可以调用同一套领域函数。承担——stdio 传输和工具 schema 的演进跟 `rmcp` 走，不跟 marketplace 的 server.json 走。
+- 证据：`crates/skillstar-app/src/project_skills_mcp/`、[docs/features/project-skills-mcp/README.md](./features/project-skills-mcp/README.md)、[boundaries.md](./boundaries.md) 的项目技能 MCP 接缝。
+
+## D-058：Laya 重排只在本机 CPU 上跑，失败则回到 BM25
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：项目技能推荐需要可选的本地优选。Laya 的发布形态是 ONNX。Windows、macOS、Linux 没有同一个 GPU Execution Provider。官方 `laya_config.json` 不写语种，而中文任务不能拿英文权重来打分。
+- 决策：`skillstar-app` 用 `ort` 的 CPU Execution Provider 和 `tokenizers` 加载 Laya。默认目录是 `data_root()/models/laya`（`~/.skillstar/models/laya/`），`SKILLSTAR_LAYA_ONNX` 整目录覆盖。每个候选是一次 noul，输入布局跟 receptron/laya 的 `build_sequence`。至多 12 个，不增删候选，分数不进 `plan_hash`。含汉字的任务只接受 multilingual 导出。没有 `language` 字段时，用 tokenizer 特殊符号区分英文 ModernBERT 和 mmBERT；对不上就不加载。加载失败保持 BM25。应用不下载权重，PyTorch 不进依赖。
+- 后果：获得——英文 `receptron/laya-onnx` 可以在 CPU 上改变候选顺序。承担——这份英文包遇到中文任务仍是 BM25；中文优选要用户自行导出 multilingual，放到 `models/laya`，或用 `SKILLSTAR_LAYA_ONNX` 指过去。
+- 证据：`crates/skillstar-app/src/project_skills_mcp/ort_cpu.rs`、`crates/skillstar-app/src/project_skills_mcp/laya_pack.rs`、`crates/skillstar-app/tests/fixtures/laya-ort-reference.json`。
+
 ## 新增记录格式
 
 

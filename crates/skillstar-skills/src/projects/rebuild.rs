@@ -19,6 +19,7 @@ use skillstar_core::infra::fs_ops;
 ///
 /// It persists and returns the rebuilt list, without performing full sync.
 pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
+    let _guard = super::write_lock::lock_project_write()?;
     let entry = register_project(project_path)?;
     let project = Path::new(project_path);
     let profiles = agent_profile::list_profiles();

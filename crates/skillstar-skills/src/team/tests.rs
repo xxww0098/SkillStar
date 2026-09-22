@@ -93,6 +93,69 @@ fn bm25_ranks_the_more_specific_skill_first() {
 }
 
 #[test]
+fn search_installed_skills_orders_the_more_specific_skill_first() {
+    with_team_env(|_| {
+        write_skill(
+            "pr-review",
+            "Review pull requests and leave blocking comments",
+            "Always request tests for API changes. Flag missing coverage.",
+        );
+        write_skill(
+            "frontend-design",
+            "UI layout and visual hierarchy for marketing pages",
+            "Use a restrained palette. Avoid decorative gradients.",
+        );
+        let store = skillstar_core::infra::paths::team_store_path();
+        let before = fs::read(&store).unwrap_or_default();
+        let hits = search_installed_skills("pull request review tests", 8).unwrap();
+        assert_eq!(hits[0].id, "pr-review");
+        assert_eq!(fs::read(&store).unwrap_or_default(), before);
+    });
+}
+
+#[test]
+fn search_installed_skills_omits_learnings() {
+    with_team_env(|_| {
+        write_skill(
+            "pr-review",
+            "Review pull requests",
+            "Leave comments on tests.",
+        );
+        let learning = share_learning(
+            LearningDraft {
+                title: "PR review missed a failing CI job".into(),
+                body: "The reviewer skipped CI status and merged a red build.".into(),
+                tags: vec!["ci".into()],
+                skill_name: Some("pr-review".into()),
+                confidence: 0.8,
+            },
+            now(),
+        )
+        .unwrap();
+        let hits = search_installed_skills("failing CI merge", 8).unwrap();
+        assert!(hits.iter().all(|hit| hit.id != learning.id));
+        assert!(hits.iter().all(|hit| hit.title != learning.title));
+    });
+}
+
+#[test]
+fn search_installed_skills_does_not_append_recall_events() {
+    with_team_env(|_| {
+        write_skill(
+            "pr-review",
+            "Review pull requests and leave blocking comments",
+            "Always request tests for API changes.",
+        );
+        let _ = recall("pull request review", 8, now()).unwrap();
+        let store = skillstar_core::infra::paths::team_store_path();
+        let before = fs::read(&store).unwrap();
+        let _ = search_installed_skills("pull request review", 8).unwrap();
+        assert_eq!(fs::read(&store).unwrap(), before);
+        assert!(search_installed_skills("the", 8).unwrap().is_empty());
+    });
+}
+
+#[test]
 fn learning_neighbor_boosts_linked_skill() {
     with_team_env(|_| {
         write_skill(

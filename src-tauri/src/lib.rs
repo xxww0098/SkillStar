@@ -348,6 +348,8 @@ pub fn run() {
             commands::get_marketplace_mirror_config,
             commands::save_marketplace_mirror_config,
             commands::diagnose_network,
+            commands::project_host::list_pending_project_skill_plans,
+            commands::project_host::approve_project_skill_plan,
             commands::projects::register_project,
             commands::projects::list_projects,
             commands::projects::get_project_skills,

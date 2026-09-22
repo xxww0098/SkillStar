@@ -79,6 +79,7 @@ CI 由 `.github/workflows/ci.yml`、`windows-ci.yml` 和 `release.yml` 负责。
 - [Skills](./docs/features/skills/README.md)
 - [Marketplace](./docs/features/marketplace/README.md)
 - [MCP](./docs/features/mcp/README.md)
+- [Project skills MCP](./docs/features/project-skills-mcp/README.md)
 - [Models](./docs/features/models/README.md)
 - [Usage](./docs/features/usage/README.md)
 - [Sync](./docs/features/sync/README.md)
