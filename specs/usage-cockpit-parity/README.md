@@ -1,16 +1,16 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（14/27：01–14）
+状态：active（16/27：01–16）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
 你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。
 
-- **当前进度**：01–14 完成。Copilot、Windsurf（含切号）、Kiro（含切号）、Qoder 已进 catalog。决定见 `choices.md`。真账号和官方 app 重启都还没验，所以不降级。
-- **下一个拾取点**：`slices/15-qoder-writeback-switch.md` 与 `slices/16-codebuddy-quota-login.md`。15 只加 Qoder 的 IDE adapter，不要改 catalog。16 新增 `fetchers/oauth/codebuddy/`（含 codebuddy-cn），并自己注册 catalog。
-- **还没做**：17–23，然后 24 实例隔离、25 前端收尾、26 文档、27 唤醒决策。
-- **每次切片收尾**：更新本节，把静默决定补进 `choices.md`。`usage_switch/windsurf.rs` 已有 987 行，`kiro_tests.rs` 816 行；新 adapter 单独成文件，不要往这两个文件里堆。
+- **当前进度**：01–16 完成。Copilot、Windsurf、Kiro、Qoder 含切号；CodeBuddy 与 CodeBuddy CN 已进 catalog，切号还没有。决定见 `choices.md`。真账号和官方 app 重启都还没验，所以不降级。
+- **下一个拾取点**：`slices/17-codebuddy-writeback-switch.md` 与 `slices/18-trae-quota-login.md`。17 只加 CodeBuddy 的 IDE adapter（两个 catalog 可以共用一个带 host 参数的实现）。18 新增 `fetchers/oauth/trae/`，四个 catalog 一套实现，并自己注册 catalog。17 不改 catalog。
+- **还没做**：19–23，然后 24 实例隔离、25 前端收尾、26 文档、27 唤醒决策。
+- **每次切片收尾**：更新本节，把静默决定补进 `choices.md`。新 adapter 单独成文件。`usage_switch/windsurf.rs` 987 行，`qoder.rs` 893 行，不要再往里堆。
 
 ## 目标
 
