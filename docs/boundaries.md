@@ -143,6 +143,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | Tauri → 域 | command 做参数/State/事件适配后调用 facade | `src-tauri/src/commands/` |
 | 跨域事务 | 放入 `skillstar-app`，由窄 facade 组合 | `crates/skillstar-app/src/` |
 | MCP catalog → store | 运行时形态选择、draft 映射、安装前确认负载、preset 映射全部在 `skillstar-app::mcp`；两个域 crate 互不知晓，命令层不做映射 | `crates/skillstar-app/src/mcp/` |
+| 项目技能 MCP | 本机 stdio 服务、项目技能推荐与批准编排在 `skillstar_app::project_skills_mcp`。不进入 `skillstar_app::mcp` 或 `skillstar_models::mcp` | `crates/skillstar-app/src/project_skills_mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/skillstar-core/src/infra/http_client.rs` |
 | 生成类型 | Rust struct → ts-rs → `src/types/generated/` | `package.json` 的 `types:gen` |
 | 远端 SSH | `skillstar-sync` 只依赖 `skillstar-core`；SFTP 列出远端 hub，不消费 skills 域契约 | `crates/skillstar-sync/Cargo.toml` |

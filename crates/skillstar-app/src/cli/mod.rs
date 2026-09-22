@@ -310,6 +310,7 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "init"
             | "create"
             | "publish"
+            | "mcp"
             | "team"
             | "help"
             | "-h"
@@ -423,6 +424,7 @@ mod mode_tests {
             "init",
             "create",
             "publish",
+            "mcp",
             "team",
             "help",
             "-h",

@@ -39,6 +39,8 @@ uuid.workspace = true
 ts-rs = { workspace = true, features = ["serde-compat"] }
 thiserror.workspace = true
 base64.workspace = true
+rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-async-rw"] }
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 rusqlite = { workspace = true }
