@@ -1,15 +1,14 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（20/27：01–20）
+状态：active（22/27：01–22）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
-你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。
+你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。集成树在 `/Users/xxww/.grok/worktrees/usage-cockpit-parity`。
 
-- **当前进度**：01–20 完成。Copilot、Windsurf、Kiro、Qoder、CodeBuddy/CN、Trae×4 含切号。Zed 已进 catalog（登录、配额、令牌导入、本机导入），切号还没有，也永不进实例注册表。决定见 `choices.md`。真账号和官方 app 重启都还没验，所以不降级。
-- **下一个拾取点**：`slices/21-zed-writeback-switch.md` 与 `slices/22-zcode-quota-login.md`。21 是 macOS internet-password 写回，`available()` 在非 macOS 为 false。22 新增 ZCode 登录和配额并注册 catalog。21 不改 catalog。
-- **还没做**：23，然后 24 实例隔离、25 前端收尾、26 文档、27 唤醒决策。
+- **当前进度**：01–22 完成。ZCode 登录已进 catalog，切号还没有。Zed 切号只在测试里用假的 `security` 命令，没有写真钥匙串。决定见 `choices.md`。真账号和官方 app 重启都还没验，所以不降级。
+- **下一个拾取点**：`slices/23-zcode-writeback-switch.md`，然后 24 实例隔离、25 前端收尾、26 文档、27 唤醒决策。
 - **每次切片收尾**：更新本节，把静默决定补进 `choices.md`。新 adapter 单独成文件。
 
 ## 目标
