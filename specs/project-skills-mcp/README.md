@@ -1,14 +1,14 @@
 # 项目技能 MCP
 
-状态：14 已落地。下一档是 15。最后更新：2026-09-22。
+状态：15 已落地。下一档是 16。最后更新：2026-09-22。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar 的项目技能 MCP。不要从聊天记录恢复上下文，以本目录为准。
 
-14 已完成。从 [slices/15-cli-approve.md](slices/15-cli-approve.md) 开始，做完一档再做下一档。不要并行改两档的行为。01 到 17 是默认阶梯。18 处于休眠：只有环境变量 `SKILLSTAR_LAYA_ONNX` 指向本机导出目录时才做，缺模型时不要开工，也不要把它算进 17 的完成条件。
+15 已完成。从 [slices/16-gui-approve.md](slices/16-gui-approve.md) 开始，做完一档再做下一档。不要并行改两档的行为。01 到 17 是默认阶梯。18 处于休眠：只有环境变量 `SKILLSTAR_LAYA_ONNX` 指向本机导出目录时才做，缺模型时不要开工，也不要把它算进 17 的完成条件。
 
-已落地：01–13；14 elicitation（有 form 能力才发 `elicitation/create`，接受值必须对上当前计划，确认在项目写锁之外）。`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
+已落地：01–14；15 CLI 批准（`skillstar mcp approve` 走 CLI，确认行是 `approve <plan_hash>`，不部署）。`rmcp` initialize 对 `2026-07-28` 回落 `2025-11-25`。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
 
 全局决定已经写在下面，不要重开。切片里标成「可改」的才是实现自由。做完一档之前，运行该档写明的测试。文档和代码同一档一起改，不留「待补」。
 
@@ -30,7 +30,7 @@
 - [x] 12 应用编排 — [slices/12-apply.md](slices/12-apply.md)
 - [x] 13 三个 MCP 工具 — [slices/13-protocol-tools.md](slices/13-protocol-tools.md)
 - [x] 14 elicitation — [slices/14-elicitation.md](slices/14-elicitation.md)
-- [ ] 15 CLI 批准 — [slices/15-cli-approve.md](slices/15-cli-approve.md)
+- [x] 15 CLI 批准 — [slices/15-cli-approve.md](slices/15-cli-approve.md)
 - [ ] 16 桌面批准 — [slices/16-gui-approve.md](slices/16-gui-approve.md)
 - [ ] 17 ort CPU — [slices/17-ort-cpu.md](slices/17-ort-cpu.md)
 - [ ] 18 Laya 图（休眠）— [slices/18-laya-graph.md](slices/18-laya-graph.md)

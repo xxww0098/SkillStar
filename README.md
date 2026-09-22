@@ -171,6 +171,15 @@ skillstar team notes
 skillstar team used pr-review
 ```
 
+### 项目技能 MCP
+
+`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。
+
+```bash
+skillstar mcp serve --stdio
+skillstar mcp approve <plan_id>
+```
+
 ### 创建与发布
 
 ```bash

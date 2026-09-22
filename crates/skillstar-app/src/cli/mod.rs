@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod install;
 mod manage;
+mod mcp_approve;
 mod team;
 
 pub use commands::*;
@@ -114,6 +115,11 @@ pub enum Commands {
     Publish,
     /// Force launch GUI mode
     Gui,
+    /// Terminal commands for the project-skill MCP. `serve` is handled before Clap.
+    Mcp {
+        #[command(subcommand)]
+        command: McpCliCommand,
+    },
     /// Team intelligence: recall, health, friction notes, digest
     Team {
         #[command(subcommand)]
@@ -188,6 +194,17 @@ pub enum TeamCommand {
     },
 }
 
+/// Subcommands of `skillstar mcp` that a person runs in a terminal.
+/// `mcp serve` is dispatched before Clap.
+#[derive(Subcommand)]
+pub enum McpCliCommand {
+    /// Show a plan diff and record a SkillStar approval
+    Approve {
+        /// Plan id from `recommend_project_skills`
+        plan_id: String,
+    },
+}
+
 /// Options passed to the install handler.
 pub struct InstallOpts<'a> {
     pub url: &'a str,
@@ -259,6 +276,9 @@ pub fn run(args: Vec<String>, migrate_and_run: fn()) {
         Commands::Init { name } => cmd_init(name.as_deref()),
         Commands::Publish => cmd_publish(),
         Commands::Gui => println!("Launching SkillStar GUI..."),
+        Commands::Mcp { command } => match command {
+            McpCliCommand::Approve { plan_id } => mcp_approve::cmd_approve(&plan_id),
+        },
         Commands::Team { command } => match command {
             TeamCommand::Recall { query, limit, json } => team::cmd_recall(&query, limit, json),
             TeamCommand::Health { json } => team::cmd_health(json),

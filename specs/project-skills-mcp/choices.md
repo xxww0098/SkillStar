@@ -118,3 +118,11 @@
 - **表单字段是 `plan_hash`、`root`、`will_register`、`owner_id`、`affected_agents`、`changes`。** 每一项都必须和当前计划一致。技能清单放在 `changes` 文本里，因为 elicitation schema 只允许原始类型。说明文字在 `message`。
 - **确认发生在项目写锁之外。** 用户拒绝、取消或 120 秒超时都不写批准。接受后才 `record_from_elicitation`，然后调用领域 apply。
 - **协商下来的协议仍是 `2025-11-25`。** 因此 SEP-2260 对 `2026-07-28` 的严格请求关联不会拦住这次 `elicitation/create`。请求仍在处理工具调用的任务里发出。
+
+## 15 CLI 批准
+
+### 已定，按这个做
+
+- **只有 `mcp serve` 进入 stdio serve。** `mcp approve` 跳过 askpass，然后走普通 CLI。差异打在 CLI stdout，不进 serve。
+- **确认行去掉末尾换行后必须等于 `approve <plan_hash>`。** stdin 读到 EOF 且不是终端时，按非交互失败，不写批准。
+- **CLI 复用 elicitation 的同一段差异文本。** 不另写一套计划摘要。

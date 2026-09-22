@@ -359,6 +359,10 @@ fn plan_acceptance(plan: &DeploymentPlan) -> PlanAcceptance {
     }
 }
 
+pub(crate) fn plan_confirmation(plan: &DeploymentPlan) -> String {
+    confirmation_message(&plan_acceptance(plan))
+}
+
 fn confirmation_message(acceptance: &PlanAcceptance) -> String {
     format!(
         "Confirm this project skill deployment.\nroot: {root}\nwill_register: {will}\nowner: {owner}\naffected_agents: {affected}\nchanges:\n{changes}\nplan_hash: {hash}\nSubmit these values unchanged.",

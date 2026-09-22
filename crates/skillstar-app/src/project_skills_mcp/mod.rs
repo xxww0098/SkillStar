@@ -5,6 +5,7 @@
 
 pub mod apply;
 pub mod approval;
+pub mod cli_approve;
 pub mod inspect;
 pub mod plan;
 pub mod protocol;
@@ -12,7 +13,8 @@ pub mod ranker;
 pub mod recommend;
 mod stdio;
 
-pub use stdio::{is_mcp_invocation, serve, serve_with};
+pub use cli_approve::run_approve;
+pub use stdio::{is_mcp_invocation, is_mcp_serve, serve, serve_with};
 
 #[cfg(test)]
 mod mcp_stdio_tests;

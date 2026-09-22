@@ -10,11 +10,15 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     // MCP serve must run before askpass. Askpass prints to stdout and returns
     // when SKILLSTAR_GIT_ASKPASS_MODE=1, which would swallow the JSON-RPC stream.
-    if skillstar_app::project_skills_mcp::is_mcp_invocation(&args) {
+    // Other `mcp` commands, including `mcp approve`, also skip askpass, then
+    // use the normal CLI so their text stays out of the serve stdout.
+    if skillstar_app::project_skills_mcp::is_mcp_serve(&args) {
         let code = skillstar_app::project_skills_mcp::serve();
         std::process::exit(code);
     }
-    if skillstar_git::transport::handle_internal_askpass(&args) {
+    if !skillstar_app::project_skills_mcp::is_mcp_invocation(&args)
+        && skillstar_git::transport::handle_internal_askpass(&args)
+    {
         return;
     }
 

@@ -15,6 +15,12 @@ pub fn is_mcp_invocation(args: &[String]) -> bool {
     args.get(1).map(String::as_str) == Some("mcp")
 }
 
+/// `skillstar mcp serve ...` stays on the stdio serve path, including a
+/// missing `--stdio`, so the usage error does not fall through to the CLI.
+pub fn is_mcp_serve(args: &[String]) -> bool {
+    is_mcp_invocation(args) && args.get(2).map(String::as_str) == Some("serve")
+}
+
 /// Run the stdio server, or report a usage error on stderr.
 ///
 /// Returns a process exit code. Does not call marketplace snapshot

@@ -1,6 +1,6 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use super::{is_mcp_invocation, serve_with};
+use super::{is_mcp_invocation, is_mcp_serve, serve_with};
 use crate::cli::{is_cli_subcommand, is_gui_force_arg};
 use crate::test_support::ENV_LOCK;
 
@@ -112,21 +112,31 @@ fn askpass_env_does_not_swallow_mcp() {
     let previous = std::env::var_os("SKILLSTAR_GIT_ASKPASS_MODE");
     unsafe { std::env::set_var("SKILLSTAR_GIT_ASKPASS_MODE", "1") };
 
-    let args = vec![
+    let serve_args = vec![
         "skillstar".into(),
         "mcp".into(),
         "serve".into(),
         "--stdio".into(),
     ];
-    let swallowed = if is_mcp_invocation(&args) {
-        false
-    } else {
-        skillstar_git::transport::handle_internal_askpass(&args)
+    let approve_args = vec![
+        "skillstar".into(),
+        "mcp".into(),
+        "approve".into(),
+        "abcd".into(),
+    ];
+    let swallowed = |args: &[String]| {
+        if is_mcp_serve(args) || is_mcp_invocation(args) {
+            false
+        } else {
+            skillstar_git::transport::handle_internal_askpass(args)
+        }
     };
 
     unsafe { restore_env("SKILLSTAR_GIT_ASKPASS_MODE", previous) };
-    assert!(is_mcp_invocation(&args));
-    assert!(!swallowed);
+    assert!(is_mcp_serve(&serve_args));
+    assert!(!is_mcp_serve(&approve_args));
+    assert!(!swallowed(&serve_args));
+    assert!(!swallowed(&approve_args));
 }
 
 unsafe fn restore_env(key: &str, previous: Option<std::ffi::OsString>) {
