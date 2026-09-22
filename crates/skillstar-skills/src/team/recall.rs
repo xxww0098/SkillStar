@@ -82,6 +82,67 @@ pub fn recall(query: &str, limit: usize, now: DateTime<Utc>) -> Result<Vec<Recal
     Ok(hits)
 }
 
+/// BM25 over installed skills only. Does not read or write `state/team.json`.
+pub struct InstalledSkillHit {
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+    pub score: f32,
+}
+
+pub fn search_installed_skills(
+    query: &str,
+    limit: usize,
+) -> Result<Vec<InstalledSkillHit>, AppError> {
+    let tokens = tokenize(query);
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 12);
+    let docs = skill_docs()?;
+    if docs.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(score_docs(&tokens, &docs)
+        .into_iter()
+        .take(limit)
+        .map(|(doc, score)| InstalledSkillHit {
+            id: doc.id.clone(),
+            title: doc.title.clone(),
+            snippet: doc.snippet.clone(),
+            score,
+        })
+        .collect())
+}
+
+fn skill_docs() -> Result<Vec<Doc>, AppError> {
+    let mut docs = Vec::new();
+    for name in installed_skill_names() {
+        let Ok(raw) = read_skill_text(&name) else {
+            continue;
+        };
+        let parsed = parse_skill_content(name.clone(), raw);
+        let description = parsed.description.clone().unwrap_or_default();
+        let body = parsed.content.trim();
+        let snippet = if description.is_empty() {
+            snippet_of(body)
+        } else {
+            description.clone()
+        };
+        let weighted = format!("{name} {name} {name} {name} {description} {description} {body}");
+        docs.push(Doc {
+            kind: RecallKind::Skill,
+            id: name.clone(),
+            title: name.clone(),
+            snippet,
+            skill_name: Some(name),
+            tokens: tokenize(&weighted),
+            neighbors: Vec::new(),
+        });
+    }
+    Ok(docs)
+}
+
 pub(crate) fn tokenize(query: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut latin = String::new();
@@ -144,31 +205,7 @@ fn is_stopword(token: &str) -> bool {
 }
 
 fn corpus() -> Result<Vec<Doc>, AppError> {
-    let mut docs = Vec::new();
-    for name in installed_skill_names() {
-        let Ok(raw) = read_skill_text(&name) else {
-            continue;
-        };
-        let parsed = parse_skill_content(name.clone(), raw);
-        let description = parsed.description.clone().unwrap_or_default();
-        let body = parsed.content.trim();
-        let snippet = if description.is_empty() {
-            snippet_of(body)
-        } else {
-            description.clone()
-        };
-        let weighted = format!("{name} {name} {name} {name} {description} {description} {body}");
-        docs.push(Doc {
-            kind: RecallKind::Skill,
-            id: name.clone(),
-            title: name.clone(),
-            snippet,
-            skill_name: Some(name),
-            tokens: tokenize(&weighted),
-            neighbors: Vec::new(),
-        });
-    }
-
+    let mut docs = skill_docs()?;
     let store = store::load()?;
     let mut neighbors: HashMap<String, HashSet<String>> = HashMap::new();
     for learning in &store.learnings {
