@@ -146,6 +146,12 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("github-copilot"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "windsurf",
+        display_name: "Windsurf",
+        catalog_id: Some("windsurf"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.

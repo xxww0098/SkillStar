@@ -1,9 +1,5 @@
 //! Windsurf quota, browser login, and local/token import.
 //!
-//! Not registered in `dispatch` or `start_login`. The catalog row owns that.
-
-#![cfg_attr(not(test), allow(dead_code))]
-
 mod import;
 mod login;
 mod quota;

@@ -63,6 +63,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "xai" => xai::fetch(subscription).await,
         "anthropic" => anthropic::fetch(subscription).await,
         "github-copilot" => github_copilot::fetch(subscription).await,
+        "windsurf" => windsurf::fetch(subscription).await,
         // OpenCode is Cookie/Manual only (`catalog.rs`). Its OAuth fetcher was
         // 265 lines that never issued a request — it only ever returned this
         // sentence. Legacy rows saved before the catalog narrowed still land
@@ -99,6 +100,7 @@ pub async fn start_login(
         // the local store and resolves the pending login immediately.
         "anthropic" => anthropic::start_login(region, target_subscription_id).await,
         "github-copilot" => github_copilot::start_login(region, target_subscription_id).await,
+        "windsurf" => windsurf::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }
 }

@@ -81,6 +81,10 @@ const CATEGORY_KEYS: Record<string, string> = {
   "Inline Suggestions": "usage.copilotInlineSuggestions",
   "Chat messages": "usage.copilotChatMessages",
   "Premium requests": "usage.copilotPremiumRequests",
+  "User Prompt credits": "usage.windsurfPromptCredits",
+  "Add-on prompt credits": "usage.windsurfAddonCredits",
+  Daily: "usage.windsurfDaily",
+  Weekly: "usage.windsurfWeekly",
 };
 
 const WINDOW_KEYS: Record<string, string> = {

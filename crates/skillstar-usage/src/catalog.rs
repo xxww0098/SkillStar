@@ -168,6 +168,16 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "USD",
             "https://github.com/settings/copilot",
         ),
+        entry(
+            "windsurf",
+            "Windsurf",
+            "Codeium Windsurf",
+            CatalogTier::OAuth,
+            OAUTH_TOKEN_IMPORT,
+            "09B6A2",
+            "USD",
+            "https://windsurf.com",
+        ),
         // ── Tier 2: API Key ────────────────────────────────────────────
         entry(
             "deepseek",
@@ -269,7 +279,7 @@ mod tests {
 
     #[test]
     fn catalog_has_13_entries() {
-        assert_eq!(catalog().len(), 13);
+        assert_eq!(catalog().len(), 14);
     }
 
     #[test]
@@ -288,7 +298,7 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 6);
+        assert_eq!(oauth, 7);
         assert_eq!(api_key, 5);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);

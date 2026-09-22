@@ -37,6 +37,7 @@ const THEMES: Record<string, BrandTheme> = {
   anthropic: { header: ["#A8412A", "#D97757"], bar: ["#D97757", "#C15F3C"], fg: "#ffffff", glow: "#D97757" },
   // GitHub ink. The bar stays on Copilot purple/blue so a near-black brand still reads.
   "github-copilot": { header: ["#24292F", "#0D1117"], bar: ["#8250DF", "#0969DA"], fg: "#ffffff", glow: "#8250DF" },
+  windsurf: { header: ["#09B6A2", "#04685C"], bar: ["#09B6A2", "#0E8F7E"], fg: "#ffffff", glow: "#09B6A2" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

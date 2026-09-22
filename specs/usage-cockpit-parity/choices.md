@@ -102,6 +102,12 @@ xAI 完成登录时仍要求 `auth_mode == OAuth`。这个 provider 没有 token
 
 判定：就这么做。四种面板有组件测试。这轮没有截图终审。
 
+### Windsurf 没有自定义 scheme
+
+cockpit 里没有 `windsurf://`。登录用本地回调。共享 loopback 只认 `code`，所以 implicit 的 `access_token` 由 Windsurf 模块自己的监听器收。`provider_state` 是明文 JSON，里面是 apiKey，必要时还有 apiServerUrl 和 auth1Token。`auth1_` 不跑 Devin 交换。本机导入不刷新配额，只把行存下来。
+
+判定：就这么做。真浏览器登录和 Windsurf 重启还没做，不降级。
+
 ### OAuth 完成后只重写 IDE 和 xAI 的本机凭据
 
 已置顶的卡在登录完成时，原先只有 xAI 和 Antigravity 会再写一次本机文件。注册表落地时一度改成「凡是能切号的都重写」，那样 Codex 和 OpenCode 也会被再写一遍，但它们的登录过程自己已经写过 CLI 文件。收成：有 IDE 适配器（Antigravity、Cursor），或者 catalog 是 `xai`。

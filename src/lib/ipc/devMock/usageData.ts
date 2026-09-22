@@ -82,6 +82,18 @@ export const USAGE_CATALOG = [
     regions: [],
   },
   {
+    id: "windsurf",
+    display_name: "Windsurf",
+    description: "Codeium Windsurf",
+    tier: "o-auth",
+    auth_modes: ["o-auth", "token-import"],
+    brand_color: "09B6A2",
+    default_currency: "USD",
+    subscription_url: "https://windsurf.com",
+    warning: null,
+    regions: [],
+  },
+  {
     id: "deepseek",
     display_name: "DeepSeek",
     description: "API Key 余额",

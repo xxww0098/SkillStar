@@ -33,6 +33,15 @@ fn import_cursor() -> LocalImportFuture {
     Box::pin(crate::fetchers::oauth::cursor_import::import_from_local())
 }
 
+fn import_windsurf() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::windsurf::import_from_local()?;
+        let sub = crate::fetchers::oauth::windsurf::oauth_row_from_imported(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("Windsurf 订阅保存失败：{err}")))
+    })
+}
+
 const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "codex",
@@ -45,6 +54,10 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "cursor",
         import_from_local: import_cursor,
+    },
+    LocalImporter {
+        catalog_id: "windsurf",
+        import_from_local: import_windsurf,
     },
 ];
 

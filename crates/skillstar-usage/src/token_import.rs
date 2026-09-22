@@ -32,10 +32,16 @@ struct TokenImporter {
 }
 
 /// Production importers. One row per catalog that accepts a pasted credential.
-const TOKEN_IMPORTERS: &[TokenImporter] = &[TokenImporter {
-    catalog_id: "github-copilot",
-    import_from_token: crate::fetchers::oauth::github_copilot::import_from_token,
-}];
+const TOKEN_IMPORTERS: &[TokenImporter] = &[
+    TokenImporter {
+        catalog_id: "github-copilot",
+        import_from_token: crate::fetchers::oauth::github_copilot::import_from_token,
+    },
+    TokenImporter {
+        catalog_id: "windsurf",
+        import_from_token: crate::fetchers::oauth::windsurf::import_from_token,
+    },
+];
 
 pub fn token_import_supported(catalog_id: &str) -> bool {
     importer_for(catalog_id).is_some()

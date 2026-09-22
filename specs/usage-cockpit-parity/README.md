@@ -1,15 +1,15 @@
 # Usage × cockpit-tools 对齐 — Spec
 
-状态：active（8/27：01–08）
+状态：active（10/27：01–10）
 更新：2026-09-22
 
 ## Next Agent Prompt
 
 你从分支 `feat/usage-cockpit-parity` 接续。主工作区 `main` 上有无关未提交改动，不要混进提交，也不要在那个脏工作区里改本特性。
 
-- **当前进度**：01–08 完成。决定见 `choices.md`。四个 spike 只证明了本地往返；真钥匙串、Windsurf 重启、ExchangeToken、ZCode app 都还没验，所以不降级。
-- **下一个拾取点**：`slices/09-github-copilot.md`。之后各 provider 的 (a) 片可并行，但都要改 `catalog.rs`、`identity.rs`、`fetchers/oauth/mod.rs`、`token_import.rs`、i18n 和 devMock。并行时只有一个 agent 改这些共享文件，其它 agent 只加自己的 fetcher 文件。
-- **顺序**：09，然后 10/12/14/16/18/20/22 的 (a)，各自的 (b) 紧跟。24 等全部 (b)。
+- **当前进度**：01–10 完成。GitHub Copilot 和 Windsurf 已进 catalog。决定见 `choices.md`。四个 spike 和这两家登录都只证明了本地测试；真账号、真钥匙串、Windsurf 重启都还没验，所以不降级。
+- **下一个拾取点**：`slices/11-windsurf-writeback-switch.md` 与 `slices/12-kiro-quota-login.md` 可同时做。11 改 IDE 适配器和 Windsurf 写回；12 只新增 `fetchers/oauth/kiro/`，不要改 catalog、identity、`oauth/mod.rs` 的 dispatch、`token_import.rs`、i18n、devMock。集成时再注册 Kiro。
+- **顺序**：剩下的 (a)/(b) 按 provider 成对推进。24 等全部 (b)。
 - **每次切片收尾**：更新本节的进度与下一个拾取点，把静默决定补进 `choices.md`。
 
 ## 目标
