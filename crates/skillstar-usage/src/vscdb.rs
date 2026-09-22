@@ -1,4 +1,4 @@
-//! Read plaintext keys from VS Code `state.vscdb` (ItemTable).
+//! Read and write plaintext keys in VS Code `state.vscdb` (ItemTable).
 
 use std::path::Path;
 
@@ -76,38 +76,80 @@ fn read_item_strings(db_path: &Path, keys: &[&str]) -> UsageResult<Vec<Option<St
 }
 
 fn write_item_strings(db_path: &Path, items: &[(&str, &str)]) -> UsageResult<()> {
+    write_labeled_items(db_path, "Cursor", items)
+}
+
+/// Insert or replace ItemTable rows in one transaction.
+///
+/// `label` is the product name interpolated into IO errors (Cursor,
+/// Antigravity, …). An empty `items` slice does not touch the file.
+pub(crate) fn write_labeled_items(
+    db_path: &Path,
+    label: &str,
+    items: &[(&str, &str)],
+) -> UsageResult<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    in_item_table_tx(db_path, label, |tx| {
+        for (key, value) in items {
+            tx.execute(
+                "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
+                (*key, *value),
+            )
+            .map_err(|error| UsageError::Other(format!("写入 {label} {key} 失败：{error}")))?;
+        }
+        Ok(())
+    })
+}
+
+/// Delete ItemTable rows in one transaction. Missing keys are not an error.
+/// An empty `keys` slice does not touch the file.
+pub(crate) fn delete_labeled_items(db_path: &Path, label: &str, keys: &[&str]) -> UsageResult<()> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    in_item_table_tx(db_path, label, |tx| {
+        for key in keys {
+            tx.execute("DELETE FROM ItemTable WHERE key = ?1", [*key])
+                .map_err(|error| UsageError::Other(format!("删除 {label} {key} 失败：{error}")))?;
+        }
+        Ok(())
+    })
+}
+
+fn in_item_table_tx(
+    db_path: &Path,
+    label: &str,
+    mutate: impl FnOnce(&rusqlite::Transaction<'_>) -> UsageResult<()>,
+) -> UsageResult<()> {
     if !db_path.exists() {
         return Err(UsageError::Other(format!(
-            "未找到 Cursor state.vscdb：{}。请先启动 Cursor 并完成一次登录",
+            "未找到 {label} state.vscdb：{}。请先启动 {label} 并完成一次登录",
             db_path.display()
         )));
     }
     let conn = rusqlite::Connection::open(db_path).map_err(|error| {
         UsageError::Io(std::io::Error::other(format!(
-            "打开 Cursor state.vscdb：{error}"
+            "打开 {label} state.vscdb：{error}"
         )))
     })?;
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|error| {
-            UsageError::Other(format!("设置 Cursor state.vscdb 锁等待失败：{error}"))
+            UsageError::Other(format!("设置 {label} state.vscdb 锁等待失败：{error}"))
         })?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)",
         [],
     )
-    .map_err(|error| UsageError::Other(format!("初始化 Cursor ItemTable 失败：{error}")))?;
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|error| UsageError::Other(format!("开启 Cursor state.vscdb 事务失败：{error}")))?;
-    for (key, value) in items {
-        tx.execute(
-            "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
-            (*key, *value),
-        )
-        .map_err(|error| UsageError::Other(format!("写入 Cursor {key} 失败：{error}")))?;
-    }
-    tx.commit()
-        .map_err(|error| UsageError::Other(format!("提交 Cursor state.vscdb 事务失败：{error}")))?;
+    .map_err(|error| UsageError::Other(format!("初始化 {label} ItemTable 失败：{error}")))?;
+    let tx = conn.unchecked_transaction().map_err(|error| {
+        UsageError::Other(format!("开启 {label} state.vscdb 事务失败：{error}"))
+    })?;
+    mutate(&tx)?;
+    tx.commit().map_err(|error| {
+        UsageError::Other(format!("提交 {label} state.vscdb 事务失败：{error}"))
+    })?;
     Ok(())
 }
 
@@ -270,30 +312,11 @@ pub fn write_antigravity_oauth_token(
             email,
         ),
     );
-    let conn = rusqlite::Connection::open(db_path).map_err(|error| {
-        UsageError::Io(std::io::Error::other(format!(
-            "打开 Antigravity state.vscdb：{error}"
-        )))
-    })?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))
-        .map_err(|error| {
-            UsageError::Other(format!("设置 Antigravity state.vscdb 锁等待失败：{error}"))
-        })?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)",
-        [],
-    )
-    .map_err(|error| UsageError::Other(format!("初始化 Antigravity ItemTable 失败：{error}")))?;
-    let tx = conn.unchecked_transaction().map_err(|error| {
-        UsageError::Other(format!("开启 Antigravity state.vscdb 事务失败：{error}"))
-    })?;
-    tx.execute(
-        "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
-        (ANTIGRAVITY_OAUTH_KEY, &encoded),
-    )
-    .map_err(|error| UsageError::Other(format!("写入 Antigravity OAuth 失败：{error}")))?;
-    tx.commit()
-        .map_err(|error| UsageError::Other(format!("提交 Antigravity OAuth 失败：{error}")))?;
+    write_labeled_items(
+        db_path,
+        "Antigravity",
+        &[(ANTIGRAVITY_OAUTH_KEY, encoded.as_str())],
+    )?;
 
     let actual = read_antigravity_refresh_token(db_path)?;
     if actual.as_deref() != Some(refresh_token) {
@@ -402,6 +425,23 @@ mod tests {
                 .expect("mirror read")
                 .as_deref(),
             Some("cursor-access")
+        );
+    }
+
+    #[test]
+    fn missing_cursor_database_names_cursor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let error = write_cursor_oauth_session(
+            &dir.path().join("state.vscdb"),
+            "cursor-access",
+            "cursor-refresh",
+            None,
+            None,
+        )
+        .expect_err("missing database");
+        assert!(
+            error.to_string().contains("未找到 Cursor state.vscdb"),
+            "{error}"
         );
     }
 }

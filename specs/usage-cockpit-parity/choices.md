@@ -1,0 +1,73 @@
+# Choices — usage-cockpit-parity
+
+静默决定。规格没写死、实现时定下来的事。按确信程度从低到高。
+
+## 先看这些
+
+### ZCode 的设置文件叫 `setting.json`
+
+规格写的是 `settings.json`。cockpit 实际读的是 `~/.zcode/v2/setting.json`，`dataBaseDir` 指到 `{dir}/.zcode`。路径函数按 cockpit 来，测试锁了错误文件名会被忽略。
+
+判定：就这么做。和参照实现一致，规格笔误。
+
+### 钥匙串查询必须带账号
+
+切片 03 先做成只按 server 找第一条。Zed 的钥匙串项是 `server=https://zed.dev` 加 `account=user_id`，不带账号会读错人。`find_internet_password(server, account)` 两个都传给 `security`。删除仍按 server 循环删光该 server 下的 internet-password，因为一条 `security delete` 只删一项。
+
+判定：查询带账号。删除范围等切片 21 写回时再核对，现在没有调用方。
+
+### `SubscriptionBuilder` 收明文再加密
+
+`provider_state(json)` 跟 access token 一样，收明文，`build` 时用现有 AES-GCM 写进 `provider_state_encrypted`。JSON 形状留给各 provider。现在没有生产调用。
+
+判定：就这么做。和同文件其它凭据字段同一条路。
+
+## 已经定了
+
+### 窄 patch 只写在 `apply_oauth_credentials`
+
+`apply_fetcher_state` 本来就会调用它，所以两条 refresh 路径都会轮换 `provider_state_encrypted`。没有再写一遍。
+
+判定：就这么做。
+
+### 通用更新拒绝已有的 token-import 行
+
+更新入参里没有 `auth_mode`。拒绝的是库里这行已经是 TokenImport，避免编辑表单改写导入行。创建路径拒绝传入的模式。
+
+判定：就这么做。
+
+### xAI 的 OAuth 检查不放宽
+
+xAI 完成登录时仍要求 `auth_mode == OAuth`。这个 provider 没有 token-import。
+
+判定：就这么做。
+
+### `cursor.rs` 只补了一个字段初值
+
+新字段没有 `Default`，Cursor 的手写结构体字面量必须写 `provider_state_encrypted: None`，否则编不过。登录逻辑没动。
+
+判定：就这么做。这是编译要求，不是行为变更。
+
+### 订阅 JSON 落盘本来就是原子的
+
+`write_json_unlocked` 已经走 `fs_ops::atomic_write`。把它标成 `pub(crate)`，`tool_store::atomic_json::write` 只是这一个实现的薄包装。
+
+判定：就这么做。不另写一套原子写。
+
+### 三平台路径用纯函数测
+
+`DesktopOs` 把 macOS / Windows / Linux 的相对路径做成不依赖宿主的函数，一个测试进程锁全部平台。沙箱只认非空的 `SKILLSTAR_TOOL_SYNC_HOME`。测试不改 `HOME`。
+
+判定：就这么做。
+
+### Qoder 只在已有文件里挑路径
+
+候选顺序跟 cockpit：`User/globalStorage/state.vscdb`，然后 `globalStorage/state.vscdb`，然后 `state.vscdb`。没有文件就不建库。
+
+判定：就这么做。建库是注入，不是路径解析。
+
+### AWS SSO 缓存不在 Kiro 目录里
+
+三平台都是 `~/.aws/sso/cache`。
+
+判定：就这么做。跟 cockpit 一致。

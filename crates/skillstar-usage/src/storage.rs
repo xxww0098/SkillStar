@@ -110,7 +110,10 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &PathBuf) -> UsageRes
     Ok(serde_json::from_str(&raw)?)
 }
 
-fn write_json_unlocked<T: Serialize>(path: &Path, value: &T) -> UsageResult<()> {
+/// Pretty-print JSON and replace `path` via `fs_ops::atomic_write`
+/// (same-directory temp file, fsync, rename). Subscription callers hold
+/// `storage_write_guard` first; other JSON files can call this directly.
+pub(crate) fn write_json_unlocked<T: Serialize>(path: &Path, value: &T) -> UsageResult<()> {
     let raw = serde_json::to_string_pretty(value)?;
     skillstar_core::infra::fs_ops::atomic_write(path, raw.as_bytes())?;
     Ok(())

@@ -45,7 +45,6 @@
 ## 会改变本片的人类反馈
 
 - 若你更希望复用 `platform_token_encrypted` 而不是新增字段——现在说，这是最后一个便宜时点。
-
 ## 结果
 
 已落地，无新 catalog provider。
