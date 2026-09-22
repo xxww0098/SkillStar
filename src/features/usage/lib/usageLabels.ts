@@ -85,6 +85,8 @@ const CATEGORY_KEYS: Record<string, string> = {
   "Add-on prompt credits": "usage.windsurfAddonCredits",
   Daily: "usage.windsurfDaily",
   Weekly: "usage.windsurfWeekly",
+  Credits: "usage.kiroCredits",
+  "Free trial": "usage.kiroFreeTrial",
 };
 
 const WINDOW_KEYS: Record<string, string> = {
@@ -98,6 +100,8 @@ const WINDOW_KEYS: Record<string, string> = {
   模型额度: "usage.windowModelQuota",
   "Model quota": "usage.windowModelQuota",
   Copilot: "usage.windowCopilot",
+  Credits: "usage.kiroCredits",
+  "Free trial": "usage.kiroFreeTrial",
   本月: "usage.defaultPeriod",
 };
 

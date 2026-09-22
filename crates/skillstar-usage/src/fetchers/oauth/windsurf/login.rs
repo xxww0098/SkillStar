@@ -136,6 +136,7 @@ pub(crate) fn exchanged_to_imported(
         oauth_account_id: email,
         provider_state: state.to_json(),
         currency: None,
+        oauth_region: None,
     }
 }
 

@@ -44,3 +44,28 @@ Kiro 卡选「社交登录（浏览器）」或「AWS IDC（复制验证码→�
 ## 会改变本片的人类反馈
 
 - 若只想要 portal 腿（砍掉 IDC）——说，本片可减半。
+
+## 结果
+
+`kiro` 已进 catalog（OAuth + TokenImport，品牌色 `14B8A6`，续费页 `https://app.kiro.dev/signin`）和 identity。配额、两条登录腿、令牌导入、本机导入都在 `fetchers/oauth/kiro/`。
+
+测试里两条腿都走到了，没有打真实 AWS：
+
+- Portal / Builder ID：PKCE 授权 URL、`/oauth/callback` 与 `/signin/callback` 白名单、`loginOption=builderid|awsidc|internal` 无 code 的明确报错、本地监听、JSON `/oauth/token` 的 `invalid_grant` → AuthRequired。`start_login` 默认 `LocalCallback`。
+- AWS IDC：mock 上 `client/register` → `device_authorization` → `/token`。`authorization_pending` 保持间隔，`slow_down` +5s，然后发 token。`OAuthFlow::RemotePoll` 带 user code。403 不是 AuthRequired；401 / `invalid_grant` 是。
+
+本机导入在 `SKILLSTAR_TOOL_SYNC_HOME` 下读 `~/.aws/sso/cache/kiro-auth-token.json` 和 `<clientIdHash>.json`，并在存在时读 `profile.json` 与 `state.vscdb`。令牌导入接受 refresh token 或 JSON，拒绝垃圾。IDC 的 `clientId` / `clientSecret` / `region` / `startUrl`（以及有则带上的 `profileArn`）在 `provider_state` 明文 JSON 里，由导入管线加密。不写 `platform_token_encrypted`。
+
+注册缓存路径照抄 cockpit `idc_client_registration_path`：40 位小写 hex，否则拒绝，不扫描目录。文件名哈希是 cockpit `compute_idc_client_id_hash`：start URL 的 SHA-1。目录是 `tool_paths::aws_sso_cache_dir()`。
+
+真实登录未联调。
+
+静默决定：
+
+- 默认腿是 portal（社交登录）。`idc` / `aws-idc` 或 AWS region（如 `eu-central-1`）才走 device flow。卡片上 portal 在前。
+- IDC 只用 Builder ID start URL `https://view.awsapps.com/start`，没有 Enterprise URL 输入。
+- `provider_state` 是扁平 JSON，不是 `{idc:{...}}`。
+- Credits 进 monthly 窗口，Free trial 进 weekly；缺字段就不建窗口。`resetOn` 只挂到已有窗口。
+- Portal token 是 JSON；IDC `/token` 是 src-tauri 的 form snake_case。响应同时认 camelCase 和 snake_case。
+- OIDC 客户端名是 `SkillStar Kiro`。不探测 `mwinit`。回调成功页是本地 200，不 302 回 portal。
+- 裸 refresh token 记下 region `us-east-1`。没有 client 凭据时刷新走 portal `refreshToken`。`oauth_account_id` 是 user id，邮箱只做标题。
