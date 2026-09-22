@@ -38,6 +38,16 @@ export function mockOAuthStart(args: Record<string, unknown> = {}): OAuthStart {
       interval_secs: 1,
     };
   }
+  if ((catalog === "codebuddy" || catalog === "codebuddy-cn") && args.flow == null) {
+    return {
+      ...base,
+      auth_url: catalog === "codebuddy-cn" ? "https://www.codebuddy.cn/login" : "https://www.codebuddy.ai/login",
+      flow: "remote-poll",
+      user_code: null,
+      verification_uri: null,
+      interval_secs: 2,
+    };
+  }
   if (requested === "remote-poll") {
     const verification =
       typeof args.verification_uri === "string" ? args.verification_uri : "https://example.test/device";

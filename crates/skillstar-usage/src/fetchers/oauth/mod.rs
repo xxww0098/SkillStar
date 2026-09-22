@@ -20,6 +20,7 @@ pub mod codex;
 pub(crate) mod common;
 pub mod cursor;
 // Local import only. `cursor.rs` stays untouched.
+pub mod codebuddy;
 pub(crate) mod cursor_import;
 pub mod github_copilot;
 pub mod kiro;
@@ -68,6 +69,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "windsurf" => windsurf::fetch(subscription).await,
         "kiro" => kiro::fetch(subscription).await,
         "qoder" => qoder::fetch(subscription).await,
+        "codebuddy" | "codebuddy-cn" => codebuddy::fetch(subscription).await,
         // OpenCode is Cookie/Manual only (`catalog.rs`). Its OAuth fetcher was
         // 265 lines that never issued a request — it only ever returned this
         // sentence. Legacy rows saved before the catalog narrowed still land
@@ -107,6 +109,9 @@ pub async fn start_login(
         "windsurf" => windsurf::start_login(region, target_subscription_id).await,
         "kiro" => kiro::start_login(region, target_subscription_id).await,
         "qoder" => qoder::start_login(region, target_subscription_id).await,
+        "codebuddy" | "codebuddy-cn" => {
+            codebuddy::start_login(catalog_id, region, target_subscription_id).await
+        }
         other => Err(super::unsupported(other)),
     }
 }

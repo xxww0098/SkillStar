@@ -41,6 +41,9 @@ const THEMES: Record<string, BrandTheme> = {
   kiro: { header: ["#0F766E", "#14B8A6"], bar: ["#14B8A6", "#0D9488"], fg: "#ffffff", glow: "#14B8A6" },
   // Qoder icon green is #2ADB5C. The header stops stay darker so white type holds.
   qoder: { header: ["#0B6B2A", "#1FA34A"], bar: ["#2ADB5C", "#16A34A"], fg: "#ffffff", glow: "#2ADB5C" },
+  // Lobe CodeBuddy: #6C4DFF → #2EA99D. CN uses the teal stop so the two cards differ.
+  codebuddy: { header: ["#3A2A99", "#6C4DFF"], bar: ["#6C4DFF", "#2EA99D"], fg: "#ffffff", glow: "#6C4DFF" },
+  "codebuddy-cn": { header: ["#145E57", "#2EA99D"], bar: ["#2EA99D", "#6C4DFF"], fg: "#ffffff", glow: "#2EA99D" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

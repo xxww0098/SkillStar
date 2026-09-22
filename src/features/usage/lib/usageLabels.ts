@@ -87,6 +87,12 @@ const CATEGORY_KEYS: Record<string, string> = {
   Weekly: "usage.windsurfWeekly",
   Credits: "usage.kiroCredits",
   "Free trial": "usage.kiroFreeTrial",
+  Usage: "usage.codebuddyUsage",
+  "Add-on": "usage.codebuddyAddon",
+  Basic: "usage.codebuddyBasic",
+  Pro: "usage.codebuddyPro",
+  Enterprise: "usage.codebuddyEnterprise",
+  Activity: "usage.codebuddyActivity",
 };
 
 const WINDOW_KEYS: Record<string, string> = {
@@ -103,6 +109,12 @@ const WINDOW_KEYS: Record<string, string> = {
   Credits: "usage.kiroCredits",
   "Free trial": "usage.kiroFreeTrial",
   本月: "usage.defaultPeriod",
+  Usage: "usage.codebuddyUsage",
+  "Add-on": "usage.codebuddyAddon",
+  Basic: "usage.codebuddyBasic",
+  Pro: "usage.codebuddyPro",
+  Enterprise: "usage.codebuddyEnterprise",
+  Activity: "usage.codebuddyActivity",
 };
 
 export function localizeCategoryLabel(label: string, t: TFunction): string {
