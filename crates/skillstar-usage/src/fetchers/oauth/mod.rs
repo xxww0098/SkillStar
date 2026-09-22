@@ -22,6 +22,8 @@ pub mod cursor;
 // Local import only. `cursor.rs` stays untouched.
 pub(crate) mod cursor_import;
 pub mod xai;
+// registration lands with the catalog row
+pub mod windsurf;
 
 // Zed callback RSA only. Not registered in `dispatch`.
 #[allow(dead_code)]
