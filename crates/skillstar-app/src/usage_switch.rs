@@ -32,9 +32,13 @@
 //! | `qoder` | Qoder IDE | `state.vscdb` (`secret://aicoding.auth.*`) |
 //! | `codebuddy` | CodeBuddy IDE | `state.vscdb` (`secret://` `planning-genie.new.accessToken`) |
 //! | `codebuddy-cn` | CodeBuddy CN IDE | `state.vscdb` (`secret://` `planning-genie.new.accessTokencn`) |
+//! | `trae` | Trae IDE | `storage.json` (`iCubeAuthInfo://icube.cloudide`) |
+//! | `trae-solo` | TRAE SOLO IDE | `storage.json` (same iCube auth keys) |
+//! | `trae-cn` | Trae CN IDE | `storage.json` (same iCube auth keys) |
+//! | `trae-solo-cn` | TRAE SOLO CN IDE | `storage.json` (same iCube auth keys) |
 //!
 //! CLI support is derived from [`target_for`]. Antigravity, Cursor, Windsurf,
-//! Kiro, Qoder, CodeBuddy, and CodeBuddy CN are [`ide::IdeCredentialAdapter`]s
+//! Kiro, Qoder, CodeBuddy, and Trae are [`ide::IdeCredentialAdapter`]s
 //! because they do not fit the whole-file JSON/symlink model.
 //!
 //! Domain glue lives in `skillstar-app` because it bridges `skillstar-usage`
@@ -52,6 +56,7 @@ mod keychain;
 mod kiro;
 mod qoder;
 mod target;
+mod trae;
 mod windsurf;
 
 use std::collections::HashMap;
@@ -245,7 +250,7 @@ pub struct ActivationResult {
 /// lock stays.
 pub struct CliRefreshLease {
     target: Option<&'static dyn CliCredentialTarget>,
-    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy. Those stores do not use the symlink file lease.
+    /// Antigravity / Cursor / Windsurf / Kiro / Qoder / CodeBuddy / Trae. Those stores do not use the symlink file lease.
     ide: Option<&'static dyn ide::IdeCredentialAdapter>,
     _lease: Option<CustodyLease>,
 }
@@ -595,6 +600,10 @@ mod tests {
             "cursor",
             "kiro",
             "qoder",
+            "trae",
+            "trae-cn",
+            "trae-solo",
+            "trae-solo-cn",
             "windsurf",
         ] {
             assert!(supports_switch(catalog), "{catalog}");
@@ -623,6 +632,10 @@ mod tests {
                 "cursor",
                 "kiro",
                 "qoder",
+                "trae",
+                "trae-cn",
+                "trae-solo",
+                "trae-solo-cn",
                 "windsurf",
             ]
         );
@@ -661,6 +674,10 @@ mod tests {
         forget_subscription_session("qoder", "missing").unwrap();
         forget_subscription_session("codebuddy", "missing").unwrap();
         forget_subscription_session("codebuddy-cn", "missing").unwrap();
+        forget_subscription_session("trae", "missing").unwrap();
+        forget_subscription_session("trae-cn", "missing").unwrap();
+        forget_subscription_session("trae-solo", "missing").unwrap();
+        forget_subscription_session("trae-solo-cn", "missing").unwrap();
         forget_subscription_session("deepseek", "missing").unwrap();
     }
 

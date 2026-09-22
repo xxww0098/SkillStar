@@ -36,3 +36,26 @@
 ## 会改变本片的人类反馈
 
 - 无。
+
+## 结果
+
+`trae` / `trae-solo` / `trae-cn` / `trae-solo-cn` 共用 `usage_switch/trae.rs` 一个 `IdeCredentialAdapter`，在 `usage_switch/ide.rs` 注册四次。目录仍走 `tool_paths::trae_storage_path_for`。密文是标准 base64 的 `byte_crypto` blob。官方 app 重启未验证。
+
+写入的 iCube 认证键（只替换这些键，不整文件覆盖）：
+
+- 用户认证键：文件里已有 `iCubeAuthInfo://icube.cloudide` 时写它；否则写已有的其它用户认证键（`iCubeAuthInfo://`，排除 `usertag` 和 `icube-dc:`）；都没有时创建默认键。明文含 `platformId` / `platformName` / `authClientId` / `authDomain` / `loginHost`，以及令牌、user id、有的话还有 `deviceKeyPair`。已有未知字段保留；上一账号的令牌、邮箱、过期时间会清掉。
+- 设备键：订阅里有设备密钥，且 `provider_state` 带了 device id，或文件里已经有 `iCubeAuthInfo://icube-dc:<id>` 时，更新那一个槽。不新造 device id。
+
+不写 `iCubeServerData://*`、`iCubeEntitlementInfo://*`、`iCubeAuthInfo://usertag`，也不动其它键。
+
+- activate：文件必须已存在。先整文件滚动备份，内存里拼好再 `atomic_write`。写完解密回读，和准备写入的 JSON 一致才 `set_active_subscription`。回读失败或写入失败都把备份拷回去，不钉 pin。文件被占用时按 0/50/100/200ms 重试，然后明确报错，不做逐键部分写。
+- reconcile：解不出认证键是 Diverged；没有令牌也没有 user id 是 Missing；access token、user id 或 refresh token 对上已有订阅是 LinkedTo，并吸收更新的令牌和设备密钥。
+- forget：只删对得上的用户认证键，以及密钥对得上的 `icube-dc` 槽。其余键留下。`storage.json` 不删。
+
+测试把 `SKILLSTAR_TOOL_SYNC_HOME` 指到临时目录，覆盖 global 与 cn（切换回环覆盖四个变体）。`cargo test -p skillstar-app --locked --lib -- usage_switch::trae` 9 passed。注册表测试 `supports_switch_follows_the_registries` 与 `forgetting_an_ide_card_does_not_need_a_live_store` 也通过。
+
+静默决定：
+
+- 不移植 cockpit `ensure_auth_raw_for_inject` 的整份账号 JSON（server / entitlement / usertag 默认 `"row"`）。SkillStar 没有那些原文，写空的会盖掉 IDE 里已有的键。
+- 没有 storage.json 时不创建文件，报错并保持原 pin。
+- 官方客户端是否正在运行没有探测；只对占用中的写入做短重试。重启换号未验证。
