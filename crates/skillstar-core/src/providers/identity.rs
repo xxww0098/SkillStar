@@ -176,6 +176,30 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("codebuddy-cn"),
         preset_ids: &[],
     },
+    ProviderIdentity {
+        canonical_id: "trae",
+        display_name: "Trae",
+        catalog_id: Some("trae"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae-solo",
+        display_name: "TRAE SOLO",
+        catalog_id: Some("trae-solo"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae-cn",
+        display_name: "Trae CN",
+        catalog_id: Some("trae-cn"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
+        canonical_id: "trae-solo-cn",
+        display_name: "TRAE SOLO CN",
+        catalog_id: Some("trae-solo-cn"),
+        preset_ids: &[],
+    },
 ];
 
 /// Resolve the canonical identity for a usage-side catalog id.
@@ -248,6 +272,19 @@ mod tests {
                 spec.catalog_id
             );
         }
+    }
+
+    #[test]
+    fn trae_identities_are_subscription_only() {
+        for id in ["trae", "trae-solo", "trae-cn", "trae-solo-cn"] {
+            let identity = identity_for_catalog(id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(identity.canonical_id, id);
+            assert!(identity.preset_ids.is_empty(), "{id}");
+        }
+        assert_ne!(
+            identity_for_catalog("trae").unwrap().display_name,
+            identity_for_catalog("trae-cn").unwrap().display_name
+        );
     }
 
     #[test]

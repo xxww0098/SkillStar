@@ -69,6 +69,58 @@ fn import_codebuddy() -> LocalImportFuture {
     })
 }
 
+fn import_trae_kind(kind: crate::trae_platform::TraePlatformKind) -> LocalImportFuture {
+    Box::pin(async move {
+        let imported = match kind {
+            crate::trae_platform::TraePlatformKind::Trae => {
+                crate::fetchers::oauth::trae::import_from_local()
+            }
+            crate::trae_platform::TraePlatformKind::TraeSolo => {
+                crate::fetchers::oauth::trae::import_from_local_solo()
+            }
+            crate::trae_platform::TraePlatformKind::TraeCn => {
+                crate::fetchers::oauth::trae::import_from_local_cn()
+            }
+            crate::trae_platform::TraePlatformKind::TraeSoloCn => {
+                crate::fetchers::oauth::trae::import_from_local_solo_cn()
+            }
+        }?;
+        let sub = match kind {
+            crate::trae_platform::TraePlatformKind::Trae => {
+                crate::fetchers::oauth::trae::oauth_row_from_imported(imported)
+            }
+            crate::trae_platform::TraePlatformKind::TraeSolo => {
+                crate::fetchers::oauth::trae::oauth_row_from_imported_solo(imported)
+            }
+            crate::trae_platform::TraePlatformKind::TraeCn => {
+                crate::fetchers::oauth::trae::oauth_row_from_imported_cn(imported)
+            }
+            crate::trae_platform::TraePlatformKind::TraeSoloCn => {
+                crate::fetchers::oauth::trae::oauth_row_from_imported_solo_cn(imported)
+            }
+        }?;
+        crate::storage::upsert_subscription(sub).map_err(|err| {
+            crate::UsageError::Other(format!("{} 订阅保存失败：{err}", kind.display_name()))
+        })
+    })
+}
+
+fn import_trae() -> LocalImportFuture {
+    import_trae_kind(crate::trae_platform::TraePlatformKind::Trae)
+}
+
+fn import_trae_solo() -> LocalImportFuture {
+    import_trae_kind(crate::trae_platform::TraePlatformKind::TraeSolo)
+}
+
+fn import_trae_cn() -> LocalImportFuture {
+    import_trae_kind(crate::trae_platform::TraePlatformKind::TraeCn)
+}
+
+fn import_trae_solo_cn() -> LocalImportFuture {
+    import_trae_kind(crate::trae_platform::TraePlatformKind::TraeSoloCn)
+}
+
 fn import_codebuddy_cn() -> LocalImportFuture {
     Box::pin(async {
         let imported = crate::fetchers::oauth::codebuddy::import_from_local_cn()?;
@@ -110,6 +162,22 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "codebuddy-cn",
         import_from_local: import_codebuddy_cn,
+    },
+    LocalImporter {
+        catalog_id: "trae",
+        import_from_local: import_trae,
+    },
+    LocalImporter {
+        catalog_id: "trae-solo",
+        import_from_local: import_trae_solo,
+    },
+    LocalImporter {
+        catalog_id: "trae-cn",
+        import_from_local: import_trae_cn,
+    },
+    LocalImporter {
+        catalog_id: "trae-solo-cn",
+        import_from_local: import_trae_solo_cn,
     },
 ];
 

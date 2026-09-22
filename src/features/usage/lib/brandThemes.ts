@@ -44,6 +44,11 @@ const THEMES: Record<string, BrandTheme> = {
   // Lobe CodeBuddy: #6C4DFF → #2EA99D. CN uses the teal stop so the two cards differ.
   codebuddy: { header: ["#3A2A99", "#6C4DFF"], bar: ["#6C4DFF", "#2EA99D"], fg: "#ffffff", glow: "#6C4DFF" },
   "codebuddy-cn": { header: ["#145E57", "#2EA99D"], bar: ["#2EA99D", "#6C4DFF"], fg: "#ffffff", glow: "#2EA99D" },
+  // Trae green. Solo is ink, CN is a deeper green, SOLO CN is violet so the four cards differ.
+  trae: { header: ["#064E3B", "#12B886"], bar: ["#12B886", "#34D399"], fg: "#ffffff", glow: "#12B886" },
+  "trae-solo": { header: ["#111827", "#0F172A"], bar: ["#12B886", "#34D399"], fg: "#ffffff", glow: "#12B886" },
+  "trae-cn": { header: ["#14532D", "#166534"], bar: ["#22C55E", "#12B886"], fg: "#ffffff", glow: "#22C55E" },
+  "trae-solo-cn": { header: ["#3B0764", "#6D28D9"], bar: ["#A78BFA", "#12B886"], fg: "#ffffff", glow: "#6D28D9" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

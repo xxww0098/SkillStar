@@ -60,6 +60,10 @@ export const LOCAL_IMPORT_CATALOG_IDS = [
   "qoder",
   "codebuddy",
   "codebuddy-cn",
+  "trae",
+  "trae-solo",
+  "trae-cn",
+  "trae-solo-cn",
 ] as const;
 
 /** Backend broadcast when a catalog's active account changes. */
