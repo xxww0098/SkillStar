@@ -31,6 +31,8 @@ pub mod request;
 pub mod storage;
 pub mod subscription;
 pub mod tool_paths;
+pub mod tool_store;
+pub mod trae_platform;
 pub mod urlencode;
 pub mod vscdb;
 
