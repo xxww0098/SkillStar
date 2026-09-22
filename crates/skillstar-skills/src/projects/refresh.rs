@@ -43,6 +43,7 @@ fn refresh_stale_copies_inner(
     project_path: &str,
     only_skills: Option<&[String]>,
 ) -> Result<RefreshStaleCopiesReport> {
+    let _guard = super::write_lock::lock_project_write()?;
     let hub_dir = fs_paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
     let project = ensure_project_root_exists(project_path)?;

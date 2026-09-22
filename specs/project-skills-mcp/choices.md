@@ -22,3 +22,11 @@
 - **两条活记录落到同一规范路径时直接返回错误，`ObservedProject.ambiguous` 在成功结果里恒为 false。** 规格要求结构里有这个状态，也要求此时不写索引。错误字符串含 `ambiguous`，调用方不用再看那个布尔值。
 - **macOS 夹具优先用 `/tmp` 与 `/private/tmp`。** 这台机器上 `/tmp` 是符号链接。若某环境没有这种根，测试改在临时目录里造一条等价符号链接。比较的始终是 canonicalize 之后的路径。
 - **Windows 的越界夹具用已有的 `junction` 依赖造 junction，不新增 crate。** `\\?\` 前缀不单独比较；两边都先 canonicalize 再比。
+
+## 03 写锁
+
+### 已定，按这个做
+
+- **入口函数自己拿锁，不把函数体再缩进进闭包。** `with_project_write_lock` 和 `lock_project_write` 是同一把锁。长函数用守卫，避免把几百行包进一个闭包。
+- **第二把文件描述符上的 `try_lock` 失败，用来证明不是只靠进程内 mutex。** 同进程第二个线程也会失败。没有另起一个 Windows 进程；文件锁 API 就是 `File::try_lock`。
+- **`refresh_stale_copies_strict` 也走这把锁。** 规格点名的是公开的 `refresh_stale_copies`。严格变体写的是同一份清单和目录，所以锁在内部函数上。

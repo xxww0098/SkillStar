@@ -109,6 +109,7 @@ pub fn remove_project(name: &str) -> Result<()> {
 
 /// Update a project's local path and rebuild its symlinks.
 pub fn update_project_path(name: &str, new_path: &str) -> Result<u32> {
+    let _guard = super::write_lock::lock_project_write()?;
     // Validate before mutating the index so we don't persist a broken path.
     let _ = ensure_project_root_exists(new_path)?;
 

@@ -105,6 +105,7 @@ fn build_path_plans<'a>(
 /// instead of running a full project sync, so unmanaged on-disk directories are
 /// left alone.
 pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
+    let _guard = super::write_lock::lock_project_write()?;
     let profiles = agent_profile::list_profiles();
     let mut touched_projects = Vec::new();
 
@@ -179,6 +180,7 @@ pub fn full_sync(
     skills_list: &SkillsList,
     cleanup_agents: Option<&[String]>,
 ) -> Result<u32> {
+    let _guard = super::write_lock::lock_project_write()?;
     let hub_dir = fs_paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
     let project = ensure_project_root_exists(project_path)?;
@@ -268,6 +270,7 @@ pub fn save_and_sync(
     agents: HashMap<String, Vec<String>>,
     deploy_modes: HashMap<String, ProjectDeployMode>,
 ) -> Result<(String, u32)> {
+    let _guard = super::write_lock::lock_project_write()?;
     let entry = register_project(project_path)?;
     let agents = normalize_project_agents(agents);
 
@@ -313,6 +316,7 @@ pub fn save_skills_list_only(
     project_path: &str,
     agents: HashMap<String, Vec<String>>,
 ) -> Result<SkillsList> {
+    let _guard = super::write_lock::lock_project_write()?;
     let entry = register_project(project_path)?;
 
     let profiles = agent_profile::list_profiles();
@@ -361,6 +365,7 @@ pub fn add_skills_to_project_with_mode(
     agent_ids: &[String],
     mode: ProjectDeployMode,
 ) -> Result<u32> {
+    let _guard = super::write_lock::lock_project_write()?;
     let hub_dir = fs_paths::hub_skills_dir();
     let mut seen_skill_names = HashSet::new();
     let deployable_skill_names = skill_names

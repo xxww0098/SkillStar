@@ -19,6 +19,7 @@ mod scan;
 mod store;
 mod sync;
 mod types;
+pub mod write_lock;
 
 pub use types::{
     AmbiguousGroup, CascadeUpdateSummary, DetectedAgent, ImportResult, ImportTarget,
