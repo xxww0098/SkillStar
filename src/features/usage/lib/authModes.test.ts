@@ -22,12 +22,16 @@ describe("selectableAuthModes", () => {
     expect(selectableAuthModes(["api-key"])).toEqual(["api-key"]);
     expect(selectableAuthModes([])).toEqual([]);
   });
+
+  it("keeps token-import in catalog order", () => {
+    expect(selectableAuthModes(["token-import", "o-auth", "manual"])).toEqual(["token-import", "o-auth"]);
+  });
 });
 
 describe("isCookieMode", () => {
   it("is true only for the pasted-cookie credential", () => {
     expect(isCookieMode("cookie")).toBe(true);
-    for (const mode of ["o-auth", "api-key", "manual"] as const) {
+    for (const mode of ["o-auth", "api-key", "manual", "token-import"] as const) {
       expect(isCookieMode(mode)).toBe(false);
     }
   });

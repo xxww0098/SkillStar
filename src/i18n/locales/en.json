@@ -1455,6 +1455,7 @@
     "authBadgeApiKey": "API Key",
     "authBadgeCookie": "Cookie",
     "authBadgeManual": "Manual",
+    "authBadgeTokenImport": "Token import",
     "quotaUsedOfTotal": "{{used}} / {{total}}",
     "quotaRemaining": "{{remaining}} left",
     "modelQuota": "Model quota",

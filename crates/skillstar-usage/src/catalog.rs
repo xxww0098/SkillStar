@@ -15,6 +15,8 @@ pub enum AuthMode {
     OAuth,
     Cookie,
     Manual,
+    /// Pasted credential. The generic create/update form must not write this mode.
+    TokenImport,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -84,6 +86,8 @@ const fn entry(
 const OAUTH_ONLY: &[AuthMode] = &[AuthMode::OAuth];
 const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey];
 const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
+/// Browser OAuth and pasted-token rows share refresh dispatch and in-place re-authorization.
+pub(crate) const OAUTH_TOKEN_IMPORT: &[AuthMode] = &[AuthMode::OAuth, AuthMode::TokenImport];
 
 /// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
@@ -283,8 +287,10 @@ mod tests {
     #[test]
     fn auto_fetch_providers_exclude_manual_auth() {
         for entry in catalog() {
-            let auto_fetch = entry.auth_modes.contains(&AuthMode::OAuth)
-                || entry.auth_modes.contains(&AuthMode::ApiKey);
+            let auto_fetch = entry
+                .auth_modes
+                .iter()
+                .any(|mode| OAUTH_TOKEN_IMPORT.contains(mode) || *mode == AuthMode::ApiKey);
             if auto_fetch {
                 assert!(
                     !entry.auth_modes.contains(&AuthMode::Manual),
@@ -298,6 +304,18 @@ mod tests {
     /// Every catalog id must resolve to exactly one canonical provider identity
     /// in `skillstar-core::providers`. This pins the usage-side half of the
     /// catalog↔preset id reconciliation so the two can never silently drift.
+    #[test]
+    fn token_import_is_kebab_case_and_shares_the_oauth_refresh_set() {
+        assert_eq!(
+            serde_json::to_string(&AuthMode::TokenImport).unwrap(),
+            "\"token-import\""
+        );
+        assert_eq!(
+            OAUTH_TOKEN_IMPORT,
+            &[AuthMode::OAuth, AuthMode::TokenImport]
+        );
+    }
+
     #[test]
     fn every_catalog_id_resolves_to_a_provider_identity() {
         for entry in catalog() {

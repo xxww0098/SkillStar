@@ -114,8 +114,21 @@ pub fn list_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
         .collect())
 }
 
+/// Token-import rows are written only by `import_subscription_token`.
+/// The generic form would persist a card with no credential.
+fn reject_token_import_write(auth_mode: AuthMode) -> Result<(), AppError> {
+    if auth_mode != AuthMode::TokenImport {
+        return Ok(());
+    }
+    Err(AppError::Other(
+        "Usage: `token-import` 账号只能通过 `import_subscription_token` 导入，不能用创建或更新订阅写入"
+            .into(),
+    ))
+}
+
 pub fn create_subscription(input: CreateSubscriptionInput) -> Result<SubscriptionDto, AppError> {
     let entry = ensure_catalog(&input.catalog_id)?;
+    reject_token_import_write(input.auth_mode)?;
     // Validate auth_mode against catalog whitelist.
     if !entry.auth_modes.contains(&input.auth_mode) {
         return Err(AppError::Other(format!(
@@ -175,6 +188,7 @@ pub fn create_subscription(input: CreateSubscriptionInput) -> Result<Subscriptio
         oauth_account_id: None,
         oauth_region: input.oauth_region,
         requires_reauth: false,
+        provider_state_encrypted: None,
         cookie_jar_encrypted,
         cookie_session_expires_at: None,
         manual_quota: input.manual_quota,
@@ -213,6 +227,7 @@ fn update_subscription_locked(
     input: UpdateSubscriptionInput,
 ) -> Result<SubscriptionDto, AppError> {
     let mut sub = storage::get_subscription(&id).map_err(map_err)?;
+    reject_token_import_write(sub.auth_mode)?;
     if let Some(name) = input.display_name
         && !name.trim().is_empty()
     {

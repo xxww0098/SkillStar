@@ -241,6 +241,7 @@ fn apply_oauth_credentials(target: &mut Subscription, source: &Subscription) {
     target.id_token_encrypted = source.id_token_encrypted.clone();
     target.oauth_account_id = source.oauth_account_id.clone();
     target.requires_reauth = source.requires_reauth;
+    target.provider_state_encrypted = source.provider_state_encrypted.clone();
 }
 
 pub fn delete_subscription(id: &str) -> UsageResult<()> {
@@ -431,6 +432,7 @@ mod tests {
             oauth_account_id: Some("old-user".into()),
             oauth_region: None,
             requires_reauth: false,
+            provider_state_encrypted: Some("old-blob".into()),
             cookie_jar_encrypted: None,
             cookie_session_expires_at: None,
             manual_quota: None,
@@ -453,6 +455,7 @@ mod tests {
         refreshed.access_token_expires_at = Some(999);
         refreshed.oauth_account_id = Some("new-user".into());
         refreshed.requires_reauth = true;
+        refreshed.provider_state_encrypted = Some("rotated-blob".into());
 
         apply_oauth_credentials(&mut stored, &refreshed);
 
@@ -464,6 +467,10 @@ mod tests {
         assert_eq!(stored.access_token_expires_at, Some(999));
         assert_eq!(stored.oauth_account_id.as_deref(), Some("new-user"));
         assert!(stored.requires_reauth);
+        assert_eq!(
+            stored.provider_state_encrypted.as_deref(),
+            Some("rotated-blob")
+        );
         assert_eq!(stored.display_name, "alice@example.com");
         assert_eq!(stored.note.as_deref(), Some("keep this metadata"));
         assert_eq!(stored.sort_index, 7);
@@ -480,6 +487,7 @@ mod tests {
         refreshed.cookie_session_expires_at = Some(999);
         refreshed.monthly_price = Some(999.0);
         refreshed.sort_index = 99;
+        refreshed.provider_state_encrypted = Some("fetcher-blob".into());
 
         apply_fetcher_state(&mut stored, &refreshed);
 
@@ -487,6 +495,10 @@ mod tests {
         assert_eq!(stored.display_name, "normalized@example.com");
         assert_eq!(stored.note.as_deref(), Some("fetcher-project-id"));
         assert_eq!(stored.cookie_session_expires_at, Some(999));
+        assert_eq!(
+            stored.provider_state_encrypted.as_deref(),
+            Some("fetcher-blob")
+        );
         assert_eq!(stored.monthly_price, Some(20.0));
         assert_eq!(stored.sort_index, 7);
     }

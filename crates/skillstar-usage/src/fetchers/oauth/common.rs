@@ -75,7 +75,7 @@ pub fn apply_email_title(
 /// provider's literal used to repeat: `plan_tier`/`monthly_price`: `None`,
 /// `billing_cycle`: `Monthly`, `start_date`/`renew_date`: `0`, `auto_renew`:
 /// `false`, `api_key_encrypted`/`platform_token_encrypted`: `None`,
-/// `requires_reauth`: `false`,
+/// `requires_reauth`: `false`, `provider_state_encrypted`: `None`,
 /// `cookie_jar_encrypted`/`cookie_session_expires_at`: `None`,
 /// `manual_quota`/`note`: `None`, `sort_index`: `0`, `created_at` ==
 /// `updated_at` == now. `id_token_encrypted`/`oauth_account_id`
@@ -90,6 +90,7 @@ pub struct SubscriptionBuilder {
     access_token_expires_at: Option<i64>,
     id_token: Option<String>,
     oauth_account_id: Option<String>,
+    provider_state: Option<String>,
 }
 
 impl SubscriptionBuilder {
@@ -111,6 +112,7 @@ impl SubscriptionBuilder {
             access_token_expires_at,
             id_token: None,
             oauth_account_id: None,
+            provider_state: None,
         }
     }
 
@@ -129,6 +131,16 @@ impl SubscriptionBuilder {
     /// `oauth_account_id` (Codex account id / Antigravity email / xAI subject-or-email).
     pub fn oauth_account_id(mut self, account_id: Option<String>) -> Self {
         self.oauth_account_id = account_id;
+        self
+    }
+
+    /// Plaintext provider-private JSON. Encrypted into `provider_state_encrypted`.
+    ///
+    /// No production caller until token import. The setter stays so that path
+    /// does not hand-write the ciphertext field.
+    #[allow(dead_code)]
+    pub fn provider_state(mut self, json: impl Into<String>) -> Self {
+        self.provider_state = Some(json.into());
         self
     }
 
@@ -157,6 +169,7 @@ impl SubscriptionBuilder {
             oauth_account_id: self.oauth_account_id,
             oauth_region: None,
             requires_reauth: false,
+            provider_state_encrypted: self.provider_state.as_deref().map(crypto::encrypt),
             cookie_jar_encrypted: None,
             cookie_session_expires_at: None,
             manual_quota: None,
@@ -172,9 +185,9 @@ impl SubscriptionBuilder {
 ///
 /// `docs/features/usage/README.md` requires an OAuth flow started from an
 /// existing card to land back on that same card. Returns `None` when no target
-/// was requested, the row vanished, or it is not this catalog's OAuth row —
-/// in which case the caller falls back to creating a fresh subscription
-/// rather than hijacking someone else's.
+/// was requested, the row vanished, or it is not this catalog's OAuth or
+/// token-import row — in which case the caller falls back to creating a fresh
+/// subscription rather than hijacking someone else's.
 pub fn reauth_target(
     catalog_id: &str,
     target_subscription_id: Option<&str>,
@@ -185,7 +198,8 @@ pub fn reauth_target(
     crate::storage::get_subscription(id)
         .ok()
         .filter(|existing| {
-            existing.catalog_id == catalog_id && existing.auth_mode == AuthMode::OAuth
+            existing.catalog_id == catalog_id
+                && crate::catalog::OAUTH_TOKEN_IMPORT.contains(&existing.auth_mode)
         })
 }
 
@@ -318,5 +332,69 @@ mod tests {
         carry_over_user_metadata(&mut fresh, &existing, &["Codex"]);
 
         assert_eq!(fresh.display_name, "a@b.com");
+    }
+
+    #[test]
+    fn reauth_target_accepts_oauth_and_token_import_on_the_same_catalog() {
+        let _lock = crate::test_env_lock().lock().expect("env lock");
+        let dir = tempfile::tempdir().unwrap();
+        let _env = DataDirGuard::set(dir.path());
+
+        let mut oauth = SubscriptionBuilder::new("codex", "oauth", "USD", "at", None).build();
+        oauth.id = "oauth-row".into();
+        crate::storage::upsert_subscription(oauth).unwrap();
+
+        let mut imported = SubscriptionBuilder::new("codex", "imported", "USD", "at", None)
+            .provider_state(r#"{"v":1,"token":"pasted"}"#)
+            .build();
+        imported.id = "import-row".into();
+        imported.auth_mode = AuthMode::TokenImport;
+        let blob = imported.provider_state_encrypted.clone();
+        assert_ne!(blob.as_deref(), Some(r#"{"v":1,"token":"pasted"}"#));
+        crate::storage::upsert_subscription(imported).unwrap();
+
+        let mut api_key = SubscriptionBuilder::new("codex", "key", "USD", "at", None).build();
+        api_key.id = "key-row".into();
+        api_key.auth_mode = AuthMode::ApiKey;
+        crate::storage::upsert_subscription(api_key).unwrap();
+
+        assert_eq!(
+            reauth_target("codex", Some("oauth-row")).unwrap().id,
+            "oauth-row"
+        );
+        let landed = reauth_target("codex", Some("import-row")).unwrap();
+        assert_eq!(landed.id, "import-row");
+        assert_eq!(landed.auth_mode, AuthMode::TokenImport);
+        assert_eq!(landed.provider_state_encrypted, blob);
+        assert!(reauth_target("codex", Some("key-row")).is_none());
+        assert!(reauth_target("cursor", Some("import-row")).is_none());
+        assert!(reauth_target("codex", Some("missing")).is_none());
+        assert!(reauth_target("codex", None).is_none());
+        assert!(reauth_target("codex", Some("  ")).is_none());
+    }
+
+    struct DataDirGuard(Option<String>);
+
+    impl DataDirGuard {
+        fn set(path: &std::path::Path) -> Self {
+            let previous = std::env::var("SKILLSTAR_DATA_DIR").ok();
+            // SAFETY: caller holds `crate::test_env_lock` for the guard's lifetime.
+            unsafe {
+                std::env::set_var("SKILLSTAR_DATA_DIR", path);
+            }
+            Self(previous)
+        }
+    }
+
+    impl Drop for DataDirGuard {
+        fn drop(&mut self) {
+            // SAFETY: still covered by `crate::test_env_lock` held by the test.
+            unsafe {
+                match self.0.take() {
+                    Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+                    None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+                }
+            }
+        }
     }
 }

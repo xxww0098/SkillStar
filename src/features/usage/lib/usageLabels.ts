@@ -136,6 +136,8 @@ export function authModeLabel(mode: AuthMode, t: TFunction): string {
       return t("usage.authBadgeCookie");
     case "manual":
       return t("usage.authBadgeManual");
+    case "token-import":
+      return t("usage.authBadgeTokenImport");
   }
 }
 

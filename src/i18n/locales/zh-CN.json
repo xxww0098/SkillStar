@@ -1455,6 +1455,7 @@
     "authBadgeApiKey": "API Key",
     "authBadgeCookie": "Cookie",
     "authBadgeManual": "手动",
+    "authBadgeTokenImport": "令牌导入",
     "quotaUsedOfTotal": "{{used}} / {{total}}",
     "quotaRemaining": "剩余 {{remaining}}",
     "modelQuota": "模型额度",

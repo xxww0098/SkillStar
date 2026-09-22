@@ -70,7 +70,8 @@ pub struct SubscriptionDto {
     #[ts(type = "number")]
     pub renew_date: i64,
     pub auto_renew: bool,
-    /// `true` when ApiKey/OAuth credentials are present (without revealing them).
+    /// `true` when a credential is stored (API key, OAuth token, cookie jar,
+    /// or provider-private state) without revealing the secret.
     pub has_credential: bool,
     /// DeepSeek platform session token configured (usage charts).
     #[serde(default)]
@@ -119,6 +120,10 @@ impl SubscriptionDto {
                 .is_some_and(|s| !s.is_empty())
             || sub
                 .cookie_jar_encrypted
+                .as_ref()
+                .is_some_and(|s| !s.is_empty())
+            || sub
+                .provider_state_encrypted
                 .as_ref()
                 .is_some_and(|s| !s.is_empty());
         let has_platform_token = sub
