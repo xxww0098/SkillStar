@@ -17,10 +17,10 @@ pub(crate) const AUTH1_API_SERVER: &str = "https://server.self-serve.windsurf.co
 pub(crate) const CLIENT_ID: &str = "3GUryQ7ldAeKEuD2obYnppsnmj58eP5u";
 pub(crate) const SEAT_SERVICE: &str = "exa.seat_management_pb.SeatManagementService";
 pub(crate) const CALLBACK_PATH: &str = "/windsurf-auth-callback";
-pub(crate) const AUTH_STATUS_KEY: &str = "windsurfAuthStatus";
-pub(crate) const SESSIONS_SECRET_KEY: &str =
+pub const AUTH_STATUS_KEY: &str = "windsurfAuthStatus";
+pub const SESSIONS_SECRET_KEY: &str =
     r#"secret://{"extensionId":"codeium.windsurf","key":"windsurf_auth.sessions"}"#;
-pub(crate) const API_SERVER_SECRET_KEY: &str =
+pub const API_SERVER_SECRET_KEY: &str =
     r#"secret://{"extensionId":"codeium.windsurf","key":"windsurf_auth.apiServerUrl"}"#;
 
 #[allow(unused_imports)]

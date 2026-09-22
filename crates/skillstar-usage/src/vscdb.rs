@@ -42,7 +42,7 @@ pub fn read_item_string(db_path: &Path, key: &str) -> UsageResult<Option<String>
 /// opportunities during a single account refresh. Keeping the query together
 /// gives callers one consistent read while preserving the public single-key
 /// helper for other providers.
-fn read_item_strings(db_path: &Path, keys: &[&str]) -> UsageResult<Vec<Option<String>>> {
+pub fn read_item_strings(db_path: &Path, keys: &[&str]) -> UsageResult<Vec<Option<String>>> {
     if keys.is_empty() {
         return Ok(Vec::new());
     }
@@ -113,6 +113,35 @@ pub(crate) fn delete_labeled_items(db_path: &Path, label: &str, keys: &[&str]) -
         for key in keys {
             tx.execute("DELETE FROM ItemTable WHERE key = ?1", [*key])
                 .map_err(|error| UsageError::Other(format!("删除 {label} {key} 失败：{error}")))?;
+        }
+        Ok(())
+    })
+}
+
+/// Delete and upsert ItemTable rows in one transaction.
+///
+/// Deletes run first, so a key listed in both is removed and then inserted.
+/// Empty `upserts` and `deletes` do not touch the file.
+pub fn mutate_labeled_items(
+    db_path: &Path,
+    label: &str,
+    upserts: &[(&str, &str)],
+    deletes: &[&str],
+) -> UsageResult<()> {
+    if upserts.is_empty() && deletes.is_empty() {
+        return Ok(());
+    }
+    in_item_table_tx(db_path, label, |tx| {
+        for key in deletes {
+            tx.execute("DELETE FROM ItemTable WHERE key = ?1", [*key])
+                .map_err(|error| UsageError::Other(format!("删除 {label} {key} 失败：{error}")))?;
+        }
+        for (key, value) in upserts {
+            tx.execute(
+                "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
+                (*key, *value),
+            )
+            .map_err(|error| UsageError::Other(format!("写入 {label} {key} 失败：{error}")))?;
         }
         Ok(())
     })

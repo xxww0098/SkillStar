@@ -1,8 +1,8 @@
 //! IDE credential adapters.
 //!
-//! Antigravity and Cursor do not fit the CLI symlink model. Each adapter
-//! writes its own live store, reads it back, then pins. The registry is the
-//! only switch path that knows those catalogs.
+//! Antigravity, Cursor, and Windsurf do not fit the CLI symlink model. Each
+//! adapter writes its own live store, reads it back, then pins. The registry
+//! is the only switch path that knows those catalogs.
 
 use skillstar_usage::UsageResult;
 use skillstar_usage::subscription::Subscription;
@@ -28,8 +28,11 @@ pub(super) trait IdeCredentialAdapter: Send + Sync {
     fn forget(&self, sub_id: &str) -> UsageResult<()>;
 }
 
-const IDE_ADAPTERS: &[&'static dyn IdeCredentialAdapter] =
-    &[&super::antigravity::Adapter, &super::cursor::Adapter];
+const IDE_ADAPTERS: &[&'static dyn IdeCredentialAdapter] = &[
+    &super::antigravity::Adapter,
+    &super::cursor::Adapter,
+    &super::windsurf::Adapter,
+];
 
 pub(super) fn adapters() -> &'static [&'static dyn IdeCredentialAdapter] {
     IDE_ADAPTERS
