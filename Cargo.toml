@@ -46,6 +46,10 @@ r2d2 = "0.8.10"
 r2d2_sqlite = "0.34.0"
 rand = "0.10.0"
 regex = "1.12"
+rmcp = { version = "3.4.0", default-features = false }
+ndarray = "0.17.2"
+ort = { version = "2.0.0-rc.13", default-features = false }
+schemars = "1.2.1"
 # system-proxy: honor HTTP(S)_PROXY env vars and the macOS/Windows system proxy
 # when the in-app proxy is not configured; without it api.github.com is a dead
 # 10s timeout per repo on proxied networks while git (which reads its own proxy
@@ -60,6 +64,7 @@ tar = "0.4"
 tauri = { version = "2.11.1", features = ["tray-icon", "image-png"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"
+tokenizers = { version = "0.23.2", default-features = false }
 tokio = { version = "1.52.3" }
 toml = "1.1"
 tracing = "0.1.44"

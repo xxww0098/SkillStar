@@ -34,4 +34,6 @@
 # skillstar-marketplace, skillstar-models, cli/install.rs, four command-layer
 # files) plus the 3 surviving `HashMap<String, String>` nested-generic false
 # positives (usage_commands.rs, usage/service.rs, skillstar-usage/storage.rs).
-27
+#
+# 2026-09-22: 27 -> 28 on merging project_skills_mcp (ort_cpu try_load_bundle).
+28

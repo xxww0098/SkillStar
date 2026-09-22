@@ -10,6 +10,7 @@ import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { AgentDisambiguationDialog } from "../features/projects/components/AgentDisambiguationDialog";
 import { DeployBanner } from "../features/projects/components/DeployBanner";
 import { ProjectDeployAgentDialog } from "../features/projects/components/ProjectDeployAgentDialog";
+import { PendingPlanApproval } from "../features/projects/components/PendingPlanApproval";
 import { ProjectDetailPanel } from "../features/projects/components/ProjectDetailPanel";
 import { ProjectListPanel } from "../features/projects/components/ProjectListPanel";
 import { UnsavedChangesDialog } from "../features/projects/components/UnsavedChangesDialog";
@@ -643,6 +644,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       />
 
       <DeployBanner pendingGroupSkills={pendingGroupSkills} onDismiss={() => setPendingGroupSkills(null)} />
+      <PendingPlanApproval projectPath={selectedProject?.path ?? null} />
 
       <div className="flex-1 min-w-0 flex overflow-hidden">
         <ProjectListPanel

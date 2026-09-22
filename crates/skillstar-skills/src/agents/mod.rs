@@ -16,6 +16,7 @@ mod validation;
 
 use anyhow::Result;
 
+pub use builtin::additional_project_skill_reads;
 pub use custom::CustomProfileDef;
 pub use registry::{AgentProfile, compatible_profile_id, find_profile};
 

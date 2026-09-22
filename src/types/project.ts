@@ -28,6 +28,9 @@ export interface ProjectEntry {
   created_at: string;
 }
 
+export type { ProjectSkillPlanChange } from "./generated/ProjectSkillPlanChange";
+export type { ProjectSkillPlanDiff } from "./generated/ProjectSkillPlanDiff";
+
 /** Per `project_skills_rel` path (e.g. `.agents/skills`), how hub skills are materialized in the project. */
 
 export type ProjectDeployMode = "symlink" | "copy";

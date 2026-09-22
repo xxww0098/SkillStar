@@ -40,7 +40,16 @@ ts-rs = { workspace = true, features = ["serde-compat"] }
 thiserror.workspace = true
 base64.workspace = true
 skillstar-decision = { version = "0.0.0", path = "../skillstar-decision" }
+rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-async-rw"] }
+tracing-subscriber.workspace = true
+schemars = { workspace = true }
+ort = { workspace = true, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "api-27", "tls-rustls"] }
+ndarray = { workspace = true }
+tokenizers = { workspace = true, features = ["fancy-regex"] }
 
 [dev-dependencies]
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
+
+[target."cfg(windows)".dev-dependencies]
+junction.workspace = true

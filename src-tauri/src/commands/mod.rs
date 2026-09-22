@@ -9,6 +9,7 @@ pub mod mcp_marketplace;
 pub mod models_commands;
 pub mod network;
 pub mod patrol;
+pub mod project_host;
 pub mod projects;
 pub mod shell;
 pub mod updater;

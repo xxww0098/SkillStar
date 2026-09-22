@@ -13,6 +13,8 @@
 
 这四组 Rust 类型通过 ts-rs 导出到 `src/types/generated/`，`src/types/mcp.ts` 只做 re-export。修改字段后运行 `bun run types:gen`；不得在 TypeScript 手写第二份大型 wire type。
 
+SkillStar 自己作为 stdio MCP 被 Agent 调用时，不使用这三类模型。见 [项目技能 MCP](../project-skills-mcp/README.md)。
+
 ## 多源 catalog
 
 - catalog 不是「某一个 registry 返回了什么」，而是所有启用源的合并结果。每个源由一个 `McpSourceDescriptor` 描述；新增源是数据，不是控制流。

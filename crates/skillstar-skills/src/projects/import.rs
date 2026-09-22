@@ -22,6 +22,7 @@ pub fn import_scanned_skills(
     targets: &[ImportTarget],
 ) -> Result<ImportResult> {
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    let _project_guard = super::write_lock::lock_project_write()?;
     for target in targets {
         crate::skill_mutation::policy().ensure_skill_mutation_allowed(&target.name)?;
     }

@@ -105,6 +105,7 @@ fn build_path_plans<'a>(
 /// instead of running a full project sync, so unmanaged on-disk directories are
 /// left alone.
 pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
+    let _guard = super::write_lock::lock_project_write()?;
     let profiles = agent_profile::list_profiles();
     let mut touched_projects = Vec::new();
 
@@ -179,6 +180,7 @@ pub fn full_sync(
     skills_list: &SkillsList,
     cleanup_agents: Option<&[String]>,
 ) -> Result<u32> {
+    let _guard = super::write_lock::lock_project_write()?;
     let hub_dir = fs_paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
     let project = ensure_project_root_exists(project_path)?;
@@ -268,6 +270,7 @@ pub fn save_and_sync(
     agents: HashMap<String, Vec<String>>,
     deploy_modes: HashMap<String, ProjectDeployMode>,
 ) -> Result<(String, u32)> {
+    let _guard = super::write_lock::lock_project_write()?;
     let entry = register_project(project_path)?;
     let agents = normalize_project_agents(agents);
 
@@ -313,6 +316,7 @@ pub fn save_skills_list_only(
     project_path: &str,
     agents: HashMap<String, Vec<String>>,
 ) -> Result<SkillsList> {
+    let _guard = super::write_lock::lock_project_write()?;
     let entry = register_project(project_path)?;
 
     let profiles = agent_profile::list_profiles();
@@ -361,6 +365,7 @@ pub fn add_skills_to_project_with_mode(
     agent_ids: &[String],
     mode: ProjectDeployMode,
 ) -> Result<u32> {
+    let _guard = super::write_lock::lock_project_write()?;
     let hub_dir = fs_paths::hub_skills_dir();
     let mut seen_skill_names = HashSet::new();
     let deployable_skill_names = skill_names
@@ -427,15 +432,15 @@ pub fn add_skills_to_project_with_mode(
         }
 
         // A shared physical path has one manifest owner. Preserve an existing
-        // owner when possible; otherwise the first selected profile owns it.
-        let owner_id = profiles
-            .iter()
-            .find(|candidate| {
-                candidate.project_skills_rel == profile.project_skills_rel
-                    && skills_list.agents.contains_key(&candidate.id)
-            })
-            .map(|candidate| candidate.id.clone())
-            .unwrap_or_else(|| profile.id.clone());
+        // owner when possible; otherwise the selected profile owns it.
+        let owner_id = super::owner::shared_path_owner(
+            &profiles,
+            &skills_list,
+            &profile.project_skills_rel,
+            &profile.id,
+        )
+        .owner_id
+        .unwrap_or_else(|| profile.id.clone());
 
         let shared_agent_ids = profiles
             .iter()

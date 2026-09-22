@@ -123,4 +123,16 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
     ambiguous_groups: [],
     auto_enable: ["claude"],
   }),
+  list_pending_project_skill_plans: (args) => [
+    {
+      plan_id: "plan-demo",
+      plan_hash: "abc",
+      root: String(args?.projectPath ?? "/tmp/demo"),
+      will_register: false,
+      owner_id: "codex",
+      affected_agents: ["codex", "deepseek", "cursor"],
+      changes: [{ name: "demo", action: "create", skill_path: ".agents/skills/demo/SKILL.md" }],
+    },
+  ],
+  approve_project_skill_plan: () => undefined,
 };

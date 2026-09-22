@@ -11,6 +11,7 @@
 //! ├── db/                     # SQLite databases
 //! ├── logs/                   # Runtime and per-run logs
 //! ├── state/                  # Rebuildable runtime state & metadata
+//! ├── models/laya/            # Optional Laya ONNX bundle (laya_model_dir)
 //! ├── instances/              # Desktop-app multi-instance Chromium profiles
 //! └── hub/                    # hub_root() — skill hub, repos, lockfile
 //!     ├── skills/             # Central symlink index
@@ -104,6 +105,14 @@ pub fn logs_dir() -> PathBuf {
 /// `~/.skillstar/state/` — rebuildable runtime state & metadata.
 pub fn state_dir() -> PathBuf {
     data_root().join("state")
+}
+
+/// `~/.skillstar/models/laya/` — optional local Laya ONNX bundle.
+///
+/// `SKILLSTAR_DATA_DIR` moves this with the rest of the data root.
+/// `SKILLSTAR_LAYA_ONNX` replaces it entirely; the loader owns that override.
+pub fn laya_model_dir() -> PathBuf {
+    data_root().join("models").join("laya")
 }
 
 /// `~/.skillstar/instances/` — isolated Chromium/Electron profiles for desktop multi-instance.
@@ -262,7 +271,7 @@ pub(crate) fn shellexpand_home(path: &str) -> String {
 mod tests {
     use super::{
         app_instances_config_path, data_root, home_dir, hub_root, instance_profile_dir,
-        instances_dir, shellexpand_home,
+        instances_dir, laya_model_dir, shellexpand_home,
     };
     use tempfile::TempDir;
 
@@ -277,6 +286,7 @@ mod tests {
         }
         assert_eq!(data_root(), temp.path());
         assert_eq!(instances_dir(), temp.path().join("instances"));
+        assert_eq!(laya_model_dir(), temp.path().join("models/laya"));
         assert_eq!(
             instance_profile_dir("cursor", "work"),
             temp.path().join("instances/cursor/work")

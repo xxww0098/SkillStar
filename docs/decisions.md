@@ -514,6 +514,7 @@
 - 后果：获得——Context/Improvement 的第一刀可在现有 crate 内测试与发布，且不会把教程域带回来。承担——GUI 与频道推送/晋升为 Skill 仍是后续切片；本机 notes 不跨设备。
 - 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
 
+<<<<<<< HEAD
 ## D-057：MCP 是配置页，不是指挥中心
 
 - 日期：2026-09-10
@@ -585,6 +586,24 @@
 - 决策：用 candle 直接读官方 bf16 safetensors，独立成 `skillstar-decision` crate（依赖集合不同：`candle-core` / `candle-nn` / `tokenizers` 只有它用，版本不进根 workspace 表）。共享前缀复用自己实现——candle 的 `ConcatKvCache` 只追加、不能回退到前缀，分支会读到兄弟候选，因此主干前向由本 crate 拥有：KV 是调用方传入的普通 `Vec<Kv>`，前缀只读不写。默认设备/精度为「macOS 走 Metal，其余走 CPU」+ f32；`candle_nn::ops::softmax_last_dim`（CustomOp，无 Metal 核）与 `rotary_emb::rope`（无 Metal 核）改用 `ops.rs` 里可移植算子表达的等价实现，避免逐算子 CPU 回退。正确性由 golden 测试锁定：官方 `jev_service`（torch CPU f32）在六个固定 payload 上产出的 token id、logits、校准概率与答案被固化进 fixture，Rust 侧必须复现。
 - 后果：获得——单二进制、无 Python、无中间产物，Metal 上比 CPU 快 4–6 倍（长状态 732 ms vs 4281 ms），数值与参考实现的最大概率偏差 5e-7（CPU）与 7.2e-7（Metal）。承担——workspace 首次引入张量运行时（编译时间与二进制体积增长，Metal 目标额外拉 `objc2-metal`/`candle-metal-kernels`）；主干前向由本仓库维护，模型升级需要重新对齐数值；`--dtype f16` 在 Metal 上仍会撞到缺失的算子核，因此默认是 f32（2.4 GB 常驻）；每个候选都要把前缀 KV 与候选 KV 拼接一次，宽候选集上还有可做的性能优化。
 - 证据：`crates/skillstar-decision/`（`backbone.rs`、`head.rs`、`ops.rs`、`engine.rs`、`model_files.rs`）、`crates/skillstar-decision/tests/golden.rs` 与 `tests/fixtures/agentjev_golden.json`、`src-tauri/src/commands/decision.rs`、`crates/skillstar-app/src/cli/decide.rs`、[docs/features/models/README.md](./features/models/README.md)、[docs/boundaries.md](./boundaries.md)。
+
+## D-065：SkillStar 作为 MCP 服务时不进入外部 MCP catalog
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：开发 Agent 需要本机 stdio 调用 SkillStar 来推荐并启用项目技能。外部 MCP 的 store、安装计划和 marketplace 模型已经由 `skillstar_models::mcp`、`skillstar_marketplace` 和 `skillstar_app::mcp` 分三层持有。把本机服务塞进其中任一层会让「SkillStar 调用别人」和「别人调用 SkillStar」共用一套类型。
+- 决策：本机服务留在 `skillstar_app::project_skills_mcp`。进程入口是 `skillstar mcp serve --stdio`，stdout 只有 JSON-RPC。工具参数在 `protocol`，不接收批准字段。`rmcp` 只加入 `skillstar-app`，不新增 crate。项目部署仍由 `skillstar-skills::projects` 执行，并持有 `state/project-write.lock`。
+- 后果：获得——外部 MCP 安装流程不被项目技能协议类型污染；CLI 与将来的桌面批准可以调用同一套领域函数。承担——stdio 传输和工具 schema 的演进跟 `rmcp` 走，不跟 marketplace 的 server.json 走。
+- 证据：`crates/skillstar-app/src/project_skills_mcp/`、[docs/features/project-skills-mcp/README.md](./features/project-skills-mcp/README.md)、[boundaries.md](./boundaries.md) 的项目技能 MCP 接缝。
+
+## D-066：Laya 重排只在本机 CPU 上跑，失败则回到 BM25
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：项目技能推荐需要可选的本地优选。Laya 的发布形态是 ONNX。Windows、macOS、Linux 没有同一个 GPU Execution Provider。官方 `laya_config.json` 不写语种，而中文任务不能拿英文权重来打分。
+- 决策：`skillstar-app` 用 `ort` 的 CPU Execution Provider 和 `tokenizers` 加载 Laya。默认目录是 `data_root()/models/laya`（`~/.skillstar/models/laya/`），`SKILLSTAR_LAYA_ONNX` 整目录覆盖。每个候选是一次 noul，输入布局跟 receptron/laya 的 `build_sequence`。至多 12 个，不增删候选，分数不进 `plan_hash`。含汉字的任务只接受 multilingual 导出。没有 `language` 字段时，用 tokenizer 特殊符号区分英文 ModernBERT 和 mmBERT；对不上就不加载。加载失败保持 BM25。应用不下载权重，PyTorch 不进依赖。
+- 后果：获得——英文 `receptron/laya-onnx` 可以在 CPU 上改变候选顺序。承担——这份英文包遇到中文任务仍是 BM25；中文优选要用户自行导出 multilingual，放到 `models/laya`，或用 `SKILLSTAR_LAYA_ONNX` 指过去。
+- 证据：`crates/skillstar-app/src/project_skills_mcp/ort_cpu.rs`、`crates/skillstar-app/src/project_skills_mcp/laya_pack.rs`、`crates/skillstar-app/tests/fixtures/laya-ort-reference.json`。
 
 ## 新增记录格式
 
