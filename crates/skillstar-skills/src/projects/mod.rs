@@ -19,6 +19,7 @@ mod rebuild;
 mod refresh;
 mod scan;
 mod store;
+mod strict;
 mod sync;
 mod types;
 pub mod write_lock;
@@ -41,6 +42,9 @@ pub use rebuild::rebuild_skills_list_from_disk;
 pub use refresh::refresh_stale_copies;
 pub use scan::{detect_project_agents, scan_project_skills};
 pub use store::{load_skills_list, save_skills_list};
+pub use strict::{
+    StrictEnableReport, StrictSkillReport, StrictSkillStatus, enable_project_skills_strict,
+};
 pub use sync::{
     add_skills_to_project, add_skills_to_project_with_mode, full_sync,
     remove_skill_from_all_projects, save_and_sync, save_skills_list_only,
