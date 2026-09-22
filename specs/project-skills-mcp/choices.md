@@ -90,3 +90,12 @@
 
 - **加载提示是「相对路径 + 一句未验证说明」。** 路径用正斜杠，指向项目里的 `SKILL.md`，不指向 Hub 绝对路径。
 - **`RuntimeVisibility` 只有 `Unverified` 一个值。** 没有布尔开关。
+
+## 12 应用
+
+### 已定，按这个做
+
+- **没有批准时返回 `Ok(ApprovalRequired)`，不是错误。** 项目树和项目索引都不改。调用方能把它和部署失败分开。
+- **应用前再对 Agent 的物理路径和 owner。** 计划里的路径必须等于该 Agent 的 `project_skills_rel`，owner 必须等于当时的 `shared_path_owner`。对不上就停，不建链接。
+- **回执复用查询的 `RuntimeVisibility`，序列化成 `unverified`。** 不另做一份可见性枚举。
+- **Windows 测试用 workspace 里已有的 `junction` 做目录别名。** 只加在 `skillstar-app` 的 `cfg(windows)` dev-dependency 上。生产代码不依赖它。
