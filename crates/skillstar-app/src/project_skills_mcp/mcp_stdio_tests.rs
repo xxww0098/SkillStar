@@ -89,7 +89,21 @@ fn serve_stdio_initialize_emits_only_jsonrpc() {
     assert!(init["result"]["capabilities"].get("roots").is_none());
     let tools: serde_json::Value = serde_json::from_str(&frames[1]).unwrap();
     assert_eq!(tools["id"], 2);
-    assert_eq!(tools["result"]["tools"].as_array().map(Vec::len), Some(0));
+    let mut names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("tool name"))
+        .collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "apply_project_skills",
+            "get_project_skills",
+            "recommend_project_skills",
+        ]
+    );
 }
 
 #[test]

@@ -99,3 +99,13 @@
 - **应用前再对 Agent 的物理路径和 owner。** 计划里的路径必须等于该 Agent 的 `project_skills_rel`，owner 必须等于当时的 `shared_path_owner`。对不上就停，不建链接。
 - **回执复用查询的 `RuntimeVisibility`，序列化成 `unverified`。** 不另做一份可见性枚举。
 - **Windows 测试用 workspace 里已有的 `junction` 做目录别名。** 只加在 `skillstar-app` 的 `cfg(windows)` dev-dependency 上。生产代码不依赖它。
+
+## 13 协议工具
+
+### 已定，按这个做
+
+- **未知字段返回 `isError: true` 的工具结果，不是 JSON-RPC error。** rmcp 3.4 把参数反序列化失败包在这次 `tools/call` 的结果里。正文含 unknown field。结构化结果不出现，领域函数不跑。
+- **工具结果不带 Hub 绝对路径。** 查询事实里的 `link_target` 留在领域类型，不放进协议结果。磁盘种类仍用 `SkillDiskKind`。
+- **短文本用英文。** 结构化字段才是契约。句子可以以后改。
+- **`schemars` 作为 `skillstar-app` 的直接依赖，版本 1.2.1，与 rmcp 相同。** `JsonSchema` 派生宏按 crate 名找 `schemars`，只靠 rmcp 的 re-export 编不过。没有再次 `cargo add rmcp`，`transport-async-rw` 保留。
+- **推荐结果里的计划包含确认所需的差异，不包含技能正文或内容哈希。** `plan_id` 和 `plan_hash` 都在。应用参数只有 `plan_id` 和 `idempotency_key`。

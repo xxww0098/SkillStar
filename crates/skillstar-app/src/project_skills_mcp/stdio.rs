@@ -6,9 +6,9 @@
 use std::io::Write;
 
 use rmcp::ServiceExt;
-use rmcp::handler::server::ServerHandler;
-use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::transport::IntoTransport;
+
+use super::protocol::ProjectSkillsMcp;
 
 /// `argv[1] == "mcp"`. Main checks this before Git askpass and the GUI.
 pub fn is_mcp_invocation(args: &[String]) -> bool {
@@ -65,7 +65,7 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     prepare_process();
-    let running = ProjectSkillsMcp
+    let running = ProjectSkillsMcp::new()
         .serve(transport)
         .await
         .map_err(|err| anyhow::anyhow!("mcp initialize failed: {err}"))?;
@@ -90,19 +90,4 @@ fn install_stderr_tracing() {
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .try_init();
-}
-
-/// No business tools yet. Later tools replace this handler without changing
-/// the process rules above.
-#[derive(Clone)]
-struct ProjectSkillsMcp;
-
-impl ServerHandler for ProjectSkillsMcp {
-    fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("skillstar", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-                "SkillStar project skills. This process advertises no business tools yet.",
-            )
-    }
 }

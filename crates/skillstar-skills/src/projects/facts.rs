@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 
 use super::binding::ObservedProject;
@@ -15,7 +16,8 @@ use super::types::{ProjectDeployMode, SkillsList};
 use crate::agents::{self, AgentProfile};
 use crate::content::validate_skill_name;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SkillDiskKind {
     Missing,
     Symlink,

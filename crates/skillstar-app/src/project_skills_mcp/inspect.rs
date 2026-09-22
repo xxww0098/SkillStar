@@ -10,7 +10,7 @@ pub enum RuntimeVisibility {
     Unverified,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LoadHint {
     pub skill_path: String,
     pub message: String,

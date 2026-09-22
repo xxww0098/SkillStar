@@ -514,6 +514,15 @@
 - 后果：获得——Context/Improvement 的第一刀可在现有 crate 内测试与发布，且不会把教程域带回来。承担——GUI 与频道推送/晋升为 Skill 仍是后续切片；本机 notes 不跨设备。
 - 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
 
+## D-057：SkillStar 作为 MCP 服务时不进入外部 MCP catalog
+
+- 日期：2026-09-22
+- 状态：accepted
+- 背景：开发 Agent 需要本机 stdio 调用 SkillStar 来推荐并启用项目技能。外部 MCP 的 store、安装计划和 marketplace 模型已经由 `skillstar_models::mcp`、`skillstar_marketplace` 和 `skillstar_app::mcp` 分三层持有。把本机服务塞进其中任一层会让「SkillStar 调用别人」和「别人调用 SkillStar」共用一套类型。
+- 决策：本机服务留在 `skillstar_app::project_skills_mcp`。进程入口是 `skillstar mcp serve --stdio`，stdout 只有 JSON-RPC。工具参数在 `protocol`，不接收批准字段。`rmcp` 只加入 `skillstar-app`，不新增 crate。项目部署仍由 `skillstar-skills::projects` 执行，并持有 `state/project-write.lock`。
+- 后果：获得——外部 MCP 安装流程不被项目技能协议类型污染；CLI 与将来的桌面批准可以调用同一套领域函数。承担——stdio 传输和工具 schema 的演进跟 `rmcp` 走，不跟 marketplace 的 server.json 走。
+- 证据：`crates/skillstar-app/src/project_skills_mcp/`、[docs/features/project-skills-mcp/README.md](./features/project-skills-mcp/README.md)、[boundaries.md](./boundaries.md) 的项目技能 MCP 接缝。
+
 ## 新增记录格式
 
 

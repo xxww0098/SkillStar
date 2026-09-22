@@ -7,6 +7,7 @@ pub mod apply;
 pub mod approval;
 pub mod inspect;
 pub mod plan;
+pub mod protocol;
 pub mod ranker;
 pub mod recommend;
 mod stdio;

@@ -41,6 +41,7 @@ thiserror.workspace = true
 base64.workspace = true
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-async-rw"] }
 tracing-subscriber.workspace = true
+schemars = { workspace = true }
 
 [dev-dependencies]
 rusqlite = { workspace = true }
