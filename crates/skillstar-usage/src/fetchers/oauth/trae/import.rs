@@ -394,6 +394,8 @@ fn imported_from_secrets(
         provider_state: state.has_key().then(|| state.to_json()),
         currency: Some("USD".to_string()),
         oauth_region: region,
+        id_token: None,
+        api_key: None,
     })
 }
 

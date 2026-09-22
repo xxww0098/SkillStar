@@ -8,6 +8,7 @@ import {
   GithubCopilotMono,
   KiroColor,
   WindsurfMono,
+  ZAIMono,
   GrokMono,
   KimiMono,
   type LobeIconComponent,
@@ -47,6 +48,8 @@ const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
   kiro: KiroColor,
   qoder: QoderColor,
   windsurf: WindsurfMono,
+  // Same glyph the agent registry uses for ZCode.
+  zcode: ZAIMono,
   // api-key
   deepseek: DeepSeekColor,
   glm: ZhipuColor,

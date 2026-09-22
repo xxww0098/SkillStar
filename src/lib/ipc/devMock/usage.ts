@@ -74,7 +74,6 @@ export function mockOAuthStart(args: Record<string, unknown> = {}): OAuthStart {
     const prefix = schemePrefixFrom(requested, args);
     return {
       ...base,
-      auth_url: `${prefix}login`,
       flow: { "scheme-paste": { scheme_prefix: prefix } },
     };
   }

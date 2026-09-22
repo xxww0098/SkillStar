@@ -130,6 +130,15 @@ fn import_zed() -> LocalImportFuture {
     })
 }
 
+fn import_zcode() -> LocalImportFuture {
+    Box::pin(async {
+        let imported = crate::fetchers::oauth::zcode::import_from_local()?;
+        let sub = crate::fetchers::oauth::zcode::oauth_row_from_imported(imported)?;
+        crate::storage::upsert_subscription(sub)
+            .map_err(|err| crate::UsageError::Other(format!("ZCode 订阅保存失败：{err}")))
+    })
+}
+
 fn import_codebuddy_cn() -> LocalImportFuture {
     Box::pin(async {
         let imported = crate::fetchers::oauth::codebuddy::import_from_local_cn()?;
@@ -191,6 +200,10 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     LocalImporter {
         catalog_id: "zed",
         import_from_local: import_zed,
+    },
+    LocalImporter {
+        catalog_id: "zcode",
+        import_from_local: import_zcode,
     },
 ];
 
@@ -415,6 +428,8 @@ mod tests {
     fn zed_local_import_is_registered_and_macos_only() {
         assert!(local_import_supported("zed"));
         assert_eq!(local_import_available("zed"), cfg!(target_os = "macos"));
+        assert!(local_import_supported("zcode"));
+        assert!(local_import_available("zcode"));
         assert!(local_import_available("codex"));
         assert!(!local_import_available("not-a-provider"));
     }

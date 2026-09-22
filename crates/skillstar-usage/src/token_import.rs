@@ -23,6 +23,10 @@ pub(crate) struct ImportedToken {
     pub provider_state: Option<String>,
     pub currency: Option<String>,
     pub oauth_region: Option<String>,
+    /// Plaintext OIDC / provider JWT. ZCode stores the zcode JWT here.
+    pub id_token: Option<String>,
+    /// Plaintext API key. Distinct from `access_token`.
+    pub api_key: Option<String>,
 }
 
 type ImportFromToken = fn(&str) -> UsageResult<ImportedToken>;
@@ -77,6 +81,10 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
     TokenImporter {
         catalog_id: "zed",
         import_from_token: crate::fetchers::oauth::zed::import_from_token,
+    },
+    TokenImporter {
+        catalog_id: "zcode",
+        import_from_token: crate::fetchers::oauth::zcode::import_from_token,
     },
 ];
 
@@ -151,7 +159,14 @@ fn subscription_from_import(
         .refresh_token
         .as_deref()
         .is_some_and(|value| !value.trim().is_empty());
-    if imported.access_token.trim().is_empty() && provider_state.is_none() && !has_refresh {
+    let id_token = imported.id_token.filter(|value| !value.trim().is_empty());
+    let api_key = imported.api_key.filter(|value| !value.trim().is_empty());
+    if imported.access_token.trim().is_empty()
+        && provider_state.is_none()
+        && !has_refresh
+        && id_token.is_none()
+        && api_key.is_none()
+    {
         return Err(UsageError::Other("令牌导入没有可用凭据".into()));
     }
     let now = chrono::Utc::now().timestamp();
@@ -172,7 +187,7 @@ fn subscription_from_import(
         start_date: 0,
         renew_date: 0,
         auto_renew: false,
-        api_key_encrypted: None,
+        api_key_encrypted: api_key.as_deref().map(crypto::encrypt),
         platform_token_encrypted: None,
         access_token_encrypted: (!imported.access_token.is_empty())
             .then(|| crypto::encrypt(&imported.access_token)),
@@ -181,7 +196,7 @@ fn subscription_from_import(
             .filter(|value| !value.is_empty())
             .map(|value| crypto::encrypt(&value)),
         access_token_expires_at: imported.expires_at,
-        id_token_encrypted: None,
+        id_token_encrypted: id_token.as_deref().map(crypto::encrypt),
         oauth_account_id: imported.oauth_account_id,
         oauth_region: imported.oauth_region,
         requires_reauth: false,
@@ -358,6 +373,8 @@ mod tests {
             provider_state: None,
             currency: None,
             oauth_region: None,
+            id_token: None,
+            api_key: None,
         })
     }
 
@@ -528,5 +545,41 @@ mod tests {
         assert!(err.to_string().contains("inactive"), "{err}");
         assert_eq!(storage::list_subscriptions().unwrap().len(), 1);
         assert!(!tree_contains(tmp.path(), PASTE));
+    }
+
+    fn rich_token(_payload: &str) -> UsageResult<ImportedToken> {
+        Ok(ImportedToken {
+            display_name: "Z".into(),
+            access_token: String::new(),
+            refresh_token: None,
+            expires_at: None,
+            oauth_account_id: None,
+            provider_state: Some(r#"{"kind":"api_key"}"#.into()),
+            currency: None,
+            oauth_region: Some("zai".into()),
+            id_token: Some("jwt-1".into()),
+            api_key: Some("sk-test".into()),
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn token_import_stores_id_token_and_api_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::data_dir(tmp.path());
+        let _guard = test_hooks::register("cursor", rich_token);
+        test_hooks::set_refresh("cursor", Duration::ZERO, None);
+
+        let saved = import_subscription_from_token("cursor", "paste-secret".into(), None)
+            .await
+            .unwrap();
+        assert_eq!(plain(&saved.id_token_encrypted), "jwt-1");
+        assert_eq!(plain(&saved.api_key_encrypted), "sk-test");
+        assert_eq!(
+            plain(&saved.provider_state_encrypted),
+            r#"{"kind":"api_key"}"#
+        );
+        assert!(saved.access_token_encrypted.is_none());
+        assert_eq!(saved.oauth_region.as_deref(), Some("zai"));
+        assert!(!tree_contains(tmp.path(), "paste-secret"));
     }
 }

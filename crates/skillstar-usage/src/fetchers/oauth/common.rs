@@ -78,9 +78,8 @@ pub fn apply_email_title(
 /// `requires_reauth`: `false`, `provider_state_encrypted`: `None`,
 /// `cookie_jar_encrypted`/`cookie_session_expires_at`: `None`,
 /// `manual_quota`/`note`: `None`, `sort_index`: `0`, `created_at` ==
-/// `updated_at` == now. `id_token_encrypted`/`oauth_account_id`
-/// default to `None`, opt-in via their setters. `oauth_region` is always
-/// `None` (no catalog currently needs region-scoped OAuth).
+/// `updated_at` == now. `id_token_encrypted`/`oauth_account_id`/
+/// `oauth_region` default to `None`, opt-in via their setters.
 pub struct SubscriptionBuilder {
     catalog_id: &'static str,
     display_name: String,
@@ -90,6 +89,7 @@ pub struct SubscriptionBuilder {
     access_token_expires_at: Option<i64>,
     id_token: Option<String>,
     oauth_account_id: Option<String>,
+    oauth_region: Option<String>,
     provider_state: Option<String>,
 }
 
@@ -112,6 +112,7 @@ impl SubscriptionBuilder {
             access_token_expires_at,
             id_token: None,
             oauth_account_id: None,
+            oauth_region: None,
             provider_state: None,
         }
     }
@@ -134,11 +135,13 @@ impl SubscriptionBuilder {
         self
     }
 
+    /// Catalog region stored on the row. ZCode uses it for `zai` / `bigmodel`.
+    pub fn oauth_region(mut self, region: Option<String>) -> Self {
+        self.oauth_region = region.filter(|value| !value.trim().is_empty());
+        self
+    }
+
     /// Plaintext provider-private JSON. Encrypted into `provider_state_encrypted`.
-    ///
-    /// No production caller until token import. The setter stays so that path
-    /// does not hand-write the ciphertext field.
-    #[allow(dead_code)]
     pub fn provider_state(mut self, json: impl Into<String>) -> Self {
         self.provider_state = Some(json.into());
         self
@@ -167,7 +170,7 @@ impl SubscriptionBuilder {
             access_token_expires_at: self.access_token_expires_at,
             id_token_encrypted: self.id_token.as_deref().map(crypto::encrypt),
             oauth_account_id: self.oauth_account_id,
-            oauth_region: None,
+            oauth_region: self.oauth_region,
             requires_reauth: false,
             provider_state_encrypted: self.provider_state.as_deref().map(crypto::encrypt),
             cookie_jar_encrypted: None,

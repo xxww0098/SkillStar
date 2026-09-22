@@ -29,6 +29,7 @@ pub mod trae;
 pub mod xai;
 // registration lands with the catalog row
 pub mod windsurf;
+pub mod zcode;
 pub mod zed;
 /// Callback RSA decrypt. Login uses it; it is not a fetcher.
 pub(crate) mod zed_token;
@@ -75,6 +76,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "trae-cn" => trae::fetch(subscription).await,
         "trae-solo-cn" => trae::fetch(subscription).await,
         "zed" => zed::fetch(subscription).await,
+        "zcode" => zcode::fetch(subscription).await,
         // OpenCode is Cookie/Manual only (`catalog.rs`). Its OAuth fetcher was
         // 265 lines that never issued a request — it only ever returned this
         // sentence. Legacy rows saved before the catalog narrowed still land
@@ -122,6 +124,7 @@ pub async fn start_login(
         "trae-cn" => trae::start_login(catalog_id, region, target_subscription_id).await,
         "trae-solo-cn" => trae::start_login(catalog_id, region, target_subscription_id).await,
         "zed" => zed::start_login(region, target_subscription_id).await,
+        "zcode" => zcode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }
 }

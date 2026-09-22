@@ -288,6 +288,8 @@ fn token_row(
         provider_state: enterprise_state(&enterprise),
         currency: None,
         oauth_region: Some(host.oauth_region.to_string()),
+        id_token: None,
+        api_key: None,
     }
 }
 

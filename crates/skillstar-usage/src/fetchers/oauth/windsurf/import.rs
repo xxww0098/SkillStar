@@ -205,6 +205,8 @@ fn token_row(
         provider_state: state.to_json(),
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     }
 }
 
@@ -415,6 +417,8 @@ fn local_to_imported(auth: LocalAuth) -> ImportedToken {
         .to_json(),
         currency: None,
         oauth_region: None,
+        id_token: None,
+        api_key: None,
     }
 }
 

@@ -65,6 +65,7 @@ export const LOCAL_IMPORT_CATALOG_IDS = [
   "trae-cn",
   "trae-solo-cn",
   "zed",
+  "zcode",
 ] as const;
 
 /** Backend broadcast when a catalog's active account changes. */

@@ -206,6 +206,18 @@ export const USAGE_CATALOG = [
     regions: [],
   },
   {
+    id: "zcode",
+    display_name: "ZCode",
+    description: "Z.ai / BigModel",
+    tier: "o-auth",
+    auth_modes: ["o-auth", "token-import"],
+    brand_color: "000000",
+    default_currency: "USD",
+    subscription_url: "https://zcode.z.ai",
+    warning: null,
+    regions: ["zai", "bigmodel"],
+  },
+  {
     id: "deepseek",
     display_name: "DeepSeek",
     description: "API Key 余额",

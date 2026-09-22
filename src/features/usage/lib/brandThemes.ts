@@ -52,6 +52,8 @@ const THEMES: Record<string, BrandTheme> = {
   // No Zed glyph in lobe.ts; ProviderLogo falls back to the letter Z.
   // `#2E6BE6` is the catalog brand (cockpit has no hex).
   zed: { header: ["#0B1F6E", "#2E6BE6"], bar: ["#2E6BE6", "#60A5FA"], fg: "#ffffff", glow: "#2E6BE6" },
+  // Lobe ZAI COLOR_PRIMARY is #000. Zinc bar stays visible on the black band.
+  zcode: { header: ["#18181B", "#000000"], bar: ["#A1A1AA", "#52525B"], fg: "#ffffff", glow: "#A1A1AA" },
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },

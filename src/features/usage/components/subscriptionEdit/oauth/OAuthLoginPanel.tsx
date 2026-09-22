@@ -101,11 +101,14 @@ export function OAuthLoginPanel({
       ) : kind === "scheme-paste" ? (
         <SchemePasteBody
           prefix={prefix}
+          authUrl={oauthStart?.auth_url ?? null}
           value={oauthCallbackInput}
           onChange={setOauthCallbackInput}
           disabled={callbackDisabled}
           submitting={oauthSubmittingCallback}
           onSubmit={onSubmitCallback}
+          onCopy={onCopyAuthLink}
+          onOpen={onOpenOAuthLink}
         />
       ) : (
         <>
@@ -241,24 +244,48 @@ function PollCountdown({ seconds }: { seconds: number }) {
 
 function SchemePasteBody({
   prefix,
+  authUrl,
   value,
   onChange,
   disabled,
   submitting,
   onSubmit,
+  onCopy,
+  onOpen,
 }: {
   prefix: string | null;
+  authUrl: string | null;
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
   submitting: boolean;
   onSubmit: () => void;
+  onCopy: () => void;
+  onOpen: () => void;
 }) {
   const { t } = useTranslation();
   const trimmed = value.trim();
   const mismatch = trimmed.length > 0 && !!prefix && !trimmed.startsWith(prefix);
   return (
     <div className="space-y-1.5">
+      {authUrl ? (
+        <div className="rounded-xl border border-dashed border-border bg-background/70 p-3">
+          <p className="text-[11px] font-semibold text-foreground/75">{t("usage.oauthAuthLink")}</p>
+          <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+            {authUrl}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button type="button" size="xs" variant="outline" onClick={onCopy}>
+              <Copy className="h-3 w-3" />
+              {t("usage.oauthCopyLink")}
+            </Button>
+            <Button type="button" size="xs" variant="outline" onClick={onOpen}>
+              <ExternalLink className="h-3 w-3" />
+              {t("usage.oauthOpenLink")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <p className="text-[11px] font-semibold text-foreground">{t("usage.oauthSchemeLabel")}</p>
       <Textarea
         value={value}
@@ -273,7 +300,9 @@ function SchemePasteBody({
           {t("usage.oauthSchemePrefixMismatch", { prefix })}
         </p>
       ) : (
-        <p className="text-[10px] leading-relaxed text-foreground/60">{t("usage.oauthSchemeHint")}</p>
+        <p className="text-[10px] leading-relaxed text-foreground/60">
+          {t("usage.oauthSchemeHint", { prefix: prefix ?? "" })}
+        </p>
       )}
       <Button
         type="button"
