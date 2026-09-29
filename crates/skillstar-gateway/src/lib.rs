@@ -1,8 +1,9 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
-//! routing order, the loopback listener, the Claude process bridge, and the
+//! routing order, session affinity, the loopback listener, the Claude process bridge, and the
 //! Codex config writer. It does not own provider keys, usage accounts, or the
 //! decision model.
 
+mod affinity;
 mod claude;
 mod codex;
 mod codex_prompt;
@@ -13,6 +14,10 @@ mod serve;
 mod surface;
 mod translate;
 
+pub use affinity::{
+    AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
+    CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,
+};
 pub use claude::{
     AccountSnapshot, CallbackOutcome, ClaudeBridge, ClaudeError, ClaudeLaunch, ClaudeRun,
     ClaudeTool, IDLE_LONGEST, IDLE_MOST, PARK_LONGEST, STDERR_CAP, TEMP_PREFIX, TURN_ABORT,

@@ -1,0 +1,12 @@
+{
+  "mode": "",
+  "within": false,
+  "why": "first",
+  "kept": false,
+  "candidates": [
+    {"id": "a"},
+    {"id": "b"}
+  ],
+  "stick": null,
+  "expect": ["a", "b"]
+}

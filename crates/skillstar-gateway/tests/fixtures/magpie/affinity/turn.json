@@ -1,0 +1,14 @@
+{
+  "mode": "turn",
+  "within": true,
+  "why": "turn",
+  "kept": true,
+  "candidates": [
+    {"id": "a"},
+    {"id": "b"},
+    {"id": "c"}
+  ],
+  "stick": {"who": "c", "age_ms": 1000, "cache_read": 0, "resting": false},
+  "expect": ["c", "a", "b"],
+  "across": {"within": false, "why": "new-turn", "kept": false, "expect": ["a", "b", "c"]}
+}

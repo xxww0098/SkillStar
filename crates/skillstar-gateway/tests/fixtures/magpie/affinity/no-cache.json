@@ -1,0 +1,13 @@
+{
+  "mode": "",
+  "within": false,
+  "why": "no-cache",
+  "kept": false,
+  "candidates": [
+    {"id": "a"},
+    {"id": "b"},
+    {"id": "c"}
+  ],
+  "stick": {"who": "b", "age_ms": 60000, "cache_read": 1023, "resting": false},
+  "expect": ["a", "b", "c"]
+}
