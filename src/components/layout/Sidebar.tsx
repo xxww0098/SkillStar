@@ -328,7 +328,6 @@ export function Sidebar({
     navigate,
     selectedProviderId,
     setSelectedProviderId,
-    openModelsDrawer,
     usageCatalogFilter,
     setUsageCatalogFilter,
   } = useNavigation();
@@ -349,16 +348,11 @@ export function Sidebar({
     }
   };
 
-  const handleAddProvider = useCallback(() => {
-    setSelectedProviderId(null);
-    openModelsDrawer({ kind: "create" });
-  }, [setSelectedProviderId, openModelsDrawer]);
-
   const handleSelectProvider = useCallback(
     (id: string) => {
-      openModelsDrawer({ kind: "edit", providerId: id });
+      setSelectedProviderId(id);
     },
-    [openModelsDrawer],
+    [setSelectedProviderId],
   );
 
   const isMacDesktop = detectPlatform() === "macos";
@@ -475,7 +469,6 @@ export function Sidebar({
           <ModelsSidebar
             selectedProviderId={selectedProviderId}
             onSelectProvider={handleSelectProvider}
-            onAddProvider={handleAddProvider}
             collapsed={collapsed}
           />
         ) : appMode === "usage" ? (

@@ -2025,10 +2025,15 @@
       "minutesAgo": "{{count}} 分钟前",
       "hoursAgo": "{{count}} 小时前"
     },
+    "columns": {
+      "agents": "Agents",
+      "providers": "Providers",
+      "gateway": "Gateway"
+    },
     "sidebar": {
       "addProvider": "新增供应商",
-      "workbench": "Claude 工作台",
-      "intro": "管理 Claude 连接、API 供应商与模型角色。",
+      "workbench": "Models",
+      "intro": "Agents, Providers, Gateway.",
       "recent": "最近"
     },
     "roleDrops": {

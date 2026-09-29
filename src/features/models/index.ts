@@ -20,4 +20,5 @@ export {
 } from "./lib/officialProviders";
 export { useModelFetch } from "./api/modelCatalog";
 export { AgentToolIcon } from "./components/shared/AgentToolIcon";
+export { useModelsBoard } from "./api/board";
 export { useProvidersFlat } from "./hooks/useProvidersFlat";

@@ -19,10 +19,10 @@
 - **能力位语义**：`Tri::Unknown` 是「需要检测」，**不是**「不支持」。只有探测明确返回 `No` 才允许禁用绑定入口。迁移期一律写 `Unknown`。
 - **Official = `Credential::ExternalCli`**：不再靠 id 白名单分支。`claude-official` / `codex-official` 两个固定 id 保留（改 id 会让用户的原生登录绑定失效）。
 - **角色路由归 `AgentBinding.roles`**：`provider.meta.claude_*_model` 与 `binding.settings.roles` 都迁到这里。键是开放 map，规范键为 `default` / `fast` / `plan` / `vision` / `subagent`，其余（含 OMP 的 `slow`、`designer`）原样保留为 extra 角色。
-- **Desktop 能力以原生写盘效果判断**，不是注册表是否有行：sync 不再写 `skillstar-binding.json`。工作台的只读边界见 [Models 工作台](#models-工作台)。迁移报告不能把 marker 描述为已生效的原生配置，也不得擅自将 Desktop 绑定搬到 CLI。
+- **Desktop 能力以原生写盘效果判断**，不是注册表是否有行：sync 不再写 `skillstar-binding.json`。迁移报告不能把 marker 描述为已生效的原生配置，也不得擅自将 Desktop 绑定搬到 CLI。
 - **磁盘格式已切换**：`model_providers.json` 现在以 v4 写盘（`version: 4`，`providers` + `bindings`）。启动入口是 `load_store_and_repair`：读→（必要时）迁移→落盘 catalog 缓存→写回 store。它不改 Agent 文件。`get_providers_flat` 是唯一调用它的命令，其余命令走 `load_store`。
 - **v3 reader 拒绝未来版本**：`migrate_store_if_needed` 的 v1 分支是「排除法」到达的，而 v1 结构每个字段都有 serde 默认值——所以一个 v4 文件会被**成功**解析成四个空桶，然后覆盖用户的真实配置。现在遇到高于 `FLAT_STORE_VERSION` 的版本直接报错并保留原文件。
-- **IPC 线上形状仍是 v3**：store 与所有 writer 都是 v4，但渲染进程读到的仍是 v3 形状，翻译集中在 `src-tauri/src/commands/models_commands/compat.rs` 一处。写入是**打补丁**而非重建：v3 表达不了的 `caps` / `headers` / key 故障转移链 / `ext` 因此不会在每次保存时被清空。前端 IA 重写时删除该模块，明文 key 也随之停止过界。
+- **Settings 的 provider 列表仍是 v3 形状**，翻译集中在 `src-tauri/src/commands/models_commands/compat.rs`。写入是**打补丁**而非重建：v3 表达不了的 `caps` / `headers` / key 故障转移链 / `ext` 因此不会在每次保存时被清空。Models 页的 `get_models_board` 不经过这条缝，只返回 id 和 name。`compat.rs` 留到 Settings 不再调用 `get_providers_flat` 时再删。
 
 ### 迁移契约（v3 → v4）
 
@@ -98,17 +98,11 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 ## Models 工作台
 
-- `pages/Models.tsx` 只组合一个 `ModelsHub`。生产界面是 **Claude Code 专用工作台**，不再保留 Provider × Agent 矩阵、列显隐 carousel 或通用 Agent 设置原型。客户端标签与顺序以 [`claudeClients.ts`](../../../src/features/models/lib/claudeClients.ts) 及测试为准。
-- 默认打开 CLI；客户端切换只改变查看对象，不触发绑定或修改用户文件。CLI 用「官方登录 / API 连接」选择连接方式，选中供应商只预览，必须显式点击应用才绑定。原生登录不代表 SkillStar 已验证订阅或登录状态。
-- **Desktop 是只读说明入口**：后端仍注册 Desktop。sync 不写 marker，这也不等于原生 Desktop 配置生效。界面显式禁止 Desktop 的绑定、官方切换和模型映射写入，标注原生配置尚未接入；既有 Desktop 状态不显示为已同步，也不自动迁移到 CLI。
-- CLI 的 API 连接优先展示 Anthropic 端点和凭据状态；没有 Anthropic 端点的旧供应商仍可查看、编辑，但不能应用到 CLI。所有 Provider、其他 Agent 的绑定、后端 writer 和诊断能力保留，界面重构不做数据清理。
-- 主区域提供连接来源、当前绑定与模型映射。切换提交期间禁用重复操作；失败明确展示，不能把本地选择或乐观更新当作写盘成功。已保存绑定仍可重新应用，因为上一次落盘可能失败。读取失败提供重试，不伪装成空列表。
-- 角色映射以内联面板呈现；有未确认草稿时锁定客户端/连接切换，保存确认或明确放弃草稿后解锁，避免标签的 mousedown 卸载先于输入 blur 保存。角色与 env key 从 `list_agent_descriptors` 获取；加载或空角色描述不伪造可写角色。「统一使用一个模型」仅作用于已声明角色。修改经 `update_agent_settings` 持久化，成功提示必须等待实际成功结果；跳过原因继续来自后端。
-- 供应商创建是 Claude 专用表单：名称、Anthropic Base URL、API Key 为主，默认模型与模型目录地址可选；密钥默认隐藏，URL 在提交前验证。保存只创建连接，不自动绑定；随后打开已有编辑抽屉。
-- Provider 编辑继续复用 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。Anthropic 端点常显且优先，OpenAI 兼容端点与目录地址放入可展开的附加设置，旧字段与元数据继续以 patch 保留。
-- 侧栏添加与 Recent 快捷入口继续打开创建/编辑；Official 种子不进 Recent。删除仍须确认并列出全部受影响 Agent，包括当前工作台不展示的既有绑定。
-- 生产组件位于 `components/hub/claude/`，数据和导航桥接由 `hooks/useModelsData.ts` 与 `lib/navBridge.ts` 提供。旧矩阵与 OMP 专属前端面板删除。OMP 的 store 绑定还在；sync 不再把厂商密钥写进它的 YAML。App AI 的完整设置保留在 Settings，不再保留工作台内无效的原型页。
-- `ProviderConfigPrimitives.tsx` 是 Models 表单视觉 SSOT：标准控件 40px、dense 控件 36px，并统一 border、focus、disabled 和 invalid 状态。
+Models 页从左到右是 Agents、Providers、Gateway 三栏。栏内第一屏可以是空列表。这一屏不决定行密度、选择器、路由控件或空态句子。
+
+`get_models_board` 只返回每一行的 id 和 name。Agents 来自注册表，Providers 来自 `load_store()` 的名字，Gateway 在有最近调用之前是空列表。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
+
+Settings 的 App AI 仍用 `get_providers_flat`。切换三栏或侧栏里的最近名字只改变当前选中，不写 Agent 配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
 
 
 ## 前端状态与诊断
@@ -117,8 +111,8 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 - mutation 采用 optimistic update → error rollback/toast → settled invalidate；create 用返回实体填充 cache。
 - activation map 从 provider flat cache 投影，不额外维护第二套 `tool_activations` fetch。
 - built-in preset 由 Rust command 返回，TypeScript 不复制 registry。
-- probe 规则由共享 helper 决定，不在每个 panel 分叉；Models 余额响应解析表位于 `api/balance.ts`，Rust preset 和前端 parser/fixture 由双侧测试锁定。
-- App AI 可以绑定 Models provider 或本地 Ollama；Models hub 只负责前者，Ollama 配置仍由 Settings 管理。
+- 余额响应的解析在 Rust preset。Models 页不保留第二份解析表。
+- App AI 可以绑定 Models provider 或本地 Ollama。这个表单在 Settings，不在 Models 页。
 - App AI 的完整设置区块（Models provider 选择与本地 Ollama 表单）由 `src/features/models/components/settings/` 提供，`src/pages/Settings.tsx` 只负责组合，避免 Settings feature 反向读取 Models 私有 hooks。
 
 ## 应用内 AI

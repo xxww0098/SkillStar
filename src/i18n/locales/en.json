@@ -2025,10 +2025,15 @@
       "minutesAgo": "{{count}}m ago",
       "hoursAgo": "{{count}}h ago"
     },
+    "columns": {
+      "agents": "Agents",
+      "providers": "Providers",
+      "gateway": "Gateway"
+    },
     "sidebar": {
       "addProvider": "Add provider",
-      "workbench": "Claude workbench",
-      "intro": "Manage Claude connections, API providers and model roles.",
+      "workbench": "Models",
+      "intro": "Agents, Providers, Gateway.",
       "recent": "Recent"
     },
     "roleDrops": {

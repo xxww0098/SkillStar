@@ -53,7 +53,7 @@
 - 样式使用 Tailwind utilities；不新增 CSS Modules 或 styled-components。
 - 优先复用 `src/components/ui/`。需要焦点管理、Esc、portal 的组件使用 Radix primitive。
 - 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。嵌套面板用 `InsetPanel`，不要用会 hover 抬升的 `Card`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
-- 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。 Models 的 `ProviderConfigPrimitives` 是该域自己的表单语言，不并进通用 `Input`/`Textarea`。
+- 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。
 - 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。`ModalShell` 由 Radix 管理层叠、portal 与焦点；Esc 只作用于最上层，不穿透到底层弹窗或页面快捷键。Esc 与 backdrop 共用 `dismissable` 门控，处理中不可关闭的弹窗仍拦截 Esc；调用方不再重复注册关闭监听。关闭后焦点返回打开前的控件。modal 活跃期间不启动全局命令面板，避免非模态命令面板与焦点锁冲突；关闭后 ⌘K / Ctrl+K 恢复，包括输入框内。
 - Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。设置侧栏 lg 断点保持纯图标（900–1280px 窗口放不下文字），xl 起图标 + 文字标签。
 - 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。

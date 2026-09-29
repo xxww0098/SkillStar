@@ -59,6 +59,21 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     ensureOfficialInMockStore();
     return FLAT_PROVIDERS;
   },
+  get_models_board: () => ({
+    agents: [
+      { id: "claude-code", name: "Claude Code" },
+      { id: "claude-desktop", name: "Claude Desktop" },
+      { id: "codex", name: "Codex" },
+      { id: "opencode", name: "OpenCode" },
+      { id: "pi", name: "Pi" },
+      { id: "omp", name: "Oh My Pi" },
+    ],
+    providers: FLAT_PROVIDERS.providers.map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+    })),
+    gateway: [],
+  }),
   create_provider_flat: (args) => {
     const entry = (args?.entry ?? {}) as Record<string, unknown>;
     const requestedId = typeof entry.id === "string" ? entry.id : "";

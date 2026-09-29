@@ -419,6 +419,7 @@ pub fn run() {
             commands::models_commands::list_agent_descriptors,
             // Flat store commands (v2)
             commands::models_commands::get_providers_flat,
+            commands::models_commands::get_models_board,
             commands::models_commands::create_provider_flat,
             commands::models_commands::update_provider_flat,
             commands::models_commands::delete_provider_flat,

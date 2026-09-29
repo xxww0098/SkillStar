@@ -5,6 +5,7 @@
 //! rhythm must not be the thing the frontend is pinned to.
 
 pub mod agents;
+pub mod board;
 mod codex_save;
 pub mod dto;
 

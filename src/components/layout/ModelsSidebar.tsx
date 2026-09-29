@@ -1,54 +1,43 @@
-import { Plug, Server, Sparkles } from "lucide-react";
+import { Server } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ProviderBrandIcon } from "@/components/shared/ProviderBrandIcon";
-import { apiProviders, useProvidersFlat } from "@/features/models";
+import { useModelsBoard } from "@/features/models";
 import { cn } from "@/lib/utils";
 
 export interface ModelsSidebarProps {
   collapsed: boolean;
   selectedProviderId: string | null;
   onSelectProvider: (id: string) => void;
-  onAddProvider: () => void;
 }
 
 /**
- * Minimal sidebar shown in Models mode. The full provider list and Agent
- * connections live in the main hub now — this strip is just a Recent /
- * pinned shortcut so users can jump to a provider quickly without leaving
- * the sidebar.
+ * Models mode sidebar. Recent names come from the board (id + name only).
+ * Adding a provider is not on this strip: the old create form is gone.
  */
-export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider, onAddProvider }: ModelsSidebarProps) {
-  const { providers } = useProvidersFlat();
+export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider }: ModelsSidebarProps) {
+  const { data } = useModelsBoard();
   const { t } = useTranslation();
-  // Native login is a connection mode, not a Recent provider shortcut.
-  const recent = useMemo(() => apiProviders(providers).slice(0, 6), [providers]);
+  const recent = useMemo(() => (data?.providers ?? []).slice(0, 6), [data?.providers]);
+
   if (collapsed) {
     return (
       <div className="flex flex-col items-center gap-1.5 py-2">
-        <button
-          type="button"
-          onClick={onAddProvider}
-          title={t("models.sidebar.addProvider")}
-          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-primary/35 bg-primary/15 text-primary transition hover:bg-primary/25 shadow-xs"
-        >
-          <Plug className="h-4 w-4" />
-        </button>
-        {recent.map((p) => (
+        {recent.map((provider) => (
           <button
-            key={p.id}
+            key={provider.id}
             type="button"
-            onClick={() => onSelectProvider(p.id)}
-            title={p.name}
+            onClick={() => onSelectProvider(provider.id)}
+            title={provider.name}
             className={cn(
               "flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border bg-background/60 transition hover:bg-card-hover shadow-2xs",
-              selectedProviderId === p.id ? "border-primary bg-primary/20 ring-1 ring-primary/40" : "border-border/80",
+              selectedProviderId === provider.id
+                ? "border-primary bg-primary/20 ring-1 ring-primary/40"
+                : "border-border/80",
             )}
           >
             <ProviderBrandIcon
-              presetId={p.preset_id}
-              providerName={p.name}
-              iconColor={p.icon_color}
+              providerName={provider.name}
               size="xs"
               className="h-5 w-5 border-0 bg-transparent shadow-none"
             />
@@ -60,20 +49,11 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
 
   return (
     <div className="flex flex-col gap-3 py-1">
-      <div className="rounded-xl border border-primary/25 bg-primary/[0.08] px-3 py-3 shadow-xs">
-        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary">
-          <Sparkles className="h-3 w-3" />
+      <div className="rounded-2xl border border-border bg-card px-3 py-3">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-foreground/70">
           {t("models.sidebar.workbench")}
         </div>
         <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{t("models.sidebar.intro")}</p>
-        <button
-          type="button"
-          onClick={onAddProvider}
-          className="mt-2.5 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground shadow-xs transition hover:bg-primary-hover active:scale-[0.98]"
-        >
-          <Plug className="h-3 w-3" />
-          {t("models.sidebar.addProvider")}
-        </button>
       </div>
 
       {recent.length > 0 ? (
@@ -83,13 +63,13 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
             {t("models.sidebar.recent")}
           </div>
           <div className="space-y-0.5">
-            {recent.map((p) => {
-              const active = selectedProviderId === p.id;
+            {recent.map((provider) => {
+              const active = selectedProviderId === provider.id;
               return (
                 <button
-                  key={p.id}
+                  key={provider.id}
                   type="button"
-                  onClick={() => onSelectProvider(p.id)}
+                  onClick={() => onSelectProvider(provider.id)}
                   className={cn(
                     "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition select-none",
                     active
@@ -97,8 +77,8 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
                       : "text-muted-foreground hover:bg-muted/40 hover:text-foreground font-medium",
                   )}
                 >
-                  <ProviderBrandIcon presetId={p.preset_id} providerName={p.name} iconColor={p.icon_color} size="xs" />
-                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                  <ProviderBrandIcon providerName={provider.name} size="xs" />
+                  <span className="min-w-0 flex-1 truncate">{provider.name}</span>
                 </button>
               );
             })}

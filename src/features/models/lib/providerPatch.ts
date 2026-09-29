@@ -71,7 +71,7 @@ export type ValidatePatchErrorCode = "nameRequired" | "invalidOpenaiUrl" | "inva
 /**
  * Returns a stable error code (not display text) so callers can map it
  * through `t("models.errors." + code)` — keeps this pure-domain file free of
- * i18n context. See useProviderForm.save for the consumer.
+ * i18n context.
  */
 export function validatePatch(patch: ProviderPatchFlat): ValidatePatchErrorCode | null {
   if (!patch.name?.trim()) return "nameRequired";

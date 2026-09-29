@@ -34,11 +34,13 @@ use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 // resolves exactly as before).
 // ---------------------------------------------------------------------------
 
+mod board;
 mod compat;
 mod diagnostics;
 mod provider_cmds;
 mod tools;
 
+pub use board::*;
 pub use diagnostics::*;
 pub use provider_cmds::*;
 pub use tools::*;

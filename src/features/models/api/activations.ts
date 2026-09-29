@@ -40,36 +40,21 @@ export function useActivationMutations() {
     queryClient.invalidateQueries({ queryKey });
   }, [queryClient, queryKey]);
 
-  /**
-   * Park what the write skipped, and say so once.
-   *
-   * Every mutation here can silently discard part of the role map — a role
-   * pointing at a provider this agent is not bound to, a row with no model.
-   * Before this, the panel kept showing the assignment and the file did not
-   * have it, and only the file knew. The backend reports the difference; this
-   * is the one place that remembers it and tells the user, so no call site can
-   * forget to.
-   */
-  const recordDrops = useCallback(
-    (toolId: string, result: ToolSyncResult | null | undefined) => {
-      const dropped: DroppedRole[] = result?.dropped_roles ?? [];
-      queryClient.setQueryData<DroppedRole[]>(modelsKeys.roleDrops(toolId), dropped);
-      if (dropped.length > 0) {
-        toast.warning(
-          i18n.t("models.roleDrops.toastTitle", {
-            count: dropped.length,
-            name: toolDisplayName(toolId),
-          }),
-          {
-            description: dropped
-              .map((drop) => `${drop.role}: ${i18n.t(`models.roleDrops.reason.${drop.reason}`)}`)
-              .join("\n"),
-          },
-        );
-      }
-    },
-    [queryClient],
-  );
+  const recordDrops = useCallback((toolId: string, result: ToolSyncResult | null | undefined) => {
+    const dropped: DroppedRole[] = result?.dropped_roles ?? [];
+    if (dropped.length === 0) return;
+    toast.warning(
+      i18n.t("models.roleDrops.toastTitle", {
+        count: dropped.length,
+        name: toolDisplayName(toolId),
+      }),
+      {
+        description: dropped
+          .map((drop) => `${drop.role}: ${i18n.t(`models.roleDrops.reason.${drop.reason}`)}`)
+          .join("\n"),
+      },
+    );
+  }, []);
 
   const activateMutation = useMutation({
     mutationFn: ({

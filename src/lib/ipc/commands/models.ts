@@ -16,6 +16,7 @@ import type {
   WriteToolConfigFileResult,
 } from "../../../types";
 import type { AgentDescriptorDto } from "../../../types/generated/AgentDescriptorDto";
+import type { ModelsBoardDto } from "../../../types/generated/ModelsBoardDto";
 
 interface ConfigConflict {
   conflict_type: "EnvVarOverride" | "LegacyConfig" | "ExternalModification";
@@ -39,6 +40,8 @@ interface BalanceRawResponse {
 export interface ModelsCommands {
   // Flat provider store (v2)
   get_providers_flat: { args: Record<string, never>; result: FlatProvidersResponse };
+  /** Agents, providers, and gateway as id + name. No secrets and no endpoints. */
+  get_models_board: { args: Record<string, never>; result: ModelsBoardDto };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
   update_provider_flat: {
     args: { id: string; patch: ProviderPatchFlat };
