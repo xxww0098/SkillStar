@@ -423,3 +423,15 @@
 - **占位 bearer 是 `skillstar`，Qoder、Qoder CN、WorkBuddy 是 `skillstar-<id>`。** fx、omp、Command Code 不写 bearer 字符串。Gemini 的 URL 不带后缀，ZCode 的 Anthropic 地址也不带，WorkBuddy 带到 `/v1/chat/completions`，其余带到 `/v1`。信心：高。
 
 - **写出的文件里没有厂商主机，也没有厂商密钥。** DeepSeek Harness 没有 profile 时写旧版 `config.yaml`，标记是 `# skillstar`，它自己的 provider 名 `deepseek-official` 留着。信心：高。
+
+## 19 Claude Code 文件
+
+### 先这样，后面的档再接
+
+- **`settings.json` 整份替换，不逐键拼进用户原来的文件。** 托管期间主题和其它键不留在文件里，取消托管才整份放回。第二次保存不保留单独改过的某一档，四个档都跟着新的 `model_ref`。信心：中。
+
+### 已定，按这个做
+
+- **`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。** `ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`。环境里就算放着 Usage 的 access token，文件里也不写它，也不写 `CLAUDE_CODE_OAUTH_TOKEN`。信心：高。
+
+- **四个档、小快模型和子代理模型都写成这一次的 `model_ref`。** 不读 `AgentBinding.roles`。不写 effort。进程桥不读这份文件，保存时不启动 `claude`。信心：高。

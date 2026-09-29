@@ -34,6 +34,7 @@ pub const FILE_AGENTS: &[&str] = &[
     "grok",
     "zcode",
     "workbuddy",
+    "claude",
 ];
 
 pub(super) struct Written {

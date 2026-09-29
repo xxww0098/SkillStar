@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：18 已落地。最后更新：2026-09-30。
+状态：19 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-18 已落地。`apply_gateway` 把文件型 Agent 指到环回网关。URL 带该 Agent 的后缀，bearer 是 `skillstar` 或 `skillstar-<agent-id>`。取消托管从 `agent_stash.json` 放回接管前的整份文件。Goose、Cursor CLI、Copilot CLI、Devin 仍返回 `agent_not_managed`，见 39，这一档先不勾。选择记在 [choices.md](choices.md)。
+19 已落地。`apply_gateway("claude", …)` 写 `~/.claude/settings.json`。`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token。四个档跟随这一次的模型。取消托管放回接管前的整份文件。进程桥不读这份文件。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/19-claude-code.md](slices/19-claude-code.md)：`apply_gateway("claude", …)` 写 Claude Code 的配置文件。`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。`ANTHROPIC_AUTH_TOKEN` 是占位 bearer `skillstar`，不是 Usage 的 access token，也不写 `CLAUDE_CODE_OAUTH_TOKEN`。05 档的进程桥仍是另一条路径，本档不启动 `claude`。保持 `apply_gateway_`、`sign_`、`codex_writer_`、`claude_bridge_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/20-claude-desktop.md](slices/20-claude-desktop.md)：Claude Desktop 写原生 `claude_desktop_config.json` 和 Claude-3p 配置档。配置档 id 是 `00000000-0000-4000-8000-736b696c6c73`。`inferenceGatewayBaseUrl` 是网关根，`inferenceGatewayApiKey` 是 `skillstar-claude-desktop`。不写 `skillstar-binding.json`。保持 `claude_code_`、`apply_gateway_`、`claude_bridge_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -36,7 +36,7 @@
 - [x] 16 视觉转述 — [slices/16-vision.md](slices/16-vision.md)
 - [x] 17 订阅签名 — [slices/17-signing.md](slices/17-signing.md)
 - [x] 18 共享写入 — [slices/18-shared-writers.md](slices/18-shared-writers.md)
-- [ ] 19 Claude Code 文件 — [slices/19-claude-code.md](slices/19-claude-code.md)
+- [x] 19 Claude Code 文件 — [slices/19-claude-code.md](slices/19-claude-code.md)
 - [ ] 20 Claude Desktop — [slices/20-claude-desktop.md](slices/20-claude-desktop.md)
 - [ ] 21 OpenHanako — [slices/21-hanako.md](slices/21-hanako.md)
 - [ ] 22 Alma — [slices/22-alma.md](slices/22-alma.md)

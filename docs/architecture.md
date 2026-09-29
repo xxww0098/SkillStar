@@ -132,6 +132,7 @@ flowchart LR
 - 上游签名只用调用方注入的账户快照和 Usage 已经写好的余量。`skillstar-app` 从 Usage 的已保存列表填这份快照。网关不打开 Usage 的存储，不刷新令牌，不请求配额。没有快照时候选保持未知。`anthropic` 不产生 Anthropic HTTP，生成仍走进程桥。没有 Usage 行的 Agent 只用 provider 快照里的 API 密钥。
 - 保存 Codex 只写环回。已登录：`openai_base_url` 指向 `{origin}/backend-api/codex`。API 形态：`[model_providers.skillstar]`，`base_url` 是 `{origin}/v1`，`wire_api = "responses"`，占位 bearer `skillstar`，目录文件 `skillstar-models.json`。接管字段之前，旧值进 `config_dir()/agent_stash.json`（Unix `0600`，原子替换）。取消托管按 stash 写回。表和目录文件留下。网关不推断登录态，调用方传入形态。`skillstar-models` 不依赖网关。
 - 保存文件型 Agent 走 `apply_gateway`。写出的地址总是 `http://127.0.0.1:<端口>` 加上该 Agent 的路径后缀，占位 bearer 是 `skillstar` 或 `skillstar-<id>`。取消托管把接管前的整份文件从同一份 `agent_stash.json` 放回。Goose、Cursor CLI、Copilot CLI、Devin 不写环回地址，调用返回未托管。在册的 id 以 `apply_gateway_` 测试为准。
+- Claude Code 的 `~/.claude/settings.json` 由 `apply_gateway("claude", …)` 写入。`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token，文件里也不写 `CLAUDE_CODE_OAUTH_TOKEN`。各档跟随这一次的模型。取消托管放回接管前的整份文件。进程桥不读这份文件，保存时不启动 `claude`。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP

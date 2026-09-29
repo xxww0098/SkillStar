@@ -40,3 +40,5 @@ base URL 带了 `/v1`，或 token 等于测试注入的 Usage access token。
 ## 决定
 
 - 角色 env 与 magpie 的 tier 表一致。SkillStar 旧的 `AgentBinding.roles` 不再投影到这些文件。
+- 与 18 档一样整份替换 `settings.json`。托管期间其它键不留在文件里。取消托管把接管前的整份文件放回，用户原来的 URL 和 token 在里面。
+- 这个函数只收到一个 `model_ref`。四个档、`ANTHROPIC_SMALL_FAST_MODEL` 和 `CLAUDE_CODE_SUBAGENT_MODEL` 都写成它。不写 `CLAUDE_CODE_OAUTH_TOKEN`，也不写 effort。

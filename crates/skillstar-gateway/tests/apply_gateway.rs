@@ -82,6 +82,10 @@ const ROSTER: &[(&str, &[(&str, &str)])] = &[
         "workbuddy",
         &[(".workbuddy/models.json", "workbuddy.models.json")],
     ),
+    (
+        "claude",
+        &[(".claude/settings.json", "claude.settings.json")],
+    ),
 ];
 
 const HOSTS: &[&str] = &[
@@ -280,7 +284,6 @@ fn apply_gateway_specials_still_unmanaged() {
     with_sandbox("specials", |home, data| {
         for id in [
             "codex",
-            "claude",
             "claude-desktop",
             "hanako",
             "alma",
@@ -457,4 +460,61 @@ fn apply_gateway_grok_home_outside_sandbox() {
         "{text}"
     );
     assert!(!home.join(".grok").exists());
+}
+
+#[test]
+fn claude_code_base_url_has_no_v1() {
+    with_sandbox("claude-url", |home, _data| {
+        apply_gateway("claude", REF).unwrap();
+        let text = fs::read_to_string(home.join(".claude/settings.json")).unwrap();
+        assert!(
+            text.contains("\"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:21847\""),
+            "{text}"
+        );
+        assert!(!text.contains("/v1"), "{text}");
+    });
+}
+
+#[test]
+fn claude_code_auth_token_is_placeholder() {
+    with_sandbox("claude-token", |home, _data| {
+        let planted = OsString::from("sk-ant-usage-should-not-leak");
+        let _plant = EnvRestore::set(&[
+            ("ANTHROPIC_AUTH_TOKEN", planted.as_os_str()),
+            ("CLAUDE_CODE_OAUTH_TOKEN", planted.as_os_str()),
+        ]);
+        apply_gateway("claude", REF).unwrap();
+        let text = fs::read_to_string(home.join(".claude/settings.json")).unwrap();
+        assert!(
+            text.contains("\"ANTHROPIC_AUTH_TOKEN\": \"skillstar\""),
+            "{text}"
+        );
+        assert!(!text.contains("sk-ant-usage-should-not-leak"), "{text}");
+        assert!(!text.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{text}");
+    });
+}
+
+#[test]
+fn claude_code_tiers_match_fixture() {
+    with_sandbox("claude-tiers", |home, _data| {
+        check_agent(home, "claude");
+    });
+}
+
+#[test]
+fn claude_code_unstash() {
+    with_sandbox("claude-unstash", |home, data| {
+        let prior = "{\n  \"env\": {\n    \"ANTHROPIC_BASE_URL\": \"https://api.anthropic.com\",\n    \"ANTHROPIC_AUTH_TOKEN\": \"sk-ant-user-token\"\n  },\n  \"theme\": \"dark\"\n}\n";
+        let path = home.join(".claude").join("settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, prior).unwrap();
+        apply_gateway("claude", REF).unwrap();
+        let managed = fs::read_to_string(&path).unwrap();
+        assert_eq!(managed, fixture("claude.settings.json"));
+        assert!(!managed.contains("sk-ant-user-token"), "{managed}");
+        assert!(!managed.contains("api.anthropic.com"), "{managed}");
+        apply_gateway("claude", "").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), prior);
+        assert!(!data.join("config").join("agent_stash.json").exists());
+    });
 }

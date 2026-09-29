@@ -42,6 +42,7 @@ pub(super) fn files(
         "grok" => Ok(grok(home, &v1, model_ref, &full, token)),
         "zcode" => Ok(zcode(home, origin, model_ref, token)),
         "workbuddy" => Ok(workbuddy(home, &v1, model_ref)),
+        "claude" => Ok(claude_code(home, origin, model_ref)),
         _ => Err(ApplyError::NotManaged),
     }
 }
@@ -260,6 +261,16 @@ fn omp(home: &Path, v1: &str, full: &str, model_ref: &str) -> Vec<Written> {
         file(home, yml_or_yaml(&dir, "config"), config),
         file(home, yml_or_yaml(&dir, "models"), models),
     ]
+}
+
+fn claude_code(home: &Path, origin: &str, model_ref: &str) -> Vec<Written> {
+    let body = format!(
+        "{{\n  \"env\": {{\n    \"ANTHROPIC_BASE_URL\": {origin},\n    \"ANTHROPIC_AUTH_TOKEN\": {token},\n    \"ANTHROPIC_MODEL\": {model_ref},\n    \"ANTHROPIC_SMALL_FAST_MODEL\": {model_ref},\n    \"ANTHROPIC_DEFAULT_OPUS_MODEL\": {model_ref},\n    \"ANTHROPIC_DEFAULT_SONNET_MODEL\": {model_ref},\n    \"ANTHROPIC_DEFAULT_HAIKU_MODEL\": {model_ref},\n    \"ANTHROPIC_DEFAULT_FABLE_MODEL\": {model_ref},\n    \"CLAUDE_CODE_SUBAGENT_MODEL\": {model_ref}\n  }},\n  \"model\": {model_ref}\n}}\n",
+        origin = json(origin),
+        token = json(PLACEHOLDER_BEARER),
+        model_ref = json(model_ref),
+    );
+    vec![file(home, home.join(".claude").join("settings.json"), body)]
 }
 
 fn grok(home: &Path, v1: &str, model_ref: &str, full: &str, token: &str) -> Vec<Written> {
