@@ -43,7 +43,7 @@
 - **绑定按 wire protocol 校验**：注册表列从 `required_url` 换成 `required_wire`（`RequiredWire`）。`codex` 要求 `OpenaiResponses`，`claude-code` / `claude-desktop` 要求 `AnthropicMessages`，其余要求 `OpenaiChat`。`Credential::ExternalCli` 行豁免（空端点是它的语义）。`Tri::Unknown` 从不拒绝，只有探测得到的 `No` 才拒绝。
 - Agent descriptor 的 `kind` 是 UI 和后端能力的共同开关：single 只激活一个 provider；multi 原生保留多个条目并维护 active 指针。
 - Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、`required_wire`、**角色清单**、sync/unsync/探测 dispatch）的 SSOT 是 `tool_sync::agents` 注册表；写盘、卸载、resync 与配置目标枚举都经它路由，新增 Agent 只加一行 spec 及其 writer。这条目标是**可证伪的**，不是口号：`a_synthetic_agent_syncs_through_the_registry_alone` 用一个 dispatch 从没见过的合成 Agent 走完整条同步路径；`agent_ids_are_spelled_out_only_in_the_registry_and_the_writers` 给注册表和 writer 之外的每个文件钉死 Agent id 字面量预算。声明面通过 `list_agent_descriptors` 命令投影为 `AgentDescriptorDto` 供前端消费（`crates/skillstar-app/src/models/agents.rs`）；前端 `agentRegistry.ts` 只保留没有后端对应物的展示项（图标、tagline、安装文档链接）。
-- 托管模型配置的所有者是 `skillstar-gateway`。`tool_sync` 对六个受管 Agent 的 sync 不再写入厂商 base URL 或 API key。Codex 的环回地址只在用户保存时由网关写入。文件型 Agent 的环回地址在保存时由 `apply_gateway` 写入。哪些 id 在册，以 gateway 的 `apply_gateway_` 测试为准。Claude Code 的 `settings.json` 在保存时把 `ANTHROPIC_BASE_URL` 指到网关根，不带 `/v1`；`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token。进程桥不读这份文件。
+- 托管模型配置的所有者是 `skillstar-gateway`。`tool_sync` 对六个受管 Agent 的 sync 不再写入厂商 base URL 或 API key。Codex 的环回地址只在用户保存时由网关写入。文件型 Agent 的环回地址在保存时由 `apply_gateway` 写入。哪些 id 在册，以 gateway 的 `apply_gateway_` 测试为准。Claude Code 的 `settings.json` 在保存时把 `ANTHROPIC_BASE_URL` 指到网关根，不带 `/v1`；`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token。进程桥不读这份文件。Claude Desktop 在保存时写入原生 `claude_desktop_config.json` 和 Claude-3p 配置档，不写 `skillstar-binding.json`。
 - 启动和保存 provider 都不改 Agent 文件。已有文件里的厂商 URL 保持不动，直到用户保存 Codex；这次保存只改这一档声明的键。`repair_agent_configs` 不再从启动路径调用。
 - unsync 仍删除 SkillStar 已经写过的托管键（Claude 托管 env、Desktop marker、`skillstar` / `skillstar_*` 块，以及指向它们的指针）。那是解除托管，不是把厂商密钥写回去。
 - 所有测试把 `SKILLSTAR_TOOL_SYNC_HOME`、`SKILLSTAR_DATA_DIR` 和 `HOME` 指到临时目录。
@@ -87,7 +87,7 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 - `ensure_official_providers` 在缺失时插入种子行；已存在同 `id`/`preset_id` 则跳过（不覆盖用户改名）。`get_providers_flat` 会调用它并在变更时写盘。
 - `create_provider_from_preset` 对这两个种子保留稳定 id 并写 `Credential::ExternalCli`；`create_provider` 不再改写调用方给的 id（v3 会覆盖成 UUID，这正是固定 slug 需要白名单的原因），重复 id 直接报错。
 - 激活时跳过「必须有 anthropic/openai URL」校验。
-- 激活官方登录只改 store 里的绑定。它不改 `~/.claude/settings.json`，也不改 Codex 的 `config.toml` 或 `auth.json`。解除托管仍走 unsync。Desktop 没有原生写盘，界面不提供其激活操作。
+- 激活官方登录只改 store 里的绑定。它不改 `~/.claude/settings.json`，也不改 Codex 的 `config.toml` 或 `auth.json`。解除托管仍走 unsync。官方登录的激活界面不提供 Desktop。
 - Codex Official 的 `bind_provider` 强制 `auth_mode = oauth`。这不写入 `OPENAI_API_KEY`，也不改用户的 ChatGPT token。
 - 停用 Official 与普通 unbind 一致（清 binding；Claude 不额外清用户自有配置）。
 - Official 是连接方式，不是可创建/编辑的 API 供应商：原生种子从供应商选择与 Recent 中排除。使用原生登录通过 `bind_provider` 选择后端种子，保持它的真实 id 与 ExternalCli 凭据；不能用空 API Key 新建行冒充原生种子。

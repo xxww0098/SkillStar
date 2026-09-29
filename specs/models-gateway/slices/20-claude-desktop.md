@@ -42,4 +42,8 @@ id 写成了 magpie 的 `6d6167706965`，或 marker 文件又被写出来。
 
 ## 决定
 
-- `/v1/models` 给 Desktop 的 id 过滤规则抄 `desktopAccepts` 与 `desktopDenied`。词表不自行增删。别名后的 id 必须能通过这个检查。
+- `/v1/models` 给 Desktop 的 id 过滤规则抄 `desktopAccepts` 与 `desktopDenied`。词表不自行增删。别名后的 id 必须能通过这个检查。过滤是纯函数，不挂进现在返回空列表的 `/v1/models`。等目录进网关，再按 Desktop 的 User-Agent 过滤。
+- 两份 `claude_desktop_config.json`、配置档和 `_meta.json` 整份替换，取消托管放回接管前的整份文件。不移植 magpie 的逐键拼接。托管期间原文件里的其它键不留着。空目录不删。
+- `_meta.json` 的 `appliedId` 是配置档 id，`entries` 里这一条的 `name` 是 `skillstar`。配置档还写 `inferenceProvider` 为 `gateway`、`inferenceGatewayAuthScheme` 为 `bearer`、`disableDeploymentModeChooser` 为 true、`coworkEgressAllowedHosts` 为 `["*"]`。两份 config 写 `deploymentMode` 为 `3p`。`model_ref` 不写进这些文件。
+- effort 的 Claude 形态（`skillstar-<number>.anthropic.<model>`）本档不生成。`apply_gateway` 没有 efforts，也没有目录。`mythos-skillstar-` 只由别名函数给出。
+- `SKILLSTAR_TOOL_SYNC_HOME` 非空时，写者不读 `XDG_CONFIG_HOME` 和 `LOCALAPPDATA`，落在该 home 下的系统默认位置。路径函数本身仍接受调用方传入的 getenv，测试用它覆盖 darwin、windows 和其余系统。不写 `%APPDATA%\Claude`，也不写 `skillstar-binding.json`。

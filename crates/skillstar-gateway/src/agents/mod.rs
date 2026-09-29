@@ -6,6 +6,7 @@
 //! before any file is opened.
 
 mod body;
+mod desktop;
 
 use std::fs;
 use std::path::PathBuf;
@@ -35,7 +36,12 @@ pub const FILE_AGENTS: &[&str] = &[
     "zcode",
     "workbuddy",
     "claude",
+    "claude-desktop",
 ];
+
+pub use desktop::{
+    DESKTOP_PROFILE_ID, desktop_accepts, desktop_alias, desktop_dirs, desktop_effort_alias,
+};
 
 pub(super) struct Written {
     rel: String,

@@ -418,7 +418,7 @@
 
 - **一个函数 `apply_gateway(agent_id, model_ref)`。** 空的 `model_ref` 才是取消。只含空白不是取消。写出的主机总是 `127.0.0.1`，端口是网关正在听的端口，不是 3425。信心：高。
 
-- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Claude Code、Claude Desktop、Hanako、Alma、Cindy、WSL 同样还不写。花名册以 `apply_gateway_` 测试为准。信心：高。
+- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Hanako、Alma、Cindy、WSL 同样还不写。Claude Code 与 Claude Desktop 已纳入。花名册以 `apply_gateway_` 测试为准。信心：高。
 
 - **占位 bearer 是 `skillstar`，Qoder、Qoder CN、WorkBuddy 是 `skillstar-<id>`。** fx、omp、Command Code 不写 bearer 字符串。Gemini 的 URL 不带后缀，ZCode 的 Anthropic 地址也不带，WorkBuddy 带到 `/v1/chat/completions`，其余带到 `/v1`。信心：高。
 
@@ -435,3 +435,19 @@
 - **`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。** `ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`。环境里就算放着 Usage 的 access token，文件里也不写它，也不写 `CLAUDE_CODE_OAUTH_TOKEN`。信心：高。
 
 - **四个档、小快模型和子代理模型都写成这一次的 `model_ref`。** 不读 `AgentBinding.roles`。不写 effort。进程桥不读这份文件，保存时不启动 `claude`。信心：高。
+
+## 20 Claude Desktop
+
+### 先这样，后面的档再接
+
+- **Desktop 的四份文件整份替换。** 两份 `claude_desktop_config.json`、配置档和 `_meta.json` 不逐键拼进用户原来的文件。托管期间其它键不留着，取消托管才整份放回。空目录留下。信心：中。
+
+- **`/v1/models` 的 Desktop 过滤先不挂上监听。** 现在这条路由返回空列表。`desktop_accepts` 抄 magpie 的词表，别名必须能通过。等目录进网关，再只对 Desktop 的 User-Agent 过滤。信心：中。
+
+- **effort 的 Claude 形态本档不生成。** `mythos-skillstar-` 只出现在别名函数里。`apply_gateway` 没有 efforts，也没有模型目录，写不了 `skillstar-<number>.anthropic.<model>`。信心：中。36 档再接。
+
+### 已定，按这个做
+
+- **配置档 id 是 `00000000-0000-4000-8000-736b696c6c73`。** 不写 magpie 的 `6d6167706965`。`inferenceGatewayBaseUrl` 是网关根，不带 `/v1`。`inferenceGatewayApiKey` 是 `skillstar-claude-desktop`。`_meta.json` 的 `name` 是 `skillstar`。不写 `skillstar-binding.json`。信心：高。
+
+- **测试沙箱里不跟 `XDG_CONFIG_HOME` 和 `LOCALAPPDATA`。** 路径函数本身仍按 darwin、windows、其余系统三条算，测试把目录传进去，不读开发者的家目录。正式运行时这几个变量照 magpie 的规则生效。信心：高。

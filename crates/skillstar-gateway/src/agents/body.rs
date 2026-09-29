@@ -43,6 +43,7 @@ pub(super) fn files(
         "zcode" => Ok(zcode(home, origin, model_ref, token)),
         "workbuddy" => Ok(workbuddy(home, &v1, model_ref)),
         "claude" => Ok(claude_code(home, origin, model_ref)),
+        "claude-desktop" => Ok(super::desktop::files(home, origin)),
         _ => Err(ApplyError::NotManaged),
     }
 }
@@ -315,7 +316,7 @@ fn yml_or_yaml(dir: &Path, name: &str) -> PathBuf {
     }
 }
 
-fn file(home: &Path, path: PathBuf, body: String) -> Written {
+pub(super) fn file(home: &Path, path: PathBuf, body: String) -> Written {
     let rel = path
         .strip_prefix(home)
         .unwrap_or(path.as_path())

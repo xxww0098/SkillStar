@@ -24,7 +24,10 @@ mod surface;
 mod translate;
 mod vision;
 
-pub use agents::{FILE_AGENTS, apply_gateway};
+pub use agents::{
+    DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, desktop_accepts, desktop_alias, desktop_dirs,
+    desktop_effort_alias,
+};
 pub use affinity::{
     AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
     CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,

@@ -11,6 +11,66 @@ use skillstar_gateway::{ApplyError, FILE_AGENTS, apply_gateway};
 const REF: &str = "deepseek/pro";
 const ADDR: &str = "127.0.0.1:21847";
 
+#[cfg(target_os = "macos")]
+const DESKTOP_ROWS: &[(&str, &str)] = &[
+    (
+        "Library/Application Support/Claude/claude_desktop_config.json",
+        "desktop.config.json",
+    ),
+    (
+        "Library/Application Support/Claude-3p/claude_desktop_config.json",
+        "desktop.config.json",
+    ),
+    (
+        "Library/Application Support/Claude-3p/configLibrary/00000000-0000-4000-8000-736b696c6c73.json",
+        "desktop.profile.json",
+    ),
+    (
+        "Library/Application Support/Claude-3p/configLibrary/_meta.json",
+        "desktop.meta.json",
+    ),
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const DESKTOP_ROWS: &[(&str, &str)] = &[
+    (
+        ".config/Claude/claude_desktop_config.json",
+        "desktop.config.json",
+    ),
+    (
+        ".config/Claude-3p/claude_desktop_config.json",
+        "desktop.config.json",
+    ),
+    (
+        ".config/Claude-3p/configLibrary/00000000-0000-4000-8000-736b696c6c73.json",
+        "desktop.profile.json",
+    ),
+    (
+        ".config/Claude-3p/configLibrary/_meta.json",
+        "desktop.meta.json",
+    ),
+];
+
+#[cfg(windows)]
+const DESKTOP_ROWS: &[(&str, &str)] = &[
+    (
+        "AppData/Local/Claude/claude_desktop_config.json",
+        "desktop.config.json",
+    ),
+    (
+        "AppData/Local/Claude-3p/claude_desktop_config.json",
+        "desktop.config.json",
+    ),
+    (
+        "AppData/Local/Claude-3p/configLibrary/00000000-0000-4000-8000-736b696c6c73.json",
+        "desktop.profile.json",
+    ),
+    (
+        "AppData/Local/Claude-3p/configLibrary/_meta.json",
+        "desktop.meta.json",
+    ),
+];
+
 const ROSTER: &[(&str, &[(&str, &str)])] = &[
     (
         "gemini",
@@ -86,6 +146,7 @@ const ROSTER: &[(&str, &[(&str, &str)])] = &[
         "claude",
         &[(".claude/settings.json", "claude.settings.json")],
     ),
+    ("claude-desktop", DESKTOP_ROWS),
 ];
 
 const HOSTS: &[&str] = &[
@@ -278,13 +339,13 @@ fixture_test!(apply_gateway_qoder_cn_matches_fixture, "qoder-cn");
 fixture_test!(apply_gateway_grok_matches_fixture, "grok");
 fixture_test!(apply_gateway_zcode_matches_fixture, "zcode");
 fixture_test!(apply_gateway_workbuddy_matches_fixture, "workbuddy");
+fixture_test!(apply_gateway_claude_desktop_matches_fixture, "claude-desktop");
 
 #[test]
 fn apply_gateway_specials_still_unmanaged() {
     with_sandbox("specials", |home, data| {
         for id in [
             "codex",
-            "claude-desktop",
             "hanako",
             "alma",
             "cindy",
