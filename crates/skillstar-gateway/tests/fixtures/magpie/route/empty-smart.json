@@ -1,0 +1,11 @@
+{
+  "mode": "",
+  "turn": 2,
+  "candidates": [
+    {"id": "spent", "used": 99},
+    {"id": "room", "used": 10},
+    {"id": "unknown"}
+  ],
+  "expect": ["room", "unknown", "spent"],
+  "next_turn": 2
+}

@@ -58,7 +58,7 @@ flowchart LR
 | 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `skillstar-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
 | Models provider 与工具同步状态 | `~/.skillstar/config/model_providers.json`（v4：`providers` + `bindings`）及 Agent 配置文件 | `skillstar-models` |
-| 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走。文件这一步还不写 |
+| 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走。缺文件、空的 `routing`，以及读不出来的文件，都是 smart。启动不创建、不改写这个文件 |
 | 本地决策模型 checkpoint（AgentJev-0.6B，1.2 GB） | 默认 `~/.skillstar/models/agentjev-0.6b/`；`SKILLSTAR_DECISION_MODEL_DIR` 覆盖目录，`SKILLSTAR_HF_ENDPOINT` / `HF_ENDPOINT` 覆盖下载源 | `skillstar-decision`；四个文件按固定 revision + SHA-256 校验，缺一个都不能加载。权重不进仓库，也不进 rolling 清理之外的位置 |
 | 迁移前的 provider store 快照 | `~/.skillstar/config/model_providers.v3.json` | `skillstar-models::providers::store_v4`；**不进 rolling 清理**，它是迁移报告「撤销」按钮的依据 |
 | Provider 自身 `/v1/models` 返回的模型目录 | `~/.skillstar/cache/model_catalog/<provider_id>.json` | `skillstar-models::providers::catalog_cache`；从 provider 行搬出来的——目录可重新拉取、绑定不可，两者不该共享同一份持久性保证，也不该让几百个模型的原始 JSON 反复重写进存着凭据的文件 |
@@ -121,7 +121,7 @@ flowchart LR
 - 桌面进程在打开窗口之前，用后台线程调用 `skillstar_gateway::serve`。`skillstar gateway serve` 走同一个函数，不打开窗口。其它 CLI 子命令不启动它。`src-tauri` 只认 argv，不直接依赖网关 crate。
 - 默认听 `127.0.0.1:21847`。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 直接拒绝，不绑定。地址已经被占用时，后启动的那一份把「地址已被占用」写到 stderr，不关掉先启动的那份，也不往 stdout 打日志。
 - 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。模型目录不在网关 crate 里；模型 id 含 `/` 时解析失败是本机错误，请求不转给厂商。
-- 路由、亲和和分组的配置将放在 `model_gateway.json`。这一步还不写这个文件。密钥仍在 `model_providers.json`，配额仍在 Usage。网关不自己打开这两处。
+- 路由模式放在 `model_gateway.json` 里 provider 或分组的 `routing`。空字符串和缺省是 smart。这份文件只在已经存在时读取；启动不创建、不改写它。密钥仍在 `model_providers.json`，配额仍在 Usage。网关不打开这两处。
 - 保存 Codex 只写环回。已登录：`openai_base_url` 指向 `{origin}/backend-api/codex`。API 形态：`[model_providers.skillstar]`，`base_url` 是 `{origin}/v1`，`wire_api = "responses"`，占位 bearer `skillstar`，目录文件 `skillstar-models.json`。接管字段之前，旧值进 `config_dir()/agent_stash.json`（Unix `0600`，原子替换）。取消托管按 stash 写回。表和目录文件留下。网关不推断登录态，调用方传入形态。`skillstar-models` 不依赖网关。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 

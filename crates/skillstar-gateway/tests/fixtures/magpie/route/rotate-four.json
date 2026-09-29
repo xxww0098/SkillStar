@@ -1,0 +1,15 @@
+{
+  "mode": "rotate",
+  "candidates": [
+    {"id": "a"},
+    {"id": "b"},
+    {"id": "c"}
+  ],
+  "steps": [
+    {"turn": 0, "expect": ["a", "b", "c"], "next_turn": 1},
+    {"turn": 1, "expect": ["b", "c", "a"], "next_turn": 2},
+    {"turn": 2, "expect": ["c", "a", "b"], "next_turn": 3},
+    {"turn": 3, "expect": ["a", "b", "c"], "next_turn": 4}
+  ],
+  "one": {"id": "only", "turn": 4}
+}

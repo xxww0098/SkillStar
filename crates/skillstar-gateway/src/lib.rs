@@ -1,7 +1,7 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
-//! one smart ordering, the loopback listener, the Claude process bridge, and
-//! the Codex config writer. It does not own provider keys, usage accounts, or
-//! the decision model.
+//! routing order, the loopback listener, the Claude process bridge, and the
+//! Codex config writer. It does not own provider keys, usage accounts, or the
+//! decision model.
 
 mod claude;
 mod codex;
@@ -23,7 +23,10 @@ pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use outbound::{clear_outbound_log, outbound_log};
-pub use route::{AllowanceSnapshot, RouteCandidate, USED_SHARE, route_smart};
+pub use route::{
+    AllowanceSnapshot, RouteCandidate, RouteMode, RouteOwner, USED_SHARE, route_mode, route_smart,
+    stored_route_mode,
+};
 pub use serve::{
     ADDR_ENV, DEFAULT_ADDR, HEADER_READ_TIMEOUT, IDLE_TIMEOUT, PLACEHOLDER_BEARER, REFUSED_PORT,
     ServeError, ServeOptions, Stop, resolve_addr, serve,

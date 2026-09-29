@@ -1,0 +1,13 @@
+{
+  "mode": "usage",
+  "turn": 4,
+  "candidates": [
+    {"id": "mid", "used": 40},
+    {"id": "unknown"},
+    {"id": "low", "used": 5},
+    {"id": "high", "used": 99},
+    {"id": "tie", "used": 40}
+  ],
+  "expect": ["unknown", "low", "mid", "tie", "high"],
+  "next_turn": 4
+}
