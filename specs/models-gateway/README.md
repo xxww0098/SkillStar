@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：16 已落地。最后更新：2026-09-30。
+状态：17 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-16 已落地。`model_gateway.json` 的 `vision` 写了模型 id 时，不能看图的目标先拿到描述，不是图片。提示词逐字、User-Agent `skillstar-vision/1`、2 分钟、并行 4、缓存 256。关闭时不发出描述请求。选择记在 [choices.md](choices.md)。
+17 已落地。网关用调用方注入的 `AccountSnapshot` 签上游。`anthropic` 不产生 HTTP，仍走进程桥。没有快照时不发配额请求，候选保持未知。没有 Usage 行的 gemini CLI、devin、workbuddy、commandcode 只使用 provider 的 API 密钥。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/17-signing.md](slices/17-signing.md)：订阅签名。用调用方注入的 `AccountSnapshot` 签上游，映射以本目录的表为准。`anthropic` 不产生 Anthropic HTTP，仍走进程桥。`cursor` 的签名写在 `skillstar-gateway`，可以读 `cursor.rs`，不能改它。没有 Usage 行的 gemini CLI、devin、workbuddy、commandcode 不签订阅。缺失快照时不发配额请求。保持 `vision_`、`redact_`、`classify_`、`rules_`、`group_`、`translate_`、`hold_`、`route_smart_`、`route_mode_`、`affinity_`、`rest_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/18-shared-writers.md](slices/18-shared-writers.md)：`apply_gateway` 把文件型 Agent 指到环回。URL 带该 Agent 在 magpie 里使用的后缀，bearer 是 `skillstar` 或 `skillstar-<agent-id>`。Codex、Claude Code、Claude Desktop、Hanako、Alma、Cindy、WSL 仍返回 `agent_not_managed`。保持 `sign_`、`vision_`、`redact_`、`classify_`、`rules_`、`group_`、`translate_`、`hold_`、`route_smart_`、`route_mode_`、`affinity_`、`rest_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -34,7 +34,7 @@
 - [x] 14 分类器 — [slices/14-classifier.md](slices/14-classifier.md)
 - [x] 15 脱敏 — [slices/15-redact.md](slices/15-redact.md)
 - [x] 16 视觉转述 — [slices/16-vision.md](slices/16-vision.md)
-- [ ] 17 订阅签名 — [slices/17-signing.md](slices/17-signing.md)
+- [x] 17 订阅签名 — [slices/17-signing.md](slices/17-signing.md)
 - [ ] 18 共享写入 — [slices/18-shared-writers.md](slices/18-shared-writers.md)
 - [ ] 19 Claude Code 文件 — [slices/19-claude-code.md](slices/19-claude-code.md)
 - [ ] 20 Claude Desktop — [slices/20-claude-desktop.md](slices/20-claude-desktop.md)

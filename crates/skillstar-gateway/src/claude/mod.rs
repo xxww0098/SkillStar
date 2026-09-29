@@ -62,10 +62,15 @@ const ADDED_ENV: &[(&str, &str)] = &[
     ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
 ];
 
-/// Account material copied in by the app. The bridge does not read a store.
+/// Account material copied in by the app. The bridge does not read a store,
+/// and none of these fields is copied into the child environment.
 #[derive(Debug, Clone, Default)]
 pub struct AccountSnapshot {
     pub access_token: Option<String>,
+    /// Codex sends this as `chatgpt-account-id`. Other catalogs leave it empty.
+    pub account_id: Option<String>,
+    /// ZCode's own key. Other catalogs leave it empty.
+    pub api_key: Option<String>,
 }
 
 /// One tool the helper will advertise to Claude Code.

@@ -12,6 +12,7 @@
 - Provider 私有刷新上下文放在 `Subscription.provider_state_encrypted`（AES-GCM 的版本化 JSON）。它不进 DTO，也不放宽 `platform_token_encrypted`（那仍是 DeepSeek 平台 token）。refresh 的窄 patch 会轮换这个字段。
 - 不支持的旧 auth-mode 行在 load migration 中清理；文档不保留已删除 catalog 清单。
 - 远程请求统一使用 `skillstar_core::infra::http_client::probe_http_client`。
+- 本机网关读取这里已经保存的凭证和余量来签上游，不在 Usage 里实现第二套登录。
 - 除非用户明确要求，不修改完成态的 `fetchers/oauth/cursor.rs`。
 
 ## OAuth 与刷新

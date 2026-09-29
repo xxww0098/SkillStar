@@ -1,7 +1,8 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
 //! routing order, session affinity, upstream rest, routing groups and their
-//! rules, the intent classifier, secret redaction, vision transcription, the
-//! loopback listener, the Claude process bridge, and the Codex config writer.
+//! rules, the intent classifier, secret redaction, vision transcription,
+//! subscription signing, the loopback listener, the Claude process bridge, and
+//! the Codex config writer.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -17,6 +18,7 @@ mod rest;
 mod route;
 mod rules;
 mod serve;
+mod sign;
 mod surface;
 mod translate;
 mod vision;
@@ -51,6 +53,7 @@ pub use route::{
     stored_route_mode,
 };
 pub use rules::{Caller, GroupRule, RuleRequest, order_with_rules, request_agent, stored_rules};
+pub use sign::{AccountBook, ProviderSnapshot, SignInput, SignedUpstream, sign_upstream};
 pub use serve::{
     ADDR_ENV, DEFAULT_ADDR, HEADER_READ_TIMEOUT, IDLE_TIMEOUT, PLACEHOLDER_BEARER, REFUSED_PORT,
     ServeError, ServeOptions, Stop, resolve_addr, serve,

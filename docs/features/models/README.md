@@ -96,6 +96,8 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 官方账号经本机网关转发是当前目标。「本轮不做 proxy takeover」不再描述它。监听地址、谁启动 serve、路由表、Codex 环回写入和 `agent_stash.json` 见 [运行架构](../../architecture.md#本机模型网关)。订阅侧 Claude 的进程桥也写在那里：本机 `claude`，access token 不进子进程。
 
+能签上游的是 Usage 里已经保存的账户，catalog 与请求头以 `skillstar-gateway` 的签名模块及其 `sign_` 测试为准。`anthropic` 不签 HTTP。Gemini CLI、Devin、WorkBuddy、Command Code 没有 Usage 凭证行，出站只用 provider 快照里的 API 密钥，不读厂商自己的认证文件。没有注入的账户快照时不请求配额，该候选保持未知。
+
 ## Models 工作台
 
 Models 页从左到右是 Agents、Providers、Gateway 三栏。栏内第一屏可以是空列表。这一屏不决定行密度、选择器、路由控件或空态句子。

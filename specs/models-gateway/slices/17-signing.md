@@ -46,3 +46,7 @@ trait 的方法名。
 ## 决定
 
 - 头不在 magpie 测试里的，不加。实现时把出处文件名写进夹具旁的一行注释。
+- 出处：codex 用 `internal/provider/logins_on_test.go`，copilot 用 `internal/provider/account_test.go`，cursor 用 `internal/gateway/cursor_test.go`，xai 用 `internal/provider/grok_test.go`，kiro 用 `internal/gateway/kiro_test.go`，zcode 用 `internal/provider/zcode_test.go`，antigravity 用 `internal/provider/google_test.go`。
+- `anthropic` 的签名结果没有头。即使快照里有 access token，也不打开 HTTP，不写回凭证。生成仍走进程桥。
+- 没有账户快照时不调用配额回调，该候选的余量保持空，路由仍把它放在 unknown。
+- `gemini`、`gemini-cli`、`devin`、`workbuddy`、`commandcode` 不读账户。出站只用 `ProviderSnapshot` 的 API 密钥。

@@ -383,3 +383,21 @@
 - **打开且目标不能看图时，图片换成描述。** 正文里有描述中的文字，有 `{模型} describes it`，不再有图片的 data。描述请求的系统提示词就是上面那一段。信心：高。
 
 - **描述请求不再转述。** 系统提示词已经是转述提示词，或调用方标了 describing，正文原样返回。网关的 skillstar 依赖仍然只有 `skillstar-core`。信心：高。
+
+## 17 订阅签名
+
+### 先这样，后面的档再接
+
+- **签名函数先不挂进 `serve` 的转发。** 监听这条路径还不知道请求属于哪个 catalog。调用方查到账户后自己调用 `sign_upstream`。这样 08 档的假上游字节不会被订阅头改掉。信心：中。
+
+- **Grok 的版本固定写成 `1.0.41`，User-Agent 只有 `grok-shell/1.0.41`。** 不探测本机 CLI。Antigravity 的 User-Agent 用测试期望的 `antigravity/hub/3.1.4` 前缀，后面接本进程的 OS 和架构，不请求它的更新地址。信心：中。
+
+- **Copilot 写 `Authorization` 和 `Copilot-Integration-Id: vscode-chat`。** 专用签名测试要求这个集成头非空；多账户测试只核对 Authorization。不把 GitHub 令牌换成 session，也不写 Editor-Version。信心：中。
+
+- **同一个 catalog 有多张卡时用 active pin，没有能对上的 pin 时用列表里的第一张。** 余量取已经写好的窗口里最大的 percent，不自己用 used 和 total 相除。ZCode 优先用 `api_key`，没有再用 access token。读列表走 Usage 现有的列表函数；那个函数在发现已删除 catalog 时会顺手改写文件，网关自己不碰这个目录。信心：中。
+
+### 已定，按这个做
+
+- **没有账户快照时余量是空的，即使账面函数能返回一个用尽的数。** 路由仍把这个候选放在有余量和用尽之间。配额回调次数是 0。信心：高。
+
+- **Gemini CLI 的两个 id，以及 Devin、WorkBuddy、Command Code，不读账户。** 出站只有 provider API 密钥的 Bearer。没有密钥就不写头。信心：高。

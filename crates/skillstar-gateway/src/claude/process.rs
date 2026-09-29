@@ -136,7 +136,11 @@ fn supervise(run: Arc<RunInner>, bridge: Arc<Inner>) {
 
 pub(super) fn child_env(account: &AccountSnapshot) -> Vec<(String, String)> {
     // The access token stays on the snapshot. It is not an environment value.
-    let AccountSnapshot { access_token: _ } = account;
+    let AccountSnapshot {
+        access_token: _,
+        account_id: _,
+        api_key: _,
+    } = account;
     let mut env = Vec::new();
     for (key, value) in std::env::vars() {
         if STRIPPED_ENV.contains(&key.as_str()) || ADDED_ENV.iter().any(|(name, _)| *name == key) {

@@ -156,6 +156,8 @@ fn launch(
     spec.web_search = web_search;
     spec.account = AccountSnapshot {
         access_token: token.map(str::to_string),
+        account_id: token.map(|_| "snapshot-account-id-9f3c".to_string()),
+        api_key: token.map(|_| "snapshot-api-key-9f3c".to_string()),
     };
     bridge
         .launch(spec)
@@ -447,7 +449,11 @@ fn claude_bridge_strips_oauth_even_when_snapshot_has_token() {
         assert!(!env.contains_key(key), "{key} leaked into the child");
     }
     assert!(!env_text.contains("snapshot-access-token-9f3c"));
+    assert!(!env_text.contains("snapshot-account-id-9f3c"));
+    assert!(!env_text.contains("snapshot-api-key-9f3c"));
     assert!(!args_text.contains("snapshot-access-token-9f3c"));
+    assert!(!args_text.contains("snapshot-account-id-9f3c"));
+    assert!(!args_text.contains("snapshot-api-key-9f3c"));
     assert!(!scratch.home().join(".claude").exists());
     for url in outbound_log() {
         assert!(!url.contains("api.anthropic.com"), "{url}");
