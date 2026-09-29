@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：02 已落地。最后更新：2026-09-29。
+状态：03 已落地。最后更新：2026-09-29。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-02 已落地。`HoldWriter` 在第一个内容字节之前可以换上游；超过 15 秒或 1 MiB 之后放行，此后不再换。时钟由调用方注入。不监听，不选下一个候选。选择记在 [choices.md](choices.md)。
+03 已落地。`route_smart` 只做一道分界：用量达到 98 的候选靠后；没有快照的 unknown 排在仍有余量的后面，但不算耗尽。快照类型在 `skillstar-gateway`，测试自己构造，不读盘、不发 HTTP。01 和 02 的测试仍绿。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/03-routing-probe.md](slices/03-routing-probe.md)：一条路由决定。做完运行 `cargo test -p skillstar-gateway route_`，并保持 `translate_` 与 `hold_` 为绿。不要并行改 `skillstar-gateway` 的公共类型。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/04-loopback-serve.md](slices/04-loopback-serve.md)：环回监听。做完运行该档写明的探针，并保持 `translate_`、`hold_`、`route_smart_` 为绿。从这一档起 `skillstar-app` 可以依赖 gateway，mermaid 才画 `app → gateway`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -20,7 +20,7 @@
 
 - [x] 01 协议夹具 — [slices/01-protocol-fixtures.md](slices/01-protocol-fixtures.md)
 - [x] 02 首内容字节 — [slices/02-content-byte.md](slices/02-content-byte.md)
-- [ ] 03 一条路由决定 — [slices/03-routing-probe.md](slices/03-routing-probe.md)
+- [x] 03 一条路由决定 — [slices/03-routing-probe.md](slices/03-routing-probe.md)
 - [ ] 04 环回监听 — [slices/04-loopback-serve.md](slices/04-loopback-serve.md)
 - [ ] 05 Claude 进程桥 — [slices/05-claude-bridge.md](slices/05-claude-bridge.md)
 - [ ] 06 Codex 写入 — [slices/06-codex-writer.md](slices/06-codex-writer.md)
