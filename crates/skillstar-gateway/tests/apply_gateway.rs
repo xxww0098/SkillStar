@@ -346,7 +346,6 @@ fn apply_gateway_specials_still_unmanaged() {
     with_sandbox("specials", |home, data| {
         for id in [
             "codex",
-            "alma",
             "cindy",
             "codex@wsl:debian",
             "not-an-agent",

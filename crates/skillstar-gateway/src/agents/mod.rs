@@ -5,6 +5,7 @@
 //! An agent this slice does not write returns [`ApplyError::NotManaged`]
 //! before any file is opened.
 
+mod alma;
 mod body;
 mod desktop;
 mod hanako;
@@ -61,6 +62,9 @@ pub fn apply_gateway(agent_id: &str, model_ref: &str) -> Result<(), ApplyError> 
     let origin = loopback_origin();
     if agent_id == "hanako" {
         return hanako::apply(&home, &origin, model_ref);
+    }
+    if agent_id == "alma" {
+        return alma::apply(&origin, model_ref);
     }
     let files = body::files(agent_id, &home, &origin, model_ref)?;
     if model_ref.is_empty() {

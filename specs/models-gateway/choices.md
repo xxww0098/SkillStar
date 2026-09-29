@@ -418,7 +418,7 @@
 
 - **一个函数 `apply_gateway(agent_id, model_ref)`。** 空的 `model_ref` 才是取消。只含空白不是取消。写出的主机总是 `127.0.0.1`，端口是网关正在听的端口，不是 3425。信心：高。
 
-- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Alma、Cindy、WSL 同样还不写。Claude Code、Claude Desktop 与 OpenHanako 已纳入。花名册以 `apply_gateway_` 测试为准。信心：高。
+- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Cindy、WSL 同样还不写。Claude Code、Claude Desktop、OpenHanako 与 Alma 已纳入。花名册以 `apply_gateway_` 测试为准。信心：高。
 
 - **占位 bearer 是 `skillstar`，Qoder、Qoder CN、WorkBuddy 是 `skillstar-<id>`。** fx、omp、Command Code 不写 bearer 字符串。Gemini 的 URL 不带后缀，ZCode 的 Anthropic 地址也不带，WorkBuddy 带到 `/v1/chat/completions`，其余带到 `/v1`。信心：高。
 
@@ -467,3 +467,21 @@
 - **在跑才打本地 API。** `GET /api/server/identity` 要 200 且 `serverId` 非空。然后 PUT 配置和 chat。PUT 失败不改文件。没在跑就写文件。HTTP 只连 `127.0.0.1`。信心：高。
 
 - **provider 名是 `skillstar`，地址带 `/v1`，密钥是 `skillstar-hanako`。** chat 的 id 是整个 `model_ref`。没有已有 agent 时一个字节不写。沙箱不读 `HANA_HOME`。信心：高。
+
+## 22 Alma
+
+### 先这样，后面的档再接
+
+- **模型列表只放这一次的 `model_ref`。** 参照实现会同步整份目录。这一档的入口只有所选 id，不读 provider 存储。信心：中。
+
+- **已经指向网关的 openai 或 custom provider，名字不是 skillstar 也拿来改。** 用 URL 的 host 来认。信心：中。
+
+- **占位密钥 `skillstar` 换成 `skillstar-alma`。** Alma 用别的方式存着的密钥不动。信心：中。
+
+### 已定，按这个做
+
+- **没在跑是成功。** 连不上，或沙箱没设 `SKILLSTAR_ALMA_URL`，返回成功，一个字节不写。生产基址是 `http://localhost:23001`。沙箱 URL 的主机只能是 `localhost` 或 `127.0.0.1`。探测超时上限 1 秒。信心：高。
+
+- **默认模型是 `<providerId>:<model>`。** providerId 来自 Alma 的响应，不是 SkillStar 的 v4 id。地址是网关的 `/v1`，类型是 openai，名字是 `skillstar`，密钥是 `skillstar-alma`。settings 整份放回，只改 `defaultModel`。不写本地文件。信心：高。
+
+- **取消托管删掉这个 provider。** 默认模型的 provider id 对上才清空。用户自己的 provider 留下。信心：高。

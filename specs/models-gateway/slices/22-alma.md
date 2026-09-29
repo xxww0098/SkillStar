@@ -39,3 +39,6 @@ Alma 没启动时返回错误，或在临时 HOME 里写出了 provider 文件�
 ## 决定
 
 - 默认模型的字符串形状是 `<providerId>:<model>`，providerId 来自 Alma 创建 provider 的响应，不使用 SkillStar 的 v4 id。
+- 没连上，或沙箱里没设 `SKILLSTAR_ALMA_URL`，都算没在跑：返回成功，不写文件。连上之后 HTTP 不是 2xx 才是错误。
+- 生产基址固定 `http://localhost:23001`。沙箱只认 `SKILLSTAR_ALMA_URL`，主机只能是 `localhost` 或 `127.0.0.1`。探测超时默认 1 秒；沙箱可用 `SKILLSTAR_ALMA_TIMEOUT_MS` 注入，超过 1 秒按 1 秒。
+- settings 先 GET 再整份 PUT，只改 `chat.defaultModel`。模型列表只放这一次的 `model_ref`。取消托管删掉名为 `skillstar` 的 provider；默认模型若指向它就清空。不写本地数据库，Alma 不进 `FILE_AGENTS`。
