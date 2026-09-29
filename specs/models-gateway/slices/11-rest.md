@@ -2,7 +2,7 @@
 
 ## 契约
 
-02 档锁定了「内容字节之后不换」。本档锁定换的时候跳过谁、跳多久。时长以 README 常量表为准：`creditRest` 30 分钟，`quotaRest` 15 分钟，`longestWait` 1 小时，`longestQuota` 8 天，`longestRetry` 10 分钟，`verifyRest` 30 分钟，`verifyHold` 1 分钟。分类失败的 30 秒休息不在本档。
+02 档锁定了「内容字节之后不换」。本档锁定换的时候跳过谁、跳多久。时长以 README 常量表为准：`creditRest` 30 分钟，`quotaRest` 15 分钟，`longestWait` 1 小时，`longestQuota` 8 天，`longestRetry` 10 分钟，`verifyRest` 30 分钟，`verifyHold` 1 分钟，`fallbackCooldown` 1 分钟。分类失败的 30 秒休息不在本档。频率限制没有 Retry-After 时用 `fallbackCooldown`，不按配额休息。配额恢复时间读正文和 `X-Skillstar-Resets-At`，不读 `X-Magpie-Resets-At`。
 
 错误正文的归类（余额、配额、频率、验证）跟 magpie `routing.go` 的那些正则。中文词也在里面。
 

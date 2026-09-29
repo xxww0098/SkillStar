@@ -7694,6 +7694,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "regex",
  "serde",
  "serde_json",
  "skillstar-core",
