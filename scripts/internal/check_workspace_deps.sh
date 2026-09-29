@@ -58,6 +58,17 @@ forbidden = [
     # SSH listing talks SFTP, not the skills domain. A stale path dep used to
     # force sync to rebuild whenever skills/git/agents/auth changed.
     ("skillstar-sync", "skillstar-skills"),
+    # The gateway crate is a protocol stack. Key storage, usage, and the
+    # decision model must keep compiling when it is removed, so none of those
+    # crates may point at each other.
+    ("skillstar-models", "skillstar-gateway"),
+    ("skillstar-usage", "skillstar-gateway"),
+    ("skillstar-gateway", "skillstar-models"),
+    ("skillstar-gateway", "skillstar-usage"),
+    ("skillstar-gateway", "skillstar-decision"),
+    ("skillstar-gateway", "skillstar-app"),
+    ("skillstar-core", "skillstar-gateway"),
+    ("skillstar-models", "skillstar-decision"),
 ]
 
 for a, b in forbidden:
@@ -85,6 +96,15 @@ for leaf in PROTOCOL_LEAVES:
     product = sorted(d for d in all_deps(leaf) if d.startswith("skillstar") or d == "skillstar")
     if product:
         errors.append(f"{leaf} must not depend on skillstar-* packages: {product}")
+
+gateway_deps = deps("skillstar-gateway")
+if "skillstar-gateway" not in packages:
+    errors.append("skillstar-gateway must exist")
+elif gateway_deps != {"skillstar-core"}:
+    errors.append(
+        "skillstar-gateway skillstar deps must be {skillstar-core}, got "
+        + ", ".join(sorted(gateway_deps) or ["(none)"])
+    )
 
 app = packages.get("skillstar-app")
 if app:

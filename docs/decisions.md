@@ -660,6 +660,15 @@
 - 后果：获得——所有敏感密钥与凭据纯净保留在用户应用本地加密文件内，无系统钥匙串提权弹窗、无外溢、可审计、与平台钥匙串彻底解耦。承担——Zed 无法通过写钥匙串实现外部 IDE 自动切号（Zed 保持仅本地导入与用量监控）。
 - 证据：`crates/skillstar-sync/src/ssh/store.rs`、`crates/skillstar-app/src/usage_switch/{antigravity.rs,keychain.rs,zed.rs}`、`crates/skillstar-usage/src/tool_store/keychain_cli.rs`。
 
+## D-073：模型网关是只依赖 core 的独立 crate
+
+- 日期：2026-09-29
+- 状态：accepted
+- 背景：Models 要有本机网关。放进 `skillstar-models` 会让协议栈和密钥表绑在同一次编译里。让网关依赖 models 或 usage，则拿掉网关时会把密钥表或订阅存储的类型一起带走。
+- 决策：网关是 `skillstar-gateway`，skillstar 依赖只有 `skillstar-core`。密钥表仍属 models，订阅仍属 usage，决策模型仍属 decision。产品编排要到监听那一档才由 `skillstar-app` 依赖它。
+- 后果：获得——删掉 gateway 之后 models 与 usage 仍能编译。承担——网关不能自己打开密钥表或配额库，调用方把快照交进来。
+- 证据：`crates/skillstar-gateway`、`scripts/internal/check_workspace_deps.sh`。
+
 ## 新增记录格式
 
 
