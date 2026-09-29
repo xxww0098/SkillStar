@@ -1,8 +1,8 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
 //! routing order, session affinity, upstream rest, routing groups and their
-//! rules, the intent classifier, secret redaction, the loopback listener, the
-//! Claude process bridge, and the Codex config writer. It does
-//! not own provider keys, usage accounts, or the decision model.
+//! rules, the intent classifier, secret redaction, vision transcription, the
+//! loopback listener, the Claude process bridge, and the Codex config writer.
+//! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
 mod classify;
@@ -19,6 +19,7 @@ mod rules;
 mod serve;
 mod surface;
 mod translate;
+mod vision;
 
 pub use affinity::{
     AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
@@ -55,3 +56,7 @@ pub use serve::{
     ServeError, ServeOptions, Stop, resolve_addr, serve,
 };
 pub use translate::{Protocol, TranslateError, outbound_body, upstream_body};
+pub use vision::{
+    VISION_CACHE, VISION_PARALLEL, VISION_SYSTEM, VISION_TIMEOUT, VISION_USER_AGENT, VisionCall,
+    VisionReject, VisionReply, apply_vision,
+};

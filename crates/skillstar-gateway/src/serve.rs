@@ -288,6 +288,19 @@ async fn forward_turn(
     let Some(base) = upstream else {
         return plain(StatusCode::BAD_GATEWAY, "no upstream");
     };
+    // After translation, before redaction. Raw image routes have no protocol
+    // and stay byte-for-byte; a missing vision id leaves the body alone.
+    let upstream_bytes = if protocol.is_some() {
+        match crate::vision::rewrite_forward(&upstream_bytes, base).await {
+            Ok(bytes) => bytes,
+            Err(reject) => {
+                let status = StatusCode::from_u16(reject.status).unwrap_or(StatusCode::BAD_GATEWAY);
+                return plain(status, &reject.message);
+            }
+        }
+    } else {
+        upstream_bytes
+    };
     let upstream_bytes = crate::redact::mask_outbound(&upstream_bytes);
     let url = format!("{}{url_path}", base.trim_end_matches('/'));
     crate::outbound::note_outbound(&url);
