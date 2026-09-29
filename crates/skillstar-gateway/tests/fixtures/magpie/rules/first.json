@@ -1,0 +1,23 @@
+{
+  "providers": [
+    {"id": "keep", "routing": "order"}
+  ],
+  "groups": [
+    {
+      "id": "pick",
+      "routing": "rotate",
+      "members": ["img", "long", "longer"],
+      "rules": [
+        {"use": "img", "images": true},
+        {"use": "long", "tokens": 100},
+        {"use": "longer", "tokens": 50}
+      ]
+    }
+  ],
+  "cases": [
+    {"tokens": 10, "order": ["img", "long", "longer"]},
+    {"tokens": 60, "order": ["longer", "img", "long"]},
+    {"tokens": 200, "order": ["long", "img", "longer"]},
+    {"tokens": 200, "images": true, "order": ["img", "long", "longer"]}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "members": ["text/m", "vision/m"],
+  "rules": [
+    {"use": "vision/m", "images": true, "tokens": 1, "intent": "writing tests"}
+  ],
+  "request": {"tokens": 50, "images": true, "intent": "writing tests"}
+}

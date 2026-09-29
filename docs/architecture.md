@@ -125,6 +125,7 @@ flowchart LR
 - 亲和在路由顺序之前决定要不要留下上次的回答者。留下时，那一名排到已经算出的顺序最前；`off` 时顺序不变。空模式在回合内留下，跨回合只在厂商缓存还值得、而且还没冷的时候留下。会话从 `X-Skillstar-Session` 认起，不认 `X-Magpie-Session`。休息中的回答者标成 `resting`，这一步不换人。模式、上次的 stick 和时钟由调用方传入。
 - 一次失败休息多久，只看这次的状态码和正文。时钟、已用份额和窗口恢复时间由调用方传入，不向 Usage 拉取。频率限制不按配额的缺省时长休息。配额自己写明的恢复时间可以长过一小时，厂商的 Retry-After 仍最多信一小时。验证失败在更短的一段时间里用上一次的拒绝回答，不再问上游。内容字节已经写下之后，下一次挑选不再叫另一条上游。未到期的候选从这次挑选里拿掉。不认 `X-Magpie-Resets-At`。
 - 模型 id `group/<id>` 展开成该分组的成员，成员也可以是另一个分组。会让分组包含自己、或嵌套深过 8 层的写入不改 `model_gateway.json`。同名模型的自动分组在调用方列出模型时推导，用户编辑之前不写入。不读密钥表。
+- 分组上的规则按书写顺序匹配。token 数、图像、effort 和来源 Agent 都满足才算命中。第一条命中的成员排到已经展开的顺序最前，其余不动。带 intent 的规则这一步不命中，也不问分类器。没有命中时展开顺序保持原样。来源 Agent 先看占位 bearer `skillstar-<id>`，认不出再用 User-Agent。
 - 保存 Codex 只写环回。已登录：`openai_base_url` 指向 `{origin}/backend-api/codex`。API 形态：`[model_providers.skillstar]`，`base_url` 是 `{origin}/v1`，`wire_api = "responses"`，占位 bearer `skillstar`，目录文件 `skillstar-models.json`。接管字段之前，旧值进 `config_dir()/agent_stash.json`（Unix `0600`，原子替换）。取消托管按 stash 写回。表和目录文件留下。网关不推断登录态，调用方传入形态。`skillstar-models` 不依赖网关。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
