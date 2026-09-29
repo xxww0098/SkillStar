@@ -33,7 +33,7 @@ SkillStar/
 │   ├── skillstar-marketplace/   # 本地市场快照、FTS 与 MCP catalog
 │   ├── skillstar-models/        # Provider store、AI、MCP store、tool sync
 │   ├── skillstar-decision/      # 本地 AgentJev-0.6B 决策模型：权重、tokenizer、candle 前向
-│   ├── skillstar-gateway/       # 本机模型网关：协议翻译与 Agent 配置写入
+│   ├── skillstar-gateway/       # 本机模型网关：协议翻译、环回监听与 Agent 配置写入
 │   ├── skillstar-usage/         # 订阅、OAuth 和配额
 │   ├── skillstar-sync/          # SSH 远端技能传输
 │   └── skillstar-app/           # 跨域 use case 与共享 CLI 解析
@@ -58,10 +58,10 @@ SkillStar/
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场；MCP 多源 catalog（源注册表、用户自定义源持久化、跨源抓取合并、`server.json` 解析、参数化卡片查询）与 curated 数据 | 技能安装实现、MCP 本地配置、registry→store 的映射 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store 与 per-tool 投影、双纪元健康探测 | Usage 订阅、Marketplace 快照或 catalog 形态选择 |
 | `skillstar-decision` | 本地 AgentJev-0.6B 决策模型：checkpoint 的文件规格/下载/校验、`agentjev.decision.v1` 请求校验与答案整形、Qwen3-0.6B 主干与候选集合头的前向（共享前缀 KV 复用）；workspace 内唯一允许引入 ML 运行时（candle / tokenizers）的 crate | Provider store、tool sync、App AI 的 chat/summarize 路径、任何 Tauri 类型；不拥有业务闸门/路由的判定策略（由调用方决定阈值与后果） |
-| `skillstar-gateway` | 本机模型网关：协议翻译，以及 Agent 配置写入 | 密钥表、Usage 订阅、决策模型。不读取 `model_providers.json`，不发起配额请求 |
+| `skillstar-gateway` | 本机模型网关：协议翻译、环回监听，以及 Agent 配置写入 | 密钥表、Usage 订阅、决策模型。不读取 `model_providers.json`，不发起配额请求 |
 | `skillstar-usage` | catalog、OAuth/API-key/Cookie/TokenImport fetcher、加密 token、`tool_paths` / `tool_store` 本地存储基元、请求构建器 | Models provider store、CLI 凭证文件编排、桌面应用多开、IDE 切号注册表 |
 | `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
-| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；桌面应用多开；`usage_switch::ide` 凭据写回注册表 | Tauri command 宏或窗口对象 |
+| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；桌面应用多开；启动本机模型网关；`usage_switch::ide` 凭据写回注册表 | Tauri command 宏或窗口对象。网关协议不放在这里 |
 
 ## 允许的依赖方向
 
@@ -104,6 +104,7 @@ flowchart LR
   app --> models
   app --> decision
   app --> usage
+  app --> gateway
   tauri --> app
   tauri --> core
   tauri --> skills
@@ -125,7 +126,7 @@ flowchart LR
 
 - `skillstar-core` 依赖任一产品域。
 - `skills ↔ marketplace`、`usage → models`、域 crate → `src-tauri`。
-- `skillstar-gateway` 的 skillstar 依赖只有 `skillstar-core`。models、usage、decision、app、core 不依赖它，它也不依赖 models、usage、decision、app。从 workspace 拿掉这个 crate 之后，`skillstar-models` 与 `skillstar-usage` 仍必须能单独编译。`app → gateway` 要到网关开始监听才存在，上面的图先不画这条边。
+- `skillstar-gateway` 的 skillstar 依赖只有 `skillstar-core`。它不依赖 models、usage、decision、app。models、usage、decision、core 不依赖它。`skillstar-app` 依赖它来启动监听；`src-tauri`（包名 `skillstar`）不直接依赖它。从 workspace 拿掉这个 crate 之后，`skillstar-models` 与 `skillstar-usage` 仍必须能单独编译。
 - 命令层为绕过边界而直接拼装跨域事务。
 - leaf crate 用 default feature 隐式决定最终二进制的重 feature；由 `src-tauri` 显式选择。
 - 协议叶子（`skill-spec`，以及将来若拆出的 `mcp-registry-spec`）依赖任一 `skillstar-*` crate、Tauri、业务 HTTP/DB 运行时或打包库。它们只解析外部技术规范，由产品 crate 做薄 adapter。

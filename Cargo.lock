@@ -3781,6 +3781,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -7604,6 +7605,7 @@ dependencies = [
  "skillstar-channels",
  "skillstar-core",
  "skillstar-decision",
+ "skillstar-gateway",
  "skillstar-git",
  "skillstar-marketplace",
  "skillstar-models",
@@ -7688,9 +7690,14 @@ dependencies = [
 name = "skillstar-gateway"
 version = "0.0.0"
 dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "serde",
  "serde_json",
  "skillstar-core",
+ "tokio",
 ]
 
 [[package]]

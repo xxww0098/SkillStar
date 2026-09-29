@@ -4,17 +4,19 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 mod decide;
+mod gateway;
 mod install;
 mod manage;
 mod mcp_approve;
 mod team;
 
 pub use commands::*;
-pub use decide::{cmd_decide, DecideOpts};
+pub use decide::{DecideOpts, cmd_decide};
 pub use install::cmd_install;
 pub use manage::{cmd_publish, cmd_remove, cmd_update};
 
 mod helpers;
+pub use gateway::{run_gateway, start_desktop_gateway};
 pub use helpers::*;
 
 /// CLI root type — owned by this crate.
@@ -153,6 +155,11 @@ pub enum Commands {
         /// Dtype: auto, f32, f16, or bf16
         #[arg(long, default_value = "auto")]
         dtype: String,
+    },
+    /// Loopback model gateway. Does not open a window.
+    Gateway {
+        #[command(subcommand)]
+        command: Option<gateway::GatewayCli>,
     },
 }
 
@@ -357,6 +364,12 @@ pub fn run(args: Vec<String>, migrate_and_run: fn()) {
             device: &device,
             dtype: &dtype,
         }),
+        Commands::Gateway { command } => {
+            let code = gateway::run_parsed(command);
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
     }
 }
 
@@ -381,6 +394,7 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "mcp"
             | "team"
             | "decide"
+            | "gateway"
             | "help"
             | "-h"
             | "--help"
@@ -496,6 +510,7 @@ mod mode_tests {
             "mcp",
             "team",
             "decide",
+            "gateway",
             "help",
             "-h",
             "--help",
@@ -517,5 +532,37 @@ mod mode_tests {
     fn unknown_args_do_not_look_like_cli() {
         assert!(!is_cli_subcommand("totally-unknown"));
         assert!(!is_cli_subcommand("--some-os-flag"));
+    }
+
+    #[test]
+    fn gateway_is_a_cli_subcommand_and_not_gui() {
+        assert!(is_cli_subcommand("gateway"));
+        assert!(!is_gui_force_arg("gateway"));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = super::gateway::run_gateway_io(
+            &["skillstar".to_string(), "gateway".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_ne!(code, 0);
+        assert!(stdout.is_empty());
+        assert!(!stderr.is_empty());
+
+        stdout.clear();
+        stderr.clear();
+        let code = super::gateway::run_gateway_io(
+            &[
+                "skillstar".to_string(),
+                "gateway".to_string(),
+                "nope".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_ne!(code, 0);
+        assert!(stdout.is_empty());
+        assert!(!stderr.is_empty());
     }
 }

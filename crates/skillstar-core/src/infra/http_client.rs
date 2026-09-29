@@ -60,6 +60,9 @@ impl ProxyFingerprint {
 static SHARED_PROBE_CLIENT: LazyLock<Mutex<Option<(ProxyFingerprint, Duration, reqwest::Client)>>> =
     LazyLock::new(|| Mutex::new(None));
 
+static SHARED_STREAM_CLIENT: LazyLock<Mutex<Option<(ProxyFingerprint, reqwest::Client)>>> =
+    LazyLock::new(|| Mutex::new(None));
+
 fn current_proxy_fingerprint() -> ProxyFingerprint {
     match proxy::load_config() {
         Ok(config) => ProxyFingerprint::from_config(&config),
@@ -75,35 +78,69 @@ fn current_proxy_fingerprint() -> ProxyFingerprint {
     }
 }
 
-fn build_client(fingerprint: &ProxyFingerprint, timeout: Duration) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(timeout)
-        .connect_timeout(Duration::from_secs(10))
-        .pool_idle_timeout(Duration::from_secs(90))
-        .pool_max_idle_per_host(4);
+/// Connect budget shared by probes and the streaming client.
+pub const STREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-    if fingerprint.enabled {
-        let proxy_url = format!(
-            "{}://{}:{}",
-            fingerprint.scheme, fingerprint.host, fingerprint.port
-        );
-        let mut proxy = reqwest::Proxy::all(&proxy_url).context("Invalid proxy URL")?;
-        if !fingerprint.username.is_empty() {
-            proxy = proxy.basic_auth(&fingerprint.username, &fingerprint.password);
-        }
-        // Hosts the user excluded from the proxy. `NoProxy::from_string` parses
-        // lazily and hands back `Some` for anything, including `""` — a list
-        // that matches nothing — so the empty case is filtered out here rather
-        // than relying on that `Option`. Accepted entry forms are reqwest's:
-        // domains (`example.com`, `.example.com`, matching subdomains too),
-        // literal IPs, CIDR blocks (`10.0.0.0/8`), and the single wildcard `*`.
-        if !fingerprint.bypass.is_empty() {
-            proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&fingerprint.bypass));
-        }
-        builder = builder.proxy(proxy);
+/// How long a streaming call may wait for response headers.
+///
+/// The wait wraps `send` only. Reading the body is not under this deadline,
+/// and the client has no total timeout that would cut a stream off.
+pub const STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+fn apply_proxy(
+    builder: reqwest::ClientBuilder,
+    fingerprint: &ProxyFingerprint,
+) -> Result<reqwest::ClientBuilder> {
+    if !fingerprint.enabled {
+        return Ok(builder);
     }
+    let proxy_url = format!(
+        "{}://{}:{}",
+        fingerprint.scheme, fingerprint.host, fingerprint.port
+    );
+    let mut proxy = reqwest::Proxy::all(&proxy_url).context("Invalid proxy URL")?;
+    if !fingerprint.username.is_empty() {
+        proxy = proxy.basic_auth(&fingerprint.username, &fingerprint.password);
+    }
+    // Hosts the user excluded from the proxy. `NoProxy::from_string` parses
+    // lazily and hands back `Some` for anything, including `""` — a list
+    // that matches nothing — so the empty case is filtered out here rather
+    // than relying on that `Option`. Accepted entry forms are reqwest's:
+    // domains (`example.com`, `.example.com`, matching subdomains too),
+    // literal IPs, CIDR blocks (`10.0.0.0/8`), and the single wildcard `*`.
+    if !fingerprint.bypass.is_empty() {
+        proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&fingerprint.bypass));
+    }
+    Ok(builder.proxy(proxy))
+}
 
-    builder.build().context("Failed to build HTTP client")
+fn pooled(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder
+        .connect_timeout(STREAM_CONNECT_TIMEOUT)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(4)
+}
+
+/// Total timeout for a streaming call. `None` means the body is not capped.
+fn stream_total_timeout() -> Option<Duration> {
+    None
+}
+
+fn build_client(fingerprint: &ProxyFingerprint, timeout: Duration) -> Result<reqwest::Client> {
+    let builder = pooled(reqwest::Client::builder().timeout(timeout));
+    apply_proxy(builder, fingerprint)?
+        .build()
+        .context("Failed to build HTTP client")
+}
+
+fn build_stream_client(fingerprint: &ProxyFingerprint) -> Result<reqwest::Client> {
+    let mut builder = pooled(reqwest::Client::builder());
+    if let Some(total) = stream_total_timeout() {
+        builder = builder.timeout(total);
+    }
+    apply_proxy(builder, fingerprint)?
+        .build()
+        .context("Failed to build streaming HTTP client")
 }
 
 /// Shared HTTP client with SkillStar proxy settings from `~/.skillstar/config/proxy.json`.
@@ -123,6 +160,38 @@ pub fn probe_http_client(timeout: Duration) -> Result<reqwest::Client> {
     let rebuilt = build_client(&fingerprint, timeout)?;
     *guard = Some((fingerprint, timeout, rebuilt.clone()));
     Ok(rebuilt)
+}
+
+/// Streaming client with the same `proxy.json` fingerprint as [`probe_http_client`].
+///
+/// Connect is capped at [`STREAM_CONNECT_TIMEOUT`]. There is no total timeout:
+/// a long body stays open. Waiting for headers is [`send_stream`]'s job.
+pub fn stream_http_client() -> Result<reqwest::Client> {
+    let fingerprint = current_proxy_fingerprint();
+    let mut guard = SHARED_STREAM_CLIENT
+        .lock()
+        .map_err(|_| anyhow::anyhow!("HTTP client cache lock poisoned"))?;
+
+    if let Some((cached_fp, client)) = guard.as_ref()
+        && *cached_fp == fingerprint
+    {
+        return Ok(client.clone());
+    }
+
+    let rebuilt = build_stream_client(&fingerprint)?;
+    *guard = Some((fingerprint, rebuilt.clone()));
+    Ok(rebuilt)
+}
+
+/// Send `builder` and stop waiting if the headers do not arrive in time.
+///
+/// `send` resolves when the headers arrive, so this deadline does not cover
+/// the body. Callers read the body from the returned response.
+pub async fn send_stream(builder: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+    match tokio::time::timeout(STREAM_HEADER_TIMEOUT, builder.send()).await {
+        Ok(result) => result.context("upstream request failed"),
+        Err(_) => anyhow::bail!("upstream headers timed out"),
+    }
 }
 
 #[cfg(test)]
@@ -280,6 +349,61 @@ mod tests {
         // The cached entry moved: the edit was not swallowed by the cache.
         assert_eq!(second.bypass, "localhost,10.0.0.0/8");
         assert_ne!(first, second);
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
+    }
+
+    fn cached_probe_fingerprint() -> ProxyFingerprint {
+        SHARED_PROBE_CLIENT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(|(fingerprint, _, _)| fingerprint.clone())
+            .expect("probe client cached")
+    }
+
+    fn cached_stream_fingerprint() -> ProxyFingerprint {
+        SHARED_STREAM_CLIENT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(|(fingerprint, _)| fingerprint.clone())
+            .expect("stream client cached")
+    }
+
+    #[test]
+    fn stream_client_uses_probe_proxy_fingerprint() {
+        let _guard = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        assert_eq!(STREAM_CONNECT_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(STREAM_HEADER_TIMEOUT, Duration::from_secs(10 * 60));
+        assert!(stream_total_timeout().is_none());
+
+        proxy::save_config(&proxied(Some("localhost,10.1.0.0/16"))).unwrap();
+        probe_http_client(Duration::from_secs(11)).unwrap();
+        stream_http_client().unwrap();
+        let probe = cached_probe_fingerprint();
+        let stream = cached_stream_fingerprint();
+        assert_eq!(probe, stream);
+        assert_eq!(stream.bypass, "localhost,10.1.0.0/16");
+        assert!(stream.enabled);
+
+        proxy::save_config(&proxied(Some("127.0.0.1"))).unwrap();
+        probe_http_client(Duration::from_secs(11)).unwrap();
+        stream_http_client().unwrap();
+        let probe_after = cached_probe_fingerprint();
+        let stream_after = cached_stream_fingerprint();
+        assert_eq!(probe_after, stream_after);
+        assert_ne!(stream, stream_after);
+        assert_eq!(stream_after.bypass, "127.0.0.1");
 
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");

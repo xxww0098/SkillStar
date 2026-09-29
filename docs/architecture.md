@@ -58,6 +58,7 @@ flowchart LR
 | 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `skillstar-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
 | Models provider 与工具同步状态 | `~/.skillstar/config/model_providers.json`（v4：`providers` + `bindings`）及 Agent 配置文件 | `skillstar-models` |
+| 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走。文件这一步还不写 |
 | 本地决策模型 checkpoint（AgentJev-0.6B，1.2 GB） | 默认 `~/.skillstar/models/agentjev-0.6b/`；`SKILLSTAR_DECISION_MODEL_DIR` 覆盖目录，`SKILLSTAR_HF_ENDPOINT` / `HF_ENDPOINT` 覆盖下载源 | `skillstar-decision`；四个文件按固定 revision + SHA-256 校验，缺一个都不能加载。权重不进仓库，也不进 rolling 清理之外的位置 |
 | 迁移前的 provider store 快照 | `~/.skillstar/config/model_providers.v3.json` | `skillstar-models::providers::store_v4`；**不进 rolling 清理**，它是迁移报告「撤销」按钮的依据 |
 | Provider 自身 `/v1/models` 返回的模型目录 | `~/.skillstar/cache/model_catalog/<provider_id>.json` | `skillstar-models::providers::catalog_cache`；从 provider 行搬出来的——目录可重新拉取、绑定不可，两者不该共享同一份持久性保证，也不该让几百个模型的原始 JSON 反复重写进存着凭据的文件 |
@@ -95,7 +96,7 @@ flowchart LR
 
 ### 网络
 
-- HTTP 统一通过 `probe_http_client`，确保代理配置和探测策略一致。SOCKS5 出网使用 `socks5h`（远端 DNS）；bypass 列表进入 client fingerprint。
+- 短探测和有总超时的 HTTP 走 `probe_http_client`。上游流式生成走同一模块的 `stream_http_client`：同一份 `proxy.json` 指纹，连接有上限，响应体没有总超时。两条路径都不另读一套代理。SOCKS5 出网使用 `socks5h`（远端 DNS）；bypass 列表进入 client fingerprint。
 - 匿名 GitHub 族 HTTP（raw / codeload / objects / gist / 无凭据的 `api.github.com`）经 `github_http::get_anonymous` 走健康加速源链，失败回直连。带 `Authorization` 的请求禁止进入该入口。
 - GitHub mirror 影响单次 Git 命令与匿名 HTTP，不修改用户全局 Git 配置；连续失败熔断 20 分钟，保存配置重置；传输失败允许直接 GitHub fallback。
 - `skillstar-skills::github_auth` 的 GitHub App 用户登录使用设备授权流；access/refresh token 只经凭据抽象读写，设备码和已解析身份只保存在进程内。到期时间必须来自 GitHub 响应元数据，登出同时清除本地凭据、待处理授权与内存身份。
@@ -114,6 +115,12 @@ flowchart LR
 - GitHub mirror 改写 GitHub 族 origin（含 raw/codeload/objects/gist），只影响单次 Git 命令，不修改用户全局 Git 配置；传输失败允许直接 GitHub fallback 和熔断。
 - 决策模型 checkpoint 的下载同样经 `probe_http_client`（用户代理与 bypass 生效），走 Hugging Face 的 `resolve/<pinned-revision>/<file>`；中断的传输用 Range 续传，落地前逐个核对固定 SHA-256，校验失败删除临时文件而不是留一份看似完整的权重。除这条下载外，决策模型不再发起任何网络请求：推理完全在本进程内。
 - SSH 在发送认证材料前完成 host-key gate；远端命令检查退出码并设置超时，SFTP 路径显式解析为绝对路径。
+
+### 本机模型网关
+
+- 桌面进程在打开窗口之前，用后台线程调用 `skillstar_gateway::serve`。`skillstar gateway serve` 走同一个函数，不打开窗口。其它 CLI 子命令不启动它。`src-tauri` 只认 argv，不直接依赖网关 crate。
+- 默认听 `127.0.0.1:21847`。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 直接拒绝，不绑定。地址已经被占用时，后启动的那一份把「地址已被占用」写到 stderr，不关掉先启动的那份，也不往 stdout 打日志。
+- 路由、亲和和分组的配置将放在上面的 `model_gateway.json`。密钥仍在 `model_providers.json`，配额仍在 Usage。网关不自己打开这两处。
 
 ### 本机项目技能 MCP
 

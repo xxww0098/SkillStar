@@ -47,6 +47,7 @@ schemars = { workspace = true }
 ort = { workspace = true, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "api-27", "tls-rustls"] }
 ndarray = { workspace = true }
 tokenizers = { workspace = true, features = ["fancy-regex"] }
+skillstar-gateway = { version = "0.0.0", path = "../skillstar-gateway" }
 
 [dev-dependencies]
 rusqlite = { workspace = true }

@@ -69,6 +69,9 @@ forbidden = [
     ("skillstar-gateway", "skillstar-app"),
     ("skillstar-core", "skillstar-gateway"),
     ("skillstar-models", "skillstar-decision"),
+    # src-tauri's package name is `skillstar`. It reaches the gateway through
+    # skillstar-app, not a direct dependency.
+    ("skillstar", "skillstar-gateway"),
 ]
 
 for a, b in forbidden:
@@ -105,6 +108,10 @@ elif gateway_deps != {"skillstar-core"}:
         "skillstar-gateway skillstar deps must be {skillstar-core}, got "
         + ", ".join(sorted(gateway_deps) or ["(none)"])
     )
+
+app_deps = deps("skillstar-app")
+if "skillstar-gateway" not in app_deps:
+    errors.append("skillstar-app must depend on skillstar-gateway")
 
 app = packages.get("skillstar-app")
 if app:

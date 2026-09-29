@@ -30,8 +30,13 @@ fn main() {
 
     // CLI mode: first arg is a known subcommand owned by skillstar-app's Clap surface.
     // Unknown args fall through to GUI so deep-links / OS launchers still work.
+    // `gateway` is recognized here, before a window, and calls the app serve.
     if args.len() > 1 {
         let first_arg = args[1].as_str();
+        if first_arg == "gateway" {
+            let code = skillstar_app::cli::run_gateway(&args);
+            std::process::exit(code);
+        }
         if skillstar_app::cli::is_gui_force_arg(first_arg) {
             // Fall through to GUI mode
         } else if skillstar_app::cli::is_cli_subcommand(first_arg) {
@@ -40,6 +45,8 @@ fn main() {
         }
     }
 
-    // GUI mode
+    // GUI mode. The listener is the same serve the CLI calls, and it stays up
+    // for the life of this process, including after the Models page is left.
+    skillstar_app::cli::start_desktop_gateway();
     skillstar_lib::run();
 }

@@ -101,7 +101,10 @@ OMP 按任务意图把请求路由到不同模型，角色写在 `~/.omp/agent/c
 - Codex Official 绑定 `codex`：`bind_provider` 强制 `auth_mode = oauth`，不写 `OPENAI_API_KEY`、不触碰用户 ChatGPT token；清除指向 SkillStar 托管表的 `model_provider`/`model` 指针。
 - 停用 Official 与普通 unbind 一致（清 binding；Claude 不额外清用户自有配置）。
 - Official 是连接方式，不是可创建/编辑的 API 供应商：原生种子从供应商选择与 Recent 中排除。使用原生登录通过 `bind_provider` 选择后端种子，保持它的真实 id 与 ExternalCli 凭据；不能用空 API Key 新建行冒充原生种子。
-- 本轮不做 proxy takeover /「官方账号路由」例外。
+
+## 本机网关
+
+官方账号经本机网关转发是当前目标。「本轮不做 proxy takeover」不再描述它。监听地址、谁启动 serve、配置文件将放在哪，见 [运行架构](../../architecture.md#本机模型网关)。
 
 ## Models 工作台
 
