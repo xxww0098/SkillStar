@@ -485,3 +485,17 @@
 - **默认模型是 `<providerId>:<model>`。** providerId 来自 Alma 的响应，不是 SkillStar 的 v4 id。地址是网关的 `/v1`，类型是 openai，名字是 `skillstar`，密钥是 `skillstar-alma`。settings 整份放回，只改 `defaultModel`。不写本地文件。信心：高。
 
 - **取消托管删掉这个 provider。** 默认模型的 provider id 对上才清空。用户自己的 provider 留下。信心：高。
+
+## 23 Cindy
+
+### 先这样，后面的档再接
+
+- **展示名和 id 都是小写 `skillstar`。** 参照实现的展示名是 Magpie。信心：中。
+
+- **`apply_gateway("cindy")` 仍返回未托管。** 链接不借保存去写文件。界面把链接放在哪一行，留给后面的视觉档。信心：中。
+
+### 已定，按这个做
+
+- **链接是 `cindy://provider/import?v=1&data=`。** data 是不带填充的 base64url。Claude Code 的 `baseUrl` 不带 `/v1`，Codex 和 Pi 带 `/v1`。`modelsUrl` 是 `{origin}/v1/models`。密钥是 `token_for("cindy")`。信心：高。
+
+- **数据库只读。** 没有文件、打不开、没有表，都当作还没导入。读过之后文件字节不变。信心：高。

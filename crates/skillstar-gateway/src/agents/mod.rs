@@ -7,6 +7,7 @@
 
 mod alma;
 mod body;
+mod cindy;
 mod desktop;
 mod hanako;
 
@@ -41,6 +42,7 @@ pub const FILE_AGENTS: &[&str] = &[
     "claude-desktop",
 ];
 
+pub use cindy::{cindy_imported, cindy_link};
 pub use desktop::{
     DESKTOP_PROFILE_ID, desktop_accepts, desktop_alias, desktop_dirs, desktop_effort_alias,
 };
@@ -138,7 +140,7 @@ fn restore(agent_id: &str, files: &[Written]) -> Result<(), ApplyError> {
     Ok(())
 }
 
-pub(crate) fn token_for(agent_id: &str) -> String {
+pub fn token_for(agent_id: &str) -> String {
     format!("{PLACEHOLDER_BEARER}-{agent_id}")
 }
 

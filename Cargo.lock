@@ -7690,11 +7690,13 @@ dependencies = [
 name = "skillstar-gateway"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "http-body-util",
  "hyper",
  "hyper-util",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "skillstar-core",

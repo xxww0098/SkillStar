@@ -37,3 +37,5 @@ scheme、只读、bearer 形式。
 ## 决定
 
 - 用户是否在 Cindy 里确认，SkillStar 不等待。链接生成即这一档完成。
+- `name` 和 `id` 都是 `skillstar`。Claude Code 的 `baseUrl` 是网关根，不带 `/v1`；Codex 和 Pi 带 `/v1`。`modelsUrl` 是 `{origin}/v1/models`。密钥是 `token_for("cindy")`。
+- 数据库用只读方式打开。没有文件、打不开、没有表，都当作还没导入。`apply_gateway("cindy")` 仍返回未托管，不写 Cindy 的文件。这一档的入口是 `cindy_link` 和 `cindy_imported`。

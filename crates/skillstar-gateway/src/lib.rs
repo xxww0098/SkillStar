@@ -25,8 +25,8 @@ mod translate;
 mod vision;
 
 pub use agents::{
-    DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, desktop_accepts, desktop_alias, desktop_dirs,
-    desktop_effort_alias,
+    DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
+    desktop_alias, desktop_dirs, desktop_effort_alias, token_for,
 };
 pub use affinity::{
     AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
