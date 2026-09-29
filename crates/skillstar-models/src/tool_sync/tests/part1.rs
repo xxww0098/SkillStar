@@ -54,211 +54,116 @@ fn test_get_tool_config_targets_returns_all_tools() {
     assert!(omp_target.config_path.contains(".omp"));
 }
 
-// =========================================================================
-// Flat store sync tests (v2 architecture)
-// =========================================================================
+// Provider-store sync no longer writes Agent configs. Codex loopback config
+// belongs to skillstar-gateway.
 
-#[test]
-fn test_build_opencode_provider_block_uses_model_catalog_metadata() {
-    // The catalog left the provider row in v4 and lives in the cache directory;
-    // the writer reads it from there.
-    let _data = DataDirSandbox::new();
-    let mut provider = make_test_provider_flat();
-    provider.models = vec!["model-a".to_string(), "model-b".to_string()];
-    crate::providers::catalog_cache::write_catalog(
-        &provider.id,
-        &serde_json::from_value::<Vec<ModelCatalogEntry>>(serde_json::json!([
-            {
-                "id": "model-a",
-                "display_name": "Model A Display",
-                "context_length": 200000,
-                "max_completion_tokens": 65536,
-                "cost": { "input": 0.2, "output": 0.8 }
-            },
-            {
-                "id": "model-b",
-                "display_name": "Model B Display",
-                "context_length": 128000
-            }
-        ]))
-        .unwrap(),
-    )
-    .unwrap();
-
-    let block = build_opencode_provider_block(&provider, "model-a");
-    let model_a = block
-        .get("models")
-        .and_then(|v| v.get("model-a"))
-        .expect("model-a entry");
-
-    assert_eq!(
-        model_a.get("name").and_then(Value::as_str),
-        Some("Model A Display")
-    );
-    assert_eq!(
-        model_a
-            .get("limit")
-            .and_then(|v| v.get("context"))
-            .and_then(Value::as_u64),
-        Some(200000)
-    );
-    assert_eq!(
-        model_a
-            .get("limit")
-            .and_then(|v| v.get("output"))
-            .and_then(Value::as_u64),
-        Some(65536)
-    );
-    assert_eq!(
-        model_a
-            .get("cost")
-            .and_then(|v| v.get("input"))
-            .and_then(Value::as_f64),
-        Some(0.2)
-    );
+fn assert_absent(path: &std::path::Path) {
+    assert!(!path.exists(), "sync must not create {}", path.display());
 }
 
 #[test]
-fn test_sync_to_claude_code_inner_new_file() {
+fn sync_to_claude_code_inner_does_not_create_a_file() {
     let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join(".claude").join("settings.json");
+    let config_path = tmp.path().join("settings.json");
     let provider = make_test_provider_flat();
 
     let result =
         sync_to_claude_code_inner(&provider, "model-a", &no_roles(), &config_path).unwrap();
 
-    // No backup since file didn't exist
     assert!(result.is_none());
-
-    // Verify the written content
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let parsed: Value = serde_json::from_str(&content).unwrap();
-    let env = parsed.get("env").unwrap().as_object().unwrap();
-    assert_eq!(
-        env.get("ANTHROPIC_BASE_URL").unwrap().as_str().unwrap(),
-        "https://api.example.com/anthropic"
-    );
-    assert_eq!(
-        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str().unwrap(),
-        "sk-test-key-flat-12345"
-    );
-    assert_eq!(
-        env.get("ANTHROPIC_MODEL").unwrap().as_str().unwrap(),
-        "model-a"
-    );
+    assert_absent(&config_path);
 }
 
 #[test]
-fn test_sync_to_claude_code_inner_merges_existing() {
+fn sync_to_claude_code_inner_leaves_existing_bytes() {
     let tmp = TempDir::new().unwrap();
-    let claude_dir = tmp.path().join(".claude");
-    std::fs::create_dir_all(&claude_dir).unwrap();
-    let config_path = claude_dir.join("settings.json");
-
-    // Write existing config with extra fields
-    let existing = serde_json::json!({
-        "theme": "dark",
-        "env": {
-            "MY_CUSTOM_VAR": "custom_value",
-            "ANTHROPIC_BASE_URL": "old_url"
-        }
-    });
-    std::fs::write(
-        &config_path,
-        serde_json::to_string_pretty(&existing).unwrap(),
-    )
-    .unwrap();
+    let config_path = tmp.path().join("settings.json");
+    let before = r#"{
+          "env": {
+            "ANTHROPIC_BASE_URL": "https://proxy.example/anthropic",
+            "ANTHROPIC_AUTH_TOKEN": "sk-managed",
+            "ANTHROPIC_MODEL": "claude-sonnet",
+            "MY_CUSTOM": "keep-me"
+          },
+          "other": true
+        }"#;
+    std::fs::write(&config_path, before).unwrap();
 
     let provider = make_test_provider_flat();
     let backup =
         sync_to_claude_code_inner(&provider, "model-b", &no_roles(), &config_path).unwrap();
 
-    // Backup should exist
-    assert!(backup.is_some());
-    assert!(backup.unwrap().exists());
-
-    // Verify the written content
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let parsed: Value = serde_json::from_str(&content).unwrap();
-
-    // Top-level fields preserved
-    assert_eq!(parsed.get("theme").unwrap().as_str().unwrap(), "dark");
-
-    // Env block: managed fields updated, custom field preserved
-    let env = parsed.get("env").unwrap().as_object().unwrap();
-    assert_eq!(
-        env.get("ANTHROPIC_BASE_URL").unwrap().as_str().unwrap(),
-        "https://api.example.com/anthropic"
-    );
-    assert_eq!(
-        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str().unwrap(),
-        "sk-test-key-flat-12345"
-    );
-    assert_eq!(
-        env.get("ANTHROPIC_MODEL").unwrap().as_str().unwrap(),
-        "model-b"
-    );
-    assert_eq!(
-        env.get("MY_CUSTOM_VAR").unwrap().as_str().unwrap(),
-        "custom_value"
-    );
+    assert!(backup.is_none());
+    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), before);
 }
 
 #[test]
-fn test_sync_to_claude_code_inner_fails_without_anthropic_url() {
+fn sync_codex_binding_inner_does_not_create_a_file() {
     let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join("settings.json");
+    let config_path = tmp.path().join("config.toml");
+    let provider = make_test_provider_flat();
+    let binding = AgentBinding::single(entry(&provider.id, "model-a"));
 
+    sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
+
+    assert_absent(&config_path);
+}
+
+#[test]
+fn sync_codex_binding_inner_leaves_vendor_bytes() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("config.toml");
+    let before = "\
+model_provider = \"skillstar_old-provider\"
+model = \"gpt-5\"
+
+[model_providers.skillstar_old-provider]
+name = \"SkillStar\"
+base_url = \"https://api.example.com/v1\"
+wire_api = \"chat\"
+requires_openai_auth = false
+";
+    std::fs::write(&config_path, before).unwrap();
+
+    let provider = make_test_provider_flat();
+    let binding = AgentBinding::single(entry(&provider.id, "model-a"));
+    sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), before);
+}
+
+#[test]
+fn sync_claude_desktop_binding_inner_does_not_create_a_marker() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("skillstar-binding.json");
+    let provider = make_test_provider_flat();
+    let binding = AgentBinding::single(entry(&provider.id, "model-a"));
+
+    let result =
+        sync_claude_desktop_binding_inner(&binding, std::slice::from_ref(&provider), &path)
+            .unwrap();
+
+    assert!(result.is_none());
+    assert_absent(&path);
+}
+
+#[test]
+fn removed_opencode_block_builder_is_not_part_of_sync() {
+    // The catalog-metadata block builder used to be the OpenCode write path.
+    // Sync now returns without creating the file, including when the provider
+    // has no Anthropic endpoint.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("opencode.json");
     let mut provider = make_test_provider_flat();
     provider.endpoints.anthropic_messages = None;
+    let binding = AgentBinding::single(entry(&provider.id, "model-a"));
 
-    let result = sync_to_claude_code_inner(&provider, "model-a", &no_roles(), &config_path);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("Anthropic-compatible endpoint")
-    );
+    sync_opencode_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
+    assert_absent(&config_path);
 }
 
-#[test]
-fn test_sync_to_claude_code_inner_empty_model_skips_key() {
-    // Regression: an empty model (provider with no default_model, activated
-    // without an explicit model) must NOT be written as `"ANTHROPIC_MODEL": ""`
-    // — that produces an invalid Claude Code config. Instead the key is dropped
-    // (Null → removed by merge_json_env_write), while BASE_URL/AUTH_TOKEN still
-    // land in the env block.
-    let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join(".claude").join("settings.json");
-    let provider = make_test_provider_flat();
-
-    let result = sync_to_claude_code_inner(&provider, "", &no_roles(), &config_path).unwrap();
-    assert!(result.is_none(), "no backup expected for a new file");
-
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let parsed: Value = serde_json::from_str(&content).unwrap();
-    let env = parsed.get("env").unwrap().as_object().unwrap();
-
-    // Credentials still written.
-    assert_eq!(
-        env.get("ANTHROPIC_BASE_URL").unwrap().as_str().unwrap(),
-        "https://api.example.com/anthropic"
-    );
-    assert_eq!(
-        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str().unwrap(),
-        "sk-test-key-flat-12345"
-    );
-    // Empty model is dropped, not written as "".
-    assert!(
-        !env.contains_key("ANTHROPIC_MODEL"),
-        "expected ANTHROPIC_MODEL to be absent for empty model, got: {env:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Three-state auth_mode (api_key / oauth / third_party)
-// ---------------------------------------------------------------------------
+// Kept below: auth.json must survive a Codex sync, and the env-key helper is
+// still used by unsync's managed-key spelling.
 
 /// Helper: build a binding entry with explicit Codex settings.
 fn make_codex_activation(provider: &Provider, settings: CodexSettings) -> BindingEntry {
@@ -268,93 +173,6 @@ fn make_codex_activation(provider: &Provider, settings: CodexSettings) -> Bindin
         settings: Some(serde_json::to_value(&settings).unwrap()),
         last_sync_at_ms: None,
     }
-}
-
-#[test]
-fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
-    let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join("config.toml");
-
-    let provider = make_test_provider_flat();
-    let settings = CodexSettings {
-        auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
-    };
-    let binding = AgentBinding {
-        entries: vec![make_codex_activation(&provider, settings)],
-        roles: Default::default(),
-        active_index: 0,
-        settings: None,
-    };
-
-    sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
-
-    let parsed: toml::Table =
-        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    let managed = parsed
-        .get("model_providers")
-        .unwrap()
-        .get(skillstar_managed_key(&provider.id).as_str())
-        .unwrap()
-        .as_table()
-        .unwrap();
-
-    // third_party ⇒ requires_openai_auth = false
-    assert!(
-        !managed
-            .get("requires_openai_auth")
-            .unwrap()
-            .as_bool()
-            .unwrap()
-    );
-    // env_key is written and follows the SKILLSTAR_<prefix>_KEY rule.
-    let env_key = managed.get("env_key").unwrap().as_str().unwrap();
-    assert!(
-        env_key.starts_with("SKILLSTAR_"),
-        "env_key must be namespaced: got {env_key}"
-    );
-    assert!(env_key.ends_with("_KEY"));
-    // Provider id "test-uuid-1234" → prefix "test-uui" → "TEST_UUI".
-    assert_eq!(env_key, "SKILLSTAR_TEST_UUI_KEY");
-}
-
-#[test]
-fn test_codex_oauth_enables_openai_auth_and_no_env_key() {
-    let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join("config.toml");
-
-    let provider = make_test_provider_flat();
-    let settings = CodexSettings {
-        auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
-    };
-    let binding = AgentBinding {
-        entries: vec![make_codex_activation(&provider, settings)],
-        roles: Default::default(),
-        active_index: 0,
-        settings: None,
-    };
-
-    sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
-
-    let parsed: toml::Table =
-        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    let managed = parsed
-        .get("model_providers")
-        .unwrap()
-        .get(skillstar_managed_key(&provider.id).as_str())
-        .unwrap()
-        .as_table()
-        .unwrap();
-
-    // oauth ⇒ requires_openai_auth = true (routes through ChatGPT token)
-    assert!(
-        managed
-            .get("requires_openai_auth")
-            .unwrap()
-            .as_bool()
-            .unwrap()
-    );
-    // oauth never emits env_key
-    assert!(managed.get("env_key").is_none());
 }
 
 #[test]
@@ -423,114 +241,4 @@ fn test_codex_env_key_rule_is_stable_and_shell_safe() {
     p.id = "".to_string();
     let fallback = codex_env_key_for(&p.id);
     assert!(fallback.starts_with("SKILLSTAR_") && fallback.ends_with("_KEY"));
-}
-
-#[test]
-fn test_claude_official_sync_clears_managed_env_without_writing_key() {
-    let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join("settings.json");
-    std::fs::write(
-        &config_path,
-        r#"{
-          "env": {
-            "ANTHROPIC_BASE_URL": "https://proxy.example/anthropic",
-            "ANTHROPIC_AUTH_TOKEN": "sk-managed",
-            "ANTHROPIC_MODEL": "claude-sonnet",
-            "MY_CUSTOM": "keep-me"
-          },
-          "other": true
-        }"#,
-    )
-    .unwrap();
-
-    let official =
-        crate::providers::create_provider_from_preset(crate::providers::CLAUDE_OFFICIAL_ID, "")
-            .unwrap();
-    sync_to_claude_code_inner(&official, "", &no_roles(), &config_path).unwrap();
-
-    let parsed: Value =
-        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    let env = parsed.get("env").unwrap().as_object().unwrap();
-    assert!(!env.contains_key("ANTHROPIC_BASE_URL"));
-    assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
-    assert!(!env.contains_key("ANTHROPIC_MODEL"));
-    assert_eq!(
-        env.get("MY_CUSTOM").and_then(|v| v.as_str()),
-        Some("keep-me")
-    );
-    assert_eq!(parsed.get("other").and_then(|v| v.as_bool()), Some(true));
-}
-
-#[test]
-fn test_codex_official_sync_oauth_preserves_auth_json() {
-    let _sandbox = use_sandbox_home();
-    let codex_dir = resolve_codex_auth_path()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    std::fs::create_dir_all(&codex_dir).unwrap();
-    let auth_path = codex_dir.join("auth.json");
-    let config_path = codex_dir.join("config.toml");
-
-    let oauth_blob = serde_json::json!({
-        "OPENAI_API_KEY": null,
-        "tokens": {
-            "access_token": "eyJchatgpt-access-official",
-            "refresh_token": "eyJchatgpt-refresh-official",
-            "id_token": "eyJchatgpt-id",
-            "account_id": "acct_official"
-        }
-    });
-    std::fs::write(&auth_path, oauth_blob.to_string()).unwrap();
-    // Prior third-party pointer that Official activation must clear.
-    std::fs::write(
-        &config_path,
-        r#"
-model_provider = "skillstar_old-provider"
-model = "gpt-4"
-
-[model_providers.skillstar_old-provider]
-name = "SkillStar"
-base_url = "https://api.example.com/v1"
-wire_api = "chat"
-requires_openai_auth = false
-"#,
-    )
-    .unwrap();
-
-    let official =
-        crate::providers::create_provider_from_preset(crate::providers::CODEX_OFFICIAL_ID, "")
-            .unwrap();
-    let settings = CodexSettings {
-        auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
-    };
-    let binding = AgentBinding {
-        entries: vec![make_codex_activation(&official, settings)],
-        roles: Default::default(),
-        active_index: 0,
-        settings: None,
-    };
-
-    sync_codex_binding_inner(&binding, std::slice::from_ref(&official), &config_path).unwrap();
-
-    let auth_after: Value =
-        serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
-    assert_eq!(
-        auth_after
-            .pointer("/tokens/access_token")
-            .and_then(|v| v.as_str()),
-        Some("eyJchatgpt-access-official")
-    );
-
-    let toml_after: toml::Table =
-        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    assert!(toml_after.get("model_provider").is_none());
-    assert!(
-        toml_after
-            .get("model_providers")
-            .and_then(|v| v.as_table())
-            .map(|t| t.is_empty())
-            .unwrap_or(true)
-    );
 }

@@ -1,12 +1,9 @@
 //! Tool configuration sync module.
 //!
-//! Writes provider credentials from the v4 store (`Provider` / `AgentBinding`)
-//! to external tool config files. Only supports hardcoded known config paths for
-//! security. For example:
-//! - Claude Code: `~/.claude/settings.json` env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL)
-//! - Codex: `~/.codex/auth.json` (OPENAI_API_KEY) + `~/.codex/config.toml` (model_provider, model, [model_providers.skillstar])
-//!
-//! All writes use rolling backups (keep last 5) and merge semantics (preserve non-managed fields).
+//! Paths, detection, and unsync still live here. The six managed agents
+//! (claude-code, claude-desktop, codex, opencode, pi, omp) are not given vendor
+//! base URLs or API keys from the provider store. Codex's loopback config is
+//! written by `skillstar-gateway`.
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -14,13 +11,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::providers::{
-    AgentBinding, BindingEntry, DroppedRole, ModelCatalogEntry, ModelRef, Provider,
-    ProvidersStoreV4, RequiredWire, RoleCapability, RoleDef, RoleDropReason, catalog_cache,
+    AgentBinding, DroppedRole, ModelRef, Provider, ProvidersStoreV4, RequiredWire, RoleCapability,
+    RoleDef, RoleDropReason,
 };
 use crate::providers::{ROLE_DEFAULT, ROLE_FAST, ROLE_PLAN, ROLE_SUBAGENT, ROLE_VISION};
-
-mod view;
-use view::*;
 
 mod agents;
 pub use agents::*;

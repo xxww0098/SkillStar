@@ -1,8 +1,5 @@
-//! Multi-provider binding writer tests (Codex + OpenCode + Pi).
-//!
-//! These drive the `*_inner` writers against isolated temp paths (not the
-//! shared sandbox HOME) so they can assert on exact file contents without
-//! racing other tests.
+//! Multi-provider sync no longer writes Codex, OpenCode, or Pi configs.
+//! Unsync still removes managed keys. Paths are isolated temp files.
 
 use super::*;
 
@@ -17,7 +14,7 @@ fn managed_key_is_prefixed_and_sanitized() {
 }
 
 #[test]
-fn codex_binding_writes_one_table_per_provider_plus_pointer() {
+fn codex_binding_sync_does_not_create_a_file() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.toml");
 
@@ -33,53 +30,27 @@ fn codex_binding_writes_one_table_per_provider_plus_pointer() {
     };
 
     sync_codex_binding_inner(&binding, &providers, &path).unwrap();
-
-    let content = std::fs::read_to_string(&path).unwrap();
-    let table: toml::Table = toml::from_str(&content).unwrap();
-
-    // Pointer follows active_index → beta.
-    assert_eq!(
-        table.get("model_provider").unwrap().as_str().unwrap(),
-        "skillstar_bbbb2222"
-    );
-    assert_eq!(table.get("model").unwrap().as_str().unwrap(), "model-b");
-
-    // Both managed tables exist.
-    let mp = table.get("model_providers").unwrap().as_table().unwrap();
-    assert!(mp.contains_key("skillstar_aaaa1111"));
-    assert!(mp.contains_key("skillstar_bbbb2222"));
-    assert_eq!(mp.len(), 2);
+    assert!(!path.exists());
 }
 
 #[test]
-fn codex_binding_preserves_user_provider_and_replaces_stale_managed() {
+fn codex_binding_sync_leaves_user_and_stale_tables() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.toml");
-
-    // Pre-existing config: a user-owned provider table + a stale managed one
-    // from a previous single-provider sync.
-    std::fs::write(
-        &path,
-        "model = \"old\"\n\
+    let before = "model = \"old\"\n\
          [model_providers.mycustom]\nname = \"Mine\"\nbase_url = \"https://x\"\n\
-         [model_providers.skillstar_dead0000]\nname = \"Stale\"\nbase_url = \"https://stale\"\n",
-    )
-    .unwrap();
+         [model_providers.skillstar_dead0000]\nname = \"Stale\"\nbase_url = \"https://stale\"\n";
+    std::fs::write(&path, before).unwrap();
 
     let providers = vec![responses_capable("aaaa1111", "alpha")];
     let binding = AgentBinding::single(entry("aaaa1111", "model-a"));
     sync_codex_binding_inner(&binding, &providers, &path).unwrap();
 
-    let table: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let mp = table.get("model_providers").unwrap().as_table().unwrap();
-    // User table survives; stale managed table gone; new managed table present.
-    assert!(mp.contains_key("mycustom"));
-    assert!(!mp.contains_key("skillstar_dead0000"));
-    assert!(mp.contains_key("skillstar_aaaa1111"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 }
 
 #[test]
-fn opencode_binding_writes_blocks_and_model_selector() {
+fn opencode_binding_sync_does_not_create_a_file() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("opencode.json");
 
@@ -92,33 +63,18 @@ fn opencode_binding_writes_blocks_and_model_selector() {
     };
 
     sync_opencode_binding_inner(&binding, &providers, &path).unwrap();
-
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let provider_map = json.get("provider").unwrap().as_object().unwrap();
-    assert!(provider_map.contains_key("skillstar_aaaa1111"));
-    assert!(provider_map.contains_key("skillstar_bbbb2222"));
-    // Active (index 0 → alpha) drives the top-level selector.
-    assert_eq!(
-        json.get("model").unwrap().as_str().unwrap(),
-        "skillstar_aaaa1111/model-a"
-    );
+    assert!(!path.exists());
 }
 
 #[test]
-fn pi_binding_writes_blocks_and_default_pointer() {
+fn pi_binding_sync_leaves_seeded_files() {
     let tmp = TempDir::new().unwrap();
     let models_path = tmp.path().join("models.json");
     let settings_path = tmp.path().join("settings.json");
-
-    // Pre-existing files: a user-owned provider block + unrelated settings
-    // must both survive the sync untouched.
-    std::fs::write(
-        &models_path,
-        r#"{ "providers": { "ollama": { "baseUrl": "http://localhost:11434/v1", "api": "openai-completions", "apiKey": "ollama", "models": [{ "id": "llama3.1:8b" }] }, "skillstar_dead0000": { "baseUrl": "https://stale" } } }"#,
-    )
-    .unwrap();
-    std::fs::write(&settings_path, r#"{ "defaultThinkingLevel": "medium" }"#).unwrap();
+    let models = r#"{ "providers": { "ollama": { "baseUrl": "http://localhost:11434/v1", "apiKey": "ollama" }, "skillstar_dead0000": { "baseUrl": "https://stale", "apiKey": "sk-dead" } } }"#;
+    let settings = r#"{ "defaultThinkingLevel": "medium" }"#;
+    std::fs::write(&models_path, models).unwrap();
+    std::fs::write(&settings_path, settings).unwrap();
 
     let providers = vec![flat("aaaa1111", "alpha"), flat("bbbb2222", "beta")];
     let binding = AgentBinding {
@@ -130,53 +86,8 @@ fn pi_binding_writes_blocks_and_default_pointer() {
 
     sync_pi_binding_inner(&binding, &providers, &models_path, &settings_path).unwrap();
 
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&models_path).unwrap()).unwrap();
-    let provider_map = json.get("providers").unwrap().as_object().unwrap();
-    // User block survives; stale managed block gone; both managed blocks present.
-    assert!(provider_map.contains_key("ollama"));
-    assert!(!provider_map.contains_key("skillstar_dead0000"));
-    let alpha = provider_map.get("skillstar_aaaa1111").unwrap();
-    assert_eq!(
-        alpha.get("baseUrl").unwrap().as_str().unwrap(),
-        "https://alpha.example.com/v1"
-    );
-    assert_eq!(
-        alpha.get("api").unwrap().as_str().unwrap(),
-        "openai-completions"
-    );
-    assert_eq!(
-        alpha.get("apiKey").unwrap().as_str().unwrap(),
-        "sk-aaaa1111"
-    );
-    // Model entries are minimal `{ id }` objects (Pi supplies its own defaults).
-    let alpha_models = alpha.get("models").unwrap().as_array().unwrap();
-    assert_eq!(
-        alpha_models[0],
-        serde_json::json!({ "id": "model-a" }),
-        "model entries must carry only `id`"
-    );
-    assert!(provider_map.contains_key("skillstar_bbbb2222"));
-
-    // Active (index 1 → beta) drives settings.json; unrelated keys survive.
-    let settings: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
-    assert_eq!(
-        settings.get("defaultProvider").unwrap().as_str().unwrap(),
-        "skillstar_bbbb2222"
-    );
-    assert_eq!(
-        settings.get("defaultModel").unwrap().as_str().unwrap(),
-        "model-b"
-    );
-    assert_eq!(
-        settings
-            .get("defaultThinkingLevel")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "medium"
-    );
+    assert_eq!(std::fs::read_to_string(&models_path).unwrap(), models);
+    assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), settings);
 }
 
 #[test]
@@ -185,22 +96,16 @@ fn pi_unsync_removes_managed_blocks_and_managed_pointer_only() {
     let models_path = tmp.path().join("models.json");
     let settings_path = tmp.path().join("settings.json");
 
-    let providers = vec![flat("aaaa1111", "alpha")];
-    let binding = AgentBinding::single(entry("aaaa1111", "model-a"));
-    sync_pi_binding_inner(&binding, &providers, &models_path, &settings_path).unwrap();
-
-    // Inject a user-owned provider block that must survive unsync.
-    let mut json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&models_path).unwrap()).unwrap();
-    json.get_mut("providers")
-        .unwrap()
-        .as_object_mut()
-        .unwrap()
-        .insert(
-            "mine".to_string(),
-            serde_json::json!({ "baseUrl": "https://mine" }),
-        );
-    std::fs::write(&models_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    std::fs::write(
+        &models_path,
+        r#"{"providers":{"skillstar_aaaa1111":{"apiKey":"sk-aaaa1111","baseUrl":"https://alpha.example.com/v1"},"mine":{"baseUrl":"https://mine"}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &settings_path,
+        r#"{"defaultProvider":"skillstar_aaaa1111","defaultModel":"model-a"}"#,
+    )
+    .unwrap();
 
     unsync_pi_all_at(&models_path, &settings_path).unwrap();
 
@@ -250,35 +155,42 @@ fn unsync_removes_all_managed_keys_only() {
     let codex_path = tmp.path().join("config.toml");
     let auth_path = tmp.path().join("auth.json");
 
-    let providers = vec![
-        responses_capable("aaaa1111", "alpha"),
-        responses_capable("bbbb2222", "beta"),
-    ];
-    let binding = AgentBinding {
-        entries: vec![entry("aaaa1111", "model-a"), entry("bbbb2222", "model-b")],
-        roles: Default::default(),
-        active_index: 0,
-        settings: None,
-    };
-    sync_codex_binding_inner(&binding, &providers, &codex_path).unwrap();
-
-    // Inject a user-owned table that must survive unsync.
-    let mut table: toml::Table =
-        toml::from_str(&std::fs::read_to_string(&codex_path).unwrap()).unwrap();
-    let mp = table
-        .get_mut("model_providers")
-        .unwrap()
-        .as_table_mut()
-        .unwrap();
-    mp.insert("mine".to_string(), toml::Value::Table(toml::Table::new()));
-    std::fs::write(&codex_path, toml::to_string_pretty(&table).unwrap()).unwrap();
+    std::fs::write(
+        &codex_path,
+        "model_provider = \"skillstar_aaaa1111\"\n\
+         model = \"model-a\"\n\n\
+         [model_providers.skillstar_aaaa1111]\n\
+         name = \"SkillStar\"\n\
+         base_url = \"https://alpha.example.com/v1\"\n\n\
+         [model_providers.skillstar_bbbb2222]\n\
+         name = \"SkillStar\"\n\
+         base_url = \"https://beta.example.com/v1\"\n\n\
+         [model_providers.mine]\n\
+         name = \"Mine\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &auth_path,
+        r#"{"OPENAI_API_KEY":"sk-secret","tokens":{"access_token":"keep"}}"#,
+    )
+    .unwrap();
 
     unsync_codex_all_at(&auth_path, &codex_path).unwrap();
 
     let after: toml::Table =
         toml::from_str(&std::fs::read_to_string(&codex_path).unwrap()).unwrap();
     assert!(after.get("model_provider").is_none());
+    assert!(after.get("model").is_none());
     let mp_after = after.get("model_providers").unwrap().as_table().unwrap();
     assert!(mp_after.contains_key("mine"));
     assert!(!mp_after.keys().any(|k| is_skillstar_managed_key(k)));
+
+    let auth: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
+    assert!(auth.get("OPENAI_API_KEY").is_none());
+    assert_eq!(
+        auth.pointer("/tokens/access_token")
+            .and_then(|v| v.as_str()),
+        Some("keep")
+    );
 }

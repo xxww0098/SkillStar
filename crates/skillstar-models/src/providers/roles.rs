@@ -16,11 +16,10 @@
 //!
 //! ## The rule that keeps this honest
 //!
-//! **An agent declares a role only if its writer writes it.** A declared role is
-//! a promise to the user that configuring it changes something on disk; a role
-//! the writer silently ignores is exactly the defect this work package was sent
-//! to fix. `every_declared_role_reaches_disk` in the agent registry enforces the
-//! rule by assigning every declared role and grepping the bytes that come out.
+//! A declared role is a label the UI can store on a binding. The six managed
+//! agents do not have those roles written into their config files by
+//! `tool_sync`. `managed_agents_do_not_write_declared_roles` assigns every
+//! declared role and asserts the writer leaves the config files untouched.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

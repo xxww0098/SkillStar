@@ -91,3 +91,43 @@
 - **助手把工具调用用裸的 `TcpStream` 发到回调，不走 `probe_http_client`。** 代理会把这一跳送到机器外面。连接之前先记下出站 URL。只接受 `http://`。Chat 路径也在发出去之前记下 `{base}/v1/chat/completions`。出站记录是整个进程一份，测试不能要求它是空的。这条环回 POST 是代理客户端的例外。信心：高。
 
 - **`claude-mcp-helper` 在 `main` 里比 MCP serve、askpass 和市场迁移更早返回。** 这样 stdout 只有 MCP 帧。它不是 clap 的一个变体。`is_cli_subcommand` 认这个名字。App 把 argv 收成第 3 个参数起（回调和工具文件），跟 magpie 把子命令名剥掉之后再交给助手一样。信心：高。
+
+## 06 Codex 写入
+
+### 先这样，后面的档再接
+
+- **单引号包住的 TOML 字面量不解码。** 行编辑器只认识基本双引号字符串，以及没有引号的一个词。`'https://old'` 读出来仍带着引号。用户用单引号写过的 `openai_base_url`，保存时可能被当成另一个值再包一层。信心：中。
+
+- **改一行赋值时，这一行末尾的注释消失。** 其它行按原字节留下。magpie 用 TOML 库重排整份文件。这里不引入 toml 依赖，只改声明过的键。信心：中。
+
+- **已登录、并且 `model_provider` 已经是 `skillstar` 时，`model_catalog_json` 无论现在写着什么都当成我们的。** 哨兵是空字符串，表示「这个键是我们放的」。stash 里还没有旧值，就记成空，取消托管时把这个键删掉。用户若在我们写过之后又改了目录路径，这一次已登录保存会把它清掉，而不是当成用户原值收回来。`model_provider` 只有正好是 `skillstar` 才删。信心：中。
+
+- **Windows 上不检查 stash 文件是不是 `0600`。** 权限断言只在 Unix。写入仍走原子替换。信心：中。
+
+- **Claude Code 的 sync 仍会列出写不进去的角色，OMP 的 sync 不列。** 两个函数都不写文件。Claude 的丢弃原因本来就不靠写盘。OMP 的丢弃计算是跟着写入一起删的，所以结果里的 `dropped_roles` 是空的。信心：中。
+
+- **每一次 API 形态的保存都把 `skillstar-models.json` 写成空目录。** 这一档还没有模型行可写。文件里如果已经有内容，会被这份空表盖掉。表头必须正好是 `[model_providers.skillstar]`，表里多出来的键会被整段换掉。信心：中。
+
+### 已定，按这个做
+
+- **stash 里的空字符串表示这个键原来不存在。** magpie 用空值表示删除。我们要能在取消托管时删掉自己加上的键，所以「原来没有」必须占一个位置。信心：高。
+
+- **同一个键第一次放进 stash 的值留下，后来不再覆盖。** 先 API 再已登录时，不能把刚写上的 `skillstar` 当成用户原来的 `model_provider`。信心：高。
+
+- **取消托管留下 `[model_providers.skillstar]` 和 `skillstar-models.json`。** 规格要求表留下。magpie 的 `dropProvider` 还会删目录文件。已经用这张表开过的线程还要找得到目录，所以文件也留下。信心：高。
+
+- **已登录不写提供商表。** 只设置 `openai_base_url`。`model_provider` 已经是 `skillstar` 时，去掉它和 `model_catalog_json`。magpie 会先写表再删键。规格的已登录形态只有这一条 URL。信心：高。
+
+- **空目录的字节是 magpie `json.MarshalIndent` 的一格缩进，末尾没有换行：** `{\n "models": []\n}`。紧凑的 `{"models":[]}` 对不上那份输出。信心：高。
+
+- **只改第一个表之前的根赋值。** TOML 的根键只能出现在那里。键名要整段对上，再允许空白和 `=`，所以 `openai_base_url` 不会改到 `openai_base_url_extra`。API 形态只在当前值已经是 `{origin}/backend-api/codex` 时去掉 `openai_base_url`，别的地址留着。信心：高。
+
+- **六个 Agent 的 sync 函数还在，函数体不写盘。** 注册表和现有的命令包装还按原签名调用。拼 `apiKey` 的构造器、只给写入用的 `view` 模块、`resolve_entries`、`codex_settings_for` 已经删掉。`codex_can_serve` 仍供修复路径判断「这行能不能留在 Codex 绑定上」。`repair_agent_configs` 和 `resync_active_tools` 还在，因为测试直接调用；启动和保存 provider 不再调用它们。信心：高。
+
+- **网关不猜登录态。** 调用方传入 `CodexRoute`。App 侧是 `save_codex` / `release_codex`，用 `home_dir()`，这一档不加 clap 子命令。不改用户 `config.toml` 的权限，只把 stash 在 Unix 上设为 `0600`。信心：高。
+
+- **v3 golden 夹具和「把生成的 models.yml 交给真 omp」那条忽略测试一起删掉。** 已经没有生成物可以比。D-039 仍是旧方法的历史记录。信心：高。
+
+### 琐碎
+
+- Desktop 的内部写入函数是 `pub(crate)`，单测把路径传进去，确认那一个路径没有被创建。公开包装仍然什么都不写。

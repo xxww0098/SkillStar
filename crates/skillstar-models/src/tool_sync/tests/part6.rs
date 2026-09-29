@@ -1,7 +1,5 @@
-//! What the Codex fix changed, and what the migration repairs on disk.
-//!
-//! The sibling of `golden.rs`: that file asserts the writers whose output must
-//! not move, this one asserts the one whose output must.
+//! Codex sync no longer writes `config.toml`. Unsync and the store-side repair
+//! still drop tables the migration cannot keep.
 
 use super::*;
 use crate::providers::migrate::{DropReason, MigrationReport};
@@ -24,8 +22,7 @@ fn codex_binding(entries: Vec<BindingEntry>) -> AgentBinding {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_chat_only_host_is_never_written_into_codex_config() {
-    let _home = use_sandbox_home();
+fn codex_sync_does_not_write_a_vendor_url_or_chat_wire() {
     let chat_only = flat("aaaa1111", "relay");
     let capable = responses_capable("bbbb2222", "openai");
     let binding = codex_binding(vec![
@@ -35,64 +32,12 @@ fn a_chat_only_host_is_never_written_into_codex_config() {
 
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.toml");
-    sync_codex_binding_inner(&binding, &[capable.clone(), chat_only.clone()], &path).unwrap();
+    let before =
+        "model = \"gpt-5\"\nwire_api = \"chat\"\nbase_url = \"https://vendor.example/v1\"\n";
+    std::fs::write(&path, before).unwrap();
+    sync_codex_binding_inner(&binding, &[capable, chat_only], &path).unwrap();
 
-    let table: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let providers = table["model_providers"].as_table().unwrap();
-    assert!(
-        providers.contains_key(&skillstar_managed_key(&capable.id)),
-        "the host that speaks /v1/responses must still be written"
-    );
-    assert!(
-        !providers.contains_key(&skillstar_managed_key(&chat_only.id)),
-        "a chat-only host must be skipped, not written with wire_api = \"chat\""
-    );
-}
-
-#[test]
-fn every_table_codex_writes_says_responses() {
-    let _home = use_sandbox_home();
-    let capable = responses_capable("bbbb2222", "openai");
-    let binding = codex_binding(vec![entry(&capable.id, "gpt-5.4")]);
-
-    let tmp = TempDir::new().unwrap();
-    let path = tmp.path().join("config.toml");
-    sync_codex_binding_inner(&binding, &[capable], &path).unwrap();
-
-    let written = std::fs::read_to_string(&path).unwrap();
-    assert!(written.contains(r#"wire_api = "responses""#), "{written}");
-    assert!(
-        !written.contains(r#""chat""#),
-        "the value that stops Codex booting must be unreachable: {written}"
-    );
-}
-
-#[test]
-fn codex_points_at_the_responses_endpoint_not_the_chat_one() {
-    let _home = use_sandbox_home();
-    let mut provider = flat("bbbb2222", "split");
-    provider.endpoints.openai_chat = Some("https://split.example.com/v1".to_string());
-    provider.endpoints.openai_responses = Some("https://split.example.com/responses".to_string());
-    provider.caps.responses_api = Tri::Yes;
-
-    let tmp = TempDir::new().unwrap();
-    let path = tmp.path().join("config.toml");
-    sync_codex_binding_inner(
-        &codex_binding(vec![entry(&provider.id, "m")]),
-        &[provider.clone()],
-        &path,
-    )
-    .unwrap();
-
-    let table: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let block = table["model_providers"].as_table().unwrap()[&skillstar_managed_key(&provider.id)]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        block["base_url"].as_str().unwrap(),
-        "https://split.example.com/responses",
-        "Codex only calls /v1/responses; a chat base URL parses and then fails every request"
-    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 }
 
 #[test]

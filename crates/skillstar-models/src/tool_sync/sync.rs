@@ -1,8 +1,7 @@
-//! Single-provider sync writer (Claude Code) and unsync/deactivation.
+//! Claude Code sync is a no-op. Unsync and path resolution still live here.
 //!
-//! Multi-provider binding writers (Codex, OpenCode, Pi) live in
-//! `multi_provider.rs`; this module keeps the single-env-block writers plus
-//! the registry-driven unsync dispatch.
+//! Codex, OpenCode, and Pi unsync live in `multi_provider.rs`. None of these
+//! modules write a vendor base URL or API key into an Agent config.
 
 use super::*;
 
@@ -33,22 +32,7 @@ fn codex_home() -> Result<PathBuf> {
     Ok(sync_home_dir()?.join(".codex"))
 }
 
-/// Sync a provider's credentials to Claude Code's config file.
-///
-/// Writes to `~/.claude/settings.json` env block, preserving existing non-managed fields.
-/// Creates a rolling backup before writing (keeps last 5).
-///
-/// The env block will contain:
-/// - `ANTHROPIC_BASE_URL`: the provider's Anthropic-compatible base URL
-/// - `ANTHROPIC_AUTH_TOKEN`: the provider's API key
-/// - one env key per declared role in the agent registry, taken from the
-///   binding's `roles` map (the key is removed when blank)
-///
-/// The tier overrides used to live in `provider.meta`, where only Claude could
-/// reach them; v4 stores them as roles on the binding. Which role lands in which
-/// env key is no longer spelled out here either — the registry row owns that
-/// mapping, so adding a Claude role is a registry edit rather than an edit here
-/// plus an edit to the managed-key list plus an edit to the unsync path.
+/// Claude Code settings are no longer written from the provider store.
 pub fn sync_to_claude_code(
     provider: &Provider,
     model: &str,
@@ -98,85 +82,18 @@ fn claude_dropped_roles(
     dropped
 }
 
-/// Inner implementation for Claude Code sync.
+/// Claude Code settings are no longer written from the provider store.
 pub(crate) fn sync_to_claude_code_inner(
     provider: &Provider,
     model: &str,
     roles: &std::collections::BTreeMap<String, ModelRef>,
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
-    // Native login: clear SkillStar-managed env so Claude uses its own login.
-    if provider.is_external_cli() {
-        return clear_claude_managed_env_at(config_path);
-    }
-
-    let anthropic_base = anthropic_base(provider);
-    if anthropic_base.is_empty() {
-        bail!(
-            "Provider '{}' does not have an Anthropic-compatible endpoint",
-            provider.name
-        );
-    }
-
-    // Create rolling backup if file exists
-    let backup_path = if config_path.exists() {
-        Some(create_rolling_backup(config_path)?)
-    } else {
-        None
-    };
-
-    // Ensure parent directory exists
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    // Build managed fields for the env block. Every role the registry declares
-    // contributes its env key, written when set, or Null (→ key removed) when the
-    // user left it blank. `ANTHROPIC_MODEL` is the `default` role's key and takes
-    // the active entry's model when no `default` role is assigned — the entry is
-    // the direct statement of intent that predates roles, and a binding with no
-    // role config at all has to keep behaving exactly as it did.
-    //
-    // An empty/whitespace model (a provider with no `default_model` bound without
-    // an explicit model) is Null rather than `""`: Claude Code cannot resolve an
-    // empty model id, and the missing key is the state that lets it fall back.
-    let mut managed_fields: Vec<(&str, Value)> = vec![
-        (
-            "ANTHROPIC_BASE_URL",
-            Value::String(anthropic_base.to_string()),
-        ),
-        (
-            "ANTHROPIC_AUTH_TOKEN",
-            Value::String(api_key(provider).to_string()),
-        ),
-    ];
-    for def in claude_role_defs() {
-        let from_role = role_model_field(provider, roles, def.id);
-        let value = if def.id == crate::providers::ROLE_DEFAULT && from_role.is_null() {
-            trim_or_null(model)
-        } else {
-            from_role
-        };
-        managed_fields.push((def.agent_key, value));
-    }
-
-    // Merge write into the env block
-    merge_json_env_write(config_path, &managed_fields)?;
-
-    Ok(backup_path)
+    let _ = (provider, model, roles, config_path);
+    Ok(None)
 }
 
-/// Claude Code's declared roles, or an empty slice if the registry ever loses
-/// the row (in which case the writer degrades to base URL + token rather than
-/// panicking on a lookup that should never fail).
-fn claude_role_defs() -> &'static [crate::providers::RoleDef] {
-    agent_spec("claude-code")
-        .map(|spec| spec.roles)
-        .unwrap_or(&[])
-}
-
-/// Remove SkillStar-managed Claude env keys (Official / unsync shared path).
+/// Remove SkillStar-managed Claude env keys (unsync).
 fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
     if !config_path.exists() {
         return Ok(None);
@@ -208,142 +125,7 @@ fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
     Ok(backup_path)
 }
 
-/// Read one role's model out of the binding. Returns a `Value::String` for a
-/// usable assignment, otherwise `Value::Null` (which `merge_json_env_write`
-/// treats as "remove the key").
-///
-/// A role pointing at a provider other than the bound one yields Null: Claude's
-/// env block carries a single base URL, so that model id would be sent to the
-/// wrong host. [`claude_dropped_roles`] reports the same condition to the caller
-/// so the skip is visible rather than silent.
-///
-/// Fallbacks are deliberately **not** resolved here. Writing the inherited value
-/// into the tier key would make "explicitly set to the same model" and "left to
-/// Claude's own default" identical on disk, and clearing the field would no
-/// longer restore Claude's behaviour.
-fn role_model_field(
-    provider: &Provider,
-    roles: &std::collections::BTreeMap<String, ModelRef>,
-    role: &str,
-) -> Value {
-    roles
-        .get(role)
-        .filter(|target| target.provider_id.trim().is_empty() || target.provider_id == provider.id)
-        .map(|target| target.model.trim())
-        .filter(|model| !model.is_empty())
-        .map(|model| Value::String(model.to_string()))
-        .unwrap_or(Value::Null)
-}
-
-/// Non-empty trimmed string → `Value::String`; empty/whitespace → `Value::Null`
-/// (which `merge_json_env_write` treats as "remove the key"). Used for
-/// `ANTHROPIC_MODEL` so an empty model selection is dropped instead of written
-/// as an invalid `""` value.
-fn trim_or_null(s: &str) -> Value {
-    let t = s.trim();
-    if t.is_empty() {
-        Value::Null
-    } else {
-        Value::String(t.to_string())
-    }
-}
-
-pub(crate) fn build_opencode_provider_block(provider: &Provider, model: &str) -> Value {
-    let default_model = default_model(provider);
-    let selected_model_id = if model.trim().is_empty() {
-        if default_model.trim().is_empty() {
-            "default".to_string()
-        } else {
-            default_model.to_string()
-        }
-    } else {
-        model.to_string()
-    };
-
-    let base_url = openai_base(provider).trim().trim_end_matches('/');
-    // The catalog left the provider row in v4; it now lives in the cache
-    // directory. Reading it here is what keeps each model's `name` / `limit` /
-    // `cost` block identical to what v3 wrote.
-    let catalog = catalog_cache::read_catalog(&provider.id);
-    let model_ids = build_opencode_model_ids(provider, &selected_model_id, &catalog);
-    let models = model_ids
-        .iter()
-        .map(|model_id| {
-            let entry = catalog.iter().find(|entry| entry.id == *model_id);
-            (
-                model_id.clone(),
-                build_opencode_model_entry(model_id, entry),
-            )
-        })
-        .collect::<serde_json::Map<String, Value>>();
-
-    serde_json::json!({
-        "npm": "@ai-sdk/openai-compatible",
-        "name": provider.name,
-        "options": {
-            "baseURL": base_url,
-            "apiKey": api_key(provider),
-        },
-        "models": models
-    })
-}
-
-fn build_opencode_model_ids(
-    provider: &Provider,
-    selected_model_id: &str,
-    catalog: &[ModelCatalogEntry],
-) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut ids = Vec::new();
-
-    for candidate in std::iter::once(selected_model_id)
-        .chain(std::iter::once(default_model(provider)))
-        .chain(provider.models.iter().map(String::as_str))
-        .chain(catalog.iter().map(|entry| entry.id.as_str()))
-    {
-        let id = candidate.trim();
-        if !id.is_empty() && seen.insert(id.to_string()) {
-            ids.push(id.to_string());
-        }
-    }
-
-    ids
-}
-
-fn build_opencode_model_entry(model_id: &str, catalog_entry: Option<&ModelCatalogEntry>) -> Value {
-    let mut model = serde_json::Map::new();
-    let display_name = catalog_entry
-        .and_then(|entry| entry.display_name.as_deref())
-        .unwrap_or(model_id);
-    model.insert("name".to_string(), Value::String(display_name.to_string()));
-
-    if let Some(entry) = catalog_entry {
-        if let Some(source_name) = entry.source_name.as_deref()
-            && source_name != model_id
-        {
-            model.insert("id".to_string(), Value::String(source_name.to_string()));
-        }
-
-        let mut limit = serde_json::Map::new();
-        if let Some(context) = entry.context_length {
-            limit.insert("context".to_string(), Value::Number(context.into()));
-        }
-        if let Some(output) = entry.max_completion_tokens {
-            limit.insert("output".to_string(), Value::Number(output.into()));
-        }
-        if !limit.is_empty() {
-            model.insert("limit".to_string(), Value::Object(limit));
-        }
-        if let Some(cost) = entry.cost.clone() {
-            model.insert("cost".to_string(), cost);
-        }
-    }
-
-    Value::Object(model)
-}
-
-/// Registry adapter: write a Claude Code binding by resolving its active
-/// entry (single-provider agents only ever project the active entry).
+/// Registry adapter: Claude Code sync resolves the active entry and writes nothing.
 pub(crate) fn sync_claude_code_binding(
     binding: &AgentBinding,
     providers: &[Provider],
@@ -352,11 +134,7 @@ pub(crate) fn sync_claude_code_binding(
     sync_to_claude_code(provider, model, &binding.roles)
 }
 
-/// Persist the Claude Desktop store binding to a local marker file.
-///
-/// Does not write Claude Desktop's native profile/proxy config yet. The marker
-/// (`resolve_claude_desktop_binding_path`) keeps CLI / Desktop store bindings
-/// independently inspectable under `SKILLSTAR_TOOL_SYNC_HOME`.
+/// Claude Desktop's marker file is no longer written from the provider store.
 pub(crate) fn sync_claude_desktop_binding(
     binding: &AgentBinding,
     providers: &[Provider],
@@ -369,32 +147,13 @@ pub(crate) fn sync_claude_desktop_binding(
     ))
 }
 
-fn sync_claude_desktop_binding_inner(
+pub(crate) fn sync_claude_desktop_binding_inner(
     binding: &AgentBinding,
     providers: &[Provider],
     path: &Path,
 ) -> Result<Option<PathBuf>> {
-    let (provider, model) = resolve_single_active(binding, providers)?;
-    let mut first_backup: Option<PathBuf> = None;
-    if path.exists() {
-        first_backup = Some(create_rolling_backup(path)?);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-    let body = serde_json::json!({
-        "provider_id": provider.id,
-        "provider_name": provider.name,
-        "model": model,
-        "note": "SkillStar binding marker; Claude Desktop native write-path TBD",
-    });
-    skillstar_core::infra::fs_ops::atomic_write(
-        path,
-        serde_json::to_string_pretty(&body)?.as_bytes(),
-    )
-    .with_context(|| format!("Failed to write {}", path.display()))?;
-    Ok(first_backup)
+    let _ = (binding, providers, path);
+    Ok(None)
 }
 
 /// Remove the Claude Desktop SkillStar binding marker (deactivation).

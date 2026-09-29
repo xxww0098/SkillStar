@@ -3,10 +3,9 @@
 //! Three claims are under test here, and each one is the sort that goes stale
 //! silently if nobody pins it:
 //!
-//! 1. **Every declared role reaches disk.** The registry is a promise to the
-//!    user that configuring a role changes a file. A role listed but never
-//!    written is the exact defect this work package was sent to fix, so the
-//!    check is generic over the registry rather than written per agent.
+//! 1. **Declared roles are not written by tool_sync.** The six managed agents
+//!    keep role labels on the binding. Sync does not copy them into Agent
+//!    config files.
 //! 2. **Roles that cannot be written are reported, not dropped in silence.**
 //! 3. **Adding an agent needs a registry row and a writer, and nothing else.**
 
@@ -46,15 +45,9 @@ fn write_all_configs(spec: &AgentSpec, store: &ProvidersStoreV4) -> (ToolSyncRes
     (result, written)
 }
 
-/// **The rule that keeps `AgentSpec::roles` honest.**
-///
-/// For each agent, assign every role it declares and assert the agent's own key
-/// for that role appears in what the writer produced. A registry row that lists
-/// a role its writer ignores is a UI that offers a setting with no effect —
-/// which is what the OMP audit found and what a declaration-only abstraction
-/// makes easy to reintroduce.
+/// Assign every declared role and assert tool_sync writes no config bytes.
 #[test]
-fn every_declared_role_reaches_disk() {
+fn managed_agents_do_not_write_declared_roles() {
     for spec in agent_specs() {
         if spec.roles.is_empty() {
             continue;
@@ -74,27 +67,15 @@ fn every_declared_role_reaches_disk() {
             providers: vec![provider],
             ..Default::default()
         };
-        store.bindings.insert(spec.id.to_string(), binding.clone());
+        store.bindings.insert(spec.id.to_string(), binding);
 
         let (result, written) = write_all_configs(spec, &store);
         assert!(result.success, "{}: {:?}", spec.id, result.error);
         assert!(
-            result.dropped_roles.is_empty(),
-            "{}: every role was assignable, yet {:?} were dropped",
-            spec.id,
-            result.dropped_roles
+            written.is_empty(),
+            "{}: tool_sync wrote config bytes:\n{written}",
+            spec.id
         );
-
-        for def in spec.roles {
-            assert!(
-                written.contains(def.agent_key),
-                "{}: role `{}` is declared with key `{}` but no config file mentions it — \
-                 a declared role the writer ignores is a setting with no effect\n{written}",
-                spec.id,
-                def.id,
-                def.agent_key
-            );
-        }
     }
 }
 
@@ -210,13 +191,8 @@ fn agents_land_in_the_three_role_tiers() {
 // Claude Code: the mapping the frontend never persisted
 // ---------------------------------------------------------------------------
 
-/// End-to-end for 00 §1.3: what the role panel saves is what lands in the env
-/// block. The chain the renderer drives is `roles` on the binding → store →
-/// writer → `~/.claude/settings.json`, and the middle two links are what this
-/// asserts; `roles_round_trip_through_the_v3_settings_bag` in the command layer
-/// covers the renderer's end of it.
 #[test]
-fn claude_role_mapping_lands_in_the_env_block() {
+fn claude_role_mapping_is_not_written_into_settings() {
     let _home = use_sandbox_home();
 
     let mut provider = flat("claude-p1", "relay");
@@ -237,22 +213,11 @@ fn claude_role_mapping_lands_in_the_env_block() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("settings.json");
     sync_to_claude_code_inner(&provider, "entry-model", &binding.roles, &path).unwrap();
-
-    let env: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let env = &env["env"];
-    assert_eq!(env["ANTHROPIC_MODEL"], "entry-model");
-    assert_eq!(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku-fast");
-    assert_eq!(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "sonnet-mid");
-    assert_eq!(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "opus-deep");
-    assert_eq!(env["CLAUDE_CODE_SUBAGENT_MODEL"], "subagent-model");
+    assert!(!path.exists());
 }
 
-/// An explicit `default` role beats the entry's model. The entry is the older
-/// statement of intent and stays the fallback, but a user who set the role
-/// meant the role.
 #[test]
-fn an_assigned_default_role_wins_over_the_entry_model() {
+fn an_assigned_default_role_is_not_written() {
     let _home = use_sandbox_home();
     let mut provider = flat("claude-p2", "relay");
     provider.endpoints.anthropic_messages = Some("https://relay.example.com/anthropic".to_string());
@@ -266,10 +231,7 @@ fn an_assigned_default_role_wins_over_the_entry_model() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("settings.json");
     sync_to_claude_code_inner(&provider, "entry-model", &roles, &path).unwrap();
-
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(json["env"]["ANTHROPIC_MODEL"], "role-model");
+    assert!(!path.exists());
 }
 
 /// Claude's env block names one base URL, so a role pointing at some other
@@ -312,11 +274,10 @@ fn a_claude_role_on_another_provider_is_skipped_and_reported() {
     );
 
     let path = resolve_tool_config_path("claude-code").unwrap();
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!(
-        json["env"].get("ANTHROPIC_DEFAULT_HAIKU_MODEL").is_none(),
-        "the model of an unbindable provider must not be written for the bound one"
+        !path.exists(),
+        "a skipped role must not create {}",
+        path.display()
     );
 }
 
@@ -324,10 +285,10 @@ fn a_claude_role_on_another_provider_is_skipped_and_reported() {
 // OMP: the drops that used to be silent (02 §9.3 gap 1)
 // ---------------------------------------------------------------------------
 
-/// The three conditions `resolve_omp_roles` skips on, each of which used to be
-/// a bare `continue`, now each carrying a reason back to the caller.
+/// OMP sync no longer projects roles, so it neither writes them nor reports
+/// writer-side drops.
 #[test]
-fn omp_reports_why_each_dropped_role_was_dropped() {
+fn omp_sync_does_not_write_or_report_role_drops() {
     let _home = use_sandbox_home();
 
     let bound = flat("omp-bound", "relay");
@@ -368,29 +329,13 @@ fn omp_reports_why_each_dropped_role_was_dropped() {
 
     let result = sync_tool_binding(&store, "omp");
     assert!(result.success, "{:?}", result.error);
-    assert_eq!(
-        result.dropped_roles,
-        vec![
-            DroppedRole::for_provider("fast", RoleDropReason::ProviderNotBound, &unbound.id),
-            DroppedRole::for_provider(
-                "plan",
-                RoleDropReason::ProviderHasNoEndpoint,
-                &no_endpoint.id
-            ),
-            DroppedRole::new("tiny", RoleDropReason::NoModel),
-            DroppedRole::for_provider(
-                "vision",
-                RoleDropReason::ProviderMissing,
-                "provider-that-was-deleted"
-            ),
-        ]
+    assert!(
+        result.dropped_roles.is_empty(),
+        "{:?}",
+        result.dropped_roles
     );
-
-    // And the surviving role is still written — reporting drops must not turn
-    // into refusing to write.
-    let config = std::fs::read_to_string(resolve_omp_config_path().unwrap()).unwrap();
-    assert!(config.contains("default:"), "{config}");
-    assert!(!config.contains("smol:"), "{config}");
+    assert!(!resolve_omp_config_path().unwrap().exists());
+    assert!(!resolve_omp_models_path().unwrap().exists());
 }
 
 /// A binding whose roles are all writable reports nothing, so the UI has no
@@ -544,7 +489,6 @@ fn agent_ids_are_spelled_out_only_in_the_registry_and_the_writers() {
         ),
         ("paths_files.rs", include_str!("../paths_files.rs"), 2),
         ("backup_merge.rs", include_str!("../backup_merge.rs"), 0),
-        ("view.rs", include_str!("../view.rs"), 0),
         ("mod.rs", include_str!("../mod.rs"), 0),
     ];
 

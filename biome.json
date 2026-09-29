@@ -86,7 +86,6 @@
       "!!**/.vscode",
       "!!.claude",
       "!!**/src/types/generated",
-      "!!**/tool_sync/tests/golden_v3",
       "!!**/skillstar-gateway/tests/fixtures",
       "!!**/graft"
     ]

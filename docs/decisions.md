@@ -669,6 +669,15 @@
 - 后果：获得——删掉 gateway 之后 models 与 usage 仍能编译。承担——网关不能自己打开密钥表或配额库，调用方把快照交进来。
 - 证据：`crates/skillstar-gateway`、`scripts/internal/check_workspace_deps.sh`。
 
+## D-076：模型网关硬切换，不迁移 Agent 文件
+
+- 日期：2026-09-29
+- 状态：accepted
+- 背景：旧的 tool sync 把厂商 URL 和 API key 写进 Agent 配置。网关接管之后，那些文件里的旧值不能在启动或保存密钥时被改写，否则用户还没在新工作台保存，Codex 或 Claude 就已经指向别处。
+- 决策：不迁移。启动不改写 Agent 文件。保存 provider 不触发 Agent 写盘。v4 `model_providers.json` 不加路由列，`version` 仍是 4。厂商密钥留在 provider store。Codex 的环回配置只在显式保存时由 `skillstar-gateway` 写入。
+- 后果：获得——已有 Agent 文件保持原样，直到用户保存这一档。承担——`[model_providers.skillstar]` 里留下的 `wire_api = "chat"` 要等 API 形态的这次保存才换掉，其它表不动；`tool_sync` 的六个 sync 不再写厂商 URL 或密钥。
+- 证据：`crates/skillstar-gateway/src/codex.rs`、`crates/skillstar-models/tests/startup_agent_files.rs`。
+
 ## 新增记录格式
 
 

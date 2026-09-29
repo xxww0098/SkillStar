@@ -1,17 +1,7 @@
-//! Multi-provider tool sync (Codex, OpenCode, Pi).
+//! Multi-provider sync (Codex, OpenCode, Pi) no longer writes Agent configs.
 //!
-//! The single-provider agent (Claude Code) writes one global env block, so its
-//! writer lives in `sync.rs` and takes a single provider+model. The agents
-//! handled here — Codex, OpenCode and Pi — natively support several providers
-//! coexisting in one config file (Codex `[model_providers.*]`, OpenCode
-//! `provider.*`, Pi `providers.*` in `models.json`), with a pointer selecting
-//! the active one (Codex `model_provider`, OpenCode top-level `model`, Pi
-//! `defaultProvider`/`defaultModel` in `settings.json`).
-//!
-//! These writers project an entire [`AgentBinding`] onto disk: one managed entry
-//! per bound provider, keyed `skillstar_<id8>`, plus the active pointer. Every
-//! managed key shares the `skillstar` prefix so unsync and conflict detection
-//! can find them all regardless of how many providers are bound.
+//! Unsync still removes managed `skillstar` / `skillstar_*` keys. Codex's
+//! loopback config is written by `skillstar-gateway`, not from this store.
 
 use super::*;
 
@@ -54,140 +44,11 @@ pub fn is_skillstar_managed_key(key: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('_'))
 }
 
-/// Resolve a binding's entries to `(provider, entry)` pairs in list order,
-/// skipping entries whose provider id no longer exists in the store, and report
-/// the active provider's id.
-///
-/// Returns `None` when no usable entry remains (the tool should be unsynced).
-pub(crate) fn resolve_entries<'a>(
-    binding: &'a AgentBinding,
-    providers: &'a [Provider],
-) -> Option<(Vec<(&'a Provider, &'a BindingEntry)>, String)> {
-    let resolved: Vec<_> = binding
-        .entries
-        .iter()
-        .filter_map(|entry| {
-            providers
-                .iter()
-                .find(|p| p.id == entry.provider_id)
-                .map(|p| (p, entry))
-        })
-        .collect();
-
-    if resolved.is_empty() {
-        return None;
-    }
-
-    // The active provider id, clamped through ToolBinding::active.
-    let active_id = binding.active()?.provider_id.clone();
-    // If the active entry's provider was filtered out, fall back to the first.
-    let active_id = if resolved.iter().any(|(p, _)| p.id == active_id) {
-        active_id
-    } else {
-        resolved[0].0.id.clone()
-    };
-    Some((resolved, active_id))
-}
-
-// ---------------------------------------------------------------------------
-// Shared JSON managed-block skeleton (OpenCode, Pi)
-// ---------------------------------------------------------------------------
-
-/// Shared write skeleton for JSON multi-provider configs (OpenCode, Pi):
-/// rolling backup → read-or-init root → drop stale `skillstar_*` blocks →
-/// one managed block per bound provider (skipping entries without an
-/// OpenAI-compatible URL, computing the active `(key, model)` pair) → let the
-/// caller finalize the root (active selector, `$schema`, …) → persist.
-///
-/// Returns the backup path plus the active pointer when it resolved to a
-/// non-empty model. Codex deliberately does NOT go through this skeleton: its
-/// TOML document, `auth.json` side-channel and per-entry wire settings would
-/// push the adapter surface past the writer it replaces (see
-/// docs/decisions.md).
-/// Active pointer for a managed binding: `(skillstar_<id8> key, model_id)`.
-pub(crate) type ActivePointer = (String, String);
-
-pub(crate) fn sync_json_blocks_inner(
-    entries: &[(&Provider, &BindingEntry)],
-    active_id: &str,
-    config_path: &Path,
-    blocks_key: &str,
-    init_root: impl Fn() -> Value,
-    build_block: impl Fn(&Provider, &str) -> Value,
-    finish_root: impl FnOnce(&mut serde_json::Map<String, Value>, Option<&ActivePointer>),
-) -> Result<(Option<PathBuf>, Option<ActivePointer>)> {
-    let backup_path = if config_path.exists() {
-        Some(create_rolling_backup(config_path)?)
-    } else {
-        None
-    };
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    let mut root: Value = match read_existing_config(config_path)? {
-        Some(content) => serde_json::from_str(&content).with_context(|| {
-            format!(
-                "Failed to parse {} — fix or remove it before syncing",
-                config_path.display()
-            )
-        })?,
-        None => init_root(),
-    };
-
-    let file_label = config_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| config_path.display().to_string());
-    let root_obj = root
-        .as_object_mut()
-        .with_context(|| format!("{file_label} root must be an object"))?;
-
-    let provider_map = root_obj
-        .entry(blocks_key)
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let provider_map = provider_map
-        .as_object_mut()
-        .with_context(|| format!("{file_label} `{blocks_key}` must be an object"))?;
-
-    // Drop stale skillstar* blocks, then write one per current entry.
-    provider_map.retain(|k, _| !is_skillstar_managed_key(k));
-    let mut active_pointer: Option<(String, String)> = None;
-    for (provider, entry) in entries {
-        if openai_base(provider).trim().is_empty() {
-            continue;
-        }
-        let key = skillstar_managed_key(&provider.id);
-        let block = build_block(provider, &entry.model);
-        if provider.id == active_id {
-            let model_id = if entry.model.trim().is_empty() {
-                default_model(provider).to_string()
-            } else {
-                entry.model.clone()
-            };
-            if !model_id.trim().is_empty() {
-                active_pointer = Some((key.clone(), model_id));
-            }
-        }
-        provider_map.insert(key, block);
-    }
-
-    finish_root(root_obj, active_pointer.as_ref());
-
-    let output = serde_json::to_string_pretty(&root)
-        .with_context(|| format!("Failed to serialize {file_label}"))?;
-    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
-        .with_context(|| format!("Failed to write {}", config_path.display()))?;
-
-    Ok((backup_path, active_pointer))
-}
-
 // ---------------------------------------------------------------------------
 // Codex
 // ---------------------------------------------------------------------------
 
-/// Whether a provider can be written into Codex's config at all.
+/// Whether a Codex binding may keep this provider.
 ///
 /// Two conditions, and they are not the same question:
 ///
@@ -200,52 +61,15 @@ pub(crate) fn sync_json_blocks_inner(
 /// upgrade — the endpoint's presence is what carries the decision, and the
 /// capability bit only ever *removes* a host a probe has disproved.
 pub fn codex_can_serve(provider: &Provider) -> bool {
-    !provider.caps.responses_api.is_denied() && serves(provider, RequiredWire::OpenaiResponses)
+    let has_responses = !provider
+        .endpoint_for(RequiredWire::OpenaiResponses)
+        .unwrap_or("")
+        .trim()
+        .is_empty();
+    !provider.caps.responses_api.is_denied() && has_responses
 }
 
-/// The Codex settings for one entry, defaulting from the credential.
-///
-/// v3 fell back to two columns on the provider row (`codex_wire_api` /
-/// `codex_auth_mode`) that applied to agents with no such concept. v4 keeps
-/// `auth_mode` per entry, where it belongs, and derives the default from what
-/// kind of credential the provider actually has: a key that lives in another
-/// CLI's store must never be written to `auth.json`, and a literal third-party
-/// key travels via `env_key` so a concurrent ChatGPT login survives.
-pub(crate) fn codex_settings_for(provider: &Provider, entry: &BindingEntry) -> CodexSettings {
-    let mut settings = entry
-        .settings
-        .as_ref()
-        .map(CodexSettings::from_value)
-        .unwrap_or_else(|| CodexSettings {
-            auth_mode: default_codex_auth_mode(provider).to_string(),
-        });
-    if settings.auth_mode.trim().is_empty() {
-        settings.auth_mode = default_codex_auth_mode(provider).to_string();
-    }
-    settings
-}
-
-/// The auth mode a provider implies when its entry does not name one.
-fn default_codex_auth_mode(provider: &Provider) -> &'static str {
-    if provider.is_external_cli() {
-        // Credentials belong to the Codex CLI's own login; never touch them.
-        CODEX_AUTH_MODE_OAUTH
-    } else if serves(provider, RequiredWire::OpenaiResponses)
-        && responses_base(provider).contains("api.openai.com")
-    {
-        CODEX_AUTH_MODE_API_KEY
-    } else {
-        CODEX_AUTH_MODE_THIRD_PARTY
-    }
-}
-
-/// Write a whole Codex binding to `~/.codex/config.toml` (+ `auth.json`).
-///
-/// Each bound provider gets a `[model_providers.skillstar_<id>]` table; the
-/// active entry drives top-level `model_provider` + `model`. `auth.json` is
-/// written from the active entry only (Codex has a single `OPENAI_API_KEY`
-/// slot); third-party entries carry their key via per-table `env_key`, so they
-/// never depend on `auth.json`.
+/// Codex config is no longer written from the provider store.
 pub fn sync_codex_binding(
     binding: &AgentBinding,
     providers: &[Provider],
@@ -258,148 +82,21 @@ pub fn sync_codex_binding(
     ))
 }
 
-/// Path-taking core of [`sync_codex_binding`] — public so property tests can
-/// drive the TOML merge against an isolated temp path instead of the shared
-/// sandbox HOME. (`auth.json` still resolves through the sandboxable home; use
-/// an OAuth/third-party auth mode to keep a test fully path-hermetic.)
+/// Codex config is no longer written from the provider store.
 pub fn sync_codex_binding_inner(
     binding: &AgentBinding,
     providers: &[Provider],
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
-    let (entries, active_id) = resolve_entries(binding, providers)
-        .context("Codex binding has no resolvable provider entries")?;
-
-    // Resolve the active entry + its settings for the auth.json decision and
-    // the top-level pointer.
-    let (active_provider, active_entry) = entries
-        .iter()
-        .find(|(p, _)| p.id == active_id)
-        .copied()
-        .context("active Codex entry not found after resolution")?;
-    let active_settings = codex_settings_for(active_provider, active_entry);
-
-    let official_active = active_provider.is_external_cli();
-
-    // Official (ChatGPT OAuth): never require a Base URL and never touch auth.json.
-    if !official_active && !codex_can_serve(active_provider) {
-        bail!(
-            "Provider '{}' has no /v1/responses endpoint; Codex >=0.95 speaks nothing else",
-            active_provider.name
-        );
-    }
-
-    let auth_path = resolve_codex_auth_path()?;
-    let mut first_backup: Option<PathBuf> = None;
-
-    // --- auth.json (active entry only; Official / oauth / third_party skip) ---
-    if !official_active && !active_settings.preserves_oauth_token() {
-        if auth_path.exists() {
-            let backup = create_rolling_backup(&auth_path)?;
-            first_backup.get_or_insert(backup);
-        }
-        if let Some(parent) = auth_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-        }
-        let auth_fields: Vec<(&str, Value)> = vec![(
-            "OPENAI_API_KEY",
-            Value::String(api_key(active_provider).to_string()),
-        )];
-        merge_json_write(&auth_path, &auth_fields)?;
-    }
-
-    // --- config.toml ---
-    if config_path.exists() {
-        let backup = create_rolling_backup(config_path)?;
-        first_backup.get_or_insert(backup);
-    }
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    let mut table: toml::Table = match read_existing_config(config_path)? {
-        Some(content) => toml::from_str(&content).with_context(|| {
-            format!(
-                "Failed to parse {} — fix or remove it before syncing",
-                config_path.display()
-            )
-        })?,
-        None => toml::Table::new(),
-    };
-
-    // Official active → clear SkillStar top-level pointers so Codex uses native
-    // ChatGPT login. Other bound (non-Official) providers keep their tables for
-    // later switching.
-    if official_active {
-        if table
-            .get("model_provider")
-            .and_then(|v| v.as_str())
-            .is_some_and(is_skillstar_managed_key)
-        {
-            table.remove("model_provider");
-            table.remove("model");
-        }
-    } else {
-        let active_key = skillstar_managed_key(&active_id);
-        table.insert(
-            "model_provider".to_string(),
-            toml::Value::String(active_key.clone()),
-        );
-        table.insert(
-            "model".to_string(),
-            toml::Value::String(active_entry.model.clone()),
-        );
-    }
-
-    // Rebuild the managed provider tables: drop every stale skillstar* table,
-    // then write one per current non-Official entry (empty Official URLs skip).
-    let mp = table
-        .entry("model_providers")
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-    if !mp.is_table() {
-        *mp = toml::Value::Table(toml::Table::new());
-    }
-    let mp_table = mp.as_table_mut().expect("model_providers is a table");
-    mp_table.retain(|k, _| !is_skillstar_managed_key(k));
-
-    for (provider, entry) in &entries {
-        // The Codex fix, in one condition. A host with no `/v1/responses`
-        // endpoint is *skipped*, not written with `wire_api = "chat"`: that
-        // value no longer exists in Codex's enum, and a config.toml containing
-        // it fails to deserialize — taking the whole file, and every other
-        // provider in it, down with it.
-        if provider.is_external_cli() || !codex_can_serve(provider) {
-            continue;
-        }
-        let settings = codex_settings_for(provider, entry);
-        let section = CodexModelProvider::from_binding(provider, &settings).to_toml_table();
-        mp_table.insert(
-            skillstar_managed_key(&provider.id),
-            toml::Value::Table(section),
-        );
-    }
-
-    if mp_table.is_empty() {
-        table.remove("model_providers");
-    }
-
-    let output = toml::to_string_pretty(&table).context("Failed to serialize Codex config.toml")?;
-    skillstar_core::infra::fs_ops::atomic_write(config_path, output.as_bytes())
-        .with_context(|| format!("Failed to write {}", config_path.display()))?;
-
-    Ok(first_backup)
+    let _ = (binding, providers, config_path);
+    Ok(None)
 }
 
 // ---------------------------------------------------------------------------
 // OpenCode
 // ---------------------------------------------------------------------------
 
-/// Write a whole OpenCode binding to `opencode.json`.
-///
-/// Each bound provider becomes a `provider.skillstar_<id>` block; the active
-/// entry sets the top-level `model = "skillstar_<id>/<model>"` selector.
+/// OpenCode config is no longer written from the provider store.
 pub fn sync_opencode_binding(
     binding: &AgentBinding,
     providers: &[Provider],
@@ -417,43 +114,15 @@ pub(crate) fn sync_opencode_binding_inner(
     providers: &[Provider],
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
-    let (entries, active_id) = resolve_entries(binding, providers)
-        .context("OpenCode binding has no resolvable provider entries")?;
-
-    let (backup_path, _) = sync_json_blocks_inner(
-        &entries,
-        &active_id,
-        config_path,
-        "provider",
-        || serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} }),
-        build_opencode_provider_block,
-        |root, active| {
-            root.entry("$schema")
-                .or_insert_with(|| Value::String("https://opencode.ai/config.json".to_string()));
-            // The active entry sets the top-level `model` selector; when no
-            // model resolved, any pre-existing selector is left untouched.
-            if let Some((key, model_id)) = active {
-                root.insert(
-                    "model".to_string(),
-                    Value::String(format!("{key}/{model_id}")),
-                );
-            }
-        },
-    )?;
-
-    Ok(backup_path)
+    let _ = (binding, providers, config_path);
+    Ok(None)
 }
 
 // ---------------------------------------------------------------------------
 // Pi
 // ---------------------------------------------------------------------------
 
-/// Write a whole Pi binding to `~/.pi/agent/models.json` (+ `settings.json`).
-///
-/// Each bound provider becomes a `providers.skillstar_<id>` block
-/// (`api: "openai-completions"`, plaintext `apiKey`, minimal `{ id }` model
-/// entries so Pi's own defaults apply); the active entry drives
-/// `defaultProvider` / `defaultModel` in `settings.json`.
+/// Pi config is no longer written from the provider store.
 pub fn sync_pi_binding(
     binding: &AgentBinding,
     providers: &[Provider],
@@ -467,74 +136,16 @@ pub fn sync_pi_binding(
     ))
 }
 
-/// Build one Pi provider block. Model entries carry only `id` — Pi supplies
-/// its own `contextWindow` / `maxTokens` defaults, and we have no reliable
-/// per-model metadata to override them with.
-pub(crate) fn build_pi_provider_block(provider: &Provider, model: &str) -> Value {
-    let base_url = openai_base(provider).trim().trim_end_matches('/');
-
-    let mut seen = std::collections::HashSet::new();
-    let mut model_ids: Vec<String> = Vec::new();
-    for candidate in std::iter::once(model)
-        .chain(std::iter::once(default_model(provider)))
-        .chain(provider.models.iter().map(String::as_str))
-    {
-        let id = candidate.trim();
-        if !id.is_empty() && seen.insert(id.to_string()) {
-            model_ids.push(id.to_string());
-        }
-    }
-
-    let models: Vec<Value> = model_ids
-        .into_iter()
-        .map(|id| serde_json::json!({ "id": id }))
-        .collect();
-
-    serde_json::json!({
-        "baseUrl": base_url,
-        "api": "openai-completions",
-        "apiKey": api_key(provider),
-        "models": models
-    })
-}
-
 pub(crate) fn sync_pi_binding_inner(
     binding: &AgentBinding,
     providers: &[Provider],
     config_path: &Path,
     settings_path: &Path,
 ) -> Result<Option<PathBuf>> {
-    let (entries, active_id) = resolve_entries(binding, providers)
-        .context("Pi binding has no resolvable provider entries")?;
-
-    let (backup_path, active_pointer) = sync_json_blocks_inner(
-        &entries,
-        &active_id,
-        config_path,
-        "providers",
-        || serde_json::json!({ "providers": {} }),
-        build_pi_provider_block,
-        // Pi's active pointer lives in settings.json, not models.json.
-        |_root, _active| {},
-    )?;
-
-    // settings.json: point Pi's default model at the active entry, preserving
-    // every other setting the user keeps there.
-    if let Some((provider_key, model_id)) = active_pointer {
-        if settings_path.exists() {
-            create_rolling_backup(settings_path)?;
-        }
-        merge_json_write(
-            settings_path,
-            &[
-                ("defaultProvider", Value::String(provider_key)),
-                ("defaultModel", Value::String(model_id)),
-            ],
-        )?;
-    }
-
-    Ok(backup_path)
+    let _ = (binding, providers, config_path, settings_path);
+    Ok(None)
 }
+
 // ---------------------------------------------------------------------------
 // Unified dispatch
 // ---------------------------------------------------------------------------

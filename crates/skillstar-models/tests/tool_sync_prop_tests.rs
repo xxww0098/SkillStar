@@ -8,11 +8,10 @@ use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
     AgentBinding, BindingEntry, FlatProvidersStore, Provider, ProviderEntryFlat, ProvidersStoreV4,
-    ToolActivation, ToolBinding, Tri,
+    ToolActivation, ToolBinding,
 };
 use skillstar_models::tool_sync::{
-    CodexSettings, TOOL_SYNC_HOME_ENV, merge_json_env_write, resync_active_tools,
-    skillstar_managed_key, sync_codex_binding_inner,
+    TOOL_SYNC_HOME_ENV, merge_json_env_write, resync_active_tools, sync_codex_binding_inner,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -169,14 +168,6 @@ fn to_v4_provider(entry: &ProviderEntryFlat) -> Provider {
     })
     .providers
     .remove(0)
-}
-
-/// The same row, given the `/v1/responses` endpoint Codex requires.
-fn codex_capable(entry: &ProviderEntryFlat) -> Provider {
-    let mut provider = to_v4_provider(entry);
-    provider.endpoints.openai_responses = provider.endpoints.openai_chat.clone();
-    provider.caps.responses_api = Tri::Yes;
-    provider
 }
 
 /// Strategy that generates a safe TOML section name (not managed by Codex sync).
@@ -341,20 +332,9 @@ proptest! {
         }
     }
 
-    /// **Validates: Requirements 8.4**
-    ///
-    /// Property 6 (part 2): TOML merge (Codex) preserves existing fields.
-    ///
-    /// Generate random TOML content with extra sections, then write a
-    /// single-entry binding via `sync_codex_binding_inner`. Verify that all
-    /// non-managed sections/keys are preserved unchanged.
-    ///
-    /// Managed fields for Codex config.toml:
-    /// - model_provider (top-level)
-    /// - model (top-level)
-    /// - [model_providers.skillstar_<id8>] table
+    /// Codex sync from the provider store leaves the file byte-for-byte.
     #[test]
-    fn prop_toml_merge_preserves_existing_fields(
+    fn prop_codex_sync_leaves_toml_bytes(
         extra_sections in extra_toml_sections_strategy(),
         provider in provider_entry_flat_strategy(),
         model in model_name_strategy(),
@@ -362,7 +342,6 @@ proptest! {
         let tmp = TempDir::new().expect("Failed to create temp dir");
         let config_path = tmp.path().join("config.toml");
 
-        // Build initial TOML with extra sections
         let mut initial_table = toml::Table::new();
         for (section_name, fields) in &extra_sections {
             let mut section = toml::Table::new();
@@ -372,27 +351,17 @@ proptest! {
             initial_table.insert(section_name.clone(), toml::Value::Table(section));
         }
 
-        // Write initial TOML to file
         let initial_content = toml::to_string_pretty(&initial_table)
             .expect("Failed to serialize initial TOML");
         std::fs::write(&config_path, &initial_content)
             .expect("Failed to write initial config");
 
-        // Write the binding. OAuth auth-mode keeps the case path-hermetic:
-        // it never touches the home-resolved auth.json (see the writer docs).
-        let settings = CodexSettings {
-            auth_mode: "oauth".to_string(),
-        };
-        // Codex only accepts hosts that implement /v1/responses, so the
-        // generated row is given one. Without it the writer would correctly
-        // refuse, and this property is about TOML merging, not capability
-        // gating (which part6 covers).
-        let provider = codex_capable(&provider);
+        let provider = to_v4_provider(&provider);
         let binding = AgentBinding {
             entries: vec![BindingEntry {
                 provider_id: provider.id.clone(),
                 model: model.clone(),
-                settings: Some(serde_json::to_value(&settings).unwrap()),
+                settings: None,
                 last_sync_at_ms: None,
             }],
             active_index: 0,
@@ -402,61 +371,9 @@ proptest! {
         sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path)
             .expect("sync_codex_binding_inner should succeed");
 
-        // Read back the result
         let result_content = std::fs::read_to_string(&config_path)
             .expect("Failed to read result config");
-        let result_table: toml::Table = toml::from_str(&result_content)
-            .expect("Result should be valid TOML");
-
-        // Verify: managed fields are correctly set
-        let managed_key = skillstar_managed_key(&provider.id);
-        prop_assert_eq!(
-            result_table.get("model_provider").and_then(|v| v.as_str()),
-            Some(managed_key.as_str()),
-            "model_provider should be the managed skillstar_<id8> key"
-        );
-        prop_assert_eq!(
-            result_table.get("model").and_then(|v| v.as_str()),
-            Some(model.as_str()),
-            "model should match the provided model"
-        );
-
-        // Verify: [model_providers.skillstar_<id8>] table is correctly set
-        let mp = result_table.get("model_providers")
-            .expect("Result should have 'model_providers'")
-            .as_table()
-            .expect("'model_providers' should be a table");
-        let skillstar = mp.get(managed_key.as_str())
-            .expect("model_providers should have the managed key")
-            .as_table()
-            .expect("managed provider entry should be a table");
-        prop_assert_eq!(
-            skillstar.get("base_url").and_then(|v| v.as_str()),
-            provider.endpoints.openai_responses.as_deref(),
-            "skillstar.base_url mismatch"
-        );
-        prop_assert_eq!(
-            skillstar.get("name").and_then(|v| v.as_str()),
-            Some("SkillStar"),
-            "skillstar.name should be 'SkillStar'"
-        );
-
-        // Verify: all extra sections are preserved unchanged
-        for (section_name, fields) in &extra_sections {
-            let section = result_table.get(section_name)
-                .unwrap_or_else(|| panic!("Section '{}' should be preserved", section_name));
-            let section_table = section.as_table()
-                .unwrap_or_else(|| panic!("Section '{}' should be a table", section_name));
-
-            for (key, expected_value) in fields {
-                let actual = section_table.get(key);
-                prop_assert_eq!(
-                    actual, Some(expected_value),
-                    "Field '{}.{}' was not preserved. Expected {:?}, got {:?}",
-                    section_name, key, expected_value, actual
-                );
-            }
-        }
+        prop_assert_eq!(result_content, initial_content);
     }
 }
 

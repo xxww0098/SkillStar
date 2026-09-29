@@ -64,10 +64,8 @@ pub struct AgentSpec {
     /// tool ignores — Cline paid 88 duplicated fields for two roles and is the
     /// standing example of why not.
     ///
-    /// **A role appears here only when [`Self::sync_binding`] writes it.** The
-    /// list is a promise that configuring the role changes a file; anything
-    /// declared but unwritten is the silent-drop defect wearing a registry row.
-    /// `every_declared_role_reaches_disk` holds the two sides together.
+    /// Roles this agent can store on a binding. `sync_binding` for the six
+    /// managed agents does not write those roles into Agent config files.
     pub roles: &'static [RoleDef],
     /// Config-file inventory. The first entry is the agent's primary config
     /// file (the one `resolve_tool_config_path` returns).

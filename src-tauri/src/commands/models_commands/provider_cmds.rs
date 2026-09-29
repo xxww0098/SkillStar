@@ -112,8 +112,9 @@ pub async fn create_provider_flat(
     Ok(compat::provider_to_flat(&created))
 }
 
-/// Update an existing provider with a partial patch, then re-sync any agent
-/// that is bound to it.
+/// Update an existing provider with a partial patch.
+///
+/// Saving a provider does not rewrite Agent config files.
 #[tauri::command]
 pub async fn update_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
@@ -132,7 +133,7 @@ pub async fn update_provider_flat(
     let updated = providers::replace_provider(&mut store, provider)?;
     providers::write_store_v4(&store, &path)?;
 
-    let tool_sync_results = tool_sync::resync_active_tools(&store, &id);
+    let tool_sync_results = Vec::new();
 
     Ok(ProviderUpdateFlatResult {
         provider: compat::provider_to_flat(&updated),

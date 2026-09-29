@@ -3,7 +3,6 @@
 //! Shared sandbox-home guard and builder helpers live here; the actual
 //! test cases are split across `part1`..`part5` to keep each file small.
 
-mod golden;
 mod part1;
 mod part2;
 mod part3;

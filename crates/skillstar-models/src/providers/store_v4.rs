@@ -259,34 +259,22 @@ pub fn load_store() -> Result<LoadedStore, StoreError> {
     load_or_migrate_store_v4(&super::store::flat_store_path())
 }
 
-/// The full startup path: load, migrate, and repair what is already on disk.
+/// Load the store and, on the run that migrates it, persist extracted catalogs
+/// and the migrated store file.
 ///
-/// Migrating the store is only half the job. The other half is that
-/// `~/.codex/config.toml` may already contain `wire_api = "chat"` tables this
-/// version can no longer produce — and which Codex can no longer parse, taking
-/// the whole file down with them. So on the run that migrates, and only then,
-/// every binding is re-projected: unwritable Codex entries are dropped from
-/// both the store and the file, and everything that survives is rewritten.
-///
-/// Ordering matters. The catalogs are persisted *before* the re-sync, because
-/// the OpenCode writer reads them to build its model blocks; doing it the other
-/// way round would write a correct file with the model metadata stripped out.
-///
-/// After a repair the store is written again — the dropped entries are a store
-/// change, and leaving them only in memory would resurrect them on restart.
+/// This does not rewrite Agent config files. A user's existing Codex or Claude
+/// files stay as they are until an explicit save.
 pub fn load_store_and_repair(path: &Path) -> Result<LoadedStore, StoreError> {
     let mut loaded = load_or_migrate_store_v4(path)?;
     let Some(report) = loaded.report.as_mut() else {
-        // Not the migrating run. Nothing on disk is stale.
         return Ok(loaded);
     };
 
     super::catalog_cache::persist_extracted(&loaded.catalogs, &mut report.warnings);
-    crate::tool_sync::repair_agent_configs(&mut loaded.store, report);
 
     write_store_v4(&loaded.store, path).map_err(|e| StoreError::VerifyFailed {
         path: path.to_path_buf(),
-        detail: format!("persisting the post-repair store: {e}"),
+        detail: format!("persisting the migrated store: {e}"),
     })?;
     Ok(loaded)
 }
