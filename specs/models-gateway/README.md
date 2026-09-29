@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：07 已落地。最后更新：2026-09-30。
+状态：08 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-07 已落地。Models 页从左到右是 Agents、Providers、Gateway 三栏。`get_models_board` 只有 id 和 name。旧的 Claude 工作台不在生产路径上。选择记在 [choices.md](choices.md)。
+08 已落地。`serve` 应答「网关听什么」里的路由。`GET /api/hello` 的 name 是 `skillstar`。没有配额路径。模型 id 含 `/` 是本机错误。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/08-http-surface.md](slices/08-http-surface.md)：补齐 README「网关听什么」里其余的 HTTP 路由。图像、Gemini、`/backend-api/codex/`、`GET /api/hello`、`GET /v1/models`、Codex WebSocket 的 426。不注册配额路径。保持 `translate_`、`hold_`、`route_smart_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要打开 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/09-routing-modes.md](slices/09-routing-modes.md)：四种路由 smart、order、rotate、usage。空字符串是 smart。usage 只读注入的快照，不发配额请求。保持 `translate_`、`hold_`、`route_smart_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要打开 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -25,7 +25,7 @@
 - [x] 05 Claude 进程桥 — [slices/05-claude-bridge.md](slices/05-claude-bridge.md)
 - [x] 06 Codex 写入 — [slices/06-codex-writer.md](slices/06-codex-writer.md)
 - [x] 07 信息架构 — [slices/07-information-architecture.md](slices/07-information-architecture.md)
-- [ ] 08 HTTP 表面 — [slices/08-http-surface.md](slices/08-http-surface.md)
+- [x] 08 HTTP 表面 — [slices/08-http-surface.md](slices/08-http-surface.md)
 - [ ] 09 四种路由 — [slices/09-routing-modes.md](slices/09-routing-modes.md)
 - [ ] 10 亲和 — [slices/10-affinity.md](slices/10-affinity.md)
 - [ ] 11 休息与换上游 — [slices/11-rest.md](slices/11-rest.md)

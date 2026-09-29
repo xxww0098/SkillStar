@@ -151,3 +151,27 @@
 - **读板失败时三栏标题仍在，不把错误字符串画出来。** 错误正文可能带路径。不退回旧工作台那句加载失败。信心：高。
 
 - **导航里残留的抽屉请求被丢掉，旧的创建层不再挂上。** 点三栏或点供应商行只改本地选中。没有任何一栏被默认选中。信心：高。
+
+## 08 HTTP 表面
+
+### 先这样，后面的档再接
+
+- **没配置上游时，Codex 的非斜杠模型不连接 `api.openai.com`，回 502。** 配置了上游才原样转到 `{upstream}/v1` 加上剩余路径。参考实现会把已签名的原生请求转给 OpenAI。这一档不签名，测试也不能打到公网。斜杠模型在这之前就本机失败。信心：中。
+
+- **`count_tokens` 和 Gemini 的 `countTokens` 按正文原始字节数除以 4。** 不是合法 JSON 就是 400。模型 id 里有没有斜杠都只在本机算，不把路径转给厂商。参考实现是把解析后的文本长度除以 4。信心：中。
+
+- **模型列表这一档是空的。** 网关 crate 看不到供应商目录，所以 `GET /v1/models`、`GET /models`、`GET /v1beta/models` 和 Codex 的 `/models` 都不向外请求。Codex 的模型列表也不打 OpenAI。目录在后面的档。信心：中。
+
+- **Responses、图像和 Gemini 的生成请求原样转给配置的上游，路径保持来路。** Chat 和 Anthropic 仍走已有翻译，上游路径是 `/v1/chat/completions`，不带 `/v1` 的那两条也打这里。这一档不做这两套之外的协议翻译。图像的视觉转述在 16 档。信心：中。
+
+- **GET 路由同时应答 HEAD，正文为空。** Claude Desktop 会先对 `/api/hello` 发 HEAD。空正文时响应里没有 Content-Length。信心：中。
+
+### 已定，按这个做
+
+- **`GET /` 不列配额路径，也没有 `window`。** `name` 是 `skillstar`，版本字是 `dev`。错误 JSON 不加 Go 编码器那一截换行。未知路径用 Chat 的错误形状，正文点名本网关的路径，不出现配额。信心：高。
+
+- **单个模型 GET 找不到时，正文是 `unknown model` 加上 id。** 含 `/` 的模型解析失败时，正文是 `skillstar knows no model "..."; add a provider in skillstar first`。这个 crate 列不出供应商 id，所以用「先加一个供应商」这句，不用「it has …」。信心：高。
+
+- **Codex 这一档只认 `/models`、`/responses`、`/responses/compact`。** 别的剩余路径是本机 404，不转给 OpenAI。`Upgrade: websocket` 在读正文之前回 426，正文是 `skillstar speaks HTTP`。没有尾斜杠的 `/backend-api/codex` 不是这条路由。含斜杠模型的 compact 是 400。信心：高。
+
+- **聊天正文不是合法 JSON 时，仍按原字节转发。** 只有解析成功、并且模型 id 含 `/`，才是本机 404。图像和 Responses 缺 `model` 字段时仍转发，用来证明这条路由接受请求。信心：高。

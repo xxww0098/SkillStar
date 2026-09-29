@@ -5,10 +5,12 @@
 
 mod claude;
 mod codex;
+mod codex_prompt;
 mod hold;
 mod outbound;
 mod route;
 mod serve;
+mod surface;
 mod translate;
 
 pub use claude::{
@@ -18,6 +20,7 @@ pub use claude::{
     run_mcp_helper,
 };
 pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
+pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use outbound::{clear_outbound_log, outbound_log};
 pub use route::{AllowanceSnapshot, RouteCandidate, USED_SHARE, route_smart};

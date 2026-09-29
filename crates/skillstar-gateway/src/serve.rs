@@ -1,4 +1,4 @@
-//! Loopback listener for one Chat Completions turn and the Claude MCP callback.
+//! Loopback listener for the gateway route table and the Claude MCP callback.
 //!
 //! The first request on a connection has `HEADER_READ_TIMEOUT` to finish its
 //! headers, counted from when the connection is accepted. After a response,
@@ -46,8 +46,6 @@ pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a keep-alive connection may sit before the next request starts.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-
-const CHAT_PATH: &str = "/v1/chat/completions";
 
 /// Why `serve` did not keep listening.
 #[derive(Debug)]
@@ -163,7 +161,7 @@ pub fn resolve_addr() -> Result<SocketAddr, ServeError> {
     Ok(addr)
 }
 
-/// Bind and answer Chat Completions until [`Stop::stop`].
+/// Bind and answer the gateway route table until [`Stop::stop`].
 ///
 /// A second bind of the same address returns [`ServeError::Busy`] and leaves
 /// the first listener running. stdout is not used.
@@ -249,21 +247,48 @@ async fn dispatch(
         };
         return claude_callback(peer, &token, &body).await;
     }
-    if request.method() != Method::POST || request.uri().path() != CHAT_PATH {
-        return plain(StatusCode::NOT_FOUND, "not found");
+    let head = request.method() == Method::HEAD;
+    let upgrade = request
+        .headers()
+        .get(hyper::header::UPGRADE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    match crate::surface::plan(method.as_str(), &path, upgrade.as_deref()) {
+        crate::surface::Plan::Local(local) => respond_local(local, head),
+        crate::surface::Plan::WithBody(kind) => {
+            let inbound = match request.into_body().collect().await {
+                Ok(collected) => collected.to_bytes(),
+                Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
+            };
+            match crate::surface::finish(kind, &path, &inbound) {
+                crate::surface::Outcome::Local(local) => respond_local(local, head),
+                crate::surface::Outcome::Forward { protocol, url_path } => {
+                    forward_turn(upstream, protocol, &url_path, inbound).await
+                }
+            }
+        }
     }
-    let inbound = match request.into_body().collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
-    };
-    let upstream_bytes = match upstream_body(Protocol::Chat, &inbound) {
-        Ok(body) => body,
-        Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
+}
+
+async fn forward_turn(
+    upstream: Option<&str>,
+    protocol: Option<Protocol>,
+    url_path: &str,
+    inbound: Bytes,
+) -> Response<Full<Bytes>> {
+    let upstream_bytes = match protocol {
+        Some(protocol) => match upstream_body(protocol, &inbound) {
+            Ok(body) => body,
+            Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
+        },
+        None => inbound.to_vec(),
     };
     let Some(base) = upstream else {
         return plain(StatusCode::BAD_GATEWAY, "no upstream");
     };
-    let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+    let url = format!("{}{url_path}", base.trim_end_matches('/'));
     crate::outbound::note_outbound(&url);
     let client = match skillstar_core::infra::http_client::stream_http_client() {
         Ok(client) => client,
@@ -283,14 +308,27 @@ async fn dispatch(
         Ok(bytes) => bytes,
         Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream body"),
     };
-    let outbound = match outbound_body(Protocol::Chat, &bytes) {
-        Ok(body) => body,
-        Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream body"),
+    let outbound = match protocol {
+        Some(protocol) => match outbound_body(protocol, &bytes) {
+            Ok(body) => body,
+            Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream body"),
+        },
+        None => bytes.to_vec(),
     };
     Response::builder()
         .status(status)
         .header(hyper::header::CONTENT_TYPE, "application/json")
         .body(Full::new(Bytes::from(outbound)))
+        .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
+}
+
+fn respond_local(local: crate::surface::Local, head: bool) -> Response<Full<Bytes>> {
+    let status = StatusCode::from_u16(local.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let body = if head { Vec::new() } else { local.body };
+    Response::builder()
+        .status(status)
+        .header(hyper::header::CONTENT_TYPE, local.content_type)
+        .body(Full::new(Bytes::from(body)))
         .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
 }
 

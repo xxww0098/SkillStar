@@ -94,7 +94,7 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 ## 本机网关
 
-官方账号经本机网关转发是当前目标。「本轮不做 proxy takeover」不再描述它。监听地址、谁启动 serve、Codex 环回写入和 `agent_stash.json` 见 [运行架构](../../architecture.md#本机模型网关)。订阅侧 Claude 的进程桥也写在那里：本机 `claude`，access token 不进子进程。
+官方账号经本机网关转发是当前目标。「本轮不做 proxy takeover」不再描述它。监听地址、谁启动 serve、路由表、Codex 环回写入和 `agent_stash.json` 见 [运行架构](../../architecture.md#本机模型网关)。订阅侧 Claude 的进程桥也写在那里：本机 `claude`，access token 不进子进程。
 
 ## Models 工作台
 
