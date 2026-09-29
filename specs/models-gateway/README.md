@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：11 已落地。最后更新：2026-09-30。
+状态：12 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-11 已落地。失败的上游按状态码和正文休息。频率限制不是 15 分钟配额。配额自己写的恢复时间可以长过 1 小时。内容字节之后不再叫下一条上游。选择记在 [choices.md](choices.md)。
+12 已落地。`group/<id>` 展开成员。成环和深于 8 的写入不改文件。同名自动分组在编辑之前不落盘。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/12-groups.md](slices/12-groups.md)：分组。模型 id `group/<id>` 展开成员，成员可以是另一个分组。成环和深于 8 的写入被拒绝，拒绝时不改文件。同名模型的自动分组在用户编辑之前不写入 `model_gateway.json`。保持 `translate_`、`hold_`、`route_smart_`、`route_mode_`、`affinity_`、`rest_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要打开 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/13-rules.md](slices/13-rules.md)：规则。分组上的规则按顺序匹配 token 数、图像、effort、来源 Agent。第一条命中决定成员。带 intent 的规则本档不匹配，分类器不运行。保持 `group_`、`translate_`、`hold_`、`route_smart_`、`route_mode_`、`affinity_`、`rest_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要打开 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -29,7 +29,7 @@
 - [x] 09 四种路由 — [slices/09-routing-modes.md](slices/09-routing-modes.md)
 - [x] 10 亲和 — [slices/10-affinity.md](slices/10-affinity.md)
 - [x] 11 休息与换上游 — [slices/11-rest.md](slices/11-rest.md)
-- [ ] 12 分组 — [slices/12-groups.md](slices/12-groups.md)
+- [x] 12 分组 — [slices/12-groups.md](slices/12-groups.md)
 - [ ] 13 规则 — [slices/13-rules.md](slices/13-rules.md)
 - [ ] 14 分类器 — [slices/14-classifier.md](slices/14-classifier.md)
 - [ ] 15 脱敏 — [slices/15-redact.md](slices/15-redact.md)

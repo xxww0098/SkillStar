@@ -1,12 +1,13 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
-//! routing order, session affinity, upstream rest, the loopback listener, the Claude process bridge, and the
-//! Codex config writer. It does not own provider keys, usage accounts, or the
-//! decision model.
+//! routing order, session affinity, upstream rest, routing groups, the loopback
+//! listener, the Claude process bridge, and the Codex config writer. It does
+//! not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
 mod claude;
 mod codex;
 mod codex_prompt;
+mod group;
 mod hold;
 mod outbound;
 mod rest;
@@ -27,6 +28,7 @@ pub use claude::{
 };
 pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
+pub use group::{GROUP_PREFIX, MAX_NEST, SaveGroupError, ServedModel, expand_group, save_group};
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use outbound::{clear_outbound_log, outbound_log};
 pub use rest::{

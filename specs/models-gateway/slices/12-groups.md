@@ -2,7 +2,7 @@
 
 ## 契约
 
-模型 id `group/<id>` 展开成分组成员。组成员可以是另一个分组。成环的写入被拒绝。嵌套深于 `maxNest`（8）被拒绝。同名模型的自动分组只在读取时推导，用户没有编辑过就不写入 `model_gateway.json`。
+模型 id `group/<id>` 展开成分组成员。成员数组的字段名是 `members`。组成员可以是另一个分组。成环的写入被拒绝。嵌套深于 `maxNest`（8）被拒绝。同名模型的自动分组只在读取时推导，用户没有编辑过就不写入 `model_gateway.json`。
 
 ## 缝
 
@@ -25,7 +25,7 @@ cargo test -p skillstar-gateway group_
 
 ## 可改
 
-JSON 里成员数组的字段名，只要有夹具锁定。
+无。成员字段名定为 `members`。
 
 ## 不可改
 
