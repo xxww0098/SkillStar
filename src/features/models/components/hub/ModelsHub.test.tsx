@@ -9,10 +9,12 @@ import { ModelsHub } from "./ModelsHub";
 const mockInvoke = vi.mocked(invoke);
 
 const BOARD = {
-  agents: [{ id: "codex", name: "Codex" }],
-  providers: [{ id: "p1", name: "DeepSeek" }],
+  agents: [{ id: "codex", name: "Codex", credential_summary: "" }],
+  providers: [{ id: "p1", name: "DeepSeek", credential_summary: "" }],
   gateway: [],
 };
+
+const PLAINTEXT_KEY = "sk-secret-value";
 
 function navigation(): ModelsNavBridge {
   return {
@@ -68,6 +70,28 @@ describe("ModelsHub", () => {
     expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(new Set(["get_models_board"]));
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
     expect(nav.setSelectedProviderId).toHaveBeenCalledWith("p1");
+  });
+
+  it("draws the masked summary when the row has no key field", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") {
+        return {
+          agents: [{ id: "codex", name: "Codex", credential_summary: "" }],
+          providers: [{ id: "p1", name: "DeepSeek", credential_summary: "sk-s••••alue" }],
+          gateway: [],
+        };
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    expect(await screen.findByText("sk-s••••alue")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /DeepSeek/ })).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain(PLAINTEXT_KEY);
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/https:\/\/api\./);
+    expect(text).not.toMatch(/vendor\.example/);
   });
 
   it("keeps the three titles when the board command fails", async () => {

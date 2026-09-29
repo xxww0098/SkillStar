@@ -31,6 +31,14 @@ const MULTI_PROVIDER_TOOLS = new Set(["codex", "opencode", "pi", "omp"]);
 
 const NATIVE_OFFICIAL_IDS = new Set(["claude-official", "codex-official"]);
 
+/** Dev stand-in for `Credential::summary`. The board payload keeps this, not `api_key`. */
+function maskedKey(apiKey: string): string {
+  const chars = Array.from(apiKey);
+  if (chars.length === 0) return "";
+  if (chars.length <= 8) return "••••••••";
+  return `${chars.slice(0, 4).join("")}••••${chars.slice(-4).join("")}`;
+}
+
 /** Mirror backend `ensure_official_providers` so the D1 hub can prefer store rows. */
 function ensureOfficialInMockStore() {
   for (const id of ["claude-official", "codex-official"] as const) {
@@ -71,6 +79,7 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     providers: FLAT_PROVIDERS.providers.map((provider) => ({
       id: provider.id,
       name: provider.name,
+      credential_summary: maskedKey(provider.api_key),
     })),
     gateway: [],
   }),

@@ -48,3 +48,7 @@ Providers 栏的一行显示名称和掩码后的凭据摘要。行内没有明�
 ## 决定
 
 - 编辑密钥的表单不在本档。本档的行是只读摘要。
+- 摘要用已有的 `Credential::summary`。行组件只接收名称和这串摘要。
+- 名称在左，摘要在右。窄列里名称截断，摘要保持原样。不显示厂商主机。
+- Agents 和 Gateway 的 `credential_summary` 是空字符串。三栏仍用同一个行 DTO。
+- 参照作物 `26-provider-row.png` 不在仓库里，本机 magpie 页面没在听。screenshot-critique 技能不在磁盘上。按 README 五问接受这一行。

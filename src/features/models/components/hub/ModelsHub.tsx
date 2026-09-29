@@ -7,6 +7,18 @@ import type { ModelsNavBridge } from "../../lib/navBridge";
 
 type ColumnId = "agents" | "providers" | "gateway";
 
+/** Providers column label. It receives the masked summary, not a key or a URL. */
+function ProviderRowLabel({ name, credentialSummary }: { name: string; credentialSummary: string }) {
+  return (
+    <span className="flex w-full min-w-0 items-baseline gap-2">
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      {credentialSummary ? (
+        <span className="shrink-0 text-xs font-normal text-muted-foreground">{credentialSummary}</span>
+      ) : null}
+    </span>
+  );
+}
+
 const COLUMNS: { id: ColumnId; labelKey: string }[] = [
   { id: "agents", labelKey: "models.columns.agents" },
   { id: "providers", labelKey: "models.columns.providers" },
@@ -60,11 +72,16 @@ export function ModelsHub({
                       if (entry.id === "providers") setSelectedProviderId(row.id);
                     }}
                     className={cn(
-                      "w-full cursor-pointer truncate rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/40",
+                      "w-full min-w-0 cursor-pointer rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/40",
+                      entry.id === "providers" ? "flex" : "truncate",
                       entry.id === "providers" && selectedProviderId === row.id && "bg-primary/15 font-medium",
                     )}
                   >
-                    {row.name}
+                    {entry.id === "providers" ? (
+                      <ProviderRowLabel name={row.name} credentialSummary={row.credential_summary ?? ""} />
+                    ) : (
+                      row.name
+                    )}
                   </button>
                 </li>
               ))}

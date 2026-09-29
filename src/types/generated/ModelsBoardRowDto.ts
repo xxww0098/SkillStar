@@ -3,4 +3,8 @@
 /**
  * One Agents, Providers, or Gateway row.
  */
-export type ModelsBoardRowDto = { id: string, name: string, };
+export type ModelsBoardRowDto = { id: string, name: string, 
+/**
+ * Masked credential line for a provider. Empty on Agents and Gateway.
+ */
+credential_summary: string, };

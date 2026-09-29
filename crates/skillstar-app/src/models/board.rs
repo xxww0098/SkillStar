@@ -1,8 +1,9 @@
 //! The Models page's three columns.
 //!
-//! A row is an id and a display name. Endpoints, credentials, and the gateway
-//! listen address stay out of this DTO, so the page cannot show a vendor key
-//! or a vendor URL.
+//! A row is an id and a display name. Provider rows also carry
+//! [`Credential::summary`](skillstar_models::providers::Credential::summary):
+//! a masked key or a pointer, never the secret. Endpoints and the gateway
+//! listen address stay out of this DTO, so the page cannot show a vendor URL.
 
 use serde::{Deserialize, Serialize};
 use skillstar_models::providers::{Provider, StoreError, load_store};
@@ -15,6 +16,8 @@ use ts_rs::TS;
 pub struct ModelsBoardRowDto {
     pub id: String,
     pub name: String,
+    /// Masked credential line for a provider. Empty on Agents and Gateway.
+    pub credential_summary: String,
 }
 
 /// The three columns, left to right: Agents, Providers, Gateway.
@@ -44,6 +47,7 @@ fn board_from_providers(providers: &[Provider]) -> ModelsBoardDto {
             .map(|spec| ModelsBoardRowDto {
                 id: spec.id.to_string(),
                 name: spec.display_name.to_string(),
+                credential_summary: String::new(),
             })
             .collect(),
         providers: providers
@@ -51,6 +55,7 @@ fn board_from_providers(providers: &[Provider]) -> ModelsBoardDto {
             .map(|provider| ModelsBoardRowDto {
                 id: provider.id.clone(),
                 name: provider.name.clone(),
+                credential_summary: provider.credential.summary(),
             })
             .collect(),
         gateway: Vec::new(),
@@ -74,8 +79,11 @@ mod tests {
         let row = &value["providers"][0];
         assert_eq!(row["id"], "p1");
         assert_eq!(row["name"], "DeepSeek");
+        assert_eq!(row["credential_summary"], "sk-s••••alue");
         assert!(row.get("credential").is_none());
         assert!(row.get("endpoints").is_none());
+        assert!(row.get("api_key").is_none());
+        assert_eq!(value["agents"][0]["credential_summary"], "");
         assert!(value["gateway"].as_array().unwrap().is_empty());
 
         let text = value.to_string();
