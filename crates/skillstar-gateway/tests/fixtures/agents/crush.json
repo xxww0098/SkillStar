@@ -1,0 +1,25 @@
+{
+  "models": {
+    "large": {
+      "model": "deepseek/pro",
+      "provider": "skillstar"
+    }
+  },
+  "providers": {
+    "skillstar": {
+      "api_key": "skillstar",
+      "base_url": "http://127.0.0.1:21847/v1",
+      "models": [
+        {
+          "can_reason": false,
+          "context_window": 200000,
+          "default_max_tokens": 16384,
+          "id": "deepseek/pro",
+          "name": "deepseek/pro"
+        }
+      ],
+      "name": "skillstar",
+      "type": "openai"
+    }
+  }
+}

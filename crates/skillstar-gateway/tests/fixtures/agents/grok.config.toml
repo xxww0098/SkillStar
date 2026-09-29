@@ -1,0 +1,12 @@
+[features]
+campaigns = false
+
+[models]
+default = "skillstar/deepseek/pro"
+
+[model."skillstar/deepseek/pro"]
+model = "deepseek/pro"
+name = "deepseek/pro"
+base_url = "http://127.0.0.1:21847/v1"
+api_key = "skillstar"
+api_backend = "chat_completions"

@@ -1,0 +1,9 @@
+providers:
+  skillstar:
+    baseUrl: "http://127.0.0.1:21847/v1"
+    api: openai-completions
+    auth: none
+    models:
+      - id: "deepseek/pro"
+        name: "deepseek/pro"
+        reasoning: false

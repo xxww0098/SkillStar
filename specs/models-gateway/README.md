@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：17 已落地。最后更新：2026-09-30。
+状态：18 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-17 已落地。网关用调用方注入的 `AccountSnapshot` 签上游。`anthropic` 不产生 HTTP，仍走进程桥。没有快照时不发配额请求，候选保持未知。没有 Usage 行的 gemini CLI、devin、workbuddy、commandcode 只使用 provider 的 API 密钥。选择记在 [choices.md](choices.md)。
+18 已落地。`apply_gateway` 把文件型 Agent 指到环回网关。URL 带该 Agent 的后缀，bearer 是 `skillstar` 或 `skillstar-<agent-id>`。取消托管从 `agent_stash.json` 放回接管前的整份文件。Goose、Cursor CLI、Copilot CLI、Devin 仍返回 `agent_not_managed`，见 39，这一档先不勾。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/18-shared-writers.md](slices/18-shared-writers.md)：`apply_gateway` 把文件型 Agent 指到环回。URL 带该 Agent 在 magpie 里使用的后缀，bearer 是 `skillstar` 或 `skillstar-<agent-id>`。Codex、Claude Code、Claude Desktop、Hanako、Alma、Cindy、WSL 仍返回 `agent_not_managed`。保持 `sign_`、`vision_`、`redact_`、`classify_`、`rules_`、`group_`、`translate_`、`hold_`、`route_smart_`、`route_mode_`、`affinity_`、`rest_`、`serve_`、`claude_bridge_`、`codex_writer_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/19-claude-code.md](slices/19-claude-code.md)：`apply_gateway("claude", …)` 写 Claude Code 的配置文件。`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。`ANTHROPIC_AUTH_TOKEN` 是占位 bearer `skillstar`，不是 Usage 的 access token，也不写 `CLAUDE_CODE_OAUTH_TOKEN`。05 档的进程桥仍是另一条路径，本档不启动 `claude`。保持 `apply_gateway_`、`sign_`、`codex_writer_`、`claude_bridge_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -35,7 +35,7 @@
 - [x] 15 脱敏 — [slices/15-redact.md](slices/15-redact.md)
 - [x] 16 视觉转述 — [slices/16-vision.md](slices/16-vision.md)
 - [x] 17 订阅签名 — [slices/17-signing.md](slices/17-signing.md)
-- [ ] 18 共享写入 — [slices/18-shared-writers.md](slices/18-shared-writers.md)
+- [x] 18 共享写入 — [slices/18-shared-writers.md](slices/18-shared-writers.md)
 - [ ] 19 Claude Code 文件 — [slices/19-claude-code.md](slices/19-claude-code.md)
 - [ ] 20 Claude Desktop — [slices/20-claude-desktop.md](slices/20-claude-desktop.md)
 - [ ] 21 OpenHanako — [slices/21-hanako.md](slices/21-hanako.md)
@@ -56,6 +56,7 @@
 - [ ] 36 effort — [slices/36-effort.md](slices/36-effort.md)
 - [ ] 37 可见家族 — [slices/37-visible-families.md](slices/37-visible-families.md)
 - [ ] 38 effort 子集 — [slices/38-effort-subset.md](slices/38-effort-subset.md)
+- [ ] 39 不写环回 URL — [slices/39-name-only.md](slices/39-name-only.md)
 
 ## 目标
 
@@ -84,6 +85,7 @@ Models 页变成 magpie 那种本机模型切换：每个探测到的 Agent 一�
 08 ──► 16 视觉转述
 04 ──► 17 订阅签名
 06 ──► 18 共享写入 ──► 19 Claude Code
+18 ──► 39 不写环回 URL
 18 ──► 20 Desktop ──► 21 Hanako
 18 ──► 22 Alma ──► 23 Cindy ──► 24 WSL Codex
 08 ──► 25 models.dev ──► 27 模型选择器

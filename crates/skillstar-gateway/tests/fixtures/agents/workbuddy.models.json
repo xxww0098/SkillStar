@@ -1,0 +1,13 @@
+[
+  {
+    "apiKey": "skillstar-workbuddy",
+    "id": "deepseek/pro",
+    "maxInputTokens": 200000,
+    "name": "deepseek/pro",
+    "supportsImages": false,
+    "supportsReasoning": false,
+    "supportsToolCall": true,
+    "url": "http://127.0.0.1:21847/v1/chat/completions",
+    "vendor": "skillstar"
+  }
+]

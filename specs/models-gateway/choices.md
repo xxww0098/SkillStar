@@ -401,3 +401,25 @@
 - **没有账户快照时余量是空的，即使账面函数能返回一个用尽的数。** 路由仍把这个候选放在有余量和用尽之间。配额回调次数是 0。信心：高。
 
 - **Gemini CLI 的两个 id，以及 Devin、WorkBuddy、Command Code，不读账户。** 出站只有 provider API 密钥的 Bearer。没有密钥就不写头。信心：高。
+
+## 18 共享写入
+
+### 先这样，后面的档再接
+
+- **provider 块里只有这次传入的那一个模型。** 整份目录要读密钥表，这个函数不读。没有目录就省略上下文、effort 和图像；Crush、WorkBuddy、ZCode 的窗口缺省写成 200000。Pi 这条模型不标 `anthropic-messages`，缺省 `openai-completions`。信心：中。
+
+- **取消托管放回的是接管前的整份文件。** 托管期间用户改过的内容，以及同一文件里的其它 provider，要等取消才回来。第二次保存不刷新这份快照。Pi 已有的 `enabledModels` 也一起被换掉。信心：中。
+
+- **JSON 键序按写入模板固定，不跟 Go map 的顺序。** Cline 不写 `updatedAt`，也不新建 `globalState.json` 或 `secrets.json`。Cline 的数据目录不读 `CLINE_DATA_DIR`。omp 不把已有的 `models.json` 转成 YAML。信心：中。
+
+- **测试沙箱设着时，厂商的目录覆盖不生效。** `SKILLSTAR_TOOL_SYNC_HOME` 非空就不读 `XDG_CONFIG_HOME`、`GROK_HOME`、`HERMES_HOME`、`DSH_HOME`、`CLINE_DIR`、`QODER_CONFIG_DIR`、`QODERCN_CONFIG_DIR`、`WORKBUDDY_CONFIG_DIR`。没设这个变量时，这些覆盖照常生效。信心：中。
+
+### 已定，按这个做
+
+- **一个函数 `apply_gateway(agent_id, model_ref)`。** 空的 `model_ref` 才是取消。只含空白不是取消。写出的主机总是 `127.0.0.1`，端口是网关正在听的端口，不是 3425。信心：高。
+
+- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Claude Code、Claude Desktop、Hanako、Alma、Cindy、WSL 同样还不写。花名册以 `apply_gateway_` 测试为准。信心：高。
+
+- **占位 bearer 是 `skillstar`，Qoder、Qoder CN、WorkBuddy 是 `skillstar-<id>`。** fx、omp、Command Code 不写 bearer 字符串。Gemini 的 URL 不带后缀，ZCode 的 Anthropic 地址也不带，WorkBuddy 带到 `/v1/chat/completions`，其余带到 `/v1`。信心：高。
+
+- **写出的文件里没有厂商主机，也没有厂商密钥。** DeepSeek Harness 没有 profile 时写旧版 `config.yaml`，标记是 `# skillstar`，它自己的 provider 名 `deepseek-official` 留着。信心：高。

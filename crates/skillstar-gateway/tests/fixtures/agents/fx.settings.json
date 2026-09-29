@@ -1,0 +1,22 @@
+{
+  "models": {
+    "skillstar": "deepseek/pro"
+  },
+  "provider": "skillstar",
+  "providers": {
+    "skillstar": {
+      "auth": {
+        "type": "none"
+      },
+      "base_url": "http://127.0.0.1:21847/v1",
+      "model_metadata": {
+        "deepseek/pro": {
+          "supports_tool_use": true,
+          "supports_vision": false
+        }
+      },
+      "protocol": "openai-chat-completions",
+      "tool_choice_mode": "send"
+    }
+  }
+}

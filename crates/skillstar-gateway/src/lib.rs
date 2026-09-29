@@ -1,11 +1,12 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
 //! routing order, session affinity, upstream rest, routing groups and their
 //! rules, the intent classifier, secret redaction, vision transcription,
-//! subscription signing, the loopback listener, the Claude process bridge, and
-//! the Codex config writer.
+//! subscription signing, the loopback listener, the Claude process bridge, the
+//! Codex config writer, and the file-agent loopback writer.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
+mod agents;
 mod classify;
 mod claude;
 mod codex;
@@ -23,6 +24,7 @@ mod surface;
 mod translate;
 mod vision;
 
+pub use agents::{FILE_AGENTS, apply_gateway};
 pub use affinity::{
     AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
     CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,

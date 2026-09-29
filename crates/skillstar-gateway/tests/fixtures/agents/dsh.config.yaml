@@ -1,0 +1,20 @@
+- id: llm-deepseek # skillstar
+  config:
+    apiKey: "skillstar"
+    baseURL: "http://127.0.0.1:21847/v1"
+    thinking: enabled
+    reasoningEffort: high
+    models:
+      - id: "deepseek/pro"
+        name: "deepseek/pro"
+- id: agent-loop # skillstar
+  config:
+    agents:
+      - id: main
+        provider: deepseek-official
+        model: "deepseek/pro"
+        cwd: !!js process.cwd()
+- id: api-gateway # skillstar
+  config:
+    provider: deepseek-official
+    model: "deepseek/pro"

@@ -1,0 +1,47 @@
+{
+  "config": {
+    "modelConfigRules": {
+      "manualProviderModelRules": [],
+      "providerModelRules": [
+        {
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false
+              }
+            }
+          },
+          "modelId": "deepseek/pro",
+          "providerId": "skillstar"
+        }
+      ]
+    },
+    "providerConfigRules": {
+      "providerRules": [
+        {
+          "config": {
+            "access": {
+              "apiKey": "skillstar",
+              "type": "api-key"
+            },
+            "api": {
+              "baseUrl": "http://127.0.0.1:21847",
+              "type": "anthropic-messages"
+            },
+            "group": "standard-personal",
+            "modelOrder": [
+              "deepseek/pro"
+            ],
+            "personalModelIds": [
+              "deepseek/pro"
+            ]
+          },
+          "enabled": true,
+          "providerId": "skillstar",
+          "providerName": "skillstar"
+        }
+      ]
+    }
+  },
+  "schemaVersion": 1
+}

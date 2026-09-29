@@ -195,7 +195,7 @@ fn path_utf8(path: &Path) -> Result<String, ApplyError> {
     })
 }
 
-fn load_stash() -> Result<Stash, ApplyError> {
+pub(crate) fn load_stash() -> Result<Stash, ApplyError> {
     let path = stash_path();
     if !path.exists() {
         return Ok(Stash::new());
@@ -209,7 +209,7 @@ fn load_stash() -> Result<Stash, ApplyError> {
     })
 }
 
-fn save_stash(stash: &Stash) -> Result<(), ApplyError> {
+pub(crate) fn save_stash(stash: &Stash) -> Result<(), ApplyError> {
     let path = stash_path();
     if stash.is_empty() {
         if path.exists() {

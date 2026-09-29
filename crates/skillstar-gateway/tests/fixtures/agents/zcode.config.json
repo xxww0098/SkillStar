@@ -1,0 +1,30 @@
+{
+  "provider": {
+    "skillstar": {
+      "enabled": true,
+      "kind": "anthropic",
+      "models": {
+        "deepseek/pro": {
+          "limit": {
+            "context": 200000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "name": "deepseek/pro"
+        }
+      },
+      "name": "skillstar",
+      "options": {
+        "apiKey": "skillstar",
+        "baseURL": "http://127.0.0.1:21847"
+      },
+      "source": "custom"
+    }
+  }
+}

@@ -131,6 +131,7 @@ flowchart LR
 - 视觉转述默认关闭。`model_gateway.json` 顶层的 `vision` 为空、`off` 或缺省时，带图请求按原文转发。写成模型 id 之后，目标不是这个 id、正文里有 Chat 图片，就先请这个 id 把图写成文字，再把文字交给目标。提示词固定，User-Agent 是 `skillstar-vision/1`，单次 2 分钟，同时最多 4 张，成功的描述保留 256 条。描述请求本身不再转述。调用方明确目标不能看图、且转述关着时，当前这张图被拒绝，不会发出描述请求。
 - 上游签名只用调用方注入的账户快照和 Usage 已经写好的余量。`skillstar-app` 从 Usage 的已保存列表填这份快照。网关不打开 Usage 的存储，不刷新令牌，不请求配额。没有快照时候选保持未知。`anthropic` 不产生 Anthropic HTTP，生成仍走进程桥。没有 Usage 行的 Agent 只用 provider 快照里的 API 密钥。
 - 保存 Codex 只写环回。已登录：`openai_base_url` 指向 `{origin}/backend-api/codex`。API 形态：`[model_providers.skillstar]`，`base_url` 是 `{origin}/v1`，`wire_api = "responses"`，占位 bearer `skillstar`，目录文件 `skillstar-models.json`。接管字段之前，旧值进 `config_dir()/agent_stash.json`（Unix `0600`，原子替换）。取消托管按 stash 写回。表和目录文件留下。网关不推断登录态，调用方传入形态。`skillstar-models` 不依赖网关。
+- 保存文件型 Agent 走 `apply_gateway`。写出的地址总是 `http://127.0.0.1:<端口>` 加上该 Agent 的路径后缀，占位 bearer 是 `skillstar` 或 `skillstar-<id>`。取消托管把接管前的整份文件从同一份 `agent_stash.json` 放回。Goose、Cursor CLI、Copilot CLI、Devin 不写环回地址，调用返回未托管。在册的 id 以 `apply_gateway_` 测试为准。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP
