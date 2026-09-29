@@ -224,6 +224,12 @@ fn serve_chat_fixture_matches_translate() {
 
     assert_eq!(seen, expected_upstream);
     assert_eq!(outbound, expected_outbound);
+    let logged = skillstar_gateway::outbound_log();
+    let forwarded = format!("http://{fake_addr}/v1/chat/completions");
+    assert!(
+        logged.iter().any(|url| url == &forwarded),
+        "chat forward should be on the outbound log: {logged:?}"
+    );
     stop.stop();
     handle.join().unwrap().unwrap();
 }

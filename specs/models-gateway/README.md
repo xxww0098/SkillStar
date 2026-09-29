@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：04 已落地。最后更新：2026-09-29。
+状态：05 已落地。最后更新：2026-09-29。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-04 已落地。`skillstar gateway serve` 与桌面进程调用同一个 `skillstar_gateway::serve`，默认 `127.0.0.1:21847`，拒绝 `3425`。Chat 夹具经真实 HTTP 与 01 档字节一致。选择记在 [choices.md](choices.md)。
+05 已落地。订阅侧 Claude 启动本机 `claude`，不注入 access token，不请求 Anthropic 令牌地址或 `/v1/messages`。回调只接受环回。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/05-claude-bridge.md](slices/05-claude-bridge.md)：Claude 进程桥。做完运行该档写明的探针，并保持 `translate_`、`hold_`、`route_smart_`、`serve_` 为绿。不要打开 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/06-codex-writer.md](slices/06-codex-writer.md)：Codex 保存只写环回网关。做完运行该档写明的探针，并保持 `translate_`、`hold_`、`route_smart_`、`serve_`、`claude_bridge_` 为绿。不要打开 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -22,7 +22,7 @@
 - [x] 02 首内容字节 — [slices/02-content-byte.md](slices/02-content-byte.md)
 - [x] 03 一条路由决定 — [slices/03-routing-probe.md](slices/03-routing-probe.md)
 - [x] 04 环回监听 — [slices/04-loopback-serve.md](slices/04-loopback-serve.md)
-- [ ] 05 Claude 进程桥 — [slices/05-claude-bridge.md](slices/05-claude-bridge.md)
+- [x] 05 Claude 进程桥 — [slices/05-claude-bridge.md](slices/05-claude-bridge.md)
 - [ ] 06 Codex 写入 — [slices/06-codex-writer.md](slices/06-codex-writer.md)
 - [ ] 07 信息架构 — [slices/07-information-architecture.md](slices/07-information-architecture.md)
 - [ ] 08 HTTP 表面 — [slices/08-http-surface.md](slices/08-http-surface.md)

@@ -8,6 +8,12 @@ unsafe extern "system" {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Claude Code starts this process as an MCP helper. stdout is only JSON-RPC
+    // frames, so this returns before askpass, marketplace migration, and the window.
+    if args.get(1).map(String::as_str) == Some("claude-mcp-helper") {
+        let code = skillstar_app::cli::run_claude_mcp_helper(&args);
+        std::process::exit(code);
+    }
     // MCP serve must run before askpass. Askpass prints to stdout and returns
     // when SKILLSTAR_GIT_ASKPASS_MODE=1, which would swallow the JSON-RPC stream.
     // Other `mcp` commands, including `mcp approve`, also skip askpass, then

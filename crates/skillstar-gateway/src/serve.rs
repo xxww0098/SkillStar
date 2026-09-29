@@ -1,4 +1,4 @@
-//! Loopback listener for one Chat Completions turn.
+//! Loopback listener for one Chat Completions turn and the Claude MCP callback.
 //!
 //! The first request on a connection has `HEADER_READ_TIMEOUT` to finish its
 //! headers, counted from when the connection is accepted. After a response,
@@ -197,7 +197,7 @@ async fn run(options: ServeOptions) -> Result<(), ServeError> {
                 }
             }
             accepted = listener.accept() => {
-                let (stream, _) = match accepted {
+                let (stream, peer) = match accepted {
                     Ok(pair) => pair,
                     Err(_) => continue,
                 };
@@ -210,7 +210,7 @@ async fn run(options: ServeOptions) -> Result<(), ServeError> {
                         let upstream = upstream.clone();
                         let finished = Arc::clone(&finished);
                         async move {
-                            let response = dispatch(request, upstream.as_deref()).await;
+                            let response = dispatch(request, upstream.as_deref(), peer).await;
                             finished.store(true, Ordering::Relaxed);
                             Ok::<_, std::convert::Infallible>(response)
                         }
@@ -234,7 +234,21 @@ fn classify_bind(error: io::Error) -> ServeError {
     }
 }
 
-async fn dispatch(request: Request<Incoming>, upstream: Option<&str>) -> Response<Full<Bytes>> {
+async fn dispatch(
+    request: Request<Incoming>,
+    upstream: Option<&str>,
+    peer: SocketAddr,
+) -> Response<Full<Bytes>> {
+    if request.method() == Method::POST
+        && let Some(token) = crate::claude::callback_token(request.uri().path())
+    {
+        let token = token.to_string();
+        let body = match request.into_body().collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
+        };
+        return claude_callback(peer, &token, &body).await;
+    }
     if request.method() != Method::POST || request.uri().path() != CHAT_PATH {
         return plain(StatusCode::NOT_FOUND, "not found");
     }
@@ -250,6 +264,7 @@ async fn dispatch(request: Request<Incoming>, upstream: Option<&str>) -> Respons
         return plain(StatusCode::BAD_GATEWAY, "no upstream");
     };
     let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+    crate::outbound::note_outbound(&url);
     let client = match skillstar_core::infra::http_client::stream_http_client() {
         Ok(client) => client,
         Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream client"),
@@ -276,6 +291,32 @@ async fn dispatch(request: Request<Incoming>, upstream: Option<&str>) -> Respons
         .status(status)
         .header(hyper::header::CONTENT_TYPE, "application/json")
         .body(Full::new(Bytes::from(outbound)))
+        .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
+}
+
+async fn claude_callback(peer: SocketAddr, token: &str, body: &[u8]) -> Response<Full<Bytes>> {
+    use crate::claude::{CallbackOutcome, begin_callback, listener_bridge};
+
+    match begin_callback(listener_bridge(), peer, token, body) {
+        CallbackOutcome::Ready { status, body } => {
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            plain(status, &body)
+        }
+        CallbackOutcome::Wait(rx) => {
+            let received = tokio::task::spawn_blocking(move || rx.recv()).await;
+            match received {
+                Ok(Ok(result)) => json_body(StatusCode::OK, result.json_bytes()),
+                _ => plain(StatusCode::GONE, "the agent's run ended"),
+            }
+        }
+    }
+}
+
+fn json_body(status: StatusCode, bytes: Vec<u8>) -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(status)
+        .header(hyper::header::CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from(bytes)))
         .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
 }
 

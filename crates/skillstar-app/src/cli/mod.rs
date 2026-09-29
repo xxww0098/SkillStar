@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 
+mod claude_mcp;
 mod commands;
 mod decide;
 mod gateway;
@@ -16,6 +17,7 @@ pub use install::cmd_install;
 pub use manage::{cmd_publish, cmd_remove, cmd_update};
 
 mod helpers;
+pub use claude_mcp::run_claude_mcp_helper;
 pub use gateway::{run_gateway, start_desktop_gateway};
 pub use helpers::*;
 
@@ -395,6 +397,7 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "team"
             | "decide"
             | "gateway"
+            | "claude-mcp-helper"
             | "help"
             | "-h"
             | "--help"
@@ -511,6 +514,7 @@ mod mode_tests {
             "team",
             "decide",
             "gateway",
+            "claude-mcp-helper",
             "help",
             "-h",
             "--help",

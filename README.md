@@ -165,6 +165,8 @@ skillstar gateway serve
 
 在 `127.0.0.1:21847` 上监听，不打开窗口。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 会拒绝并退出。桌面应用启动时会自己拉起同一份监听；地址已被占用时只在 stderr 报告，不关掉先启动的那份。
 
+`skillstar claude-mcp-helper` 是 Claude Code 拉起的内部命令，不打开窗口。stdout 只有 MCP 帧，日志在 stderr。
+
 ### 本地决策模型（AgentJev-0.6B）
 
 本地跑的系统一（System One）决策模型：给一段状态（diff、日志、工单、JSON）和若干结构化问题，一次前向返回每个选项的校准概率，不生成任何文本。权重 1.2 GB，首次使用需下载。

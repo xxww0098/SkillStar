@@ -63,3 +63,31 @@
 - **地址解析失败就是错误。** 空的环境变量用默认地址。写错的地址不回退到默认，也不做 DNS。监听要的是 `IP:端口`。信心：高。
 
 - **`skillstar gateway` 在打开 CLI 的迁移之前就返回。** 规格要求它不打开窗口。普通 CLI 入口会先做路径迁移和商店快照初始化，那会碰本机数据目录。只为了听一个端口，不跑那一步。`skillstar help` 仍能列出这个子命令。`gateway` 后面如果不是正好一个 `serve`，用法写到 stderr。信心：高。
+
+## 05 Claude 进程桥
+
+### 先这样，后面的档再接
+
+- **助手的每一帧在自己的线程里处理，回复按 id 对上，可以比到达顺序更早写完。** magpie 是一帧做完再读下一帧。调用方要按 id 收，不能假设后发的 `tools/call` 一定后返回。信心：中。
+
+- **回调不是 04 档那种「其它路径都是 404」。** 非环回是 403，正文 `forbidden`。先看对端，再查 token，拒绝不会顺手停一个进程。未知 token 是 404，正文 `unknown or expired Claude run`。正文坏了或 `tool_call_id` 是空的，是 400，正文 `invalid tool call`。`::1` 算环回，`0.0.0.0` 不算，IPv4 映射的 `::ffff:127.0.0.1` 也不算。等结果的人如果进程已经结束，或等待被丢掉，HTTP 是 410，正文 `the agent's run ended`。请求体会先读完再进回调。08 档仍然拥有其余路由。信心：中。
+
+- **这一档的启动拿到的是已经拼好的环回回调根，不在这里改写 `0.0.0.0`。** 生成接到监听上、要对外地址时，才由 34 档处理。工具列表也是调用方给好的，进程桥不解析 Agent 的 HTTP 正文。`claude` 的 stdout 读完就丢掉，stream-json 这一档还不译成给 Agent 的 HTTP 流。`AccountSnapshot` 这一档只有 `access_token`；别的字段等 17 档。信心：中。
+
+- **助手不读 `SKILLSTAR_MCP_CALLBACK` 或 `SKILLSTAR_MCP_TOOLS`。** 参数必须正好两个：回调 URL 和工具文件。个数不对时，stderr 是 magpie 那句英文 `claude MCP helper expects callback URL and tools file`。找不到二进制时，展示文案是中文 `未找到 claude`。测试不锁这句中文。信心：中。
+
+- **Windows 上 PATH 和用户目录还要找 `claude.exe`。** 后面两个绝对路径只在真正 `launch()` 时用。顺序测试注入自己的回退列表，不会落到开发机上的 `/usr/local/bin/claude`。信心：中。
+
+- **`listener_bridge()` 是进程里唯一一份桥，监听和测试停在同一份上。** 这样 HTTP 回调和进程是同一个对象。`shared()` 仍是 crate 私有。信心：中。
+
+### 已定，按这个做
+
+- **中止时子进程单独成组，再杀整组。** 启动时 `setpgid(0, 0)`。pid 大于 0 才 `kill(-pid, SIGKILL)`，避免 `kill(0)` 打到自己这组。然后在拿着生命锁的时候 `child.kill()` 并 `wait()`，所以 `is_running` 要等回收完才变假。只改一个标志会把进程留在后面。信心：高。
+
+- **空闲时间相同时，先停进去的那个先被丢掉。** 比较的是进入时刻，相同时比下标。magpie 的 map 遍历顺序不稳定。信心：高。
+
+- **stderr 超过 1 MiB 仍然继续读，只留下最前面的 1 MiB。** 不读的话子进程会堵在写 stderr 上。`tools.json` 在 Unix 上是 `0600`。信心：高。
+
+- **助手把工具调用用裸的 `TcpStream` 发到回调，不走 `probe_http_client`。** 代理会把这一跳送到机器外面。连接之前先记下出站 URL。只接受 `http://`。Chat 路径也在发出去之前记下 `{base}/v1/chat/completions`。出站记录是整个进程一份，测试不能要求它是空的。这条环回 POST 是代理客户端的例外。信心：高。
+
+- **`claude-mcp-helper` 在 `main` 里比 MCP serve、askpass 和市场迁移更早返回。** 这样 stdout 只有 MCP 帧。它不是 clap 的一个变体。`is_cli_subcommand` 认这个名字。App 把 argv 收成第 3 个参数起（回调和工具文件），跟 magpie 把子命令名剥掉之后再交给助手一样。信心：高。
