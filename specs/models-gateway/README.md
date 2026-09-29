@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：01 已落地。最后更新：2026-09-29。
+状态：02 已落地。最后更新：2026-09-29。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-01 已落地。`crates/skillstar-gateway` 把 Chat Completions 原样穿过，并把一条带工具调用的 Anthropic Messages 译成 Chat Completions，再把上游的 JSON 回复译回。它的 skillstar 依赖只有 `skillstar-core`。删除测试写在 `scripts/internal/check_workspace_deps.sh`。所有权在 `docs/boundaries.md`，独立 crate 的决定是 `docs/decisions.md` 的 D-073。本档不监听。选择记在 [choices.md](choices.md)。
+02 已落地。`HoldWriter` 在第一个内容字节之前可以换上游；超过 15 秒或 1 MiB 之后放行，此后不再换。时钟由调用方注入。不监听，不选下一个候选。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/02-content-byte.md](slices/02-content-byte.md)：首个内容字节之前可以换上游。做完运行 `cargo test -p skillstar-gateway hold_`，并保持 `translate_` 为绿。01、02、03 按编号做，不要并行改 `skillstar-gateway` 的公共类型。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/03-routing-probe.md](slices/03-routing-probe.md)：一条路由决定。做完运行 `cargo test -p skillstar-gateway route_`，并保持 `translate_` 与 `hold_` 为绿。不要并行改 `skillstar-gateway` 的公共类型。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -19,7 +19,7 @@
 ### TODO
 
 - [x] 01 协议夹具 — [slices/01-protocol-fixtures.md](slices/01-protocol-fixtures.md)
-- [ ] 02 首内容字节 — [slices/02-content-byte.md](slices/02-content-byte.md)
+- [x] 02 首内容字节 — [slices/02-content-byte.md](slices/02-content-byte.md)
 - [ ] 03 一条路由决定 — [slices/03-routing-probe.md](slices/03-routing-probe.md)
 - [ ] 04 环回监听 — [slices/04-loopback-serve.md](slices/04-loopback-serve.md)
 - [ ] 05 Claude 进程桥 — [slices/05-claude-bridge.md](slices/05-claude-bridge.md)

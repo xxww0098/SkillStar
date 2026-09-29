@@ -1,0 +1,18 @@
+{
+  "content_at": 8,
+  "swaps": 0,
+  "downstream_has": ["hi"],
+  "leads": [
+    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}\n\n",
+    "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}\n\n",
+    "event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n",
+    "event: response.queued\ndata: {\"type\":\"response.queued\"}\n\n",
+    "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+    "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n",
+    "event: codex.rate_limits\ndata: {\"type\":\"codex.rate_limits\",\"plan_type\":\"plus\",\"rate_limits\":{\"allowed\":true}}\n\n",
+    ": keep-alive\n\n"
+  ],
+  "content": "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n",
+  "done": "data: [DONE]\n\n",
+  "finish": "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}]}\n\n"
+}
