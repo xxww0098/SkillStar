@@ -418,7 +418,7 @@
 
 - **一个函数 `apply_gateway(agent_id, model_ref)`。** 空的 `model_ref` 才是取消。只含空白不是取消。写出的主机总是 `127.0.0.1`，端口是网关正在听的端口，不是 3425。信心：高。
 
-- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Hanako、Alma、Cindy、WSL 同样还不写。Claude Code 与 Claude Desktop 已纳入。花名册以 `apply_gateway_` 测试为准。信心：高。
+- **在册的是会写环回 URL 的那些 id。** Goose、Cursor CLI、Copilot CLI、Devin 返回 `agent_not_managed`，一个字节都不写。Codex、Alma、Cindy、WSL 同样还不写。Claude Code、Claude Desktop 与 OpenHanako 已纳入。花名册以 `apply_gateway_` 测试为准。信心：高。
 
 - **占位 bearer 是 `skillstar`，Qoder、Qoder CN、WorkBuddy 是 `skillstar-<id>`。** fx、omp、Command Code 不写 bearer 字符串。Gemini 的 URL 不带后缀，ZCode 的 Anthropic 地址也不带，WorkBuddy 带到 `/v1/chat/completions`，其余带到 `/v1`。信心：高。
 
@@ -451,3 +451,19 @@
 - **配置档 id 是 `00000000-0000-4000-8000-736b696c6c73`。** 不写 magpie 的 `6d6167706965`。`inferenceGatewayBaseUrl` 是网关根，不带 `/v1`。`inferenceGatewayApiKey` 是 `skillstar-claude-desktop`。`_meta.json` 的 `name` 是 `skillstar`。不写 `skillstar-binding.json`。信心：高。
 
 - **测试沙箱里不跟 `XDG_CONFIG_HOME` 和 `LOCALAPPDATA`。** 路径函数本身仍按 darwin、windows、其余系统三条算，测试把目录传进去，不读开发者的家目录。正式运行时这几个变量照 magpie 的规则生效。信心：高。
+
+## 21 OpenHanako
+
+### 先这样，后面的档再接
+
+- **catalog 和 agent 配置整份替换。** 不逐键拼进用户原来的文件。取消托管放回整份文件，不写 `meta.deletedProviders`。`provider-plugins/skillstar` 写文件时删掉，不放进 stash，取消也不找回来。信心：中。
+
+- **模型列表只有这一次的 `model_ref`。** `image` 和 `reasoning` 写成 false。没有目录，就不写 context。信心：中。
+
+- **活着时不刷新 stash。** 本地 API 成功之后，文件保持原样。信心：中。
+
+### 已定，按这个做
+
+- **在跑才打本地 API。** `GET /api/server/identity` 要 200 且 `serverId` 非空。然后 PUT 配置和 chat。PUT 失败不改文件。没在跑就写文件。HTTP 只连 `127.0.0.1`。信心：高。
+
+- **provider 名是 `skillstar`，地址带 `/v1`，密钥是 `skillstar-hanako`。** chat 的 id 是整个 `model_ref`。没有已有 agent 时一个字节不写。沙箱不读 `HANA_HOME`。信心：高。

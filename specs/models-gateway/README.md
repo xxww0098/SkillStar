@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：20 已落地。最后更新：2026-09-30。
+状态：21 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-20 已落地。`apply_gateway("claude-desktop", …)` 写两份 `claude_desktop_config.json` 和 Claude-3p 配置档。配置档 id 是 `00000000-0000-4000-8000-736b696c6c73`。`inferenceGatewayBaseUrl` 是网关根，不带 `/v1`。`inferenceGatewayApiKey` 是 `skillstar-claude-desktop`。不写 `skillstar-binding.json`。选择记在 [choices.md](choices.md)。
+21 已落地。`apply_gateway("hanako", …)` 在 OpenHanako 跑着时打它本地 API 的 `PUT /api/config` 和 `PUT /api/agents/<id>/config`，没在跑时写 catalog 和 agent 配置。provider 名是 `skillstar`，地址是网关的 `/v1`。没有已有 agent 时不写文件。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/21-hanako.md](slices/21-hanako.md)：OpenHanako 在跑时打它 `server-info.json` 里的本地 API，没在跑时写 catalog 与 agent 文件。provider 名是 `skillstar`，URL 是网关的 `/v1`，密钥是占位 bearer。`apply_gateway_specials_still_unmanaged` 改为 Hanako 已纳入，Alma、Cindy、WSL 仍未纳入。保持 `desktop_`、`claude_code_`、`apply_gateway_`、`claude_bridge_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/22-alma.md](slices/22-alma.md)：Alma 在跑时经 `http://localhost:23001` 写入名为 `skillstar` 的 openai provider，base URL 是网关 `/v1`，并把默认模型设成所选 id。没在跑不是错误，不写文件。保持 `hanako_` 为绿，并确认 Alma 不写 Hanako 的目录。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -38,7 +38,7 @@
 - [x] 18 共享写入 — [slices/18-shared-writers.md](slices/18-shared-writers.md)
 - [x] 19 Claude Code 文件 — [slices/19-claude-code.md](slices/19-claude-code.md)
 - [x] 20 Claude Desktop — [slices/20-claude-desktop.md](slices/20-claude-desktop.md)
-- [ ] 21 OpenHanako — [slices/21-hanako.md](slices/21-hanako.md)
+- [x] 21 OpenHanako — [slices/21-hanako.md](slices/21-hanako.md)
 - [ ] 22 Alma — [slices/22-alma.md](slices/22-alma.md)
 - [ ] 23 Cindy — [slices/23-cindy.md](slices/23-cindy.md)
 - [ ] 24 WSL Codex — [slices/24-wsl-codex.md](slices/24-wsl-codex.md)

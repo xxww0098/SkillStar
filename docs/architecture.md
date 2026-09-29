@@ -134,6 +134,7 @@ flowchart LR
 - 保存文件型 Agent 走 `apply_gateway`。写出的地址总是 `http://127.0.0.1:<端口>` 加上该 Agent 的路径后缀，占位 bearer 是 `skillstar` 或 `skillstar-<id>`。取消托管把接管前的整份文件从同一份 `agent_stash.json` 放回。Goose、Cursor CLI、Copilot CLI、Devin 不写环回地址，调用返回未托管。在册的 id 以 `apply_gateway_` 测试为准。
 - Claude Code 的 `~/.claude/settings.json` 由 `apply_gateway("claude", …)` 写入。`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token，文件里也不写 `CLAUDE_CODE_OAUTH_TOKEN`。各档跟随这一次的模型。取消托管放回接管前的整份文件。进程桥不读这份文件，保存时不启动 `claude`。
 - Claude Desktop 由 `apply_gateway("claude-desktop", …)` 写入两份 `claude_desktop_config.json` 和 Claude-3p 配置档。配置档 id 是 `00000000-0000-4000-8000-736b696c6c73`。`inferenceGatewayBaseUrl` 是网关根，不带 `/v1`。`inferenceGatewayApiKey` 是 `skillstar-claude-desktop`。不写 `skillstar-binding.json`。取消托管放回接管前的整份文件。
+- OpenHanako 由 `apply_gateway("hanako", …)` 写入。进程在跑时，先确认 `server-info.json` 里的本地 API，再 `PUT /api/config` 和 `PUT /api/agents/<id>/config`。没在跑时写 catalog 和该 agent 的配置。provider 名是 `skillstar`，地址是网关的 `/v1`，密钥是占位 `skillstar-hanako`。没有已有 agent 时不写文件。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP

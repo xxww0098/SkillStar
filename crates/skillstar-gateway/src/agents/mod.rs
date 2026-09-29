@@ -7,6 +7,7 @@
 
 mod body;
 mod desktop;
+mod hanako;
 
 use std::fs;
 use std::path::PathBuf;
@@ -57,7 +58,11 @@ pub(super) struct Written {
 /// gateway's listen port, never `3425`.
 pub fn apply_gateway(agent_id: &str, model_ref: &str) -> Result<(), ApplyError> {
     let home = agent_home();
-    let files = body::files(agent_id, &home, &loopback_origin(), model_ref)?;
+    let origin = loopback_origin();
+    if agent_id == "hanako" {
+        return hanako::apply(&home, &origin, model_ref);
+    }
+    let files = body::files(agent_id, &home, &origin, model_ref)?;
     if model_ref.is_empty() {
         return restore(agent_id, &files);
     }
