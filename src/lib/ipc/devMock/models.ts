@@ -67,6 +67,8 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     ensureOfficialInMockStore();
     return FLAT_PROVIDERS;
   },
+  get_model_choices: () => [{ id: "openai/gpt-test" }, { id: "group/fast" }],
+  save_agent_model: () => null,
   get_models_board: () => ({
     agents: [
       { id: "claude-code", name: "Claude Code" },

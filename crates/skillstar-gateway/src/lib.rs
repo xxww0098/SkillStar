@@ -47,7 +47,9 @@ pub use claude::{
 };
 pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
-pub use group::{GROUP_PREFIX, MAX_NEST, SaveGroupError, ServedModel, expand_group, save_group};
+pub use group::{
+    GROUP_PREFIX, MAX_NEST, SaveGroupError, ServedModel, expand_group, save_group, stored_group_ids,
+};
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use models_dev::{
     MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,

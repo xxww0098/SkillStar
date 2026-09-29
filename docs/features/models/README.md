@@ -100,11 +100,13 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 ## Models 工作台
 
-Models 页从左到右是 Agents、Providers、Gateway 三栏。栏内第一屏可以是空列表。这一屏不决定行密度、选择器、路由控件或空态句子。
+Models 页从左到右是 Agents、Providers、Gateway 三栏。栏内第一屏可以是空列表。这一屏不决定行密度、路由控件或空态句子。
 
-`get_models_board` 只返回每一行的 id 和 name。Agents 来自注册表，Providers 来自 `load_store()` 的名字，Gateway 在有最近调用之前是空列表。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
+`get_models_board` 返回每一行的 id 和 name。提供商行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字，Gateway 在有最近调用之前是空列表。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
-Settings 的 App AI 仍用 `get_providers_flat`。切换三栏或侧栏里的最近名字只改变当前选中，不写 Agent 配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
+点 Agents 栏的一行打开选择器。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`。保存走该 Agent 已经落地的 writer。尚未落地的 id 返回 `agent_not_managed`，不写文件。弹出层不显示密钥，也不显示厂商 URL。
+
+Settings 的 App AI 仍用 `get_providers_flat`。切换三栏、点 Providers 或 Gateway 的行、或点侧栏里的最近名字，只改变当前选中。保存所选模型才写该 Agent 的配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
 
 
 ## 前端状态与诊断

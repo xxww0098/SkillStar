@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ModelsBoardRowDto } from "@/types/generated/ModelsBoardRowDto";
 import { cn } from "@/lib/utils";
+import { tauriInvoke } from "@/lib/ipc";
 import { useModelsBoard } from "../../api/board";
 import type { ModelsNavBridge } from "../../lib/navBridge";
 
@@ -38,6 +39,8 @@ export function ModelsHub({
   const { t } = useTranslation();
   const { data } = useModelsBoard();
   const [column, setColumn] = useState<ColumnId | null>(null);
+  const [picker, setPicker] = useState<{ id: string; name: string } | null>(null);
+  const [choices, setChoices] = useState<{ id: string }[]>([]);
   void modelsDrawerRequest;
   void clearModelsDrawerRequest;
 
@@ -70,6 +73,14 @@ export function ModelsHub({
                     onClick={() => {
                       setColumn(entry.id);
                       if (entry.id === "providers") setSelectedProviderId(row.id);
+                      if (entry.id === "agents") {
+                        const next = picker?.id === row.id ? null : { id: row.id, name: row.name };
+                        setPicker(next);
+                        setChoices([]);
+                        if (next) {
+                          void tauriInvoke("get_model_choices").then(setChoices);
+                        }
+                      }
                     }}
                     className={cn(
                       "w-full min-w-0 cursor-pointer rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/40",
@@ -89,6 +100,38 @@ export function ModelsHub({
           </section>
         ))}
       </div>
+      {picker ? (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center bg-black/20 px-4 pt-24"
+          onClick={() => setPicker(null)}
+        >
+          <div
+            role="dialog"
+            aria-label={picker.name}
+            className="max-h-[70vh] w-full max-w-sm overflow-auto rounded-2xl border bg-card p-3 shadow-lg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <ul className="space-y-0.5">
+              {choices.map((choice) => (
+                <li key={choice.id}>
+                  <button
+                    type="button"
+                    className="w-full truncate rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/40"
+                    onClick={() => {
+                      void tauriInvoke("save_agent_model", { agentId: picker.id, modelRef: choice.id }).then(
+                        () => setPicker(null),
+                        () => setPicker(null),
+                      );
+                    }}
+                  >
+                    {choice.id}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

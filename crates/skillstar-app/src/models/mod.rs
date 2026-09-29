@@ -10,7 +10,9 @@ pub mod board;
 mod codex_save;
 pub mod dto;
 mod gateway_save;
+pub mod picker;
 
 pub use account_book::UsageAccountBook;
 pub use codex_save::{CodexRoute, release_codex, save_codex};
 pub use gateway_save::save_agent;
+pub use picker::{ModelChoiceDto, load_model_choices};

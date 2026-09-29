@@ -53,6 +53,14 @@ struct Bucket {
     members: Vec<String>,
 }
 
+/// Group ids saved in `model_gateway.json`, without the `group/` prefix.
+pub fn stored_group_ids() -> Vec<String> {
+    groups_in(&read_doc())
+        .into_iter()
+        .map(|group| group.id)
+        .collect()
+}
+
 /// Members of `group/<id>`, outer order preserved, nested groups flattened.
 ///
 /// A repeated member stays where it first appeared. A missing group, a loop,

@@ -138,7 +138,7 @@ flowchart LR
 - Alma 由 `apply_gateway("alma", …)` 经 `http://localhost:23001` 写入。provider 名是 `skillstar`，类型是 openai，地址是网关的 `/v1`。默认模型是 Alma 返回的 provider id、一个冒号、再加所选 id。没在跑时成功返回，不写文件。
 - Cindy 不写自己的数据库。`cindy_link` 生成 `cindy://provider/import?v=1&data=...`。Claude Code 的端点是网关根，Codex 和 Pi 是网关的 `/v1`。密钥是 `skillstar-cindy`。是否已经导入，只读那份数据库来判断。
 - WSL 里正在运行的 Codex 是单独的 Agent，id 是 `codex@wsl:<发行版>`。配置经 `\\wsl.localhost\<发行版>` 打开。已停止的发行版不启动。mirrored 写 `127.0.0.1`，NAT 写该发行版看到的 Windows 地址。toml 形态与本机 Codex 相同。非 Windows 不调用 `wsl.exe`。
-- models.dev 目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，正文是下载到的 `https://models.dev/api.json`。下载走 `probe_http_client`。失败时留下已有文件；没有文件时读出来是空的，不放入手写模型表。不写 provider 的 `model_catalog`，也不写 `cache/model_catalog/`。
+- models.dev 目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，正文是下载到的 `https://models.dev/api.json`。下载走 `probe_http_client`。失败时留下已有文件；没有文件时读出来是空的，不放入手写模型表。不写 provider 的 `model_catalog`，也不写 `cache/model_catalog/`。选择器由 `skillstar-app` 读这份缓存和已保存的分组做投影。投影不携带密钥或厂商 URL，也不经过环回的模型列表。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP

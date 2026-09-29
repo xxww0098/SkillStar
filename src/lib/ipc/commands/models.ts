@@ -16,6 +16,7 @@ import type {
   WriteToolConfigFileResult,
 } from "../../../types";
 import type { AgentDescriptorDto } from "../../../types/generated/AgentDescriptorDto";
+import type { ModelChoiceDto } from "../../../types/generated/ModelChoiceDto";
 import type { ModelsBoardDto } from "../../../types/generated/ModelsBoardDto";
 
 interface ConfigConflict {
@@ -42,6 +43,9 @@ export interface ModelsCommands {
   get_providers_flat: { args: Record<string, never>; result: FlatProvidersResponse };
   /** Agents, providers, and gateway as id + name. No secrets and no endpoints. */
   get_models_board: { args: Record<string, never>; result: ModelsBoardDto };
+  /** Picker ids: `provider/model` or `group/<id>`. No secrets and no endpoints. */
+  get_model_choices: { args: Record<string, never>; result: ModelChoiceDto[] };
+  save_agent_model: { args: { agentId: string; modelRef: string }; result: void };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
   update_provider_flat: {
     args: { id: string; patch: ProviderPatchFlat };
