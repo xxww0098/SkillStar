@@ -71,10 +71,24 @@ pub fn apply_agent(
     if agent != "codex" {
         return Err(ApplyError::NotManaged);
     }
+    apply_codex_home(agent, route, origin, home, None)
+}
+
+/// Same two toml shapes as [`apply_agent`]. `agent` is the stash prefix.
+///
+/// `catalog_native` is the catalog path that agent opens. `None` stores
+/// `home/.codex/skillstar-models.json` as this machine spells it.
+pub(crate) fn apply_codex_home(
+    agent: &str,
+    route: CodexRoute,
+    origin: &str,
+    home: &Path,
+    catalog_native: Option<&str>,
+) -> Result<(), ApplyError> {
     let origin = origin.trim_end_matches('/');
     match route {
-        CodexRoute::LoggedIn => apply_logged_in(origin, home),
-        CodexRoute::Api => apply_api(origin, home),
+        CodexRoute::LoggedIn => apply_logged_in(agent, origin, home),
+        CodexRoute::Api => apply_api(agent, origin, home, catalog_native),
     }
 }
 
@@ -83,51 +97,65 @@ pub fn release_agent(agent: &str, home: &Path) -> Result<(), ApplyError> {
     if agent != "codex" {
         return Err(ApplyError::NotManaged);
     }
-    release_codex(home)
+    release_codex(agent, home)
 }
 
-fn apply_logged_in(origin: &str, home: &Path) -> Result<(), ApplyError> {
+fn apply_logged_in(agent: &str, origin: &str, home: &Path) -> Result<(), ApplyError> {
     let url = format!("{origin}/backend-api/codex");
     let path = config_path(home);
     let mut doc = read_doc(&path)?;
     let mut stash = load_stash()?;
     let provider = doc.root_value("model_provider");
-    take_over(&mut doc, &mut stash, "openai_base_url", &url);
+    take_over(agent, &mut doc, &mut stash, "openai_base_url", &url);
     if provider.as_deref() == Some(PROVIDER_NAME) {
-        drop_owned(&mut doc, &mut stash, "model_provider", PROVIDER_NAME);
-        drop_owned(&mut doc, &mut stash, "model_catalog_json", "");
+        drop_owned(agent, &mut doc, &mut stash, "model_provider", PROVIDER_NAME);
+        drop_owned(agent, &mut doc, &mut stash, "model_catalog_json", "");
     }
     // Stash first so a crash cannot lose the user's previous value.
     save_stash(&stash)?;
     write_doc(&path, &doc)
 }
 
-fn apply_api(origin: &str, home: &Path) -> Result<(), ApplyError> {
+fn apply_api(
+    agent: &str,
+    origin: &str,
+    home: &Path,
+    catalog_native: Option<&str>,
+) -> Result<(), ApplyError> {
     let base = format!("{origin}/v1");
     let catalog = home.join(".codex").join(CATALOG_FILE);
-    let catalog_value = path_utf8(&catalog)?;
+    let catalog_value = match catalog_native {
+        Some(value) => value.to_string(),
+        None => path_utf8(&catalog)?,
+    };
     let gateway_url = format!("{origin}/backend-api/codex");
     let path = config_path(home);
     let mut doc = read_doc(&path)?;
     let mut stash = load_stash()?;
     doc.set_provider_table(&base);
-    take_over(&mut doc, &mut stash, "model_provider", PROVIDER_NAME);
-    take_over(&mut doc, &mut stash, "model_catalog_json", &catalog_value);
+    take_over(agent, &mut doc, &mut stash, "model_provider", PROVIDER_NAME);
+    take_over(
+        agent,
+        &mut doc,
+        &mut stash,
+        "model_catalog_json",
+        &catalog_value,
+    );
     if doc.root_value("openai_base_url").as_deref() == Some(gateway_url.as_str()) {
-        drop_owned(&mut doc, &mut stash, "openai_base_url", &gateway_url);
+        drop_owned(agent, &mut doc, &mut stash, "openai_base_url", &gateway_url);
     }
     save_stash(&stash)?;
     atomic_write(&catalog, EMPTY_CATALOG)?;
     write_doc(&path, &doc)
 }
 
-fn release_codex(home: &Path) -> Result<(), ApplyError> {
+fn release_codex(agent: &str, home: &Path) -> Result<(), ApplyError> {
     let mut stash = load_stash()?;
     let path = config_path(home);
     let mut doc = read_doc(&path)?;
     let mut touched = false;
     for field in ["openai_base_url", "model_provider", "model_catalog_json"] {
-        let key = stash_key(field);
+        let key = stash_key(agent, field);
         let Some(value) = stash.remove(&key) else {
             continue;
         };
@@ -145,7 +173,7 @@ fn release_codex(home: &Path) -> Result<(), ApplyError> {
     save_stash(&stash)
 }
 
-fn take_over(doc: &mut Doc, stash: &mut Stash, field: &str, new_value: &str) {
+fn take_over(agent: &str, doc: &mut Doc, stash: &mut Stash, field: &str, new_value: &str) {
     let current = doc.root_value(field);
     if current.as_deref() == Some(new_value) {
         return;
@@ -153,7 +181,7 @@ fn take_over(doc: &mut Doc, stash: &mut Stash, field: &str, new_value: &str) {
     // Keep the first user value. A later mode switch must not overwrite it
     // with a URL or provider name this writer just stored.
     stash
-        .entry(stash_key(field))
+        .entry(stash_key(agent, field))
         .or_insert_with(|| current.unwrap_or_default());
     doc.set_root(field, new_value);
 }
@@ -163,19 +191,19 @@ fn take_over(doc: &mut Doc, stash: &mut Stash, field: &str, new_value: &str) {
 /// An empty `sentinel` means "whatever is there is ours" (the catalog path,
 /// which this writer just set). A missing stash entry is recorded as `""`,
 /// which release treats as "the user had no such key".
-fn drop_owned(doc: &mut Doc, stash: &mut Stash, field: &str, sentinel: &str) {
+fn drop_owned(agent: &str, doc: &mut Doc, stash: &mut Stash, field: &str, sentinel: &str) {
     let Some(current) = doc.root_value(field) else {
         return;
     };
     if !sentinel.is_empty() && current != sentinel {
         return;
     }
-    stash.entry(stash_key(field)).or_default();
+    stash.entry(stash_key(agent, field)).or_default();
     doc.remove_root(field);
 }
 
-fn stash_key(field: &str) -> String {
-    format!("codex.{field}")
+fn stash_key(agent: &str, field: &str) -> String {
+    format!("{agent}.{field}")
 }
 
 fn config_path(home: &Path) -> PathBuf {

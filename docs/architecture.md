@@ -137,6 +137,7 @@ flowchart LR
 - OpenHanako 由 `apply_gateway("hanako", …)` 写入。进程在跑时，先确认 `server-info.json` 里的本地 API，再 `PUT /api/config` 和 `PUT /api/agents/<id>/config`。没在跑时写 catalog 和该 agent 的配置。provider 名是 `skillstar`，地址是网关的 `/v1`，密钥是占位 `skillstar-hanako`。没有已有 agent 时不写文件。
 - Alma 由 `apply_gateway("alma", …)` 经 `http://localhost:23001` 写入。provider 名是 `skillstar`，类型是 openai，地址是网关的 `/v1`。默认模型是 Alma 返回的 provider id、一个冒号、再加所选 id。没在跑时成功返回，不写文件。
 - Cindy 不写自己的数据库。`cindy_link` 生成 `cindy://provider/import?v=1&data=...`。Claude Code 的端点是网关根，Codex 和 Pi 是网关的 `/v1`。密钥是 `skillstar-cindy`。是否已经导入，只读那份数据库来判断。
+- WSL 里正在运行的 Codex 是单独的 Agent，id 是 `codex@wsl:<发行版>`。配置经 `\\wsl.localhost\<发行版>` 打开。已停止的发行版不启动。mirrored 写 `127.0.0.1`，NAT 写该发行版看到的 Windows 地址。toml 形态与本机 Codex 相同。非 Windows 不调用 `wsl.exe`。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP

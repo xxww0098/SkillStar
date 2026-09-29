@@ -2,7 +2,7 @@
 //! routing order, session affinity, upstream rest, routing groups and their
 //! rules, the intent classifier, secret redaction, vision transcription,
 //! subscription signing, the loopback listener, the Claude process bridge, the
-//! Codex config writer, and the file-agent loopback writer.
+//! Codex config writer, WSL Codex, and the file-agent loopback writer.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -23,6 +23,7 @@ mod sign;
 mod surface;
 mod translate;
 mod vision;
+mod wsl;
 
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
@@ -67,4 +68,8 @@ pub use translate::{Protocol, TranslateError, outbound_body, upstream_body};
 pub use vision::{
     VISION_CACHE, VISION_PARALLEL, VISION_SYSTEM, VISION_TIMEOUT, VISION_USER_AGENT, VisionCall,
     VisionReject, VisionReply, apply_vision,
+};
+pub use wsl::{
+    WslCodex, apply_wsl_codex, wsl_codex_discover, wsl_codex_id, wsl_codex_list,
+    wsl_codex_open_path,
 };

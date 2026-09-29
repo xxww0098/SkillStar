@@ -499,3 +499,23 @@
 - **链接是 `cindy://provider/import?v=1&data=`。** data 是不带填充的 base64url。Claude Code 的 `baseUrl` 不带 `/v1`，Codex 和 Pi 带 `/v1`。`modelsUrl` 是 `{origin}/v1/models`。密钥是 `token_for("cindy")`。信心：高。
 
 - **数据库只读。** 没有文件、打不开、没有表，都当作还没导入。读过之后文件字节不变。信心：高。
+
+## 24 WSL Codex
+
+### 先这样，后面的档再接
+
+- **`apply_gateway("codex@wsl:…")` 仍返回未托管。** 这一档先锁路径和 URL。保存还没接到这个 id。界面行留给后面的视觉档。信心：中。
+
+- **不记住已停止的发行版。** 不写 `wsl.json`。停掉的发行版这次不出现，下次跑起来再探测。信心：中。
+
+- **NAT 没探到地址时仍写 `127.0.0.1`。** 参照实现在地址为空时也回到环回。真机探针还没跑。信心：中。
+
+### 已定，按这个做
+
+- **id 是 `codex@wsl:<发行版>`。** 打开路径是 `\\wsl.localhost\<发行版>` 再加上 Linux 路径的反斜杠拼法。信心：高。
+
+- **mirrored 写 `127.0.0.1`，NAT 写发行版看到的 Windows 地址。** 端口是网关监听端口。两种 toml 和本机 Codex 一样。API 形态的目录路径是发行版里的 Linux 路径。信心：高。
+
+- **已停止的发行版不启动。** 不向它发 `wsl.exe -d`。`docker-desktop` 开头的名字不探测。列不出正在运行的名单时，一个都不探测。信心：高。
+
+- **非 Windows 不调用 `wsl.exe`。** 测试替换的是列举函数。stash 键用 WSL 的 id，不覆盖本机 `codex.*`。登录态仍由调用方传入。信心：高。

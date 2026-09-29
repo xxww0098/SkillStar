@@ -47,3 +47,8 @@ id 格式、不启动已停止的发行版、mirrored 仍写 127.0.0.1、非 Win
 ## 决定
 
 - 真机探针未跑之前，规格状态不写「Windows 已验证」。
+- `apply_gateway("codex@wsl:…")` 仍返回未托管。入口是 `wsl_codex_list` 和 `apply_wsl_codex`。非 Windows 的 `wsl_codex_discover` 不调用 `wsl.exe`。
+- mirrored 写 `127.0.0.1`。NAT 写探针里的 Windows 地址；没探到地址时仍写 `127.0.0.1`。端口是网关监听端口。
+- 已停止的发行版不探测、不写文件。`docker-desktop` 开头的名字跳过。列不出正在运行的名单时，一个都不探测。
+- toml 形态与本机 Codex 相同。API 形态的目录路径是发行版里的 Linux 路径。stash 键是 `codex@wsl:<distro>.<field>`，不覆盖本机 `codex.*`。登录态仍由调用方传入。
+- 不写 `wsl.json`，不记住已停止的发行版。
