@@ -127,6 +127,7 @@ flowchart LR
 - 模型 id `group/<id>` 展开成该分组的成员，成员也可以是另一个分组。会让分组包含自己、或嵌套深过 8 层的写入不改 `model_gateway.json`。同名模型的自动分组在调用方列出模型时推导，用户编辑之前不写入。不读密钥表。
 - 分组上的规则按书写顺序匹配。token 数、图像、effort 和来源 Agent 都满足才算命中。第一条命中的成员排到已经展开的顺序最前，其余不动。没有命中时展开顺序保持原样。来源 Agent 先看占位 bearer `skillstar-<id>`，认不出再用 User-Agent。
 - 带 intent 的规则只在分类器于回合开始点名、且置信度达到 0.4 时命中。模型 id 写在分组的 `classifier`，可以是 `provider/model` 或 `group/<id>`。没写时不命中，也不另找本机模型。失败、超时或答非所问都没有 intent 命中。相同消息 10 分钟内沿用上次的回答；失败后 30 秒内不再问。回合中途不再问。问询带上 User-Agent `skillstar-router/1`，期限 8 秒。这一步不加载决策模型。
+- 脱敏默认关闭。开关在 `model_gateway.json` 顶层：`redact`、`redact_personal`、`redact_words`、`redact_rules`，词表和自定义规则是 `redact_word_list`、`redact_rule_list`。打开后，正文在翻译之后、发给上游之前换成占位符；上游响应在译回 Agent 之前还原。密钥文件是 `config_dir()/redact.key`，新建时 Unix 权限 `0600`。文件缺失或读不出来时正文原样离开，不创建密钥文件。
 - 保存 Codex 只写环回。已登录：`openai_base_url` 指向 `{origin}/backend-api/codex`。API 形态：`[model_providers.skillstar]`，`base_url` 是 `{origin}/v1`，`wire_api = "responses"`，占位 bearer `skillstar`，目录文件 `skillstar-models.json`。接管字段之前，旧值进 `config_dir()/agent_stash.json`（Unix `0600`，原子替换）。取消托管按 stash 写回。表和目录文件留下。网关不推断登录态，调用方传入形态。`skillstar-models` 不依赖网关。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 

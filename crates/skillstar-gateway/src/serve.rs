@@ -288,6 +288,7 @@ async fn forward_turn(
     let Some(base) = upstream else {
         return plain(StatusCode::BAD_GATEWAY, "no upstream");
     };
+    let upstream_bytes = crate::redact::mask_outbound(&upstream_bytes);
     let url = format!("{}{url_path}", base.trim_end_matches('/'));
     crate::outbound::note_outbound(&url);
     let client = match skillstar_core::infra::http_client::stream_http_client() {
@@ -308,6 +309,7 @@ async fn forward_turn(
         Ok(bytes) => bytes,
         Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream body"),
     };
+    let bytes = crate::redact::unmask_response(&bytes);
     let outbound = match protocol {
         Some(protocol) => match outbound_body(protocol, &bytes) {
             Ok(body) => body,
