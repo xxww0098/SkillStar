@@ -4,9 +4,9 @@
 //! all have to hold. The first rule that holds moves its member to the front
 //! of an already expanded list. The rest stay where they were.
 //!
-//! A rule that names an intent does not match here. This function does not
-//! ask a classifier. No match, or a rule that names nobody on the list,
-//! leaves the expanded order alone.
+//! A rule that names an intent matches only when `request.intent` is that
+//! verdict. This function does not ask a classifier. No match, or a rule
+//! that names nobody on the list, leaves the expanded order alone.
 
 use std::fs;
 
@@ -34,7 +34,8 @@ pub struct GroupRule {
     pub intent: String,
 }
 
-/// What a rule can see in one request. `intent` is ignored until a classifier runs.
+/// What a rule can see in one request. `intent` is a classifier verdict.
+/// Leave it empty when no classifier has accepted one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuleRequest {
     pub tokens: u64,
@@ -118,8 +119,9 @@ pub fn request_agent(caller: &Caller<'_>) -> String {
     agent_product(caller.user_agent)
 }
 
-fn matches_now(rule: &GroupRule, request: &RuleRequest) -> bool {
-    if !rule.intent.trim().is_empty() {
+pub(crate) fn matches_now(rule: &GroupRule, request: &RuleRequest) -> bool {
+    let intent = rule.intent.trim();
+    if !intent.is_empty() && !intent.eq_ignore_ascii_case(request.intent.trim()) {
         return false;
     }
     if rule.tokens > 0 && request.tokens < rule.tokens {
@@ -134,7 +136,11 @@ fn matches_now(rule: &GroupRule, request: &RuleRequest) -> bool {
     if !agent_ok(&rule.agents, &request.agent) {
         return false;
     }
-    rule.tokens > 0 || rule.images || !rule.effort.trim().is_empty() || !rule.agents.is_empty()
+    rule.tokens > 0
+        || rule.images
+        || !rule.effort.trim().is_empty()
+        || !rule.agents.is_empty()
+        || !intent.is_empty()
 }
 
 fn effort_ok(effort: &str, request: &RuleRequest) -> bool {

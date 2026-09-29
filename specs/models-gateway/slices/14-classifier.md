@@ -2,7 +2,7 @@
 
 ## 契约
 
-带 intent 的规则在回合开始时问一次分类器：模型 id 是 `provider/model` 或另一个 `group/<id>`。置信度达到 `jevSure`（0.4）才算数。超时 8 秒、失败后 30 秒内不再问、相同消息缓存 10 分钟。回合中途不再问。问的时候 User-Agent 是 `skillstar-router/1`。失败、超时或答非所问时，没有 intent 命中。
+带 intent 的规则在回合开始时问一次分类器：模型 id 是 `provider/model` 或另一个 `group/<id>`，写在分组的 `classifier`。置信度达到 `jevSure`（0.4）才算数。超时 8 秒、失败后 30 秒内不再问、相同消息缓存 10 分钟。回合中途不再问。问的时候 User-Agent 是 `skillstar-router/1`。假上游收到的 JSON 带 `model` 和 `intents`。回答带 `intent` 和 `confidence`。失败、超时或答非所问时，没有 intent 命中。
 
 分类器是网关里的一次模型调用。它不加载 `skillstar-decision`，也不读 AgentJev 的权重。
 
@@ -24,6 +24,7 @@ cargo test -p skillstar-gateway classify_
 - `classify_once_per_turn`
 - `classify_cache_10m_and_rest_30s`
 - `classify_user_agent`
+- `classify_garbage_skips_intent`
 - `gateway_manifest_has_no_decision_dep`
 
 ## 可改

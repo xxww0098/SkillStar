@@ -5,8 +5,9 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 use skillstar_gateway::{
-    Caller, GroupRule, RouteMode, RouteOwner, RuleRequest, expand_group, order_with_rules,
-    outbound_log, request_agent, save_group, stored_route_mode, stored_rules,
+    Caller, ClassifyReply, ClassifyTurn, GroupRule, RouteMode, RouteOwner, RuleRequest,
+    expand_group, order_with_classifier, order_with_rules, outbound_log, request_agent, save_group,
+    stored_route_mode, stored_rules,
 };
 
 #[test]
@@ -122,11 +123,24 @@ fn rules_with_intent_do_not_match_yet() {
         .iter()
         .map(|rule| serde_json::from_value(rule.clone()).unwrap())
         .collect::<Vec<GroupRule>>();
-    let order = order_with_rules(
+    let mut asked = 0;
+    let order = order_with_classifier(
         &strings(&fixture["members"]),
         &rules,
         &request_from(&fixture["request"]),
+        "",
+        &ClassifyTurn {
+            id: "classifier-off",
+            opening: true,
+            message: "writing tests",
+            at: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
+        },
+        |_| {
+            asked += 1;
+            ClassifyReply::Failed
+        },
     );
+    assert_eq!(asked, 0, "a group with no classifier does not ask");
     assert_eq!(order, strings(&fixture["members"]));
     assert_eq!(outbound_log(), before, "an intent rule does not call out");
 }

@@ -1,0 +1,19 @@
+{
+  "message": "add a unit test for the parser",
+  "intents": ["writing tests"],
+  "members": ["text/m", "vision/m"],
+  "rules": [
+    {"use": "vision/m", "intent": "writing tests"},
+    {"use": "text/m", "intent": "reviewing code", "images": true}
+  ],
+  "group": {
+    "id": "pick",
+    "classifier": " c/cls ",
+    "members": ["text/m", "vision/m"],
+    "rules": [
+      {"use": "vision/m", "intent": "writing tests"},
+      {"use": "text/m", "intent": "reviewing code", "images": true}
+    ]
+  },
+  "groupModel": "group/fast"
+}
