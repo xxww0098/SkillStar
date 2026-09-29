@@ -2,7 +2,8 @@
 //! routing order, session affinity, upstream rest, routing groups and their
 //! rules, the intent classifier, secret redaction, vision transcription,
 //! subscription signing, the loopback listener, the Claude process bridge, the
-//! Codex config writer, WSL Codex, and the file-agent loopback writer.
+//! Codex config writer, WSL Codex, the models.dev catalog cache, and the
+//! file-agent loopback writer.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -13,6 +14,7 @@ mod codex;
 mod codex_prompt;
 mod group;
 mod hold;
+mod models_dev;
 mod outbound;
 mod redact;
 mod rest;
@@ -47,6 +49,9 @@ pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use group::{GROUP_PREFIX, MAX_NEST, SaveGroupError, ServedModel, expand_group, save_group};
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
+pub use models_dev::{
+    MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,
+};
 pub use outbound::{clear_outbound_log, outbound_log};
 pub use redact::{mask_outbound, unmask_response};
 pub use rest::{

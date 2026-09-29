@@ -120,7 +120,7 @@ flowchart LR
 
 - 桌面进程在打开窗口之前，用后台线程调用 `skillstar_gateway::serve`。`skillstar gateway serve` 走同一个函数，不打开窗口。其它 CLI 子命令不启动它。`src-tauri` 只认 argv，不直接依赖网关 crate。
 - 默认听 `127.0.0.1:21847`。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 直接拒绝，不绑定。地址已经被占用时，后启动的那一份把「地址已被占用」写到 stderr，不关掉先启动的那份，也不往 stdout 打日志。
-- 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。模型目录不在网关 crate 里；模型 id 含 `/` 时解析失败是本机错误，请求不转给厂商。
+- 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。环回的模型列表不读 models.dev 缓存；模型 id 含 `/` 时解析失败是本机错误，请求不转给厂商。
 - 路由模式放在 `model_gateway.json` 里 provider 或分组的 `routing`。空字符串和缺省是 smart。这份文件只在已经存在时读取；启动不创建、不改写它。密钥仍在 `model_providers.json`，配额仍在 Usage。网关不打开这两处。
 - 亲和在路由顺序之前决定要不要留下上次的回答者。留下时，那一名排到已经算出的顺序最前；`off` 时顺序不变。空模式在回合内留下，跨回合只在厂商缓存还值得、而且还没冷的时候留下。会话从 `X-Skillstar-Session` 认起，不认 `X-Magpie-Session`。休息中的回答者标成 `resting`，这一步不换人。模式、上次的 stick 和时钟由调用方传入。
 - 一次失败休息多久，只看这次的状态码和正文。时钟、已用份额和窗口恢复时间由调用方传入，不向 Usage 拉取。频率限制不按配额的缺省时长休息。配额自己写明的恢复时间可以长过一小时，厂商的 Retry-After 仍最多信一小时。验证失败在更短的一段时间里用上一次的拒绝回答，不再问上游。内容字节已经写下之后，下一次挑选不再叫另一条上游。未到期的候选从这次挑选里拿掉。不认 `X-Magpie-Resets-At`。
@@ -138,6 +138,7 @@ flowchart LR
 - Alma 由 `apply_gateway("alma", …)` 经 `http://localhost:23001` 写入。provider 名是 `skillstar`，类型是 openai，地址是网关的 `/v1`。默认模型是 Alma 返回的 provider id、一个冒号、再加所选 id。没在跑时成功返回，不写文件。
 - Cindy 不写自己的数据库。`cindy_link` 生成 `cindy://provider/import?v=1&data=...`。Claude Code 的端点是网关根，Codex 和 Pi 是网关的 `/v1`。密钥是 `skillstar-cindy`。是否已经导入，只读那份数据库来判断。
 - WSL 里正在运行的 Codex 是单独的 Agent，id 是 `codex@wsl:<发行版>`。配置经 `\\wsl.localhost\<发行版>` 打开。已停止的发行版不启动。mirrored 写 `127.0.0.1`，NAT 写该发行版看到的 Windows 地址。toml 形态与本机 Codex 相同。非 Windows 不调用 `wsl.exe`。
+- models.dev 目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，正文是下载到的 `https://models.dev/api.json`。下载走 `probe_http_client`。失败时留下已有文件；没有文件时读出来是空的，不放入手写模型表。不写 provider 的 `model_catalog`，也不写 `cache/model_catalog/`。
 - 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP

@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：24 已落地。最后更新：2026-09-30。
+状态：25 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-24 已落地。正在运行的发行版是 `codex@wsl:<distro>`，配置经 `\\wsl.localhost\<distro>` 打开。mirrored 写 `127.0.0.1`，NAT 写该发行版看到的 Windows 地址。已停止的发行版不启动。非 Windows 不调用 `wsl.exe`。当前机器不是 Windows，真探针未跑，不要标成三平台已通过。选择记在 [choices.md](choices.md)。
+25 已落地。目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，正文是 `https://models.dev/api.json` 的响应。下载走 `probe_http_client`。失败留下已有文件；没有文件时读出来是空的。不写 provider 的 `model_catalog`，不写 `cache/model_catalog/`。页面投影留到 27 档。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/25-models-dev.md](slices/25-models-dev.md)：网关从 `https://models.dev/api.json` 取目录，缓存在数据根的 `cache/gateway-catalog/models.dev.json`。下载走 `probe_http_client`。不写 provider 的 `model_catalog`，不写 `cache/model_catalog/`。`SKILLSTAR_DATA_DIR` 带着缓存走。保持 `wsl_codex_`、`cindy_`、`alma_`、`hanako_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/26-provider-row.md](slices/26-provider-row.md)：Providers 栏的一行显示名称和掩码后的凭据摘要。行内没有明文密钥，没有厂商 base URL。这是视觉档，接受前跑 screenshot-critique，看 1440×900 与 1280×800。不要重启 Vite，也不要重启 magpie 的静态服务。保持 `models_dev_`、`wsl_codex_`、`cindy_`、`alma_`、`hanako_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -42,7 +42,7 @@
 - [x] 22 Alma — [slices/22-alma.md](slices/22-alma.md)
 - [x] 23 Cindy — [slices/23-cindy.md](slices/23-cindy.md)
 - [x] 24 WSL Codex — [slices/24-wsl-codex.md](slices/24-wsl-codex.md)
-- [ ] 25 models.dev — [slices/25-models-dev.md](slices/25-models-dev.md)
+- [x] 25 models.dev — [slices/25-models-dev.md](slices/25-models-dev.md)
 - [ ] 26 提供商行 — [slices/26-provider-row.md](slices/26-provider-row.md)
 - [ ] 27 模型选择器 — [slices/27-model-picker.md](slices/27-model-picker.md)
 - [ ] 28 次要字段 — [slices/28-secondary-fields.md](slices/28-secondary-fields.md)
