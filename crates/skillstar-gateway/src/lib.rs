@@ -29,7 +29,7 @@ mod wsl;
 
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
-    desktop_alias, desktop_dirs, desktop_effort_alias, token_for,
+    desktop_alias, desktop_dirs, desktop_effort_alias, token_for, written_loopback_label,
 };
 pub use affinity::{
     AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,

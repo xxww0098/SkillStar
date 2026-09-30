@@ -7,4 +7,9 @@ export type ModelsBoardRowDto = { id: string, name: string,
 /**
  * Masked credential line for a provider. Empty on Agents and Gateway.
  */
-credential_summary: string, };
+credential_summary: string, 
+/**
+ * Loopback host:port already written for this agent, such as `127.0.0.1:21847`.
+ * Empty when nothing loopback has been written, and on Providers and Gateway.
+ */
+loopback_label: string, };

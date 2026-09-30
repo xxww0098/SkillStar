@@ -93,6 +93,49 @@ fn loopback_origin() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// Host and port already written for this agent, like `127.0.0.1:21847`.
+///
+/// Reads the files that writer owns. A missing file, or a file whose URL is
+/// not `http://127.0.0.1:<port>`, is empty. This does not read the provider
+/// store and does not invent an address.
+pub fn written_loopback_label(agent_id: &str) -> String {
+    for path in written_paths(agent_id) {
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(label) = loopback_label_in(&text) {
+            return label;
+        }
+    }
+    String::new()
+}
+
+fn written_paths(agent_id: &str) -> Vec<PathBuf> {
+    let home = agent_home();
+    if agent_id == "codex" {
+        return vec![home_dir().join(".codex").join("config.toml")];
+    }
+    if agent_id == "hanako" {
+        return vec![hanako::catalog_path(&home)];
+    }
+    if !FILE_AGENTS.contains(&agent_id) {
+        return Vec::new();
+    }
+    body::files(agent_id, &home, "http://127.0.0.1:1", "probe")
+        .map(|files| files.into_iter().map(|file| file.path).collect())
+        .unwrap_or_default()
+}
+
+fn loopback_label_in(text: &str) -> Option<String> {
+    const MARKER: &str = "http://127.0.0.1:";
+    let rest = &text[text.find(MARKER)? + MARKER.len()..];
+    let port: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if port.is_empty() || port.len() > 5 {
+        return None;
+    }
+    Some(format!("127.0.0.1:{port}"))
+}
+
 fn snap_key(agent_id: &str, rel: &str) -> String {
     format!("{agent_id}|{rel}")
 }
@@ -158,5 +201,23 @@ pub(crate) fn override_dir(var: &str, fallback: PathBuf) -> PathBuf {
     match std::env::var_os(var) {
         Some(value) if !value.is_empty() => PathBuf::from(value),
         _ => fallback,
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::loopback_label_in;
+
+    #[test]
+    fn a_vendor_url_is_not_a_loopback_label() {
+        assert_eq!(loopback_label_in("https://api.openai.com/v1"), None);
+        assert_eq!(
+            loopback_label_in("base_url = \"http://127.0.0.1:21847/v1\""),
+            Some("127.0.0.1:21847".to_string())
+        );
+        assert_eq!(
+            loopback_label_in("http://127.0.0.1:21847/backend-api/codex"),
+            Some("127.0.0.1:21847".to_string())
+        );
     }
 }

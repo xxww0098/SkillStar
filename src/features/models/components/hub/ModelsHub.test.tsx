@@ -94,6 +94,35 @@ describe("ModelsHub", () => {
     expect(text).not.toMatch(/vendor\.example/);
   });
 
+  it("shows the written loopback under the agent and hides a vendor url", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") {
+        return {
+          agents: [
+            { id: "codex", name: "Codex", credential_summary: "", loopback_label: "127.0.0.1:21847" },
+            {
+              id: "opencode",
+              name: "OpenCode",
+              credential_summary: "",
+              loopback_label: "https://api.openai.com/v1",
+            },
+          ],
+          providers: [{ id: "p1", name: "DeepSeek", credential_summary: "", loopback_label: "" }],
+          gateway: [],
+        };
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    expect(await screen.findByText("127.0.0.1:21847")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Codex/ })).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toContain("api.openai.com");
+    expect(text).not.toContain(PLAINTEXT_KEY);
+  });
+
   it("opens a picker of provider and group ids and saves the chosen id", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_models_board") return BOARD;

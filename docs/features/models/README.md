@@ -106,6 +106,8 @@ Models 页从左到右是 Agents、Providers、Gateway 三栏。栏内第一屏�
 
 点 Agents 栏的一行打开选择器。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`。保存走该 Agent 已经落地的 writer。尚未落地的 id 返回 `agent_not_managed`，不写文件。弹出层不显示密钥，也不显示厂商 URL。
 
+Agent 名称下面的一行是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
+
 Settings 的 App AI 仍用 `get_providers_flat`。切换三栏、点 Providers 或 Gateway 的行、或点侧栏里的最近名字，只改变当前选中。保存所选模型才写该 Agent 的配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
 
 

@@ -168,6 +168,10 @@ fn chat_body(model_ref: &str) -> String {
     )
 }
 
+pub(super) fn catalog_path(home: &Path) -> PathBuf {
+    hanako_dir(home).join("provider-catalog.json")
+}
+
 fn hanako_dir(home: &Path) -> PathBuf {
     if !sandboxed()
         && let Some(value) = std::env::var("HANA_HOME").ok().filter(|value| !value.is_empty())

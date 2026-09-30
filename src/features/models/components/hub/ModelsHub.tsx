@@ -8,6 +8,26 @@ import type { ModelsNavBridge } from "../../lib/navBridge";
 
 type ColumnId = "agents" | "providers" | "gateway";
 
+/** Agent name, then the loopback host:port when one was written. */
+function AgentRowLabel({ name, loopbackLabel }: { name: string; loopbackLabel: string }) {
+  const label = loopbackText(loopbackLabel);
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate">{name}</span>
+      {label ? <span className="truncate text-xs font-normal text-muted-foreground">{label}</span> : null}
+    </span>
+  );
+}
+
+/** Only `127.0.0.1:<port>` is drawn. Anything else, including a vendor URL, is blank. */
+function loopbackText(value: string): string {
+  const prefix = "127.0.0.1:";
+  if (!value.startsWith(prefix)) return "";
+  const port = value.slice(prefix.length);
+  if (!/^\d{1,5}$/.test(port)) return "";
+  return value;
+}
+
 /** Providers column label. It receives the masked summary, not a key or a URL. */
 function ProviderRowLabel({ name, credentialSummary }: { name: string; credentialSummary: string }) {
   return (
@@ -84,12 +104,15 @@ export function ModelsHub({
                     }}
                     className={cn(
                       "w-full min-w-0 cursor-pointer rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/40",
-                      entry.id === "providers" ? "flex" : "truncate",
+                      entry.id === "providers" && "flex",
+                      entry.id === "gateway" && "truncate",
                       entry.id === "providers" && selectedProviderId === row.id && "bg-primary/15 font-medium",
                     )}
                   >
                     {entry.id === "providers" ? (
                       <ProviderRowLabel name={row.name} credentialSummary={row.credential_summary ?? ""} />
+                    ) : entry.id === "agents" ? (
+                      <AgentRowLabel name={row.name} loopbackLabel={row.loopback_label ?? ""} />
                     ) : (
                       row.name
                     )}
