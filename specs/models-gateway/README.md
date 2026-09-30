@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：30 已落地。最后更新：2026-09-30。
+状态：31 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-30 已落地。Gateway 栏里，选中的提供商和已经写在 `model_gateway.json` 里的分组，用分段按钮改路由和亲和。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json`。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
+31 已落地。三栏在读取成功而且为空时各有一句：还没有探测到可配置的 Agent；还没有密钥；还没有调用。读取失败不显示这些句子。不造假行，不提示厂商 URL。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/31-empty-states.md](slices/31-empty-states.md)：三栏没有数据时各有一句。Agents：还没有探测到可配置的 Agent。Providers：还没有密钥。Gateway：还没有调用。三句都不提示厂商 URL，也不出现示例密钥。不造一条假数据来躲开空态。文案在前端。这是视觉档，三栏各裁一次，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 26–30 的非空渲染为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/32-group-controls.md](slices/32-group-controls.md)：人可以新建分组、增减成员，并在成环或超过 8 层时看到拒绝。拒绝时文件不变，界面留下后端返回的原因。控件调用 12 档的写入，不在前端再算环。未编辑的自动分组不出现在已保存列表里。这是视觉档，裁正在编辑的分组的成员区，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 `cargo test -p skillstar-gateway group_` 为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -48,7 +48,7 @@
 - [x] 28 次要字段 — [slices/28-secondary-fields.md](slices/28-secondary-fields.md)
 - [x] 29 最近请求 — [slices/29-recent-calls.md](slices/29-recent-calls.md)
 - [x] 30 路由控件 — [slices/30-routing-controls.md](slices/30-routing-controls.md)
-- [ ] 31 空态 — [slices/31-empty-states.md](slices/31-empty-states.md)
+- [x] 31 空态 — [slices/31-empty-states.md](slices/31-empty-states.md)
 - [ ] 32 分组控件 — [slices/32-group-controls.md](slices/32-group-controls.md)
 - [ ] 33 配置档 — [slices/33-profiles.md](slices/33-profiles.md)
 - [ ] 34 局域网 — [slices/34-lan.md](slices/34-lan.md)

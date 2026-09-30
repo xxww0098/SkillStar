@@ -103,6 +103,13 @@ const COLUMNS: { id: ColumnId; labelKey: string }[] = [
   { id: "gateway", labelKey: "models.columns.gateway" },
 ];
 
+/** Shown only after that column's read succeeds with nothing in it. */
+const EMPTY_COLUMN: Record<ColumnId, string> = {
+  agents: "还没有探测到可配置的 Agent",
+  providers: "还没有密钥",
+  gateway: "还没有调用",
+};
+
 /**
  * Models page: Agents, Providers, Gateway. Column bodies may be empty.
  * A drawer request from the retired workbench is ignored.
@@ -114,10 +121,11 @@ export function ModelsHub({
   clearModelsDrawerRequest,
 }: ModelsNavBridge) {
   const { t } = useTranslation();
-  const { data } = useModelsBoard();
-  const { data: recent } = useRecentCalls();
+  const boardQuery = useModelsBoard();
+  const recentQuery = useRecentCalls();
+  const { data } = boardQuery;
   const { data: routingPage } = useRoutingPage(selectedProviderId);
-  const calls = recent ?? [];
+  const calls = recentQuery.data ?? [];
   const groups = routingPage?.groups ?? [];
   const [column, setColumn] = useState<ColumnId | null>(null);
   const [picker, setPicker] = useState<{ id: string; name: string } | null>(null);
@@ -165,8 +173,14 @@ export function ModelsHub({
                     affinity={group.affinity}
                   />
                 ))}
-                <RecentCalls calls={calls} />
+                {recentQuery.isSuccess && calls.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">{EMPTY_COLUMN.gateway}</p>
+                ) : calls.length > 0 ? (
+                  <RecentCalls calls={calls} />
+                ) : null}
               </>
+            ) : boardQuery.isSuccess && rows[entry.id].length === 0 ? (
+              <p className="px-4 py-3 text-sm text-muted-foreground">{EMPTY_COLUMN[entry.id]}</p>
             ) : (
               <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto px-2 py-3">
                 {rows[entry.id].map((row) => (

@@ -177,6 +177,9 @@ describe("ModelsHub", () => {
     expect(text).not.toContain("api.openai.com");
     expect(text).not.toContain("remaining");
     expect(text).not.toContain(PLAINTEXT_KEY);
+    expect(screen.queryByText("还没有调用")).toBeNull();
+    expect(screen.queryByText("还没有探测到可配置的 Agent")).toBeNull();
+    expect(screen.queryByText("还没有密钥")).toBeNull();
   });
 
   it("opens a picker of provider and group ids and saves the chosen id", async () => {
@@ -264,6 +267,51 @@ describe("ModelsHub", () => {
     expect(text).not.toMatch(/quota|remaining|配额|剩余/i);
   });
 
+  it("says what is missing when each column is empty", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return { agents: [], providers: [], gateway: [] };
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    expect(await screen.findByText("还没有探测到可配置的 Agent")).toBeTruthy();
+    expect(screen.getByText("还没有密钥")).toBeTruthy();
+    expect(screen.getByText("还没有调用")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /DeepSeek|Codex|sk-/ })).toBeNull();
+    expect(screen.queryByRole("columnheader")).toBeNull();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+    expect(text).not.toContain("api.openai.com");
+  });
+
+  it("drops only the provider sentence after one provider exists", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") {
+        return {
+          agents: [],
+          providers: [{ id: "p1", name: "DeepSeek", credential_summary: "" }],
+          gateway: [],
+        };
+      }
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    expect(await screen.findByRole("button", { name: "DeepSeek" })).toBeTruthy();
+    expect(screen.getByText("还没有探测到可配置的 Agent")).toBeTruthy();
+    expect(screen.queryByText("还没有密钥")).toBeNull();
+    expect(screen.getByText("还没有调用")).toBeTruthy();
+    expect(screen.queryByRole("columnheader")).toBeNull();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+  });
+
   it("keeps the three titles when the board command fails", async () => {
     mockInvoke.mockRejectedValue(new Error("https://vendor.example/v1 sk-secret"));
     renderHub(<ModelsHub {...navigation()} />);
@@ -271,6 +319,9 @@ describe("ModelsHub", () => {
     expect(await screen.findByRole("heading", { name: "Agents" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Providers" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Gateway" })).toBeTruthy();
+    expect(screen.queryByText("还没有探测到可配置的 Agent")).toBeNull();
+    expect(screen.queryByText("还没有密钥")).toBeNull();
+    expect(screen.queryByText("还没有调用")).toBeNull();
     expect(document.body.textContent).not.toMatch(/https:\/\//);
     expect(document.body.textContent).not.toMatch(/sk-secret/);
   });
