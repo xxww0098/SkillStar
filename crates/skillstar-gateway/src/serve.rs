@@ -351,7 +351,7 @@ async fn forward_body(
 ) -> Turn {
     let upstream_bytes = match protocol {
         Some(protocol) => match upstream_body(protocol, inbound) {
-            Ok(body) => body,
+            Ok(body) => crate::effort::apply_upstream_effort(&body, ""),
             Err(_) => return Turn::text(StatusCode::BAD_REQUEST, "bad request"),
         },
         None => inbound.to_vec(),

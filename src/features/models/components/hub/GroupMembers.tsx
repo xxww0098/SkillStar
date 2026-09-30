@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { tauriInvoke } from "@/lib/ipc";
 import type { SavedGroup } from "@/lib/ipc/commands/models";
 import { modelsKeys } from "../../api/keys";
@@ -91,6 +91,12 @@ export function GroupMembers() {
               group.members.filter((item) => item !== member),
             );
           }}
+          onFix={(member, next) => {
+            void commit(
+              group.id,
+              group.members.map((item) => (item === member ? next : item)),
+            );
+          }}
         />
       ))}
     </div>
@@ -104,6 +110,7 @@ function GroupRow({
   onDraft,
   onAdd,
   onRemove,
+  onFix,
 }: {
   group: SavedGroup;
   draft: string;
@@ -111,28 +118,21 @@ function GroupRow({
   onDraft: (value: string) => void;
   onAdd: () => void;
   onRemove: (member: string) => void;
+  onFix: (member: string, next: string) => void;
 }) {
   const label = plainText(group.id);
   return (
     <div role="group" aria-label={`group members ${label}`.trim()} className="space-y-1">
       {label ? <div className="truncate text-xs text-muted-foreground">{label}</div> : null}
       <ul className="space-y-0.5">
-        {group.members.map((member) => {
-          const shown = plainText(member);
-          return (
-            <li key={member} className="flex items-center gap-1">
-              {shown ? <span className="min-w-0 flex-1 truncate text-xs">{shown}</span> : <span className="flex-1" />}
-              <button
-                type="button"
-                aria-label={shown ? `Remove ${shown}` : "Remove"}
-                onClick={() => onRemove(member)}
-                className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40"
-              >
-                Remove
-              </button>
-            </li>
-          );
-        })}
+        {group.members.map((member) => (
+          <MemberLine
+            key={member}
+            member={member}
+            onRemove={() => onRemove(member)}
+            onFix={(next) => onFix(member, next)}
+          />
+        ))}
       </ul>
       <form
         className="flex gap-1"
@@ -158,6 +158,60 @@ function GroupRow({
       ) : null}
     </div>
   );
+}
+
+function MemberLine({
+  member,
+  onRemove,
+  onFix,
+}: {
+  member: string;
+  onRemove: () => void;
+  onFix: (next: string) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: modelsKeys.modelEfforts(member),
+    queryFn: () => tauriInvoke<string[]>("model_efforts", { id: member }),
+  });
+  const levels = data ?? [];
+  const { model, effort } = splitMember(member, levels);
+  const shown = plainText(model);
+  return (
+    <li className="flex items-center gap-1">
+      {shown ? <span className="min-w-0 flex-1 truncate text-xs">{shown}</span> : <span className="flex-1" />}
+      {levels.length > 0 ? (
+        <select
+          aria-label={`effort for ${shown}`}
+          value={levels.includes(effort) ? effort : ""}
+          onChange={(event) => onFix(event.target.value ? `${model}:${event.target.value}` : model)}
+          className="rounded-lg bg-muted/40 px-2 py-1 text-xs text-foreground"
+        >
+          <option value="">·</option>
+          {levels.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <button
+        type="button"
+        aria-label={shown ? `Remove ${shown}` : "Remove"}
+        onClick={onRemove}
+        className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+      >
+        Remove
+      </button>
+    </li>
+  );
+}
+
+function splitMember(member: string, levels: string[]): { model: string; effort: string } {
+  const index = member.lastIndexOf(":");
+  if (index <= 0) return { model: member, effort: "" };
+  const effort = member.slice(index + 1);
+  if (!levels.includes(effort)) return { model: member, effort: "" };
+  return { model: member.slice(0, index), effort };
 }
 
 function plainText(value: string): string {

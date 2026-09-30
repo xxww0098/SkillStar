@@ -154,6 +154,11 @@ pub(super) fn child_env(account: &AccountSnapshot) -> Vec<(String, String)> {
     env
 }
 
+/// The effort word the Claude process is given. `xhigh` is `max` here only.
+pub fn bridge_effort_arg(effort: &str) -> &str {
+    if effort == "xhigh" { "max" } else { effort }
+}
+
 fn cli_args(model: &str, mcp_config: &str, effort: &str, web_search: bool) -> Vec<String> {
     let tools = if web_search { "WebSearch" } else { "" };
     let mut args = vec![
@@ -177,7 +182,7 @@ fn cli_args(model: &str, mcp_config: &str, effort: &str, web_search: bool) -> Ve
         "--no-session-persistence".to_string(),
     ];
     if !effort.is_empty() {
-        let effort = if effort == "xhigh" { "max" } else { effort };
+        let effort = bridge_effort_arg(effort);
         args.push("--effort".to_string());
         args.push(effort.to_string());
         args.push("--thinking-display".to_string());

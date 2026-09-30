@@ -3,7 +3,8 @@
 //! rules, the intent classifier, secret redaction, vision transcription,
 //! subscription signing, the listener, the Claude process bridge, the
 //! Codex config writer, WSL Codex, the models.dev catalog cache, the
-//! file-agent loopback writer, named profiles, model display names, and the in-memory ring of recent calls.
+//! file-agent loopback writer, named profiles, model display names, effort
+//! fitting, and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -12,6 +13,7 @@ mod classify;
 mod claude;
 mod codex;
 mod codex_prompt;
+mod effort;
 mod group;
 mod hold;
 mod listen;
@@ -47,11 +49,12 @@ pub use classify::{
 pub use claude::{
     AccountSnapshot, CallbackOutcome, ClaudeBridge, ClaudeError, ClaudeLaunch, ClaudeRun,
     ClaudeTool, IDLE_LONGEST, IDLE_MOST, PARK_LONGEST, STDERR_CAP, TEMP_PREFIX, TURN_ABORT,
-    ToolResult, begin_callback, callback_token, find_claude_binary, listener_bridge,
-    run_mcp_helper,
+    ToolResult, begin_callback, bridge_effort_arg, callback_token, find_claude_binary,
+    listener_bridge, run_mcp_helper,
 };
 pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
+pub use effort::{apply_upstream_effort, model_efforts};
 pub use group::{
     GROUP_PREFIX, MAX_NEST, SaveGroupError, SavedGroup, ServedModel, expand_group, save_group,
     stored_group_ids, stored_groups,

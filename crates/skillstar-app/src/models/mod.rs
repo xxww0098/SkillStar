@@ -9,6 +9,7 @@ pub mod agents;
 pub mod board;
 mod codex_save;
 pub mod dto;
+pub mod effort;
 mod gateway_save;
 pub mod groups;
 pub mod listen;
@@ -23,6 +24,7 @@ pub use codex_save::{CodexRoute, release_codex, save_codex};
 pub use gateway_save::save_agent;
 pub use groups::{SavedGroupDto, SaveGroupControlError, load_saved_groups, save_group_members};
 pub use listen::{SaveListenControlError, load_listen_mode, save_listen_mode};
+pub use effort::model_efforts;
 pub use names::{SaveModelNameControlError, save_model_name};
 pub use picker::{ModelChoiceDto, load_model_choices};
 pub use profiles::{

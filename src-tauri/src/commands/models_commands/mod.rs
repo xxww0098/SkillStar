@@ -41,11 +41,13 @@ mod listen;
 mod names;
 mod profiles;
 mod routing;
+mod efforts;
 mod diagnostics;
 mod provider_cmds;
 mod tools;
 
 pub use board::*;
+pub use efforts::*;
 pub use diagnostics::*;
 pub use groups::*;
 pub use listen::*;

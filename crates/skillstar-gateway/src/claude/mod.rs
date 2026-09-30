@@ -24,7 +24,7 @@ use serde_json::Value;
 
 pub use callback::{CallbackOutcome, begin_callback, callback_token};
 pub use helper::run_mcp_helper;
-pub use process::find_claude_binary;
+pub use process::{bridge_effort_arg, find_claude_binary};
 
 use clock::SharedClock;
 

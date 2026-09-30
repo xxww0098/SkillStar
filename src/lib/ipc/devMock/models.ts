@@ -120,6 +120,12 @@ export const MODELS_HANDLERS: DevMockHandlers = {
       groups: savedGroups.map((group) => ({ id: group.id, ...remembered("group", group.id) })),
     };
   },
+  model_efforts: (args) => {
+    const id = typeof args?.id === "string" ? args.id : "";
+    const bare = id.replace(/:(none|minimal|low|medium|high|xhigh|max)$/, "");
+    if (!bare.includes("/") || bare.startsWith("group/")) return [];
+    return ["low", "high"];
+  },
   get_saved_groups: () => savedGroups.map((group) => ({ id: group.id, members: [...group.members] })),
   save_group_members: (args) => {
     const raw = typeof args?.id === "string" ? args.id : "";

@@ -84,6 +84,8 @@ export interface ModelsCommands {
   get_saved_groups: { args: Record<string, never>; result: SavedGroup[] };
   /** Replace one group's members. A refusal leaves the file unchanged. */
   save_group_members: { args: { id: string; members: string[] }; result: void };
+  /** Catalog effort levels for one upstream id. Empty when the cache has none. */
+  model_efforts: { args: { id: string }; result: string[] };
   /** Names already stored in the gateway file. */
   get_profile_names: { args: Record<string, never>; result: string[] };
   /** Replace one profile's agent id and model ref pairs. */
