@@ -18,7 +18,7 @@ use skillstar_core::infra::fs_ops::atomic_write;
 use skillstar_core::infra::paths::home_dir;
 
 use crate::codex::{self, ApplyError};
-use crate::{PLACEHOLDER_BEARER, resolve_addr};
+use crate::PLACEHOLDER_BEARER;
 
 /// Agents whose magpie writer emits a loopback URL. Order is the spec's.
 pub const FILE_AGENTS: &[&str] = &[
@@ -89,8 +89,7 @@ fn agent_home() -> PathBuf {
 }
 
 fn loopback_origin() -> String {
-    let port = resolve_addr().map(|addr| addr.port()).unwrap_or(21847);
-    format!("http://127.0.0.1:{port}")
+    crate::published_origin()
 }
 
 /// Host and port already written for this agent, like `127.0.0.1:21847`.

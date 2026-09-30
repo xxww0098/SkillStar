@@ -9,7 +9,7 @@
 //! is not cut off by either one.
 
 use std::io::{self, ErrorKind};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -154,11 +154,20 @@ pub fn resolve_addr() -> Result<SocketAddr, ServeError> {
         Ok(value) if !value.is_empty() => value,
         _ => DEFAULT_ADDR.to_string(),
     };
-    let addr: SocketAddr = raw.parse().map_err(|_| ServeError::BadAddr(raw))?;
+    let mut addr: SocketAddr = raw.parse().map_err(|_| ServeError::BadAddr(raw))?;
     if addr.port() == REFUSED_PORT {
         return Err(ServeError::RefusedPort);
     }
+    if crate::listen::listen_is_lan() {
+        addr.set_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    }
     Ok(addr)
+}
+
+/// Base URL written into agent files. A wildcard listen is still loopback here.
+pub fn published_origin() -> String {
+    let port = resolve_addr().map(|addr| addr.port()).unwrap_or(21847);
+    format!("http://127.0.0.1:{port}")
 }
 
 /// Bind and answer the gateway route table until [`Stop::stop`].

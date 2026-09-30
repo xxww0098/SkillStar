@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：33 已落地。最后更新：2026-09-30。
+状态：34 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-33 已落地。Gateway 栏列出已经保存的配置档名字。保存写下名字和 Agent 的 model ref。点一个名字就调用 `apply_gateway`。未实现的 id 不写文件。超过 64 个字或密钥形状的内容不改 `model_gateway.json`。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
+34 已落地。Gateway 栏可以在环回和局域网之间选。局域网让 `serve` 听 `0.0.0.0` 和原来的端口。写进 Agent 文件的地址仍是 `http://127.0.0.1:<端口>`。端口 `3425` 仍拒绝绑定。已经在听的进程不重新绑定。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/34-lan.md](slices/34-lan.md)：监听可以改成 `0.0.0.0:<端口>`。写进 Agent 文件的 URL 仍是 `http://127.0.0.1:<端口>`。默认仍是环回。端口 `3425` 拒绝绑定。这是视觉档，裁局域网开关和它的一行说明，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 04 档 `serve_refuses_magpie_port` 以及 06 与 18 的 URL 断言为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/35-model-rename.md](slices/35-model-rename.md)：人可以给一个目录模型一个显示名。显示名出现在选择器里，出站请求的 `model` 字段仍是上游 id。名字存在 `model_gateway.json` 的 `model_names`，不改 models.dev 缓存。这是视觉档，裁选择器里的那一项，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 01 档翻译夹具和 27 档按 id 保存为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -51,7 +51,7 @@
 - [x] 31 空态 — [slices/31-empty-states.md](slices/31-empty-states.md)
 - [x] 32 分组控件 — [slices/32-group-controls.md](slices/32-group-controls.md)
 - [x] 33 配置档 — [slices/33-profiles.md](slices/33-profiles.md)
-- [ ] 34 局域网 — [slices/34-lan.md](slices/34-lan.md)
+- [x] 34 局域网 — [slices/34-lan.md](slices/34-lan.md)
 - [ ] 35 模型改名 — [slices/35-model-rename.md](slices/35-model-rename.md)
 - [ ] 36 effort — [slices/36-effort.md](slices/36-effort.md)
 - [ ] 37 可见家族 — [slices/37-visible-families.md](slices/37-visible-families.md)

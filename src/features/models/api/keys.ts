@@ -10,6 +10,7 @@ export const modelsKeys = {
   routingPage: (providerId: string) => [...modelsKeys.all, "routing-page", providerId] as const,
   savedGroups: () => [...modelsKeys.all, "saved-groups"] as const,
   profileNames: () => [...modelsKeys.all, "profile-names"] as const,
+  listenMode: () => [...modelsKeys.all, "listen-mode"] as const,
 };
 
 /**

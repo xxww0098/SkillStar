@@ -120,6 +120,7 @@ fn fixture(name: &str) -> Vec<u8> {
 #[test]
 fn serve_binds_default_port() {
     let _guard = env_lock();
+    let _data = IsolatedDataDir::new();
     let previous = std::env::var(ADDR_ENV).ok();
     unsafe {
         std::env::remove_var(ADDR_ENV);

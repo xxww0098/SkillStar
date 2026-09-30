@@ -40,6 +40,7 @@ beforeEach(() => {
     if (cmd === "get_routing_page") return { provider: null, groups: [] };
     if (cmd === "get_saved_groups") return [];
     if (cmd === "get_profile_names") return [];
+    if (cmd === "get_listen_mode") return "loopback";
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -72,7 +73,14 @@ describe("ModelsHub", () => {
     fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
 
     expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(
-      new Set(["get_models_board", "get_recent_calls", "get_routing_page", "get_saved_groups", "get_profile_names"]),
+      new Set([
+        "get_models_board",
+        "get_recent_calls",
+        "get_routing_page",
+        "get_saved_groups",
+        "get_profile_names",
+        "get_listen_mode",
+      ]),
     );
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
     expect(nav.setSelectedProviderId).toHaveBeenCalledWith("p1");
@@ -91,6 +99,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -125,6 +134,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -163,6 +173,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -201,6 +212,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -236,6 +248,7 @@ describe("ModelsHub", () => {
       if (cmd === "save_routing") return null;
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     const nav = navigation();
@@ -286,6 +299,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -314,6 +328,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -349,6 +364,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [{ id: "demo", members: ["openai/gpt-test"] }];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       if (cmd === "save_group_members") throw new Error("group_cycle");
       throw new Error(`unexpected ${cmd}`);
     });
@@ -381,6 +397,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
       if (cmd === "save_group_members") throw new Error("group_cycle");
       throw new Error(`unexpected ${cmd}`);
     });
@@ -408,6 +425,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return ["work", "home"];
+      if (cmd === "get_listen_mode") return "loopback";
       if (cmd === "apply_profile") return { applied: ["opencode"], skipped: ["goose"] };
       throw new Error(`unexpected ${cmd}`);
     });
@@ -436,6 +454,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
       if (cmd === "get_profile_names") return ["work"];
+      if (cmd === "get_listen_mode") return "loopback";
       if (cmd === "save_profile") throw new Error("profile_name");
       throw new Error(`unexpected ${cmd}`);
     });
@@ -454,5 +473,60 @@ describe("ModelsHub", () => {
       name: "later",
       agents: [{ id: "opencode", modelRef: "openai/gpt-test" }],
     });
+  });
+
+  it("presses loopback and keeps the agent address on 127.0.0.1", async () => {
+    let mode = "loopback";
+    mockInvoke.mockImplementation(async (cmd: string, args?: { mode?: string }) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return mode;
+      if (cmd === "save_listen_mode") {
+        mode = typeof args?.mode === "string" ? args.mode : mode;
+        return null;
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const group = await screen.findByRole("group", { name: "lan listen" });
+    expect(await within(group).findByRole("button", { name: "环回", pressed: true })).toBeTruthy();
+    expect(within(group).getByRole("button", { name: "局域网", pressed: false })).toBeTruthy();
+    expect(group.textContent).toContain("127.0.0.1");
+    expect(group.textContent).not.toContain("0.0.0.0");
+
+    fireEvent.click(within(group).getByRole("button", { name: "局域网" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_listen_mode", { mode: "lan" });
+    });
+    expect(await within(group).findByRole("button", { name: "局域网", pressed: true })).toBeTruthy();
+    expect(within(group).getByRole("button", { name: "环回", pressed: false })).toBeTruthy();
+  });
+
+  it("leaves the pressed listen mode when the backend refuses", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      if (cmd === "save_listen_mode") throw new Error("listen_store");
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const group = await screen.findByRole("group", { name: "lan listen" });
+    expect(await within(group).findByRole("button", { name: "环回", pressed: true })).toBeTruthy();
+    fireEvent.click(within(group).getByRole("button", { name: "局域网" }));
+
+    expect((await within(group).findByRole("alert")).textContent).toBe("listen_store");
+    expect(within(group).getByRole("button", { name: "环回", pressed: true })).toBeTruthy();
+    expect(within(group).getByRole("button", { name: "局域网", pressed: false })).toBeTruthy();
+    expect(group.textContent).toContain("127.0.0.1");
+    expect(group.textContent).not.toContain("0.0.0.0");
   });
 });

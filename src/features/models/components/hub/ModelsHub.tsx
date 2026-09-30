@@ -9,6 +9,7 @@ import { useRecentCalls } from "../../api/recent";
 import { useRoutingPage } from "../../api/routing";
 import type { ModelsNavBridge } from "../../lib/navBridge";
 import { GroupMembers } from "./GroupMembers";
+import { LanListen } from "./LanListen";
 import { ProfileNames } from "./ProfileNames";
 import { RoutingControl } from "./RoutingControl";
 
@@ -159,6 +160,7 @@ export function ModelsHub({
             {entry.id === "gateway" ? (
               <>
                 <ProfileNames />
+                <LanListen />
                 {routingPage?.provider && selectedProviderId ? (
                   <RoutingControl
                     owner="provider"

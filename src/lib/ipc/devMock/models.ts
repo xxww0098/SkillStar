@@ -17,6 +17,8 @@ const routingMemory = new Map<string, { routing: string; affinity: string }>();
 
 const savedGroups: { id: string; members: string[] }[] = [{ id: "fast", members: ["openai/gpt-test"] }];
 
+let listenMode = "loopback";
+
 const profiles: { name: string; agents: { id: string; modelRef: string }[] }[] = [
   { name: "work", agents: [{ id: "opencode", modelRef: "openai/gpt-test" }] },
   { name: "home", agents: [{ id: "pi", modelRef: "group/fast" }] },
@@ -149,6 +151,13 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     const name = typeof args?.name === "string" ? args.name.trim() : "";
     if (!profiles.some((profile) => profile.name === name)) throw new Error("profile_missing");
     return { applied: [], skipped: [] };
+  },
+  get_listen_mode: () => listenMode,
+  save_listen_mode: (args) => {
+    const mode = typeof args?.mode === "string" ? args.mode : "";
+    if (mode !== "loopback" && mode !== "lan") throw new Error("listen_store");
+    listenMode = mode;
+    return null;
   },
   save_routing: (args) => {
     const owner = typeof args?.owner === "string" ? args.owner : "";

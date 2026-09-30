@@ -96,6 +96,10 @@ export interface ModelsCommands {
     args: { name: string };
     result: { applied: string[]; skipped: string[] };
   };
+  /** `loopback` or `lan`. */
+  get_listen_mode: { args: Record<string, never>; result: string };
+  /** Save loopback or LAN. A refusal leaves the file unchanged. */
+  save_listen_mode: { args: { mode: string }; result: void };
   save_agent_model: { args: { agentId: string; modelRef: string }; result: void };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
   update_provider_flat: {

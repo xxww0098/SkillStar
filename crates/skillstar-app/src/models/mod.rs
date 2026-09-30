@@ -11,6 +11,7 @@ mod codex_save;
 pub mod dto;
 mod gateway_save;
 pub mod groups;
+pub mod listen;
 pub mod picker;
 pub mod profiles;
 pub mod recent;
@@ -20,6 +21,7 @@ pub use account_book::UsageAccountBook;
 pub use codex_save::{CodexRoute, release_codex, save_codex};
 pub use gateway_save::save_agent;
 pub use groups::{SavedGroupDto, SaveGroupControlError, load_saved_groups, save_group_members};
+pub use listen::{SaveListenControlError, load_listen_mode, save_listen_mode};
 pub use picker::{ModelChoiceDto, load_model_choices};
 pub use profiles::{
     ApplyProfileControlError, ProfileAgentDto, ProfileApplyDto, SaveProfileControlError,
