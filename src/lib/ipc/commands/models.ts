@@ -98,6 +98,8 @@ export interface ModelsCommands {
   };
   /** `loopback` or `lan`. */
   get_listen_mode: { args: Record<string, never>; result: string };
+  /** Save the name shown for one catalog model. The upstream id stays. */
+  save_model_name: { args: { id: string; name: string }; result: void };
   /** Save loopback or LAN. A refusal leaves the file unchanged. */
   save_listen_mode: { args: { mode: string }; result: void };
   save_agent_model: { args: { agentId: string; modelRef: string }; result: void };

@@ -121,6 +121,7 @@ flowchart LR
 - 桌面进程在打开窗口之前，用后台线程调用 `skillstar_gateway::serve`。`skillstar gateway serve` 走同一个函数，不打开窗口。其它 CLI 子命令不启动它。`src-tauri` 只认 argv，不直接依赖网关 crate。
 - 默认听 `127.0.0.1:21847`。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 直接拒绝，不绑定。地址已经被占用时，后启动的那一份把「地址已被占用」写到 stderr，不关掉先启动的那份，也不往 stdout 打日志。
 - `model_gateway.json` 的 `listen` 写成 `lan` 时，`serve` 听 `0.0.0.0` 和原来的端口。没写或写成别的，仍按环境变量或默认环回。写进 Agent 文件的地址仍是 `http://127.0.0.1:<端口>`。端口 `3425` 在局域网打开时也拒绝绑定。已经绑上的套接字留到下一次 `serve`。
+- `model_gateway.json` 的 `model_names` 以 `provider/model` 为键保存显示名。选择器展示这个名字，没有时展示 id。出站 `model` 仍是上游 id。空名字、换行、超过 80 个标量、含 `://` 或 `sk-`、或目录里没有这个 id 时不写文件。目录缓存不被改写。
 - 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。转发完成的调用记在进程内的环里，最多 60 条，重启后为空，不写文件。记下的是时间、Agent、模型、状态和补全 token。没有密钥，没有上游 URL，也不向 Usage 要配额。环回的模型列表不读 models.dev 缓存；模型 id 含 `/` 时解析失败是本机错误，请求不转给厂商。
 - 路由模式放在 `model_gateway.json` 里 provider 或分组的 `routing`。空字符串和缺省是 smart。启动只在文件已经存在时读取，不创建、不改写它。路由控件另写这一行的 `routing` 与 `affinity`；smart 和 auto 可以不落字段，读回来仍是这两项。控件不打开 `model_providers.json`。密钥仍在那份 v4 文件里，配额仍在 Usage。网关转发不打开这两处。
 - 亲和在路由顺序之前决定要不要留下上次的回答者。留下时，那一名排到已经算出的顺序最前；`off` 时顺序不变。空模式在回合内留下，跨回合只在厂商缓存还值得、而且还没冷的时候留下。会话从 `X-Skillstar-Session` 认起，不认 `X-Magpie-Session`。休息中的回答者标成 `resting`，这一步不换人。模式、上次的 stick 和时钟由调用方传入。

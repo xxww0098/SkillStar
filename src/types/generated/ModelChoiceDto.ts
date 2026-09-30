@@ -2,5 +2,6 @@
 
 /**
  * One picker row. `id` is `provider/model` or `group/<id>`.
+ * `label` is the display name, or the same id when none was saved.
  */
-export type ModelChoiceDto = { id: string, };
+export type ModelChoiceDto = { id: string, label: string, };

@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：34 已落地。最后更新：2026-09-30。
+状态：35 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-34 已落地。Gateway 栏可以在环回和局域网之间选。局域网让 `serve` 听 `0.0.0.0` 和原来的端口。写进 Agent 文件的地址仍是 `http://127.0.0.1:<端口>`。端口 `3425` 仍拒绝绑定。已经在听的进程不重新绑定。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
+35 已落地。人可以给目录里的一个模型一个显示名。选择器展示这个名字，没有时展示 id。出站请求的 `model` 仍是上游 id。名字在 `model_gateway.json` 的 `model_names`。空名字、换行、过长、密钥形状，或目录里没有这个 id 时不写文件。目录缓存不改。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/35-model-rename.md](slices/35-model-rename.md)：人可以给一个目录模型一个显示名。显示名出现在选择器里，出站请求的 `model` 字段仍是上游 id。名字存在 `model_gateway.json` 的 `model_names`，不改 models.dev 缓存。这是视觉档，裁选择器里的那一项，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 01 档翻译夹具和 27 档按 id 保存为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/36-effort.md](slices/36-effort.md)：请求里的 effort 在发给上游之前，收成该模型目录里声明的等级。没有目录数据时原样通过。分组成员可以固定 effort，固定值优先于请求。Claude 进程桥的 `xhigh` → `max` 仍只按 05 档。38 档的等级子集本档不读。这是视觉档，裁成员上的 effort 固定控件，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 01 档翻译夹具为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -52,7 +52,7 @@
 - [x] 32 分组控件 — [slices/32-group-controls.md](slices/32-group-controls.md)
 - [x] 33 配置档 — [slices/33-profiles.md](slices/33-profiles.md)
 - [x] 34 局域网 — [slices/34-lan.md](slices/34-lan.md)
-- [ ] 35 模型改名 — [slices/35-model-rename.md](slices/35-model-rename.md)
+- [x] 35 模型改名 — [slices/35-model-rename.md](slices/35-model-rename.md)
 - [ ] 36 effort — [slices/36-effort.md](slices/36-effort.md)
 - [ ] 37 可见家族 — [slices/37-visible-families.md](slices/37-visible-families.md)
 - [ ] 38 effort 子集 — [slices/38-effort-subset.md](slices/38-effort-subset.md)

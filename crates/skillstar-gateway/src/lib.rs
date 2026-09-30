@@ -3,7 +3,7 @@
 //! rules, the intent classifier, secret redaction, vision transcription,
 //! subscription signing, the listener, the Claude process bridge, the
 //! Codex config writer, WSL Codex, the models.dev catalog cache, the
-//! file-agent loopback writer, named profiles, and the in-memory ring of recent calls.
+//! file-agent loopback writer, named profiles, model display names, and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -16,6 +16,7 @@ mod group;
 mod hold;
 mod listen;
 mod models_dev;
+mod names;
 mod outbound;
 mod profile;
 mod redact;
@@ -59,6 +60,7 @@ pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use models_dev::{
     MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,
 };
+pub use names::{SaveModelNameError, model_label, save_model_name, stored_model_names};
 pub use outbound::{clear_outbound_log, outbound_log};
 pub use profile::{
     ApplyProfileError, ProfileAgent, ProfileApply, SaveProfileError, apply_profile, profile_names,

@@ -46,3 +46,8 @@ screenshot-critique。参照可选 `assets/magpie/35-rename.png`。视口两档�
 ## 决定
 
 - 没有显示名时，选择器展示 id。
+- 显示名写在 `model_gateway.json` 的 `model_names`，键是 `provider/model`。不使用 `modelNames`。
+- 空名字拒绝，不删已有的键。换行和回车拒绝，不折成空格。超过 80 个 Unicode 标量，或含 `://`、`sk-`，同样拒绝。
+- 未知 id 和 `group/` 拒绝。目录缓存文件的字节不变。翻译函数不读 `model_names`。
+- 选择器按钮仍用上游 id 保存。改名表单在该项外面。语言文件不动。
+- 没有参照 `assets/magpie/35-rename.png`。1440×900 的裁剪是 `probe/m1`。1280×800 保存后的裁剪是「实验」。五问：这一裁是要选中的那一项；局域网开关不在裁剪里；没有密钥和厂商 URL；没有对照就不比较；第一下点这一项，保存的仍是上游 id。

@@ -235,6 +235,62 @@ describe("ModelsHub", () => {
     });
   });
 
+  it("shows a display name and still saves the upstream id", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_model_choices") return [{ id: "probe/m1", label: "实验" }];
+      if (cmd === "save_agent_model") return null;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
+
+    const list = await screen.findByRole("list", { name: "model choices" });
+    expect(within(list).getByRole("button", { name: "实验" })).toBeTruthy();
+    expect(within(list).queryByRole("button", { name: "probe/m1" })).toBeNull();
+    const text = list.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+
+    fireEvent.click(within(list).getByRole("button", { name: "实验" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_agent_model", {
+        agentId: "codex",
+        modelRef: "probe/m1",
+      });
+    });
+  });
+
+  it("leaves the upstream id on the row when the display name is refused", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_model_choices") return [{ id: "probe/m1", label: "probe/m1" }];
+      if (cmd === "save_model_name") throw new Error("model_name");
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
+
+    const list = await screen.findByRole("list", { name: "model choices" });
+    fireEvent.change(screen.getByRole("textbox", { name: "model id" }), { target: { value: "probe/m1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "display name" }), { target: { value: "实\n验" } });
+    fireEvent.submit(screen.getByRole("textbox", { name: "model id" }).closest("form") as HTMLFormElement);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("model_name");
+    expect(within(list).getByRole("button", { name: "probe/m1" })).toBeTruthy();
+    expect(within(list).queryByText("实")).toBeNull();
+  });
+
   it("saves rotate from the eight routing and affinity words", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_models_board") return BOARD;

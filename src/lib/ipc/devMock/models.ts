@@ -19,6 +19,8 @@ const savedGroups: { id: string; members: string[] }[] = [{ id: "fast", members:
 
 let listenMode = "loopback";
 
+const modelLabels = new Map<string, string>();
+
 const profiles: { name: string; agents: { id: string; modelRef: string }[] }[] = [
   { name: "work", agents: [{ id: "opencode", modelRef: "openai/gpt-test" }] },
   { name: "home", agents: [{ id: "pi", modelRef: "group/fast" }] },
@@ -86,7 +88,22 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     ensureOfficialInMockStore();
     return FLAT_PROVIDERS;
   },
-  get_model_choices: () => [{ id: "openai/gpt-test" }, { id: "group/fast" }],
+  get_model_choices: () =>
+    [
+      { id: "probe/m1", label: "probe/m1" },
+      { id: "openai/gpt-test", label: "openai/gpt-test" },
+      { id: "group/fast", label: "group/fast" },
+    ].map((choice) => ({ ...choice, label: modelLabels.get(choice.id) ?? choice.label })),
+  save_model_name: (args) => {
+    const id = typeof args?.id === "string" ? args.id.trim() : "";
+    const name = typeof args?.name === "string" ? args.name.trim() : "";
+    if (!id.includes("/") || id.startsWith("group/") || !name || name.includes("\n") || name.includes("\r")) {
+      throw new Error("model_name");
+    }
+    if (name.includes("://") || name.includes("sk-") || Array.from(name).length > 80) throw new Error("model_name");
+    modelLabels.set(id, name);
+    return null;
+  },
   get_recent_calls: () => [
     {
       at: "12:00:00",

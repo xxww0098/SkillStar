@@ -26,6 +26,15 @@ function AgentRowLabel({ name, loopbackLabel }: { name: string; loopbackLabel: s
   );
 }
 
+/** Display name, or the upstream id when the name is missing or secret-shaped. */
+function choiceText(choice: { id: string; label?: string }): string {
+  const label = choice.label?.trim() ?? "";
+  if (!label || label.includes("\n") || label.includes("\r") || label.includes("://") || label.includes("sk-")) {
+    return choice.id;
+  }
+  return label;
+}
+
 /** Only `127.0.0.1:<port>` is drawn. Anything else, including a vendor URL, is blank. */
 function loopbackText(value: string): string {
   const prefix = "127.0.0.1:";
@@ -132,7 +141,10 @@ export function ModelsHub({
   const groups = routingPage?.groups ?? [];
   const [column, setColumn] = useState<ColumnId | null>(null);
   const [picker, setPicker] = useState<{ id: string; name: string } | null>(null);
-  const [choices, setChoices] = useState<{ id: string }[]>([]);
+  const [choices, setChoices] = useState<{ id: string; label?: string }[]>([]);
+  const [nameId, setNameId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [nameError, setNameError] = useState("");
   void modelsDrawerRequest;
   void clearModelsDrawerRequest;
 
@@ -237,7 +249,7 @@ export function ModelsHub({
             className="max-h-[70vh] w-full max-w-sm overflow-auto rounded-2xl border bg-card p-3 shadow-lg"
             onClick={(event) => event.stopPropagation()}
           >
-            <ul className="space-y-0.5">
+            <ul aria-label="model choices" className="space-y-0.5">
               {choices.map((choice) => (
                 <li key={choice.id}>
                   <button
@@ -250,11 +262,48 @@ export function ModelsHub({
                       );
                     }}
                   >
-                    {choice.id}
+                    {choiceText(choice)}
                   </button>
                 </li>
               ))}
             </ul>
+            <form
+              aria-label="model display name"
+              className="mt-3 flex flex-wrap gap-1"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void tauriInvoke("save_model_name", { id: nameId, name: displayName })
+                  .then(async () => {
+                    setNameError("");
+                    setDisplayName("");
+                    setChoices(await tauriInvoke("get_model_choices"));
+                  })
+                  .catch((caught: unknown) => {
+                    setNameError(caught instanceof Error ? caught.message : "");
+                  });
+              }}
+            >
+              <input
+                aria-label="model id"
+                value={nameId}
+                onChange={(event) => setNameId(event.target.value)}
+                className="min-w-0 flex-1 rounded-lg border bg-transparent px-2 py-1 text-xs"
+              />
+              <input
+                aria-label="display name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                className="min-w-0 flex-1 rounded-lg border bg-transparent px-2 py-1 text-xs"
+              />
+              <button type="submit" className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40">
+                保存显示名
+              </button>
+            </form>
+            {nameError ? (
+              <p role="alert" className="mt-1 text-xs text-muted-foreground">
+                {nameError}
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}
