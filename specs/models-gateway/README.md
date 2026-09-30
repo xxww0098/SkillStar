@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：29 已落地。最后更新：2026-09-30。
+状态：30 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-29 已落地。Gateway 栏是进程内最近 60 条调用，含时间、Agent、模型、状态和补全 token。没有用法时 token 为空。没有配额条，没有上游 URL。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
+30 已落地。Gateway 栏里，选中的提供商和已经写在 `model_gateway.json` 里的分组，用分段按钮改路由和亲和。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json`。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/30-routing-controls.md](slices/30-routing-controls.md)：一个控件改 provider 或分组的路由模式（smart、order、rotate、usage）和亲和（auto、session、turn、off）。空值保存后文件里可以缺省，读回来仍是 smart 与 auto。保存写 `model_gateway.json`，不改 `model_providers.json` 的版本和列。这是视觉档，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 07、09、10、26、选择器、次要字段和最近请求的测试为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/31-empty-states.md](slices/31-empty-states.md)：三栏没有数据时各有一句。Agents：还没有探测到可配置的 Agent。Providers：还没有密钥。Gateway：还没有调用。三句都不提示厂商 URL，也不出现示例密钥。不造一条假数据来躲开空态。文案在前端。这是视觉档，三栏各裁一次，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 26–30 的非空渲染为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -47,7 +47,7 @@
 - [x] 27 模型选择器 — [slices/27-model-picker.md](slices/27-model-picker.md)
 - [x] 28 次要字段 — [slices/28-secondary-fields.md](slices/28-secondary-fields.md)
 - [x] 29 最近请求 — [slices/29-recent-calls.md](slices/29-recent-calls.md)
-- [ ] 30 路由控件 — [slices/30-routing-controls.md](slices/30-routing-controls.md)
+- [x] 30 路由控件 — [slices/30-routing-controls.md](slices/30-routing-controls.md)
 - [ ] 31 空态 — [slices/31-empty-states.md](slices/31-empty-states.md)
 - [ ] 32 分组控件 — [slices/32-group-controls.md](slices/32-group-controls.md)
 - [ ] 33 配置档 — [slices/33-profiles.md](slices/33-profiles.md)

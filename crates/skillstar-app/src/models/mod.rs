@@ -12,9 +12,13 @@ pub mod dto;
 mod gateway_save;
 pub mod picker;
 pub mod recent;
+pub mod routing;
 
 pub use account_book::UsageAccountBook;
 pub use codex_save::{CodexRoute, release_codex, save_codex};
 pub use gateway_save::save_agent;
 pub use picker::{ModelChoiceDto, load_model_choices};
 pub use recent::{RecentCallDto, load_recent_calls};
+pub use routing::{
+    RoutingControl, RoutingGroupControl, RoutingPage, load_routing_page, save_routing_control,
+};

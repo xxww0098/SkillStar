@@ -49,3 +49,8 @@ screenshot-critique。参照 `assets/magpie/30-routing.png` 时 compare-screensh
 ## 决定
 
 - 控件放在 Gateway 栏里该 provider 或分组的详情，不放进 Settings。
+- 控件是分段按钮。选中的提供商一块，`model_gateway.json` 里每个已保存的分组再一块。分组只显示 id，不显示成员。按钮文字就是 smart、order、rotate、usage 与 auto、session、turn、off。
+- smart 和 auto 不写字段。空和未知在读文件时仍是这两项。控件提交未知词时拒绝保存，文件字节不动。
+- 保存保留这一行的其它字段和文件顶层的其它键。`group/` 前缀去掉后再写入。不打开 `model_providers.json`。
+- 页面打开时查询。保存后只让这一页的路由查询失效。带 `://`、`sk-` 或 `api.openai.com` 的 id 不画出来。
+- 参照作物 `30-routing.png` 不在仓库里。screenshot-critique 技能不在磁盘上。1440×900 与 1280×800 上，裁剪是 `p-deepseek` 与 `fast` 两块。前者按下 rotate 和 auto，后者按下 smart 和 auto。八个词都在，没有换行挤掉。裁剪里没有 `https://`，没有 `sk-`。五问：这一屏是在改这条 provider 或这个分组的路由和亲和；上一档的最近请求表还在 Gateway 栏下方一行，环回地址还在 Agent 名下，掩码还在提供商列，都不在这块裁剪里；裁剪没有厂商 URL 和密钥；没有参照作物，八个词就是契约；第一下点的是其中一个模式词。按此接受。

@@ -54,6 +54,29 @@ impl AffinityMode {
             _ => Self::Auto,
         }
     }
+
+    /// File and control spelling. Auto is the word the control sends; the
+    /// file omits that word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Session => "session",
+            Self::Turn => "turn",
+            Self::Off => "off",
+        }
+    }
+
+    /// The four control values. Empty and any other word are rejected here.
+    /// [`parse`](Self::parse) still treats those as auto when reading a file.
+    pub fn from_control(raw: &str) -> Option<Self> {
+        match raw {
+            "auto" => Some(Self::Auto),
+            "session" => Some(Self::Session),
+            "turn" => Some(Self::Turn),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
 }
 
 /// Why this request did or did not stay. The strings match the reference

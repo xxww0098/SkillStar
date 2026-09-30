@@ -19,6 +19,7 @@ mod outbound;
 mod redact;
 mod rest;
 mod route;
+mod routing_file;
 mod rules;
 mod serve;
 mod sign;
@@ -66,6 +67,7 @@ pub use route::{
     AllowanceSnapshot, RouteCandidate, RouteMode, RouteOwner, USED_SHARE, route_mode, route_smart,
     stored_route_mode,
 };
+pub use routing_file::{SaveRoutingError, routing_state, save_routing};
 pub use rules::{Caller, GroupRule, RuleRequest, order_with_rules, request_agent, stored_rules};
 pub use sign::{AccountBook, ProviderSnapshot, SignInput, SignedUpstream, sign_upstream};
 pub use serve::{

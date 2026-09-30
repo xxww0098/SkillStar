@@ -7,6 +7,7 @@ export const modelsKeys = {
   providersFlat: () => [...modelsKeys.all, "providers-flat"] as const,
   board: () => [...modelsKeys.all, "board"] as const,
   recentCalls: () => [...modelsKeys.all, "recent-calls"] as const,
+  routingPage: (providerId: string) => [...modelsKeys.all, "routing-page", providerId] as const,
 };
 
 /**

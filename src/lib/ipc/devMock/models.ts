@@ -13,6 +13,12 @@ import type { DevMockHandlers } from "./shared";
 
 let devProviderSeq = 0;
 
+const routingMemory = new Map<string, { routing: string; affinity: string }>();
+
+function remembered(owner: string, id: string): { routing: string; affinity: string } {
+  return routingMemory.get(`${owner}:${id}`) ?? { routing: "smart", affinity: "auto" };
+}
+
 /** Minimal shape of a tool binding for the dev mock's in-memory state. */
 interface MockEntry {
   provider_id: string;
@@ -77,6 +83,21 @@ export const MODELS_HANDLERS: DevMockHandlers = {
       completion_tokens: "5",
     },
   ],
+  get_routing_page: (args) => {
+    const providerId = typeof args?.providerId === "string" ? args.providerId : "";
+    return {
+      provider: providerId ? remembered("provider", providerId) : null,
+      groups: [{ id: "fast", ...remembered("group", "fast") }],
+    };
+  },
+  save_routing: (args) => {
+    const owner = typeof args?.owner === "string" ? args.owner : "";
+    const id = typeof args?.id === "string" ? args.id : "";
+    const routing = typeof args?.routing === "string" ? args.routing : "";
+    const affinity = typeof args?.affinity === "string" ? args.affinity : "";
+    routingMemory.set(`${owner}:${id}`, { routing, affinity });
+    return null;
+  },
   save_agent_model: () => null,
   get_models_board: () => ({
     agents: [

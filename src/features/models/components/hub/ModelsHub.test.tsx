@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelsNavBridge } from "../../lib/navBridge";
@@ -37,6 +37,7 @@ beforeEach(() => {
   mockInvoke.mockImplementation(async (cmd: string) => {
     if (cmd === "get_models_board") return BOARD;
     if (cmd === "get_recent_calls") return [];
+    if (cmd === "get_routing_page") return { provider: null, groups: [] };
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -58,7 +59,7 @@ describe("ModelsHub", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("clicking the three columns does not fetch past the board and recent calls", async () => {
+  it("clicking the three columns does not fetch past the board, recent calls, and routing", async () => {
     const nav = navigation();
     renderHub(<ModelsHub {...nav} />);
     await screen.findByRole("heading", { name: "Agents" });
@@ -69,7 +70,7 @@ describe("ModelsHub", () => {
     fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
 
     expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(
-      new Set(["get_models_board", "get_recent_calls"]),
+      new Set(["get_models_board", "get_recent_calls", "get_routing_page"]),
     );
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
     expect(nav.setSelectedProviderId).toHaveBeenCalledWith("p1");
@@ -85,6 +86,7 @@ describe("ModelsHub", () => {
         };
       }
       if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -116,6 +118,7 @@ describe("ModelsHub", () => {
         };
       }
       if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -151,6 +154,7 @@ describe("ModelsHub", () => {
           },
         ];
       }
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -183,6 +187,7 @@ describe("ModelsHub", () => {
       }
       if (cmd === "save_agent_model") return null;
       if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -203,6 +208,60 @@ describe("ModelsHub", () => {
       agentId: "codex",
       modelRef: "group/fast",
     });
+  });
+
+  it("saves rotate from the eight routing and affinity words", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") {
+        return {
+          provider: { routing: "smart", affinity: "auto" },
+          groups: [{ id: "fast", routing: "smart", affinity: "session" }],
+        };
+      }
+      if (cmd === "save_routing") return null;
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const nav = navigation();
+    nav.selectedProviderId = "p1";
+    renderHub(<ModelsHub {...nav} />);
+
+    const provider = await screen.findByRole("group", { name: "routing provider p1" });
+    const group = screen.getByRole("group", { name: "routing group fast" });
+    for (const word of ["smart", "order", "rotate", "usage"]) {
+      expect(within(provider).getByRole("button", { name: word })).toBeTruthy();
+      expect(within(group).getByRole("button", { name: word })).toBeTruthy();
+    }
+    for (const word of ["auto", "session", "turn", "off"]) {
+      expect(within(provider).getByRole("button", { name: word })).toBeTruthy();
+      expect(within(group).getByRole("button", { name: word })).toBeTruthy();
+    }
+    expect(within(provider).getByRole("button", { name: "smart" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(group).getByRole("button", { name: "session" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(within(provider).getByRole("button", { name: "rotate" }));
+    fireEvent.click(within(group).getByRole("button", { name: "off" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_routing", {
+        owner: "provider",
+        id: "p1",
+        routing: "rotate",
+        affinity: "auto",
+      });
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("save_routing", {
+      owner: "group",
+      id: "fast",
+      routing: "smart",
+      affinity: "off",
+    });
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toContain("api.openai.com");
+    expect(text).not.toContain(PLAINTEXT_KEY);
+    expect(text).not.toMatch(/quota|remaining|配额|剩余/i);
   });
 
   it("keeps the three titles when the board command fails", async () => {

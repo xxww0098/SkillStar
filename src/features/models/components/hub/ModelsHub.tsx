@@ -6,7 +6,9 @@ import { cn } from "@/lib/utils";
 import { tauriInvoke } from "@/lib/ipc";
 import { useModelsBoard } from "../../api/board";
 import { useRecentCalls } from "../../api/recent";
+import { useRoutingPage } from "../../api/routing";
 import type { ModelsNavBridge } from "../../lib/navBridge";
+import { RoutingControl } from "./RoutingControl";
 
 type ColumnId = "agents" | "providers" | "gateway";
 
@@ -114,7 +116,9 @@ export function ModelsHub({
   const { t } = useTranslation();
   const { data } = useModelsBoard();
   const { data: recent } = useRecentCalls();
+  const { data: routingPage } = useRoutingPage(selectedProviderId);
   const calls = recent ?? [];
+  const groups = routingPage?.groups ?? [];
   const [column, setColumn] = useState<ColumnId | null>(null);
   const [picker, setPicker] = useState<{ id: string; name: string } | null>(null);
   const [choices, setChoices] = useState<{ id: string }[]>([]);
@@ -143,7 +147,26 @@ export function ModelsHub({
           >
             <h2 className="px-4 pt-4 text-sm font-semibold tracking-wide text-foreground">{t(entry.labelKey)}</h2>
             {entry.id === "gateway" ? (
-              <RecentCalls calls={calls} />
+              <>
+                {routingPage?.provider && selectedProviderId ? (
+                  <RoutingControl
+                    owner="provider"
+                    id={selectedProviderId}
+                    routing={routingPage.provider.routing}
+                    affinity={routingPage.provider.affinity}
+                  />
+                ) : null}
+                {groups.map((group) => (
+                  <RoutingControl
+                    key={group.id}
+                    owner="group"
+                    id={group.id}
+                    routing={group.routing}
+                    affinity={group.affinity}
+                  />
+                ))}
+                <RecentCalls calls={calls} />
+              </>
             ) : (
               <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto px-2 py-3">
                 {rows[entry.id].map((row) => (

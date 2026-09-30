@@ -20,6 +20,25 @@ import type { ModelChoiceDto } from "../../../types/generated/ModelChoiceDto";
 import type { ModelsBoardDto } from "../../../types/generated/ModelsBoardDto";
 import type { RecentCallDto } from "../../../types/generated/RecentCallDto";
 
+/** The two words a routing control is showing. */
+export interface RoutingControl {
+  routing: string;
+  affinity: string;
+}
+
+/** One saved group and its routing control. */
+export interface RoutingGroupControl {
+  id: string;
+  routing: string;
+  affinity: string;
+}
+
+/** Selected provider, or null when none is selected, plus saved groups. */
+export interface RoutingPage {
+  provider: RoutingControl | null;
+  groups: RoutingGroupControl[];
+}
+
 interface ConfigConflict {
   conflict_type: "EnvVarOverride" | "LegacyConfig" | "ExternalModification";
   description: string;
@@ -48,6 +67,13 @@ export interface ModelsCommands {
   get_model_choices: { args: Record<string, never>; result: ModelChoiceDto[] };
   /** Recent forwarded calls. No secrets and no upstream URLs. */
   get_recent_calls: { args: Record<string, never>; result: RecentCallDto[] };
+  /** Routing and affinity for the selected provider and saved groups. */
+  get_routing_page: { args: { providerId: string }; result: RoutingPage };
+  /** Save one routing mode and one affinity. The words are the eight enums. */
+  save_routing: {
+    args: { owner: string; id: string; routing: string; affinity: string };
+    result: void;
+  };
   save_agent_model: { args: { agentId: string; modelRef: string }; result: void };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
   update_provider_flat: {

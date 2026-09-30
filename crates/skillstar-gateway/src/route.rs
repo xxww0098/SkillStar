@@ -66,6 +66,29 @@ impl RouteMode {
             _ => Self::Smart,
         }
     }
+
+    /// File and control spelling. Smart is the word the control sends; the
+    /// file omits that word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Smart => "smart",
+            Self::Order => "order",
+            Self::Rotate => "rotate",
+            Self::Usage => "usage",
+        }
+    }
+
+    /// The four control values. Empty and any other word are rejected here.
+    /// [`parse`](Self::parse) still treats those as smart when reading a file.
+    pub fn from_control(raw: &str) -> Option<Self> {
+        match raw {
+            "smart" => Some(Self::Smart),
+            "order" => Some(Self::Order),
+            "rotate" => Some(Self::Rotate),
+            "usage" => Some(Self::Usage),
+            _ => None,
+        }
+    }
 }
 
 /// Whose `routing` field to read in `model_gateway.json`.
