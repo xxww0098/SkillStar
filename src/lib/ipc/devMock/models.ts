@@ -88,12 +88,18 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     ensureOfficialInMockStore();
     return FLAT_PROVIDERS;
   },
-  get_model_choices: () =>
-    [
-      { id: "probe/m1", label: "probe/m1" },
+  get_model_choices: (args) => {
+    const agentId = typeof args?.agentId === "string" ? args.agentId : "";
+    const choices = [
+      { id: "relay/m1", label: "relay/m1" },
       { id: "openai/gpt-test", label: "openai/gpt-test" },
       { id: "group/fast", label: "group/fast" },
-    ].map((choice) => ({ ...choice, label: modelLabels.get(choice.id) ?? choice.label })),
+    ].map((choice) => ({ ...choice, label: modelLabels.get(choice.id) ?? choice.label }));
+    if (agentId === "opencode") {
+      return choices.filter((choice) => choice.id !== "openai/gpt-test");
+    }
+    return choices;
+  },
   save_model_name: (args) => {
     const id = typeof args?.id === "string" ? args.id.trim() : "";
     const name = typeof args?.name === "string" ? args.name.trim() : "";

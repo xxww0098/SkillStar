@@ -12,8 +12,8 @@ pub fn get_models_board() -> Result<ModelsBoardDto, AppError> {
 }
 
 #[tauri::command]
-pub fn get_model_choices() -> Vec<ModelChoiceDto> {
-    load_model_choices()
+pub fn get_model_choices(agent_id: String) -> Vec<ModelChoiceDto> {
+    load_model_choices(&agent_id)
 }
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 //! Per-agent file bodies. Field names follow the magpie writer for that agent.
-//! The model list is only the `model_ref` passed in.
+//! The model list is what that agent is shown. An empty catalog keeps the
+//! saved ref, so a file with no catalog stays the single-model body.
 
 use std::path::{Path, PathBuf};
 
@@ -71,25 +72,35 @@ fn opencode_like(
 ) -> Vec<Written> {
     let dir = home.join(".config").join(id);
     let path = json_or_jsonc(&dir, id);
+    let models = joined(id, model_ref, ",\n", |model_ref| {
+        format!(
+            "        {model_ref}: {{\n          \"name\": {model_ref},\n          \"variants\": {{}}\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let body = format!(
-        "{{\n  \"model\": {full},\n  \"provider\": {{\n    {brand}: {{\n      \"npm\": \"@ai-sdk/openai-compatible\",\n      \"name\": {brand},\n      \"options\": {{\n        \"baseURL\": {v1},\n        \"apiKey\": {token}\n      }},\n      \"models\": {{\n        {model_ref}: {{\n          \"name\": {model_ref},\n          \"variants\": {{}}\n        }}\n      }}\n    }}\n  }}\n}}\n",
+        "{{\n  \"model\": {full},\n  \"provider\": {{\n    {brand}: {{\n      \"npm\": \"@ai-sdk/openai-compatible\",\n      \"name\": {brand},\n      \"options\": {{\n        \"baseURL\": {v1},\n        \"apiKey\": {token}\n      }},\n      \"models\": {{\n{models}\n      }}\n    }}\n  }}\n}}\n",
         full = json(full),
         brand = json(PLACEHOLDER_BEARER),
         v1 = json(v1),
         token = json(token),
-        model_ref = json(model_ref),
     );
     vec![file(home, path, body)]
 }
 
 fn pi(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
     let dir = home.join(".pi").join("agent");
+    let rows = joined("pi", model_ref, ",\n", |model_ref| {
+        format!(
+            "        {{\n          \"id\": {model_ref},\n          \"name\": {model_ref},\n          \"reasoning\": false\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let models = format!(
-        "{{\n  \"providers\": {{\n    {brand}: {{\n      \"name\": {brand},\n      \"baseUrl\": {v1},\n      \"api\": \"openai-completions\",\n      \"apiKey\": {token},\n      \"models\": [\n        {{\n          \"id\": {model_ref},\n          \"name\": {model_ref},\n          \"reasoning\": false\n        }}\n      ]\n    }}\n  }}\n}}\n",
+        "{{\n  \"providers\": {{\n    {brand}: {{\n      \"name\": {brand},\n      \"baseUrl\": {v1},\n      \"api\": \"openai-completions\",\n      \"apiKey\": {token},\n      \"models\": [\n{rows}\n      ]\n    }}\n  }}\n}}\n",
         brand = json(PLACEHOLDER_BEARER),
         v1 = json(v1),
         token = json(token),
-        model_ref = json(model_ref),
     );
     let settings = format!(
         "{{\n  \"defaultProvider\": {brand},\n  \"defaultModel\": {model_ref}\n}}\n",
@@ -104,8 +115,14 @@ fn pi(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
 
 fn crush(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
     let path = crush_path(home);
+    let rows = joined("crush", model_ref, ",\n", |model_ref| {
+        format!(
+            "        {{\n          \"can_reason\": false,\n          \"context_window\": 200000,\n          \"default_max_tokens\": 16384,\n          \"id\": {model_ref},\n          \"name\": {model_ref}\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let body = format!(
-        "{{\n  \"models\": {{\n    \"large\": {{\n      \"model\": {model_ref},\n      \"provider\": {brand}\n    }}\n  }},\n  \"providers\": {{\n    {brand}: {{\n      \"api_key\": {token},\n      \"base_url\": {v1},\n      \"models\": [\n        {{\n          \"can_reason\": false,\n          \"context_window\": 200000,\n          \"default_max_tokens\": 16384,\n          \"id\": {model_ref},\n          \"name\": {model_ref}\n        }}\n      ],\n      \"name\": {brand},\n      \"type\": \"openai\"\n    }}\n  }}\n}}\n",
+        "{{\n  \"models\": {{\n    \"large\": {{\n      \"model\": {model_ref},\n      \"provider\": {brand}\n    }}\n  }},\n  \"providers\": {{\n    {brand}: {{\n      \"api_key\": {token},\n      \"base_url\": {v1},\n      \"models\": [\n{rows}\n      ],\n      \"name\": {brand},\n      \"type\": \"openai\"\n    }}\n  }}\n}}\n",
         brand = json(PLACEHOLDER_BEARER),
         v1 = json(v1),
         token = json(token),
@@ -121,11 +138,16 @@ fn commandcode(home: &Path, v1: &str, model_ref: &str, full: &str) -> Vec<Writte
         full = json(full),
         brand = json(PLACEHOLDER_BEARER),
     );
+    let models = joined("commandcode", model_ref, ",\n", |model_ref| {
+        format!(
+            "        {model_ref}: {{\n          \"name\": {model_ref}\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let providers = format!(
-        "{{\n  \"provider\": {{\n    {brand}: {{\n      \"api\": \"openai-completions\",\n      \"apiKey\": false,\n      \"baseURL\": {v1},\n      \"models\": {{\n        {model_ref}: {{\n          \"name\": {model_ref}\n        }}\n      }},\n      \"name\": {brand}\n    }}\n  }}\n}}\n",
+        "{{\n  \"provider\": {{\n    {brand}: {{\n      \"api\": \"openai-completions\",\n      \"apiKey\": false,\n      \"baseURL\": {v1},\n      \"models\": {{\n{models}\n      }},\n      \"name\": {brand}\n    }}\n  }}\n}}\n",
         brand = json(PLACEHOLDER_BEARER),
         v1 = json(v1),
-        model_ref = json(model_ref),
     );
     vec![
         file(home, dir.join("settings.json"), settings),
@@ -134,8 +156,14 @@ fn commandcode(home: &Path, v1: &str, model_ref: &str, full: &str) -> Vec<Writte
 }
 
 fn fx(home: &Path, v1: &str, model_ref: &str) -> Vec<Written> {
+    let metadata = joined("fx", model_ref, ",\n", |model_ref| {
+        format!(
+            "        {model_ref}: {{\n          \"supports_tool_use\": true,\n          \"supports_vision\": false\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let body = format!(
-        "{{\n  \"models\": {{\n    {brand}: {model_ref}\n  }},\n  \"provider\": {brand},\n  \"providers\": {{\n    {brand}: {{\n      \"auth\": {{\n        \"type\": \"none\"\n      }},\n      \"base_url\": {v1},\n      \"model_metadata\": {{\n        {model_ref}: {{\n          \"supports_tool_use\": true,\n          \"supports_vision\": false\n        }}\n      }},\n      \"protocol\": \"openai-chat-completions\",\n      \"tool_choice_mode\": \"send\"\n    }}\n  }}\n}}\n",
+        "{{\n  \"models\": {{\n    {brand}: {model_ref}\n  }},\n  \"provider\": {brand},\n  \"providers\": {{\n    {brand}: {{\n      \"auth\": {{\n        \"type\": \"none\"\n      }},\n      \"base_url\": {v1},\n      \"model_metadata\": {{\n{metadata}\n      }},\n      \"protocol\": \"openai-chat-completions\",\n      \"tool_choice_mode\": \"send\"\n    }}\n  }}\n}}\n",
         brand = json(PLACEHOLDER_BEARER),
         v1 = json(v1),
         model_ref = json(model_ref),
@@ -154,8 +182,14 @@ fn qoder(
 ) -> Vec<Written> {
     let dir = override_dir(env, home.join(dirname));
     let token = super::token_for(id);
+    let rows = joined(id, model_ref, ",\n", |model_ref| {
+        format!(
+            "        {{\n          \"capabilities\": {{\n            \"tools\": true,\n            \"vision\": false\n          }},\n          \"displayName\": {model_ref},\n          \"model\": {model_ref}\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let body = format!(
-        "{{\n  \"model\": {{\n    \"name\": {full}\n  }},\n  \"providers\": {{\n    {brand}: {{\n      \"apiKey\": {token},\n      \"baseUrl\": {v1},\n      \"displayName\": {brand},\n      \"model\": {model_ref},\n      \"models\": [\n        {{\n          \"capabilities\": {{\n            \"tools\": true,\n            \"vision\": false\n          }},\n          \"displayName\": {model_ref},\n          \"model\": {model_ref}\n        }}\n      ],\n      \"protocol\": \"openai\"\n    }}\n  }}\n}}\n",
+        "{{\n  \"model\": {{\n    \"name\": {full}\n  }},\n  \"providers\": {{\n    {brand}: {{\n      \"apiKey\": {token},\n      \"baseUrl\": {v1},\n      \"displayName\": {brand},\n      \"model\": {model_ref},\n      \"models\": [\n{rows}\n      ],\n      \"protocol\": \"openai\"\n    }}\n  }}\n}}\n",
         full = json(full),
         brand = json(PLACEHOLDER_BEARER),
         token = json(&token),
@@ -174,8 +208,14 @@ fn cline(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
         v1 = json(v1),
         model_ref = json(model_ref),
     );
+    let rows = joined("cline", model_ref, ",\n", |model_ref| {
+        format!(
+            "        {model_ref}: {{\n          \"capabilities\": [\n            \"streaming\",\n            \"tools\"\n          ],\n          \"id\": {model_ref},\n          \"name\": {model_ref}\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
     let models = format!(
-        "{{\n  \"providers\": {{\n    \"openai-compatible\": {{\n      \"models\": {{\n        {model_ref}: {{\n          \"capabilities\": [\n            \"streaming\",\n            \"tools\"\n          ],\n          \"id\": {model_ref},\n          \"name\": {model_ref}\n        }}\n      }},\n      \"provider\": {{\n        \"baseUrl\": {v1},\n        \"defaultModelId\": {model_ref},\n        \"name\": {brand}\n      }}\n    }}\n  }},\n  \"version\": 1\n}}\n",
+        "{{\n  \"providers\": {{\n    \"openai-compatible\": {{\n      \"models\": {{\n{rows}\n      }},\n      \"provider\": {{\n        \"baseUrl\": {v1},\n        \"defaultModelId\": {model_ref},\n        \"name\": {brand}\n      }}\n    }}\n  }},\n  \"version\": 1\n}}\n",
         model_ref = json(model_ref),
         v1 = json(v1),
         brand = json(PLACEHOLDER_BEARER),
@@ -188,19 +228,26 @@ fn cline(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
 
 fn zcode(home: &Path, origin: &str, model_ref: &str, token: &str) -> Vec<Written> {
     let dir = home.join(".zcode").join("v2");
+    let models = joined("zcode", model_ref, ",\n", |model_ref| {
+        format!(
+            "        {model_ref}: {{\n          \"limit\": {{\n            \"context\": 200000\n          }},\n          \"modalities\": {{\n            \"input\": [\n              \"text\"\n            ],\n            \"output\": [\n              \"text\"\n            ]\n          }},\n          \"name\": {model_ref}\n        }}",
+            model_ref = json(model_ref),
+        )
+    });
+    let order = joined("zcode", model_ref, ",\n              ", json);
     let config = format!(
-        "{{\n  \"provider\": {{\n    {brand}: {{\n      \"enabled\": true,\n      \"kind\": \"anthropic\",\n      \"models\": {{\n        {model_ref}: {{\n          \"limit\": {{\n            \"context\": 200000\n          }},\n          \"modalities\": {{\n            \"input\": [\n              \"text\"\n            ],\n            \"output\": [\n              \"text\"\n            ]\n          }},\n          \"name\": {model_ref}\n        }}\n      }},\n      \"name\": {brand},\n      \"options\": {{\n        \"apiKey\": {token},\n        \"baseURL\": {origin}\n      }},\n      \"source\": \"custom\"\n    }}\n  }}\n}}\n",
+        "{{\n  \"provider\": {{\n    {brand}: {{\n      \"enabled\": true,\n      \"kind\": \"anthropic\",\n      \"models\": {{\n{models}\n      }},\n      \"name\": {brand},\n      \"options\": {{\n        \"apiKey\": {token},\n        \"baseURL\": {origin}\n      }},\n      \"source\": \"custom\"\n    }}\n  }}\n}}\n",
         brand = json(PLACEHOLDER_BEARER),
-        model_ref = json(model_ref),
         token = json(token),
         origin = json(origin),
     );
     let rules = format!(
-        "{{\n  \"config\": {{\n    \"modelConfigRules\": {{\n      \"manualProviderModelRules\": [],\n      \"providerModelRules\": [\n        {{\n          \"config\": {{\n            \"properties\": {{\n              \"inputFormat\": {{\n                \"supportsImage\": false\n              }}\n            }}\n          }},\n          \"modelId\": {model_ref},\n          \"providerId\": {brand}\n        }}\n      ]\n    }},\n    \"providerConfigRules\": {{\n      \"providerRules\": [\n        {{\n          \"config\": {{\n            \"access\": {{\n              \"apiKey\": {token},\n              \"type\": \"api-key\"\n            }},\n            \"api\": {{\n              \"baseUrl\": {origin},\n              \"type\": \"anthropic-messages\"\n            }},\n            \"group\": \"standard-personal\",\n            \"modelOrder\": [\n              {model_ref}\n            ],\n            \"personalModelIds\": [\n              {model_ref}\n            ]\n          }},\n          \"enabled\": true,\n          \"providerId\": {brand},\n          \"providerName\": {brand}\n        }}\n      ]\n    }}\n  }},\n  \"schemaVersion\": 1\n}}\n",
+        "{{\n  \"config\": {{\n    \"modelConfigRules\": {{\n      \"manualProviderModelRules\": [],\n      \"providerModelRules\": [\n        {{\n          \"config\": {{\n            \"properties\": {{\n              \"inputFormat\": {{\n                \"supportsImage\": false\n              }}\n            }}\n          }},\n          \"modelId\": {model_ref},\n          \"providerId\": {brand}\n        }}\n      ]\n    }},\n    \"providerConfigRules\": {{\n      \"providerRules\": [\n        {{\n          \"config\": {{\n            \"access\": {{\n              \"apiKey\": {token},\n              \"type\": \"api-key\"\n            }},\n            \"api\": {{\n              \"baseUrl\": {origin},\n              \"type\": \"anthropic-messages\"\n            }},\n            \"group\": \"standard-personal\",\n            \"modelOrder\": [\n              {order}\n            ],\n            \"personalModelIds\": [\n              {order}\n            ]\n          }},\n          \"enabled\": true,\n          \"providerId\": {brand},\n          \"providerName\": {brand}\n        }}\n      ]\n    }}\n  }},\n  \"schemaVersion\": 1\n}}\n",
         brand = json(PLACEHOLDER_BEARER),
         model_ref = json(model_ref),
         token = json(token),
         origin = json(origin),
+        order = order,
     );
     vec![
         file(home, dir.join("config.json"), config),
@@ -212,20 +259,29 @@ fn workbuddy(home: &Path, v1: &str, model_ref: &str) -> Vec<Written> {
     let dir = override_dir("WORKBUDDY_CONFIG_DIR", home.join(".workbuddy"));
     let url = format!("{v1}/chat/completions");
     let token = super::token_for("workbuddy");
-    let body = format!(
-        "[\n  {{\n    \"apiKey\": {token},\n    \"id\": {model_ref},\n    \"maxInputTokens\": 200000,\n    \"name\": {model_ref},\n    \"supportsImages\": false,\n    \"supportsReasoning\": false,\n    \"supportsToolCall\": true,\n    \"url\": {url},\n    \"vendor\": {brand}\n  }}\n]\n",
-        token = json(&token),
-        model_ref = json(model_ref),
-        url = json(&url),
-        brand = json(PLACEHOLDER_BEARER),
-    );
+    let rows = joined("workbuddy", model_ref, ",\n", |model_ref| {
+        format!(
+            "  {{\n    \"apiKey\": {token},\n    \"id\": {model_ref},\n    \"maxInputTokens\": 200000,\n    \"name\": {model_ref},\n    \"supportsImages\": false,\n    \"supportsReasoning\": false,\n    \"supportsToolCall\": true,\n    \"url\": {url},\n    \"vendor\": {brand}\n  }}",
+            token = json(&token),
+            model_ref = json(model_ref),
+            url = json(&url),
+            brand = json(PLACEHOLDER_BEARER),
+        )
+    });
+    let body = format!("[\n{rows}\n]\n");
     vec![file(home, dir.join("models.json"), body)]
 }
 
 fn dsh(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
     let dir = override_dir("DSH_HOME", home.join(".dsh"));
+    let rows = joined("dsh", model_ref, "\n", |model_ref| {
+        format!(
+            "      - id: {model_ref}\n        name: {model_ref}",
+            model_ref = json(model_ref),
+        )
+    });
     let body = format!(
-        "- id: llm-deepseek # {brand}\n  config:\n    apiKey: {token}\n    baseURL: {v1}\n    thinking: enabled\n    reasoningEffort: high\n    models:\n      - id: {model_ref}\n        name: {model_ref}\n- id: agent-loop # {brand}\n  config:\n    agents:\n      - id: main\n        provider: deepseek-official\n        model: {model_ref}\n        cwd: !!js process.cwd()\n- id: api-gateway # {brand}\n  config:\n    provider: deepseek-official\n    model: {model_ref}\n",
+        "- id: llm-deepseek # {brand}\n  config:\n    apiKey: {token}\n    baseURL: {v1}\n    thinking: enabled\n    reasoningEffort: high\n    models:\n{rows}\n- id: agent-loop # {brand}\n  config:\n    agents:\n      - id: main\n        provider: deepseek-official\n        model: {model_ref}\n        cwd: !!js process.cwd()\n- id: api-gateway # {brand}\n  config:\n    provider: deepseek-official\n    model: {model_ref}\n",
         brand = PLACEHOLDER_BEARER,
         token = json(token),
         v1 = json(v1),
@@ -236,8 +292,11 @@ fn dsh(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
 
 fn hermes(home: &Path, v1: &str, model_ref: &str, token: &str) -> Vec<Written> {
     let dir = override_dir("HERMES_HOME", home.join(".hermes"));
+    let rows = joined("hermes", model_ref, "\n", |model_ref| {
+        format!("      - {model_ref}", model_ref = json(model_ref))
+    });
     let body = format!(
-        "model:\n  provider: {brand}\n  default: {model_ref}\nproviders:\n  {brand}:\n    name: {brand}\n    base_url: {v1}\n    api_key: {token}\n    api_mode: chat_completions\n    extra_headers:\n      User-Agent: hermes-agent\n    models:\n      - {model_ref}\n",
+        "model:\n  provider: {brand}\n  default: {model_ref}\nproviders:\n  {brand}:\n    name: {brand}\n    base_url: {v1}\n    api_key: {token}\n    api_mode: chat_completions\n    extra_headers:\n      User-Agent: hermes-agent\n    models:\n{rows}\n",
         brand = PLACEHOLDER_BEARER,
         model_ref = json(model_ref),
         v1 = json(v1),
@@ -252,11 +311,16 @@ fn omp(home: &Path, v1: &str, full: &str, model_ref: &str) -> Vec<Written> {
         "modelRoles:\n  default: {full}\n",
         full = json(full),
     );
+    let rows = joined("omp", model_ref, "\n", |model_ref| {
+        format!(
+            "      - id: {model_ref}\n        name: {model_ref}\n        reasoning: false",
+            model_ref = json(model_ref),
+        )
+    });
     let models = format!(
-        "providers:\n  {brand}:\n    baseUrl: {v1}\n    api: openai-completions\n    auth: none\n    models:\n      - id: {model_ref}\n        name: {model_ref}\n        reasoning: false\n",
+        "providers:\n  {brand}:\n    baseUrl: {v1}\n    api: openai-completions\n    auth: none\n    models:\n{rows}\n",
         brand = PLACEHOLDER_BEARER,
         v1 = json(v1),
-        model_ref = json(model_ref),
     );
     vec![
         file(home, yml_or_yaml(&dir, "config"), config),
@@ -276,12 +340,23 @@ fn claude_code(home: &Path, origin: &str, model_ref: &str) -> Vec<Written> {
 
 fn grok(home: &Path, v1: &str, model_ref: &str, full: &str, token: &str) -> Vec<Written> {
     let dir = override_dir("GROK_HOME", home.join(".grok"));
+    let sections = joined("grok", model_ref, "", |id| {
+        let header = if id == model_ref {
+            full.to_string()
+        } else {
+            format!("{PLACEHOLDER_BEARER}/{id}")
+        };
+        format!(
+            "[model.{header}]\nmodel = {model}\nname = {model}\nbase_url = {base}\napi_key = {key}\napi_backend = \"chat_completions\"\n",
+            header = toml(&header),
+            model = toml(id),
+            base = toml(v1),
+            key = toml(token),
+        )
+    });
     let body = format!(
-        "[features]\ncampaigns = false\n\n[models]\ndefault = {full}\n\n[model.{full}]\nmodel = {model_ref}\nname = {model_ref}\nbase_url = {v1}\napi_key = {token}\napi_backend = \"chat_completions\"\n",
+        "[features]\ncampaigns = false\n\n[models]\ndefault = {full}\n\n{sections}",
         full = toml(full),
-        model_ref = toml(model_ref),
-        v1 = toml(v1),
-        token = toml(token),
     );
     vec![file(home, dir.join("config.toml"), body)]
 }
@@ -327,6 +402,14 @@ pub(super) fn file(home: &Path, path: PathBuf, body: String) -> Written {
 
 fn json(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn joined(agent_id: &str, model_ref: &str, sep: &str, render: impl Fn(&str) -> String) -> String {
+    crate::visible::listed_ids(agent_id, model_ref)
+        .iter()
+        .map(|id| render(id))
+        .collect::<Vec<_>>()
+        .join(sep)
 }
 
 fn toml(value: &str) -> String {

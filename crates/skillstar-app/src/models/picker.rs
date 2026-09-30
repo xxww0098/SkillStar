@@ -18,13 +18,16 @@ pub struct ModelChoiceDto {
     pub label: String,
 }
 
-/// Catalog entries, then saved groups. A missing or unreadable cache is empty.
-pub fn load_model_choices() -> Vec<ModelChoiceDto> {
+/// Catalog entries this agent is shown, then saved groups. A missing cache is empty.
+pub fn load_model_choices(agent: &str) -> Vec<ModelChoiceDto> {
     project_named(
         &skillstar_gateway::models_dev_load(),
         &skillstar_gateway::stored_group_ids(),
         &skillstar_gateway::stored_model_names(),
     )
+    .into_iter()
+    .filter(|choice| skillstar_gateway::model_shown(agent, &choice.id))
+    .collect()
 }
 
 #[cfg(test)]
@@ -179,7 +182,10 @@ mod save_tests {
             .unwrap();
         });
         save_group("fast", &["openai/gpt-test"]).unwrap();
-        let ids: Vec<_> = load_model_choices().into_iter().map(|choice| choice.id).collect();
+        let ids: Vec<_> = load_model_choices("opencode")
+            .into_iter()
+            .map(|choice| choice.id)
+            .collect();
         assert_eq!(ids, vec!["openai/gpt-test".to_string(), "group/fast".to_string()]);
 
         save_agent("opencode", "group/fast").unwrap();

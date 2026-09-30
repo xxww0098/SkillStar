@@ -4,7 +4,7 @@
 //! subscription signing, the listener, the Claude process bridge, the
 //! Codex config writer, WSL Codex, the models.dev catalog cache, the
 //! file-agent loopback writer, named profiles, model display names, effort
-//! fitting, and the in-memory ring of recent calls.
+//! fitting, per-agent visible families, and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -31,6 +31,7 @@ mod sign;
 mod surface;
 mod trace;
 mod translate;
+mod visible;
 mod vision;
 mod wsl;
 
@@ -88,6 +89,7 @@ pub use serve::{
     ServeError, ServeOptions, Stop, published_origin, resolve_addr, serve,
 };
 pub use trace::{TRACE_KEEP, RecentCall, clear_recent_calls, note_recent_call, recent_calls};
+pub use visible::{catalog_serves, listed_ids, model_shown, shown_model_ids};
 pub use translate::{Protocol, TranslateError, outbound_body, upstream_body};
 pub use vision::{
     VISION_CACHE, VISION_PARALLEL, VISION_SYSTEM, VISION_TIMEOUT, VISION_USER_AGENT, VisionCall,

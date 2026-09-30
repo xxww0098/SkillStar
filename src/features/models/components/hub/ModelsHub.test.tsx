@@ -201,6 +201,39 @@ describe("ModelsHub", () => {
     expect(screen.queryByText("还没有密钥")).toBeNull();
   });
 
+  it("lists only the models that agent's visible names allow", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_models_board") {
+        return {
+          agents: [{ id: "opencode", name: "OpenCode", credential_summary: "" }],
+          providers: [],
+          gateway: [],
+        };
+      }
+      if (cmd === "get_model_choices") {
+        const agentId = (args as { agentId?: string } | undefined)?.agentId;
+        expect(agentId).toBe("opencode");
+        return [{ id: "relay/m1" }, { id: "group/fast" }];
+      }
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "OpenCode" }));
+
+    const list = await screen.findByRole("list", { name: "model choices" });
+    expect(within(list).getByRole("button", { name: "relay/m1" })).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "group/fast" })).toBeTruthy();
+    expect(within(list).queryByRole("button", { name: "openai/gpt-test" })).toBeNull();
+    const text = list.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+  });
+
   it("opens a picker of provider and group ids and saves the chosen id", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_models_board") return BOARD;

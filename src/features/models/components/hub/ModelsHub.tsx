@@ -213,7 +213,7 @@ export function ModelsHub({
                           setPicker(next);
                           setChoices([]);
                           if (next) {
-                            void tauriInvoke("get_model_choices").then(setChoices);
+                            void tauriInvoke("get_model_choices", { agentId: next.id }).then(setChoices);
                           }
                         }
                       }}
@@ -276,7 +276,7 @@ export function ModelsHub({
                   .then(async () => {
                     setNameError("");
                     setDisplayName("");
-                    setChoices(await tauriInvoke("get_model_choices"));
+                    setChoices(await tauriInvoke("get_model_choices", { agentId: picker.id }));
                   })
                   .catch((caught: unknown) => {
                     setNameError(caught instanceof Error ? caught.message : "");

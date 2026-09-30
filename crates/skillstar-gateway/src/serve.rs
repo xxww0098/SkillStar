@@ -266,7 +266,12 @@ async fn dispatch(
         .map(str::to_string);
     let method = request.method().clone();
     let path = request.uri().path().to_string();
-    match crate::surface::plan(method.as_str(), &path, upgrade.as_deref()) {
+    let agent = crate::rules::request_agent(&crate::rules::Caller {
+        authorization: &authorization,
+        user_agent: &user_agent,
+        ..crate::rules::Caller::default()
+    });
+    match crate::surface::plan(method.as_str(), &path, upgrade.as_deref(), &agent) {
         crate::surface::Plan::Local(local) => respond_local(local, head),
         crate::surface::Plan::WithBody(kind) => {
             let inbound = match request.into_body().collect().await {

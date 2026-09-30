@@ -69,8 +69,8 @@ export interface ModelsCommands {
   get_providers_flat: { args: Record<string, never>; result: FlatProvidersResponse };
   /** Agents, providers, and gateway as id + name. No secrets and no endpoints. */
   get_models_board: { args: Record<string, never>; result: ModelsBoardDto };
-  /** Picker ids: `provider/model` or `group/<id>`. No secrets and no endpoints. */
-  get_model_choices: { args: Record<string, never>; result: ModelChoiceDto[] };
+  /** Picker ids this agent is shown: `provider/model` or `group/<id>`. */
+  get_model_choices: { args: { agentId: string }; result: ModelChoiceDto[] };
   /** Recent forwarded calls. No secrets and no upstream URLs. */
   get_recent_calls: { args: Record<string, never>; result: RecentCallDto[] };
   /** Routing and affinity for the selected provider and saved groups. */

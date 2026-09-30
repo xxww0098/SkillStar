@@ -2,7 +2,7 @@
 //!
 //! Chat and Anthropic still go through `translate`. Responses, images, and
 //! Gemini posts are forwarded as the agent sent them. A model id that contains
-//! `/` is a local error: this crate has no catalog that can resolve it.
+//! `/` and is not in the catalog cache or a saved group is a local error.
 
 use serde_json::{Value, json};
 
@@ -54,7 +54,7 @@ pub(crate) enum Outcome {
 }
 
 /// `HEAD` follows the GET table and the caller clears the body.
-pub(crate) fn plan(method: &str, path: &str, upgrade: Option<&str>) -> Plan {
+pub(crate) fn plan(method: &str, path: &str, upgrade: Option<&str>, agent: &str) -> Plan {
     let method = if method.eq_ignore_ascii_case("HEAD") {
         "GET"
     } else {
@@ -64,7 +64,7 @@ pub(crate) fn plan(method: &str, path: &str, upgrade: Option<&str>) -> Plan {
         return plan_codex(method, rest, upgrade);
     }
     if method == "GET"
-        && let Some(local) = get_route(path)
+        && let Some(local) = get_route(path, agent)
     {
         return Plan::Local(local);
     }
@@ -98,11 +98,11 @@ pub(crate) fn finish(kind: Kind, path: &str, body: &[u8]) -> Outcome {
     }
 }
 
-fn get_route(path: &str) -> Option<Local> {
+fn get_route(path: &str, agent: &str) -> Option<Local> {
     match path {
         "/" => Some(info()),
         "/api/hello" => Some(hello()),
-        "/v1/models" | "/models" => Some(model_list()),
+        "/v1/models" | "/models" => Some(model_list(agent)),
         "/v1beta/models" => Some(empty_models()),
         _ => {
             let id = path.strip_prefix("/v1/models/")?;
@@ -139,7 +139,7 @@ fn codex_rest(path: &str) -> Option<&str> {
 }
 
 fn finish_translated(protocol: Protocol, body: &[u8]) -> Outcome {
-    if let Some(model) = slash_model(body) {
+    if let Some(model) = unknown_slash(body) {
         let shape = match protocol {
             Protocol::Chat => Shape::Chat,
             Protocol::Anthropic => Shape::Anthropic,
@@ -153,7 +153,7 @@ fn finish_translated(protocol: Protocol, body: &[u8]) -> Outcome {
 }
 
 fn finish_named(path: &str, body: &[u8]) -> Outcome {
-    if let Some(model) = slash_model(body) {
+    if let Some(model) = unknown_slash(body) {
         return Outcome::Local(error_local(Shape::Chat, 404, &unknown_model(&model)));
     }
     Outcome::Forward {
@@ -174,7 +174,9 @@ fn finish_codex(path: &str, body: &[u8]) -> Outcome {
                 "/responses/compact is not supported for skillstar models; use a compaction_trigger on /responses",
             ));
         }
-        return Outcome::Local(error_local(Shape::Chat, 404, &unknown_model(&model)));
+        if !crate::visible::catalog_serves(&model) {
+            return Outcome::Local(error_local(Shape::Chat, 404, &unknown_model(&model)));
+        }
     }
     Outcome::Forward {
         protocol: None,
@@ -221,7 +223,7 @@ fn finish_gemini(path: &str, body: &[u8]) -> Outcome {
         }
         return Outcome::Local(local_json(200, json!({"totalTokens": body.len() / 4})));
     }
-    if model.contains('/') {
+    if model.contains('/') && !crate::visible::catalog_serves(model) {
         return Outcome::Local(error_local(Shape::Gemini, 404, &unknown_model(model)));
     }
     match method {
@@ -234,6 +236,16 @@ fn finish_gemini(path: &str, body: &[u8]) -> Outcome {
             404,
             &format!("unknown method {method}"),
         )),
+    }
+}
+
+/// A slash id the catalog does not serve. A known id, hidden or not, is forwarded.
+fn unknown_slash(body: &[u8]) -> Option<String> {
+    let model = slash_model(body)?;
+    if crate::visible::catalog_serves(&model) {
+        None
+    } else {
+        Some(model)
     }
 }
 
@@ -273,10 +285,14 @@ fn hello() -> Local {
     local_json(200, json!({"name": "skillstar", "version": VERSION}))
 }
 
-fn model_list() -> Local {
+fn model_list(agent: &str) -> Local {
+    let data: Vec<Value> = crate::visible::shown_model_ids(agent)
+        .into_iter()
+        .map(|id| json!({"id": id, "object": "model"}))
+        .collect();
     local_json(
         200,
-        json!({"object": "list", "data": [], "has_more": false}),
+        json!({"object": "list", "data": data, "has_more": false}),
     )
 }
 

@@ -52,4 +52,8 @@ screenshot-critique。参照 `assets/magpie/37-families.png` 若存在，则 com
 
 ## 决定
 
-- 名单匹配：项等于 provider id、等于 group id、或等于该 provider/分组的 `family` 标签，三者任一即可看见。不另做模糊匹配。
+- 名单匹配：项等于 provider id、等于 group id、或等于该 provider/分组的 `family` 标签，三者任一即可看见。不另做模糊匹配。比较不区分 ASCII 大小写。provider 或分组行的 `id` 仍用区分大小写的相等去找 `family`。`group/<id>` 和去掉前缀的 id 都算这个分组。
+- 空数组与缺省相同，都显示全部。magpie 在键存在且为空时什么都不显示。这里按规格。
+- 隐藏的 id 只要目录缓存或已保存分组里有，就照常转发。`/v1/models` 的每一项只有 `id` 和 `object`。
+- Codex 的 `skillstar-models.json` 仍是空目录，不按可见名单去填。
+- 参照 `assets/magpie/37-families.png` 不在仓库里。1440×900 与 1280×800 都裁 OpenCode 的选择器列表，只有 `relay/m1` 和 `group/fast`。五问过了：这一裁是在选这个 Agent 能看见的模型；effort 固定控件和显示名不在裁剪里；没有密钥和厂商 URL；没有对照就不比较；第一下点 OpenCode 这一行。

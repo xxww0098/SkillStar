@@ -55,11 +55,10 @@ fn save_live(server: &Server, agent: &str, origin: &str, model_ref: &str) -> Res
                     "base_url": v1,
                     "api": "openai-completions",
                     "api_key": key,
-                    "models": [{
-                        "id": model_ref,
-                        "image": false,
-                        "reasoning": false
-                    }]
+                    "models": crate::visible::listed_ids("hanako", model_ref)
+                        .into_iter()
+                        .map(|id| serde_json::json!({"id": id, "image": false, "reasoning": false}))
+                        .collect::<Vec<_>>()
                 }
             }
         }),
@@ -150,11 +149,20 @@ fn catalog_body(origin: &str, model_ref: &str) -> String {
         return String::new();
     }
     let key = super::token_for("hanako");
+    let models = crate::visible::listed_ids("hanako", model_ref)
+        .iter()
+        .map(|model| {
+            format!(
+                "        {{\n          \"id\": {model},\n          \"image\": false,\n          \"reasoning\": false\n        }}",
+                model = json_string(model),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
     format!(
-        "{{\n  \"catalogVersion\": 2,\n  \"providers\": {{\n    \"skillstar\": {{\n      \"display_name\": \"skillstar\",\n      \"base_url\": {url},\n      \"api\": \"openai-completions\",\n      \"api_key\": {key},\n      \"models\": [\n        {{\n          \"id\": {model},\n          \"image\": false,\n          \"reasoning\": false\n        }}\n      ]\n    }}\n  }}\n}}\n",
+        "{{\n  \"catalogVersion\": 2,\n  \"providers\": {{\n    \"skillstar\": {{\n      \"display_name\": \"skillstar\",\n      \"base_url\": {url},\n      \"api\": \"openai-completions\",\n      \"api_key\": {key},\n      \"models\": [\n{models}\n      ]\n    }}\n  }}\n}}\n",
         url = json_string(&format!("{origin}/v1")),
         key = json_string(&key),
-        model = json_string(model_ref),
     )
 }
 

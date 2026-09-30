@@ -31,8 +31,11 @@ pub(super) fn apply(origin: &str, model_ref: &str) -> Result<(), ApplyError> {
         timeout,
         &format!("/api/providers/{id}/models"),
         &serde_json::json!({
-            "models": [model_ref],
-            "availableModels": [{ "id": model_ref, "name": model_ref }]
+            "models": crate::visible::listed_ids("alma", model_ref),
+            "availableModels": crate::visible::listed_ids("alma", model_ref)
+                .into_iter()
+                .map(|id| serde_json::json!({ "id": id, "name": id }))
+                .collect::<Vec<_>>()
         }),
     )?;
     let mut settings = get_json(&endpoint, timeout, "/api/settings")?;
