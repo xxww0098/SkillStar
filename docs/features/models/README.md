@@ -104,7 +104,7 @@ Models 页从左到右是 Agents、Providers、Gateway 三栏。这一屏不决�
 
 `get_models_board` 返回每一行的 id 和 name。提供商行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏另读进程内最近 60 条调用，含时间、Agent、模型、状态和补全 token；没有用法时 token 为空。这一栏不显示配额，也不显示上游 URL。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
-点 Agents 栏的一行打开选择器。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`。保存走该 Agent 已经落地的 writer。尚未落地的 id 返回 `agent_not_managed`，不写文件。弹出层不显示密钥，也不显示厂商 URL。
+点 Agents 栏的一行打开选择器。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`。保存走该 Agent 已经落地的 writer。不在这套写入里的 id，包括 Goose、Cursor CLI、Copilot CLI 和 Devin，返回 `agent_not_managed`，不写文件，也不为它们新造 URL 字段。弹出层不显示密钥，也不显示厂商 URL。
 
 Agent 名称下面的一行是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
 
