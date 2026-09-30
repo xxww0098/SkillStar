@@ -1,10 +1,12 @@
 //! Fit a request's effort to the levels in the models.dev cache.
 //!
 //! The lookup key is the upstream id `provider/model`. A display name is not
-//! a key. A group member may be stored as `provider/model:<level>`; that
-//! level wins over the one in the request. An unknown model keeps the effort
-//! it arrived with. This module does not map `xhigh` to `max`; the Claude
-//! process bridge owns that mapping.
+//! a key. `model_efforts` in `model_gateway.json` may keep a subset of those
+//! levels; a missing, empty, or non-matching subset offers the whole catalog. A group member
+//! may be stored as `provider/model:<level>`; that level wins over the one in
+//! the request, and the subset does not rewrite it. An unknown model keeps
+//! the effort it arrived with. This module does not map `xhigh` to `max`; the
+//! Claude process bridge owns that mapping.
 
 use serde_json::{Value, json};
 
@@ -13,7 +15,8 @@ const RANK: &[&str] = &[
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
 ];
 
-/// Levels the cache lists for this id. Missing data is an empty list.
+/// Levels offered for this id. A saved subset replaces the cache list.
+/// Missing data, and a missing or empty subset, is the cache list or empty.
 ///
 /// The cache file is only read. A display name is not consulted.
 pub fn model_efforts(id: &str) -> Vec<String> {
@@ -21,10 +24,10 @@ pub fn model_efforts(id: &str) -> Vec<String> {
     if model.starts_with("group/") || !model.contains('/') {
         return Vec::new();
     }
-    catalog_levels(model)
+    offered_levels(model)
 }
 
-/// The nearest catalog level for `member`, written into `reasoning_effort`.
+/// The catalog level for `member`, written into `reasoning_effort`.
 ///
 /// `member` empty means the body's `model`. A saved group uses its first
 /// member. Bytes stay as they arrived when the effort does not change.
@@ -45,8 +48,12 @@ pub fn apply_upstream_effort(body: &[u8], member: &str) -> Vec<u8> {
     if fixed.is_empty() && current.is_empty() {
         return body.to_vec();
     }
-    let want = if fixed.is_empty() { current } else { fixed };
-    let fitted = fit_effort(want, &catalog_levels(model));
+    let catalog = catalog_levels(model);
+    let fitted = if fixed.is_empty() {
+        fit_offered(current, model, &catalog)
+    } else {
+        fit_effort(fixed, &catalog)
+    };
     if fitted == current {
         return body.to_vec();
     }
@@ -73,6 +80,81 @@ fn member_source(explicit: &str, body_model: &str) -> String {
         }
     }
     body_model.to_string()
+}
+
+fn offered_levels(model: &str) -> Vec<String> {
+    let catalog = catalog_levels(model);
+    kept_in_catalog(model, &catalog).unwrap_or(catalog)
+}
+
+fn fit_offered(want: &str, model: &str, catalog: &[String]) -> String {
+    match kept_in_catalog(model, catalog) {
+        Some(kept) => fit_kept(want, catalog, &kept),
+        None => fit_effort(want, catalog),
+    }
+}
+
+/// Catalog order. The first kept level that is not before `want`, or the
+/// last kept level when `want` is past all of them. A `want` the catalog
+/// does not list has no place in that order, so the first kept level is used.
+fn fit_kept(want: &str, catalog: &[String], kept: &[String]) -> String {
+    let Some(at) = catalog.iter().position(|level| level == want) else {
+        return kept.first().cloned().unwrap_or_else(|| want.to_string());
+    };
+    for level in kept {
+        if catalog
+            .iter()
+            .position(|item| item == level)
+            .is_some_and(|index| index >= at)
+        {
+            return level.clone();
+        }
+    }
+    kept.last().cloned().unwrap_or_else(|| want.to_string())
+}
+
+fn kept_in_catalog(model: &str, catalog: &[String]) -> Option<Vec<String>> {
+    if catalog.is_empty() {
+        return None;
+    }
+    let names = stored_names(model)?;
+    if names.is_empty() {
+        return None;
+    }
+    let kept: Vec<String> = catalog
+        .iter()
+        .filter(|level| names.iter().any(|name| name.eq_ignore_ascii_case(level)))
+        .cloned()
+        .collect();
+    if kept.is_empty() { None } else { Some(kept) }
+}
+
+fn stored_names(model: &str) -> Option<Vec<String>> {
+    let doc = read_gateway();
+    let list = doc
+        .get("model_efforts")
+        .and_then(Value::as_object)
+        .and_then(|map| map.get(model))
+        .and_then(Value::as_array)?;
+    Some(
+        list.iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+fn read_gateway() -> Value {
+    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
+    let Ok(bytes) = std::fs::read(path) else {
+        return json!({});
+    };
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(value @ Value::Object(_)) => value,
+        _ => json!({}),
+    }
 }
 
 fn fit_effort(want: &str, levels: &[String]) -> String {

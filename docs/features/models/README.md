@@ -122,6 +122,8 @@ Gateway 栏可以选择环回或局域网。局域网让进程听 `0.0.0.0` 和�
 
 每个 Agent 可以有一份可见名单，写在 `model_gateway.json` 的 `visible`。项是家族标签、provider id 或 group id，家族写在 provider 或分组的 `family`。没有名单时看到全部模型。名单收窄这个 Agent 的 `/v1/models`、选择器，以及写进它文件的模型目录。已经保存的 model ref 留在原字段。名单外的 id 仍可以请求。
 
+一个 `provider/model` 可以留下目录等级的子集，写在 `model_gateway.json` 的 `model_efforts`。没有这份子集时，选择器和出站收束仍用目录里的全部等级。有子集时，这两处只提供子集里的等级；未固定的请求按目录顺序收进子集。成员上的固定 effort 仍优先。
+
 Settings 的 App AI 仍用 `get_providers_flat`。切换三栏、点 Providers 或 Gateway 的行、或点侧栏里的最近名字，只改变当前选中。保存所选模型才写该 Agent 的配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
 
 

@@ -508,6 +508,28 @@ describe("ModelsHub", () => {
     });
   });
 
+  it("lists only the effort levels that model keeps", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [{ id: "fast", members: ["probe/m1"] }];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      if (cmd === "model_efforts") return ["high"];
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const list = await screen.findByRole("list", { name: "effort levels for probe/m1" });
+    expect(within(list).getByText("high")).toBeTruthy();
+    expect(within(list).queryByText("low")).toBeNull();
+    expect(within(list).queryByRole("combobox")).toBeNull();
+    const text = list.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+  });
+
   it("fixes one member at a catalog level and still shows the upstream id", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_models_board") return BOARD;

@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：37 已落地。最后更新：2026-09-30。
+状态：38 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-37 已落地。每个 Agent 的可见名单在 `model_gateway.json` 的 `visible`。缺省和空数组都看到全部模型。名单收窄 `/v1/models`、选择器，以及写进该 Agent 文件的目录。隐藏的 id 仍转发。路由不读名单，已经保存的 model ref 留在原字段。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
+38 已落地。`model_gateway.json` 的 `model_efforts` 以 `provider/model` 为键保存目录等级的子集。空数组、缺省、以及一项都对不上目录时，都用全部目录等级。有子集时，选择器只列出子集，未固定的请求按目录顺序收进子集。成员上的固定等级仍按整个目录收束。已有命令 `model_efforts` 返回这份列表，没有新的保存命令，也没有往 Agent 文件里新造等级数组。1440×900 与 1280×800 的裁剪只有 `high`。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/38-effort-subset.md](slices/38-effort-subset.md)：人可以给一个 `provider/model` 留下目录等级的子集，键是 `model_gateway.json` 的 `model_efforts`。选择器和写进 Agent 的等级列表只提供这个子集。36 档的收束在子集存在时，把未固定的请求收进子集。空数组与缺省都用全部目录等级。成员上的固定 effort 仍优先，即使它不在子集里。已有的命令 `model_efforts` 返回目录等级，不要把它和这份存储键混成同一个入口。这是视觉档，裁等级列表，遮住 36 档的固定控件。看 1440×900 与 1280×800。不要重启已经在跑的 Vite。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/39-name-only.md](slices/39-name-only.md)：Goose、Cursor CLI、Copilot CLI、Devin 仍是 `agent_not_managed`。`apply_gateway` 对 `goose`、`cursor`、`copilot`、`devin` 写入 0 字节，不写环回 URL，不写占位 bearer，不为它们发明 base URL 或密钥字段。行为已在 18 档，本档不新增第二种写入。验证名 `apply_gateway_name_only_still_unmanaged` 可改。这不是视觉档。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -55,7 +55,7 @@
 - [x] 35 模型改名 — [slices/35-model-rename.md](slices/35-model-rename.md)
 - [x] 36 effort — [slices/36-effort.md](slices/36-effort.md)
 - [x] 37 可见家族 — [slices/37-visible-families.md](slices/37-visible-families.md)
-- [ ] 38 effort 子集 — [slices/38-effort-subset.md](slices/38-effort-subset.md)
+- [x] 38 effort 子集 — [slices/38-effort-subset.md](slices/38-effort-subset.md)
 - [ ] 39 不写环回 URL — [slices/39-name-only.md](slices/39-name-only.md)
 
 ## 目标

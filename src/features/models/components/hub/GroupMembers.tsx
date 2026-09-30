@@ -178,7 +178,18 @@ function MemberLine({
   const shown = plainText(model);
   return (
     <li className="flex items-center gap-1">
-      {shown ? <span className="min-w-0 flex-1 truncate text-xs">{shown}</span> : <span className="flex-1" />}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {shown ? <span className="truncate text-xs">{shown}</span> : <span />}
+        {levels.length > 0 ? (
+          <ul aria-label={`effort levels for ${shown}`} className="flex w-fit flex-wrap gap-x-2">
+            {levels.map((level) => (
+              <li key={level} className="text-xs text-muted-foreground">
+                {level}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       {levels.length > 0 ? (
         <select
           aria-label={`effort for ${shown}`}

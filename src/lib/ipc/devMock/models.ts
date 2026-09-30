@@ -130,6 +130,7 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     const id = typeof args?.id === "string" ? args.id : "";
     const bare = id.replace(/:(none|minimal|low|medium|high|xhigh|max)$/, "");
     if (!bare.includes("/") || bare.startsWith("group/")) return [];
+    if (bare === "openai/gpt-test") return ["high"];
     return ["low", "high"];
   },
   get_saved_groups: () => savedGroups.map((group) => ({ id: group.id, members: [...group.members] })),
