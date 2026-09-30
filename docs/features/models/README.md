@@ -108,7 +108,7 @@ Models 页从左到右是 Agents、Providers、Gateway 三栏。这一屏不决�
 
 Agent 名称下面的一行是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
 
-选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 栏里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。
+选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 栏里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。监听转发仍打启动时的那一个上游根，不读这次写下的路由和亲和。
 
 已保存的分组可以在 Gateway 栏里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
 

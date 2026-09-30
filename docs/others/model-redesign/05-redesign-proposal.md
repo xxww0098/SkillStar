@@ -1,6 +1,6 @@
 状态：historical
 
-> 2026-09-29 起，Models 的本机网关与 Agent 接线以 [specs/models-gateway/](../../../specs/models-gateway/README.md) 为准。本文是 2026-08-15 的数据模型提案。其中「本轮不做 proxy takeover」和文内的实施拆解都不要再拿来改代码。
+> 2026-09-30 起，本文和 [specs/done/models-gateway/](../../../specs/done/models-gateway/README.md) 都不是实施入口。当前行为以 `docs/features/models/README.md` 与 `docs/architecture.md` 为准。本文是 2026-08-15 的数据模型提案。其中「本轮不做 proxy takeover」和文内的实施拆解都不要再拿来改代码。
 
 # SkillStar Models 重设计方案（数据模型 + IA + 迁移 + 实施拆解）
 

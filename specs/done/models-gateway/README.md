@@ -1,20 +1,18 @@
 # Models 网关
 
-状态：39 已落地。最后更新：2026-09-30。
+状态：已归档。最后更新：2026-09-30。当前行为以 `docs/features/models/README.md` 和 `docs/architecture.md` 为准。本目录是落地后的理由记录，不是实施入口。
 
 ## Next Agent Prompt
 
-你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
+不要按本目录的切片图改代码。39 档都已落地，选择的最终状态在 [choices.md](choices.md)。
 
-39 已落地。Goose、Cursor CLI、Copilot CLI、Devin 仍是 `agent_not_managed`。`apply_gateway` 对 `goose`、`cursor`、`copilot`、`devin` 写入 0 字节，不写环回 URL，不写占位 bearer，也不写模型名。没有第二种写入。签名路径里的 cursor、devin、github-copilot 账号头保持原样。选择记在 [choices.md](choices.md)。
+`serve` 把一条请求打到启动时的那一个上游根。协议翻译、effort 收束、视觉转述和脱敏在这条路上。路由排序、亲和、休息、分类器、订阅签名，以及首内容字节之前的保持写者，是已测试的库函数，`forward_body` 不调用它们。页面保存的路由和亲和留在 `model_gateway.json`。要改这条转发，先改规格再改代码。
 
-切片已经全部勾完。下一步对照最终代码重写 [choices.md](choices.md)，审查 01 到 39 的已提交差异，然后把本目录归档。不要再加写入器。不要改 `cursor.rs`。不要并行改 `skillstar-gateway` 的公共类型。
+网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它。
 
-网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
+不要打开 `crates/skillstar-usage/src/fetchers/oauth/cursor.rs`。不要改 Tauri updater（`src-tauri/tauri.conf.json`、`src-tauri/src/commands/updater.rs`、`src/features` 里的 updater hook、`.github/workflows/release.yml`）。不要请求 `usemagpie.ai`，不要移植 `internal/update`、`site/worker.js`、`/api/latest`、`/download` 或 `install.sh`。不要在启动时改写 Agent 配置文件。不要把网关代码放进 `skillstar-models`。不要并行改 `skillstar-gateway` 的公共类型。
 
-不要打开 `crates/skillstar-usage/src/fetchers/oauth/cursor.rs`。不要改 Tauri updater（`src-tauri/tauri.conf.json`、`src-tauri/src/commands/updater.rs`、`src/features` 里的 updater hook、`.github/workflows/release.yml`）。不要请求 `usemagpie.ai`，不要移植 `internal/update`、`site/worker.js`、`/api/latest`、`/download` 或 `install.sh`。不要在启动时改写 Agent 配置文件。不要把网关代码放进 `skillstar-models`。
-
-全局决定在下面。切片里标成「可改」的才是实现自由。未列出的决定先改规格，再写代码。
+下面是落地时的决定，不是新的施工单。
 
 ### TODO
 
@@ -307,7 +305,7 @@ Cindy 只生成 `cindy://provider/import?...`，数据库只读。Hanako 与 Alm
 
 ## 视觉门
 
-每一档视觉切片在接受前跑 screenshot-critique：批评者只看截图和该档的验收句，不看实现理由。有参照作物时再跑 compare-screenshots，裁剪范围只盖住该档声明的那一个变量。参照图放进 `specs/models-gateway/assets/magpie/`，从本机 magpie 截取。不从 `usemagpie.ai` 下载。
+每一档视觉切片在接受前跑 screenshot-critique：批评者只看截图和该档的验收句，不看实现理由。有参照作物时再跑 compare-screenshots，裁剪范围只盖住该档声明的那一个变量。参照图放进 `specs/done/models-gateway/assets/magpie/`，从本机 magpie 截取。不从 `usemagpie.ai` 下载。
 
 两个视口：1440×900 与 1280×800。下面五问有一问失败，该档就不算过：
 
