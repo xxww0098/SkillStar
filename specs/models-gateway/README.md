@@ -1,14 +1,14 @@
 # Models 网关
 
-状态：32 已落地。最后更新：2026-09-30。
+状态：33 已落地。最后更新：2026-09-30。
 
 ## Next Agent Prompt
 
 你正在实现 SkillStar Models 的本机网关。不要从聊天记录恢复产品决定，以本目录为准。`/tmp/skillstar-models-gateway-brief.md` 和 `docs/others/model-redesign/05-redesign-proposal.md` 都已被本目录取代。
 
-32 已落地。Gateway 栏可以新建分组、增减成员。写入走 `save_group`。成环或超过 8 层时文件不变，界面留下后端返回的原因。未保存的自动分组不在列表里。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
+33 已落地。Gateway 栏列出已经保存的配置档名字。保存写下名字和 Agent 的 model ref。点一个名字就调用 `apply_gateway`。未实现的 id 不写文件。超过 64 个字或密钥形状的内容不改 `model_gateway.json`。参照作物不在仓库里，按五问接受。选择记在 [choices.md](choices.md)。
 
-下一档是 [slices/33-profiles.md](slices/33-profiles.md)：一份命名配置档记下若干 Agent 当前选中的 `model_ref`。应用时对每个已实现的 Agent 调用现有 writer。未实现的 id 跳过并出现在结果里，不写文件。配置档存在 `model_gateway.json` 的 profiles 数组，不是技能库，不同步 MCP，不备份到 WebDAV。这是视觉档，裁名字列表，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 18 与 06 的写入测试为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
+下一档是 [slices/34-lan.md](slices/34-lan.md)：监听可以改成 `0.0.0.0:<端口>`。写进 Agent 文件的 URL 仍是 `http://127.0.0.1:<端口>`。默认仍是环回。端口 `3425` 拒绝绑定。这是视觉档，裁局域网开关和它的一行说明，看 1440×900 与 1280×800。不要重启已经在跑的 Vite。保持 04 档 `serve_refuses_magpie_port` 以及 06 与 18 的 URL 断言为绿。不要改 `cursor.rs`。做完一档，把该档会改的文档一起提交，然后回到本节：改状态、把下一档指到新的入口、勾掉对应 TODO。
 
 网关是独立 crate `skillstar-gateway`（`crates/skillstar-gateway`）。01 档建它。它的 skillstar 依赖只有 `skillstar-core`。`skillstar-models` 和 `skillstar-usage` 不依赖它，它也不依赖这两个 crate，也不依赖 `skillstar-decision` 或 `skillstar-app`。只有 `skillstar-app` 依赖它，从 04 档起。
 
@@ -50,7 +50,7 @@
 - [x] 30 路由控件 — [slices/30-routing-controls.md](slices/30-routing-controls.md)
 - [x] 31 空态 — [slices/31-empty-states.md](slices/31-empty-states.md)
 - [x] 32 分组控件 — [slices/32-group-controls.md](slices/32-group-controls.md)
-- [ ] 33 配置档 — [slices/33-profiles.md](slices/33-profiles.md)
+- [x] 33 配置档 — [slices/33-profiles.md](slices/33-profiles.md)
 - [ ] 34 局域网 — [slices/34-lan.md](slices/34-lan.md)
 - [ ] 35 模型改名 — [slices/35-model-rename.md](slices/35-model-rename.md)
 - [ ] 36 effort — [slices/36-effort.md](slices/36-effort.md)

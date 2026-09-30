@@ -39,6 +39,7 @@ beforeEach(() => {
     if (cmd === "get_recent_calls") return [];
     if (cmd === "get_routing_page") return { provider: null, groups: [] };
     if (cmd === "get_saved_groups") return [];
+    if (cmd === "get_profile_names") return [];
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -71,7 +72,7 @@ describe("ModelsHub", () => {
     fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
 
     expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(
-      new Set(["get_models_board", "get_recent_calls", "get_routing_page", "get_saved_groups"]),
+      new Set(["get_models_board", "get_recent_calls", "get_routing_page", "get_saved_groups", "get_profile_names"]),
     );
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
     expect(nav.setSelectedProviderId).toHaveBeenCalledWith("p1");
@@ -89,6 +90,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -122,6 +124,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -159,6 +162,7 @@ describe("ModelsHub", () => {
       }
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -196,6 +200,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -230,6 +235,7 @@ describe("ModelsHub", () => {
       }
       if (cmd === "save_routing") return null;
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     const nav = navigation();
@@ -279,6 +285,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -306,6 +313,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -340,6 +348,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [{ id: "demo", members: ["openai/gpt-test"] }];
+      if (cmd === "get_profile_names") return [];
       if (cmd === "save_group_members") throw new Error("group_cycle");
       throw new Error(`unexpected ${cmd}`);
     });
@@ -371,6 +380,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
       if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
       if (cmd === "save_group_members") throw new Error("group_cycle");
       throw new Error(`unexpected ${cmd}`);
     });
@@ -388,6 +398,61 @@ describe("ModelsHub", () => {
     expect(mockInvoke).toHaveBeenCalledWith("save_group_members", {
       id: "demo",
       members: ["group/demo"],
+    });
+  });
+
+  it("lists backend profile names and does not put a skipped id in the list", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return ["work", "home"];
+      if (cmd === "apply_profile") return { applied: ["opencode"], skipped: ["goose"] };
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const list = await screen.findByRole("list", { name: "profiles" });
+    expect(await within(list).findByRole("button", { name: "work" })).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "home" })).toBeTruthy();
+    fireEvent.click(within(list).getByRole("button", { name: "work" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("apply_profile", { name: "work" });
+    });
+    expect(within(list).queryByRole("button", { name: "goose" })).toBeNull();
+    expect(within(list).queryByText("goose")).toBeNull();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+    expect(text).not.toContain("api.openai.com");
+  });
+
+  it("shows the backend refusal and does not invent a profile name", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return ["work"];
+      if (cmd === "save_profile") throw new Error("profile_name");
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const list = await screen.findByRole("list", { name: "profiles" });
+    fireEvent.change(screen.getByRole("textbox", { name: "profile name" }), { target: { value: "later" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "profile agent" }), { target: { value: "opencode" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "profile model" }), { target: { value: "openai/gpt-test" } });
+    fireEvent.submit(screen.getByRole("textbox", { name: "profile name" }).closest("form") as HTMLFormElement);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("profile_name");
+    expect(within(list).queryByRole("button", { name: "later" })).toBeNull();
+    expect(within(list).getByRole("button", { name: "work" })).toBeTruthy();
+    expect(mockInvoke).toHaveBeenCalledWith("save_profile", {
+      name: "later",
+      agents: [{ id: "opencode", modelRef: "openai/gpt-test" }],
     });
   });
 });

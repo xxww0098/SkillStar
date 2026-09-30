@@ -645,3 +645,23 @@
 - **新建、加入和移除都提交整份成员列表。** 判定在 gateway 的 `save_group`。拒绝时文件不变，被拒的成员不画进行，界面留下返回的那句。信心：高。
 
 - **带 `://`、`sk-` 或 `api.openai.com` 的 id 和成员不画字。** 这一档不画规则编辑器，也不画分类器字段。信心：高。
+
+## 33 配置档
+
+### 先这样，后面的档再接
+
+- **页面一次提交一对 Agent 和 model ref。** 保存接口接受整份列表。同名再存会换掉这一档里的全部 Agent。开发页要一次记下好几个 Agent，得再存一次。信心：中。
+
+- **按钮是英文。** 语言文件这次不动。按钮写 Save profile。信心：中。
+
+- **开发页的夹具叫 work 和 home。** work 记下 opencode 的 openai/gpt-test，home 记下 pi 的 group/fast。夹具里的应用不改 Agent 文件，applied 和 skipped 都是空的。信心：中。
+
+- **没有 magpie 的配置档参照。** `33-profiles.png` 不在仓库里，不下载。1440×900 与 1280×800 都只裁名字列表。五问过了：这一裁决定应用哪一份档；分组成员和保存表单不在裁剪里；没有密钥和厂商 URL；没有对照就不比较；第一下点名字。信心：中。
+
+### 已定，按这个做
+
+- **配置档是 `model_gateway.json` 里的 `profiles` 数组。** 不另开 `profiles.json`。每条只有名字、Agent id 和 model ref。不是技能库，不同步 MCP，不做 WebDAV。信心：高。
+
+- **应用只走 `apply_gateway`。** 这个写者不实现的 id 放进 skipped，不打开文件。Codex 的写入要登录态或 API 形态，不是一条 model ref，所以不在这条路径上再写一次。取消托管仍是对那个 Agent 调用空的 model ref，stash 放回第一次接管前的文件。信心：高。
+
+- **名字按 Unicode 标量计，超过 64 个就拒绝。** 空名字也拒绝。名字、id 或 model ref 里出现 `://`、`sk-` 或 `api.openai.com` 时文件不变。空的 model ref 不能写进档里冒充取消托管。同一档里重复的 Agent id 留第一条。信心：高。

@@ -17,6 +17,15 @@ const routingMemory = new Map<string, { routing: string; affinity: string }>();
 
 const savedGroups: { id: string; members: string[] }[] = [{ id: "fast", members: ["openai/gpt-test"] }];
 
+const profiles: { name: string; agents: { id: string; modelRef: string }[] }[] = [
+  { name: "work", agents: [{ id: "opencode", modelRef: "openai/gpt-test" }] },
+  { name: "home", agents: [{ id: "pi", modelRef: "group/fast" }] },
+];
+
+function secretShaped(value: string): boolean {
+  return value.includes("://") || value.includes("sk-") || value.includes("api.openai.com");
+}
+
 function remembered(owner: string, id: string): { routing: string; affinity: string } {
   return routingMemory.get(`${owner}:${id}`) ?? { routing: "smart", affinity: "auto" };
 }
@@ -106,6 +115,40 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     if (existing) existing.members = members;
     else if (id) savedGroups.push({ id, members });
     return null;
+  },
+  get_profile_names: () => profiles.map((profile) => profile.name),
+  save_profile: (args) => {
+    const name = typeof args?.name === "string" ? args.name.trim() : "";
+    const agents = Array.isArray(args?.agents) ? args.agents : [];
+    const cleaned = agents
+      .map((agent) => {
+        const row = agent as { id?: unknown; modelRef?: unknown };
+        return {
+          id: typeof row.id === "string" ? row.id.trim() : "",
+          modelRef: typeof row.modelRef === "string" ? row.modelRef.trim() : "",
+        };
+      })
+      .filter((agent) => agent.id && agent.modelRef);
+    const seen = new Set<string>();
+    const unique = cleaned.filter((agent) => {
+      if (seen.has(agent.id)) return false;
+      seen.add(agent.id);
+      return true;
+    });
+    if (!name || Array.from(name).length > 64) throw new Error("profile_name");
+    if (secretShaped(name) || unique.some((agent) => secretShaped(agent.id) || secretShaped(agent.modelRef))) {
+      throw new Error("profile_store");
+    }
+    if (unique.length === 0) throw new Error("profile_store");
+    const existing = profiles.find((profile) => profile.name === name);
+    if (existing) existing.agents = unique;
+    else profiles.push({ name, agents: unique });
+    return null;
+  },
+  apply_profile: (args) => {
+    const name = typeof args?.name === "string" ? args.name.trim() : "";
+    if (!profiles.some((profile) => profile.name === name)) throw new Error("profile_missing");
+    return { applied: [], skipped: [] };
   },
   save_routing: (args) => {
     const owner = typeof args?.owner === "string" ? args.owner : "";

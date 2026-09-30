@@ -47,3 +47,8 @@ screenshot-critique。无参照则不做 compare-screenshots，记入 `choices.m
 ## 决定
 
 - 档里只存 Agent id 和 model ref。不存密钥，不存 URL。
+- 档是 `model_gateway.json` 的 `profiles` 数组。不另写 `profiles.json`。不存技能库、MCP 或 WebDAV。
+- 应用只调用 `apply_gateway`。Codex 的现有写入要的是登录态或 API 形态，不是 model ref，所以和 goose 一样进入 skipped，不另写第二条实现。
+- 名字超过 64 个 Unicode 标量，或名字为空，返回 `profile_name`。密钥形状的名字、id 或 model ref 返回 `profile_store`，文件字节不变。空的 model ref 在档里不是取消托管。
+- 界面的 `profiles` 列表里只有名字。保存表单和跳过的 id 在列表外面。开发页夹具是 work 和 home。
+- 参照作物 `assets/magpie/33-profiles.png` 不在仓库里，不下载。1440×900 与 1280×800 都裁名字列表。五问：这一裁决定应用哪一份档；分组控件和保存表单不在裁剪里；这一裁没有密钥和厂商 URL；没有 magpie 对照，所以不比较；第一下点档的名字。

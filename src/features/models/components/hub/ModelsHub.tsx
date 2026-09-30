@@ -9,6 +9,7 @@ import { useRecentCalls } from "../../api/recent";
 import { useRoutingPage } from "../../api/routing";
 import type { ModelsNavBridge } from "../../lib/navBridge";
 import { GroupMembers } from "./GroupMembers";
+import { ProfileNames } from "./ProfileNames";
 import { RoutingControl } from "./RoutingControl";
 
 type ColumnId = "agents" | "providers" | "gateway";
@@ -157,6 +158,7 @@ export function ModelsHub({
             <h2 className="px-4 pt-4 text-sm font-semibold tracking-wide text-foreground">{t(entry.labelKey)}</h2>
             {entry.id === "gateway" ? (
               <>
+                <ProfileNames />
                 {routingPage?.provider && selectedProviderId ? (
                   <RoutingControl
                     owner="provider"

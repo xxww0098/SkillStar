@@ -12,6 +12,7 @@ pub mod dto;
 mod gateway_save;
 pub mod groups;
 pub mod picker;
+pub mod profiles;
 pub mod recent;
 pub mod routing;
 
@@ -20,6 +21,10 @@ pub use codex_save::{CodexRoute, release_codex, save_codex};
 pub use gateway_save::save_agent;
 pub use groups::{SavedGroupDto, SaveGroupControlError, load_saved_groups, save_group_members};
 pub use picker::{ModelChoiceDto, load_model_choices};
+pub use profiles::{
+    ApplyProfileControlError, ProfileAgentDto, ProfileApplyDto, SaveProfileControlError,
+    apply_saved_profile, load_profile_names, save_profile_agents,
+};
 pub use recent::{RecentCallDto, load_recent_calls};
 pub use routing::{
     RoutingControl, RoutingGroupControl, RoutingPage, load_routing_page, save_routing_control,
