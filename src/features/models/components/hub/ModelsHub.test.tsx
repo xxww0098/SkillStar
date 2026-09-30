@@ -36,6 +36,7 @@ beforeEach(() => {
   mockInvoke.mockReset();
   mockInvoke.mockImplementation(async (cmd: string) => {
     if (cmd === "get_models_board") return BOARD;
+    if (cmd === "get_recent_calls") return [];
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -57,7 +58,7 @@ describe("ModelsHub", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("clicking the three columns only calls get_models_board", async () => {
+  it("clicking the three columns does not fetch past the board and recent calls", async () => {
     const nav = navigation();
     renderHub(<ModelsHub {...nav} />);
     await screen.findByRole("heading", { name: "Agents" });
@@ -67,7 +68,9 @@ describe("ModelsHub", () => {
     fireEvent.click(screen.getByRole("heading", { name: "Gateway" }));
     fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
 
-    expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(new Set(["get_models_board"]));
+    expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(
+      new Set(["get_models_board", "get_recent_calls"]),
+    );
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
     expect(nav.setSelectedProviderId).toHaveBeenCalledWith("p1");
   });
@@ -81,6 +84,7 @@ describe("ModelsHub", () => {
           gateway: [],
         };
       }
+      if (cmd === "get_recent_calls") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -111,6 +115,7 @@ describe("ModelsHub", () => {
           gateway: [],
         };
       }
+      if (cmd === "get_recent_calls") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -123,6 +128,53 @@ describe("ModelsHub", () => {
     expect(text).not.toContain(PLAINTEXT_KEY);
   });
 
+  it("lists recent calls without a quota word or a vendor url", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") {
+        return [
+          {
+            at: "12:00:00",
+            agent: "codex",
+            model: "openai/gpt-test",
+            status: 200,
+            completion_tokens: "5",
+          },
+          {
+            at: "12:00:01",
+            agent: "opencode",
+            model: "https://api.openai.com/v1",
+            status: 502,
+            completion_tokens: "",
+            upstream: "https://api.openai.com/v1",
+            quota: "remaining 90",
+          },
+        ];
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    expect(await screen.findByText("5")).toBeTruthy();
+    expect(screen.getByText("codex")).toBeTruthy();
+    expect(screen.getByText("openai/gpt-test")).toBeTruthy();
+    expect(screen.queryByText("0")).toBeNull();
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent ?? "")
+      .join(" ");
+    expect(headers).toMatch(/Agent/);
+    expect(headers).toMatch(/Model/);
+    expect(headers).toMatch(/Status/);
+    expect(headers).toMatch(/Token/);
+    expect(headers).not.toMatch(/quota|remaining|allowance|配额|剩余/i);
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toContain("api.openai.com");
+    expect(text).not.toContain("remaining");
+    expect(text).not.toContain(PLAINTEXT_KEY);
+  });
+
   it("opens a picker of provider and group ids and saves the chosen id", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_models_board") return BOARD;
@@ -130,6 +182,7 @@ describe("ModelsHub", () => {
         return [{ id: "openai/gpt-test" }, { id: "group/fast" }];
       }
       if (cmd === "save_agent_model") return null;
+      if (cmd === "get_recent_calls") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);

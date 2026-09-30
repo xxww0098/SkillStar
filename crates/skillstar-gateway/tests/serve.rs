@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use skillstar_gateway::{
     ADDR_ENV, DEFAULT_ADDR, HEADER_READ_TIMEOUT, IDLE_TIMEOUT, PLACEHOLDER_BEARER, Protocol,
-    REFUSED_PORT, ServeError, ServeOptions, outbound_body, resolve_addr, serve, upstream_body,
+    REFUSED_PORT, ServeError, ServeOptions, outbound_body, recent_calls, resolve_addr, serve,
+    upstream_body,
 };
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -230,6 +231,51 @@ fn serve_chat_fixture_matches_translate() {
         logged.iter().any(|url| url == &forwarded),
         "chat forward should be on the outbound log: {logged:?}"
     );
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+#[test]
+fn chat_fixture_is_a_recent_call() {
+    let _data = IsolatedDataDir::new();
+    let inbound = fixture("inbound.json");
+    let upstream_response = fixture("upstream_response.json");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let fake_addr = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let _ = read_message(&mut sock);
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            upstream_response.len()
+        );
+        sock.write_all(header.as_bytes()).unwrap();
+        sock.write_all(&upstream_response).unwrap();
+    });
+
+    let (addr, stop, handle) = start(
+        ServeOptions::bind("127.0.0.1:0".parse().unwrap()).upstream(format!("http://{fake_addr}")),
+    );
+    let mut sock = TcpStream::connect(addr).unwrap();
+    let header = format!(
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer skillstar-codex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        inbound.len()
+    );
+    sock.write_all(header.as_bytes()).unwrap();
+    sock.write_all(&inbound).unwrap();
+    let _outbound = read_message(&mut sock);
+
+    let call = recent_calls()
+        .into_iter()
+        .find(|call| call.agent == "codex" && call.model == "m1")
+        .expect("the chat fixture should be on the ring");
+    assert_eq!(call.status, 200);
+    assert_eq!(call.completion_tokens, Some(5));
+    let text = format!("{call:?}");
+    assert!(!text.contains(&format!("http://{fake_addr}")), "{text}");
+    assert!(!text.contains("https://"), "{text}");
+    assert!(!text.contains("api.openai.com"), "{text}");
+    assert!(!text.contains("sk-"), "{text}");
     stop.stop();
     handle.join().unwrap().unwrap();
 }

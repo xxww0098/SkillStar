@@ -68,6 +68,15 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     return FLAT_PROVIDERS;
   },
   get_model_choices: () => [{ id: "openai/gpt-test" }, { id: "group/fast" }],
+  get_recent_calls: () => [
+    {
+      at: "12:00:00",
+      agent: "codex",
+      model: "openai/gpt-test",
+      status: 200,
+      completion_tokens: "5",
+    },
+  ],
   save_agent_model: () => null,
   get_models_board: () => ({
     agents: [

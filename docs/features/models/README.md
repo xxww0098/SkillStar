@@ -102,7 +102,7 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 Models 页从左到右是 Agents、Providers、Gateway 三栏。栏内第一屏可以是空列表。这一屏不决定行密度、路由控件或空态句子。
 
-`get_models_board` 返回每一行的 id 和 name。提供商行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字，Gateway 在有最近调用之前是空列表。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
+`get_models_board` 返回每一行的 id 和 name。提供商行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏另读进程内最近 60 条调用，含时间、Agent、模型、状态和补全 token；没有用法时 token 为空。这一栏不显示配额，也不显示上游 URL。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
 点 Agents 栏的一行打开选择器。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`。保存走该 Agent 已经落地的 writer。尚未落地的 id 返回 `agent_not_managed`，不写文件。弹出层不显示密钥，也不显示厂商 URL。
 

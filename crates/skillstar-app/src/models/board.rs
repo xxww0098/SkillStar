@@ -30,8 +30,8 @@ pub struct ModelsBoardRowDto {
 pub struct ModelsBoardDto {
     pub agents: Vec<ModelsBoardRowDto>,
     pub providers: Vec<ModelsBoardRowDto>,
-    /// Empty until recent calls have a home. This loader does not read the
-    /// listen address.
+    /// Recent calls are a separate query. This list stays empty, and this
+    /// loader does not read the listen address.
     pub gateway: Vec<ModelsBoardRowDto>,
 }
 

@@ -6,6 +6,7 @@ export const modelsKeys = {
   all: ["models"] as const,
   providersFlat: () => [...modelsKeys.all, "providers-flat"] as const,
   board: () => [...modelsKeys.all, "board"] as const,
+  recentCalls: () => [...modelsKeys.all, "recent-calls"] as const,
 };
 
 /**

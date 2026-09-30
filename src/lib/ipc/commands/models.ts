@@ -18,6 +18,7 @@ import type {
 import type { AgentDescriptorDto } from "../../../types/generated/AgentDescriptorDto";
 import type { ModelChoiceDto } from "../../../types/generated/ModelChoiceDto";
 import type { ModelsBoardDto } from "../../../types/generated/ModelsBoardDto";
+import type { RecentCallDto } from "../../../types/generated/RecentCallDto";
 
 interface ConfigConflict {
   conflict_type: "EnvVarOverride" | "LegacyConfig" | "ExternalModification";
@@ -45,6 +46,8 @@ export interface ModelsCommands {
   get_models_board: { args: Record<string, never>; result: ModelsBoardDto };
   /** Picker ids: `provider/model` or `group/<id>`. No secrets and no endpoints. */
   get_model_choices: { args: Record<string, never>; result: ModelChoiceDto[] };
+  /** Recent forwarded calls. No secrets and no upstream URLs. */
+  get_recent_calls: { args: Record<string, never>; result: RecentCallDto[] };
   save_agent_model: { args: { agentId: string; modelRef: string }; result: void };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
   update_provider_flat: {

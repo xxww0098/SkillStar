@@ -237,6 +237,8 @@ async fn dispatch(
     upstream: Option<&str>,
     peer: SocketAddr,
 ) -> Response<Full<Bytes>> {
+    let authorization = header_text(request.headers(), hyper::header::AUTHORIZATION);
+    let user_agent = header_text(request.headers(), hyper::header::USER_AGENT);
     if request.method() == Method::POST
         && let Some(token) = crate::claude::callback_token(request.uri().path())
     {
@@ -265,9 +267,41 @@ async fn dispatch(
             match crate::surface::finish(kind, &path, &inbound) {
                 crate::surface::Outcome::Local(local) => respond_local(local, head),
                 crate::surface::Outcome::Forward { protocol, url_path } => {
-                    forward_turn(upstream, protocol, &url_path, inbound).await
+                    forward_turn(
+                        upstream,
+                        protocol,
+                        &url_path,
+                        inbound,
+                        &authorization,
+                        &user_agent,
+                    )
+                    .await
                 }
             }
+        }
+    }
+}
+
+struct Turn {
+    status: StatusCode,
+    body: Vec<u8>,
+    json: bool,
+}
+
+impl Turn {
+    fn text(status: StatusCode, message: &str) -> Self {
+        Self {
+            status,
+            body: message.as_bytes().to_vec(),
+            json: false,
+        }
+    }
+
+    fn json(status: StatusCode, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            body,
+            json: true,
         }
     }
 }
@@ -277,16 +311,44 @@ async fn forward_turn(
     protocol: Option<Protocol>,
     url_path: &str,
     inbound: Bytes,
+    authorization: &str,
+    user_agent: &str,
 ) -> Response<Full<Bytes>> {
+    let turned = forward_body(upstream, protocol, url_path, &inbound).await;
+    crate::trace::note_forward(
+        authorization,
+        user_agent,
+        &inbound,
+        turned.status.as_u16(),
+        &turned.body,
+    );
+    let content_type = if turned.json {
+        "application/json"
+    } else {
+        "text/plain; charset=utf-8"
+    };
+    Response::builder()
+        .status(turned.status)
+        .header(hyper::header::CONTENT_TYPE, content_type)
+        .body(Full::new(Bytes::from(turned.body)))
+        .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
+}
+
+async fn forward_body(
+    upstream: Option<&str>,
+    protocol: Option<Protocol>,
+    url_path: &str,
+    inbound: &Bytes,
+) -> Turn {
     let upstream_bytes = match protocol {
-        Some(protocol) => match upstream_body(protocol, &inbound) {
+        Some(protocol) => match upstream_body(protocol, inbound) {
             Ok(body) => body,
-            Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
+            Err(_) => return Turn::text(StatusCode::BAD_REQUEST, "bad request"),
         },
         None => inbound.to_vec(),
     };
     let Some(base) = upstream else {
-        return plain(StatusCode::BAD_GATEWAY, "no upstream");
+        return Turn::text(StatusCode::BAD_GATEWAY, "no upstream");
     };
     // After translation, before redaction. Raw image routes have no protocol
     // and stay byte-for-byte; a missing vision id leaves the body alone.
@@ -295,7 +357,7 @@ async fn forward_turn(
             Ok(bytes) => bytes,
             Err(reject) => {
                 let status = StatusCode::from_u16(reject.status).unwrap_or(StatusCode::BAD_GATEWAY);
-                return plain(status, &reject.message);
+                return Turn::text(status, &reject.message);
             }
         }
     } else {
@@ -306,7 +368,7 @@ async fn forward_turn(
     crate::outbound::note_outbound(&url);
     let client = match skillstar_core::infra::http_client::stream_http_client() {
         Ok(client) => client,
-        Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream client"),
+        Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream client"),
     };
     let pending = client
         .post(url)
@@ -314,27 +376,31 @@ async fn forward_turn(
         .body(upstream_bytes);
     let response = match skillstar_core::infra::http_client::send_stream(pending).await {
         Ok(response) => response,
-        Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream request"),
+        Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream request"),
     };
     let status =
         StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let bytes = match response.bytes().await {
         Ok(bytes) => bytes,
-        Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream body"),
+        Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream body"),
     };
     let bytes = crate::redact::unmask_response(&bytes);
     let outbound = match protocol {
         Some(protocol) => match outbound_body(protocol, &bytes) {
             Ok(body) => body,
-            Err(_) => return plain(StatusCode::BAD_GATEWAY, "upstream body"),
+            Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream body"),
         },
         None => bytes.to_vec(),
     };
-    Response::builder()
-        .status(status)
-        .header(hyper::header::CONTENT_TYPE, "application/json")
-        .body(Full::new(Bytes::from(outbound)))
-        .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
+    Turn::json(status, outbound)
+}
+
+fn header_text(headers: &hyper::HeaderMap, name: hyper::header::HeaderName) -> String {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn respond_local(local: crate::surface::Local, head: bool) -> Response<Full<Bytes>> {

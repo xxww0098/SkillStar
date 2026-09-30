@@ -3,7 +3,7 @@
 //! rules, the intent classifier, secret redaction, vision transcription,
 //! subscription signing, the loopback listener, the Claude process bridge, the
 //! Codex config writer, WSL Codex, the models.dev catalog cache, and the
-//! file-agent loopback writer.
+//! file-agent loopback writer, and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod affinity;
@@ -23,6 +23,7 @@ mod rules;
 mod serve;
 mod sign;
 mod surface;
+mod trace;
 mod translate;
 mod vision;
 mod wsl;
@@ -71,6 +72,7 @@ pub use serve::{
     ADDR_ENV, DEFAULT_ADDR, HEADER_READ_TIMEOUT, IDLE_TIMEOUT, PLACEHOLDER_BEARER, REFUSED_PORT,
     ServeError, ServeOptions, Stop, resolve_addr, serve,
 };
+pub use trace::{TRACE_KEEP, RecentCall, clear_recent_calls, note_recent_call, recent_calls};
 pub use translate::{Protocol, TranslateError, outbound_body, upstream_body};
 pub use vision::{
     VISION_CACHE, VISION_PARALLEL, VISION_SYSTEM, VISION_TIMEOUT, VISION_USER_AGENT, VisionCall,

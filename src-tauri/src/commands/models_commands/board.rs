@@ -1,7 +1,9 @@
 //! Models page board. Names only; the store read lives in `skillstar-app`.
 
 use skillstar_app::models::board::{ModelsBoardDto, load_models_board};
-use skillstar_app::models::{ModelChoiceDto, load_model_choices, save_agent};
+use skillstar_app::models::{
+    ModelChoiceDto, RecentCallDto, load_model_choices, load_recent_calls, save_agent,
+};
 use skillstar_core::infra::error::AppError;
 
 #[tauri::command]
@@ -12,6 +14,11 @@ pub fn get_models_board() -> Result<ModelsBoardDto, AppError> {
 #[tauri::command]
 pub fn get_model_choices() -> Vec<ModelChoiceDto> {
     load_model_choices()
+}
+
+#[tauri::command]
+pub fn get_recent_calls() -> Vec<RecentCallDto> {
+    load_recent_calls()
 }
 
 #[tauri::command]

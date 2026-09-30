@@ -120,7 +120,7 @@ flowchart LR
 
 - 桌面进程在打开窗口之前，用后台线程调用 `skillstar_gateway::serve`。`skillstar gateway serve` 走同一个函数，不打开窗口。其它 CLI 子命令不启动它。`src-tauri` 只认 argv，不直接依赖网关 crate。
 - 默认听 `127.0.0.1:21847`。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 直接拒绝，不绑定。地址已经被占用时，后启动的那一份把「地址已被占用」写到 stderr，不关掉先启动的那份，也不往 stdout 打日志。
-- 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。环回的模型列表不读 models.dev 缓存；模型 id 含 `/` 时解析失败是本机错误，请求不转给厂商。
+- 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。转发完成的调用记在进程内的环里，最多 60 条，重启后为空，不写文件。记下的是时间、Agent、模型、状态和补全 token。没有密钥，没有上游 URL，也不向 Usage 要配额。环回的模型列表不读 models.dev 缓存；模型 id 含 `/` 时解析失败是本机错误，请求不转给厂商。
 - 路由模式放在 `model_gateway.json` 里 provider 或分组的 `routing`。空字符串和缺省是 smart。这份文件只在已经存在时读取；启动不创建、不改写它。密钥仍在 `model_providers.json`，配额仍在 Usage。网关不打开这两处。
 - 亲和在路由顺序之前决定要不要留下上次的回答者。留下时，那一名排到已经算出的顺序最前；`off` 时顺序不变。空模式在回合内留下，跨回合只在厂商缓存还值得、而且还没冷的时候留下。会话从 `X-Skillstar-Session` 认起，不认 `X-Magpie-Session`。休息中的回答者标成 `resting`，这一步不换人。模式、上次的 stick 和时钟由调用方传入。
 - 一次失败休息多久，只看这次的状态码和正文。时钟、已用份额和窗口恢复时间由调用方传入，不向 Usage 拉取。频率限制不按配额的缺省时长休息。配额自己写明的恢复时间可以长过一小时，厂商的 Retry-After 仍最多信一小时。验证失败在更短的一段时间里用上一次的拒绝回答，不再问上游。内容字节已经写下之后，下一次挑选不再叫另一条上游。未到期的候选从这次挑选里拿掉。不认 `X-Magpie-Resets-At`。
