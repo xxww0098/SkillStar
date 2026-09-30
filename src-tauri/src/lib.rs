@@ -425,6 +425,8 @@ pub fn run() {
             commands::models_commands::get_recent_calls,
             commands::models_commands::get_routing_page,
             commands::models_commands::save_routing,
+            commands::models_commands::get_saved_groups,
+            commands::models_commands::save_group_members,
             commands::models_commands::create_provider_flat,
             commands::models_commands::update_provider_flat,
             commands::models_commands::delete_provider_flat,

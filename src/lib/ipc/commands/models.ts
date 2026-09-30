@@ -33,6 +33,12 @@ export interface RoutingGroupControl {
   affinity: string;
 }
 
+/** One group saved in the gateway file, with its members in file order. */
+export interface SavedGroup {
+  id: string;
+  members: string[];
+}
+
 /** Selected provider, or null when none is selected, plus saved groups. */
 export interface RoutingPage {
   provider: RoutingControl | null;
@@ -74,6 +80,10 @@ export interface ModelsCommands {
     args: { owner: string; id: string; routing: string; affinity: string };
     result: void;
   };
+  /** Groups already written to the gateway file. Auto groups are absent. */
+  get_saved_groups: { args: Record<string, never>; result: SavedGroup[] };
+  /** Replace one group's members. A refusal leaves the file unchanged. */
+  save_group_members: { args: { id: string; members: string[] }; result: void };
   save_agent_model: { args: { agentId: string; modelRef: string }; result: void };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
   update_provider_flat: {

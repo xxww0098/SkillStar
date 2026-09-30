@@ -32,6 +32,16 @@ pub enum SaveGroupError {
     Store,
 }
 
+impl std::fmt::Display for SaveGroupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Cycle => "group_cycle",
+            Self::TooDeep => "group_too_deep",
+            Self::Store => "group_store",
+        })
+    }
+}
+
 /// One model a provider serves. Passed in by the caller. Not read from the key file.
 #[derive(Clone, Copy, Debug)]
 pub struct ServedModel<'a> {
@@ -58,6 +68,24 @@ pub fn stored_group_ids() -> Vec<String> {
     groups_in(&read_doc())
         .into_iter()
         .map(|group| group.id)
+        .collect()
+}
+
+/// One group saved in `model_gateway.json`. Auto groups are absent until saved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedGroup {
+    pub id: String,
+    pub members: Vec<String>,
+}
+
+/// Saved groups and their members, in file order. This read does not create the file.
+pub fn stored_groups() -> Vec<SavedGroup> {
+    groups_in(&read_doc())
+        .into_iter()
+        .map(|group| SavedGroup {
+            id: group.id,
+            members: group.members,
+        })
         .collect()
 }
 

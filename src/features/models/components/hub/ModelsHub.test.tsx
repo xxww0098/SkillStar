@@ -38,6 +38,7 @@ beforeEach(() => {
     if (cmd === "get_models_board") return BOARD;
     if (cmd === "get_recent_calls") return [];
     if (cmd === "get_routing_page") return { provider: null, groups: [] };
+    if (cmd === "get_saved_groups") return [];
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -70,7 +71,7 @@ describe("ModelsHub", () => {
     fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
 
     expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(
-      new Set(["get_models_board", "get_recent_calls", "get_routing_page"]),
+      new Set(["get_models_board", "get_recent_calls", "get_routing_page", "get_saved_groups"]),
     );
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
     expect(nav.setSelectedProviderId).toHaveBeenCalledWith("p1");
@@ -87,6 +88,7 @@ describe("ModelsHub", () => {
       }
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -119,6 +121,7 @@ describe("ModelsHub", () => {
       }
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -155,6 +158,7 @@ describe("ModelsHub", () => {
         ];
       }
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -191,6 +195,7 @@ describe("ModelsHub", () => {
       if (cmd === "save_agent_model") return null;
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -224,6 +229,7 @@ describe("ModelsHub", () => {
         };
       }
       if (cmd === "save_routing") return null;
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     const nav = navigation();
@@ -272,6 +278,7 @@ describe("ModelsHub", () => {
       if (cmd === "get_models_board") return { agents: [], providers: [], gateway: [] };
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -298,6 +305,7 @@ describe("ModelsHub", () => {
       }
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
       throw new Error(`unexpected ${cmd}`);
     });
     renderHub(<ModelsHub {...navigation()} />);
@@ -324,5 +332,62 @@ describe("ModelsHub", () => {
     expect(screen.queryByText("还没有调用")).toBeNull();
     expect(document.body.textContent).not.toMatch(/https:\/\//);
     expect(document.body.textContent).not.toMatch(/sk-secret/);
+  });
+
+  it("shows the backend refusal and leaves the saved member", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [{ id: "demo", members: ["openai/gpt-test"] }];
+      if (cmd === "save_group_members") throw new Error("group_cycle");
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const row = await screen.findByRole("group", { name: "group members demo" });
+    expect(within(row).getByText("openai/gpt-test")).toBeTruthy();
+
+    const input = within(row).getByRole("textbox", { name: "member demo" });
+    fireEvent.change(input, { target: { value: "group/demo" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+    expect((await within(row).findByRole("alert")).textContent).toBe("group_cycle");
+    expect(within(row).getByText("openai/gpt-test")).toBeTruthy();
+    expect(within(row).queryByRole("listitem", { name: "group/demo" })).toBeNull();
+    expect(within(row).queryByText("group/demo")).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith("save_group_members", {
+      id: "demo",
+      members: ["openai/gpt-test", "group/demo"],
+    });
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toMatch(/sk-/);
+  });
+
+  it("shows a refused new group from the backend and does not list it", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "save_group_members") throw new Error("group_cycle");
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const id = await screen.findByRole("textbox", { name: "new group id" });
+    fireEvent.change(id, { target: { value: "demo" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "new group member" }), {
+      target: { value: "group/demo" },
+    });
+    fireEvent.submit(id.closest("form") as HTMLFormElement);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("group_cycle");
+    expect(screen.queryByRole("group", { name: "group members demo" })).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith("save_group_members", {
+      id: "demo",
+      members: ["group/demo"],
+    });
   });
 });

@@ -8,6 +8,7 @@ import { useModelsBoard } from "../../api/board";
 import { useRecentCalls } from "../../api/recent";
 import { useRoutingPage } from "../../api/routing";
 import type { ModelsNavBridge } from "../../lib/navBridge";
+import { GroupMembers } from "./GroupMembers";
 import { RoutingControl } from "./RoutingControl";
 
 type ColumnId = "agents" | "providers" | "gateway";
@@ -173,6 +174,7 @@ export function ModelsHub({
                     affinity={group.affinity}
                   />
                 ))}
+                <GroupMembers />
                 {recentQuery.isSuccess && calls.length === 0 ? (
                   <p className="px-4 py-3 text-sm text-muted-foreground">{EMPTY_COLUMN.gateway}</p>
                 ) : calls.length > 0 ? (

@@ -8,6 +8,7 @@ export const modelsKeys = {
   board: () => [...modelsKeys.all, "board"] as const,
   recentCalls: () => [...modelsKeys.all, "recent-calls"] as const,
   routingPage: (providerId: string) => [...modelsKeys.all, "routing-page", providerId] as const,
+  savedGroups: () => [...modelsKeys.all, "saved-groups"] as const,
 };
 
 /**

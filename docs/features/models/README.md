@@ -110,6 +110,8 @@ Agent 名称下面的一行是已经写进该 Agent 文件的环回地址，形�
 
 选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 栏里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。
 
+已保存的分组可以在 Gateway 栏里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
+
 Settings 的 App AI 仍用 `get_providers_flat`。切换三栏、点 Providers 或 Gateway 的行、或点侧栏里的最近名字，只改变当前选中。保存所选模型才写该 Agent 的配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
 
 

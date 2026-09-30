@@ -10,6 +10,7 @@ pub mod board;
 mod codex_save;
 pub mod dto;
 mod gateway_save;
+pub mod groups;
 pub mod picker;
 pub mod recent;
 pub mod routing;
@@ -17,6 +18,7 @@ pub mod routing;
 pub use account_book::UsageAccountBook;
 pub use codex_save::{CodexRoute, release_codex, save_codex};
 pub use gateway_save::save_agent;
+pub use groups::{SavedGroupDto, SaveGroupControlError, load_saved_groups, save_group_members};
 pub use picker::{ModelChoiceDto, load_model_choices};
 pub use recent::{RecentCallDto, load_recent_calls};
 pub use routing::{

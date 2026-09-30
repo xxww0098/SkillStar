@@ -50,7 +50,8 @@ pub use claude::{
 pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use group::{
-    GROUP_PREFIX, MAX_NEST, SaveGroupError, ServedModel, expand_group, save_group, stored_group_ids,
+    GROUP_PREFIX, MAX_NEST, SaveGroupError, SavedGroup, ServedModel, expand_group, save_group,
+    stored_group_ids, stored_groups,
 };
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use models_dev::{

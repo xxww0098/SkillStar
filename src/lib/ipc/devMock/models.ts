@@ -15,6 +15,8 @@ let devProviderSeq = 0;
 
 const routingMemory = new Map<string, { routing: string; affinity: string }>();
 
+const savedGroups: { id: string; members: string[] }[] = [{ id: "fast", members: ["openai/gpt-test"] }];
+
 function remembered(owner: string, id: string): { routing: string; affinity: string } {
   return routingMemory.get(`${owner}:${id}`) ?? { routing: "smart", affinity: "auto" };
 }
@@ -87,8 +89,23 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     const providerId = typeof args?.providerId === "string" ? args.providerId : "";
     return {
       provider: providerId ? remembered("provider", providerId) : null,
-      groups: [{ id: "fast", ...remembered("group", "fast") }],
+      groups: savedGroups.map((group) => ({ id: group.id, ...remembered("group", group.id) })),
     };
+  },
+  get_saved_groups: () => savedGroups.map((group) => ({ id: group.id, members: [...group.members] })),
+  save_group_members: (args) => {
+    const raw = typeof args?.id === "string" ? args.id : "";
+    const id = raw.startsWith("group/") ? raw.slice("group/".length) : raw;
+    const members = Array.isArray(args?.members)
+      ? args.members.filter((item): item is string => typeof item === "string")
+      : [];
+    if (members.some((member) => member === id || member === `group/${id}`)) {
+      throw new Error("group_cycle");
+    }
+    const existing = savedGroups.find((group) => group.id === id);
+    if (existing) existing.members = members;
+    else if (id) savedGroups.push({ id, members });
+    return null;
   },
   save_routing: (args) => {
     const owner = typeof args?.owner === "string" ? args.owner : "";
