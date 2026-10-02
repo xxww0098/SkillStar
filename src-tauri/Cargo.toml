@@ -56,7 +56,6 @@ skillstar-sync = { path = "../crates/skillstar-sync" }
 skillstar-git = { path = "../crates/skillstar-git" }
 skillstar-channels = { path = "../crates/skillstar-channels" }
 sha2 = { workspace = true }
-ts-rs.workspace = true
 skillstar-decision = { version = "0.0.0", path = "../crates/skillstar-decision" }
 
 [dev-dependencies]

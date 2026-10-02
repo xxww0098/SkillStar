@@ -8,8 +8,6 @@ import type { AiCommands } from "./ai";
 import type { DecisionCommands } from "./decision";
 import type { GitHubCommands } from "./github";
 import type { MarketplaceCommands } from "./marketplace";
-import type { McpCommands } from "./mcp";
-import type { McpMarketplaceCommands } from "./mcpMarketplace";
 import type { ModelsCommands } from "./models";
 import type { ProjectCommands } from "./projects";
 import type { SharedChannelCommands } from "./sharedChannels";
@@ -28,8 +26,6 @@ export type TauriCommands = SkillCommands &
   StorageCommands &
   AiCommands &
   ModelsCommands &
-  McpCommands &
-  McpMarketplaceCommands &
   SshCommands &
   SharedChannelCommands &
   SystemCommands &
@@ -42,8 +38,6 @@ export type {
   GitHubCommands,
   InstanceCommands,
   MarketplaceCommands,
-  McpCommands,
-  McpMarketplaceCommands,
   ModelsCommands,
   ProjectCommands,
   SharedChannelCommands,

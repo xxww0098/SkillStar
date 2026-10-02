@@ -74,6 +74,7 @@ fn write_installed_skill(root: &Path) -> String {
         content_hash_version: Some(skillstar_skills::content::SNAPSHOT_HASH_VERSION),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: Some("skills/writer".into()),
+        pinned: false,
     });
     lockfile
         .save(&skillstar_skills::lockfile::lockfile_path())

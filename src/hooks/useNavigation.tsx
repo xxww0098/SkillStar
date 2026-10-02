@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TabId as MarketplaceTabId } from "../pages/Marketplace";
 import { FILTER_ALL, type CatalogFilter } from "../features/usage/types";
-import type { McpImportRequest } from "../lib/deepLink";
 import type { AppMode, ModelsNavPage, NavPage, SubPage } from "../types";
 
 // ── Page imports (for prefetching) ──────────────────────────────────
@@ -10,11 +9,10 @@ const importMarketplacePage = () => import("../pages/Marketplace");
 const importPublisherDetailPage = () => import("../pages/PublisherDetail");
 const importSkillCardsPage = () => import("../pages/SkillCards");
 const importProjectsPage = () => import("../pages/Projects");
-const importMcpPage = () => import("../pages/Mcp");
 const importSettingsPage = () => import("../pages/Settings");
 const importUsagePage = () => import("../pages/Usage");
 
-const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "mcp", "settings"];
+const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "settings"];
 
 /** Models hub drawer deep-link request (request-nonce pattern, like usageCreateRequest). */
 export interface ModelsDrawerRequest {
@@ -25,11 +23,10 @@ export interface ModelsDrawerRequest {
 }
 
 const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
-  "my-skills": ["marketplace", "mcp"],
-  marketplace: ["my-skills", "mcp"],
+  "my-skills": ["marketplace", "skill-cards"],
+  marketplace: ["my-skills", "skill-cards"],
   "skill-cards": ["projects", "my-skills"],
   projects: ["my-skills", "settings"],
-  mcp: ["my-skills", "marketplace"],
   settings: ["my-skills", "marketplace"],
 };
 
@@ -41,7 +38,6 @@ const PAGE_IMPORTERS: Record<NavPage, () => Promise<unknown>> = {
   },
   "skill-cards": importSkillCardsPage,
   projects: importProjectsPage,
-  mcp: importMcpPage,
   settings: importSettingsPage,
 };
 
@@ -78,7 +74,6 @@ const PAGE_TO_HASH: Record<NavPage, string> = {
   marketplace: "marketplace",
   "skill-cards": "cards",
   projects: "projects",
-  mcp: "mcp",
   settings: "settings",
 };
 
@@ -145,7 +140,6 @@ interface NavigationState {
   usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
   /** Request-nonce event asking the Models hub to open its drawer. */
   modelsDrawerRequest: ModelsDrawerRequest | null;
-  mcpImportRequest: McpImportRequest | null;
 }
 
 interface NavigationActions {
@@ -170,8 +164,6 @@ interface NavigationActions {
   clearUsageCreateRequest: () => void;
   openModelsDrawer: (req: Omit<ModelsDrawerRequest, "nonce">) => void;
   clearModelsDrawerRequest: () => void;
-  openMcpImport: (req: Omit<McpImportRequest, "nonce">) => void;
-  clearMcpImportRequest: () => void;
   /** Warm a page's lazy chunk before the user commits to it (hover/focus). */
   prefetchPage: (page: NavPage) => void;
 }
@@ -222,7 +214,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     preselectCatalogId: string | null;
   } | null>(null);
   const [modelsDrawerRequest, setModelsDrawerRequest] = useState<ModelsDrawerRequest | null>(null);
-  const [mcpImportRequest, setMcpImportRequest] = useState<McpImportRequest | null>(null);
 
   const prefetchedPages = useRef<Set<NavPage>>(new Set([activePage]));
   const previousPage = useRef<NavPage>(activePage);
@@ -309,14 +300,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     setModelsDrawerRequest(null);
   }, []);
 
-  const openMcpImport = useCallback((req: Omit<McpImportRequest, "nonce">) => {
-    setMcpImportRequest((prev) => ({ ...req, nonce: (prev?.nonce ?? 0) + 1 }));
-  }, []);
-
-  const clearMcpImportRequest = useCallback(() => {
-    setMcpImportRequest(null);
-  }, []);
-
   // ── Prefetching ─────────────────────────────────────────────────
   const prefetchPage = useCallback((page: NavPage) => {
     if (prefetchedPages.current.has(page)) return;
@@ -401,7 +384,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       usageCatalogFilter,
       usageCreateRequest,
       modelsDrawerRequest,
-      mcpImportRequest,
       navigate,
       setSubPage,
       setAppMode,
@@ -420,8 +402,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clearUsageCreateRequest,
       openModelsDrawer,
       clearModelsDrawerRequest,
-      openMcpImport,
-      clearMcpImportRequest,
       prefetchPage,
     }),
     [
@@ -438,7 +418,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       usageCatalogFilter,
       usageCreateRequest,
       modelsDrawerRequest,
-      mcpImportRequest,
       navigate,
       setAppMode,
       navigateModels,
@@ -449,8 +428,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clearUsageCreateRequest,
       openModelsDrawer,
       clearModelsDrawerRequest,
-      openMcpImport,
-      clearMcpImportRequest,
       prefetchPage,
     ],
   );

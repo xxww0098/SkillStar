@@ -31,7 +31,7 @@ export interface GitHubCommands {
 
   scan_github_repo: { args: { url: string; fullDepth?: boolean; sessionId?: string }; result: ScanResult };
   install_from_scan: {
-    args: { repoUrl: string; source: string; skills: SkillInstallTarget[]; sessionId?: string };
+    args: { spec: ScanResult; skills: SkillInstallTarget[]; sessionId?: string };
     result: string[];
   };
 

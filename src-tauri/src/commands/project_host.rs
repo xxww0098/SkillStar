@@ -1,7 +1,7 @@
 //! Desktop approval for a project-skill plan.
 //!
 //! The body only reads plans and records a SkillStar approval. It does not
-//! deploy, and it does not touch the external MCP command module.
+//! deploy.
 
 use chrono::Utc;
 use skillstar_app::project_skills_mcp::host::{

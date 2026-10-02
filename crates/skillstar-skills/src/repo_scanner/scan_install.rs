@@ -16,16 +16,47 @@ struct PreparedRepoInstall {
     lock_entry: crate::lockfile::LockEntry,
 }
 
+/// `spec` is the single parsed source (ref, subpath, skill filter). A
+/// `subpath` hard-pins every target: it is only materialized directly (a
+/// sparse clone's inventory would otherwise never surface it), and installed
+/// with `pinned: true` regardless of what the caller passed in.
 pub fn install_from_repo_in_session(
-    source: &str,
-    repo_url: &str,
+    spec: &source_resolver::Source,
     targets: &[SkillInstallTarget],
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<String>> {
     ensure_generic_targets_mutable(targets)?;
-    crate::skill_mutation::policy().ensure_repository_mutation_allowed(repo_url)?;
-    let repo_dir = super::clone_or_fetch_repo_in_session(repo_url, source, session)?;
-    install_from_repo_at_with_source_migrations(&repo_dir, repo_url, None, targets, &[])
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&spec.repo_url)?;
+    let repo_dir = super::clone_or_fetch_repo_at_in_session(
+        &spec.repo_url,
+        &spec.short,
+        spec.git_ref.as_deref(),
+        session,
+    )?;
+    if let Some(subpath) = spec.subpath.as_deref() {
+        super::inventory::materialize_dirs(&repo_dir, session, &[subpath.to_string()]);
+    }
+    let pinned_targets;
+    let targets = if spec.subpath.is_some() {
+        pinned_targets = targets
+            .iter()
+            .cloned()
+            .map(|mut target| {
+                target.pinned = true;
+                target
+            })
+            .collect::<Vec<_>>();
+        pinned_targets.as_slice()
+    } else {
+        targets
+    };
+    install_from_repo_at_with_source_migrations(
+        &repo_dir,
+        &spec.repo_url,
+        spec.git_ref.as_deref(),
+        targets,
+        &[],
+    )
 }
 
 pub fn install_from_repo_at(
@@ -163,6 +194,7 @@ pub fn install_from_repo_at_with_source_migrations(
                 content_hash_version: Some(content::SNAPSHOT_HASH_VERSION),
                 installed_at: chrono::Utc::now().to_rfc3339(),
                 source_folder,
+                pinned: target.pinned,
             },
         });
     }
@@ -323,6 +355,7 @@ mod tests {
         SkillInstallTarget {
             id: id.to_string(),
             folder_path: format!("skills/{id}"),
+            pinned: false,
         }
     }
 
@@ -385,5 +418,51 @@ mod tests {
         assert_eq!(installed, vec!["valid".to_string()]);
         let hub = skillstar_core::infra::paths::hub_skills_dir();
         assert!(hub.join("valid").symlink_metadata().is_ok());
+    }
+
+    /// The GUI's "install from scan" / reinstall path (not the CLI `add`
+    /// pipeline in `skill_install.rs`) must honor a tree URL's ref and
+    /// subpath the same way: pin the target even though the caller didn't
+    /// ask, and keep the ref the lock tracks for future updates.
+    #[test]
+    fn install_from_scan_keeps_ref_and_pin() {
+        let sandbox = crate::pack_fixture::Sandbox::new();
+        let fixture = crate::pack_fixture::impeccable_like();
+        let github_url = "https://github.com/pbakaus/impeccable.git";
+        sandbox.map_github_url(github_url, fixture.dir.path());
+
+        let spec = source_resolver::Source::parse(
+            "https://github.com/pbakaus/impeccable/tree/main/.claude/skills/impeccable",
+        )
+        .unwrap();
+
+        let session = crate::git::transport::GitOperationSession::public();
+        let installed = install_from_repo_in_session(
+            &spec,
+            &[SkillInstallTarget {
+                id: "impeccable".to_string(),
+                folder_path: ".claude/skills/impeccable".to_string(),
+                pinned: false,
+            }],
+            &session,
+        )
+        .unwrap();
+        assert_eq!(installed, vec!["impeccable".to_string()]);
+
+        let entry = lockfile::Lockfile::load(&lockfile::lockfile_path())
+            .unwrap()
+            .skills
+            .into_iter()
+            .find(|entry| entry.name == "impeccable")
+            .expect("lock entry");
+        assert!(
+            entry.pinned,
+            "a subpath must force pinned even when the caller didn't ask"
+        );
+        assert_eq!(
+            entry.source_folder.as_deref(),
+            Some(".claude/skills/impeccable")
+        );
+        assert_eq!(entry.git_ref.as_deref(), Some("main"));
     }
 }

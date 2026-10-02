@@ -106,15 +106,16 @@ fn sign_account(book: &impl AccountBook, input: &SignInput<'_>) -> SignedUpstrea
     }
 }
 
+/// Bearer plus `accept`. The public Responses route does not take
+/// `chatgpt-account-id`, `originator`, or a Codex affinity header.
 fn codex_headers(account: &AccountSnapshot) -> Vec<(String, String)> {
     let Some(token) = secret(&account.access_token) else {
         return Vec::new();
     };
-    let mut headers = vec![bearer(token)];
-    if let Some(account_id) = secret(&account.account_id) {
-        headers.push(("chatgpt-account-id".to_string(), account_id.to_string()));
-    }
-    headers
+    vec![
+        bearer(token),
+        ("Accept".to_string(), "application/json".to_string()),
+    ]
 }
 
 fn copilot_headers(account: &AccountSnapshot) -> Vec<(String, String)> {

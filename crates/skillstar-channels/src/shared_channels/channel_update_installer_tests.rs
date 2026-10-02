@@ -107,6 +107,7 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
             &[skillstar_skills::repo_scanner::SkillInstallTarget {
                 id: "writer".into(),
                 folder_path: "skills/writer".into(),
+                pinned: false,
             }],
         )?;
         let previous_lock_entry = lock_entry("writer")?;

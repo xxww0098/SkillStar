@@ -294,7 +294,7 @@ function Header({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       data-tauri-drag-region
-      className="flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-sidebar px-6"
+      className="flex h-12 shrink-0 items-center gap-3 border-b border-border/70 bg-sidebar px-4"
     >
       <div className="flex shrink-0 items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 text-primary border border-primary/35 shadow-xs">

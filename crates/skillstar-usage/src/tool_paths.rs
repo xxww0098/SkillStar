@@ -2,25 +2,90 @@
 
 use std::path::{Path, PathBuf};
 
-use skillstar_core::infra::paths::home_dir;
+use skillstar_core::infra::paths::{home_dir, tool_sync_home_override};
 
 use crate::trae_platform::TraePlatformKind;
 
-const TOOL_SYNC_HOME_ENV: &str = "SKILLSTAR_TOOL_SYNC_HOME";
-
 pub fn is_tool_sync_sandboxed() -> bool {
-    std::env::var_os(TOOL_SYNC_HOME_ENV).is_some_and(|value| !value.is_empty())
+    tool_sync_home_override().is_some()
 }
 
 fn tool_config_home() -> PathBuf {
-    std::env::var_os(TOOL_SYNC_HOME_ENV)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(home_dir)
+    tool_sync_home_override().unwrap_or_else(home_dir)
 }
 
 pub fn codex_auth_path() -> PathBuf {
     home_dir().join(".codex").join("auth.json")
+}
+
+// ---------------------------------------------------------------------------
+// Switch-engine credential stores (sandbox-aware)
+// ---------------------------------------------------------------------------
+// The account switcher *writes* credential files, so unlike the read-side
+// helpers above it must honour `SKILLSTAR_TOOL_SYNC_HOME` (tests never touch
+// a real `$HOME`) and each CLI's own home override (writing credentials to a
+// file the CLI never reads would silently break login). Semantics mirror
+// `skillstar_models::tool_sync` (D-077); the read-side default-install
+// helpers stay as they are.
+
+/// Read an upstream CLI's own home override (`CODEX_HOME`, `GROK_HOME`, …).
+fn upstream_home_override(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Codex's home, honouring the upstream `CODEX_HOME` override. The sandbox
+/// always wins: tests must never escape into a developer's real `~/.codex`
+/// even when `CODEX_HOME` is exported.
+fn codex_home() -> PathBuf {
+    if let Some(home) = tool_sync_home_override() {
+        return home.join(".codex");
+    }
+    if let Some(dir) = upstream_home_override("CODEX_HOME") {
+        return dir;
+    }
+    home_dir().join(".codex")
+}
+
+/// `~/.codex/auth.json` — Codex CLI's OAuth credential store, switch-aware.
+///
+/// Distinct from [`codex_auth_path`]: that one is the default-install path
+/// the OAuth fetcher reads during import; this one is where the switch
+/// engine writes and reconciles the live symlink target.
+pub fn switch_codex_auth_path() -> PathBuf {
+    codex_home().join("auth.json")
+}
+
+/// `~/.grok/auth.json` — the xAI Grok Build CLI's OAuth credential store
+/// (switch-aware: honours `GROK_HOME`, sandbox wins).
+pub fn switch_grok_auth_path() -> PathBuf {
+    if let Some(home) = tool_sync_home_override() {
+        return home.join(".grok").join("auth.json");
+    }
+    if let Some(dir) = upstream_home_override("GROK_HOME") {
+        return dir.join("auth.json");
+    }
+    home_dir().join(".grok").join("auth.json")
+}
+
+/// `$XDG_DATA_HOME/opencode/auth.json` — OpenCode's credential store, i.e.
+/// `~/.local/share/opencode/auth.json` by default (switch-aware: under the
+/// sandbox it stays inside the sandbox rather than honouring the
+/// developer's real `XDG_DATA_HOME`).
+///
+/// This is the file `opencode auth login` writes and the only one
+/// OpenCode's provider gate reads — a *different* file from the config
+/// `~/.config/opencode/opencode.json`.
+pub fn switch_opencode_auth_path() -> PathBuf {
+    let base = match tool_sync_home_override() {
+        Some(home) => home.join(".local").join("share"),
+        None => std::env::var_os("XDG_DATA_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir().join(".local").join("share")),
+    };
+    base.join("opencode").join("auth.json")
 }
 
 pub fn antigravity_user_data_dir() -> Option<PathBuf> {

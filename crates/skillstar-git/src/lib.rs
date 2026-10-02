@@ -6,6 +6,7 @@
 //! Owned by `skillstar-git`. `skillstar-skills::git::gh_manager` stays in
 //! `skillstar-skills` because it is coupled to content/lockfile/shared_channels.
 
+mod blobs;
 pub mod dismissed_skills;
 pub mod ops;
 pub mod repo_history;

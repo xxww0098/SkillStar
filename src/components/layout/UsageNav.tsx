@@ -41,7 +41,7 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className={cn("mb-1 shrink-0", collapsed ? "px-1.5" : "px-0")}>
+      <div className={cn("mb-0.5 shrink-0", collapsed ? "px-1.5" : "px-0")}>
         <NavItem
           label={t("usage.allSubscriptions")}
           count={totalCount}
@@ -70,18 +70,18 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
       </div>
 
       {!collapsed && (
-        <div className="mb-2 shrink-0 px-2">
+        <div className="mb-1.5 shrink-0 px-2">
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t("usage.searchCatalog")}
-              className="h-7 w-full rounded-md border border-border/70 bg-background/60 pl-7 pr-2 text-[12px] text-foreground transition placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-2xs"
+              className="h-7 w-full rounded-md border border-border/70 bg-background/60 pl-7 pr-2 text-[12px] text-foreground transition placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-2xs"
             />
             <Search
               aria-hidden
-              className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/70"
+              className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground"
             />
           </div>
         </div>
@@ -161,7 +161,7 @@ function NavItem({ label, description, count, selected, onClick, collapsed, logo
       onClick={onClick}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition duration-150 cursor-pointer focus-ring select-none",
+        "group flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition duration-150 cursor-pointer focus-ring select-none",
         selected
           ? "bg-primary/18 font-semibold text-primary ring-1 ring-primary/30 shadow-2xs dark:bg-primary/20"
           : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
@@ -169,8 +169,14 @@ function NavItem({ label, description, count, selected, onClick, collapsed, logo
     >
       {logo}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[12px] font-medium text-foreground">{label}</div>
-        {description && <div className="truncate text-[10px] text-muted-foreground/80">{description}</div>}
+        <div className="truncate text-[12px] font-medium text-foreground" title={label}>
+          {label}
+        </div>
+        {description && (
+          <div className="truncate text-[10px] text-muted-foreground/80" title={description}>
+            {description}
+          </div>
+        )}
       </div>
       {count > 0 && (
         <span

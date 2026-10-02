@@ -346,7 +346,7 @@ pub fn dismiss_alert(alert_id: &str) -> UsageResult<()> {
 ///
 /// For CLI-backed catalogs this map is a **cache**, not a second source of
 /// truth: which account the CLI actually serves is a property of the CLI's
-/// own credential file, and `skillstar_app::usage_switch` can rebuild this
+/// own credential file, and `crate::usage_switch` can rebuild this
 /// map from disk at any time (see D-033). It is only written after a switch
 /// has been verified, so a rejected switch leaves the previous pin standing.
 #[derive(Debug, Default, Serialize, Deserialize)]

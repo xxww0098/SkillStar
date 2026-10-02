@@ -100,21 +100,23 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 ## Models 工作台
 
-Models 页从左到右是 Agents、Providers、Gateway 三栏。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
+Models 页左侧是 Agents 和 Providers 两张列表卡，右侧是一块 Gateway 面板；面板内配置列（监听方式 → 配置档 → 路由与亲和 → 分组成员）与最近调用表并排，窄屏时配置列收为单栏。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
 
-`get_models_board` 返回每一行的 id 和 name。提供商行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏另读进程内最近 60 条调用，含时间、Agent、模型、状态和补全 token；没有用法时 token 为空。这一栏不显示配额，也不显示上游 URL。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
+`get_models_board` 返回每一行的 id、name 和 `model_label`。`model_label` 是从该 Agent 配置文件读回的当前模型（gateway 的 `written_model_ref`，含 board 拼法到 writer 拼法的归一，如 `claude-code` 行读的是 `claude` 的 `settings.json`），读不到就是空串，页面显示「未选择模型」。Providers 行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏另读进程内最近 60 条调用，含时间、Agent、模型、状态和补全 token；没有用法时 token 为空。这一栏不显示配额，也不显示上游 URL。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
-点 Agents 栏的一行打开选择器。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`。保存走该 Agent 已经落地的 writer。不在这套写入里的 id，包括 Goose、Cursor CLI、Copilot CLI 和 Devin，返回 `agent_not_managed`，不写文件，也不为它们新造 URL 字段。弹出层不显示密钥，也不显示厂商 URL。
+Gateway 面板的配置列顶部是「接入端点」：OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两行，各带复制按钮，来源是 `get_loopback_origin` 命令。展示时去掉 `http://` 前缀，复制的是完整地址。读取失败时这一区不渲染。
 
-Agent 名称下面的一行是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
+点 Agents 栏的一行打开选择器：搜索框输入即过滤，ArrowUp/Down 移动高亮，Enter 保存，Esc 关闭；底部有「保存显示名」表单。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`，当前项带勾选标记。保存走该 Agent 已经落地的 writer，成功后刷新看板并提示；失败时弹层保留。Codex 的保存走网关的字段级接管（`apply_agent_with_model`），写 `config.toml` 的 `model` 键，不整文件替换；空 ref 等于解除接管。不在这套写入里的 id，包括 Goose、Cursor CLI、Copilot CLI 和 Devin，返回 `agent_not_managed`，不写文件，也不为它们新造 URL 字段。弹出层不显示密钥，也不显示厂商 URL。
 
-选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 栏里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。监听转发仍打启动时的那一个上游根，不读这次写下的路由和亲和。
+Agent 名称旁边的小字是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`；名称下面一行 chip 是 `model_label`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
 
-已保存的分组可以在 Gateway 栏里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
+选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 面板的配置列里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。监听转发仍打启动时的那一个上游根，不读这次写下的路由和亲和。
 
-Gateway 栏列出已经保存的配置档名字。保存写下名字和若干 Agent 的 model ref。点一个名字就按这份档调用已有的写入。超过 64 个字或写不进去时文件不变，界面留下返回的原因。未实现的 Agent 不写文件。
+已保存的分组可以在 Gateway 面板里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
 
-Gateway 栏可以选择环回或局域网。局域网让进程听 `0.0.0.0` 和原来的端口。写给 Agent 的地址仍是 `127.0.0.1`。端口 `3425` 不会因为打开局域网而开始监听。
+Gateway 面板的配置列列出已经保存的配置档名字。保存写下名字和若干 Agent 的 model ref。点一个名字就按这份档调用已有的写入。超过 64 个字或写不进去时文件不变，界面留下返回的原因。未实现的 Agent 不写文件。
+
+Gateway 面板可以选择环回或局域网。局域网让进程听 `0.0.0.0` 和原来的端口。写给 Agent 的地址仍是 `127.0.0.1`。端口 `3425` 不会因为打开局域网而开始监听。
 
 人可以给目录里的模型一个显示名。选择器展示这个名字，没有时展示 id。出站请求的 `model` 仍是上游 id。空名字、换行、超过 80 个标量、含 `://` 或 `sk-`、或目录里没有这个 id 时不写文件。目录缓存不被改写。
 
@@ -124,7 +126,7 @@ Gateway 栏可以选择环回或局域网。局域网让进程听 `0.0.0.0` 和�
 
 一个 `provider/model` 可以留下目录等级的子集，写在 `model_gateway.json` 的 `model_efforts`。没有这份子集时，选择器和出站收束仍用目录里的全部等级。有子集时，这两处只提供子集里的等级；未固定的请求按目录顺序收进子集。成员上的固定 effort 仍优先。
 
-Settings 的 App AI 仍用 `get_providers_flat`。切换三栏、点 Providers 或 Gateway 的行、或点侧栏里的最近名字，只改变当前选中。保存所选模型才写该 Agent 的配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
+Settings 的 App AI 仍用 `get_providers_flat`。切换列表卡、点 Providers 或 Gateway 的行、或点侧栏里的最近名字，只改变当前选中。保存所选模型才写该 Agent 的配置。旧的 Claude 工作台和只被它挂上的编辑抽屉不在这条生产路径上。
 
 
 ## 前端状态与诊断
@@ -188,7 +190,7 @@ Settings 的 App AI 仍用 `get_providers_flat`。切换三栏、点 Providers �
 
 ## 类型生成
 
-Models/MCP 的跨 IPC 大结构使用 ts-rs。修改 Rust 类型后运行 `bun run types:gen`，禁止手改 `src/types/generated/`。是否把小型手写 mirror 转为生成类型，以实际维护收益和既有门槛为准，不在本文复制字段清单。
+Models 的跨 IPC 大结构使用 ts-rs。修改 Rust 类型后运行 `bun run types:gen`，禁止手改 `src/types/generated/`。是否把小型手写 mirror 转为生成类型，以实际维护收益和既有门槛为准，不在本文复制字段清单。
 
 ## 模型 catalog 缓存
 

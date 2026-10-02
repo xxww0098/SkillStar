@@ -87,12 +87,11 @@ impl GitSkillFacade {
 
     pub fn install_from_scan(
         &self,
-        source: &str,
-        repo_url: &str,
+        spec: &crate::source_resolver::Source,
         targets: &[SkillInstallTarget],
     ) -> anyhow::Result<Vec<String>> {
         let _guard = crate::skill_update::acquire_update_transaction_lock()?;
-        repo_scanner::install_from_repo_in_session(source, repo_url, targets, &self.session)
+        repo_scanner::install_from_repo_in_session(spec, targets, &self.session)
     }
 
     /// Replace a published local Skill with its Git-backed installation while
@@ -100,19 +99,17 @@ impl GitSkillFacade {
     pub fn graduate_local_skill_from_scan(
         &self,
         skill_name: &str,
-        source: &str,
-        repo_url: &str,
+        spec: &crate::source_resolver::Source,
         target: &SkillInstallTarget,
     ) -> anyhow::Result<()> {
         let _guard = crate::skill_update::acquire_update_transaction_lock()?;
         crate::skill_mutation::policy().ensure_skill_mutation_allowed(skill_name)?;
-        crate::skill_mutation::policy().ensure_repository_mutation_allowed(repo_url)?;
+        crate::skill_mutation::policy().ensure_repository_mutation_allowed(&spec.repo_url)?;
         let snapshot = crate::content::snapshot(skill_name)?;
         let previous_lock_entry = load_skill_lock_entry(skill_name)?;
         local_skill::graduate(skill_name)?;
         let install = repo_scanner::install_from_repo_in_session(
-            source,
-            repo_url,
+            spec,
             std::slice::from_ref(target),
             &self.session,
         )
@@ -333,6 +330,7 @@ mod tests {
                 content_hash_version: None,
                 installed_at: "2026-08-05T00:00:00Z".into(),
                 source_folder: None,
+                pinned: false,
             };
             let lock_path = crate::lockfile::lockfile_path();
             let mut lockfile = crate::lockfile::Lockfile::default();
@@ -354,14 +352,21 @@ mod tests {
                 Arc::new(NoopGitProgressSink),
             ));
 
+            let spec = crate::source_resolver::Source {
+                repo_url: "https://github.com/acme/channel.git".to_string(),
+                short: source.to_string(),
+                git_ref: None,
+                subpath: None,
+                skill_filter: None,
+            };
             let error = facade
                 .graduate_local_skill_from_scan(
                     "writer",
-                    source,
-                    "https://github.com/acme/channel.git",
+                    &spec,
                     &SkillInstallTarget {
                         id: "writer".into(),
                         folder_path: "skills/writer".into(),
+                        pinned: false,
                     },
                 )
                 .expect_err("the cache has no remote and graduation must fail");
@@ -397,5 +402,35 @@ mod tests {
             }
         }
         result.unwrap();
+    }
+
+    /// The GUI scan preview (`scan_github_repo` → `GitSkillFacade::scan_repo`)
+    /// must resolve a tree URL's ref and honor its subpath the same way the
+    /// install pipeline does, so what the user previews is what gets pinned.
+    #[test]
+    fn scan_repo_honors_tree_url_ref_and_subpath() {
+        let _sandbox = crate::pack_fixture::Sandbox::new();
+        let fixture = crate::pack_fixture::impeccable_like();
+        let github_url = "https://github.com/pbakaus/impeccable.git";
+        _sandbox.map_github_url(github_url, fixture.dir.path());
+
+        let facade = GitSkillFacade::new(GitOperationSession::public());
+        let scan = facade
+            .scan_repo(
+                "https://github.com/pbakaus/impeccable/tree/main/.claude/skills/impeccable",
+                false,
+            )
+            .unwrap();
+
+        assert_eq!(scan.spec.git_ref.as_deref(), Some("main"));
+        assert_eq!(
+            scan.spec.subpath.as_deref(),
+            Some(".claude/skills/impeccable")
+        );
+        assert_eq!(scan.skills.len(), 1, "{:?}", scan.skills);
+        assert_eq!(scan.skills[0].folder_path, ".claude/skills/impeccable");
+        let plugin = scan.plugin.expect("impeccable declares a plugin manifest");
+        assert!(plugin.hooks);
+        assert!(plugin.agents);
     }
 }

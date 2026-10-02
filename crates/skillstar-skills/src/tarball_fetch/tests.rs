@@ -12,7 +12,9 @@ fn build_archive(path: &Path, entries: &[(&str, &str)]) {
         header.set_size(contents.len() as u64);
         header.set_mode(if name.ends_with(".sh") { 0o755 } else { 0o644 });
         header.set_cksum();
-        builder.append_data(&mut header, name, contents.as_bytes()).unwrap();
+        builder
+            .append_data(&mut header, name, contents.as_bytes())
+            .unwrap();
     }
     builder.into_inner().unwrap().finish().unwrap();
 }
@@ -27,8 +29,14 @@ fn assembles_synthetic_repo_from_archive_subset() {
         &archive,
         &[
             ("pack-HEAD/.claude-plugin/marketplace.json", "{ }"),
-            ("pack-HEAD/.agents/skills/impeccable/SKILL.md", "---\nname: impeccable\n---\n"),
-            ("pack-HEAD/.cursor/skills/impeccable/SKILL.md", "---\nname: impeccable\n---\n"),
+            (
+                "pack-HEAD/.agents/skills/impeccable/SKILL.md",
+                "---\nname: impeccable\n---\n",
+            ),
+            (
+                "pack-HEAD/.cursor/skills/impeccable/SKILL.md",
+                "---\nname: impeccable\n---\n",
+            ),
             ("pack-HEAD/crates/engine/src/lib.rs", "pub fn f() {}"),
             ("pack-HEAD/README.md", "# pack"),
         ],
@@ -53,7 +61,9 @@ fn assembles_synthetic_repo_from_archive_subset() {
     assert!(dest.join(".git").exists());
     assert!(is_tarball_cache(&dest));
     assert_eq!(
-        run_local_git(&dest, &["remote", "get-url", "origin"]).unwrap().trim(),
+        run_local_git(&dest, &["remote", "get-url", "origin"])
+            .unwrap()
+            .trim(),
         "https://github.com/pbakaus/impeccable.git"
     );
     let tree_hash = crate::git::ops::compute_tree_hash(&dest).unwrap();
@@ -72,14 +82,22 @@ fn extraction_skips_links_and_outside_paths() {
     header.set_entry_type(tar::EntryType::Symlink);
     header.set_cksum();
     builder
-        .append_data(&mut header, "pack-HEAD/skills/alpha/evil-link", std::io::empty())
+        .append_data(
+            &mut header,
+            "pack-HEAD/skills/alpha/evil-link",
+            std::io::empty(),
+        )
         .unwrap();
     let mut header = tar::Header::new_gnu();
     header.set_size(3);
     header.set_mode(0o644);
     header.set_cksum();
     builder
-        .append_data(&mut header, "pack-HEAD/skills/alpha/SKILL.md", "a".as_bytes())
+        .append_data(
+            &mut header,
+            "pack-HEAD/skills/alpha/SKILL.md",
+            "a".as_bytes(),
+        )
         .unwrap();
     builder.into_inner().unwrap().finish().unwrap();
 
@@ -121,7 +139,11 @@ fn executable_bits_survive_extraction_on_unix() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let permissions = target.join("skills/alpha/run.sh").metadata().unwrap().permissions();
+        let permissions = target
+            .join("skills/alpha/run.sh")
+            .metadata()
+            .unwrap()
+            .permissions();
         let mode = permissions.mode();
         assert_ne!(mode & 0o111, 0, "execute bits must survive extraction");
     }
@@ -146,7 +168,9 @@ fn prefix_and_matching_helpers() {
 
 #[test]
 fn supports_and_archive_url() {
-    assert!(supports_tarball("https://github.com/pbakaus/impeccable.git"));
+    assert!(supports_tarball(
+        "https://github.com/pbakaus/impeccable.git"
+    ));
     assert!(!supports_tarball("https://gitlab.com/foo/bar.git"));
     assert!(!supports_tarball("git@github.com:foo/bar.git"));
 

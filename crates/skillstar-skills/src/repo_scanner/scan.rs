@@ -13,6 +13,7 @@ pub fn scan_skills_in_repo(
 ) -> Vec<DiscoveredSkill> {
     annotate_discovered_skills(
         skill_discover::discover_skills(repo_dir, full_depth),
+        repo_dir,
         repo_url,
     )
 }
@@ -25,34 +26,15 @@ pub fn scan_skills_in_repo_at(
     subpath: &str,
     full_depth: bool,
 ) -> Vec<DiscoveredSkill> {
-    let scan_root = repo_dir.join(subpath);
-    let Ok(repo_root) = repo_dir.canonicalize() else {
-        return Vec::new();
-    };
-    let Ok(scan_root) = scan_root.canonicalize() else {
-        return Vec::new();
-    };
-    if !scan_root.starts_with(&repo_root) {
-        return Vec::new();
-    }
-
-    let mut discovered = skill_discover::discover_skills(&scan_root, full_depth);
-    for skill in &mut discovered {
-        skill.folder_path = if skill.folder_path.is_empty() {
-            subpath.to_string()
-        } else {
-            format!(
-                "{}/{}",
-                subpath.trim_end_matches('/'),
-                skill.folder_path.trim_start_matches('/')
-            )
-        };
-    }
-    annotate_discovered_skills(discovered, repo_url)
+    let discovered = skill_discover::SkillDiscovery::new(repo_dir, full_depth)
+        .within(subpath)
+        .discover();
+    annotate_discovered_skills(discovered, repo_dir, repo_url)
 }
 
 pub(super) fn annotate_discovered_skills(
     mut discovered: Vec<DiscoveredSkill>,
+    repo_dir: &Path,
     repo_url: &str,
 ) -> Vec<DiscoveredSkill> {
     let hub_skills_dir = paths::hub_skills_dir();
@@ -87,7 +69,10 @@ pub(super) fn annotate_discovered_skills(
         }
     }
 
-    skill_discover::dedupe_discovered_skills(discovered)
+    skill_discover::dedupe_discovered_skills(
+        discovered,
+        &crate::plugin_manifest::declared_skill_dir_names(repo_dir),
+    )
 }
 
 fn option_str_eq(left: Option<&str>, right: Option<&str>) -> bool {

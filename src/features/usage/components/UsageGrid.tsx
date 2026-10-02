@@ -146,7 +146,7 @@ export function UsageGrid({
     [onRefresh, onResetQuota, refreshDisabled, onEdit, onDelete, onReauth, onSetActive, onSwitchToCli, cliAccounts],
   );
 
-  const gridClass = "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";
+  const gridClass = "grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";
 
   const renderReorderCards = (items: Subscription[], axis: "x" | "y", className: string, itemClassName?: string) => (
     <Reorder.Group
@@ -198,7 +198,7 @@ export function UsageGrid({
             {renderReorderCards(
               group.subscriptions,
               "x",
-              "flex min-w-0 gap-3 overflow-x-auto pb-2 pr-1 [scrollbar-gutter:stable]",
+              "flex min-w-0 gap-2.5 overflow-x-auto pb-2 pr-1 [scrollbar-gutter:stable]",
               "w-[min(100%,280px)] shrink-0",
             )}
           </ProviderSubscriptionRow>
@@ -208,7 +208,7 @@ export function UsageGrid({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
       {desktopAppIds ? <DesktopAppsSection appIds={desktopAppIds} /> : null}
       {isHomeView ? (
         subscriptions.length === 0 ? (
@@ -281,7 +281,7 @@ function ProviderSubscriptionRow({
   return (
     <section
       aria-label={`${displayName} ${countLabel}`}
-      className="border-b border-border/45 py-3 first:pt-0 last:border-b-0"
+      className="border-b border-border/45 py-2 first:pt-0 last:border-b-0"
     >
       <div className="flex w-full items-center gap-1.5">
         <button

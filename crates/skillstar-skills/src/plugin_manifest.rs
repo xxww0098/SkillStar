@@ -13,7 +13,7 @@
 //! (path-traversal guard). SkillStar never executes plugin install logic — it
 //! only reads skill locations from the manifest.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Conventional `./`-prefix requirement for manifest paths.
@@ -65,25 +65,24 @@ struct PluginEntry {
 
 #[derive(Debug, Deserialize, Default)]
 struct PluginManifest {
-    #[serde(default, deserialize_with = "deserialize_path_list")]
-    skills: Vec<String>,
+    #[serde(default)]
+    skills: PathList,
 }
 
 /// Claude plugin manifests use either `"./skills/"` or `["./skills/rust"]`.
-fn deserialize_path_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum PathList {
-        One(String),
-        Many(Vec<String>),
+/// The string form names a **container** of skills; array entries name the
+/// skills themselves.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PathList {
+    Container(String),
+    Skills(Vec<String>),
+}
+
+impl Default for PathList {
+    fn default() -> Self {
+        Self::Skills(Vec::new())
     }
-    Ok(match PathList::deserialize(deserializer)? {
-        PathList::One(path) => vec![path],
-        PathList::Many(paths) => paths,
-    })
 }
 
 /// Collect the skill container directories declared by plugin manifests.
@@ -93,12 +92,18 @@ where
 /// finds the skill's own `SKILL.md` as a direct child — the same semantics
 /// `npx skills` applies to manifest-declared paths.
 pub fn declared_skill_dirs(repo_dir: &Path) -> Vec<PathBuf> {
-    let marketplace = std::fs::read_to_string(repo_dir.join(".claude-plugin/marketplace.json")).ok();
-    let plugin = std::fs::read_to_string(repo_dir.join(".claude-plugin/plugin.json")).ok();
-    declared_skill_dir_strings(marketplace.as_deref(), plugin.as_deref())
+    declared_skill_dir_names(repo_dir)
         .into_iter()
         .map(|dir| repo_dir.join(dir))
         .collect()
+}
+
+/// Repo-relative form of [`declared_skill_dirs`], read from disk.
+pub fn declared_skill_dir_names(repo_dir: &Path) -> Vec<String> {
+    let marketplace =
+        std::fs::read_to_string(repo_dir.join(".claude-plugin/marketplace.json")).ok();
+    let plugin = std::fs::read_to_string(repo_dir.join(".claude-plugin/plugin.json")).ok();
+    declared_skill_dir_strings(marketplace.as_deref(), plugin.as_deref())
 }
 
 /// Repo-relative declared skill container dirs, from manifest file contents.
@@ -162,12 +167,63 @@ pub fn declared_skill_dir_strings(
 
     // plugin.json — single plugin at the repo root.
     if let Some(content) = plugin_json
-        && let Ok(manifest) = serde_json::from_str::<PluginManifest>(&content)
+        && let Ok(manifest) = serde_json::from_str::<PluginManifest>(content)
     {
-        add_plugin_skills(&mut dirs, "", &manifest.skills);
+        match manifest.skills {
+            PathList::Container(container) => {
+                dirs.extend(safe_relative_child("", &container));
+                add_plugin_skills(&mut dirs, "", &[]);
+            }
+            PathList::Skills(skills) => add_plugin_skills(&mut dirs, "", &skills),
+        }
     }
 
     dirs
+}
+
+/// A declared Claude Code plugin whose `hooks`/`agents` SkillStar will not
+/// install — skills-only install; see the README non-goals for why (own
+/// implementation would duplicate `impeccable`'s own installer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginHint {
+    pub hooks: bool,
+    pub agents: bool,
+}
+
+/// `paths` is every tracked file path in the checkout at the target
+/// revision (`git_ops::list_tree_paths`, a `git ls-tree` over the commit —
+/// exact even under a sparse checkout, since tree objects are known
+/// independent of what is materialized on disk). A tarball-synthesized
+/// commit only lists the fetched plan directory, so the hint can
+/// under-report there; that only ever loses the hint, never blocks install.
+///
+/// `None` when the repo does not declare a `.claude-plugin/*.json` manifest,
+/// or declares one with no `hooks`/`agents` for SkillStar to skip.
+pub fn plugin_hint<'a>(paths: impl Iterator<Item = &'a str>) -> Option<PluginHint> {
+    let mut is_plugin = false;
+    let mut hooks = false;
+    let mut agents = false;
+    for path in paths {
+        if path == ".claude-plugin/marketplace.json" || path == ".claude-plugin/plugin.json" {
+            is_plugin = true;
+        }
+        hooks |= has_dir_segment(path, "hooks");
+        agents |= has_dir_segment(path, "agents");
+    }
+    (is_plugin && (hooks || agents)).then_some(PluginHint { hooks, agents })
+}
+
+fn has_dir_segment(path: &str, name: &str) -> bool {
+    path.rsplit_once('/')
+        .is_some_and(|(dir, _file)| dir.split('/').any(|segment| segment == name))
+}
+
+/// [`plugin_hint`] over a checkout's tracked paths, read via `git ls-tree`
+/// (`crate::git::ops::list_tree_paths`). A read failure yields `None` — the
+/// hint is advisory, never worth failing a scan or install over.
+pub fn plugin_hint_for_repo(repo_dir: &Path) -> Option<PluginHint> {
+    let paths = crate::git::ops::list_tree_paths(repo_dir).ok()?;
+    plugin_hint(paths.iter().map(String::as_str))
 }
 
 #[cfg(test)]
@@ -241,19 +297,40 @@ mod tests {
         assert!(dirs[0].ends_with("skills"));
     }
 
+    /// The string form is a container path. It used to be treated as one
+    /// skill path (parent taken), which turned `./.claude/skills/` into
+    /// `.claude`; `./skills/` only passed via the conventional `skills` dir.
     #[test]
-    fn plugin_json_skills_string_is_accepted() {
+    fn plugin_json_string_is_a_container_path() {
+        let dirs = declared_skill_dir_strings(None, Some(r#"{ "skills": "./.claude/skills/" }"#));
+        assert!(dirs.contains(&".claude/skills".to_string()), "{dirs:?}");
+        assert!(!dirs.contains(&".claude".to_string()), "{dirs:?}");
+
         let repo = tempfile::tempdir().unwrap();
         write(
             &repo.path().join(".claude-plugin/plugin.json"),
-            r#"{ "skills": "./skills/" }"#,
+            r#"{ "skills": "./.claude/skills/" }"#,
         );
-        write(&repo.path().join("skills/rust/SKILL.md"), "# rust\n");
-
+        write(
+            &repo.path().join(".claude/skills/rust/SKILL.md"),
+            "# rust\n",
+        );
         let dirs = declared_skill_dirs(repo.path());
-        assert!(dirs.iter().any(|dir| dir.ends_with("skills")), "{dirs:?}");
-        let skills_dir = dirs.iter().find(|dir| dir.ends_with("skills")).unwrap();
-        assert!(skills_dir.join("rust/SKILL.md").exists());
+        let container = dirs
+            .iter()
+            .find(|dir| dir.ends_with(".claude/skills"))
+            .expect("container declared");
+        assert!(container.join("rust/SKILL.md").exists());
+    }
+
+    #[test]
+    fn plugin_json_array_entries_are_skill_paths() {
+        let dirs = declared_skill_dir_strings(
+            None,
+            Some(r#"{ "skills": ["./plugins/one/alpha", "./beta"] }"#),
+        );
+        assert!(dirs.contains(&"plugins/one".to_string()), "{dirs:?}");
+        assert!(!dirs.contains(&"plugins/one/alpha".to_string()), "{dirs:?}");
     }
 
     #[test]
@@ -261,6 +338,32 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let dirs = declared_skill_dirs(repo.path());
         assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn plugin_hint_detects_hooks_and_agents() {
+        let paths = [
+            ".claude-plugin/marketplace.json",
+            ".claude-plugin/plugin.json",
+            "plugin/skills/impeccable/SKILL.md",
+            "plugin/hooks/hooks.json",
+            "plugin/agents/impeccable-reviewer.md",
+        ];
+        let hint = plugin_hint(paths.into_iter()).expect("plugin with hooks and agents");
+        assert!(hint.hooks);
+        assert!(hint.agents);
+    }
+
+    #[test]
+    fn plugin_hint_is_none_without_manifest() {
+        // Folders literally named hooks/agents, but no `.claude-plugin/*.json`
+        // manifest declaring them: not a Claude plugin, no hint.
+        let paths = ["hooks/pre-commit.sh", "agents/README.md"];
+        assert!(plugin_hint(paths.into_iter()).is_none());
+
+        // A manifest with neither hooks nor agents: nothing to skip.
+        let paths = [".claude-plugin/plugin.json", "skills/demo/SKILL.md"];
+        assert!(plugin_hint(paths.into_iter()).is_none());
     }
 
     #[test]
@@ -279,10 +382,7 @@ mod tests {
 
         let plugin = r#"{ "skills": ["./skills/alpha", "../outside"] }"#;
         let dirs = declared_skill_dir_strings(None, Some(plugin));
-        assert_eq!(
-            dirs,
-            vec!["skills".to_string(), "skills".to_string()]
-        );
+        assert_eq!(dirs, vec!["skills".to_string(), "skills".to_string()]);
 
         assert!(declared_skill_dir_strings(None, None).is_empty());
     }

@@ -6,9 +6,9 @@ import {
   BookOpen,
   Calendar,
   Download,
-  Edit3,
   ExternalLink,
   GitBranch,
+  Loader2,
   RefreshCw,
   Sparkles,
   Square,
@@ -75,6 +75,8 @@ export function DetailPanel({
   const prefersReducedMotion = useReducedMotion();
   const [editing, setEditing] = useState(false);
   const [reading, setReading] = useState(false);
+  const [readerContent, setReaderContent] = useState<string | null>(null);
+  const [openingRead, setOpeningRead] = useState(false);
 
   // Close on Escape key
   useEffect(() => {
@@ -145,6 +147,8 @@ export function DetailPanel({
     quickRead.setError(null);
 
     setReading(false);
+    setReaderContent(null);
+    setOpeningRead(false);
   }, [
     skill?.name,
     skill?.description,
@@ -193,6 +197,29 @@ export function DetailPanel({
   };
 
   const canEdit = skill?.installed && onReadContent && onSaveContent;
+  // Installed skills view the live SKILL.md; others fall back to the
+  // marketplace snapshot readme.
+  const canRead = Boolean(skillDetails?.readme) || Boolean(skill?.installed && onReadContent);
+
+  const openReader = async () => {
+    if (!skill) return;
+    if (skillDetails?.readme) {
+      setReaderContent(skillDetails.readme);
+      setReading(true);
+      return;
+    }
+    if (!onReadContent || openingRead) return;
+    setOpeningRead(true);
+    try {
+      const latest = await onReadContent(skill.name);
+      setReaderContent(latest.content);
+      setReading(true);
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn("[DetailPanel] Failed to load SKILL.md:", e);
+    } finally {
+      setOpeningRead(false);
+    }
+  };
 
   // Per-agent deploy kind — fetched lazily when the panel opens for an installed
   // skill. Only degraded deployments (copy fallback / dangling link) get a badge.
@@ -228,7 +255,8 @@ export function DetailPanel({
           >
             <SkillEditor
               skillName={skill.name}
-              onClose={() => setEditing(false)}
+              onClose={onClose}
+              onCancel={() => setEditing(false)}
               onRead={onReadContent}
               onSave={onSaveContent}
             />
@@ -236,7 +264,7 @@ export function DetailPanel({
         </motion.div>
       )}
 
-      {reading && skill && skillDetails?.readme && (
+      {reading && skill && readerContent && (
         <motion.div
           key="skill-reader"
           initial={{ opacity: 0, x: 20 }}
@@ -252,7 +280,19 @@ export function DetailPanel({
               </div>
             }
           >
-            <SkillReader skillName={skill.name} content={skillDetails.readme} onClose={() => setReading(false)} />
+            <SkillReader
+              skillName={skill.name}
+              content={readerContent}
+              onClose={onClose}
+              onEdit={
+                canEdit
+                  ? () => {
+                      setReading(false);
+                      setEditing(true);
+                    }
+                  : undefined
+              }
+            />
           </Suspense>
         </motion.div>
       )}
@@ -497,19 +537,17 @@ export function DetailPanel({
                 </div>
               )}
 
-              {/* SKILL.md — reader uses marketplace snapshot; skip when editor is available (same AI preview there). */}
-              {skillDetails?.readme && !canEdit && (
-                <Button variant="outline" className="w-full" onClick={() => setReading(true)}>
-                  <BookOpen className="w-4 h-4 mr-2" />
-                  {t("detailPanel.readSkillMd")}
-                </Button>
-              )}
-
-              {/* Edit Button (only for installed skills) */}
-              {canEdit && (
-                <Button variant="outline" className="w-full" onClick={() => setEditing(true)}>
-                  <Edit3 className="w-4 h-4 mr-2" />
-                  {t("detailPanel.editSkillMd")}
+              {/* SKILL.md — one read entry: installed skills load the live
+                  file, others use the marketplace snapshot. Editing stays
+                  reachable from the reader header (pencil). */}
+              {canRead && (
+                <Button variant="outline" className="w-full" disabled={openingRead} onClick={() => void openReader()}>
+                  {openingRead ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <BookOpen className="w-4 h-4 mr-2" />
+                  )}
+                  {t("detailPanel.viewSkillMd")}
                 </Button>
               )}
 

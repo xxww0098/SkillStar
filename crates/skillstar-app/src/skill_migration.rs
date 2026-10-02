@@ -72,11 +72,11 @@ pub fn migrate_renamed_skill(name: &str, facade: &GitSkillFacade) -> Result<Skil
     //    across buckets (e.g. a deprecated copy), folders cannot.
     let installed = facade
         .install_from_scan(
-            &source.short,
-            &source.repo_url,
+            &source,
             &[SkillInstallTarget {
                 id: successor.skill_id.clone(),
                 folder_path: successor.folder_path.clone(),
+                pinned: false,
             }],
         )
         .with_context(|| {

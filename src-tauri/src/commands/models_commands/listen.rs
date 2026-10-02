@@ -9,6 +9,11 @@ pub fn get_listen_mode() -> String {
 }
 
 #[tauri::command]
+pub fn get_loopback_origin() -> String {
+    models::loopback_origin()
+}
+
+#[tauri::command]
 pub fn save_listen_mode(mode: String) -> Result<(), AppError> {
     models::save_listen_mode(&mode)
         .map_err(|error: SaveListenControlError| AppError::Other(error.to_string()))

@@ -6,7 +6,6 @@ export * from "./marketplace";
 export * from "./project";
 export * from "./ai";
 export * from "./decision";
-export * from "./mcp";
 export * from "./models";
 export * from "./share";
 export * from "./config";

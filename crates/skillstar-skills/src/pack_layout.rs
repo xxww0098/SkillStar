@@ -37,26 +37,126 @@ pub fn is_canonical_skill_folder(folder_path: &str) -> bool {
         || path.starts_with("source/skills/")
 }
 
-/// Higher values win when the same skill identity is found in more than one
-/// folder. Root (empty path) is scored separately by the caller.
-pub fn source_priority(folder_path: &str) -> u8 {
+/// Directory names that never hold installable Skills: build output, vendored
+/// dependencies, and test fixtures (packs ship fixture `SKILL.md` files).
+pub(crate) const IGNORED_DIR_NAMES: &[&str] = &[
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "tests",
+    "test",
+    "__tests__",
+    "fixtures",
+];
+
+/// True when an **ancestor** segment of `folder_path` is ignored: a Skill
+/// named `test` inside `skills/` is still a Skill; `tests/**/impeccable` is not.
+pub(crate) fn is_under_ignored_dir(folder_path: &str) -> bool {
     let path = folder_path.replace('\\', "/");
-    if is_canonical_skill_folder(&path) {
-        3
-    } else if path.starts_with(".agent/skills") || path.starts_with(".agents/skills") {
-        2
-    } else {
-        1
-    }
+    let mut segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    segments.pop();
+    segments
+        .iter()
+        .any(|segment| IGNORED_DIR_NAMES.contains(segment))
 }
 
-/// Priority used when deduplicating discovered skills by identity.
-pub fn discovered_folder_priority(folder_path: &str) -> u8 {
-    if folder_path.is_empty() {
-        4
-    } else {
-        source_priority(folder_path)
+/// Case-insensitive Skill identity: frontmatter `name`, else the folder
+/// basename (same rule as filesystem discovery).
+pub(crate) fn identity_key(frontmatter_name: Option<&str>, folder_path: &str) -> String {
+    frontmatter_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| folder_path.rsplit('/').next().unwrap_or(folder_path))
+        .to_lowercase()
+}
+
+/// What the caller wants from a set of same-identity copies.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CopyRequest<'a> {
+    /// Harness prefix of the clicked Agent (`".cursor"`).
+    pub harness: Option<&'a str>,
+    /// The identity's current lock `source_folder`.
+    pub installed: Option<&'a str>,
+    /// Hard-pinned folder from a subpath URL; nothing else qualifies.
+    pub pinned: Option<&'a str>,
+}
+
+/// The single ranking table for choosing among same-identity copies. Lower
+/// wins; ties break on folder path so the choice never depends on
+/// filesystem iteration order. `None` excludes the folder.
+///
+/// | request | order |
+/// |---|---|
+/// | default | root → `skills/`·`source/skills/` → `.agents/skills/` → manifest container → other |
+/// | harness `h` | `h/skills/` → `h` → other under `h` → catalog → installed → `.agents/skills/` → manifest → other (root excluded) |
+/// | pinned `p` | only `p` |
+fn copy_rank(folder: &str, req: CopyRequest<'_>, manifest_dirs: &[String]) -> Option<u8> {
+    if let Some(pinned) = req.pinned {
+        return (folder == pinned).then_some(0);
     }
+    let in_manifest = || {
+        folder
+            .rsplit_once('/')
+            .is_some_and(|(parent, _)| manifest_dirs.iter().any(|dir| dir == parent))
+    };
+    let shared = folder.starts_with(".agents/skills/");
+    let Some(prefix) = req.harness else {
+        return Some(if folder.is_empty() {
+            0
+        } else if is_canonical_skill_folder(folder) {
+            1
+        } else if shared {
+            2
+        } else if in_manifest() {
+            3
+        } else {
+            4
+        });
+    };
+    if folder.is_empty() {
+        return None;
+    }
+    Some(if folder.starts_with(&format!("{prefix}/skills/")) {
+        0
+    } else if folder == prefix {
+        1
+    } else if folder_matches_harness(folder, prefix) {
+        2
+    } else if is_canonical_skill_folder(folder) {
+        3
+    } else if req.installed == Some(folder) {
+        4
+    } else if shared {
+        5
+    } else if in_manifest() {
+        6
+    } else {
+        7
+    })
+}
+
+/// Pick the copy `req` asks for from same-identity candidates.
+pub(crate) fn choose_copy<'a, T>(
+    copies: &'a [T],
+    folder: impl Fn(&T) -> &str,
+    req: CopyRequest<'_>,
+    manifest_dirs: &[String],
+) -> Option<&'a T> {
+    copies
+        .iter()
+        .filter_map(|copy| {
+            let path = folder(copy);
+            copy_rank(path, req, manifest_dirs).map(|rank| (rank, path.to_string(), copy))
+        })
+        .min_by(|left, right| (left.0, &left.1).cmp(&(right.0, &right.1)))
+        .map(|(_, _, copy)| copy)
 }
 
 /// Known pack-tree prefixes for builtin agents. Codex skills live under
@@ -135,18 +235,6 @@ pub fn folder_matches_harness(folder_path: &str, prefix: &str) -> bool {
     folder_path == prefix || folder_path.starts_with(&format!("{prefix}/"))
 }
 
-/// Prefer `.<harness>/skills/<id>` over a `SKILL.md` sitting on the harness root.
-pub fn harness_folder_rank(prefix: &str, folder: &str) -> u8 {
-    let body = format!("{prefix}/skills/");
-    if folder.starts_with(&body) {
-        0
-    } else if folder == prefix {
-        1
-    } else {
-        2
-    }
-}
-
 pub fn missing_skill_payload_error(prefix: &str, requested_name: Option<&str>) -> String {
     match requested_name {
         Some(name) => format!(
@@ -188,22 +276,125 @@ mod tests {
         assert!(!is_harness_skill_folder("examples/writer"));
     }
 
+    fn pick<'a>(
+        copies: &'a [String],
+        req: CopyRequest<'_>,
+        manifest: &[String],
+    ) -> Option<&'a str> {
+        choose_copy(copies, |copy| copy.as_str(), req, manifest).map(String::as_str)
+    }
+
+    /// The whole table, driven by the impeccable-shaped fixture registry.
     #[test]
-    fn catalog_outranks_harness_copies() {
-        assert!(source_priority("skills/rust") > source_priority(".agents/skills/rust"));
-        assert!(source_priority("skills/rust") > source_priority(".claude/skills/rust"));
+    fn copy_selection_table() {
+        let copies = crate::pack_fixture::published_copies();
+        let manifest = vec!["plugin/skills".to_string(), ".claude/skills".to_string()];
+        let harness = |prefix| CopyRequest {
+            harness: Some(prefix),
+            ..CopyRequest::default()
+        };
+        let rows: &[(CopyRequest<'_>, Option<&str>)] = &[
+            (CopyRequest::default(), Some(".agents/skills/impeccable")),
+            (harness(".cursor"), Some(".cursor/skills/impeccable")),
+            (harness(".agent"), Some(".agent/skills/impeccable")),
+            (harness(".agents"), Some(".agents/skills/impeccable")),
+            (harness(".windsurf"), Some(".agents/skills/impeccable")),
+            (
+                CopyRequest {
+                    harness: Some(".windsurf"),
+                    installed: Some(".dsh/skills/impeccable"),
+                    pinned: None,
+                },
+                Some(".dsh/skills/impeccable"),
+            ),
+            (
+                CopyRequest {
+                    pinned: Some("plugin/skills/impeccable"),
+                    ..harness(".cursor")
+                },
+                Some("plugin/skills/impeccable"),
+            ),
+            (
+                CopyRequest {
+                    pinned: Some("nowhere/impeccable"),
+                    ..CopyRequest::default()
+                },
+                None,
+            ),
+        ];
+        for (req, expected) in rows {
+            assert_eq!(pick(&copies, *req, &manifest), *expected, "{req:?}");
+        }
+    }
+
+    #[test]
+    fn default_order_is_root_catalog_agents_manifest_other() {
+        let manifest = vec!["plugin/skills".to_string()];
+        let mut copies: Vec<String> = [
+            "",
+            "skills/x",
+            ".agents/skills/x",
+            "plugin/skills/x",
+            ".claude/skills/x",
+        ]
+        .map(String::from)
+        .to_vec();
+        for expected in [
+            "",
+            "skills/x",
+            ".agents/skills/x",
+            "plugin/skills/x",
+            ".claude/skills/x",
+        ] {
+            assert_eq!(
+                pick(&copies, CopyRequest::default(), &manifest),
+                Some(expected)
+            );
+            copies.retain(|copy| copy != expected);
+        }
+    }
+
+    #[test]
+    fn harness_request_never_selects_repo_root() {
+        let copies = vec![String::new()];
+        let req = CopyRequest {
+            harness: Some(".dsh"),
+            ..CopyRequest::default()
+        };
+        assert_eq!(pick(&copies, req, &[]), None);
+    }
+
+    #[test]
+    fn ties_break_lexicographically() {
+        let forward = vec![".kiro/skills/x".to_string(), ".claude/skills/x".to_string()];
+        let backward: Vec<String> = forward.iter().rev().cloned().collect();
+        for copies in [forward, backward] {
+            assert_eq!(
+                pick(&copies, CopyRequest::default(), &[]),
+                Some(".claude/skills/x")
+            );
+        }
+    }
+
+    #[test]
+    fn ignored_dirs_match_ancestors_only() {
+        assert!(is_under_ignored_dir(
+            "tests/oracle/workspaces/ctx-pin/.claude/skills/audit"
+        ));
+        assert!(is_under_ignored_dir("node_modules/pkg/skills/x"));
+        assert!(!is_under_ignored_dir("skills/test"));
+        assert!(!is_under_ignored_dir("fixtures"));
+        assert!(!is_under_ignored_dir(".claude/skills/impeccable"));
+    }
+
+    #[test]
+    fn identity_prefers_frontmatter_name() {
         assert_eq!(
-            source_priority("skills/foo"),
-            source_priority("source/skills/foo")
+            identity_key(Some(" Impeccable "), ".cursor/skills/x"),
+            "impeccable"
         );
-        assert!(source_priority("source/skills/foo") > source_priority(".agents/skills/foo"));
-        assert!(source_priority(".agents/skills/foo") > source_priority(".claude/skills/foo"));
-        assert_eq!(
-            source_priority(".agent/skills/foo"),
-            source_priority(".agents/skills/foo")
-        );
-        assert_eq!(discovered_folder_priority(""), 4);
-        assert!(discovered_folder_priority("") > source_priority("skills/rust"));
+        assert_eq!(identity_key(Some(""), ".cursor/skills/Rust"), "rust");
+        assert_eq!(identity_key(None, "skills/rust"), "rust");
     }
 
     #[test]

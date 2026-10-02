@@ -22,6 +22,9 @@ pub struct ModelsBoardRowDto {
     /// Loopback host:port already written for this agent, such as `127.0.0.1:21847`.
     /// Empty when nothing loopback has been written, and on Providers and Gateway.
     pub loopback_label: String,
+    /// The model this writer already selected for the agent, spelled with its
+    /// saved display name. Empty when the agent is unmanaged or unset.
+    pub model_label: String,
 }
 
 /// The three columns, left to right: Agents, Providers, Gateway.
@@ -47,8 +50,13 @@ pub fn load_models_board() -> Result<ModelsBoardDto, StoreError> {
 }
 
 fn fill_loopback_labels(board: &mut ModelsBoardDto) {
+    let names = skillstar_gateway::stored_model_names();
     for agent in &mut board.agents {
         agent.loopback_label = skillstar_gateway::written_loopback_label(&agent.id);
+        let reference = skillstar_gateway::written_model_ref(&agent.id);
+        if !reference.is_empty() {
+            agent.model_label = skillstar_gateway::model_label(&reference, &names);
+        }
     }
 }
 
@@ -61,6 +69,7 @@ fn board_from_providers(providers: &[Provider]) -> ModelsBoardDto {
                 name: spec.display_name.to_string(),
                 credential_summary: String::new(),
                 loopback_label: String::new(),
+                model_label: String::new(),
             })
             .collect(),
         providers: providers
@@ -70,6 +79,7 @@ fn board_from_providers(providers: &[Provider]) -> ModelsBoardDto {
                 name: provider.name.clone(),
                 credential_summary: provider.credential.summary(),
                 loopback_label: String::new(),
+                model_label: String::new(),
             })
             .collect(),
         gateway: Vec::new(),
@@ -192,5 +202,41 @@ mod tests {
         assert_eq!(codex.loopback_label, "127.0.0.1:21847");
         let file = std::fs::read_to_string(home.join(".codex").join("config.toml")).unwrap();
         assert!(file.contains("http://127.0.0.1:21847"), "{file}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_rows_carry_the_selected_model_label() {
+        let _lock = ENV_LOCK.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let data = temp.path().join("data");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        let addr = std::path::PathBuf::from("127.0.0.1:21847");
+        let _env = EnvGuard::set(&[
+            ("HOME", &home),
+            ("USERPROFILE", &home),
+            ("SKILLSTAR_TOOL_SYNC_HOME", &home),
+            ("SKILLSTAR_DATA_DIR", &data),
+            ("SKILLSTAR_GATEWAY_ADDR", &addr),
+        ]);
+
+        let mut board = board_from_providers(&[]);
+        fill_loopback_labels(&mut board);
+        assert!(board.agents.iter().all(|agent| agent.model_label.is_empty()));
+
+        // Both spellings a save can arrive under: the file writer and Codex.
+        crate::models::save_agent("claude-code", "deepseek/pro").unwrap();
+        crate::models::save_agent("codex", "group/fast").unwrap();
+        let mut board = board_from_providers(&[]);
+        fill_loopback_labels(&mut board);
+        let claude = board
+            .agents
+            .iter()
+            .find(|agent| agent.id == "claude-code")
+            .unwrap();
+        assert_eq!(claude.model_label, "deepseek/pro");
+        let codex = board.agents.iter().find(|agent| agent.id == "codex").unwrap();
+        assert_eq!(codex.model_label, "group/fast");
     }
 }

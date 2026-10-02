@@ -18,9 +18,8 @@
 ## 桌面性能
 
 - Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
-- Skills 模式的列表页（我的技能 / 市场 / MCP / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。`Activity` 不是 DOM Element，不能作为 `Dialog.Portal` asChild 的直接子节点——Presence 会对其调用 `getComputedStyle`，WKWebView 会抛错。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
+- Skills 模式的列表页（我的技能 / 市场 / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。`Activity` 不是 DOM Element，不能作为 `Dialog.Portal` asChild 的直接子节点——Presence 会对其调用 `getComputedStyle`，WKWebView 会抛错。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
 - 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
-- MCP 远端 registry 搜索（GitHub 发布者钻入）对输入防抖后再打 `query_mcp_market_servers_local`（约 21k 行 FTS）。输入框本身不防抖。
 - `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
 
 `scripts/internal/check_feature_imports.sh` 阻止新增跨 feature 深层导入，但允许从目标 feature 根 `index.ts` 导入。存量基线只能减少；跨域协作优先由 page 组合，确需依赖时只消费目标 feature 的公开入口；若组件确实无业务语义且通用，应先提升到 shared/lib，再改调用方。
@@ -52,16 +51,16 @@
 
 - 样式使用 Tailwind utilities；不新增 CSS Modules 或 styled-components。
 - 优先复用 `src/components/ui/`。需要焦点管理、Esc、portal 的组件使用 Radix primitive。
-- 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。嵌套面板用 `InsetPanel`，不要用会 hover 抬升的 `Card`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
+- 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
 - 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。
 - 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。`ModalShell` 由 Radix 管理层叠、portal 与焦点；Esc 只作用于最上层，不穿透到底层弹窗或页面快捷键。Esc 与 backdrop 共用 `dismissable` 门控，处理中不可关闭的弹窗仍拦截 Esc；调用方不再重复注册关闭监听。关闭后焦点返回打开前的控件。modal 活跃期间不启动全局命令面板，避免非模态命令面板与焦点锁冲突；关闭后 ⌘K / Ctrl+K 恢复，包括输入框内。
 - Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。设置侧栏 lg 断点保持纯图标（900–1280px 窗口放不下文字），xl 起图标 + 文字标签。
 - 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。
 - 外链元素使用 `ExternalAnchor`；按钮/程序化跳转使用 `openExternalUrl`，避免业务页面直接写 `<a target="_blank">`。
-- Marketplace 与 MCP 共用的 Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；两个 feature 都只能依赖该 shared interface。
+- Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；消费方只能依赖该 shared interface。
 - 动态颜色无法用 utility 表达时才使用 inline style。
 - 侧边栏导航的选中态由带 `layoutId` 的 motion 元素承载，切换时弹簧滑动；收起态改为静态高亮，不做滑动。新增导航区沿用这条约定，不要再写第三种选中态实现。
-- Skill 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。MCP 已装卡片沿用同一网格：状态点与状态说明在标题行，页脚只放 Agent rail；工具数和 schema token 不进卡片。MCP 目录浏览仍用卡片。
+- Skill 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。
 - 卡片列表（`.ss-cards-grid` / `.ss-cards-list`）第 13 项起由 CSS `content-visibility: auto` 跳过屏幕外的样式、布局和绘制；卡片高度由内容决定，`SkillGrid` 量出首张卡片写入 `--ss-card-h` 供 `contain-intrinsic-size` 占位。新增卡片列表沿用这两个类，不要自己写 JS 虚拟滚动。
 
 ## Agent 手动激活投影
@@ -73,10 +72,9 @@
 - 项目级能力再通过 `supportsProjectDeploy` 判断；不要硬编码 global-only Agent id。
 - 全局能力通过后端 `has_global_skills()` 判断；空全局路径是“不支持全局部署”的能力标记，
   不能被解释为当前工作目录。
-- Skills、Deck 和 MCP 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播轨道占满卡片底栏可用宽度，图标之间保持固定间距、不随剩余空间拉开；滚动箭头贴在轨道最左/最右，超出可视宽度时横向滚动，不固定可见个数。轮播只展示 Settings 已启用的 Agent；未启用的 profile 不占轮播位，即使资源仍挂着。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
-- MCP 等能力消费者可以叠加静态能力映射，但不得再用本机安装探测隐藏用户已手动启用的 Agent；执行时的真实失败由对应 mutation 显式反馈。
+- Skills 和 Deck 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播轨道占满卡片底栏可用宽度，图标之间保持固定间距、不随剩余空间拉开；滚动箭头贴在轨道最左/最右，超出可视宽度时横向滚动，不固定可见个数。轮播只展示 Settings 已启用的 Agent；未启用的 profile 不占轮播位，即使资源仍挂着。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
 - Claude Settings profile `claude` 映射到唯一能力 id `claude-code`；不要生成第二张 Claude 卡。
-- 工具栏 `AgentFilterPill` 的条目是 `{ id, profile }`：`id` 是消费方筛选值（Skills 是 Agent profile id，MCP 是 tool id），品牌图标与显示名只能取自 `profile`。用 `id` 解析图标会让两个词汇表拼写不同的 id（`claude-code` / `vscode`）静默退回通用字标。
+- 工具栏 `AgentFilterPill` 的条目是 `{ id, profile }`：`id` 是消费方筛选值，品牌图标与显示名只能取自 `profile`。用 `id` 解析图标会让与 profile id 拼写不同的筛选值静默退回通用字标。
 - SSH 远端 Agent 由远端 discovery 决定，不复用本机 rail。
 
 ## 桌面交互
@@ -120,7 +118,6 @@ bash scripts/internal/check_ts_orphan_modules.sh
 | 已安装或可安装的技能单元 | Card | 技能 |
 | 技能分组 | Deck | 卡组 |
 | 技能目录 | Marketplace | 市场 |
-| MCP 目录 | Catalog | 目录 |
 | Agent CLI / 桌面端 | Agent | 智能体 |
 | 模型供应商 | Provider | 供应商 |
 | 用量账号 | Subscription | 订阅 |

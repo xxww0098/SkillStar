@@ -1,6 +1,6 @@
 # MCP 现状与缺口盘点（T2）
 
-状态：historical / 一次性盘点快照
+状态：historical / 一次性盘点快照（MCP 管理与商店已按 [D-074](../decisions.md#d-074删除-mcp-管理与-mcp-商店) 删除，本文所列代码与 `docs/features/mcp/` 均已不存在）
 盘点日期：2026-08-13
 盘点范围：`crates/skillstar-marketplace`（商店层）、`crates/skillstar-models/src/mcp`（安装/投影层）、`src-tauri/src/commands`（编排层）、`src/features/mcp` + `src/pages`（前端层）、以及全部 MCP 相关测试。
 

@@ -40,6 +40,7 @@ fn lock_entry(name: &str, folder: &str) -> LockEntry {
         content_hash_version: None,
         installed_at: "2026-08-21T00:00:00Z".into(),
         source_folder: Some(folder.into()),
+        pinned: false,
     }
 }
 

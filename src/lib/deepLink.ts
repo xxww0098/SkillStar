@@ -22,8 +22,6 @@ export function deepLinkNavTarget(host: string | null, path: string): DeepLinkTa
       return "skill-cards";
     case "projects":
       return "projects";
-    case "mcp":
-      return "mcp";
     case "settings":
       return "settings";
     case "models":
@@ -31,34 +29,4 @@ export function deepLinkNavTarget(host: string | null, path: string): DeepLinkTa
     default:
       return null;
   }
-}
-
-/** Request-nonce payload asking the MCP page to open a confirm UI. */
-export interface McpImportRequest {
-  nonce: number;
-  /** Full `skillstar://` URL when the OS supplied one. */
-  url: string | null;
-  /** Raw query string (`url=` / `catalog=` / `config=` / `command=`). */
-  query: string | null;
-}
-
-/**
- * Whether an MCP deep-link query is an *install intent*, not just navigation.
- *
- * Presence of these keys is enough — parsing and confirmation still happen
- * in `parse_mcp_paste` / the wizard. Returning the raw query (not a parsed
- * draft) keeps this file from becoming a second parser.
- */
-export function mcpImportQuery(query: string | null | undefined): string | null {
-  if (!query?.trim()) return null;
-  return /(?:^|&)(url|catalog|config|command)=/i.test(query.trim()) ? query.trim() : null;
-}
-
-/** Reconstruct the paste text the backend parser already understands. */
-export function mcpImportPasteText(request: Pick<McpImportRequest, "url" | "query">): string | null {
-  const url = request.url?.trim();
-  if (url) return url;
-  const query = request.query?.trim();
-  if (query) return `skillstar://mcp?${query}`;
-  return null;
 }

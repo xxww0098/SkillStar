@@ -448,6 +448,71 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Create a rolling backup of a file before rewriting it (keep last 5).
+///
+/// Copies the file to `{path}.bak.{timestamp_ms}` next to the original and
+/// prunes older backups beyond the 5 most recent. Returns the new backup path.
+///
+/// Domain-agnostic crash guard: every external tool-config writer (provider
+/// store, account switcher, …) funnels through here so a botched merge can
+/// always be rolled back to the previous on-disk state.
+pub fn create_rolling_backup(path: &Path) -> anyhow::Result<PathBuf> {
+    let path_str = path.to_string_lossy().to_string();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup_name = format!("{}.bak.{}", path_str, timestamp);
+    let backup_path = PathBuf::from(&backup_name);
+
+    std::fs::copy(path, &backup_path)
+        .with_context(|| format!("Failed to create backup at {}", backup_name))?;
+
+    // Clean up old backups — keep only the 5 most recent
+    cleanup_old_backups(path, 5)?;
+
+    Ok(backup_path)
+}
+
+/// Remove old `{filename}.bak.{timestamp}` siblings, keeping only the `keep`
+/// most recent. Siblings whose suffix is not plain digits are left alone.
+pub fn cleanup_old_backups(path: &Path, keep: usize) -> anyhow::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+
+    // Pattern: {filename}.bak.{digits}
+    let prefix = format!("{}.bak.", file_name);
+
+    let mut backups: Vec<(u128, PathBuf)> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let entry_name = entry.file_name();
+            let entry_name_str = entry_name.to_string_lossy();
+            if let Some(suffix) = entry_name_str.strip_prefix(&prefix)
+                && let Ok(ts) = suffix.parse::<u128>()
+            {
+                backups.push((ts, entry.path()));
+            }
+        }
+    }
+
+    // Sort by timestamp descending (newest first)
+    backups.sort_by_key(|b| std::cmp::Reverse(b.0));
+
+    // Remove backups beyond the keep limit
+    for (_ts, backup_path) in backups.iter().skip(keep) {
+        let _ = std::fs::remove_file(backup_path);
+    }
+
+    Ok(())
+}
+
 /// Reveal or open a directory in the operating system's default file manager.
 pub fn open_in_file_manager(path: &Path) -> anyhow::Result<()> {
     let path_str = path.to_string_lossy().to_string();
@@ -531,6 +596,44 @@ mod tests {
             remove_link_or_copy(&dst).unwrap();
             assert!(!dst.exists());
         }
+    }
+
+    #[test]
+    fn rolling_backup_keeps_only_the_five_most_recent() {
+        use super::{cleanup_old_backups, create_rolling_backup};
+
+        let temp = TempDir::new().unwrap();
+        let target = temp.path().join("config.json");
+        std::fs::write(&target, b"v0").unwrap();
+
+        for round in 1..=7u128 {
+            std::fs::write(&target, format!("v{round}")).unwrap();
+            let backup = create_rolling_backup(&target).unwrap();
+            assert_eq!(backup.parent().unwrap(), target.parent().unwrap());
+            let name = backup.file_name().unwrap().to_string_lossy().to_string();
+            assert!(name.starts_with("config.json.bak."), "{name}");
+        }
+
+        let survivors: Vec<_> = std::fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.starts_with("config.json.bak."))
+            .collect();
+        assert_eq!(survivors.len(), 5, "keep-last-5 rotation: {survivors:?}");
+
+        // The explicit variant honours its own keep limit.
+        cleanup_old_backups(&target, 1).unwrap();
+        let survivors = std::fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("config.json.bak.")
+            })
+            .count();
+        assert_eq!(survivors, 1);
     }
 
     #[cfg(unix)]

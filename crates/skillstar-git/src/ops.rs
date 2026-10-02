@@ -9,6 +9,7 @@ use skillstar_core::infra::path_env::command_with_path;
 use tracing::{debug, warn};
 
 use crate::transport::{self, GitOperationSession};
+pub use crate::blobs::{prefetch_blobs_in_session, read_local_blob};
 pub use crate::tree::{
     GitTreeEntry, list_tree_entries_at, list_tree_entries_with_trees, list_tree_paths,
     list_tree_paths_at, revision_contains_path,
@@ -297,8 +298,11 @@ pub fn apply_sparse_checkout_in_session(
 ///
 /// Reads the current sparse paths, unions them with `dirs`, and re-applies
 /// the set — the portable equivalent of `git sparse-checkout add` built from
-/// primitives every supported git already has. The trailing checkout lazily
-/// fetches only the new directories' blobs.
+/// primitives every supported git already has. `dirs`' blobs are batch-
+/// prefetched first (one fetch), so the trailing checkout reads them
+/// locally instead of git's default one-round-trip-per-blob lazy fetch —
+/// this is the pack-layout (e.g. `pbakaus/impeccable`) harness-toggle path,
+/// where a directory can hold several blobs.
 pub fn add_sparse_checkout_dirs_in_session(
     repo_path: &Path,
     dirs: &[String],
@@ -307,6 +311,7 @@ pub fn add_sparse_checkout_dirs_in_session(
     if dirs.is_empty() {
         return Ok(());
     }
+    prefetch_dir_blobs(repo_path, dirs, session);
     let mut merged = sparse_checkout_paths(repo_path).unwrap_or_default();
     for dir in dirs {
         if !merged.contains(dir) {
@@ -315,6 +320,24 @@ pub fn add_sparse_checkout_dirs_in_session(
     }
     let refs: Vec<&str> = merged.iter().map(String::as_str).collect();
     apply_sparse_checkout_in_session(repo_path, &refs, session)
+}
+
+/// One batched fetch for every blob under `dirs`, instead of letting the
+/// following `git checkout` lazily fetch each blob in its own smart-protocol
+/// round-trip (measured 39s vs 1.8s for 22 blobs — see `blobs.rs`). Best
+/// effort: a failed listing or prefetch just leaves the checkout to fetch
+/// lazily, as it did before this existed.
+fn prefetch_dir_blobs(repo_path: &Path, dirs: &[String], session: &GitOperationSession) {
+    let paths: Vec<&str> = dirs.iter().map(String::as_str).collect();
+    let Ok(entries) = crate::tree::list_tree_entries_under(repo_path, "HEAD", &paths) else {
+        return;
+    };
+    let oids: Vec<String> = entries
+        .into_iter()
+        .filter(|entry| entry.kind == "blob")
+        .map(|entry| entry.sha)
+        .collect();
+    let _ = prefetch_blobs_in_session(repo_path, &oids, session);
 }
 
 /// Ensure repository worktree files are present.

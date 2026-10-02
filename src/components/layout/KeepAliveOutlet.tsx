@@ -6,8 +6,8 @@ import { cn } from "../../lib/utils";
  * Keep the last few visited pages mounted and hidden.
  *
  * Skills-mode list pages throw away search, scroll and the already-loaded
- * chunk every time the sidebar switches. Remounting a 21k-row MCP catalog or
- * a populated SkillGrid reads as "the app is slow". An LRU of hidden pages
+ * chunk every time the sidebar switches. Remounting a populated SkillGrid
+ * reads as "the app is slow". An LRU of hidden pages
  * makes back-navigation instant without keeping every route in memory.
  *
  * Hidden pages retain state and query observers. The activity context lets

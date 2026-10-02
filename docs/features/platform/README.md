@@ -18,7 +18,7 @@
 - 匿名公开流量改写 GitHub 族 origin：`github.com`、`raw.githubusercontent.com`、`codeload.github.com`、`objects.githubusercontent.com`、`gist.github.com`。通过每条 Git 子进程的 `-c url.*.insteadOf` 注入；永不修改用户全局 `.gitconfig`。`api.github.com` 只在**无 Authorization** 的 HTTP 路径上经加速源包装。
 - 连续两次传输失败打开 20 分钟熔断；候选链按最近延迟排序并跳过开路；全部开路则 fail-open。保存新配置重置 circuit；test 命令 GET 一个公开 raw 文件，而不是 HEAD 加速源根。
 - SOCKS5 出网使用 `socks5h`（远端 DNS）。新建代理配置带国内 LLM 默认 bypass，已有 `proxy.json` 不自动改写。
-- Settings 网络诊断探测代理、直连 GitHub、各加速源、skills.sh 和 MCP Registry。
+- Settings 网络诊断探测代理、直连 GitHub、各加速源和 skills.sh。
 - Updater 插件直连 GitHub Releases 失败时，经匿名加速链读取 `latest.json` 只用于发现新版本；签名安装仍走插件，或提示用户打开 Releases 页面。永不从第三方加速源安装二进制。
 
 ## ACP

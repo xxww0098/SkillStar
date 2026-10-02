@@ -38,9 +38,10 @@ tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
+tempfile = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
 rusqlite = { workspace = true }
 ts-rs = { workspace = true, features = ["serde-compat"] }
 
 [dev-dependencies]
-tempfile = { workspace = true }
+dirs.workspace = true

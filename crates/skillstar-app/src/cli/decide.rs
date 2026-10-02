@@ -10,8 +10,8 @@ use std::io::Read;
 use std::sync::atomic::AtomicBool;
 
 use skillstar_decision::{
-    download_with_shared_client, DecisionEngine, DeviceChoice, DTypeChoice, EngineOptions,
-    ModelPaths, ModelState,
+    DTypeChoice, DecisionEngine, DeviceChoice, EngineOptions, ModelPaths, ModelState,
+    download_with_shared_client,
 };
 
 /// Options for `skillstar decide`.
@@ -57,7 +57,11 @@ pub fn cmd_decide(opts: DecideOpts<'_>) {
         Err(error) => fail(&error.to_string()),
     };
 
-    eprintln!("Loading {} ({}) …", paths.dir().display(), describe(options));
+    eprintln!(
+        "Loading {} ({}) …",
+        paths.dir().display(),
+        describe(options)
+    );
     let engine = match DecisionEngine::load(&paths, options) {
         Ok(engine) => engine,
         Err(error) => fail(&error.to_string()),
@@ -104,7 +108,10 @@ fn print_answer(answer: &skillstar_decision::AnswerDto) {
     match answer.kind {
         skillstar_decision::QuestionKind::Boolean => {
             let probability = answer.probability_true.unwrap_or_default();
-            println!("{head}  [true {probability:.3} | false {:.3}]", 1.0 - probability);
+            println!(
+                "{head}  [true {probability:.3} | false {:.3}]",
+                1.0 - probability
+            );
         }
         skillstar_decision::QuestionKind::Choice => {
             println!("{head}  margin={:.3}", answer.margin);
@@ -131,12 +138,12 @@ fn print_distribution(answer: &skillstar_decision::AnswerDto) {
             .get(entry.key.parse::<usize>().unwrap_or(usize::MAX))
             .cloned()
             .unwrap_or_default();
-        let label = if description.is_empty() || answer.kind == skillstar_decision::QuestionKind::Choice
-        {
-            entry.key.clone()
-        } else {
-            format!("{} · {description}", entry.key)
-        };
+        let label =
+            if description.is_empty() || answer.kind == skillstar_decision::QuestionKind::Choice {
+                entry.key.clone()
+            } else {
+                format!("{} · {description}", entry.key)
+            };
         println!("      {label:<28} {:>6.3}  {bar}", entry.probability);
     }
 }
@@ -215,11 +222,7 @@ fn print_status(paths: &ModelPaths, json: bool) {
         status.total_bytes as f64 / 1_048_576.0
     );
     for file in &status.files {
-        println!(
-            "  {} {}",
-            if file.present { "✓" } else { "✗" },
-            file.name
-        );
+        println!("  {} {}", if file.present { "✓" } else { "✗" }, file.name);
     }
     if status.state != ModelState::Ready {
         println!("\nRun `skillstar decide --download` to fetch the checkpoint.");

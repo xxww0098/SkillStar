@@ -301,7 +301,7 @@ pub async fn delete_subscription(id: String) -> Result<(), AppError> {
     let catalog_id = storage::get_subscription(&id).map_err(map_err)?.catalog_id;
     skillstar_usage::refresh_guard::with_catalog_lock(&catalog_id, || async move {
         let sub = storage::get_subscription(&id).map_err(map_err)?;
-        crate::usage_switch::forget_subscription_session(&sub.catalog_id, &sub.id)
+        skillstar_usage::usage_switch::forget_subscription_session(&sub.catalog_id, &sub.id)
             .map_err(map_err)?;
         storage::delete_subscription(&id).map_err(map_err)?;
         Ok(())
@@ -362,10 +362,10 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
     let catalog_id = storage::get_subscription(&id).map_err(map_err)?.catalog_id;
     skillstar_usage::refresh_guard::with_catalog_refresh(&catalog_id, || async move {
         let mut sub = storage::get_subscription(&id).map_err(map_err)?;
-        let cli_lease = crate::usage_switch::acquire_cli_refresh_lease(&sub.catalog_id)
+        let cli_lease = skillstar_usage::usage_switch::acquire_cli_refresh_lease(&sub.catalog_id)
             .await
             .map_err(map_err)?;
-        crate::usage_switch::adopt_active_cli_session_before_refresh(&mut sub, &cli_lease)
+        skillstar_usage::usage_switch::adopt_active_cli_session_before_refresh(&mut sub, &cli_lease)
             .map_err(map_err)?;
         // Set by both arms below; a dead auth verdict is the only case that
         // skips the CLI push.
@@ -397,7 +397,7 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
             }
         };
         let switch_result = if should_sync_cli {
-            crate::usage_switch::sync_refreshed_active_subscription(&mut sub, &cli_lease)
+            skillstar_usage::usage_switch::sync_refreshed_active_subscription(&mut sub, &cli_lease)
                 .map_err(map_err)?
         } else {
             None
@@ -688,7 +688,7 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     pending_state::remove(&pending_id);
     let mut sub = result.map_err(map_err)?;
     let mut switch_result = None;
-    if crate::usage_switch::oauth_completion_rewrites_live_store(&sub.catalog_id)
+    if skillstar_usage::usage_switch::oauth_completion_rewrites_live_store(&sub.catalog_id)
         && storage::get_active_subscription(&sub.catalog_id)
             .map_err(map_err)?
             .as_deref()
@@ -696,7 +696,7 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     {
         // OAuth can rotate the pinned row. IDE adapters and xAI rewrite the
         // live store so the UI cannot say "active" over the previous token.
-        let activation = crate::usage_switch::activate_subscription(&sub.id)
+        let activation = skillstar_usage::usage_switch::activate_subscription(&sub.id)
             .await
             .map_err(map_err)?;
         sub = activation.subscription;
@@ -744,7 +744,7 @@ pub fn get_active_subscriptions() -> Result<std::collections::HashMap<String, St
 /// credential validation/write fails, the previous active pin is restored so
 /// the UI cannot claim an account that the CLI did not actually activate.
 pub async fn set_active_subscription(subscription_id: String) -> Result<SubscriptionDto, AppError> {
-    let activation = crate::usage_switch::activate_subscription(&subscription_id)
+    let activation = skillstar_usage::usage_switch::activate_subscription(&subscription_id)
         .await
         .map_err(map_err)?;
     let sub = activation.subscription;
@@ -768,7 +768,7 @@ pub async fn set_active_subscription(subscription_id: String) -> Result<Subscrip
 pub async fn switch_active_subscription_to_cli(
     catalog_id: String,
 ) -> Result<SwitchOutcomeDto, AppError> {
-    crate::usage_switch::resync_active_subscription(&catalog_id)
+    skillstar_usage::usage_switch::resync_active_subscription(&catalog_id)
         .await
         .map(SwitchOutcomeDto::from)
         .map_err(map_err)
@@ -782,7 +782,7 @@ pub async fn switch_active_subscription_to_cli(
 /// catalogs absent from this map (no CLI adapter behind them, or unreadable).
 pub async fn reconcile_cli_accounts()
 -> Result<std::collections::HashMap<String, CliAccountStateDto>, AppError> {
-    Ok(crate::usage_switch::reconcile_cli_accounts()
+    Ok(skillstar_usage::usage_switch::reconcile_cli_accounts()
         .await
         .map_err(map_err)?
         .into_iter()

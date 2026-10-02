@@ -6,7 +6,7 @@ import type { ModelsBoardRowDto } from "./ModelsBoardRowDto";
  */
 export type ModelsBoardDto = { agents: Array<ModelsBoardRowDto>, providers: Array<ModelsBoardRowDto>, 
 /**
- * Empty until recent calls have a home. This loader does not read the
- * listen address.
+ * Recent calls are a separate query. This list stays empty, and this
+ * loader does not read the listen address.
  */
 gateway: Array<ModelsBoardRowDto>, };

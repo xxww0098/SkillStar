@@ -621,6 +621,7 @@ pub fn publish_skill(
             content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
             installed_at: chrono::Utc::now().to_rfc3339(),
             source_folder: Some(repo_rel_path.clone()),
+            pinned: false,
         });
         lf.save(lockfile_mode.path())?;
     }

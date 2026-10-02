@@ -577,3 +577,55 @@ fn claude_code_unstash() {
         assert!(!data.join("config").join("agent_stash.json").exists());
     });
 }
+
+#[test]
+fn written_model_ref_round_trips_for_every_file_agent() {
+    with_sandbox("read-back", |home, _data| {
+        for (id, _) in ROSTER {
+            if *id == "claude-desktop" {
+                // Desktop writes a profile, not a single current model.
+                continue;
+            }
+            apply_gateway(id, REF).unwrap();
+            assert_eq!(
+                skillstar_gateway::written_model_ref(id),
+                REF,
+                "{id}: read back its own write"
+            );
+            assert!(
+                home.join(rows(id)[0].0).exists(),
+                "{id}: fixture file missing"
+            );
+        }
+    });
+}
+
+#[test]
+fn written_model_ref_is_empty_for_foreign_and_missing_files() {
+    with_sandbox("read-back-empty", |home, _data| {
+        apply_gateway("opencode", REF).unwrap();
+        // A user's own opencode config, never written by this writer.
+        fs::write(
+            home.join(".config/opencode/opencode.json"),
+            "{\"model\":\"https://vendor.example\",\"provider\":\"skillstar\"}\n",
+        )
+        .unwrap();
+        assert_eq!(skillstar_gateway::written_model_ref("opencode"), "");
+        assert_eq!(skillstar_gateway::written_model_ref("goose"), "");
+    });
+}
+
+#[test]
+fn board_spelling_claude_code_reaches_the_claude_writer() {
+    with_sandbox("claude-code-alias", |home, _data| {
+        apply_gateway("claude-code", REF).unwrap();
+        assert!(home.join(".claude/settings.json").exists());
+        assert_eq!(skillstar_gateway::written_model_ref("claude-code"), REF);
+        assert_eq!(
+            skillstar_gateway::written_loopback_label("claude-code"),
+            "127.0.0.1:21847"
+        );
+        apply_gateway("claude-code", "").unwrap();
+        assert!(!home.join(".claude/settings.json").exists());
+    });
+}

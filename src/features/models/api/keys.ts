@@ -12,6 +12,7 @@ export const modelsKeys = {
   modelEfforts: (id: string) => [...modelsKeys.all, "model-efforts", id] as const,
   profileNames: () => [...modelsKeys.all, "profile-names"] as const,
   listenMode: () => [...modelsKeys.all, "listen-mode"] as const,
+  loopbackOrigin: () => [...modelsKeys.all, "loopback-origin"] as const,
 };
 
 /**

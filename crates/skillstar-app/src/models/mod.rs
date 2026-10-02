@@ -20,10 +20,10 @@ pub mod recent;
 pub mod routing;
 
 pub use account_book::UsageAccountBook;
-pub use codex_save::{CodexRoute, release_codex, save_codex};
+pub use codex_save::{CodexRoute, release_codex, save_codex, save_codex_model};
 pub use gateway_save::save_agent;
 pub use groups::{SavedGroupDto, SaveGroupControlError, load_saved_groups, save_group_members};
-pub use listen::{SaveListenControlError, load_listen_mode, save_listen_mode};
+pub use listen::{SaveListenControlError, load_listen_mode, loopback_origin, save_listen_mode};
 pub use effort::model_efforts;
 pub use names::{SaveModelNameControlError, save_model_name};
 pub use picker::{ModelChoiceDto, load_model_choices};

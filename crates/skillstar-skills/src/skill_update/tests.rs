@@ -169,18 +169,15 @@ fn high_level_facade_scans_installs_and_updates_private_github_without_persistin
     let facade = GitSkillFacade::new(session.clone());
 
     let scan = facade.scan_repo(remote_url, true).unwrap();
-    assert_eq!(scan.source_url, remote_url);
+    assert_eq!(scan.spec.repo_url, remote_url);
     assert_eq!(scan.skills.len(), 1);
     let target = crate::repo_scanner::SkillInstallTarget {
         id: scan.skills[0].id.clone(),
         folder_path: scan.skills[0].folder_path.clone(),
+        pinned: false,
     };
     let installed = facade
-        .install_from_scan(
-            &scan.source,
-            &scan.source_url,
-            std::slice::from_ref(&target),
-        )
+        .install_from_scan(&scan.spec, std::slice::from_ref(&target))
         .unwrap();
     assert_eq!(installed.as_slice(), std::slice::from_ref(&target.id));
 
@@ -550,10 +547,12 @@ fn missing_representative_lock_still_protects_locked_checkout_siblings() {
         crate::repo_scanner::SkillInstallTarget {
             id: "alpha".to_string(),
             folder_path: "skills/alpha".to_string(),
+            pinned: false,
         },
         crate::repo_scanner::SkillInstallTarget {
             id: "beta".to_string(),
             folder_path: "skills/beta".to_string(),
+            pinned: false,
         },
     ];
     crate::repo_scanner::install_from_repo_at(

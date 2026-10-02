@@ -2,67 +2,15 @@
 
 use super::*;
 
-/// Create a rolling backup of a config file (keep last 5).
-///
-/// Copies the file to `{path}.bak.{timestamp_ms}` and removes older backups
-/// beyond the 5 most recent.
-///
-/// Returns the path to the newly created backup file.
-pub fn create_rolling_backup(path: &Path) -> Result<PathBuf> {
-    let path_str = path.to_string_lossy().to_string();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let backup_name = format!("{}.bak.{}", path_str, timestamp);
-    let backup_path = PathBuf::from(&backup_name);
-
-    std::fs::copy(path, &backup_path)
-        .with_context(|| format!("Failed to create backup at {}", backup_name))?;
-
-    // Clean up old backups — keep only the 5 most recent
-    cleanup_old_backups(path, 5)?;
-
-    Ok(backup_path)
-}
-
-/// Remove old backup files, keeping only the `keep` most recent.
-pub(crate) fn cleanup_old_backups(path: &Path, keep: usize) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-
-    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-        return Ok(());
-    };
-
-    // Pattern: {filename}.bak.{digits}
-    let prefix = format!("{}.bak.", file_name);
-
-    let mut backups: Vec<(u128, PathBuf)> = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let entry_name = entry.file_name();
-            let entry_name_str = entry_name.to_string_lossy();
-            if let Some(suffix) = entry_name_str.strip_prefix(&prefix)
-                && let Ok(ts) = suffix.parse::<u128>()
-            {
-                backups.push((ts, entry.path()));
-            }
-        }
-    }
-
-    // Sort by timestamp descending (newest first)
-    backups.sort_by_key(|b| std::cmp::Reverse(b.0));
-
-    // Remove backups beyond the keep limit
-    for (_ts, backup_path) in backups.iter().skip(keep) {
-        let _ = std::fs::remove_file(backup_path);
-    }
-
-    Ok(())
-}
+// Rolling backups are domain-agnostic filesystem plumbing and live in
+// `skillstar_core::infra::fs_ops` (D-077): both the provider store and the
+// Usage account switcher call the same implementation, so the rotation
+// rules cannot drift between writers. Re-exported here so existing
+// `skillstar_models::tool_sync::*` callers — including this crate's own
+// tests — keep compiling unchanged.
+pub use skillstar_core::infra::fs_ops::create_rolling_backup;
+#[cfg(test)]
+pub(crate) use skillstar_core::infra::fs_ops::cleanup_old_backups;
 
 /// Read an existing config file for a merge write, failing closed on garbage.
 ///

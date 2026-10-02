@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use skillstar_gateway::{ApplyError, CodexRoute, PLACEHOLDER_BEARER, apply_agent, release_agent};
+use skillstar_gateway::{
+    ApplyError, CodexRoute, PLACEHOLDER_BEARER, apply_agent, apply_agent_with_model, release_agent,
+};
 
 fn gate() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
@@ -290,5 +292,49 @@ theme = \"dark\"
             .join("config")
             .join("agent_stash.json");
         assert!(!stash_path.exists(), "empty stash file is removed");
+    });
+}
+
+#[test]
+fn codex_model_save_selects_the_model_and_release_restores_it() {
+    with_sandbox("model-save", |home| {
+        write_config(home, "model = \"gpt-5\"\n\n[tui]\ntheme = \"dark\"\n");
+        apply_agent_with_model("codex", ORIGIN, home, "deepseek/pro").unwrap();
+        let text = read_config(home);
+        assert!(
+            text.contains("model = \"skillstar/deepseek/pro\"\n"),
+            "{text}"
+        );
+        assert!(text.contains("[model_providers.skillstar]"), "{text}");
+        assert!(text.contains("model_provider = \"skillstar\"\n"), "{text}");
+        assert!(text.contains("[tui]\ntheme = \"dark\"\n"), "{text}");
+
+        release_agent("codex", home).unwrap();
+        let restored = read_config(home);
+        assert!(restored.contains("model = \"gpt-5\"\n"), "{restored}");
+        assert!(!restored.contains("model_provider ="), "{restored}");
+        assert!(!restored.contains("skillstar/deepseek/pro"), "{restored}");
+    });
+}
+
+#[test]
+fn codex_model_save_with_empty_ref_releases() {
+    with_sandbox("model-release", |home| {
+        write_config(home, "model = \"gpt-5\"\n");
+        apply_agent_with_model("codex", ORIGIN, home, "deepseek/pro").unwrap();
+        assert!(read_config(home).contains("skillstar/deepseek/pro"));
+        apply_agent_with_model("codex", ORIGIN, home, "").unwrap();
+        let text = read_config(home);
+        assert!(text.contains("model = \"gpt-5\"\n"), "{text}");
+        assert!(!text.contains("skillstar/deepseek/pro"), "{text}");
+    });
+}
+
+#[test]
+fn codex_model_save_unmanaged_agent_writes_zero_bytes() {
+    with_sandbox("model-unmanaged", |home| {
+        let err = apply_agent_with_model("goose", ORIGIN, home, "deepseek/pro").unwrap_err();
+        assert!(matches!(err, ApplyError::NotManaged), "{err}");
+        assert!(!config_path(home).exists(), "goose wrote a codex file");
     });
 }

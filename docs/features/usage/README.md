@@ -73,7 +73,7 @@
 Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们真实使用的 OAuth 存储。路线选择与后果见
 [../../decisions.md](../../decisions.md)。
 
-- `skillstar-app::usage_switch` 是唯一跨 Usage/Models 的账号激活 facade；Tauri command 不直接理解 provider 凭证文件 schema。
+- `skillstar_usage::usage_switch` 是账号切换引擎本体（D-077 迁入 usage crate；它对 models 的旧依赖已收敛为 core 的滚动备份/沙箱原语与本 crate 的 `tool_paths` 解析）；Tauri command 不直接理解 provider 凭证文件 schema。
 - 快照落点 `~/.skillstar/accounts/<catalog_id>/<subscription_id>.json`，权限 0600，走后端解析真实数据目录（`SKILLSTAR_DATA_DIR` 等覆盖继续生效）。**一份快照是整个 CLI 凭证文件**，不是其中一个账号的片段 —— 软链只能整文件替身。
 - live 路径必须是 CLI 自己读的那个文件，并尊重上游 env 覆盖：`CODEX_HOME`、`GROK_HOME`、`XDG_DATA_HOME`（OpenCode 用 `$XDG_DATA_HOME/opencode/auth.json`，不是 config 目录）。`SKILLSTAR_TOOL_SYNC_HOME` 沙箱优先级最高，测试不得逃逸。
 - 支持哪些 catalog 由切换适配器推导，不是 UI 手抄白名单：CLI 账号走 `usage_switch::target_for`，IDE 账号走 `usage_switch::ide` 的 `IdeCredentialAdapter` 注册表。Antigravity 和 Cursor 是最初的两个实现；其后的 IDE 只加注册表项，不改切号顺序。Antigravity 的“当前账号”优先读取 macOS Keychain 的 `gemini` / `antigravity` 条目；没有该条目时读取 `state.vscdb` 中 `antigravityUnifiedStateSync.oauthToken`。Cursor 的当前账号读取其 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken` 和 `cursorAuth/cachedEmail`，都不是 Usage 的 active pin。

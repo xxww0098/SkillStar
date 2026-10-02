@@ -252,7 +252,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     !aiSearching &&
     displaySkills.length === 0 &&
     snapshot.status === "miss";
-  // Align with the MCP browser: a seeding snapshot is a loading state, not an
+  // A seeding snapshot is a loading state, not an
   // empty market. Only take over the viewport while there is nothing to show.
   const showSeedingLoader = snapshot.status === "seeding" && displaySkills.length === 0;
 

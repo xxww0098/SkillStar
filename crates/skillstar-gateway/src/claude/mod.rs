@@ -67,7 +67,8 @@ const ADDED_ENV: &[(&str, &str)] = &[
 #[derive(Debug, Clone, Default)]
 pub struct AccountSnapshot {
     pub access_token: Option<String>,
-    /// Codex sends this as `chatgpt-account-id`. Other catalogs leave it empty.
+    /// ChatGPT account id copied in with the login. Codex signing does not
+    /// put it on the upstream request. Other catalogs leave it empty.
     pub account_id: Option<String>,
     /// ZCode's own key. Other catalogs leave it empty.
     pub api_key: Option<String>,

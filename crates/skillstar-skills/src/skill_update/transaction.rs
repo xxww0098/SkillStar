@@ -75,12 +75,8 @@ pub fn acquire_repo_cache_lock(cache_key: &str) -> Result<RepoCacheGuard> {
         .truncate(false)
         .open(&lock_path)
         .with_context(|| format!("Failed to open repo cache lock '{}'", lock_path.display()))?;
-    file.lock().with_context(|| {
-        format!(
-            "Failed to lock repository cache '{}'",
-            lock_path.display()
-        )
-    })?;
+    file.lock()
+        .with_context(|| format!("Failed to lock repository cache '{}'", lock_path.display()))?;
     Ok(RepoCacheGuard { _file: file })
 }
 
@@ -108,7 +104,12 @@ pub fn acquire_lockfile_write_lock() -> Result<LockfileWriteGuard> {
         .write(true)
         .truncate(false)
         .open(&lock_path)
-        .with_context(|| format!("Failed to open lockfile write lock '{}'", lock_path.display()))?;
+        .with_context(|| {
+            format!(
+                "Failed to open lockfile write lock '{}'",
+                lock_path.display()
+            )
+        })?;
     file.lock()
         .with_context(|| format!("Failed to lock lockfile writes '{}'", lock_path.display()))?;
     Ok(LockfileWriteGuard { _file: file })

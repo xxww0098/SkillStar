@@ -59,7 +59,7 @@ static CLIENT_ID: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// The resolved Grok OAuth `client_id` (honours env / file overrides). The CLI
-/// account switch (`skillstar_app::usage_switch`) keys `~/.grok/auth.json` by
+/// account switch (`crate::usage_switch`) keys `~/.grok/auth.json` by
 /// `https://auth.x.ai::<this id>`, so it must read the same resolved value the
 /// fetcher uses rather than a separate hard-coded copy.
 pub fn client_id() -> &'static str {

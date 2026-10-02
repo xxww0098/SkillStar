@@ -9,6 +9,7 @@
 
 mod affinity;
 mod agents;
+mod chatgpt;
 mod classify;
 mod claude;
 mod codex;
@@ -38,6 +39,7 @@ mod wsl;
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
     desktop_alias, desktop_dirs, desktop_effort_alias, token_for, written_loopback_label,
+    written_model_ref,
 };
 pub use affinity::{
     AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
@@ -53,7 +55,7 @@ pub use claude::{
     ToolResult, begin_callback, bridge_effort_arg, callback_token, find_claude_binary,
     listener_bridge, run_mcp_helper,
 };
-pub use codex::{ApplyError, CodexRoute, apply_agent, release_agent};
+pub use codex::{ApplyError, CodexRoute, apply_agent, apply_agent_with_model, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use effort::{apply_upstream_effort, model_efforts};
 pub use group::{

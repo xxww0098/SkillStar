@@ -354,6 +354,7 @@ fn apply_blocking(
     let target = skillstar_skills::repo_scanner::SkillInstallTarget {
         id: request.released.id.clone(),
         folder_path: request.released.content_root.clone(),
+        pinned: false,
     };
     if let Err(error) = git.replace_verified_channel_checkout(
         &repo_dir,
@@ -533,6 +534,7 @@ fn rollback_exact(receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChann
         &[skillstar_skills::repo_scanner::SkillInstallTarget {
             id: receipt.previous.id.clone(),
             folder_path: receipt.previous.content_root.clone(),
+            pinned: false,
         }],
         &[(receipt.previous.id.clone(), current_repository_url)],
     )

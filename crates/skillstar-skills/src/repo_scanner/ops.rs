@@ -46,17 +46,7 @@ pub fn pull_repo_skill_update_in_session(
         // existing install is bound to its lockfile source_folder even when
         // the remote adds a higher-priority duplicate path) and leaves
         // duplicate harness copies deferred.
-        if let Ok(plan) = super::inventory::load_or_plan(&repo_root, session, &installed_source_folders)
-        {
-            if plan.sparse_dirs.is_empty() {
-                let _ =
-                    git_ops::checkout_in_session(&repo_root, &["sparse-checkout", "disable"], session);
-                let _ = git_ops::checkout_in_session(&repo_root, &["checkout"], session);
-            } else {
-                let dir_refs: Vec<&str> = plan.sparse_dirs.iter().map(String::as_str).collect();
-                let _ = git_ops::apply_sparse_checkout_in_session(&repo_root, &dir_refs, session);
-            }
-        }
+        let _ = super::inventory::apply(&repo_root, session, &installed_source_folders);
     }
 
     match folder_path {

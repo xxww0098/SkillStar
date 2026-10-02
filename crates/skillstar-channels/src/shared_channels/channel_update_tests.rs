@@ -1305,6 +1305,7 @@ fn lock_entry(name: &str, commit: &str) -> skillstar_skills::lockfile::LockEntry
         content_hash_version: Some(CHANNEL_CONTENT_HASH_VERSION),
         installed_at: "2026-08-05T00:00:00Z".into(),
         source_folder: Some(format!("skills/{name}")),
+        pinned: false,
     }
 }
 

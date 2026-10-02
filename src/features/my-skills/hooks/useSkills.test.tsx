@@ -184,8 +184,7 @@ describe("useSkills", () => {
           return { source, source_url: sourceUrl, skills: targets };
         case "install_from_scan":
           expect(args).toEqual({
-            repoUrl: sourceUrl,
-            source,
+            spec: { source, source_url: sourceUrl, skills: targets },
             skills: targets.map(({ id, folder_path }) => ({ id, folder_path })),
           });
           return INITIAL_SKILLS.map((skill) => skill.name);
@@ -229,8 +228,7 @@ describe("useSkills", () => {
           return { source, source_url: sourceUrl, skills: targets };
         case "install_from_scan":
           expect(args).toEqual({
-            repoUrl: sourceUrl,
-            source,
+            spec: { source, source_url: sourceUrl, skills: targets },
             skills: [{ id: "opencli-search", folder_path: "skills/opencli-search" }],
           });
           return ["opencli-search"];

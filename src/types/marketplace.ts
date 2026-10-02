@@ -65,10 +65,9 @@ export type SortOption = "stars-desc" | "updated" | "name";
 
 export type ViewMode = "grid" | "list";
 
-export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "mcp" | "settings";
+export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "settings";
 
-/** Drill-down sub-page payload. The MCP store no longer has one: its publishers are a scope, not a page. */
-
+/** Drill-down sub-page payload. */
 export type SubPage = {
   type: "publisher-detail";
   publisher: OfficialPublisher;
@@ -85,10 +84,19 @@ export interface DiscoveredSkill {
   frontmatter_issues: string[];
 }
 
+export interface PluginHint {
+  hooks: boolean;
+  agents: boolean;
+}
+
 export interface ScanResult {
   source: string;
   source_url: string;
+  git_ref?: string;
+  subpath?: string;
+  skill_filter?: string;
   skills: DiscoveredSkill[];
+  plugin?: PluginHint;
 }
 
 export interface RepoHistoryEntry {

@@ -11,7 +11,7 @@ import { useNavigation } from "./hooks/useNavigation";
 import { useTauriSetup } from "./hooks/useTauriSetup";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdater } from "./hooks/useUpdater";
-import { deepLinkNavTarget, mcpImportQuery } from "./lib/deepLink";
+import { deepLinkNavTarget } from "./lib/deepLink";
 import { looksLikeShareCode } from "./lib/shareCode";
 import type { NavPage, OfficialPublisher } from "./types";
 
@@ -22,7 +22,6 @@ const PublisherDetailPage = lazy(() =>
 );
 const SkillCardsPage = lazy(() => import("./pages/SkillCards").then((mod) => ({ default: mod.SkillCards })));
 const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ default: mod.Projects })));
-const McpPage = lazy(() => import("./pages/Mcp").then((mod) => ({ default: mod.Mcp })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((mod) => ({ default: mod.Settings })));
 
 // Models mode (single hub page that merges agent connections / providers / health / tool configs)
@@ -50,7 +49,7 @@ const MAIN_CONTENT_PAD_EXPANDED_PX = SHELL_GAP_PX + SIDEBAR_EXPANDED_PX + SHELL_
 const MAIN_CONTENT_PAD_COLLAPSED_PX = SHELL_GAP_PX + SIDEBAR_COLLAPSED_PX + SHELL_GAP_PX;
 
 /** Skills-mode list pages whose search/scroll should survive a sidebar hop. */
-const SKILLS_KEEP_PAGES = ["my-skills", "marketplace", "mcp", "skill-cards", "projects", "settings"] as const;
+const SKILLS_KEEP_PAGES = ["my-skills", "marketplace", "skill-cards", "projects", "settings"] as const;
 
 function UsageModeShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
@@ -80,20 +79,11 @@ function AppContent() {
 
   // ── OS deep links (skillstar:// scheme, emitted by the backend) ──
   // Routes the link to the matching page; unknown targets are ignored.
-  useTauriEvent<{ host?: string | null; path?: string; query?: string | null; url?: string | null }>(
-    "skillstar://deep-link",
-    (payload) => {
-      const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
-      if (target === "models") nav.setAppMode("models");
-      else if (target) nav.navigate(target);
-      if (target === "mcp") {
-        const query = mcpImportQuery(payload.query);
-        if (query || payload.url) {
-          nav.openMcpImport({ url: payload.url ?? null, query });
-        }
-      }
-    },
-  );
+  useTauriEvent<{ host?: string | null; path?: string }>("skillstar://deep-link", (payload) => {
+    const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
+    if (target === "models") nav.setAppMode("models");
+    else if (target) nav.navigate(target);
+  });
 
   // ── Sidebar collapsed ──────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
@@ -245,8 +235,6 @@ function AppContent() {
             onClearPreSelected={handleClearPreSelectedProjects}
           />
         );
-      case "mcp":
-        return <McpPage importRequest={nav.mcpImportRequest} onImportRequestHandled={nav.clearMcpImportRequest} />;
       case "settings":
         return <SettingsPage onCheckUpdate={updater.check} isCheckingUpdate={updater.state.status === "checking"} />;
       default:

@@ -1,8 +1,10 @@
 //! Routes on the one loopback handler, other than the Claude MCP callback.
 //!
 //! Chat and Anthropic still go through `translate`. Responses, images, and
-//! Gemini posts are forwarded as the agent sent them. A model id that contains
-//! `/` and is not in the catalog cache or a saved group is a local error.
+//! Gemini posts are forwarded as the agent sent them. A Codex `/responses`
+//! post is reshaped to the public Responses body first. A model id that
+//! contains `/` and is not in the catalog cache or a saved group is a local
+//! error.
 
 use serde_json::{Value, json};
 
@@ -50,6 +52,8 @@ pub(crate) enum Outcome {
         protocol: Option<Protocol>,
         /// Path beginning with `/`, appended to the configured origin.
         url_path: String,
+        /// Reshape the body to the public Responses route before POST.
+        public_responses: bool,
     },
 }
 
@@ -149,6 +153,7 @@ fn finish_translated(protocol: Protocol, body: &[u8]) -> Outcome {
     Outcome::Forward {
         protocol: Some(protocol),
         url_path: CHAT_UPSTREAM.to_string(),
+        public_responses: false,
     }
 }
 
@@ -159,6 +164,7 @@ fn finish_named(path: &str, body: &[u8]) -> Outcome {
     Outcome::Forward {
         protocol: None,
         url_path: path.to_string(),
+        public_responses: false,
     }
 }
 
@@ -181,6 +187,7 @@ fn finish_codex(path: &str, body: &[u8]) -> Outcome {
     Outcome::Forward {
         protocol: None,
         url_path: format!("/v1{rest}"),
+        public_responses: rest == "/responses",
     }
 }
 
@@ -230,6 +237,7 @@ fn finish_gemini(path: &str, body: &[u8]) -> Outcome {
         "generateContent" | "streamGenerateContent" => Outcome::Forward {
             protocol: None,
             url_path: path.to_string(),
+            public_responses: false,
         },
         _ => Outcome::Local(error_local(
             Shape::Gemini,

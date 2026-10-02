@@ -18,6 +18,7 @@ fn install_shared_checkout(remote: &Path) -> std::path::PathBuf {
     let targets = ["alpha", "beta"].map(|name| crate::repo_scanner::SkillInstallTarget {
         id: name.to_string(),
         folder_path: format!("skills/{name}"),
+        pinned: false,
     });
     crate::repo_scanner::install_from_repo_at(&cache, &remote.to_string_lossy(), None, &targets)
         .unwrap();
@@ -356,6 +357,7 @@ fn adding_a_duplicate_provider_path_does_not_look_like_source_removal() {
         &[crate::repo_scanner::SkillInstallTarget {
             id: "impeccable".to_string(),
             folder_path: ".agents/skills/impeccable".to_string(),
+            pinned: false,
         }],
     )
     .unwrap();

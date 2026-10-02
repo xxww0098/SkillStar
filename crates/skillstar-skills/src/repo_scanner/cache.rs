@@ -176,32 +176,15 @@ pub fn clone_or_fetch_repo_at_in_session(
             // while every installed skill's source folder must re-materialize
             // or the reset would leave its hub link dangling.
             let installed = super::ops::installed_source_folders(&repo_dir).unwrap_or_default();
-            if let Ok(plan) = super::inventory::load_or_plan(&repo_dir, session, &installed) {
-                if plan.sparse_dirs.is_empty() {
-                    let _ = git_ops::checkout_in_session(
-                        &repo_dir,
-                        &["sparse-checkout", "disable"],
-                        session,
-                    );
-                    let _ = git_ops::checkout_in_session(&repo_dir, &["checkout"], session);
-                } else {
-                    let dir_refs: Vec<&str> = plan.sparse_dirs.iter().map(String::as_str).collect();
-                    let _ = git_ops::apply_sparse_checkout_in_session(&repo_dir, &dir_refs, session);
-                }
-            }
+            let _ = super::inventory::apply(&repo_dir, session, &installed);
         }
 
         Ok(repo_dir)
-    } else if let Some(git_ref) = git_ref {
-        // Ref-pinned sources use an isolated cache entry. A shallow worktree is
-        // intentionally preferred here: after fetching an arbitrary ref we
-        // need its files available before applying any subpath filter.
-        git_ops::clone_repo_shallow_in_session(repo_url, &repo_dir, session)
-            .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
-        fetch_and_reset_ref(&repo_dir, git_ref, session)?;
-        Ok(repo_dir)
     } else {
-        match clone_sparse_with_skills(repo_url, &repo_dir, session) {
+        // Ref-pinned sources use an isolated cache entry (see `cache_key_for`)
+        // but stay sparse like the unpinned path: `clone_sparse` fetches and
+        // resets onto `git_ref` before planning when one is given.
+        match clone_sparse(repo_url, &repo_dir, git_ref, &[], session) {
             Ok(()) => Ok(repo_dir),
             Err(sparse_err) => {
                 warn!(target: "repo_scanner", error = %sparse_err, "sparse clone failed");
@@ -209,33 +192,30 @@ pub fn clone_or_fetch_repo_at_in_session(
                 // breaks at blob materialization); its tree metadata tells the
                 // tarball path which directories to extract. Read it before
                 // removing the entry.
-                let plan = super::inventory::load_or_plan(&repo_dir, session, &[])
+                let plan = super::inventory::load_or_plan(&repo_dir, session)
                     .ok()
-                    .filter(|plan| !plan.sparse_dirs.is_empty());
+                    .map(|inventory| (inventory.sparse_dirs(&[], &[]), inventory))
+                    .filter(|(dirs, _)| !dirs.is_empty());
                 let _ = std::fs::remove_dir_all(&repo_dir);
 
                 // Plain HTTPS through the anonymous mirror chain — one GET
                 // instead of the smart-protocol round-trips that just failed.
                 // Never a full-repo download: only the planned skill dirs.
-                if let Some(plan) = plan
-                    .filter(|_| crate::tarball_fetch::supports_tarball(repo_url))
-                    .clone()
+                if let Some((dirs, inventory)) =
+                    plan.filter(|_| crate::tarball_fetch::supports_tarball(repo_url))
                 {
                     match crate::tarball_fetch::rebuild_cache_from_tarball(
-                        repo_url,
-                        git_ref,
-                        &repo_dir,
-                        &plan.sparse_dirs,
+                        repo_url, git_ref, &repo_dir, &dirs,
                     ) {
                         Ok(()) => {
                             // The synthetic tree only knows the extracted
                             // directories; adopt the real plan so deferred
                             // copies stay on-demand-materializable.
-                            super::inventory::adopt_plan_for_synthetic_repo(&repo_dir, &plan);
+                            super::inventory::adopt_plan_for_synthetic_repo(&repo_dir, &inventory);
                             warn!(
                                 target: "repo_scanner",
                                 url = repo_url,
-                                dirs = plan.sparse_dirs.len(),
+                                dirs = dirs.len(),
                                 "repo cache rebuilt from the codeload tarball fallback"
                             );
                             return Ok(repo_dir);
@@ -258,6 +238,9 @@ pub fn clone_or_fetch_repo_at_in_session(
                 );
                 git_ops::clone_repo_shallow_in_session(repo_url, &repo_dir, session)
                     .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
+                if let Some(git_ref) = git_ref {
+                    fetch_and_reset_ref(&repo_dir, git_ref, session)?;
+                }
                 Ok(repo_dir)
             }
         }
@@ -430,26 +413,29 @@ fn fetch_and_reset_ref(
     Ok(())
 }
 
-fn clone_sparse_with_skills(
+/// Cold-clone a repo cache through git's sparse machinery: treeless clone,
+/// then (when `git_ref` pins a non-default revision) fetch and reset onto it
+/// before planning — a pin only changes which commit sparse-checkout resets
+/// onto, never whether the clone stays sparse. `extra` are folders that must
+/// stay materialized beyond whatever `inventory::apply` selects as each
+/// identity's representative copy; a fresh cache entry has no installed
+/// Skills linking into it yet, so callers here always pass `&[]` today.
+fn clone_sparse(
     repo_url: &str,
     dest: &Path,
+    git_ref: Option<&str>,
+    extra: &[String],
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<()> {
     git_ops::clone_repo_sparse_in_session(repo_url, dest, session)?;
-
-    // A fresh cache entry has no installed skills linking into it yet, so the
-    // plan only collapses duplicate copies of the same identity.
-    let plan = super::inventory::load_or_plan(dest, session, &[])?;
-    if plan.sparse_dirs.is_empty() {
-        let _ = git_ops::checkout_in_session(dest, &["sparse-checkout", "disable"], session);
-        let _ = git_ops::checkout_in_session(dest, &["checkout"], session);
-        return Ok(());
+    if let Some(git_ref) = git_ref {
+        // Cone mode must already be active before the reset below, or it
+        // materializes the whole tree instead of just the top level.
+        git_ops::checkout_in_session(dest, &["sparse-checkout", "init", "--cone"], session)
+            .context("Failed to init sparse-checkout before fetching the pinned ref")?;
+        fetch_and_reset_ref(dest, git_ref, session)?;
     }
-
-    let dir_refs: Vec<&str> = plan.sparse_dirs.iter().map(String::as_str).collect();
-    git_ops::apply_sparse_checkout_in_session(dest, &dir_refs, session)?;
-
-    Ok(())
+    super::inventory::apply(dest, session, extra)
 }
 
 pub(super) fn is_sparse_checkout(repo_dir: &Path) -> bool {
@@ -465,7 +451,9 @@ pub(super) fn is_sparse_checkout(repo_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_dir_name, clone_or_fetch_repo_in_session, ensure_installed_checkout_is_clean};
+    use super::{
+        cache_dir_name, clone_or_fetch_repo_in_session, ensure_installed_checkout_is_clean,
+    };
     use crate::git::transport::{GitAuthMaterial, GitOperationSession, NoopGitProgressSink};
     use std::sync::Arc;
 
@@ -560,6 +548,7 @@ mod tests {
                 content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
                 installed_at: chrono::Utc::now().to_rfc3339(),
                 source_folder: Some("skills/writer".into()),
+                pinned: false,
             });
             lockfile.save(&crate::lockfile::lockfile_path())?;
 
@@ -593,14 +582,14 @@ mod tests {
             "source/skills/animate".to_string(),
             "source/skills/bolder".to_string(),
         ];
-        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs, &[]);
         assert_eq!(compacted, vec!["source/skills"]);
     }
 
     #[test]
     fn compact_parents_preserves_singles() {
         let dirs = vec!["custom/my-skill".to_string()];
-        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs, &[]);
         assert_eq!(compacted, vec!["custom/my-skill"]);
     }
 
@@ -611,14 +600,14 @@ mod tests {
             "source/skills/adapt".to_string(),
             "source/skills/animate".to_string(),
         ];
-        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs, &[]);
         assert_eq!(compacted, vec!["custom/lone-skill", "source/skills"]);
     }
 
     #[test]
     fn compact_parents_empty() {
         let dirs: Vec<String> = Vec::new();
-        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs);
+        let compacted = crate::repo_scanner::inventory::compact_to_common_parents(&dirs, &[]);
         assert!(compacted.is_empty());
     }
 }

@@ -8,7 +8,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use crate::providers::{
     AgentBinding, DroppedRole, ModelRef, Provider, ProvidersStoreV4, RequiredWire, RoleCapability,
@@ -55,7 +55,7 @@ pub use migrate_configs::*;
 /// overwrites a developer's live tool configuration (a real bug we hit:
 /// `resync_active_tools` tests clobbered `~/.codex/config.toml` and
 /// `~/.claude/settings.json`). It also lets advanced users sandbox sync.
-pub const TOOL_SYNC_HOME_ENV: &str = "SKILLSTAR_TOOL_SYNC_HOME";
+pub use skillstar_core::infra::paths::TOOL_SYNC_HOME_ENV;
 
 /// The sandbox root: a per-test override if one is installed (unit tests only),
 /// else [`TOOL_SYNC_HOME_ENV`] if set, otherwise — in this crate's
@@ -146,15 +146,6 @@ fn upstream_home_override(var: &str) -> Option<PathBuf> {
     std::env::var_os(var)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-}
-
-/// Resolve the OS config directory (`~/Library/Application Support`, `%APPDATA%`,
-/// or `~/.config`) while keeping legacy MCP compatibility writes sandboxable.
-pub(crate) fn sync_config_dir() -> Result<PathBuf> {
-    if let Some(dir) = sandbox_home() {
-        return Ok(dir.join(".config"));
-    }
-    dirs::config_dir().context("Could not determine config directory")
 }
 
 // ---------------------------------------------------------------------------

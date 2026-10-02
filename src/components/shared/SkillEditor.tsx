@@ -23,11 +23,14 @@ import { AiErrorBanner } from "./AiBanners";
 
 interface SkillEditorProps {
   skillName: string;
+  /** Header X: dismiss the whole detail drawer. */
   onClose: () => void;
+  /** Footer cancel: leave the editor, back to the detail view. */
+  onCancel: () => void;
   onRead: (name: string) => Promise<SkillContent>;
   onSave: (name: string, content: string) => Promise<void>;
 }
-export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorProps) {
+export function SkillEditor({ skillName, onClose, onCancel, onRead, onSave }: SkillEditorProps) {
   const { t } = useTranslation();
   const [content, setContent] = useState<SkillContent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -314,7 +317,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
             </Button>
           )}
         </div>
-        <Button variant="outline" onClick={onClose} className="cursor-pointer">
+        <Button variant="outline" onClick={onCancel} className="cursor-pointer">
           {t("common.cancel")}
         </Button>
         <Button onClick={handleSave} disabled={!hasChanges || saving} className="cursor-pointer">

@@ -100,6 +100,8 @@ export interface ModelsCommands {
   };
   /** `loopback` or `lan`. */
   get_listen_mode: { args: Record<string, never>; result: string };
+  /** The loopback origin agents are written with, such as `http://127.0.0.1:21847`. */
+  get_loopback_origin: { args: Record<string, never>; result: string };
   /** Save the name shown for one catalog model. The upstream id stays. */
   save_model_name: { args: { id: string; name: string }; result: void };
   /** Save loopback or LAN. A refusal leaves the file unchanged. */

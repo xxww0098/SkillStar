@@ -27,6 +27,7 @@
 //! |---|---|---|
 //! | `SKILLSTAR_DATA_DIR` | `~/.skillstar` | App config & metadata root |
 //! | `SKILLSTAR_HUB_DIR` | `~/.skillstar/hub` | Skill hub, repo cache, lockfile |
+//! | `SKILLSTAR_TOOL_SYNC_HOME` | *(real home)* | Sandbox root for external tool-config paths |
 //!
 //! Setting these variables during development keeps dev data completely
 //! separate from the production (installed) app.
@@ -75,6 +76,23 @@ pub fn home_dir() -> PathBuf {
         return home;
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Env var that re-roots every external tool-config path (`~/.codex`,
+/// `~/.claude`, `~/.grok`, `~/.config/opencode`, …) under a sandbox directory.
+///
+/// When set to a non-empty path, tool-config path resolution happens *inside*
+/// that directory instead of the user's real home. Tests MUST set this so the
+/// suite never overwrites a developer's live tool configuration; it also lets
+/// advanced users sandbox tool sync. Crates that need the raw name import it
+/// from here instead of redeclaring a private copy.
+pub const TOOL_SYNC_HOME_ENV: &str = "SKILLSTAR_TOOL_SYNC_HOME";
+
+/// The [`TOOL_SYNC_HOME_ENV`] sandbox root when set to a non-empty path.
+pub fn tool_sync_home_override() -> Option<PathBuf> {
+    std::env::var_os(TOOL_SYNC_HOME_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// `$HOME` on Unix, `%USERPROFILE%` on Windows — the canonical home env var

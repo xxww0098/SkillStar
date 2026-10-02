@@ -183,6 +183,7 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     return { applied: [], skipped: [] };
   },
   get_listen_mode: () => listenMode,
+  get_loopback_origin: () => "http://127.0.0.1:21847",
   save_listen_mode: (args) => {
     const mode = typeof args?.mode === "string" ? args.mode : "";
     if (mode !== "loopback" && mode !== "lan") throw new Error("listen_store");
@@ -200,18 +201,29 @@ export const MODELS_HANDLERS: DevMockHandlers = {
   save_agent_model: () => null,
   get_models_board: () => ({
     agents: [
-      { id: "claude-code", name: "Claude Code", loopback_label: "" },
-      { id: "claude-desktop", name: "Claude Desktop", loopback_label: "" },
-      { id: "codex", name: "Codex", loopback_label: "127.0.0.1:21847" },
-      { id: "opencode", name: "OpenCode", loopback_label: "" },
-      { id: "pi", name: "Pi", loopback_label: "" },
-      { id: "omp", name: "Oh My Pi", loopback_label: "" },
+      { id: "claude-code", name: "Claude Code", loopback_label: "", model_label: "" },
+      { id: "claude-desktop", name: "Claude Desktop", loopback_label: "", model_label: "" },
+      {
+        id: "codex",
+        name: "Codex",
+        loopback_label: "127.0.0.1:21847",
+        model_label: "group/fast",
+      },
+      {
+        id: "opencode",
+        name: "OpenCode",
+        loopback_label: "",
+        model_label: "deepseek/deepseek-chat",
+      },
+      { id: "pi", name: "Pi", loopback_label: "", model_label: "" },
+      { id: "omp", name: "Oh My Pi", loopback_label: "", model_label: "" },
     ],
     providers: FLAT_PROVIDERS.providers.map((provider) => ({
       id: provider.id,
       name: provider.name,
       credential_summary: maskedKey(provider.api_key),
       loopback_label: "",
+      model_label: "",
     })),
     gateway: [],
   }),

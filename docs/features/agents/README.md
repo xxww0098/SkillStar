@@ -12,14 +12,9 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以作为扩展保留，
 但不能改变同名上游 Agent 的目录语义。
 **Gemini 的三轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已重新接入
-轴①（`BUILTIN_AGENT_DEFS` 的 extension 区，全局目录 `~/.gemini/skills`）与 MCP 写入
-（公开 target `gemini-cli` → `~/.gemini/settings.json`）；轴②Models 工具同步**仍未接入**。
-裸 id `gemini` 只是 MCP 的 cleanup 墓碑，永远不是 target（见
-[MCP 的墓碑与公开后继规则](../mcp/README.md#墓碑与它的公开后继distinct-id--subsumption)）。
+轴①（`BUILTIN_AGENT_DEFS` 的 extension 区，全局目录 `~/.gemini/skills`）；轴②Models 工具同步**仍未接入**。
 Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 Gemini CLI 是不同
-产品，两个 profile 互不顶替；MCP 也是独立 target（`antigravity` →
-`~/.gemini/config/mcp_config.json`，未迁移时回落 `~/.gemini/antigravity/mcp_config.json`），
-不会写进 Gemini CLI 的 `settings.json`。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
+产品，两个 profile 互不顶替。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
 **一个** Agent profile，部署时再扇出到三份 `builtin/skills`，见下面的[镜像目录](#镜像目录一个-profile多份技能目录)。Usage/Cloud Code 中的 Gemini **模型名**
 与 Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store 的 `gemini`
 字段仅用于迁移读取。
@@ -182,10 +177,7 @@ WorkBuddy 是腾讯的办公 Agent，技能目录与 CodeBuddy 同构（`~/.work
 `vercel-labs/skills` 上游清单里，所以落在 `BUILTIN_AGENT_DEFS` 的 extension 区。
 Lobe Icons 没有对应品牌字形，图标走通用 `LobeHubMono`。
 
-轴①与 MCP 写入都已接入：MCP 目标写用户级 `~/.workbuddy/mcp.json`（顶层 `mcpServers`，
-文档示例无 `type` 键，因此 dialect 是 `PlainNoType`）。官方还有项目级
-`<project>/.workbuddy/mcp.json`，SkillStar 按既有密钥策略不写任何项目级 MCP 配置。
-WorkBuddy 没有 Models 工具同步。
+轴①已接入。WorkBuddy 没有 Models 工具同步。
 
 ### Devin 注册说明
 
@@ -193,13 +185,7 @@ Devin 是 Cognition 的软件工程 Agent，`devin` 行与 `vercel-labs/skills` 
 `Devin for Terminal`，全局 `~/.config/devin/skills`，项目 `.devin/skills`（上游 id 就在
 `UPSTREAM_AGENT_IDS` 内，不是 extension 区）。图标走 Lobe Icons 的品牌字形 `DevinColor`。
 
-轴①与 MCP 写入都已接入。MCP 是独立于 profile 的目标（`McpToolSpec` 一行），写用户级
-`~/.config/devin/mcp_config.json`（顶层 `mcpServers`，文档示例无 `type`）：这份文件同时被
-Devin CLI 与 Devin Desktop 的 Devin Local agent 读取。Windsurf 已改名 Devin Desktop，但它的
-legacy Cascade 仍读 `~/.codeium/windsurf/mcp_config.json`，依旧归既有的 `windsurf` 目标——
-同属 Cognition 不代表两个 profile 可以互相顶替。v3000.3 之前 `mcpServers` 位于
-`~/.config/devin/config.json`，CLI 启动时自行迁移，SkillStar 只写专用文件；官方项目级
-`.devin/mcp_config.json` 按既有密钥策略不写。
+轴①已接入。Windsurf 已改名 Devin Desktop，但同属 Cognition 不代表两个 profile 可以互相顶替。
 
 Devin **没有 Models 工具同步**：模型由 Cognition 托管，`~/.config/devin/config.json` 的
 `agent.model` 只在自家模型名之间选择，没有 base URL / API Key 之类的自带 provider 配置，
@@ -250,10 +236,6 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
    - `src/features/models/components/shared/AgentToolIcon.tsx`：
      `AgentToolIconId` 对齐 `ProviderToolId`，并为每个 tool 挂 `@lobehub/icons` 字形
      （经 `lobe.ts`）；gallery 徽章经 `getAgent(toolId).iconId` 渲染，勿再维护身份映射表；
-   - 如支持 MCP 配置同步，除扩展 `src/types/mcp.ts` / Rust 侧对应的 `MCP_TOOL_IDS`
-     外，还要在 `src/features/mcp/lib/agentTargets.ts` 登记 Settings Agent id → MCP
-     tool id 的能力映射。MCP 卡片轮播会用这张映射与当前手动 `enabled` profiles 取交集；
-     不得再叠加本机安装探测，图标与显示名直接来自 `AgentProfile`，不要另建 SVG 清单。
 5. 跑 `cargo test -p skillstar-models`（含属性测试 `tool_sync_prop_tests`）。
 
 ---

@@ -21,6 +21,12 @@ pub fn load_listen_mode() -> String {
     listen_label().to_string()
 }
 
+/// The loopback origin agents are written with. A wildcard listen still
+/// publishes loopback; this read binds nothing.
+pub fn loopback_origin() -> String {
+    skillstar_gateway::published_origin()
+}
+
 /// Save `lan` or `loopback`.
 pub fn save_listen_mode(mode: &str) -> Result<(), SaveListenControlError> {
     save_listen(mode).map_err(|error| match error {

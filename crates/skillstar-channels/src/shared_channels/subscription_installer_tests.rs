@@ -98,6 +98,7 @@ fn install_fixture() -> (InstallSandbox, ChannelInstallReceipt, PathBuf, PathBuf
         content_hash_version: Some(CHANNEL_CONTENT_HASH_VERSION),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: Some("skills/writer".into()),
+        pinned: false,
     });
     lockfile
         .save(&skillstar_skills::lockfile::lockfile_path())

@@ -12,4 +12,9 @@ credential_summary: string,
  * Loopback host:port already written for this agent, such as `127.0.0.1:21847`.
  * Empty when nothing loopback has been written, and on Providers and Gateway.
  */
-loopback_label: string, };
+loopback_label: string, 
+/**
+ * The model this writer already selected for the agent, spelled with its
+ * saved display name. Empty when the agent is unmanaged or unset.
+ */
+model_label: string, };

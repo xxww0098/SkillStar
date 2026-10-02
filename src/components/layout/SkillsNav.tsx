@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Boxes, FolderKanban, Globe, Layers, Package } from "lucide-react";
+import { FolderKanban, Globe, Layers, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSkillBadgeCounts } from "../../features/my-skills/hooks/useSkills";
 import { cn } from "../../lib/utils";
@@ -26,7 +26,6 @@ export function SkillsNav({ activePage, onNavigate, onPrefetch, collapsed }: Ski
     { id: "marketplace", label: t("sidebar.market"), icon: Globe },
     { id: "skill-cards", label: t("sidebar.groups"), icon: Layers },
     { id: "projects", label: t("sidebar.projects"), icon: FolderKanban },
-    { id: "mcp", label: t("sidebar.mcp"), icon: Boxes },
   ];
 
   return (

@@ -83,12 +83,14 @@ fn assemble_from_archive(
 fn move_staging_into_place(staging: &Path, dest: &Path) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
-            format!("Failed to create the repo cache parent '{}'", parent.display())
+            format!(
+                "Failed to create the repo cache parent '{}'",
+                parent.display()
+            )
         })?;
     }
-    std::fs::rename(staging, dest).with_context(|| {
-        format!("Failed to move the tarball cache into '{}'", dest.display())
-    })
+    std::fs::rename(staging, dest)
+        .with_context(|| format!("Failed to move the tarball cache into '{}'", dest.display()))
 }
 
 /// `https://codeload.github.com/<owner>/<repo>/tar.gz/<ref>` for GitHub URLs.
@@ -106,7 +108,10 @@ fn archive_url(repo_url: &str, reference: &str) -> Result<String> {
 /// Tarball caches hold no git objects for deferred copies, so on-demand
 /// materialization re-downloads the archive and commits the new directories.
 pub(crate) fn add_dirs_via_tarball(repo_dir: &Path, dirs: &[String]) -> Result<()> {
-    if dirs.iter().any(|dir| dir == ".git" || dir.starts_with(".git/")) {
+    if dirs
+        .iter()
+        .any(|dir| dir == ".git" || dir.starts_with(".git/"))
+    {
         bail!("Refusing to extract archive entries into the repository metadata");
     }
     let repo_url = crate::git::ops::remote_origin_url(repo_dir)
@@ -141,7 +146,10 @@ fn fetch_and_extract(
     if dirs.is_empty() {
         bail!("The tarball fallback requires at least one directory to extract");
     }
-    if dirs.iter().any(|dir| dir == ".git" || dir.starts_with(".git/")) {
+    if dirs
+        .iter()
+        .any(|dir| dir == ".git" || dir.starts_with(".git/"))
+    {
         bail!("Refusing to extract archive entries into the repository metadata");
     }
     let spool = spool_path_for(target);
@@ -177,14 +185,14 @@ fn download_to_file(url: &str, dest: &Path) -> Result<PathBuf> {
         .build()
         .context("Unable to start the archive download runtime")?;
     runtime.block_on(async {
-        let mut response = skillstar_core::infra::github_http::get_anonymous(
-            url,
-            DOWNLOAD_TIMEOUT,
-        )
-        .await
-        .with_context(|| format!("Failed to download '{url}'"))?;
+        let mut response = skillstar_core::infra::github_http::get_anonymous(url, DOWNLOAD_TIMEOUT)
+            .await
+            .with_context(|| format!("Failed to download '{url}'"))?;
         if !response.status().is_success() {
-            bail!("Archive download returned HTTP {}", response.status().as_u16());
+            bail!(
+                "Archive download returned HTTP {}",
+                response.status().as_u16()
+            );
         }
         let mut file = std::fs::File::create(dest)
             .with_context(|| format!("Failed to create archive spool '{}'", dest.display()))?;
@@ -250,13 +258,16 @@ fn extract_subset(archive_path: &Path, target: &Path, dirs: &[String]) -> Result
         // mutable read below.
         let (entry_type, size, file_mode) = {
             let header = entry.header();
-            (header.entry_type(), header.size().unwrap_or(0), header.mode().unwrap_or(0o644))
+            (
+                header.entry_type(),
+                header.size().unwrap_or(0),
+                header.mode().unwrap_or(0o644),
+            )
         };
         let out_path = target.join(rel);
         if entry_type.is_dir() {
-            std::fs::create_dir_all(&out_path).with_context(|| {
-                format!("Failed to create directory '{}'", out_path.display())
-            })?;
+            std::fs::create_dir_all(&out_path)
+                .with_context(|| format!("Failed to create directory '{}'", out_path.display()))?;
             continue;
         }
         // Symlinks and hardlinks are skipped: skill payloads are plain files,
@@ -265,9 +276,7 @@ fn extract_subset(archive_path: &Path, target: &Path, dirs: &[String]) -> Result
             continue;
         }
         if size > MAX_FILE_BYTES {
-            bail!(
-                "Archive file '{rest}' is {size} bytes, above the per-file cap"
-            );
+            bail!("Archive file '{rest}' is {size} bytes, above the per-file cap");
         }
         extracted_bytes = extracted_bytes.saturating_add(size);
         extracted_files += 1;

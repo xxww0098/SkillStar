@@ -176,7 +176,7 @@ mod tests {
             signed.headers,
             vec![
                 ("Authorization".to_string(), "Bearer access-2".to_string()),
-                ("chatgpt-account-id".to_string(), "acct-2".to_string()),
+                ("Accept".to_string(), "application/json".to_string()),
             ]
         );
 

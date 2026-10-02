@@ -316,18 +316,10 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
     marketplace: "marketplace",
     "skill-cards": "cards",
     projects: "projects",
-    mcp: "mcp",
     settings: "settings",
   };
 
-  const skillsPages = fc.constantFrom<NavPage>(
-    "my-skills",
-    "marketplace",
-    "skill-cards",
-    "projects",
-    "mcp",
-    "settings",
-  );
+  const skillsPages = fc.constantFrom<NavPage>("my-skills", "marketplace", "skill-cards", "projects", "settings");
 
   beforeEach(() => {
     window.location.hash = "";

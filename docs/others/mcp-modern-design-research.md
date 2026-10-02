@@ -1,6 +1,6 @@
 # MCP 现代设计理念调研（2026-08）
 
-状态：active（调研快照，不是 SSOT）
+状态：historical（调研快照，不是 SSOT；MCP 管理与商店已按 [D-074](../decisions.md#d-074删除-mcp-管理与-mcp-商店) 删除，本文不再对应产品契约）
 类型：一次性外部技术调研。本文只记录**外部生态事实**与由此推导的建议，不定义 SkillStar 的架构、边界或功能行为。
 落点约束：本文出现的任何结论若要变成 SkillStar 的实现约定，必须先写进 `docs/boundaries.md` / `docs/architecture.md` / `docs/features/mcp/README.md` / `docs/decisions.md`，再由本文链接过去。
 

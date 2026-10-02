@@ -64,10 +64,12 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
   // edits fails closed instead of overwriting them.
   scan_github_repo: (args) => {
     const url = String((args?.url as string) ?? "");
-    const source = sourceOfRepoUrl(url);
+    const { repoUrl, source, gitRef, subpath } = parseSourceUrl(url);
     return {
       source,
-      source_url: url,
+      source_url: repoUrl,
+      ...(gitRef ? { git_ref: gitRef } : {}),
+      ...(subpath ? { subpath } : {}),
       skills: devRepoSourceSkills(source).map((skill) => ({
         id: skill.name,
         folder_path: skill.name,
@@ -76,10 +78,14 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
         installable: true,
         frontmatter_issues: [],
       })),
+      // A subpath containing "impeccable" (this feature's fixture repo)
+      // gives the plugin hint a demo path without needing a real scan.
+      ...(subpath?.includes("impeccable") ? { plugin: { hooks: true, agents: true } } : {}),
     };
   },
   install_from_scan: (args) => {
-    const source = String((args?.source as string) ?? sourceOfRepoUrl(String((args?.repoUrl as string) ?? "")));
+    const spec = (args?.spec as { source?: string; source_url?: string }) ?? {};
+    const source = String(spec.source ?? sourceOfRepoUrl(String(spec.source_url ?? "")));
     devAssertRepoSourceClean(source);
     return ((args?.skills as Array<{ id: string }>) ?? []).map((skill) => skill.id);
   },
@@ -91,4 +97,19 @@ function sourceOfRepoUrl(url: string): string {
     .replace(/^https?:\/\/[^/]+\//, "")
     .replace(/\.git$/, "")
     .replace(/\/$/, "");
+}
+
+/** Mirrors `source_resolver::Source::parse` for tree URLs, dev-mock only. */
+function parseSourceUrl(url: string): {
+  repoUrl: string;
+  source: string;
+  gitRef?: string;
+  subpath?: string;
+} {
+  const tree = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.+)$/);
+  if (tree) {
+    const [, owner, repo, ref, subpath] = tree;
+    return { repoUrl: `https://github.com/${owner}/${repo}.git`, source: `${owner}/${repo}`, gitRef: ref, subpath };
+  }
+  return { repoUrl: url, source: sourceOfRepoUrl(url) };
 }

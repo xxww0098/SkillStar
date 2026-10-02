@@ -1,5 +1,7 @@
 //! tool_sync tests — part3 (split out of the original inline test module).
 
+use std::time::SystemTime;
+
 use super::*;
 
 // =========================================================================

@@ -17,14 +17,11 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
   const hiddenCount = alerts.length - visibleAlerts.length;
 
   return (
-    <div className="max-h-[30vh] shrink-0 overflow-y-auto space-y-1.5 border-b border-border/40 bg-card/30 px-4 py-2">
+    <div className="max-h-[30vh] shrink-0 overflow-y-auto space-y-1 border-b border-border/40 bg-card/30 px-4 py-1.5">
       {visibleAlerts.map((alert) => (
         <div
           key={alert.id}
-          className={cn(
-            "flex items-center gap-2 rounded-md border px-3 py-1.5 text-[12px]",
-            toneClasses(alert.severity),
-          )}
+          className={cn("flex items-center gap-2 rounded-md border px-3 py-1 text-[12px]", toneClasses(alert.severity))}
         >
           {toneIcon(alert.severity)}
           <span className="flex-1 truncate" title={alert.message}>

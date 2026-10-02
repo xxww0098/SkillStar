@@ -1,7 +1,7 @@
 /**
  * Public API of the models feature.
  *
- * Cross-feature consumers (pages, layout, settings, mcp) must import from
+ * Cross-feature consumers (pages, layout, settings) must import from
  * here instead of reaching into internal paths. `ModelsHub` is intentionally
  * NOT re-exported: pages/Models.tsx imports it directly so the hub stays in
  * its own lazy-loaded chunk.

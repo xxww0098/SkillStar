@@ -13,7 +13,7 @@ import {
 import type { CatalogEntry, Subscription } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 
-const CHIP_MIN_WIDTH = 188;
+const CHIP_MIN_WIDTH = 172;
 const CHIP_GAP = 10;
 
 interface UsageSpendSummaryProps {
@@ -96,7 +96,7 @@ function SubscriptionSpendChip({ sub, catalog, total, monthly, showLabel }: Subs
 
   return (
     <div
-      className="flex min-w-[188px] max-w-[240px] select-none items-center gap-2.5 rounded-2xl border border-border/55 bg-card/55 px-3 py-2 shadow-sm backdrop-blur-sm"
+      className="flex min-w-[172px] max-w-[240px] select-none items-center gap-2 rounded-xl border border-border/60 bg-card/70 px-2.5 py-1.5 shadow-sm"
       title={title}
     >
       <ProviderLogo
@@ -113,7 +113,7 @@ function SubscriptionSpendChip({ sub, catalog, total, monthly, showLabel }: Subs
             <SpendStat
               label={t("usage.totalSpendShort")}
               value={formatCurrencyAmount(total, sub.currency)}
-              className={monthly == null || monthly <= 0 ? "flex-1" : undefined}
+              className="flex-1"
             />
           )}
           {monthly != null && monthly > 0 && (
@@ -145,7 +145,7 @@ function SpendStat({
   className?: string;
 }) {
   return (
-    <div className={cn("flex min-w-[72px] flex-col justify-center px-2 py-0.5", className)}>
+    <div className={cn("flex min-w-16 flex-col justify-center px-1.5 py-0.5", className)}>
       <span className="text-[10px] leading-none text-muted-foreground">{label}</span>
       <span
         className={cn(

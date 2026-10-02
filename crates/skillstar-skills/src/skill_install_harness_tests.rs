@@ -2,81 +2,10 @@ use super::{install_skill_for_agent, install_skills_batch_in_session};
 use crate::deployment::{self, batch_deploy_skills_to_agents};
 use crate::git::transport::GitOperationSession;
 use crate::lockfile;
+use crate::pack_fixture::Sandbox;
 use crate::projects::ProjectDeployMode;
 use crate::repo_scanner;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-
-struct Sandbox {
-    previous: Vec<(&'static str, Option<OsString>)>,
-    _temp: tempfile::TempDir,
-    _guard: std::sync::MutexGuard<'static, ()>,
-}
-
-impl Sandbox {
-    fn new() -> Self {
-        let _guard = crate::lock_test_env();
-        let temp = tempfile::tempdir().unwrap();
-        let overrides = [
-            ("SKILLSTAR_HUB_DIR", Some(temp.path().join("hub"))),
-            ("SKILLSTAR_DATA_DIR", Some(temp.path().join("data"))),
-            (
-                "SKILLSTAR_TOOL_SYNC_HOME",
-                Some(temp.path().join("tool-home")),
-            ),
-            ("HOME", Some(temp.path().join("home"))),
-            ("USERPROFILE", Some(temp.path().join("home"))),
-            ("GIT_CONFIG_GLOBAL", Some(temp.path().join("gitconfig"))),
-            ("GIT_CONFIG_NOSYSTEM", Some(PathBuf::from("1"))),
-            ("DSH_HOME", None),
-            ("CODEX_HOME", None),
-        ];
-        let previous = overrides
-            .iter()
-            .map(|(key, _)| (*key, std::env::var_os(key)))
-            .collect();
-        unsafe {
-            for (key, value) in &overrides {
-                match value {
-                    Some(path) => std::env::set_var(key, path),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-        deployment::invalidate_profile_cache();
-        Self {
-            previous,
-            _temp: temp,
-            _guard,
-        }
-    }
-
-    fn map_github_url(&self, github_url: &str, local_repo: &Path) {
-        let config = std::env::var_os("GIT_CONFIG_GLOBAL").expect("GIT_CONFIG_GLOBAL");
-        std::fs::write(
-            config,
-            format!(
-                "[url \"{}\"]\n\tinsteadOf = {github_url}\n",
-                crate::git::ops::local_file_url(local_repo)
-            ),
-        )
-        .unwrap();
-    }
-}
-
-impl Drop for Sandbox {
-    fn drop(&mut self) {
-        deployment::invalidate_profile_cache();
-        unsafe {
-            for (key, previous) in self.previous.drain(..).rev() {
-                match previous {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
-}
 
 fn run_git(repo: &Path, args: &[&str]) {
     let output = skillstar_core::infra::path_env::command_with_path("git")
@@ -483,6 +412,47 @@ fn installed_impeccable_deepseek_falls_back_to_a_skill_folder() {
     assert_eq!(payload_at(&dsh), "cursor copy");
 }
 
+/// cua-driver-shaped repo: the Skill lives under a monorepo path like
+/// `libs/cua-driver/rust/Skills/cua-driver` — outside every priority scan
+/// directory, so the shallow rescan can never see it. A second harness click
+/// must reuse the recorded payload already materialized in this checkout
+/// instead of fetching the repository again.
+#[test]
+fn installed_monorepo_skill_reuses_cached_checkout_without_fetch() {
+    let sandbox = Sandbox::new();
+    let remote = init_pack(&[(
+        "libs/cua-driver/rust/Skills/cua-driver",
+        "cua-driver",
+        "deep payload",
+    )]);
+    let url = "https://github.com/acme/cua.git";
+    sandbox.map_github_url(url, remote.path());
+
+    install_skill_for_agent(url.to_string(), Some("cua-driver".into()), "cursor")
+        .expect("deep monorepo folder must install on first click");
+    assert_eq!(
+        lock_source_folder("cua-driver").as_deref(),
+        Some("libs/cua-driver/rust/Skills/cua-driver")
+    );
+
+    sandbox.map_github_url(url, Path::new("/nonexistent/skillstar-disconnected-remote"));
+    poison_cached_remotes();
+
+    let second = install_skill_for_agent(url.to_string(), Some("cua-driver".into()), "deepseek")
+        .expect("payload is already materialized; the shallow rescan must not force a fetch");
+    assert_eq!(second.name, "cua-driver");
+    assert_eq!(
+        lock_source_folder("cua-driver").as_deref(),
+        Some("libs/cua-driver/rust/Skills/cua-driver"),
+        "no harness copy exists, so the lock must keep the recorded folder"
+    );
+    deploy("cua-driver", "deepseek");
+    assert_eq!(
+        payload_at(&home_skill(".dsh", "cua-driver")),
+        "deep payload"
+    );
+}
+
 /// Wiping the repo cache after a hub install must still fetch on the next
 /// harness click. First-time install keeps the slow path.
 #[test]
@@ -779,12 +749,14 @@ fn pack_collapses_duplicate_copies_and_heavy_content() {
     let repo_dir = skillstar_core::infra::paths::repos_cache_dir()
         .join(repo_scanner::cache_key_for("pbakaus/impeccable", None).unwrap());
     assert!(
-        repo_dir.join(".agents/skills/impeccable/SKILL.md").is_file(),
+        repo_dir
+            .join(".agents/skills/impeccable/SKILL.md")
+            .is_file(),
         "representative must be materialized"
     );
     assert!(
-        repo_dir.join(".cursor/skills/impeccable/SKILL.md").is_file(),
-        "content-divergent copy always materializes (its identity may differ)"
+        !repo_dir.join(".cursor/skills/impeccable").exists(),
+        "a same-name harness rewrite is the same identity: deferred"
     );
     assert!(
         !repo_dir.join(".claude/skills/impeccable").exists(),
@@ -810,7 +782,11 @@ fn pack_collapses_duplicate_copies_and_heavy_content() {
         Some(".claude/skills/impeccable")
     );
     assert_eq!(payload_at(&hub), "agents copy");
-    assert!(repo_dir.join(".claude/skills/impeccable/SKILL.md").is_file());
+    assert!(
+        repo_dir
+            .join(".claude/skills/impeccable/SKILL.md")
+            .is_file()
+    );
 }
 
 #[derive(Default)]
@@ -842,13 +818,8 @@ fn fresh_install_emits_stage_progress_in_order() {
         crate::git::transport::GitAuthMaterial::missing(),
         sink.clone(),
     );
-    let installed = install_skills_batch_in_session(
-        url,
-        &["alpha".to_string()],
-        None,
-        &session,
-    )
-    .expect("install");
+    let installed = install_skills_batch_in_session(url, &["alpha".to_string()], None, &session)
+        .expect("install");
     assert_eq!(installed.len(), 1);
 
     let stages = sink.0.lock().unwrap().clone();
@@ -863,3 +834,111 @@ fn fresh_install_emits_stage_progress_in_order() {
         "fresh install must emit the four in-crate stages in order"
     );
 }
+
+const IMPECCABLE_URL: &str = "https://github.com/pbakaus/impeccable.git";
+
+fn impeccable_cache() -> PathBuf {
+    skillstar_core::infra::paths::repos_cache_dir()
+        .join(repo_scanner::cache_key_for("pbakaus/impeccable", None).unwrap())
+}
+
+/// Published `impeccable` copies currently checked out in the cache.
+fn impeccable_copies_on_disk() -> Vec<String> {
+    let repo_dir = impeccable_cache();
+    let mut on_disk: Vec<String> = crate::pack_fixture::published_copies()
+        .into_iter()
+        .filter(|dir| repo_dir.join(dir).join("SKILL.md").is_file())
+        .collect();
+    on_disk.sort();
+    on_disk
+}
+
+fn install_impeccable(agent: Option<&str>) {
+    install_skills_batch_in_session(
+        IMPECCABLE_URL,
+        &["impeccable".to_string()],
+        agent,
+        &GitOperationSession::public(),
+    )
+    .unwrap_or_else(|error| panic!("install for {agent:?}: {error}"));
+}
+
+/// A harness click surfaces exactly the copy the shared table picks for it,
+/// next to the representative — never every same-name copy.
+#[test]
+fn harness_install_materializes_only_the_chosen_copy() {
+    let fixture = crate::pack_fixture::impeccable_like();
+    for (agent, chosen) in [
+        ("cursor", ".cursor/skills/impeccable"),
+        ("deepseek", ".dsh/skills/impeccable"),
+        ("gemini-cli", ".gemini/skills/impeccable"),
+        ("antigravity", ".agent/skills/impeccable"),
+        ("codex", ".agents/skills/impeccable"),
+        // The pack's `.windsurf` folder is a different Skill (the decoy).
+        ("windsurf", ".agents/skills/impeccable"),
+    ] {
+        let sandbox = Sandbox::new();
+        sandbox.map_github_url(IMPECCABLE_URL, fixture.dir.path());
+        install_impeccable(Some(agent));
+
+        assert_eq!(
+            lock_source_folder("impeccable").as_deref(),
+            Some(chosen),
+            "{agent}"
+        );
+        let mut expected = vec![".agents/skills/impeccable".to_string(), chosen.to_string()];
+        expected.sort();
+        expected.dedup();
+        assert_eq!(impeccable_copies_on_disk(), expected, "{agent}");
+        assert!(!impeccable_cache().join("tests").exists(), "{agent}");
+    }
+}
+
+#[test]
+fn name_request_without_harness_materializes_nothing_new() {
+    let sandbox = Sandbox::new();
+    let fixture = crate::pack_fixture::impeccable_like();
+    sandbox.map_github_url(IMPECCABLE_URL, fixture.dir.path());
+    install_impeccable(None);
+    install_impeccable(None);
+    assert_eq!(
+        impeccable_copies_on_disk(),
+        vec![".agents/skills/impeccable".to_string()]
+    );
+    assert_eq!(
+        lock_source_folder("impeccable").as_deref(),
+        Some(".agents/skills/impeccable")
+    );
+}
+
+/// A fresh cache for an installed Skill: a click for a harness the pack does
+/// not ship falls back to the installed `source_folder`, which must be
+/// materialized even though the new inventory deferred it.
+#[test]
+fn harness_fallback_materializes_the_installed_source_folder() {
+    let sandbox = Sandbox::new();
+    let fixture = crate::pack_fixture::impeccable_like();
+    sandbox.map_github_url(IMPECCABLE_URL, fixture.dir.path());
+    install_impeccable(Some("deepseek"));
+    std::fs::remove_dir_all(impeccable_cache()).unwrap();
+
+    install_impeccable(Some("windsurf"));
+    assert_eq!(
+        lock_source_folder("impeccable").as_deref(),
+        Some(".dsh/skills/impeccable")
+    );
+    assert!(
+        impeccable_cache()
+            .join(".dsh/skills/impeccable/SKILL.md")
+            .is_file()
+    );
+    assert!(
+        !impeccable_cache()
+            .join(".cursor/skills/impeccable")
+            .exists()
+    );
+}
+
+#[cfg(test)]
+#[path = "skill_install_pin_tests.rs"]
+mod pin_tests;

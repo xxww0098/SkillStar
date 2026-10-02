@@ -20,8 +20,8 @@ use crate::{
 use divergence::SourceRemovedStop;
 use plan::{SiblingState, UpdatePlan};
 pub use transaction::{
-    acquire_lockfile_write_lock, acquire_repo_cache_lock, acquire_update_transaction_lock,
-    RepoCacheGuard,
+    RepoCacheGuard, acquire_lockfile_write_lock, acquire_repo_cache_lock,
+    acquire_update_transaction_lock,
 };
 
 #[cfg(test)]
@@ -229,6 +229,9 @@ pub fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
         content_hash_version: None,
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder,
+        // Reconstruction has no memory of a prior pin; this is a rare repair
+        // path (D-063/D-075 do not migrate), so the pin is simply lost.
+        pinned: false,
     })
 }
 

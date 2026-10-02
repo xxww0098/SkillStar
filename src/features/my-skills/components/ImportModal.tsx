@@ -460,8 +460,7 @@ export function ImportModal({
 
       try {
         const installed = await tauriInvoke("install_from_scan", {
-          repoUrl: scanResult.source_url,
-          source: scanResult.source,
+          spec: scanResult,
           skills: targets,
           sessionId,
         });
@@ -577,6 +576,7 @@ export function ImportModal({
           <SelectSkillsPhase
             skills={scanResult.skills}
             source={scanResult.source}
+            plugin={scanResult.plugin}
             selectedSkills={selectedSkills}
             onToggle={toggleSkill}
             onSelectAll={selectAll}

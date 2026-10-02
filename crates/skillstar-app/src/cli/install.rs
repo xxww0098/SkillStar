@@ -10,6 +10,7 @@ use super::{
 
 use skillstar_skills::deployment;
 use skillstar_skills::git_skill::GitSkillFacade;
+use skillstar_skills::plugin_manifest;
 use skillstar_skills::repo_scanner;
 use skillstar_skills::skill_bundle;
 use std::io::{self, IsTerminal, Write};
@@ -25,6 +26,18 @@ enum InstallScope {
 
 fn git_skill_facade() -> Result<GitSkillFacade, String> {
     Ok(GitSkillFacade::from_file_store())
+}
+
+/// SkillStar only installs Skills, never a Claude plugin's `hooks`/`agents` —
+/// see README non-goals. Prints nothing when the source is not a declared
+/// plugin, or declares one with nothing to skip.
+fn print_plugin_hint(repo_dir: &Path) {
+    if plugin_manifest::plugin_hint_for_repo(repo_dir).is_some() {
+        println!(
+            "ℹ This repository is a Claude Code plugin; hooks/agents will not be installed. \
+             For the full plugin, use `/plugin marketplace add`."
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -403,9 +416,10 @@ fn install_or_reuse_skill(
     }
 
     let git = git_skill_facade()?;
-    let (_, _, _, skills_found) = git
+    let (_, _, repo_dir, skills_found) = git
         .fetch_repo_scanned_preferring_local_cache(url, false)
         .map_err(|error| error.to_string())?;
+    print_plugin_hint(&repo_dir);
     if skills_found.is_empty() {
         return Err("No valid SKILL.md found in the selected source".to_string());
     }
@@ -536,7 +550,8 @@ fn prompt_for_skill_selection(
 fn list_skills_in_source(url: &str) {
     println!("Scanning {}...\n", url);
     match git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false)) {
-        Ok((repo_url, source, _, skills_found)) => {
+        Ok((repo_url, source, repo_dir, skills_found)) => {
+            print_plugin_hint(&repo_dir);
             if skills_found.is_empty() {
                 println!(
                     "No SKILL.md found in {} (scanned root + priority dirs).",

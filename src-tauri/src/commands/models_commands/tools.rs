@@ -230,7 +230,7 @@ fn stamp_sync(
 /// configured, or config may exist from a previous installation).
 ///
 /// This probe belongs only to the explicit Models tool-setup workflow. It must
-/// never feed Agent profile activation or card/MCP rail visibility; those are
+/// never feed Agent profile activation or card rail visibility; those are
 /// controlled solely by the user's Settings switch.
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {

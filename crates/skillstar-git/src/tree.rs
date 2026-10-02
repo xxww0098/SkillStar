@@ -30,7 +30,7 @@ pub fn list_tree_paths_at(repo_path: &Path, revision: &str) -> Result<Vec<String
 }
 
 pub fn list_tree_entries_at(repo_path: &Path, revision: &str) -> Result<Vec<GitTreeEntry>> {
-    list_tree_entries_with_args(repo_path, revision, &["-r"])
+    list_tree_entries_with_args(repo_path, revision, &["-r"], &[])
 }
 
 /// Recursive tree entries including intermediate directory (`tree`) entries.
@@ -40,22 +40,39 @@ pub fn list_tree_entries_at(repo_path: &Path, revision: &str) -> Result<Vec<GitT
 /// The extra entries are `kind == "tree"` and must be filtered out by callers
 /// that only want file paths.
 pub fn list_tree_entries_with_trees(repo_path: &Path, revision: &str) -> Result<Vec<GitTreeEntry>> {
-    list_tree_entries_with_args(repo_path, revision, &["-r", "-t"])
+    list_tree_entries_with_args(repo_path, revision, &["-r", "-t"], &[])
+}
+
+/// Recursive blob entries restricted to `paths` — a pathspec-scoped listing
+/// instead of the whole tree, cheap enough to run before materializing just
+/// those directories (see `ops::add_sparse_checkout_dirs_in_session`).
+pub fn list_tree_entries_under(
+    repo_path: &Path,
+    revision: &str,
+    paths: &[&str],
+) -> Result<Vec<GitTreeEntry>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    list_tree_entries_with_args(repo_path, revision, &["-r"], paths)
 }
 
 fn list_tree_entries_with_args(
     repo_path: &Path,
     revision: &str,
     extra_args: &[&str],
+    paths: &[&str],
 ) -> Result<Vec<GitTreeEntry>> {
     let mut command = command_with_path("git");
     command
         .current_dir(repo_path)
         .args(["ls-tree", "-z"])
         .args(extra_args)
-        .arg(revision)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .arg(revision);
+    if !paths.is_empty() {
+        command.arg("--").args(paths);
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().context("Failed to execute git ls-tree")?;
     let stdout = child
         .stdout

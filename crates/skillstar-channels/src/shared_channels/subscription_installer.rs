@@ -187,6 +187,7 @@ fn install_blocking(
             targets.push(skillstar_skills::repo_scanner::SkillInstallTarget {
                 id: released_skill.id.clone(),
                 folder_path: released_skill.content_root.clone(),
+                pinned: false,
             });
         }
     }

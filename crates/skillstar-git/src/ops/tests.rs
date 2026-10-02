@@ -189,6 +189,78 @@ fn list_tree_paths_returns_file_names() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn add_sparse_checkout_dirs_batches_new_blobs_into_one_fetch() -> Result<()> {
+    // Regression for the impeccable-style harness-toggle stutter: adding a
+    // directory with several new blobs must cost one fetch, not one
+    // round-trip per blob (see `blobs.rs`'s 39s-vs-1.8s measurement).
+    let temp_root = make_temp_root("sparse-add")?;
+    let remote = temp_root.join("remote");
+    fs::create_dir_all(&remote)?;
+    run_git(&remote, &["init", "-q", "--initial-branch=main"])?;
+    for (key, value) in [
+        ("user.email", "t@example.com"),
+        ("user.name", "T"),
+        ("uploadpack.allowFilter", "true"),
+        ("uploadpack.allowAnySHA1InWant", "true"),
+    ] {
+        run_git(&remote, &["config", key, value])?;
+    }
+    fs::create_dir_all(remote.join("kept"))?;
+    fs::write(remote.join("kept").join("SKILL.md"), "kept")?;
+    fs::create_dir_all(remote.join("new"))?;
+    fs::write(remote.join("new").join("SKILL.md"), "new-a")?;
+    fs::write(remote.join("new").join("scripts.sh"), "new-b")?;
+    run_git(&remote, &["add", "-A"])?;
+    run_git(&remote, &["commit", "-q", "-m", "init"])?;
+
+    let dest = temp_root.join("clone");
+    run_git(
+        &temp_root,
+        &[
+            "clone",
+            "-q",
+            "--filter=blob:none",
+            "--no-checkout",
+            "--sparse",
+            &local_file_url(&remote),
+            dest.to_str().unwrap(),
+        ],
+    )?;
+
+    let session = GitOperationSession::public();
+    apply_sparse_checkout_in_session(&dest, &["kept"], &session)?;
+    assert!(dest.join("kept/SKILL.md").exists());
+    assert!(!dest.join("new").exists(), "not materialized yet");
+
+    let before = promisor_packs(&dest);
+    add_sparse_checkout_dirs_in_session(&dest, &["new".to_string()], &session)?;
+    assert_eq!(fs::read_to_string(dest.join("new/SKILL.md"))?, "new-a");
+    assert_eq!(fs::read_to_string(dest.join("new/scripts.sh"))?, "new-b");
+    assert_eq!(
+        promisor_packs(&dest),
+        before + 1,
+        "both new blobs must land in the same batched fetch"
+    );
+
+    let _ = fs::remove_dir_all(temp_root);
+    Ok(())
+}
+
+fn promisor_packs(repo: &Path) -> usize {
+    fs::read_dir(repo.join(".git/objects/pack"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "promisor")
+        })
+        .count()
+}
+
 fn make_temp_root(suffix: &str) -> Result<PathBuf> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -143,6 +143,7 @@ fn save_lock_entries(entries: &[(&str, &str)]) {
                 content_hash_version: None,
                 installed_at: "2026-08-05T00:00:00Z".into(),
                 source_folder: None,
+                pinned: false,
             })
             .collect(),
         ..Default::default()

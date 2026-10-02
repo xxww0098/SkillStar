@@ -26,7 +26,7 @@
 #
 # 2026-08-14: that dedicated pass, done against the symlink-custody rewrite
 # that replaced grok/io.rs. `usage_switch` now has its own layered error enums
-# in crates/skillstar-app/src/usage_switch/error.rs (CustodyError /
+# in crates/skillstar-usage/src/usage_switch/error.rs (CustodyError /
 # MaterializeError / ExternalStoreError, plus the ActivationError + Stage pair
 # that carries the before/after-replace rollback contract), so all 31
 # stringly-typed signatures in custody.rs, target*.rs and keychain.rs are
@@ -36,4 +36,5 @@
 # positives (usage_commands.rs, usage/service.rs, skillstar-usage/storage.rs).
 #
 # 2026-09-22: 27 -> 28 on merging project_skills_mcp (ort_cpu try_load_bundle).
-28
+# 2026-09-29: 28 -> 25 on deleting MCP management (mcp_snapshot, mcp/probe).
+25

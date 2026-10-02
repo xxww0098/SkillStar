@@ -280,7 +280,11 @@ async fn dispatch(
             };
             match crate::surface::finish(kind, &path, &inbound) {
                 crate::surface::Outcome::Local(local) => respond_local(local, head),
-                crate::surface::Outcome::Forward { protocol, url_path } => {
+                crate::surface::Outcome::Forward {
+                    protocol,
+                    url_path,
+                    public_responses,
+                } => {
                     forward_turn(
                         upstream,
                         protocol,
@@ -288,6 +292,7 @@ async fn dispatch(
                         inbound,
                         &authorization,
                         &user_agent,
+                        public_responses,
                     )
                     .await
                 }
@@ -327,8 +332,9 @@ async fn forward_turn(
     inbound: Bytes,
     authorization: &str,
     user_agent: &str,
+    public_responses: bool,
 ) -> Response<Full<Bytes>> {
-    let turned = forward_body(upstream, protocol, url_path, &inbound).await;
+    let turned = forward_body(upstream, protocol, url_path, &inbound, public_responses).await;
     crate::trace::note_forward(
         authorization,
         user_agent,
@@ -353,14 +359,18 @@ async fn forward_body(
     protocol: Option<Protocol>,
     url_path: &str,
     inbound: &Bytes,
+    public_responses: bool,
 ) -> Turn {
-    let upstream_bytes = match protocol {
+    let mut upstream_bytes = match protocol {
         Some(protocol) => match upstream_body(protocol, inbound) {
             Ok(body) => crate::effort::apply_upstream_effort(&body, ""),
             Err(_) => return Turn::text(StatusCode::BAD_REQUEST, "bad request"),
         },
         None => inbound.to_vec(),
     };
+    if public_responses {
+        upstream_bytes = crate::chatgpt::shape_responses(&upstream_bytes);
+    }
     let Some(base) = upstream else {
         return Turn::text(StatusCode::BAD_GATEWAY, "no upstream");
     };
@@ -384,10 +394,13 @@ async fn forward_body(
         Ok(client) => client,
         Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream client"),
     };
-    let pending = client
+    let mut pending = client
         .post(url)
-        .header(hyper::header::CONTENT_TYPE, "application/json")
-        .body(upstream_bytes);
+        .header(hyper::header::CONTENT_TYPE, "application/json");
+    if public_responses {
+        pending = pending.header(hyper::header::ACCEPT, "application/json");
+    }
+    let pending = pending.body(upstream_bytes);
     let response = match skillstar_core::infra::http_client::send_stream(pending).await {
         Ok(response) => response,
         Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream request"),
@@ -406,6 +419,11 @@ async fn forward_body(
         },
         None => bytes.to_vec(),
     };
+    if public_responses
+        && let Some(replaced) = crate::chatgpt::quota_reply(status.as_u16(), &outbound)
+    {
+        return Turn::json(status, replaced);
+    }
     Turn::json(status, outbound)
 }
 

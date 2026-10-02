@@ -11,7 +11,8 @@ const MODES = [
 ] as const;
 
 /**
- * Loopback or LAN. The sentence under the switch is the address agents keep.
+ * Loopback or LAN as one segmented control. The sentence under the switch is
+ * the address agents keep.
  */
 export function LanListen() {
   const queryClient = useQueryClient();
@@ -20,8 +21,9 @@ export function LanListen() {
   const [error, setError] = useState("");
 
   return (
-    <div role="group" aria-label="lan listen" className="shrink-0 space-y-1 px-4 py-3">
-      <div className="flex flex-wrap gap-1">
+    <div role="group" aria-label="lan listen" className="space-y-2">
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">监听方式</div>
+      <div className="flex w-fit rounded-lg bg-muted/50 p-0.5">
         {MODES.map((item) => (
           <button
             key={item.id}
@@ -38,17 +40,19 @@ export function LanListen() {
                 });
             }}
             className={cn(
-              "rounded-lg px-2 py-1 text-xs text-foreground",
-              mode === item.id ? "bg-primary/15 font-medium" : "hover:bg-muted/40",
+              "rounded-md px-3 py-1 text-xs transition",
+              mode === item.id
+                ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/60"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {item.label}
           </button>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">写给 Agent 的地址仍是 127.0.0.1。</p>
+      <p className="text-xs leading-relaxed text-muted-foreground">写给 Agent 的地址仍是 127.0.0.1。</p>
       {error ? (
-        <p role="alert" className="text-xs text-muted-foreground">
+        <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
       ) : null}

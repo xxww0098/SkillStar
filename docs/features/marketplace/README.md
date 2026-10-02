@@ -2,13 +2,13 @@
 
 状态：active
 
-本文件维护技能市场快照、搜索和 Publisher 浏览契约。MCP 安装与工具同步见 [../mcp/README.md](../mcp/README.md)。
+本文件维护技能市场快照、搜索和 Publisher 浏览契约。
 
 ## 所有权
 
-- `skillstar-marketplace` 拥有 SQLite snapshot、FTS、远程 seed/refresh、Marketplace 专用 DTO 和 MCP registry/curated catalog。
+- `skillstar-marketplace` 拥有 SQLite snapshot、FTS、远程 seed/refresh、Marketplace 专用 DTO。
 - 市场列表、搜索结果与已安装技能共用 `skillstar-core::types::Skill`；Marketplace 不定义同名副本，也不增加仅用于掩盖重复所有权的转换链。
-- `db` 与远程 MCP loader 是 crate 内实现，不作为外部深路径 API；调用方消费 crate root DTO 或明确的 `snapshot`/`mcp_snapshot` use-case 入口。
+- `db` 与远程 loader 是 crate 内实现，不作为外部深路径 API；调用方消费 crate root DTO 或明确的 `snapshot` use-case 入口。
 - `src-tauri/src/core/marketplace_snapshot/` 只包装 Tauri State；业务查询和 schema 不应回流到该目录。
 - 技能安装仍归 `skillstar-skills`；“搜索结果 → 安装”的跨域流程通过 command/`skillstar-app` 组合窄 facade。
 
@@ -29,7 +29,8 @@
 - 拉取按 host 候选链执行：`remote::marketplace_hosts()` 以 `https://skills.sh` 为首；若启用了 GitHub 加速，则追加 `{mirror}https://skills.sh/`（按熔断健康度排序）；再按 `config/marketplace_mirror.json` 的 `enabled`/`hosts` 追加用户镜像（仅接受 `https://`，去重）。`fetch_with_failover` 按序尝试，成功即停，全部失败返回聚合错误。
 - 每次成功拉取产生 `FetchMeta{payload_sha256, source_host, etag, degraded}`：sha256 是响应体内容指纹；`source_host` 记录实际服务端；服务端 ETag 存在时记录；`degraded` 标记这份 payload 是解析降级/兜底得到的，不是完整可信结果。
 - `If-None-Match` **只**发给当初签发该 ETag 的 `source_host`。把 skills.sh 的 validator 带到加速源包装地址上会产生假 304，把快照钉死在旧 host 上。
-- snapshot schema v11 起，`marketplace_sync_state` 含 `source_host`/`payload_sha256`/`etag` 三列。快照同步与 MCP registry 同步都是内容寻址增量写：本次 payload 与上次记录相同（304 或 sha256 一致）时，只刷新 scope 时间戳并保留旧指纹与旧 `source_host`，不重写数据表；内容变化才走既有 delete+reinsert 事务。唯一例外是 `etag`：服务端可能在同字节响应上轮换 validator，所以本次带回 ETag 就采纳（`COALESCE(new, old)`），否则一直发一个服务端已经不认的 token，再也拿不到 304。
+- snapshot schema v11 起，`marketplace_sync_state` 含 `source_host`/`payload_sha256`/`etag` 三列。快照同步是内容寻址增量写：本次 payload 与上次记录相同（304 或 sha256 一致）时，只刷新 scope 时间戳并保留旧指纹与旧 `source_host`，不重写数据表；内容变化才走既有 delete+reinsert 事务。唯一例外是 `etag`：服务端可能在同字节响应上轮换 validator，所以本次带回 ETag 就采纳（`COALESCE(new, old)`），否则一直发一个服务端已经不认的 token，再也拿不到 304。
+- snapshot schema v14 删除已下线 MCP 商店的 registry/curated 表及其 FTS，并清掉 `marketplace_sync_state` 中的 `mcp_registry` 行（见 [D-074](../../decisions.md#d-074删除-mcp-管理与-mcp-商店)）；旧 v8/v10/v13 迁移已移除。
 - 镜像只在主站不可达时启用；镜像内容是中间代理，应只添加可信来源。
 
 ## 降级数据不冒充新鲜数据
@@ -76,10 +77,8 @@
 
 ## 前端信息架构
 
-- Marketplace 只做技能发现：总排行 / 趋势 / 热门 / 官方技能发布者。不要再在工具栏放 MCP 胶囊。
-- MCP 商店在 MCP 页面内（见 [MCP](../mcp/README.md)）；侧栏「市场」不承载 MCP 发现。MCP 没有发布者 grid——发布者是商店内的一个范围，不是一个页面。
+- Marketplace 只做技能发现：总排行 / 趋势 / 热门 / 官方技能发布者。
 - 技能 Publisher drill-down 复用主市场的 grid/list 和 toolbar 交互，不创建第二套 fetch 逻辑。
-- installed MCP 管理不放 Marketplace，而在 MCP 页面处理。
 
 ## 验证
 

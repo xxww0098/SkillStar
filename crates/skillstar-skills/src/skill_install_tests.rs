@@ -286,11 +286,8 @@ mod pipeline_local_source_tests {
         .unwrap();
         git_commit_all(repo.path(), "add pr");
 
-        let skill = install_skill(
-            repo.path().to_string_lossy().to_string(),
-            Some("pr".into()),
-        )
-        .expect("a skill added upstream after the cached clone must still install");
+        let skill = install_skill(repo.path().to_string_lossy().to_string(), Some("pr".into()))
+            .expect("a skill added upstream after the cached clone must still install");
         assert_eq!(skill.name, "pr");
         let hub = skillstar_core::infra::paths::hub_skills_dir().join("pr");
         assert!(hub.join("SKILL.md").is_file());

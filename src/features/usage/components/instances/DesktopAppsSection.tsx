@@ -28,7 +28,7 @@ export function DesktopAppsSection({ appIds }: { appIds: DesktopAppId[] }) {
   );
 
   return (
-    <section className="mb-4 rounded-2xl border border-border/70 bg-card/60 px-3 py-3">
+    <section className="mb-3 rounded-2xl border border-border/70 bg-card/60 px-3 py-2.5">
       <div className="mb-2">
         <h2 className="text-sm font-semibold text-foreground">{t("usage.desktopApps")}</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{t("usage.desktopAppsHint")}</p>
@@ -42,7 +42,7 @@ export function DesktopAppsSection({ appIds }: { appIds: DesktopAppId[] }) {
                 type="button"
                 aria-expanded={expanded}
                 onClick={() => setOpen((current) => ({ ...current, [item.id]: !expanded }))}
-                className="flex w-full items-center gap-2 px-2.5 py-2 text-left"
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
               >
                 <ProviderLogo
                   catalogId={item.catalogId}

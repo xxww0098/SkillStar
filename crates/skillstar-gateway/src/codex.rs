@@ -74,6 +74,33 @@ pub fn apply_agent(
     apply_codex_home(agent, route, origin, home, None)
 }
 
+/// Same as [`apply_agent`], and also select `model_ref` as Codex's model.
+///
+/// The write always takes the API route: it is self-contained and does not
+/// depend on a ChatGPT login. An empty `model_ref` releases the takeover,
+/// restoring the user's own `model` alongside the other stashed fields.
+pub fn apply_agent_with_model(
+    agent: &str,
+    origin: &str,
+    home: &Path,
+    model_ref: &str,
+) -> Result<(), ApplyError> {
+    if agent != "codex" {
+        return Err(ApplyError::NotManaged);
+    }
+    if model_ref.is_empty() {
+        return release_agent(agent, home);
+    }
+    apply_codex_full(
+        agent,
+        CodexRoute::Api,
+        origin,
+        home,
+        None,
+        Some(model_ref),
+    )
+}
+
 /// Same two toml shapes as [`apply_agent`]. `agent` is the stash prefix.
 ///
 /// `catalog_native` is the catalog path that agent opens. `None` stores
@@ -85,10 +112,21 @@ pub(crate) fn apply_codex_home(
     home: &Path,
     catalog_native: Option<&str>,
 ) -> Result<(), ApplyError> {
+    apply_codex_full(agent, route, origin, home, catalog_native, None)
+}
+
+fn apply_codex_full(
+    agent: &str,
+    route: CodexRoute,
+    origin: &str,
+    home: &Path,
+    catalog_native: Option<&str>,
+    model: Option<&str>,
+) -> Result<(), ApplyError> {
     let origin = origin.trim_end_matches('/');
     match route {
         CodexRoute::LoggedIn => apply_logged_in(agent, origin, home),
-        CodexRoute::Api => apply_api(agent, origin, home, catalog_native),
+        CodexRoute::Api => apply_api(agent, origin, home, catalog_native, model),
     }
 }
 
@@ -121,6 +159,7 @@ fn apply_api(
     origin: &str,
     home: &Path,
     catalog_native: Option<&str>,
+    model: Option<&str>,
 ) -> Result<(), ApplyError> {
     let base = format!("{origin}/v1");
     let catalog = home.join(".codex").join(CATALOG_FILE);
@@ -144,6 +183,10 @@ fn apply_api(
     if doc.root_value("openai_base_url").as_deref() == Some(gateway_url.as_str()) {
         drop_owned(agent, &mut doc, &mut stash, "openai_base_url", &gateway_url);
     }
+    if let Some(model) = model {
+        let selected = format!("{PLACEHOLDER_BEARER}/{model}");
+        take_over(agent, &mut doc, &mut stash, "model", &selected);
+    }
     save_stash(&stash)?;
     atomic_write(&catalog, EMPTY_CATALOG)?;
     write_doc(&path, &doc)
@@ -154,7 +197,7 @@ fn release_codex(agent: &str, home: &Path) -> Result<(), ApplyError> {
     let path = config_path(home);
     let mut doc = read_doc(&path)?;
     let mut touched = false;
-    for field in ["openai_base_url", "model_provider", "model_catalog_json"] {
+    for field in ["openai_base_url", "model_provider", "model_catalog_json", "model"] {
         let key = stash_key(agent, field);
         let Some(value) = stash.remove(&key) else {
             continue;

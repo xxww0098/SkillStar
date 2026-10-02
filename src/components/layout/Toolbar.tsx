@@ -70,7 +70,7 @@ interface ToolbarProps {
   /** Candidates for Spotlight result list (filtered client-side by query).
    *  Providing `onSearchSelect` switches the search slot into Spotlight mode
    *  (compact trigger + ⌘F overlay); without it the slot is an always-visible
-   *  inline input like the MCP pages. */
+   *  inline input. */
   searchItems?: SpotlightSearchItem[];
   /** Open detail / focus a result selected from Spotlight. */
   onSearchSelect?: (id: string) => void;

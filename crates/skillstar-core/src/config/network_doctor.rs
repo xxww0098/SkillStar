@@ -1,7 +1,7 @@
 //! One-shot network diagnosis for Settings.
 //!
 //! Probes the SkillStar proxy, direct GitHub, each configured accelerator,
-//! skills.sh, and the official MCP registry. Recommendations are machine
+//! and skills.sh. Recommendations are machine
 //! keys; the UI maps them through i18n. HTTP stays in this module so the
 //! Tauri command remains a thin adapter (command-boundary ratchet).
 
@@ -42,14 +42,6 @@ pub async fn diagnose_network() -> Result<NetworkDiagnosis> {
     checks.push(probe_http("github", "GitHub", "https://github.com/").await);
     checks.push(probe_http("api_github", "GitHub API", "https://api.github.com/").await);
     checks.push(probe_http("skills_sh", "skills.sh", "https://skills.sh/").await);
-    checks.push(
-        probe_http(
-            "mcp_registry",
-            "MCP Registry",
-            "https://registry.modelcontextprotocol.io/v0.1/servers?limit=1",
-        )
-        .await,
-    );
 
     let mut mirror_checks = probe_mirrors().await;
     checks.append(&mut mirror_checks);

@@ -362,8 +362,7 @@ function useSkillsState() {
       }
 
       const installed = await tauriInvoke("install_from_scan", {
-        repoUrl: scan.source_url,
-        source: scan.source,
+        spec: scan,
         skills: [{ id: target.id, folder_path: target.folder_path }],
       });
 
@@ -388,8 +387,7 @@ function useSkillsState() {
       }
 
       const installed = await tauriInvoke("install_from_scan", {
-        repoUrl: scan.source_url,
-        source: scan.source,
+        spec: scan,
         skills: scan.skills.map((skill) => ({
           id: skill.id,
           folder_path: skill.folder_path,

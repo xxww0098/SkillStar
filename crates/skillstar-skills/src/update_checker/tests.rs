@@ -109,6 +109,7 @@ fn api_remote_hashes_drive_update_detection_without_fetching() {
         content_hash_version: None,
         installed_at: String::new(),
         source_folder: Some("skills/demo".into()),
+        pinned: false,
     };
 
     // API says "same as local HEAD" → no update, and no fetch happened.
@@ -251,6 +252,7 @@ fn subtree_comparison_ignores_unrelated_repo_changes() {
         content_hash_version: None,
         installed_at: String::new(),
         source_folder: Some("skills/demo".to_string()),
+        pinned: false,
     };
     let result = check_update_local_with(
         &skill_link,
@@ -307,6 +309,7 @@ fn subtree_comparison_badges_skills_whose_folder_moved() {
         content_hash_version: None,
         installed_at: String::new(),
         source_folder: Some("skills/demo".to_string()),
+        pinned: false,
     };
     let result = check_update_local_with(
         &skill_link,
@@ -318,6 +321,97 @@ fn subtree_comparison_badges_skills_whose_folder_moved() {
         Some(&entry),
     );
     assert_eq!(result, Some(true));
+}
+
+/// A pinned skill's `source_folder` is what update comparison follows: a
+/// change to a sibling copy in the same clone must not badge it, and a
+/// change to its own pinned folder must. `pinned` itself never enters this
+/// comparison — it is plumbing the install/harness layer already resolved
+/// into `source_folder`.
+#[cfg(unix)]
+#[test]
+fn pinned_skill_update_follows_its_folder() {
+    let remote = init_repo();
+    for dir in [".claude", ".cursor"] {
+        fs::create_dir_all(remote.path().join(format!("{dir}/skills/impeccable"))).unwrap();
+        fs::write(
+            remote
+                .path()
+                .join(format!("{dir}/skills/impeccable/SKILL.md")),
+            "v1",
+        )
+        .unwrap();
+    }
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "initial"]);
+
+    let clone_parent = tempfile::tempdir().unwrap();
+    let clone_path = clone_parent.path().join("clone");
+    run_git(
+        clone_parent.path(),
+        &[
+            "clone",
+            remote.path().to_str().unwrap(),
+            clone_path.to_str().unwrap(),
+        ],
+    );
+
+    // A sibling harness copy changes; the pinned folder does not.
+    fs::write(
+        remote.path().join(".cursor/skills/impeccable/SKILL.md"),
+        "v2",
+    )
+    .unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "cursor copy changed"]);
+    run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
+
+    let pinned_folder = ".claude/skills/impeccable";
+    let skill_link_parent = tempfile::tempdir().unwrap();
+    let skill_link = skill_link_parent.path().join("impeccable");
+    std::os::unix::fs::symlink(clone_path.join(pinned_folder), &skill_link).unwrap();
+
+    let entry = crate::lockfile::LockEntry {
+        name: "impeccable".to_string(),
+        git_url: String::new(),
+        git_ref: None,
+        tree_hash: String::new(),
+        content_hash: None,
+        content_hash_version: None,
+        installed_at: String::new(),
+        source_folder: Some(pinned_folder.to_string()),
+        pinned: true,
+    };
+    let repo_root_of = |path: &Path| {
+        let real = std::fs::read_link(path).ok()?;
+        Some(real.parent()?.parent()?.parent()?.to_path_buf())
+    };
+
+    let unaffected =
+        check_update_local_with(&skill_link, &HashSet::new(), repo_root_of, Some(&entry));
+    assert_eq!(
+        unaffected,
+        Some(false),
+        "a sibling copy's change must not badge the pin"
+    );
+
+    // Now change the pinned folder itself upstream.
+    fs::write(
+        remote.path().join(format!("{pinned_folder}/SKILL.md")),
+        "v2",
+    )
+    .unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "pinned copy changed"]);
+    run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
+
+    let affected =
+        check_update_local_with(&skill_link, &HashSet::new(), repo_root_of, Some(&entry));
+    assert_eq!(
+        affected,
+        Some(true),
+        "a change to the pinned folder itself must badge it"
+    );
 }
 
 #[test]
@@ -347,6 +441,7 @@ fn github_trees_api_commit_ish_sha_does_not_badge_an_up_to_date_root_skill() {
         content_hash_version: None,
         installed_at: String::new(),
         source_folder: None,
+        pinned: false,
     };
     let repo_root = repo.path().to_path_buf();
     let skill_path = repo_root.join("root-skill");

@@ -131,7 +131,7 @@ impl SubscriptionDto {
             .platform_token_encrypted
             .as_ref()
             .is_some_and(|s| !s.is_empty());
-        let supports_cli = crate::usage_switch::supports_cli_switch(&sub.catalog_id);
+        let supports_cli = skillstar_usage::usage_switch::supports_cli_switch(&sub.catalog_id);
         Self {
             id: sub.id,
             catalog_id: sub.catalog_id,
@@ -221,7 +221,7 @@ pub struct UpdateSubscriptionInput {
     pub cookie_header: Option<String>,
 }
 
-/// Frontend projection of [`crate::usage_switch::SwitchOutcome`].
+/// Frontend projection of [`skillstar_usage::usage_switch::SwitchOutcome`].
 ///
 /// The switch domain owns its own outcome type and is free to reshape it;
 /// this DTO is what the UI actually contracts against. The [`From`] impl
@@ -251,7 +251,7 @@ pub struct SwitchOutcomeDto {
     pub error: Option<String>,
 }
 
-/// Frontend projection of [`crate::usage_switch::LinkMode`].
+/// Frontend projection of [`skillstar_usage::usage_switch::LinkMode`].
 ///
 /// `copy` is a real behaviour difference, not an implementation detail: under
 /// `symlink` the CLI's own token rotation writes through into SkillStar's
@@ -267,23 +267,23 @@ pub enum LinkModeDto {
     Copy,
 }
 
-impl From<crate::usage_switch::LinkMode> for LinkModeDto {
-    fn from(mode: crate::usage_switch::LinkMode) -> Self {
+impl From<skillstar_usage::usage_switch::LinkMode> for LinkModeDto {
+    fn from(mode: skillstar_usage::usage_switch::LinkMode) -> Self {
         // Matched exhaustively for the same reason the struct below is
         // destructured: a new binding mode must stop the build here.
         match mode {
-            crate::usage_switch::LinkMode::Symlink => Self::Symlink,
-            crate::usage_switch::LinkMode::Copy => Self::Copy,
+            skillstar_usage::usage_switch::LinkMode::Symlink => Self::Symlink,
+            skillstar_usage::usage_switch::LinkMode::Copy => Self::Copy,
         }
     }
 }
 
-impl From<crate::usage_switch::SwitchOutcome> for SwitchOutcomeDto {
-    fn from(o: crate::usage_switch::SwitchOutcome) -> Self {
+impl From<skillstar_usage::usage_switch::SwitchOutcome> for SwitchOutcomeDto {
+    fn from(o: skillstar_usage::usage_switch::SwitchOutcome) -> Self {
         // Destructured, not `..`-spread: an upstream field addition must
         // land as a compile error here rather than silently vanish from the
         // frontend contract.
-        let crate::usage_switch::SwitchOutcome {
+        let skillstar_usage::usage_switch::SwitchOutcome {
             tool_id,
             config_path,
             backup_path,
@@ -304,7 +304,7 @@ impl From<crate::usage_switch::SwitchOutcome> for SwitchOutcomeDto {
     }
 }
 
-/// Frontend projection of [`crate::usage_switch::CliAccountState`] — which
+/// Frontend projection of [`skillstar_usage::usage_switch::CliAccountState`] — which
 /// account a CLI is *actually* serving, read back from disk.
 ///
 /// Deliberately three cases rather than a boolean. "Not this account" and
@@ -323,9 +323,9 @@ pub enum CliAccountStateDto {
     Missing,
 }
 
-impl From<crate::usage_switch::CliAccountState> for CliAccountStateDto {
-    fn from(state: crate::usage_switch::CliAccountState) -> Self {
-        use crate::usage_switch::CliAccountState as Domain;
+impl From<skillstar_usage::usage_switch::CliAccountState> for CliAccountStateDto {
+    fn from(state: skillstar_usage::usage_switch::CliAccountState) -> Self {
+        use skillstar_usage::usage_switch::CliAccountState as Domain;
         match state {
             Domain::LinkedTo { subscription_id } => Self::LinkedTo { subscription_id },
             Domain::Diverged => Self::Diverged,

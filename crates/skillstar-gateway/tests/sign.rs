@@ -53,8 +53,7 @@ fn sign(book: &impl AccountBook, catalog_id: &str, body: &[u8]) -> (SignedUpstre
 }
 
 #[test]
-fn sign_codex_sets_saved_account_headers() {
-    // internal/provider/logins_on_test.go
+fn sign_codex_sends_bearer_without_an_account_header() {
     let book = Fixed {
         account: AccountSnapshot {
             access_token: Some("fresh-old".to_string()),
@@ -71,7 +70,7 @@ fn sign_codex_sets_saved_account_headers() {
         signed.headers,
         vec![
             ("Authorization".to_string(), "Bearer fresh-old".to_string()),
-            ("chatgpt-account-id".to_string(), "acct-old".to_string()),
+            ("Accept".to_string(), "application/json".to_string()),
         ]
     );
 }

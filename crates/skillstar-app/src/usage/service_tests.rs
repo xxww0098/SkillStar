@@ -229,7 +229,7 @@ fn fill_active_flags_only_the_pinned_row_of_its_catalog() {
 /// three distinct answers: this account, somebody else, nobody.
 #[test]
 fn the_live_state_projects_as_three_answers_not_one_boolean() {
-    use crate::usage_switch::CliAccountState;
+    use skillstar_usage::usage_switch::CliAccountState;
 
     assert_eq!(
         CliAccountStateDto::from(CliAccountState::LinkedTo {
@@ -254,7 +254,7 @@ fn the_live_state_projects_as_three_answers_not_one_boolean() {
 /// line is not something a user can read.
 #[test]
 fn the_switch_dto_carries_the_binding_mode() {
-    use crate::usage_switch::{LinkMode, SwitchOutcome};
+    use skillstar_usage::usage_switch::{LinkMode, SwitchOutcome};
 
     let outcome = |link_mode| SwitchOutcome {
         tool_id: "grok".into(),

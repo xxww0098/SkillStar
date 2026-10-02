@@ -4,6 +4,7 @@
 //! and short display identifiers.
 
 use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 // ── Source type ─────────────────────────────────────────────────────
@@ -12,11 +13,17 @@ use std::path::{Path, PathBuf};
 ///
 /// `Source::parse` is the primary entry point for parsing user-provided
 /// repository inputs (owner/repo, HTTPS URLs, .git-suffixed URLs).
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Serializes under the field names `ScanResult` already exposed to the
+/// frontend (`source`, `source_url`), so flattening it into `ScanResult`
+/// is backward compatible.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Source {
     /// Full clone URL, e.g. `https://github.com/owner/repo.git`
+    #[serde(rename = "source_url")]
     pub repo_url: String,
     /// Short identifier, e.g. `owner/repo`
+    #[serde(rename = "source")]
     pub short: String,
     /// Optional Git ref selected by a tree URL or `#ref` suffix.
     pub git_ref: Option<String>,
@@ -593,5 +600,23 @@ mod tests {
     fn source_parse_missing_local_path_fails() {
         assert!(Source::parse("/definitely-not-a-skillstar-source").is_err());
         assert!(Source::parse("./no-such-local-skill").is_err());
+    }
+
+    #[test]
+    fn source_serde_uses_scan_field_names() {
+        let source =
+            Source::parse("https://github.com/owner/repo/tree/main/skills/demo#stable@react")
+                .unwrap();
+        let json = serde_json::to_value(&source).unwrap();
+        assert_eq!(json["source_url"], "https://github.com/owner/repo.git");
+        assert_eq!(json["source"], "owner/repo");
+        assert_eq!(json["git_ref"], "main");
+        assert_eq!(json["subpath"], "skills/demo");
+        assert_eq!(json["skill_filter"], "react");
+        assert!(json.get("repo_url").is_none());
+        assert!(json.get("short").is_none());
+
+        let roundtripped: Source = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtripped, source);
     }
 }

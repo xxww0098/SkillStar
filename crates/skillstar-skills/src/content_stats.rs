@@ -146,7 +146,11 @@ fn fingerprint_dir(
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
             return None;
         };
-        let relative = path.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/");
+        let relative = path
+            .strip_prefix(root)
+            .ok()?
+            .to_string_lossy()
+            .replace('\\', "/");
         if skillstar_core::infra::fs_ops::is_link(&path) {
             files.insert(
                 relative,

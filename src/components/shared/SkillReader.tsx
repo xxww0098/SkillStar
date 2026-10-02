@@ -1,4 +1,4 @@
-import { Eye, FileText, Loader2, Sparkles, Square, X } from "lucide-react";
+import { Edit3, Eye, FileText, Loader2, Sparkles, Square, X } from "lucide-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
@@ -13,6 +13,8 @@ interface SkillReaderProps {
   skillName: string;
   content: string;
   onClose: () => void;
+  /** Optional edit affordance: switch to the editor for installed skills. */
+  onEdit?: () => void;
 }
 
 function buildCacheKey(locale: string, sourceContent: string): string {
@@ -34,7 +36,7 @@ function trimCache<K, V>(cache: Map<K, V>) {
   }
 }
 
-export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
+export function SkillReader({ skillName, content, onClose, onEdit }: SkillReaderProps) {
   const { t } = useTranslation();
 
   const summaryStream = useAiStream({
@@ -93,6 +95,17 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
           <span className="text-micro text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded font-mono">SKILL.md</span>
         </div>
         <div className="flex items-center gap-2">
+          {onEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onEdit}
+              title={t("detailPanel.editSkillMd")}
+              aria-label={t("detailPanel.editSkillMd")}
+            >
+              <Edit3 className="w-4 h-4" />
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>

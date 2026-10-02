@@ -2,7 +2,7 @@
 import type { LinkMode } from "./LinkMode";
 
 /**
- * Frontend projection of [`crate::usage_switch::SwitchOutcome`].
+ * Frontend projection of [`skillstar_usage::usage_switch::SwitchOutcome`].
  *
  * The switch domain owns its own outcome type and is free to reshape it;
  * this DTO is what the UI actually contracts against. The [`From`] impl

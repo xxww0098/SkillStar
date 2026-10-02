@@ -116,14 +116,8 @@ pub(crate) fn migrate_schema(conn: &Connection) -> Result<()> {
         if version < 7 {
             migrate_v6_to_v7(conn)?;
         }
-        if version < 8 {
-            migrate_v7_to_v8(conn)?;
-        }
         if version < 9 {
             migrate_v8_to_v9(conn)?;
-        }
-        if version < 10 {
-            migrate_v9_to_v10(conn)?;
         }
         if version < 11 {
             migrate_v10_to_v11(conn)?;
@@ -131,8 +125,8 @@ pub(crate) fn migrate_schema(conn: &Connection) -> Result<()> {
         if version < 12 {
             migrate_v11_to_v12(conn)?;
         }
-        if version < 13 {
-            migrate_v12_to_v13(conn)?;
+        if version < 14 {
+            migrate_v13_to_v14(conn)?;
         }
         conn.pragma_update(None, "user_version", SNAPSHOT_SCHEMA_VERSION)
             .context("Failed to update marketplace user_version")?;
@@ -428,12 +422,6 @@ pub(crate) fn migrate_v6_to_v7(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// v8: add the MCP registry marketplace snapshot tables (see `mcp_snapshot`).
-pub(crate) fn migrate_v7_to_v8(conn: &Connection) -> Result<()> {
-    crate::mcp_snapshot::create_mcp_registry_tables(conn)
-        .context("Failed to create MCP registry tables (v8)")
-}
-
 /// v9: realign `marketplace_skill_fts.rowid` with the owning
 /// `marketplace_skill.rowid`.
 ///
@@ -466,14 +454,6 @@ pub(crate) fn migrate_v8_to_v9(conn: &Connection) -> Result<()> {
          LEFT JOIN marketplace_skill_detail d ON d.skill_key = s.skill_key;",
     )
     .context("Failed to realign marketplace FTS rowids (v9)")
-}
-
-/// v10: add SkillStar-maintained curated MCP marketplace entries. These live
-/// outside the remote GitHub MCP Registry table so registry refreshes cannot
-/// delete local recommendations.
-pub(crate) fn migrate_v9_to_v10(conn: &Connection) -> Result<()> {
-    crate::mcp_snapshot::create_mcp_registry_tables(conn)
-        .context("Failed to create curated MCP marketplace tables (v10)")
 }
 
 /// v11: content-addressing columns on `marketplace_sync_state`.
@@ -544,52 +524,18 @@ pub(crate) fn migrate_v11_to_v12(conn: &Connection) -> Result<()> {
         .context("Failed to commit v12 migration transaction")
 }
 
-/// v13: `server.json` `2025-12-11` columns on both MCP server tables.
-///
-/// `mcp_registry_server` and `mcp_curated_server` are created by
-/// `create_mcp_registry_tables`, which is entirely `CREATE TABLE IF NOT
-/// EXISTS`. For anyone already at `user_version >= 10` that function is a
-/// no-op, so a column added only there exists for fresh installs and nowhere
-/// else — and every `SELECT` in the MCP marketplace fails with
-/// `no such column`. The column list therefore lives in one place
-/// (`mcp_snapshot::MCP_SERVER_COLUMNS_V13`), read by both the `CREATE TABLE`
-/// statements and this migration.
-///
-/// Same idempotency contract as v11/v12: one transaction, each column added
-/// only when `PRAGMA table_info` says it is missing. A bare `ALTER` would
-/// brick startup forever if the process died between two of them, because
-/// `user_version` is only bumped after the whole chain succeeds.
-///
-/// The FTS virtual tables are deliberately untouched: none of the new columns
-/// is searchable, and FTS5 cannot `ALTER` — adding one would mean dropping,
-/// recreating and reloading both indexes.
-pub(crate) fn migrate_v12_to_v13(conn: &Connection) -> Result<()> {
-    let tx = conn
-        .unchecked_transaction()
-        .context("Failed to start v13 migration transaction")?;
-
-    for table in crate::mcp_snapshot::MCP_SERVER_TABLES {
-        // A database that never reached v8/v10 has no MCP tables at all; the
-        // create path will build them complete, so there is nothing to alter.
-        if !table_exists(&tx, table)? {
-            continue;
-        }
-        for (column, definition) in crate::mcp_snapshot::MCP_SERVER_COLUMNS_V13 {
-            if column_exists(&tx, table, column)? {
-                continue;
-            }
-            tx.execute_batch(&format!(
-                "ALTER TABLE {table} ADD COLUMN {column} {definition};"
-            ))
-            .with_context(|| format!("Failed to add {column} to {table} (v13)"))?;
-        }
-        let index = format!("idx_{table}_status");
-        tx.execute_batch(&format!(
-            "CREATE INDEX IF NOT EXISTS {index} ON {table}(status, is_latest);"
-        ))
-        .with_context(|| format!("Failed to create {index} (v13)"))?;
-    }
-
-    tx.commit()
-        .context("Failed to commit v13 migration transaction")
+/// v14: the MCP marketplace (tables from v8/v10/v13, whose migrations were
+/// deleted with it) was removed. Drop its tables and per-scope sync
+/// rows so existing databases do not keep a ~20k-row dead catalog.
+/// `IF EXISTS` keeps it repeatable.
+pub(crate) fn migrate_v13_to_v14(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS mcp_registry_server_fts;
+         DROP TABLE IF EXISTS mcp_registry_server;
+         DROP TABLE IF EXISTS mcp_curated_server_fts;
+         DROP TABLE IF EXISTS mcp_curated_server;
+         DELETE FROM marketplace_sync_state
+          WHERE scope = 'mcp_registry' OR scope LIKE 'mcp_registry:%';",
+    )
+    .context("Failed to drop MCP marketplace tables (v14)")
 }

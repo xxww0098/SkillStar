@@ -6,7 +6,7 @@ import { HScrollRow } from "../ui/HScrollRow";
 export type AgentTargetSelection = boolean | "mixed";
 
 export interface AgentTargetCarouselItem {
-  /** Consumer-owned target id: an Agent profile id or an MCP tool id. */
+  /** Consumer-owned target id: e.g. an Agent profile id. */
   id: string;
   profile: Pick<AgentProfile, "id" | "icon" | "display_name" | "enabled">;
   /** Resource-local selection; independent from the Settings enabled flag. */

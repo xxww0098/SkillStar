@@ -61,6 +61,10 @@ struct Gateway {
 
 impl Gateway {
     fn open(upstream_response: Vec<u8>) -> Self {
+        Self::open_status(200, upstream_response)
+    }
+
+    fn open_status(status: u16, upstream_response: Vec<u8>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let fake = listener.local_addr().unwrap();
         let (tx, hits) = mpsc::channel();
@@ -76,7 +80,7 @@ impl Gateway {
                     body: msg.body,
                 });
                 let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     upstream_response.len()
                 );
                 let _ = sock.write_all(header.as_bytes());
@@ -158,6 +162,13 @@ fn with_gateway(response: &[u8], test: impl FnOnce(&Gateway)) {
     let _lock = env_lock();
     let _data = IsolatedDataDir::new();
     let gateway = Gateway::open(response.to_vec());
+    test(&gateway);
+}
+
+fn with_status(status: u16, response: &[u8], test: impl FnOnce(&Gateway)) {
+    let _lock = env_lock();
+    let _data = IsolatedDataDir::new();
+    let gateway = Gateway::open_status(status, response.to_vec());
     test(&gateway);
 }
 
@@ -420,7 +431,21 @@ fn raw_routes_forward_the_body() {
                 path.to_string()
             };
             assert_eq!(seen.path, expected_path, "{path}");
-            assert_eq!(seen.body, body, "{path}");
+            if path == "/backend-api/codex/responses" {
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&seen.body).unwrap(),
+                    json!({
+                        "model": "m1",
+                        "ping": true,
+                        "prompt_cache_key": "skillstar-chatgpt",
+                        "store": false,
+                        "stream": true,
+                    }),
+                    "{path}"
+                );
+            } else {
+                assert_eq!(seen.body, body, "{path}");
+            }
             let logged = outbound_log();
             let expected_url = format!("http://{}{expected_path}", gateway.fake);
             assert!(
@@ -432,6 +457,82 @@ fn raw_routes_forward_the_body() {
                 "forward used the configured origin, not api.openai.com: {logged:?}"
             );
         }
+    });
+}
+
+#[test]
+fn codex_responses_is_posted_as_a_public_responses_body() {
+    let inbound = br#"{
+        "model": "gpt-6-sol-fast",
+        "temperature": 0.2,
+        "service_tier": "flex",
+        "max_output_tokens": 16,
+        "session_id": "sess/1",
+        "prompt_cache_key": "keep",
+        "input": [
+            {"type": "message", "role": "system", "content": "rules"},
+            {"role": "system", "content": "bare"},
+            {"role": "user", "content": "hi"},
+            {"type": "function_call", "role": "system", "name": "lookup"}
+        ]
+    }"#;
+    with_gateway(br#"{"ok":true}"#, |gateway| {
+        let (status, outbound) =
+            gateway.send("POST", "/backend-api/codex/responses", "", inbound);
+        assert_eq!(status, 200);
+        assert_eq!(outbound, br#"{"ok":true}"#);
+        let seen = gateway.next_hit();
+        assert_eq!(seen.path, "/v1/responses");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&seen.body).unwrap(),
+            json!({
+                "model": "gpt-6-sol",
+                "service_tier": "priority",
+                "prompt_cache_key": "keep",
+                "store": false,
+                "stream": true,
+                "input": [
+                    {"type": "message", "role": "developer", "content": "rules"},
+                    {"role": "developer", "content": "bare"},
+                    {"role": "user", "content": "hi"},
+                    {"type": "function_call", "role": "system", "name": "lookup"}
+                ]
+            })
+        );
+        let logged = outbound_log();
+        assert!(
+            logged.iter().all(|url| !url.contains("api.openai.com")),
+            "the public Responses shape still posts to the configured origin: {logged:?}"
+        );
+    });
+}
+
+#[test]
+fn codex_plan_limit_names_the_usage_settings_page() {
+    let limit = br#"{"error":{"message":"slow down","code":"subscription_sharing_usage_limit_exceeded"}}"#;
+    with_status(429, limit, |gateway| {
+        let (status, body) =
+            gateway.send("POST", "/backend-api/codex/responses", "", br#"{"model":"m"}"#);
+        assert_eq!(status, 429);
+        assert_eq!(
+            json_body(&body)["error"]["message"],
+            "slow down — manage usage at https://chatgpt.com/settings/usage"
+        );
+
+        let (status, body) = gateway.send("POST", "/v1/responses", "", br#"{"model":"m"}"#);
+        assert_eq!(status, 429);
+        assert_eq!(json_body(&body)["error"]["message"], "slow down");
+    });
+}
+
+#[test]
+fn codex_other_errors_pass_through() {
+    let other = br#"{"error":{"code":"rate_limit_exceeded","message":"later"}}"#;
+    with_status(429, other, |gateway| {
+        let (status, body) =
+            gateway.send("POST", "/backend-api/codex/responses", "", br#"{"model":"m"}"#);
+        assert_eq!(status, 429);
+        assert_eq!(json_body(&body), json_body(other));
     });
 }
 

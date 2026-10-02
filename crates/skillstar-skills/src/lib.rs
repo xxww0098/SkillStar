@@ -32,8 +32,10 @@ pub mod git_skill;
 pub mod github_auth;
 pub mod hub_entry;
 pub mod lockfile;
+#[cfg(test)]
+mod pack_fixture;
 mod pack_layout;
-mod plugin_manifest;
+pub mod plugin_manifest;
 pub mod skill_mutation;
 pub mod source_resolver;
 pub mod team;

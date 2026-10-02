@@ -1,16 +1,17 @@
 import { motion } from "framer-motion";
-import { Check, Download, GitBranch, Package, RotateCcw, ScanSearch, TriangleAlert } from "lucide-react";
+import { Check, Download, GitBranch, Info, Package, RotateCcw, ScanSearch, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { SearchInput } from "../../../../components/ui/SearchInput";
 import { SelectAllButton } from "../../../../components/ui/SelectAllButton";
 import { cn } from "../../../../lib/utils";
-import type { DiscoveredSkill } from "../../../../types";
+import type { DiscoveredSkill, PluginHint } from "../../../../types";
 
 export interface SelectSkillsPhaseProps {
   skills: DiscoveredSkill[];
   source: string;
+  plugin?: PluginHint;
   selectedSkills: Set<string>;
   onToggle: (id: string) => void;
   onSelectAll: (ids?: string[]) => void;
@@ -24,6 +25,7 @@ export interface SelectSkillsPhaseProps {
 export function SelectSkillsPhase({
   skills,
   source,
+  plugin,
   selectedSkills,
   onToggle,
   onSelectAll,
@@ -96,6 +98,15 @@ export function SelectSkillsPhase({
           className="h-8 text-xs rounded-lg border-border/80 bg-background/50 placeholder:text-muted-foreground/80 shadow-inner pl-8"
         />
       </div>
+
+      {plugin && (
+        <div className="px-6 pb-2 shrink-0">
+          <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+            <Info className="w-3.5 h-3.5 shrink-0" />
+            <span>{t("githubImportModal.claudePluginHint")}</span>
+          </div>
+        </div>
+      )}
 
       {/* Skill list */}
       <div className="px-6 pb-2 max-h-[38vh] overflow-y-auto">

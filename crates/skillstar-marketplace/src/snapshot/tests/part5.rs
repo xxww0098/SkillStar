@@ -1,7 +1,7 @@
 //! Schema migration regressions: the `marketplace_sync_state` column
-//! migrations (v11 content addressing, v12 `degraded_reason`) and, above all,
-//! that each one is actually reached from an existing older database. See
-//! `docs/errors.md`.
+//! migrations (v11 content addressing, v12 `degraded_reason`), the v14 MCP
+//! table drop and, above all, that each one is actually reached from an
+//! existing older database. See `docs/errors.md`.
 
 use super::*;
 use crate::snapshot::*;
@@ -170,5 +170,57 @@ fn v11_migration_survives_a_rerun_and_a_partial_application() {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read user_version");
         assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+    });
+}
+
+/// v14 removes the MCP marketplace: an existing v13 database must lose its
+/// MCP tables and MCP sync-state rows on startup, and keep everything else.
+#[test]
+fn the_mcp_tables_are_dropped_when_an_existing_v13_database_starts_up() {
+    with_temp_data_root(|temp_root| {
+        let path = temp_root.join("marketplace.db");
+        let conn = open_raw_conn(&path);
+        conn.execute_batch(
+            "CREATE TABLE marketplace_sync_state (
+                scope TEXT PRIMARY KEY,
+                last_success_at TEXT,
+                last_attempt_at TEXT,
+                last_error TEXT,
+                next_refresh_at TEXT,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                source_host TEXT,
+                payload_sha256 TEXT,
+                etag TEXT,
+                degraded_reason TEXT
+            );
+            INSERT INTO marketplace_sync_state (scope, schema_version) VALUES
+                ('leaderboard_all', 13), ('mcp_registry', 13), ('mcp_registry:github', 13);
+            CREATE TABLE mcp_registry_server (id TEXT PRIMARY KEY);
+            CREATE TABLE mcp_curated_server (id TEXT PRIMARY KEY);
+            CREATE VIRTUAL TABLE mcp_registry_server_fts USING fts5(id);
+            CREATE VIRTUAL TABLE mcp_curated_server_fts USING fts5(id);
+            PRAGMA user_version = 13;",
+        )
+        .expect("seed a v13 database");
+        drop(conn);
+
+        let conn = create_connection().expect("startup migration over a v13 database");
+        let mcp_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'mcp_%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count mcp tables");
+        assert_eq!(mcp_tables, 0, "every MCP table and index is gone");
+
+        let scopes: Vec<String> = conn
+            .prepare("SELECT scope FROM marketplace_sync_state ORDER BY scope")
+            .expect("prepare")
+            .query_map([], |row| row.get(0))
+            .expect("scopes")
+            .collect::<Result<_, _>>()
+            .expect("collect scopes");
+        assert_eq!(scopes, vec!["leaderboard_all".to_string()]);
     });
 }

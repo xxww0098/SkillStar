@@ -6,7 +6,15 @@
 use skillstar_gateway::ApplyError;
 
 /// Write `agent_id`'s loopback files, or restore them when `model_ref` is empty.
+///
+/// Codex keeps its own writer: its config takeover is field-level, not
+/// whole-file, so it goes through the codex module with the model selected.
+/// `claude-code` is the board's spelling of the file agent `claude`; the
+/// gateway maps it.
 pub fn save_agent(agent_id: &str, model_ref: &str) -> Result<(), ApplyError> {
+    if agent_id == "codex" {
+        return crate::models::save_codex_model(model_ref);
+    }
     skillstar_gateway::apply_gateway(agent_id, model_ref)
 }
 

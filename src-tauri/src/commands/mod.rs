@@ -4,8 +4,6 @@ pub mod decision;
 pub mod github;
 pub mod instances;
 pub mod marketplace;
-pub mod mcp_commands;
-pub mod mcp_marketplace;
 pub mod models_commands;
 pub mod network;
 pub mod patrol;

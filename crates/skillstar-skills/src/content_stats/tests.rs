@@ -11,7 +11,10 @@ fn set_env(dir: &std::path::Path) {
     }
 }
 
-fn restore_env(previous_data: Option<std::ffi::OsString>, previous_hub: Option<std::ffi::OsString>) {
+fn restore_env(
+    previous_data: Option<std::ffi::OsString>,
+    previous_hub: Option<std::ffi::OsString>,
+) {
     unsafe {
         match previous_data {
             Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
@@ -71,9 +74,17 @@ fn fingerprint_hits_and_misses_correctly() {
         // A retargeted link must miss even when both trees are identical.
         let other = skillstar_core::infra::paths::hub_root().join("repos/other-repo");
         std::fs::create_dir_all(other.join("skills/demo")).unwrap();
-        std::fs::write(other.join("skills/demo/SKILL.md"), "---\nname: demo\n---\nbody").unwrap();
+        std::fs::write(
+            other.join("skills/demo/SKILL.md"),
+            "---\nname: demo\n---\nbody",
+        )
+        .unwrap();
         skillstar_core::infra::fs_ops::remove_symlink(&hub.join("demo")).unwrap();
-        skillstar_core::infra::fs_ops::create_symlink(&other.join("skills/demo"), &hub.join("demo")).unwrap();
+        skillstar_core::infra::fs_ops::create_symlink(
+            &other.join("skills/demo"),
+            &hub.join("demo"),
+        )
+        .unwrap();
         assert!(!baseline_unchanged("demo", &snapshot2.content_hash));
     })();
     restore_env(previous_data, previous_hub);

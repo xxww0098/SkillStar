@@ -128,8 +128,7 @@ pub enum BillingCycle {
 // ts-rs maps i64/u64 to `bigint`, but these values only ever cross the wire as
 // JSON through serde_json + Tauri IPC + `JSON.parse`, none of which round-trip
 // a real bigint — they all produce a plain JS `number`. Epoch seconds and token
-// counters are nowhere near 2^53. (Same rationale as `McpServerEntry`'s
-// timestamp fields in skillstar-models.)
+// counters are nowhere near 2^53.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "ManualQuota.ts")]
 pub struct ManualQuota {

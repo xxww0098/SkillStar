@@ -2,6 +2,27 @@
 
 状态：active
 
+## 2026-09-29 - 卡片轮播点新 Agent 图标要卡 ~3 秒才点亮（impeccable 式复合包）
+
+- Symptom: 已装的 `pbakaus/impeccable` 式复合包（同一技能在仓库里按 harness 各放一份），点轮播上一个还没链过的 Agent 图标（如第一次点 Cursor），要停顿数秒才从灰变亮；单技能仓库不会。D-046 已经把这条路径改成「只扫描现有 checkout，不 clone、不 fetch」，但停顿仍在。
+- Root cause: `Inventory::materialize_for`/`materialize_dirs` 选中新 harness 副本所在目录后，靠 `add_sparse_checkout_dirs_in_session` → `apply_sparse_checkout_in_session` 的尾部 `git checkout` 把它物化到磁盘。该 `checkout` 用的是 partial-clone 默认的逐 blob 懒抓取：目录里每个文件各开一次 smart-protocol 往返。`blobs.rs` 早就测过这个量级（22 个 `SKILL.md` blob 懒抓 39 s、批量一次抓 1.8 s），但那次优化只接进了 `inventory.rs` 里判定 identity 用的 manifest blob 读取，没有接进真正落盘这一步。
+- Fix: `add_sparse_checkout_dirs_in_session` 在跑 sparse-checkout + `git checkout` 之前，先用 `git ls-tree -r HEAD -- <新目录>`（新增 `tree::list_tree_entries_under`，按路径限定，不必列整棵树）列出新目录下的全部 blob，一次 `prefetch_blobs_in_session` 批量抓完，checkout 再执行时这些 blob 已在本地，不再逐个懒抓。列表或抓取失败时静默回退到原来的懒抓路径，不影响正确性。
+- Self-check: `cargo test -p skillstar-git --lib ops::tests::add_sparse_checkout_dirs_batches_new_blobs_into_one_fetch`（一个新目录两个 blob，断言 promisor pack 只多一份，而不是两份）。
+
+## 2026-09-29 - 点一个 harness 图标，cache 里物化出全部同名副本
+
+- Symptom: 装 `pbakaus/impeccable` 这类仓库时，点 Cursor 图标或 `--agent cursor`，cache 里 12 份同名副本全部被检出（离线夹具实测 13 个 `SKILL.md`），延迟物化形同虚设。
+- Root cause: `materialize_deferred_matching` 的过滤条件是 `name_hit || prefix_hit`，而两个调用方总会传入技能名，于是 basename 相同的延迟副本全部命中。只放一份延迟副本的旧测试看不出来。
+- Fix: 改由 `inventory::materialize_for` 实现：对每个请求用 `Inventory::copy_for` 按 `choose_copy` 的 harness 列只选一份，与安装 chooser 走同一张表。不指定 harness 的请求不再物化任何副本。规则见 [D-075](decisions.md#d-075异形分发仓库只有一张选副本表)。
+- Self-check: `cargo test -p skillstar-skills harness_install_materializes_only_the_chosen_copy`（逐个 Agent 断言 cache 里只有代表副本加被选中的那一份）。
+
+## 2026-09-29 - `plugin.json` 的 `skills` 字符串被当成技能路径，测试碰巧通过
+
+- Symptom: `pbakaus/impeccable` 的 `.claude-plugin/plugin.json` 写 `"skills": "./.claude/skills/"`，manifest 声明的目录却变成了 `.claude`，深度 1 的扫描什么也找不到。
+- Root cause: `deserialize_path_list` 把字符串和数组都压平成一组「技能路径」，一律取父目录；而字符串形式在 Claude 插件规范里是容器。原来的测试用 `"./skills/"`，它刚好靠「总会补上约定的 `skills` 目录」通过，没有测到声明路径本身。
+- Fix: `PathList` 保留原始形状。字符串推入容器本身，数组每项推入父目录。规则见 [D-075](decisions.md#d-075异形分发仓库只有一张选副本表)。
+- Self-check: `cargo test -p skillstar-skills plugin_manifest::`，其中 `plugin_json_string_is_a_container_path` 断言结果包含 `.claude/skills`、不包含 `.claude`。
+
 ## 2026-09-22 - 新 IDE 的本地写回还没有被官方应用重启确认
 
 - Symptom: Safe Storage、byte_crypto、RSA 回调和 `enc:v1` 的本地往返测试通过，但 Windsurf、Kiro、Qoder、CodeBuddy、Trae、Zed、ZCode 的官方应用还没有在重启后认过这次写回。
@@ -9,26 +30,19 @@
 - Fix: 不把这些应用标成多开 Verified，也不因为缺一次人工记录就降级已测过的本地读写。配额解析缺字段就省略窗口，不补 0。私有接口形状变了必须返回明确错误。
 - Self-check: 各 provider 的 fetcher 测试，以及 `src/features/usage/lib/desktopApps.test.ts` 里「Pending 不进多开入口」。
 
-## 2026-09-12 - MCP 筛选条的 Claude Code 图标退回通用 LobeHub 字标
+## 2026-09-09 - 卡片 Agent rail 被 overflow 裁掉，看起来不像 Settings
 
-- Symptom: MCP 配置页工具栏的 Agent 筛选芯片里，Claude Code 和 VS Code 显示成灰色通用字标，而不是品牌图标；同一批目标在机群卡片底栏却正常。
-- Root cause: `AgentFilterPill` 的条目类型是 `Pick<AgentProfile, "id" | "icon" | "display_name">`，`AgentIcon` 按 `profile.id` 查 `agentIcons` 表；MCP 传进来的 `id` 是 `McpToolId`（`claude-code` / `vscode`），与 Agent profile id（`claude` / `github-copilot`）拼写不同的那两个目标查表落空，静默降级成 `LobeHubMono`。机群卡片走 `AgentTargetCarousel`，`id` 与 `profile` 本就分离，所以同一目标在那里正常。
-- Fix: 条目契约拆成消费方的筛选值 `id` 与品牌来源 `profile`（与 `AgentTargetCarouselItem` 同一形状；旧的 `{ id, icon, display_name }` 形状已无法通过类型检查）；Skills 工具栏传 `{ id: profile.id, profile }`，MCP 传 `{ id: toolId, profile }`。
-- Self-check: `bun run test src/components/ui/AgentFilterPill.test.tsx`；MCP 配置页筛选条上 Claude Code 与 VS Code 应显示各自品牌图标而不是通用字标。
-
-## 2026-09-09 - MCP 机群 Agent rail 被卡片 overflow 裁掉，看起来不像 Settings
-
-- Symptom: 机群卡片底栏红框里的 Agent 图标显示不全；工具栏只露出前几个，和设置里已启用的集合对不上。
+- Symptom: 卡片底栏的 Agent 图标显示不全；工具栏只露出前几个，和设置里已启用的集合对不上。
 - Root cause: 轮播曾把 Settings 已关掉但仍写入的 target 留在行里占位；底栏左侧状态 `shrink-0`、轨道 `justify-end`，外层卡片又 `overflow-hidden`。横向滚动容器一旦被内容撑开，`scrollWidth === clientWidth`，箭头不出现，多出来的图标被圆角裁掉。工具栏 `AgentFilterPill` 默认最多露出 4 个，同一批目标在筛选条上再被截一层。
-- Fix: `AgentTargetCarousel` 只绘制 `profile.enabled` 的项；机群卡片和工具栏共用 `selectMcpAgentTargets`。底栏把剩余宽度交给轨道并 `overflow-hidden` 强制内层滚动；MCP 筛选条的可见个数跟随当前目标集，不再默认 cap 在 4。契约见 [Frontend](features/frontend/README.md#agent-手动激活投影) 与 [MCP](features/mcp/README.md#前端职责)。
-- Self-check: `bun run test src/components/shared/AgentTargetCarousel.test.tsx src/features/mcp/components/McpFleetCard.test.tsx`；设置里启用/关掉若干带 MCP 映射的 Agent 后，机群卡片与工具栏应是同一批图标，窄卡片悬停出现滚动箭头而不是缺图标。
+- Fix: `AgentTargetCarousel` 只绘制 `profile.enabled` 的项。底栏把剩余宽度交给轨道并 `overflow-hidden` 强制内层滚动；筛选条的可见个数跟随当前目标集，不再默认 cap 在 4。契约见 [Frontend](features/frontend/README.md#agent-手动激活投影)。
+- Self-check: `bun run test src/components/shared/AgentTargetCarousel.test.tsx`；设置里启用/关掉若干 Agent 后，卡片与工具栏应是同一批图标，窄卡片悬停出现滚动箭头而不是缺图标。
 
 ## 2026-09-09 - 保活弹窗不能把 React Activity 交给 Dialog.Portal asChild
 
-- Symptom: 在 MCP 机群点「添加」打开新建窗口时，WKWebView 整页落到错误边界：`getComputedStyle` 的参数不是 `Element`；组件栈是 `Activity` → Radix `SlotClone`。
+- Symptom: 在保活页打开新建弹窗时（最初在已删除的 MCP 页复现），WKWebView 整页落到错误边界：`getComputedStyle` 的参数不是 `Element`；组件栈是 `Activity` → Radix `SlotClone`。
 - Root cause: `Dialog.Portal` 对每个子节点做 Presence + `asChild`，ref 回调里无条件 `getComputedStyle(node)`。React `Activity` 不是宿主节点；保活为了停用隐藏页的焦点锁、又保留表单草稿，曾把它当作 Portal 的唯一子节点。jsdom 的 `getComputedStyle` 不按 WebKit 校验类型，所以单测原先绿着。
 - Fix: Portal 的 asChild 目标必须是宿主 Element；`Activity` 只包在这层节点里面。保活语义不变：页面不活跃时停用模态生命周期、保留子树。契约见 [Frontend](features/frontend/README.md#桌面性能)。
-- Self-check: `bun run test src/components/ui/ModalShell.test.tsx src/components/layout/KeepAliveOutlet.test.tsx`；在 MCP 机群打开新建窗口，确认表单而不是错误边界；切走再回来草稿还在。
+- Self-check: `bun run test src/components/ui/ModalShell.test.tsx src/components/layout/KeepAliveOutlet.test.tsx`；在任一保活页打开带表单的弹窗，确认表单而不是错误边界；切走再回来草稿还在。
 
 ## 2026-09-08 - Provider 的空凭据投影不能作为编辑补丁回传
 
@@ -39,10 +53,10 @@
 
 ## 2026-09-08 - 保活页面的弹窗不能只隐藏父页面或卸载表单
 
-- Symptom: 切走页面后旧弹窗仍挡住新页；改为直接返回空节点后，返回页面又丢失 MCP 表单未保存的名称、命令和环境变量。
+- Symptom: 切走页面后旧弹窗仍挡住新页；改为直接返回空节点后，返回页面又丢失弹窗表单未保存的输入。
 - Root cause: body portal 不在保活页的 DOM 隐藏边界内；卸载整个弹窗则会清掉子表单自身的 React 状态。只把草稿放在外层的测试夹具不能覆盖真实消费路径。
 - Fix: 页面活跃上下文跨过 portal 边界；在 portal 内保留表单子树、停用模态交互生命周期。契约与实现选择见 [Frontend](features/frontend/README.md#桌面性能)。
-- Self-check: `bun run test src/components/layout/KeepAliveOutlet.test.tsx src/components/ui/ModalShell.test.tsx`；直接使用真实 MCP 表单编辑后切页，核对草稿提交值、焦点锁释放和快捷键恢复。
+- Self-check: `bun run test src/components/layout/KeepAliveOutlet.test.tsx src/components/ui/ModalShell.test.tsx`；直接使用真实弹窗表单编辑后切页，核对草稿提交值、焦点锁释放和快捷键恢复。
 
 ## 2026-09-08 - 详情面板复用时，旧请求把正文覆盖到新技能
 
@@ -578,7 +592,7 @@
 - Coverage added (13 new tests across 4 modules):
   - `detect_project_agents` (skillstar-projects/scan.rs, +4): detects codex when `.codex/skills` exists; does NOT detect when only the parent `.codex` exists (AGENTS.md "strictly on the skills dir itself"); detects multiple distinct agents with zero ambiguity; openclaw never appears at project level (global-only, empty `project_skills_rel`).
   - `dir_size_recursive` + `count_hub_skills` (src-tauri/commands/github.rs, +2): symlink target content contributes 0 bytes (1 MB via symlink excluded, only the real 5-byte file counted); valid dir / valid symlink / broken symlink / stray file all classified correctly.
-  - MCP `sync_server_to_tool` / `sync_server_all_tools` (skillstar-models/mcp/tests.rs, +2): unknown tool_id surfaces an error instead of silent success; `sync_server_all_tools` returns exactly `MCP_TOOL_IDS.len()` results, one per known tool.
+  - (Removed with MCP management, D-074) MCP `sync_server_to_tool` / `sync_server_all_tools` (skillstar-models/mcp/tests.rs, +2): unknown tool_id surfaces an error instead of silent success; `sync_server_all_tools` returns exactly `MCP_TOOL_IDS.len()` results, one per known tool.
   - Usage `local_import` (skillstar-usage/local_import.rs, +4): missing auth.json, empty `{}`, blank access_token, unsupported catalog_id — all return clear user-facing messages (see dedicated entry below).
 - Note: a first draft of the symlink-size test placed the symlink target *inside* the scanned root, which made it count as a normal subdirectory and falsely appeared to reveal a bug in `dir_size_recursive`. The function is correct; the test was restructured to put the target outside the root. Recorded here so the trap isn't re-hit.
 
@@ -721,7 +735,7 @@
 ## 2026-06-25 - Models workbench: Claude Code wrote empty ANTHROPIC_MODEL; ZCode removed as provider tool
 
 - Symptom: 模型工作台 (Models Hub) 功能异常。用户机器上 `~/.claude/settings.json` 的 `env` 块出现 `"ANTHROPIC_MODEL": ""`（空字符串），导致 Claude Code 模型解析失效。
-- Root cause: `sync_to_claude_code_inner` 无条件把 `model` 参数写进 `ANTHROPIC_MODEL`。当 provider 未设 `default_model` 且激活时未显式指定 model 时，链路（前端 `useAgentActivation.activate` → `activate_tool` 命令 → `crud::activate_tool` 的 model resolution → `sync_to_claude_code`）会让 model 解析成空字符串 `""`，原样写入，产生无效配置。同一次还移除了 ZCode 作为模型工作台 provider tool（`sync_to_zcode`/`unsync_zcode` 及相关分支），但保留 `tool_sync::resolve_zcode_config_path()` —— 它被 MCP 子系统（`zcode_v2_opencode_mcp_remove`）和 Usage 子系统（`switch_zcode`）跨子系统复用，删除会破坏编译。
+- Root cause: `sync_to_claude_code_inner` 无条件把 `model` 参数写进 `ANTHROPIC_MODEL`。当 provider 未设 `default_model` 且激活时未显式指定 model 时，链路（前端 `useAgentActivation.activate` → `activate_tool` 命令 → `crud::activate_tool` 的 model resolution → `sync_to_claude_code`）会让 model 解析成空字符串 `""`，原样写入，产生无效配置。同一次还移除了 ZCode 作为模型工作台 provider tool（`sync_to_zcode`/`unsync_zcode` 及相关分支），但保留 `tool_sync::resolve_zcode_config_path()` —— 它当时被 MCP 子系统（`zcode_v2_opencode_mcp_remove`，已随 D-074 删除）和 Usage 子系统（`switch_zcode`）跨子系统复用，删除会破坏编译。
 - Fix:
   - `sync_to_claude_code_inner`：`ANTHROPIC_MODEL` 改用新增的 `trim_or_null(model)` helper —— 空/空白 model 返回 `Value::Null`，由 `merge_json_env_write` 当作"移除该键"处理（与 Haiku/Sonnet/Opus 空值语义一致），不再写入无效的 `""`。
   - 模型工作台范围移除 ZCode：前端 `agentRegistry.ts`（`ProviderToolId` 联合、`PROVIDER_AGENTS`、`CONFIG_FILE_TOOLS`）、`AgentToolIcon.tsx`；后端 `tool_sync` 的 `sync_to_zcode`/`unsync_zcode`、`paths_files.rs` 各 `zcode` 分支、`backup_merge.rs` 的 `resync_active_tools` 分支、`types.rs` 注释；`providers/crud.rs` `activate_tool` 校验分支；Tauri 命令层 `tools.rs`（activate/deactivate/update_tool_settings/push_provider_to_tool_config/resync_tool/detect_tool_installation）。MCP/Usage/Projects/SSH/providers-balance 等子系统的 zcode 引用**全部保留**。
@@ -763,17 +777,10 @@
 
 ## 2026-07-14 - 共享 Agent skills 目录导致本机 Agent 被误发现和误启用
 
-- Symptom: Skill、卡组和 MCP 卡片底部的 Agent SVG 列表与 Settings 的实际 Agent 状态不一致；已经卸载的 Agent 仍可能出现在 Skill/卡组里，MCP 卡片则固定显示全部受支持工具。
+- Symptom: Skill 和卡组卡片底部的 Agent SVG 列表与 Settings 的实际 Agent 状态不一致；已经卸载的 Agent 仍可能出现在 Skill/卡组里。
 - Root cause: `installed` 曾由 binary、桌面应用、配置根和 skills 目录综合推断，并被当成 `enabled` 的默认值。目录是部署目标而不是身份信号；共享 `~/.agents/skills` 或卸载残留会让探测产生不可消除的 false positive。继续叠加更多例外只会把不同 Agent 的生命周期耦合到同一路径。
-- Fix: 删除本机 Agent 安装探测、探测元数据和探测驱动的默认值；所有 profile 默认关闭，Settings 开关成为唯一激活来源。Skill、卡组、Project、CLI 隐式目标和 MCP rail 统一按手动 `enabled` 投影；MCP rail 不再叠加 tool 安装探测。冻结 IPC 字段 `installed` 仅镜像 `enabled`。
-- Self-check: 即使 PATH、应用目录、配置根和共享 skills 目录都存在，空偏好注册表仍必须返回全部关闭；首次手动 toggle 后对应 profile 才进入各 rail；关闭后立即消失。MCP adapter 覆盖 `claude -> claude-code` 映射和 Settings 顺序，不再需要 tool status 才显示目标。
-
-## 2026-07-10 - Claude Code 统一后旧 Desktop Chat MCP 可能变成不可见孤儿
-
-- Symptom: 移除独立 `claude-desktop` Agent 后，旧版 SkillStar 已写入 `claude_desktop_config.json` 的 MCP 仍可能在 Desktop Chat 中运行，但主 store/UI 不再显示或清理它；若配置 JSON 损坏，宽松解析还可能把整个文件重写为空对象。
-- Root cause: Claude Code 的 Desktop Code 与 CLI 共享 `~/.claude.json`，而 Desktop Chat 的 `claude_desktop_config.json` 是官方明确分离的产品配置。直接删除旧 adapter 会丢失清理证据；直接保留隐藏写入又会在用户不可见时继续投影命令和凭证。
-- Fix: 公开层只保留 `claude-code`。旧 `claude-desktop=true` 仅作为 cleanup tombstone：永不 upsert，只按旧名称严格解析并移除对应 Chat MCP；成功后持久化为 `false`，失败保留 `true` 供重试。rename/delete 使用克隆 store 做事务式编排，清理失败不提交新名称/删除状态；严格 JSON 清理保留其它字段与 server，malformed 输入原文不动。前端过滤 legacy id，并统一显示投影失败警告。
-- Self-check: 覆盖 legacy true/false、rename old/new、delete、malformed JSON 保留 store 证据、其它 Chat 字段不变，以及公开 `MCP_TOOL_IDS` 只有一个 Claude Code。
+- Fix: 删除本机 Agent 安装探测、探测元数据和探测驱动的默认值；所有 profile 默认关闭，Settings 开关成为唯一激活来源。Skill、卡组、Project 和 CLI 隐式目标统一按手动 `enabled` 投影。冻结 IPC 字段 `installed` 仅镜像 `enabled`。
+- Self-check: 即使 PATH、应用目录、配置根和共享 skills 目录都存在，空偏好注册表仍必须返回全部关闭；首次手动 toggle 后对应 profile 才进入各 rail；关闭后立即消失。
 
 ## 2026-07-10 - Models Agent 设置切换供应商会串写上一家的参数
 
@@ -795,13 +802,6 @@
 - Root cause: `PageToolbar` 的 filters 容器 `<div ref={filtersRef} onWheel={...}>` 用滚轮量驱动横向滚动。来源下拉是 Radix `Popover.Content`，通过 `Popover.Portal` 渲染到 `document.body`，DOM 上不在 filters 内部；但 React synthetic event 沿 **React 组件树** 冒泡，会跨 portal 传播回这个仍是其 React 祖先的 `onWheel` handler。handler 只判断 `scrollWidth > clientWidth`，没有校验事件是否真的源自 filters 的 DOM 子树，于是把下拉里的滚动也当成 filters 滚动执行。
 - Fix: 在 `onWheel` 开头加 `if (!el.contains(e.target as Node)) return;` DOM 归属守卫。portal 出去的下拉内容不是 `el` 的 DOM 后代会被直接跳过；真正的 filter pills 是 `el` 后代，横向滚动照常。用真实 DOM 关系而非 React 树关系判断事件归属。
 - Self-check: 窗口窄到 filters 溢出时，鼠标在真正的 filter pills 上滚动仍应横向滚动 topbar；打开来源（或任何 portal 下拉）后在其内容上滚动，topbar 必须保持不动。任何经 portal 渲染、但 React 树上是 filters 后代的浮层，都不应再触发 topbar 滚动。
-
-## 2026-08-13 - MCP 写入路径宽松解析：畸形配置被静默清空，畸形 store 让全部 MCP 永久丢失
-
-- Symptom: 用户 `~/.claude.json`（或 codex/opencode/zcode 配置）有语法错误、临时不可读时，点一次 MCP 开关就把整个文件替换成只含 `mcpServers` 的新 JSON，Claude Code 的其它设置全部消失；`~/.skillstar/config/mcp_servers.json` 解析失败时 MCP 页面显示为空，随后任意一次写入把用户全部 MCP server 永久覆盖。
-- Root cause: 写入路径的读函数把「文件不存在」和「存在但读/解析失败」混为一谈，都回退成空 Map / `McpStore::default()`；而写入是整文件 `write` 或 `tmp+rename` 替换。宽松解析在只读场景（计数、探测）无害，在「读-改-写」场景等于把解析失败翻译成"用户没有配置"。store 侧还没有写前备份，覆盖后无从恢复。
-- Fix: 读函数区分三态——不存在/空文件视为空配置并继续；读失败、解析失败、根对象或目标键类型不对一律返回错误，原文件不动。四条 upsert 与对应 remove 路径（claude-code/kiro/cursor 的 `mcpServers`、opencode 的 `mcp`、codex/grok 的 `mcp_servers` TOML、zcode 的 `mcp.servers`）统一走同一对 strict reader，legacy Desktop Chat 的 `_strict` 变体退化为别名。store 解析失败额外把原文件另存为 `.corrupt.<epoch_ms>`（同内容复用同一份，避免每次进页面堆一份）并把错误传播到命令层；`write_mcp_store` 覆盖已存在文件前复用 `tool_sync::create_rolling_backup`。
-- Self-check: 对每条写入路径写一个「畸形文件存在 → 调用返回 Err → 文件字节完全不变」的测试；store 侧另外验证 `.corrupt.<ts>` 副本内容等于原文、重复读只留一份副本、二次写入留下内容等于旧版本的 `.bak.<ts>`。同时保留正向用例：缺失文件仍会被创建、既有的无关键（如 `theme`）不被改动。
 
 ## 2026-08-13 - 装第二个技能会永久锁死整个仓库；崩溃残留的 staging 会伪装成"无 lock entry 的已装技能"
 
@@ -837,3 +837,10 @@
 - Root cause: 两个缺陷叠加。① `install_from_source` → `scan_repo_preferring_local_cache_for_skill` 只要本地存在 repo cache 检出就直接扫描它，从不 fetch；而发现新技能的巡逻走的是网络路径看到了上游新增。本地检出停在旧提交，`choose_install_skills` 找不到 `pr`，返回"not found / may have been deleted or renamed"。② `GhostSkillCard` 的 `catch {}` 注释写着"Error handled by parent"，但父级 `installGhostSkill` 只是把错误继续抛出，没有任何 toast——整条 ghost 安装路径是唯一没有错误提示的安装入口。
 - Fix: `scan_repo_preferring_local_cache_for_skill` 新增 `required_skills` 参数（`install_from_source` 传入显式请求的技能名）：缓存扫描后若任一显式身份不可解析（`find_target_skill` 与 `nameless_root_skill` 双重判定），warn 并回退到 `fetch_repo_scanned_detailed_in_session` 拉最新再扫；无显式请求时保持纯缓存快路径。前端新增 `handleInstallGhost`，失败时 `toast.error` 显示原因，与 `handleInstall` 一致。
 - Self-check: `pipeline_fetches_stale_cache_when_requested_skill_is_missing` 回归测试——先装 alpha 建立缓存，上游再提交 pr，第二次安装必须成功而不是报"not found"；前端测试断言 ghost 安装 reject 时 `toast.error` 被调用且包含原因。
+
+## 2026-10-11 - 非标准布局技能的轮播图标每次点击都走网络 fetch，图标卡顿数秒
+
+- Symptom: `trycua/cua` 的 `cua-driver`（lock `source_folder` 为 `libs/cua-driver/rust/Skills/cua-driver`）这类不在优先目录（`skills/`、`.<harness>/skills/`）的技能，点技能卡底部未链接的 Agent SVG 图标会卡数秒才点亮；布局规范的技能（如 `impeccable`）同样操作是毫秒级。
+- Root cause: 上一条目给 `scan_repo_preferring_local_cache_for_skill` 加的「显式请求的技能在本地不可解析就 fetch 重扫」判定，只看**浅扫描**（`full_depth=false`，仅优先目录）的结果。深路径技能的 `SKILL.md` 永远不出现在浅扫里，即使 lockfile 记录的 `source_folder` 已在该 checkout 物化、hub 链接完好，每次 harness 点击仍被判为「缓存缺失」，强制 `clone_or_fetch_repo_at_in_session`：git fetch → worktree 校验 → `reset --hard` → baseline 刷新 → 稀疏重应用，全链秒级。
+- Fix: `all_resolvable` 增加第三个判据 `recorded_install_payload_on_disk`：lockfile 里该技能（大小写不敏感、同 remote URL）的 `source_folder` 在此 checkout 内仍带 `SKILL.md` 即视为可解析，不 fetch。`source_folder` 为 `None`、含 `..` 段、或磁盘上已不存在时仍走原 fetch 回退。代价：上游此后新增的 harness 副本对本次点击不可见（缓存按定义滞后），与既有 cache-local 契约一致。
+- Self-check: `installed_monorepo_skill_reuses_cached_checkout_without_fetch`——深路径技能装一次后毒化 remote 与 cache origin，第二个 harness 点击必须离线成功且 lock 的 `source_folder` 不变；修复前该测试会进入 fetch 并因 remote 不可达而失败。

@@ -87,7 +87,7 @@ pub fn detect_new_skills_in_cached_repos(session: &GitOperationSession) -> Vec<R
             if !discovered.iter().any(|skill| skill.folder_path.is_empty()) {
                 discovered.extend(upstream_added_skills(&repo_dir, session));
             }
-            annotate_discovered_skills(discovered, &repo_url)
+            annotate_discovered_skills(discovered, &repo_dir, &repo_url)
                 .into_iter()
                 .filter(|skill| !skill.already_installed)
                 .map(|skill| RepoNewSkill {
@@ -283,6 +283,7 @@ mod tests {
                 content_hash_version: None,
                 installed_at: "2026-08-21T00:00:00Z".into(),
                 source_folder: Some("skills/one".into()),
+                pinned: false,
             });
             lock.save(&lockfile::lockfile_path())?;
 

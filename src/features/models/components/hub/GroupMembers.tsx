@@ -5,6 +5,10 @@ import type { SavedGroup } from "@/lib/ipc/commands/models";
 import { modelsKeys } from "../../api/keys";
 import { useSavedGroups } from "../../api/groups";
 
+const FIELD = "rounded-lg border border-border/60 bg-background px-2 py-1 font-mono text-xs";
+const ACTION =
+  "shrink-0 rounded-lg border border-border/60 bg-background px-2.5 py-1 text-xs text-foreground transition hover:bg-muted/50";
+
 /**
  * Saved-group members. Add and remove send the whole list to the gateway
  * writer. A refusal is shown as the returned text, and the list stays.
@@ -33,44 +37,8 @@ export function GroupMembers() {
   }
 
   return (
-    <div className="shrink-0 space-y-3 px-4 py-3">
-      <form
-        aria-label="new group"
-        className="flex flex-wrap gap-1"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const id = newId.trim();
-          if (!id) return;
-          const member = newMember.trim();
-          void commit(id, member ? [member] : []).then((saved) => {
-            if (saved) {
-              setNewId("");
-              setNewMember("");
-            }
-          });
-        }}
-      >
-        <input
-          aria-label="new group id"
-          value={newId}
-          onChange={(event) => setNewId(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg bg-muted/40 px-2 py-1 text-xs"
-        />
-        <input
-          aria-label="new group member"
-          value={newMember}
-          onChange={(event) => setNewMember(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg bg-muted/40 px-2 py-1 text-xs"
-        />
-        <button type="submit" className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40">
-          Save group
-        </button>
-        {errors[newId.trim()] ? (
-          <p role="alert" className="basis-full text-xs text-muted-foreground">
-            {errors[newId.trim()]}
-          </p>
-        ) : null}
-      </form>
+    <div className="space-y-2">
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">分组</div>
       {groups.map((group) => (
         <GroupRow
           key={group.id}
@@ -99,6 +67,47 @@ export function GroupMembers() {
           }}
         />
       ))}
+      <form
+        aria-label="new group"
+        className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 p-2.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const id = newId.trim();
+          if (!id) return;
+          const member = newMember.trim();
+          void commit(id, member ? [member] : []).then((saved) => {
+            if (saved) {
+              setNewId("");
+              setNewMember("");
+            }
+          });
+        }}
+      >
+        <div className="flex gap-1.5">
+          <input
+            aria-label="new group id"
+            placeholder="分组名"
+            value={newId}
+            onChange={(event) => setNewId(event.target.value)}
+            className={`min-w-0 flex-1 ${FIELD}`}
+          />
+          <input
+            aria-label="new group member"
+            placeholder="provider/model"
+            value={newMember}
+            onChange={(event) => setNewMember(event.target.value)}
+            className={`min-w-0 flex-[1.4] ${FIELD}`}
+          />
+          <button type="submit" className={ACTION}>
+            Save group
+          </button>
+        </div>
+        {errors[newId.trim()] ? (
+          <p role="alert" className="text-xs text-destructive">
+            {errors[newId.trim()]}
+          </p>
+        ) : null}
+      </form>
     </div>
   );
 }
@@ -122,8 +131,17 @@ function GroupRow({
 }) {
   const label = plainText(group.id);
   return (
-    <div role="group" aria-label={`group members ${label}`.trim()} className="space-y-1">
-      {label ? <div className="truncate text-xs text-muted-foreground">{label}</div> : null}
+    <div
+      role="group"
+      aria-label={`group members ${label}`.trim()}
+      className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5"
+    >
+      {label ? (
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="truncate text-xs font-medium text-foreground">{label}</span>
+          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{group.members.length}</span>
+        </div>
+      ) : null}
       <ul className="space-y-0.5">
         {group.members.map((member) => (
           <MemberLine
@@ -135,7 +153,7 @@ function GroupRow({
         ))}
       </ul>
       <form
-        className="flex gap-1"
+        className="flex gap-1.5"
         onSubmit={(event) => {
           event.preventDefault();
           onAdd();
@@ -143,16 +161,17 @@ function GroupRow({
       >
         <input
           aria-label={`member ${label}`.trim()}
+          placeholder="provider/model"
           value={draft}
           onChange={(event) => onDraft(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg bg-muted/40 px-2 py-1 text-xs"
+          className={`min-w-0 flex-1 ${FIELD}`}
         />
-        <button type="submit" className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40">
+        <button type="submit" className={ACTION}>
           Add
         </button>
       </form>
       {error ? (
-        <p role="alert" className="text-xs text-muted-foreground">
+        <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
       ) : null}
@@ -171,19 +190,19 @@ function MemberLine({
 }) {
   const { data } = useQuery({
     queryKey: modelsKeys.modelEfforts(member),
-    queryFn: () => tauriInvoke<string[]>("model_efforts", { id: member }),
+    queryFn: () => tauriInvoke("model_efforts", { id: member }),
   });
   const levels = data ?? [];
   const { model, effort } = splitMember(member, levels);
   const shown = plainText(model);
   return (
-    <li className="flex items-center gap-1">
+    <li className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-muted/30">
       <div className="flex min-w-0 flex-1 flex-col">
-        {shown ? <span className="truncate text-xs">{shown}</span> : <span />}
+        {shown ? <span className="truncate font-mono text-xs">{shown}</span> : <span />}
         {levels.length > 0 ? (
           <ul aria-label={`effort levels for ${shown}`} className="flex w-fit flex-wrap gap-x-2">
             {levels.map((level) => (
-              <li key={level} className="text-xs text-muted-foreground">
+              <li key={level} className="text-[11px] text-muted-foreground">
                 {level}
               </li>
             ))}
@@ -195,7 +214,7 @@ function MemberLine({
           aria-label={`effort for ${shown}`}
           value={levels.includes(effort) ? effort : ""}
           onChange={(event) => onFix(event.target.value ? `${model}:${event.target.value}` : model)}
-          className="rounded-lg bg-muted/40 px-2 py-1 text-xs text-foreground"
+          className="shrink-0 rounded-md border border-border/60 bg-background px-1.5 py-0.5 text-xs text-foreground"
         >
           <option value="">·</option>
           {levels.map((level) => (
@@ -209,7 +228,7 @@ function MemberLine({
         type="button"
         aria-label={shown ? `Remove ${shown}` : "Remove"}
         onClick={onRemove}
-        className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+        className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
       >
         Remove
       </button>

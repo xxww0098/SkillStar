@@ -158,6 +158,7 @@ fn divergence_in_a_repo_sibling_blocks_the_shared_checkout_before_reset() {
     let targets = ["alpha", "beta"].map(|name| crate::repo_scanner::SkillInstallTarget {
         id: name.to_string(),
         folder_path: format!("skills/{name}"),
+        pinned: false,
     });
     crate::repo_scanner::install_from_repo_at(
         &cache,
@@ -219,6 +220,7 @@ fn shared_checkout_waits_until_every_divergent_skill_is_resolved() {
     let targets = ["alpha", "beta"].map(|name| crate::repo_scanner::SkillInstallTarget {
         id: name.to_string(),
         folder_path: format!("skills/{name}"),
+        pinned: false,
     });
     crate::repo_scanner::install_from_repo_at(
         &cache,
@@ -299,10 +301,12 @@ fn checkout_root_skill_cannot_discard_an_unresolved_nested_skill() {
         crate::repo_scanner::SkillInstallTarget {
             id: "root".to_string(),
             folder_path: String::new(),
+            pinned: false,
         },
         crate::repo_scanner::SkillInstallTarget {
             id: "beta".to_string(),
             folder_path: "skills/beta".to_string(),
+            pinned: false,
         },
     ];
     crate::repo_scanner::install_from_repo_at(
@@ -372,10 +376,12 @@ fn stale_missing_source_folder_cannot_discard_the_whole_shared_checkout() {
         crate::repo_scanner::SkillInstallTarget {
             id: "alpha".to_string(),
             folder_path: "skills/alpha".to_string(),
+            pinned: false,
         },
         crate::repo_scanner::SkillInstallTarget {
             id: "beta".to_string(),
             folder_path: "skills/beta".to_string(),
+            pinned: false,
         },
     ];
     crate::repo_scanner::install_from_repo_at(

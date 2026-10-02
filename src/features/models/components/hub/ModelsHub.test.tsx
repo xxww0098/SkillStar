@@ -41,6 +41,7 @@ beforeEach(() => {
     if (cmd === "get_saved_groups") return [];
     if (cmd === "get_profile_names") return [];
     if (cmd === "get_listen_mode") return "loopback";
+    if (cmd === "get_loopback_origin") return "http://127.0.0.1:21847";
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -70,7 +71,7 @@ describe("ModelsHub", () => {
     fireEvent.click(screen.getByRole("heading", { name: "Agents" }));
     fireEvent.click(screen.getByRole("heading", { name: "Providers" }));
     fireEvent.click(screen.getByRole("heading", { name: "Gateway" }));
-    fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
+    fireEvent.click(await screen.findByRole("button", { name: "DeepSeek" }));
 
     expect(new Set(mockInvoke.mock.calls.map((call) => call[0]))).toEqual(
       new Set([
@@ -80,6 +81,7 @@ describe("ModelsHub", () => {
         "get_saved_groups",
         "get_profile_names",
         "get_listen_mode",
+        "get_loopback_origin",
       ]),
     );
     expect(nav.setSelectedProviderId).toHaveBeenCalledTimes(1);
@@ -623,7 +625,7 @@ describe("ModelsHub", () => {
 
   it("presses loopback and keeps the agent address on 127.0.0.1", async () => {
     let mode = "loopback";
-    mockInvoke.mockImplementation(async (cmd: string, args?: { mode?: string }) => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "get_models_board") return BOARD;
       if (cmd === "get_recent_calls") return [];
       if (cmd === "get_routing_page") return { provider: null, groups: [] };
@@ -631,7 +633,8 @@ describe("ModelsHub", () => {
       if (cmd === "get_profile_names") return [];
       if (cmd === "get_listen_mode") return mode;
       if (cmd === "save_listen_mode") {
-        mode = typeof args?.mode === "string" ? args.mode : mode;
+        const next = (args as { mode?: unknown } | undefined)?.mode;
+        mode = typeof next === "string" ? next : mode;
         return null;
       }
       throw new Error(`unexpected ${cmd}`);
@@ -674,5 +677,171 @@ describe("ModelsHub", () => {
     expect(within(group).getByRole("button", { name: "局域网", pressed: false })).toBeTruthy();
     expect(group.textContent).toContain("127.0.0.1");
     expect(group.textContent).not.toContain("0.0.0.0");
+  });
+
+  it("shows the model each agent is on, and stays quiet when unset", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") {
+        return {
+          agents: [
+            {
+              id: "opencode",
+              name: "OpenCode",
+              credential_summary: "",
+              loopback_label: "",
+              model_label: "deepseek/pro",
+            },
+            {
+              id: "codex",
+              name: "Codex",
+              credential_summary: "",
+              loopback_label: "",
+              model_label: "",
+            },
+          ],
+          providers: [],
+          gateway: [],
+        };
+      }
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const opencode = await screen.findByRole("button", { name: /OpenCode/ });
+    expect(within(opencode).getByText("deepseek/pro")).toBeTruthy();
+    const codex = screen.getByRole("button", { name: /Codex/ });
+    expect(within(codex).getByText("未选择模型")).toBeTruthy();
+  });
+
+  it("filters the picker as you type and walks it with the keyboard", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_model_choices") {
+        return [
+          { id: "deepseek/pro", label: "deepseek/pro" },
+          { id: "deepseek/reasoner", label: "deepseek/reasoner" },
+          { id: "openai/gpt-test", label: "openai/gpt-test" },
+          { id: "group/fast", label: "group/fast" },
+        ];
+      }
+      if (cmd === "save_agent_model") return null;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
+
+    const search = await screen.findByRole("textbox", { name: "搜索模型" });
+    const list = screen.getByRole("list", { name: "model choices" });
+    const choiceButtons = () =>
+      within(list)
+        .getAllByRole("button")
+        .filter((button) => !(button.getAttribute("aria-label") ?? "").startsWith("重命名"));
+    expect(choiceButtons().length).toBe(4);
+
+    fireEvent.change(search, { target: { value: "reasoner" } });
+    expect(choiceButtons().length).toBe(1);
+    expect(within(list).getByRole("button", { name: "deepseek/reasoner" })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "zzz" } });
+    expect(within(list).getByText("没有匹配的模型")).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "" } });
+    // One ArrowDown walks to the second choice; Enter saves it.
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_agent_model", {
+        agentId: "codex",
+        modelRef: "deepseek/reasoner",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  it("marks the current model in the picker and refreshes the board after a save", async () => {
+    let boardCalls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") {
+        boardCalls += 1;
+        return {
+          agents: [
+            {
+              id: "codex",
+              name: "Codex",
+              credential_summary: "",
+              loopback_label: "",
+              model_label: boardCalls > 1 ? "group/fast" : "deepseek/pro",
+            },
+          ],
+          providers: [],
+          gateway: [],
+        };
+      }
+      if (cmd === "get_model_choices") {
+        return [
+          { id: "deepseek/pro", label: "deepseek/pro" },
+          { id: "group/fast", label: "group/fast" },
+        ];
+      }
+      if (cmd === "save_agent_model") return null;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
+
+    const list = await screen.findByRole("list", { name: "model choices" });
+    const current = within(list).getByRole("button", { name: "deepseek/pro" });
+    expect(current.querySelector("svg.lucide-check")).not.toBeNull();
+    expect(within(list).getByRole("button", { name: "group/fast" }).querySelector("svg.lucide-check")).toBeNull();
+
+    fireEvent.click(within(list).getByRole("button", { name: "group/fast" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_agent_model", {
+        agentId: "codex",
+        modelRef: "group/fast",
+      });
+    });
+    await waitFor(() => {
+      expect(boardCalls).toBeGreaterThan(1);
+    });
+  });
+
+  it("offers the gateway endpoints with a copy action once the origin is known", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") return BOARD;
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      if (cmd === "get_loopback_origin") return "http://127.0.0.1:21847";
+      throw new Error(`unexpected ${cmd}`);
+    });
+    renderHub(<ModelsHub {...navigation()} />);
+
+    const list = await screen.findByRole("list", { name: "接入端点" });
+    expect(within(list).getByText(/127\.0\.0\.1:21847\/v1\/chat\/completions/)).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "复制 OpenAI 端点" })).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "复制 Anthropic 端点" })).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/https:\/\//);
+    expect(text).not.toContain("api.openai.com");
   });
 });

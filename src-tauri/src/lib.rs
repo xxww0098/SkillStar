@@ -147,7 +147,6 @@ pub fn run() {
         .manage(commands::updater::PendingUpdate::new())
         .manage(commands::decision::DecisionState::new())
         .manage(commands::models_commands::ProvidersWriteLock::new())
-        .manage(commands::mcp_commands::McpWriteLock::new())
         .setup(|app| {
             // Channel-aware mutation gate must be active before any skill mutation path runs
             skillstar_channels::policy::install_global_policy();
@@ -249,18 +248,6 @@ pub fn run() {
             commands::marketplace::ai_search_marketplace_local,
             commands::marketplace::sync_marketplace_scope,
             commands::marketplace::get_marketplace_sync_states,
-            commands::mcp_marketplace::query_mcp_market_servers_local,
-            commands::mcp_marketplace::list_mcp_publishers_local,
-            commands::mcp_marketplace::get_mcp_market_server_detail_local,
-            commands::mcp_marketplace::sync_mcp_market_scope,
-            commands::mcp_marketplace::get_mcp_source_sync_states,
-            commands::mcp_marketplace::list_mcp_sources,
-            commands::mcp_marketplace::add_mcp_source,
-            commands::mcp_marketplace::remove_mcp_source,
-            commands::mcp_marketplace::set_mcp_source_enabled,
-            commands::mcp_marketplace::mcp_market_install_plan,
-            commands::mcp_marketplace::mcp_market_install_preview,
-            commands::mcp_marketplace::mcp_market_install,
             commands::github::check_gh_installed,
             commands::github::github_auth_status,
             commands::github::github_auth_start,
@@ -431,6 +418,7 @@ pub fn run() {
             commands::models_commands::save_profile,
             commands::models_commands::apply_profile,
             commands::models_commands::get_listen_mode,
+            commands::models_commands::get_loopback_origin,
             commands::models_commands::save_listen_mode,
             commands::models_commands::save_model_name,
             commands::models_commands::model_efforts,
@@ -453,19 +441,6 @@ pub fn run() {
             commands::models_commands::detect_provider_conflicts,
             commands::models_commands::resync_tool,
             commands::models_commands::test_provider_connection,
-            commands::mcp_commands::list_mcp_servers,
-            commands::mcp_commands::mcp_tool_statuses,
-            commands::mcp_commands::probe_mcp_server,
-            commands::mcp_commands::parse_mcp_paste,
-            commands::mcp_commands::create_mcp_server,
-            commands::mcp_commands::update_mcp_server,
-            commands::mcp_commands::delete_mcp_server,
-            commands::mcp_commands::set_mcp_tool_enabled,
-            commands::mcp_commands::sync_mcp_server,
-            commands::mcp_commands::sync_all_mcp,
-            commands::mcp_commands::import_mcp_from_tool,
-            commands::mcp_commands::reorder_mcp_servers,
-            commands::mcp_commands::get_mcp_presets,
             commands::updater::check_app_update,
             commands::updater::download_and_install_update,
             commands::updater::restart_after_update,

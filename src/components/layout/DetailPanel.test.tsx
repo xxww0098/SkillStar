@@ -80,7 +80,7 @@ describe("DetailPanel", () => {
     });
     expect(screen.getByText("Current")).toBeInTheDocument();
     expect(screen.queryByText("Previous")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "阅读 SKILL.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看 SKILL.md" }));
     expect(await screen.findByRole("heading", { name: "Current manual" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "current" })).toBeInTheDocument();
   });

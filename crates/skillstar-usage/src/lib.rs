@@ -22,6 +22,7 @@ pub mod crypto;
 pub mod dock_usage;
 pub mod fetchers;
 pub mod http_client;
+pub mod instances;
 pub mod local_import;
 pub mod oauth;
 pub mod oauth_clients;
@@ -35,6 +36,7 @@ pub mod tool_paths;
 pub mod tool_store;
 pub mod trae_platform;
 pub mod urlencode;
+pub mod usage_switch;
 pub mod vscdb;
 
 pub use catalog::{AuthMode, CatalogEntry, catalog};
@@ -43,13 +45,17 @@ pub use subscription::{
     UsageWindow,
 };
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 /// Serializes tests that mutate process-wide environment variables
-/// (`SKILLSTAR_DATA_DIR`, …). Mirrors `skillstar_skills::test_env_lock`.
+/// (`SKILLSTAR_DATA_DIR`, `SKILLSTAR_TOOL_SYNC_HOME`, …). Mirrors
+/// `skillstar_skills::test_env_lock` and is backed by the same
+/// [`test_support::ENV_LOCK`] the switch-engine tests hold, so no two
+/// env-mutating tests in this crate can interleave.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
-    use std::sync::{Mutex, OnceLock};
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+    &test_support::ENV_LOCK
 }
 
 /// Crate-level error type (wraps anyhow under the hood for IO/serialization).

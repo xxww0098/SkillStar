@@ -1,6 +1,6 @@
 //! Thin adapters for desktop-app multi-instance (create / start / stop / list).
 
-use skillstar_app::instances::{self, AppInstanceDto, DesktopAppDto};
+use skillstar_usage::instances::{self, AppInstanceDto, DesktopAppDto};
 use skillstar_core::infra::error::AppError;
 
 #[tauri::command]

@@ -6,14 +6,13 @@ import { HScrollRow } from "./HScrollRow";
 
 /** One filterable entry: the consumer's filter value plus the Agent it paints. */
 export interface AgentFilterItem {
-  /** Consumer-owned filter value: an Agent profile id (Skills) or an MCP tool id. */
+  /** Consumer-owned filter value: e.g. an Agent profile id. */
   id: string;
   /**
    * Agent whose brand glyph and display name paint the entry. Deliberately
-   * separate from `id`: the value vocabulary belongs to the consumer, so MCP
-   * filters by `McpToolId` (`claude-code`) while the Agent profile id is
-   * `claude`. Resolving the glyph from `id` silently falls back to the generic
-   * LobeHub glyph for every id the two vocabularies spell differently.
+   * separate from `id`: the value vocabulary belongs to the consumer and may
+   * spell ids differently from Agent profiles. Resolving the glyph from `id`
+   * would silently fall back to the generic LobeHub glyph for those ids.
    */
   profile: Pick<AgentProfile, "id" | "icon" | "display_name">;
 }
@@ -34,7 +33,7 @@ interface AgentFilterPillProps {
 
 /**
  * Segmented "All + per-icon" filter pill. Extracted from the skills Toolbar so
- * every mode (skills, MCP, …) shares one interactive filter affordance instead
+ * every mode shares one interactive filter affordance instead
  * of re-implementing the segmented control. Clicking an icon toggles it as the
  * active filter; clicking it again (or "All") clears the filter.
  */

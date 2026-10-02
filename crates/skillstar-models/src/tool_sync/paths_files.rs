@@ -56,10 +56,8 @@ pub fn resolve_claude_desktop_binding_path() -> Result<PathBuf> {
 
 /// `~/.zcode/v2/config.json` — ZCode desktop config (OpenCode schema).
 ///
-/// Retained as a shared path resolver: the MCP subsystem uses it to clean up
-/// stale OpenCode-style `mcp` entries from this file
-/// (`mcp::zcode_v2_opencode_mcp_remove`), and the Usage subsystem resolves it
-/// for `switch_zcode`. ZCode is **no longer** a model-workbench provider tool
+/// Retained as a shared path resolver: the Usage subsystem resolves it for
+/// `switch_zcode`. ZCode is **no longer** a model-workbench provider tool
 /// (no `sync_to_zcode`), so this path is intentionally not wired into
 /// `resolve_tool_config_path` anymore.
 pub fn resolve_zcode_config_path() -> Result<PathBuf> {

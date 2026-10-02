@@ -39,17 +39,6 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 更新 Git-backed Skill 前会检查完整目录；发现本地修改时先停止，让用户选择保留为可改名的 `.local` 本地副本，或明确丢弃修改后继续。
 - My Skills 可切换本机、SSH 远端与 GitHub 共享频道工作流。
 
-### MCP 服务器管理
-
-- 一份统一的 MCP server store，投影到每个受支持 Agent 工具各自的原生配置格式；写入前备份、只改 SkillStar 管理的键、失败按目标回滚。
-- 商店的目录来自多个来源的合并结果：官方 MCP Registry 作为主源（也是唯一许可明确允许长期本地镜像的源），GitHub MCP Registry 作为补充 stars / license / readme 的展示镜像。跨源按 `server.json` 的反向域名全名去重，同一个 server 不会重复上架。
-- registry 标记为 deprecated 或已被更新版本取代的 server 仍然列出，但会带标注，不会和健康的 server 一样被推荐。
-- 一个 server 可能同时提供远程端点和多种本地包。SkillStar 优先选远程 streamable-http（零工具链依赖、零本地代码执行），其次才是容器化和各语言包，并且会先检查这些运行时在你的机器上是否真的存在——`npx` 没装就不会把 npm 包推荐给你。
-- 安装本地 server 前，可以看到将要执行的**完整未截断命令**和它在 `PATH` 上解析出的实际二进制路径。命令始终直接执行，不经过 shell。
-- 表单按 registry 声明的语义渲染：必填项、密钥（掩码输入）、下拉可选值、文件路径选择器和默认值。密钥只写入用户级配置，SkillStar 不写任何项目级 MCP 配置文件，因此密钥不会随项目进入版本控制。
-
-> 自定义 registry 源、商店筛选/排序/分页和安装前确认对话框的界面正在接入中；上述能力当前已在后端就绪。
-
 ### Usage 用量面板
 
 - catalog 由代码和测试维护，按 OAuth、API Key 或手动录入模式接入。
@@ -146,7 +135,7 @@ skillstar add vercel-labs/agent-skills --copy        # 强制复制，不创建 
 skillstar add vercel-labs/agent-skills --list
 ```
 
-`install` 与 `add` 等价；未加 `-y` 时会按需选择 Skill、Agent、Project/Global scope 和部署方式。`-y` 默认 Project，并只使用 Settings 中已手动启用的 Agent；若一个也没有则报错。`--agent` / `--all` 是显式覆盖。
+`install` 与 `add` 等价；未加 `-y` 时会按需选择 Skill、Agent、Project/Global scope 和部署方式。`-y` 默认 Project，并只使用 Settings 中已手动启用的 Agent；若一个也没有则报错。`--agent` / `--all` 是显式覆盖。tree URL 里带子路径（如上面第 4 行）会钉住该副本，之后不随 Agent 换副本，更新也跟着这个路径；只有卸载才解钉。
 
 ### 管理
 

@@ -438,12 +438,10 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".omp", "agent", "skills"]),
         ".omp/skills",
     ),
-    // Google's Gemini CLI — `~/.gemini`, the same root its MCP target writes
-    // (`~/.gemini/settings.json`). Deliberately *not* the `antigravity` row
-    // above: that one is Google Antigravity, a different product that merely
-    // shares the `~/.gemini` prefix, so it cannot stand in for this profile. Without this row the `gemini-cli` MCP target has no
-    // Agent profile to hang its per-server toggle and Agent filter on
-    // (`src/features/mcp/lib/agentTargets.ts`).
+    // Google's Gemini CLI — `~/.gemini`. Deliberately *not* the `antigravity`
+    // row above: that one is Google Antigravity, a different product that
+    // merely shares the `~/.gemini` prefix, so it cannot stand in for this
+    // profile.
     (
         "gemini-cli",
         "Gemini CLI",
@@ -461,8 +459,7 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         ".dsh/skills",
     ),
     // WorkBuddy (Tencent) — not yet in vercel-labs/skills main. Global
-    // ~/.workbuddy/skills, project .workbuddy/skills. MCP is a separate
-    // target writing ~/.workbuddy/mcp.json.
+    // ~/.workbuddy/skills, project .workbuddy/skills.
     (
         "workbuddy",
         "WorkBuddy",

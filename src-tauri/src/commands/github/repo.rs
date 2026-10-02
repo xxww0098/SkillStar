@@ -9,6 +9,7 @@ use skillstar_skills::git::gh_manager;
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::repo_scanner;
+use skillstar_skills::source_resolver;
 use tauri::{AppHandle, Manager, State};
 
 use crate::core::github_auth::GitHubAuthState;
@@ -95,14 +96,10 @@ pub async fn publish_skill_to_github(
             let install_target = repo_scanner::SkillInstallTarget {
                 id: target.id,
                 folder_path: target.folder_path,
+                pinned: false,
             };
             git_facade
-                .graduate_local_skill_from_scan(
-                    &skill_name_clone,
-                    &scan.source,
-                    &git_url,
-                    &install_target,
-                )
+                .graduate_local_skill_from_scan(&skill_name_clone, &scan.spec, &install_target)
                 .map_err(|error| error.to_string())
         })
         .await;
@@ -146,7 +143,7 @@ pub async fn scan_github_repo(
         if let Ok(scan) = &scan {
             // History is a convenience dropdown; a write failure must never
             // fail the scan itself.
-            if let Err(error) = repo_history::upsert_entry(&scan.source, &scan.source_url) {
+            if let Err(error) = repo_history::upsert_entry(&scan.spec.short, &scan.spec.repo_url) {
                 tracing::warn!(target: "cmd", error = %error, "failed to record repo history");
             }
         }
@@ -159,8 +156,7 @@ pub async fn scan_github_repo(
 
 #[tauri::command]
 pub async fn install_from_scan(
-    repo_url: String,
-    source: String,
+    spec: source_resolver::Source,
     skills: Vec<repo_scanner::SkillInstallTarget>,
     session_id: Option<String>,
     app: AppHandle,
@@ -171,7 +167,7 @@ pub async fn install_from_scan(
         .map_err(|error| AppError::Git(error.to_string()))?;
     let session_id = facade.session().id().to_string();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
-        let install_result = facade.install_from_scan(&source, &repo_url, &skills);
+        let install_result = facade.install_from_scan(&spec, &skills);
         skillstar_skills::installed_skill::invalidate_cache();
         let installed = install_result?;
         Ok(installed)

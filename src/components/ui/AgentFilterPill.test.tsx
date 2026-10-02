@@ -8,18 +8,18 @@ type FilterProfile = Pick<AgentProfile, "id" | "icon" | "display_name">;
 const CLAUDE: FilterProfile = { id: "claude", icon: "lobe:claude", display_name: "Claude Code" };
 const COPILOT: FilterProfile = { id: "github-copilot", icon: "lobe:github-copilot", display_name: "GitHub Copilot" };
 
-function mcpItem(toolId: string, profile: FilterProfile): AgentFilterItem {
+function item(toolId: string, profile: FilterProfile): AgentFilterItem {
   return { id: toolId, profile };
 }
 
 describe("AgentFilterPill", () => {
   it("paints an entry from its profile when the filter value uses another vocabulary", () => {
-    // MCP filters by tool id, whose spelling differs from the Agent profile id
-    // for claude-code (claude) and vscode (github-copilot). Resolving the glyph
+    // A consumer may filter by ids spelled differently from the Agent profile id
+    // (claude-code vs claude, vscode vs github-copilot). Resolving the glyph
     // from the filter value silently fell back to the generic LobeHub mark.
     const { container } = render(
       <AgentFilterPill
-        items={[mcpItem("claude-code", CLAUDE), mcpItem("vscode", COPILOT)]}
+        items={[item("claude-code", CLAUDE), item("vscode", COPILOT)]}
         value={null}
         onChange={() => {}}
       />,
@@ -32,7 +32,7 @@ describe("AgentFilterPill", () => {
 
   it("still reports the consumer's filter value and labels the entry with the profile name", () => {
     const onChange = vi.fn();
-    render(<AgentFilterPill items={[mcpItem("claude-code", CLAUDE)]} value={null} onChange={onChange} />);
+    render(<AgentFilterPill items={[item("claude-code", CLAUDE)]} value={null} onChange={onChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Claude Code" }));
     expect(onChange).toHaveBeenCalledWith("claude-code");

@@ -25,7 +25,8 @@ export function ProfileNames() {
   }
 
   return (
-    <div className="shrink-0 space-y-3 px-4 py-3">
+    <div className="space-y-2">
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">配置档</div>
       <ul aria-label="profiles" className="space-y-0.5">
         {names.map((item) => {
           const shown = plainText(item);
@@ -45,7 +46,7 @@ export function ProfileNames() {
                       setError(caught instanceof Error ? caught.message : "");
                     });
                 }}
-                className="w-full truncate rounded-lg px-2 py-1 text-left text-xs text-foreground hover:bg-muted/40"
+                className="w-full truncate rounded-lg px-2.5 py-1.5 text-left text-xs text-foreground transition hover:bg-muted/40"
               >
                 {shown}
               </button>
@@ -58,7 +59,7 @@ export function ProfileNames() {
       ) : null}
       <form
         aria-label="save profile"
-        className="flex flex-wrap gap-1"
+        className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 p-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           void tauriInvoke("save_profile", {
@@ -79,27 +80,35 @@ export function ProfileNames() {
       >
         <input
           aria-label="profile name"
+          placeholder="配置档名称"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg bg-muted/40 px-2 py-1 text-xs"
+          className="w-full rounded-lg border border-border/60 bg-background px-2 py-1 text-xs"
         />
-        <input
-          aria-label="profile agent"
-          value={agentId}
-          onChange={(event) => setAgentId(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg bg-muted/40 px-2 py-1 text-xs"
-        />
-        <input
-          aria-label="profile model"
-          value={modelRef}
-          onChange={(event) => setModelRef(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg bg-muted/40 px-2 py-1 text-xs"
-        />
-        <button type="submit" className="rounded-lg px-2 py-1 text-xs text-foreground hover:bg-muted/40">
-          Save profile
-        </button>
+        <div className="flex gap-1.5">
+          <input
+            aria-label="profile agent"
+            placeholder="agent id"
+            value={agentId}
+            onChange={(event) => setAgentId(event.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-2 py-1 font-mono text-xs"
+          />
+          <input
+            aria-label="profile model"
+            placeholder="provider/model"
+            value={modelRef}
+            onChange={(event) => setModelRef(event.target.value)}
+            className="min-w-0 flex-[1.4] rounded-lg border border-border/60 bg-background px-2 py-1 font-mono text-xs"
+          />
+          <button
+            type="submit"
+            className="shrink-0 rounded-lg border border-border/60 bg-background px-2.5 py-1 text-xs text-foreground transition hover:bg-muted/50"
+          >
+            Save profile
+          </button>
+        </div>
         {error ? (
-          <p role="alert" className="basis-full text-xs text-muted-foreground">
+          <p role="alert" className="text-xs text-destructive">
             {error}
           </p>
         ) : null}

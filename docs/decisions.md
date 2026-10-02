@@ -238,7 +238,7 @@
 ## D-026：官方 MCP Registry 为一等主源，GitHub registry 降级为增强镜像
 
 - 日期：2026-08-13
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：MCP catalog 此前只有一个源 `api.mcp.github.com`，实测已从 `/v0` 返回 `Deprecation: true`，且其条款没有任何公开的再分发说明——我们却把它整表镜像进本地 SQLite 快照并长期保留。同期官方 registry `registry.modelcontextprotocol.io/v0.1` 已可用，实测 21338 条（`version=latest`），而 GitHub 侧只有 218 条；官方 registry 的 Terms of Service 明确把数据置于 **CC0 1.0**，是当前唯一在许可上允许长期本地镜像的源。两者字段互补：GitHub 侧额外带 stars / license / readme，官方侧没有。
 - 决策：官方 registry 成为 `priority: 0` 的一等主源且 `mirrorable: true`；GitHub registry 降为 `priority: 10` 的**展示增强镜像**（`mirrorable: false`），只在合并时补 stars/license/readme 这类官方源不携带的字段，不再定义"有哪些 server"。`priority` 语义被明确为**权威性**而非偏好：用户自定义源起始 `priority: 50`，永远输给内置源，但可以补充无人收录的 server。分页熔断按源设置而非全局——主源被截断会让 catalog 永久性不完整（`max_pages: 400`），而受 `x-ratelimit-limit: 10` 限制的镜像宁可截断也不该被反复敲打（`max_pages: 50`）。
 - 后果：获得——catalog 从 218 条扩到 21363 条（跨源合并 189、deprecated 243）；镜像行为落在明确许可的源上；单源故障不再等于 catalog 归零。承担——本地快照体量与同步耗时上一个数量级，因此**全量未分页读取不再是可用的浏览路径**（见 D-027 的分页要求）；聚合 fingerprint 必须改为按 `id=hash` 排序哈希，否则新增/移除一个源或某源答 304 都会产生假"已变更"。
@@ -247,7 +247,7 @@
 ## D-027：跨源合并主键是 `server.json` 的 `name`，不是各源的 id
 
 - 日期：2026-08-13
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：接入第二个源之后必须回答"两行是不是同一个 server"。每个 registry 都发自己的 id，同一个 server 在官方源和 GitHub 源下 id 不同；用 id 做主键会把同一个 server 重复上架两次，用户看到两张卡片、装出两份配置。`server.json` 的 `name` 是反向域名全名（如 `io.github.netdata/mcp-server`），schema 要求发布者证明命名空间所有权，是唯一跨源稳定的身份。
 - 决策：合并以 `name` 为主键；同名多版本按 registry 的 `isLatest` 收敛。安装时记录到 `McpServerEntry::registry_name` 的也是这个 `name`，与写进工具配置的 sanitized key 明确区分——后者是配置键，会因为字符清洗而丢失身份信息。
 - 后果：获得——跨源去重正确，"已安装"判定与更新检测可以摆脱 server 名字字符串的模糊匹配。承担——`name` 缺失或畸形的源行会被合并逻辑跳过；这是刻意的，一个连身份都没有的条目也无法被安全地安装或更新。
@@ -256,7 +256,7 @@
 ## D-028：不接入 PulseMCP 与 mcp.so
 
 - 日期：2026-08-13
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：调研阶段评估了六个第三方 MCP 目录作为潜在补充源。两个必须明确拒绝，否则日后会被反复重新提出。
 - 决策：**不接入 PulseMCP**——其 API 公告 2026-09 全量日落，且在此之前已强制 API key；接一个已宣布死期的源，是在为一次确定的返工付费。**不接入 mcp.so**——其 `robots.txt` 明确禁止 `/api/`，抓取它等于无视站点的明示意愿，与我们对自己数据源的要求不一致。
 - 后果：获得——避免重复调研，避免把工程投入押在确定会消失的端点上。承担——放弃这两家独有的收录条目。Smithery（`useCount` 热度、预抓取 `tools[]`）与 Glama（`spdxLicense`）未被拒绝，但只可能作为**运行时代理查询**的展示补充，不做长期镜像：两家都没有公开的再分发条款，与 D-026 的镜像许可要求冲突。
@@ -265,7 +265,7 @@
 ## D-029：MCP 运行时形态优先 remote，且以本机实际可用运行时为准
 
 - 日期：2026-08-13
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：一个 `server.json` 可以同时给出 `remotes[]` 与 `packages[]`。此前的选择逻辑是"有 packages 就取 `packages[0]`，否则取 `remotes[0]`"——由数组顺序决定在用户机器上执行什么，既不是安全判断也不是可用性判断。
 - 决策：优先级为 `remotes[streamable-http]` > `remotes[sse]`（可用但传输已弃用，必须标注） > `packages[oci]`（容器隔离，最安全的本地形态） > `packages[mcpb]` > `packages[npm/pypi/nuget/cargo]`。remote 优先的理由是它零工具链依赖、零本地代码执行，且规范把 OAuth 授权明确限定为 HTTP 传输的能力。**rank 不是最终答案**：`runtimeHint` 只是提示，每个 stdio 候选都要对真实 `PATH` 探测一次（复用与真正启动进程相同的 resolver），不可用的候选排在所有可用候选之后——没装 Docker 的机器上 npm 包胜过 OCI 包。选择器返回**全部候选 + 推荐项**而非单一结果，用户可以覆盖。
 - 后果：获得——默认选择同时是安全排序和可用性排序；"为什么推荐这个"可以在 UI 上解释（rank + 可用性 + 阻塞原因）。承担——`mcpb` 候选被列出但标为不可安装（SkillStar 没有"下载并校验 `fileSha256`"这一步，而 registry 明确不做校验），无 `runtimeHint` 的 `cargo` 候选同样不可安装（`cargo install` 是持久安装而非一次性运行器）；这两条是如实陈述能力边界，旧行为在这两种形态上本来也跑不起来，只是失败得更晚更难懂。
@@ -402,7 +402,7 @@
 - 日期：2026-08-30
 - 状态：accepted
 - 背景：impeccable 风格的技能包（如 `xxww0098/rust-skills`）把正文放在 `skills/<name>/`，同时在仓库根放一份同 identity 的 `SKILL.md`，好让一层扫描器把整仓当作技能目录。SkillStar 的 root-first 发现把根 `SKILL.md` 当成唯一技能，`folder_path` 为空就会把整个仓库（测试、脚本、各 harness 副本）链接进 Hub。全深度扫描也会因根路径优先级 4 赢过 `skills/`。
-- 决策：发现阶段先剥掉「根 SKILL.md 与同 identity 嵌套 catalog **或** harness 副本」的垫片，再执行 root-first / 去重。`skills/` 与 `source/skills/` 同为规范目录，优先级高于 `.cursor/skills`、`.dsh/skills`、`.claude/skills` 等 harness 副本。真正的单技能仓库（根 SKILL.md 没有同名嵌套副本）行为不变。`.claude-plugin/plugin.json` 的 `skills` 同时接受字符串路径和数组。
+- 决策：发现阶段先剥掉「根 SKILL.md 与同 identity 嵌套 catalog **或** harness 副本」的垫片，再执行 root-first / 去重。`skills/` 与 `source/skills/` 同为规范目录，优先级高于 `.cursor/skills`、`.dsh/skills`、`.claude/skills` 等 harness 副本。真正的单技能仓库（根 SKILL.md 没有同名嵌套副本）行为不变。`.claude-plugin/plugin.json` 的 `skills` 同时接受字符串路径和数组（语义见 [D-075](#d-075异形分发仓库只有一张选副本表)：字符串是容器）。
 - 后果：`skillstar add xxww0098/rust-skills` 安装 `skills/rust`（若 catalog 存在），不再把整仓当技能。只有 harness 副本、没有 catalog 时也安装该副本而不是整仓。一层扫描器仍可继续使用根垫片。
 - 证据：`crates/skillstar-skills/src/{pack_layout.rs,discovery.rs,plugin_manifest.rs}` 及 `pack_root_shim_installs_canonical_skills_folder` / `root_shim_plus_harness_copies_does_not_install_the_repo_root` 测试。
 
@@ -411,8 +411,8 @@
 - 日期：2026-08-31
 - 状态：accepted
 - 背景：rust-skills / impeccable 这类包在每个 Agent 目录下各放一份独立技能。卡片 SVG 轮播原先只 `toggle` 已安装链接，Install 按钮走 `install_skill(url, name)` → 发现后 `global_deploy` 到全部已启用 Agent。发现层又漏了 `.cursor/skills` 与 `.dsh/skills`，根垫片会把 `source_folder` 写成空，Hub 链整仓。
-- 决策：安装单元是含 `SKILL.md` 的 harness 技能目录（或 harness 根，若那才是单元）。未指定 harness 时 catalog `skills/<name>/` 优先；点轮播图标或 CLI 显式单个 `--agent` 时该 harness 文件夹赢。没有该文件夹时的回退见 [D-046](#d-046已安装轮播从-repo-cache-部署且缺-harness-时回退)。稀疏检出保留全部嵌套 `SKILL.md` 父目录，不再按 basename 丢掉 `.agent` / `.agents`。
-- 后果：同一 Hub 名仍只有一条 lock，`source_folder` 跟随最近一次明确请求的 harness。复用仅当现有 `source_folder` 已经是该次解析到的文件夹；否则从同一 clone 改指向（不二次 clone），并先把已链到其他 Agent 的链接钉到当前 payload。轮播未链接图标走 `install_skill(url, name, agentId)`，不得只 `toggle` 当前 Hub。缺 harness 文件夹的行为已由 D-046 修正，不再 fail-closed。
+- 决策：安装单元是含 `SKILL.md` 的 harness 技能目录（或 harness 根，若那才是单元）。未指定 harness 时 catalog `skills/<name>/` 优先；点轮播图标或 CLI 显式单个 `--agent` 时该 harness 文件夹赢。没有该文件夹时的回退见 [D-046](#d-046已安装轮播从-repo-cache-部署且缺-harness-时回退)。稀疏检出保留全部嵌套 `SKILL.md` 父目录，不再按 basename 丢掉 `.agent` / `.agents`（已被 [D-063](#d-063代表副本唯一物化与永不整仓下载) 与 [D-075](#d-075异形分发仓库只有一张选副本表) 取代：每个身份只物化一份，harness 请求只多物化它选中的那一份）。
+- 后果：同一 Hub 名仍只有一条 lock，`source_folder` 跟随最近一次明确请求的 harness——**钉住例外**：tree URL 子路径把 `source_folder` 硬钉死，之后的 harness 请求一律 `Reuse`，不再跟随（见 [D-075](#d-075异形分发仓库只有一张选副本表)）。复用仅当现有 `source_folder` 已经是该次解析到的文件夹；否则从同一 clone 改指向（不二次 clone），并先把已链到其他 Agent 的链接钉到当前 payload。轮播未链接图标走 `install_skill(url, name, agentId)`，不得只 `toggle` 当前 Hub。缺 harness 文件夹的行为已由 D-046 修正，不再 fail-closed。
 - 证据：`resolve_install_skills`、`existing_same_repo_action`、`pin_existing_global_links_to_current_source`、`install_skill(..., agentId)`、`AgentTargetCarousel` 接线测试、`stale_dsh_link_is_rewritten_to_requested_harness`。
 
 ## D-046：已安装轮播从 repo-cache 部署且缺 harness 时回退
@@ -472,7 +472,7 @@
 ## D-052：MCP 指挥中心是 SkillStar 原生形态，只吸收 Hermes 0.21 的平台能力
 
 - 日期：2026-09-02
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：Hermes Agent v0.21（Pantheon）把 MCP 做成单一桌面指挥中心：已安装机群与目录同页、粘贴即导入、后台健康/重新授权、机群 schema token 加 30 天用量、`hermes://` 深链需确认。SkillStar 已有约两万行 FTS catalog、双纪元探测、CursorJack 级命令确认、多 Agent 投影，以及只按 host 跳到 `#mcp`、丢掉 query 的 `skillstar://` 深链。把 Hermes 的单页堆叠搬过来会卡死界面；编造 30 天用量则不诚实——SkillStar 不是 Agent 运行时，看不到调用次数。
 - 决策：① 页面 IA 由 [D-059](#d-059mcp-配置页只留配置与商店) 取代（D-057 指定的「已安装 | 目录」随之作废）：MCP 是配置页（配置 | 商店），不是四 tab 指挥中心。禁止把两万行目录堆在已装列表下面一次滚完；商店是搜索 + 筛选 + 精选安装卡片，发布者是商店内的「精选 | 完整目录」范围而不是页面，完整目录走分页查询。② 「粘贴即解析」落在 `skillstar_models::mcp::parse_pasted_mcp`：社区 `mcpServers` JSON、URL、`npx`/`uvx`/`docker` 命令行、`skillstar://mcp?url|catalog|config|command`。解析只返回草稿，**永不自动写入 store**；UI 必须走现有新建表单或市场安装向导的确认路径。③ 已装列表的 schema 成本用 `tools/list` 里 `tools` 数组的紧凑 JSON 字节数，`schema_tokens = ceil(bytes / 4)`。不引入 tiktoken，不展示 30 天用量。④ 配置页首次挂载时对已装列表做一次顺序探测，上限 8，不在 window focus 上跑。`401 + WWW-Authenticate` 仍是 `authorization-required`，不是失败。⑤ `skillstar://mcp` 的 query 打开确认 UI；跳过确认即失败。不新增 crate，不抄 Hermes 页面。Marketplace 不再放 MCP 发现入口。
 - 后果：获得——粘贴/深链与市场安装共用同一条确认边界，机群能看到真实的 schema 体积和需要重新授权的 server。承担——超过 8 个已装 server 不会在后台全部探测；token 数字是字节估算不是模型 tokenizer；catalog 深链仍依赖本地快照里真有那一行。
@@ -514,12 +514,10 @@
 - 后果：获得——Context/Improvement 的第一刀可在现有 crate 内测试与发布，且不会把教程域带回来。承担——GUI 与频道推送/晋升为 Skill 仍是后续切片；本机 notes 不跨设备。
 - 证据：`crates/skillstar-skills/src/team/`、`crates/skillstar-app/src/cli/team.rs`、[docs/features/team/README.md](./features/team/README.md)。
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 ## D-057：MCP 是配置页，不是指挥中心
 
 - 日期：2026-09-10
-- 状态：superseded by [D-059](#d-059mcp-配置页只留配置与商店)
+- 状态：superseded by [D-059](#d-059mcp-配置页只留配置与商店)；功能已被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 删除
 - 背景：[D-052](#d-052mcp-指挥中心是-skillstar-原生形态只吸收-hermes-021-的平台能力) 吸收了 Hermes 0.21 的平台能力（粘贴解析、探测上限、深链确认、禁止 21k 同页堆叠），但把 MCP 画成 **Fleet | Official** 主分段外加 Tools / Sources 次级 tab。四个入口对一个配置域过重：已装列表才是每天的工作台，目录是添加路径，投影目标和目录源是检查器。工具状态再做成带指标条和筛选的迷你仪表盘，是同一错误的第二次。
 - 决策：MCP 页面是配置页。默认表面是已安装服务器；**目录**是第二个视图（curated publisher grid + 精选卡片，GitHub 钻入仍分页）。Agent 配置与目录源从工具栏打开为检查器，不是对等 tab。推荐芯片只出现在添加表单，目录页不再放第二份推荐条。D-052 的粘贴解析、探测上限、深链确认、Marketplace 不再放 MCP 发现入口，全部保留。
 - 后果：获得——侧栏 MCP 不再假装指挥中心，检查器按需出现。承担——目录源和投影状态要多点一次工具栏图标。
@@ -528,7 +526,7 @@
 ## D-058：curated 发布者的退役由代码注册表驱动清理
 
 - 日期：2026-09-11
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：curated MCP 行是 *code as data*，`seeds::default_curated_mcp_servers()` 是唯一真相，`mcp_curated_server` 由 seeding 对齐。此前 `CURATED_ORDER` 的注释宣称「从顺序表移除一个条目只会把它从 grid 隐藏，行还在库里」，于是每次下线都必须自带一条手写 `DELETE` 迁移——两份真相，必然漂移。同时 [D-057](#d-057mcp-是配置页不是指挥中心) 之后 Official 页面直接读 curated 行，「去掉一个发布者」不再等于「从 grid 隐藏」。本次下线智谱（BigModel）是该场景第一次真实发生。
 - 决策：curated 行的生命周期完全由代码注册表决定。seeding 每次运行都把 id 已不在注册表里的行连同其 FTS 行一起删除（`prune_retired_curated_rows`），不再要求手写迁移；`CURATED_ORDER` 只负责展示顺序与显示名，不再充当隐藏开关。下线一个发布者 = 从注册表与顺序表同时移除。
 - 后果：获得——新增或退役发布者只有一处改动，Official 不会留下孤儿卡片。承担——已装过该发布者服务器的用户，store 条目保留（仍可正常使用、编辑与投影），但目录行消失，因此三态标记只会显示「已安装、无更新」，既不会被判成「有更新」也不会被判成「已弃用」；这是刻意的，没有目录行就没有可比较的来源指纹。要恢复该发布者时重新加回注册表即可，旧 store 条目会重新匹配上。
@@ -537,7 +535,7 @@
 ## D-059：MCP 配置页只留配置与商店
 
 - 日期：2026-09-11
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：[D-057](#d-057mcp-是配置页不是指挥中心) 把四个 tab 收敛成「已安装 | 目录」，方向对，但只搬走了导航，没搬走仪表盘：已装页仍在列表之上压着健康汇总条（全部 / 健康 / 需登录 / 异常芯片 + schema token + 探测上限）、工具栏计数徽章、更新可用徽章、未检查更新文本、常驻的粘贴大文本框和整页拖拽遮罩，每张卡片还各有一个独立探测按钮；添加服务器有四个入口（工具栏按钮、常驻粘贴条、从工具导入按钮、表单里的推荐芯片）；商店页顶部是一整块发布者网格，而它唯一的用途是钻入某一个发布者。这些都是「把运行观测塞进配置页」，不是「配置」也不是「商店」。
 - 决策：配置页只有两个视图，每个视图只答一个问题。**配置** = 已装列表 + 搜索 + 按 Agent 筛选 + 新建/安装/编辑悬浮窗；健康只作为卡片上的状态点，再探一次在编辑悬浮窗的探测面板里——页面不再有健康汇总条、计数/更新徽章、常驻粘贴条、整页拖拽遮罩或每卡探测按钮。**商店** = 搜索 + 筛选 + 精选安装卡片 + 「精选 | 完整目录」范围切换；发布者从页面降级为范围，发布者 grid 与发布者详情子页删除。添加服务器收敛为**一个**入口：工具栏按钮打开一个弹窗，弹窗内用模式切换承载「推荐 / 手动填写 / 粘贴解析 / 从工具导入」四条来源。D-052 的粘贴解析、探测上限（8）、深链确认、禁止 21k 同页堆叠全部保留——只是换了承载面。
 - 后果：获得——一个配置域不再自带仪表盘，工具栏的 4 个动作收敛为 3 个（工具检查器 / 同步 / 添加），添加路径从四个入口变成一条，商店少一层导航。承担——列表上不再一眼看到「几个健康、几个需登录」，要读卡片状态点或打开某张卡片；商店不再有发布者 hero，进完整目录要多点一次范围切换。
@@ -546,7 +544,7 @@
 ## D-060：MCP 商店精选收敛为编程向白名单
 
 - 日期：2026-09-11
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：curated 种子层此前散在 `mod.rs` 内联的发布者小节、`publishers.rs` 的 9 个 `*_curated_servers()` 和一个单独的 `bigmodel.rs` 里，共 21 行，把编程工具和指纹浏览器（AdsPower）、桌面自动化（Cua Driver）、社交发帖（X）、笔记（Notion）、设计、支付、地图、云盘、流量分析混在同一屏；内置推荐芯片（19 项）又把同一片混杂复制了第二份。其中三个种子标识符（`@modelcontextprotocol/server-git`、`server-fetch`、`server-brave-search`）早已被上游归档，装上去就是死的。商店首屏本应是「我们为写代码背书的东西」，混杂之后用户读不出「官方推荐」和「恰好热门」的区别，这个承诺就失效了。
 - 决策：精选是**编程向白名单**，不是「好用的 MCP 合集」。只收写代码与调试会用到的能力（版本控制、代码/文档检索、数据库、容器与云、可观测性），加上通用基础能力（文件系统、网页抓取、记忆、顺序思考、时间）；指纹浏览器、桌面自动化、社交、笔记、设计、支付、地图、云盘、流量分析一律不进精选，它们的发现路径是商店的「完整目录」。判断标准是「它是否让写代码更容易」。落地：种子层从散在 `mod.rs` / `publishers.rs` / `bigmodel.rs` 的发布者小节收敛为**一张 `catalog()` 数据表** + 一个 builder（加一条 server = 加一行 spec）；内置 preset 目录收敛为与 curated `recommended` 集合逐字节对齐的 12 项；被下线的条目（adspower / cua-driver / notion / x / supabase 等）不写删除迁移——[D-058](#d-058curated-发布者的退役由代码注册表驱动清理) 的 `prune_retired_curated_rows` 已让 curated 行的生命周期完全由代码注册表决定。所有收录条目的运行时标识符都对着官方 MCP Registry 与 PyPI 重新核实过（不再沿用归档包的旧名）。
 - 后果：获得——商店首屏每一张卡都能回答「它为什么在编程场景里」；内置兜底目录与 curated `recommended` 不再各自漂移（曾经的 drift 是同一 server 出现两次）；加/删/改条目都是一处改动。承担——想装非编程 MCP 的用户要多点一次「完整目录」；`import_paste.rs` 仍保留 `cua-driver` 作为粘贴命令行识别的一个已知 launcher，因为粘贴导入是通用能力而不是商店条目（该分支确认无用可另行删除）；「纯 docker 包 + 容器内必填环境变量」的 server 暂时进不了精选，原因是安装计划器的 docker 环境变量转发缺陷，不是产品取舍（见 [MCP README](./features/mcp/README.md#marketplace-接缝)）。
@@ -555,7 +553,7 @@
 ## D-061：精选收敛为推荐短名单
 
 - 日期：2026-09-12
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：[D-060](#d-060mcp-商店精选收敛为编程向白名单) 把精选收敛成编程向白名单后还剩 29 行、八个发布者桶——数据库、云与集群、issue 跟踪、抓取、文档转换混在首屏，「推荐」标记只落在 8 条上。用户读这屏时的真实问题是「我装哪几个」，一个比芯片区大四倍的网格把答案稀释了；同时发布者分桶（谁做的）不是用户筛选心智（干什么用）。
 - 决策：精选即推荐短名单——只保留常用工具型 MCP（编程 + 设计创作；条目数随 `catalog()` 注册表走，文档不钉数量），每条都 `recommended`，`source` 从发布者桶改为功能货架（`core` / `context` / `browser` / `creative`），商店精选页按货架分区渲染。内置 preset 兜底目录保持与精选逐字节对齐。被下线的条目不写迁移，`prune_retired_curated_rows`（[D-058](#d-058curated-发布者的退役由代码注册表驱动清理)）照旧清理；它们的发现路径是「完整目录」。筛选面板只对完整目录暴露（短名单上 kind/许可证/stars 筛选无意义），切换范围时清掉除搜索词外的 narrowing。D-060 的「一张 `catalog()` 数据表」机制不变。
 - 后果：获得——商店首屏就是完整答案（核心 / 上下文 / 浏览器 / 创作四段），卡片按服务身份出图标；精选与推荐芯片是同一份清单，不再各自解释「为什么推荐」。承担——精选覆盖变窄，数据库、云等场景要切完整目录；`source` 值从发布者语义改为货架语义，旧安装条目指纹里的 `source_id` 保留旧桶名（仅作信息字段，不影响判定）。
@@ -564,7 +562,7 @@
 ## D-062：MCP 工具配置写入以「没得删就不落盘 + 原子替换 + 按格式分档保真」为契约
 
 - 日期：2026-09-12
-- 状态：accepted
+- 状态：superseded（被 [D-074](#d-074删除-mcp-管理与-mcp-商店) 取代，功能已删除）
 - 背景：MCP 的每个 target 都有自己的配置文件（`~/.claude.json`、`~/.codex/config.toml`、`~/.gemini/settings.json` …），里面绝大部分内容与 SkillStar 无关，而写入实现是「读整份 → 改自己那个键 → 整份写回」。三个具体问题：① `sync_server_public_tools` 对每个未启用的 target 也调 remove，remove 又无条件写回，于是「装一个 server」会把机器上所有 Agent 配置文件重新序列化一遍并各生成一份 backup；② 写入用裸 `std::fs::write` 覆盖，进程被杀会留下截断配置，而回滚只在 write 返回 `Err` 时执行；③ Codex/Grok 的 TOML 走 `toml::Table` 值模型，合并一次就删光用户写在该文件里的全部注释。
 - 决策：写入契约收口为三条。**没得删就不落盘**——目标文件里没有这个 key 时 remove 立即返回，不重写、不备份；**原子替换**——所有 live config writer 复用 `skillstar_core::infra::fs_ops::atomic_write`（同目录 tmp + fsync + rename + 保留原权限），rollback 语义不变；**保真度按格式分档**——TOML 换 `toml_edit` 文档模型保留注释/空行/键序，YAML 与 JSON 保持值模型（YAML 键序保留、注释丢失；JSON 键序重排）。**不开** `serde_json/preserve_order`：它是全局序列化语义变更，会让 `tool_sync` 的逐字节基线失效，换来的只是 JSON 键序这一项排版收益。
 - 后果：获得——常规路径（另一个 target 上的开关翻转、同步时的未启用 target）不再触碰无关文件；崩溃不会留下截断配置；Codex/Grok 用户手写的注释不再被一次安装删除。承担——JSON 目标的键序仍会在真正发生增删时被重排（不改变语义，也不影响任何客户端解析），YAML 注释仍会丢；`skillstar-models` 新增 `toml_edit` 依赖（单 crate 使用，按根 Cargo.toml 约定不进 workspace 表）；两个格式各有独立 writer，新增 target 时必须先决定它属于哪一档。
@@ -573,7 +571,7 @@
 ## D-063：代表副本唯一物化与永不整仓下载
 
 - 日期：2026-09-21
-- 状态：accepted
+- 状态：accepted（代表副本的排名与「内容不同的副本一律物化」被 [D-075](#d-075异形分发仓库只有一张选副本表) 取代）
 - 背景：分发型仓库（如 `pbakaus/impeccable`）把同一技能镜像进十几个 harness 目录，还携带 Rust/Node 工程等重型非技能内容。旧管线把**每个**含 `SKILL.md` 的目录都加入稀疏检出，逐副本懒取 blob；blob 物化一旦在镜像上失败（HTTP/2 framing 等），回退是**删掉部分克隆、整仓浅克隆**——等于把整个 monorepo 全量下载。加上全局事务锁串行一切安装、marketplace 安装无进度反馈，用户感知就是"卡死"。
 - 决策：四条。**tree-SHA inventory**——treeless partial clone 的 `git ls-tree -t` 免费携带每目录 tree SHA，相同 SHA 即逐字节相同副本；每个 identity 只物化一个代表目录（manifest 声明 > `skills/<name>` > `.agents/skills/<name>` > 已安装 source_folder > 字典序），相同 SHA 的重复副本记入 `.git/skillstar-inventory.json` deferred 集合按需增量物化，**内容不同的副本一律物化**（frontmatter 可能是另一个 identity）。**永不整仓下载**——checkout blob 硬失败先去 mirror 直连重试一次，克隆整体失败改走 codeload `tar.gz` 单次 HTTPS（匿名 mirror 链）选择性解压 + 本地合成 commit 构建 cache（`skillstar.transport=tarball` 标记），完整浅克隆仅作最后手段。**锁粒度**——网络/发现阶段只持每仓库 cache 锁（`state/repo-locks/`），hub 提交才持全局短锁，锁序恒为 repo → global；baseline 刷新用 `state/lockfile.lock` 跨进程互斥。**基线 stat 短路**——fetch 前的 cleanliness 证明用上次可信快照的 mtime/size 指纹（`state/snapshot-stats/`）代替全字节重读，指纹失配即回退全量快照，fail-closed 语义不变。
 - 后果：获得——impeccable 形态的安装从"物化 15+ 副本、失败即全量下载 monorepo"变为"物化 1 份代表副本、镜像协议坏了走单次 HTTPS"；不同仓库安装互不排队；安装阶段可见。承担——相同 SHA 副本的 harness 切换多一次增量物化；tarball cache 无真实 git 历史，更新走重下归档；mtime/size 指纹理论上可被刻意保时间的编辑绕过（与 make/git 同级信任，且有全量快照兜底）。
@@ -677,6 +675,48 @@
 - 决策：不迁移。启动不改写 Agent 文件。保存 provider 不触发 Agent 写盘。v4 `model_providers.json` 不加路由列，`version` 仍是 4。厂商密钥留在 provider store。Codex 的环回配置只在显式保存时由 `skillstar-gateway` 写入。
 - 后果：获得——已有 Agent 文件保持原样，直到用户保存这一档。承担——`[model_providers.skillstar]` 里留下的 `wire_api = "chat"` 要等 API 形态的这次保存才换掉，其它表不动；`tool_sync` 的六个 sync 不再写厂商 URL 或密钥。
 - 证据：`crates/skillstar-gateway/src/codex.rs`、`crates/skillstar-models/tests/startup_agent_files.rs`。
+
+## D-074：删除 MCP 管理与 MCP 商店
+
+- 日期：2026-09-29
+- 状态：accepted
+- 背景：MCP 管理要把一份 server store 投影到约 18 个 Agent 目标的原生配置里，而这些格式互不一致：载体有 JSON、TOML、YAML 和 DSH patch，顶层键各不相同（`mcpServers`、`mcp`、`mcp_servers`、`mcp.servers` …），传输字段有五种写法，可选字段的支持也参差不齐。写入对象是用户与 Agent 共享的配置文件，每条写路径都要做到无损保真、解析失败即 fail-closed、原子替换，还要为改名或下线的目标维护 cleanup 墓碑。目标本身还在不断变格式、改路径、改名。这部分维护成本和出错面长期高于它给用户的价值；MCP 商店（多源 registry 快照、curated 精选、安装计划）又完全建立在这层投影之上。
+- 决策：整体删除 MCP 管理与 MCP 商店：`skillstar-models::mcp`、`skillstar-marketplace` 的 MCP catalog/快照、`skillstar-app::mcp`、对应 Tauri 命令、前端 MCP 页面与 IPC、网络诊断里的 MCP Registry 探测。项目技能 MCP（`skillstar_app::project_skills_mcp`，SkillStar 自身作为 stdio MCP server，见 [D-065](#d-065skillstar-作为-mcp-服务时不进入外部-mcp-catalog)）与它无关，完整保留。
+- 后果：获得——不再承担十几种第三方配置格式的写入正确性，也少了一整个快照同步域。承担——SkillStar 不再管理 MCP：用户已有的 `~/.skillstar/config/mcp_servers.json` 和各 Agent 配置里已写入的 MCP 条目原样保留、不做任何清理；市场快照 schema v14 迁移 `DROP` 掉 `mcp_registry_server`、`mcp_curated_server` 及其 FTS 表，并删除 `marketplace_sync_state` 中 `mcp_registry` / `mcp_registry:*` 行，旧 v8/v10/v13 迁移随之移除；`skillstar://mcp` 深链失效，按未知目标忽略。
+- 证据：`crates/skillstar-marketplace/src/snapshot/migrations.rs`（v14）、`src/lib/deepLink.ts`、[marketplace](./features/marketplace/README.md)。
+
+## D-075：异形分发仓库只有一张选副本表
+
+- 日期：2026-09-29
+- 状态：accepted（按 [specs/irregular-skill-packs](../specs/irregular-skill-packs/README.md) 逐档补全）
+- 背景：`pbakaus/impeccable` 这类仓库把一个技能改写成二十份 harness 专用副本：`name` 相同，字节不同，正文里写死各自路径。另外还有插件包装副本和 `tests/` 夹具。SkillStar 原来有三套互不一致的排名：inventory 优先 manifest，discovery 的 root(4)/catalog(3)/`.agent`·`.agents`(2)/其他(1)，harness 回退链自成一套。平局时取 `read_dir` 顺序。`plugin.json` 里字符串形式的 `skills`（容器路径）被当成单个技能路径取了父目录。全递归扫描还会把测试夹具当技能列出来。
+- 决策：
+  - **选副本只有一张表**：`pack_layout::choose_copy`。inventory 代表副本、发现去重、完整性收拢、harness 回退全部调用它，平局一律按路径字典序。
+    - 默认：根 → `skills/`·`source/skills/` → `.agents/skills/` → manifest 容器 → 其他。
+    - harness `h`：`h/skills/` → `h` → `h` 下其他 → catalog → 已安装 `source_folder` → `.agents/skills/` → manifest → 其他，永不选根。
+    - pinned：只接受该目录。
+  - `.agent` 不再与 `.agents` 同级。
+  - `plugin.json` 的 `skills` 是字符串时，表示容器，推入其本身；是数组时，每一项是技能路径，推入父目录。
+  - 全递归发现跳过 `pack_layout::IGNORED_DIR_NAMES`，其中包括 `tests`、`test`、`__tests__`、`fixtures`。被忽略的目录自身仍可以是技能，但不再往下扫。
+  - priority 容器补上 `.gemini/skills`。
+  - **请求只物化被选中的一份**：harness 请求（轮播点击、单个 `--agent`）用 `Inventory::copy_for` 按 harness 列选出一份延迟副本物化，与安装 chooser 走同一张表，结论必然一致。不指定 harness 的请求直接用已物化的代表副本，不再物化任何副本。
+  - **身份按 `name` 判定**：inventory 先按 basename 分组；tree 不同的组，在一次 fetch 里预取各份 `SKILL.md`（连同 `.claude-plugin` manifest），按 frontmatter `name` 细分，每个身份只物化一份，其余延迟。读不出 `name` 时该组退回 tree-SHA 规则。`IGNORED_DIR_NAMES` 下的技能不进 inventory。重新应用稀疏集只增不减（已在磁盘上的目录保留）。sidecar 升到格式 2，旧文件直接丢弃重算，不做迁移。
+  - **子路径 URL 是硬钉**：tree URL 的 `subpath` 只发现、只物化那一个目录，`LockEntry.pinned = true`，`source_folder` 写死那个路径。之后任何 harness 点击或普通 URL 重装都是 `existing_same_repo_action::Reuse`（`skill_install_choice.rs`），不再重新走排名表；只有卸载才清掉 `pinned`。子路径落在 `IGNORED_DIR_NAMES` 内部（如 `tests/...`）时例外放行：`InstallQuery.scope` + `SkillDiscovery::within` 按作用域根判断忽略目录，不看祖先路径段。`Source` 是来源规格唯一 owner（加 `Serialize`/`Deserialize`，字段映射 `ScanResult` 已有的 `source`/`source_url`），一次安装只在公共入口解析一次，`&Source` 贯穿到底；`ScanResult` 平铺它（`spec: Source`），扫描预览与安装因此看到同一份 ref/subpath。
+  - **Claude 插件只提示，不装 hooks/agents**：仓库带 `.claude-plugin/marketplace.json` 或 `plugin.json`、且声明的插件目录下有 `hooks/` 或 `agents/` 时，`plugin_manifest::plugin_hint` 产出 `PluginHint{hooks, agents}`，GUI 在技能列表上方、CLI 在 `install`/`--list` 输出里各打印一行提示；SkillStar 不解析、不安装、不模拟 hooks/agents 的运行时行为。自己实现钩子注入等于把 `impeccable` 自带的 installer 重写一遍，用户要完整插件体验就用 Claude Code 自带的 `/plugin marketplace add`。
+  - **带 `git_ref` 的缓存也走稀疏检出**：`repo_scanner::cache::clone_sparse` 泛化成同时接受 `git_ref: Option<&str>` 和 `extra: &[String]`，把原来「带 ref 就整仓浅克隆」和「不带 ref 就稀疏克隆」两条分支合并成一条——合并后的克隆步骤固定为 treeless clone → `sparse-checkout init --cone` →（有 ref 时）`fetch_and_reset_ref` → `inventory::apply`，顺序不能变：cone 模式必须在 `reset --hard` 之前生效，否则 reset 会把整棵树检出。稀疏克隆失败时的 tarball / 完整浅克隆回退链和不带 ref 的路径完全共用，末尾的完整克隆兜底在有 ref 时额外调一次 `fetch_and_reset_ref`。子路径本身的物化不在这条路径里：克隆只负责把默认代表副本落到本地，钉住的具体子路径由安装（`choose_install_skills`）和扫描预览（`scan_repo_with_mode_in_session`）各自再调 `inventory::materialize_dirs` 补上——04 只在安装路径做了这一步，05 把扫描预览路径的同一个缺口也补上了（否则预览一个子路径 tree URL 会因为文件还没落盘而报「未发现技能」）。
+- 后果：
+  - 获得：同一组副本在 inventory、发现、安装三处必然选出同一份，结果不依赖文件系统的遍历顺序。impeccable 不指定 harness 时选 `.agents` 版（仓库没有 `skills/`），不再选插件版。真实仓库首装从 15 秒、24 个 `SKILL.md`、1166 个文件降到 9 秒、1 个、80 个；`--agent cursor` 安装从 24 个 `SKILL.md`、1166 个文件降到 2 个、135 个。钉住一个子路径后，换 harness 或重装都不会再换内容，前端可以直接把 tree URL 当成「装这一份，别再变」的入口。
+  - 承担：manifest 容器从第一位降到第四位；只在 `.agent/skills` 与其他非 `.agents` 副本之间做选择的仓库，默认副本会按字典序改变。已安装技能的 lock 不受影响。旧格式的 cache 不会收缩，只有新克隆受益。每次规划多一次（批量）blob fetch。`reconstruct_lock_entry`（lock 条目从磁盘重建的修复路径）不知道钉住语义，重建出的条目 `pinned` 恒为 `false`——这是决定 6「不做迁移」的直接后果，接受，走到这条路径本来就是罕见的手工修复场景。**在 06（带 ref 的稀疏缓存）完成之前，任何带 `git_ref` 的 URL（包括所有 tree URL）都走完整浅克隆**，钉住只保证选中的内容正确，不保证少下载。
+- 证据：`crates/skillstar-skills/src/pack_layout.rs`（`copy_selection_table`）、`discovery.rs`、`plugin_manifest.rs`（`plugin_json_string_is_a_container_path`、`plugin_hint_detects_hooks_and_agents`、`plugin_hint_is_none_without_manifest`）、`repo_scanner/inventory.rs`（`impeccable_fixture_materializes_one_copy_per_identity`、`identity_resolution_costs_one_fetch`、`unreadable_manifest_degrades_to_tree_sha_rule`、`reapply_keeps_on_disk_copies_and_adds_installed`）、`skill_install_harness_tests.rs`（`harness_install_materializes_only_the_chosen_copy`、`harness_fallback_materializes_the_installed_source_folder`）、`skill_install_pin_tests.rs`（`tree_url_subpath_installs_exactly_that_copy`、`pinned_subpath_inside_tests_dir_installs`、`pinned_skill_is_not_retargeted_by_harness_click`、`plain_reinstall_keeps_pin`、`ref_pinned_cache_is_sparse`、`tree_url_install_never_materializes_outside_subpath`）、`update_checker/tests.rs`（`pinned_skill_update_follows_its_folder`）、`discovery/tests.rs`（`explicit_scope_inside_tests_is_discovered`）、`source_resolver.rs`（`source_serde_uses_scan_field_names`）、`lockfile.rs`（`pinned_flag_roundtrips_and_is_omitted_when_false`）、`git_skill.rs`（`scan_repo_honors_tree_url_ref_and_subpath`）、`repo_scanner/scan_install.rs`（`install_from_scan_keeps_ref_and_pin`）、`crates/skillstar-git/src/blobs.rs`、`crates/skillstar-skills/src/pack_fixture.rs`。部分取代 [D-063](#d-063代表副本唯一物化与永不整仓下载) 的排名那句，以及 [D-044](#d-044pack-根目录-skillmd-垫片不是安装单元) 中 `plugin.json` 字符串的语义。
+
+## D-077：账号切换与桌面多开归位 skillstar-usage，滚动备份与 sandbox 名下沉 core
+
+- 日期：2026-09-30
+- 状态：accepted
+- 背景：`skillstar-app` 按 D-003 只承载跨域 use case，但 `usage_switch`（约 1.6 万行 CLI/IDE 凭证切换引擎）与 `instances`（桌面多开）长期驻留其中，唯一原因是切换引擎借用了 `skillstar_models::tool_sync` 的五个符号（`create_rolling_backup`、三个凭证路径解析、`TOOL_SYNC_HOME_ENV`）——usage 不允许依赖 models，这段「跨域」是借来的假象；而凭证的读侧（fetchers）早已在 `skillstar-usage`。同一套 sandbox / 凭证路径语义在 models、usage、gateway 三处各写一份，并已开始分叉（usage 的 `codex_auth_path()` 无视 `CODEX_HOME` 与 sandbox）。
+- 决策：(1) 无域属性的 `create_rolling_backup` / `cleanup_old_backups` 下沉 `skillstar_core::infra::fs_ops`，`TOOL_SYNC_HOME_ENV` 与 sandbox 读取收敛为 `skillstar_core::infra::paths::{TOOL_SYNC_HOME_ENV, tool_sync_home_override}`；models 经 `pub use` 原样再导出，调用方与行为不变。(2) `usage_switch` 整体迁入 `skillstar-usage`（模块名不变，路径 `skillstar_usage::usage_switch`），三个凭证路径解析改由 `tool_paths::switch_{codex,grok,opencode}_auth_path` 提供，语义照抄 models：sandbox 永远优先，其次 `CODEX_HOME` / `GROK_HOME` / `XDG_DATA_HOME`。(3) `instances` 一并迁入 usage，维持 D-054「多开不绑定 Usage catalog」的数据边界。(4) `skillstar_app::usage` facade 与 DTO 投影留在 app，D-034 不变。usage 的 skillstar 依赖归零到只剩 core。
+- 后果：获得——Usage 块单 crate 自洽（凭证读写同屋檐），`skillstar-app` 缩回纯跨域层；滚动备份与 sandbox 变量名不再三处漂移。承担——skillstar-usage 编译单元变大；凭证路径语义在 models 与 usage 仍各持一份（core 只收敛无域属性部分），以注释互指；app 的 tokio 测试锁与 usage 的 std 测试锁合并为一把 std Mutex（`EnvGuard` 自持锁，跨 await 由 guard 结构体包裹）；fetcher 的 `codex_auth_path()` 刻意保持旧语义（默认安装路径读取），与 `switch_codex_auth_path()` 的差异留待后续统一。
+- 证据：`crates/skillstar-usage/src/usage_switch/`、`crates/skillstar-usage/src/instances/`、`crates/skillstar-usage/src/tool_paths.rs`、`crates/skillstar-usage/src/test_support.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-core/src/infra/paths.rs`、`crates/skillstar-models/src/tool_sync/backup_merge.rs`、`src-tauri/src/commands/instances.rs`、[boundaries.md](./boundaries.md)。
 
 ## 新增记录格式
 

@@ -69,6 +69,7 @@ fn write_installed_skill(root: &Path) -> String {
         content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: Some("skills/writer".into()),
+        pinned: false,
     });
     lockfile.save(&crate::lockfile::lockfile_path()).unwrap();
     hash

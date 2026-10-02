@@ -162,6 +162,7 @@ mod tests {
             content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
             source_folder: folder.map(str::to_string),
+            pinned: false,
         }
     }
 

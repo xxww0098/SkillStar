@@ -6,6 +6,7 @@
 pub mod apply;
 pub mod approval;
 pub mod cli_approve;
+mod gateway;
 pub mod host;
 pub mod inspect;
 mod laya_pack;
@@ -14,7 +15,6 @@ pub mod plan;
 pub mod protocol;
 pub mod ranker;
 pub mod recommend;
-mod gateway;
 mod stdio;
 
 pub use cli_approve::run_approve;

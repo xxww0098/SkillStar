@@ -32,6 +32,11 @@ pub struct LockEntry {
     pub installed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_folder: Option<String>,
+    /// Hard-pinned to `source_folder` by a subpath tree URL: harness clicks
+    /// and plain reinstalls must not retarget it. Only uninstalling clears
+    /// the pin.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 /// Versioned lockfile model for v5.
@@ -175,6 +180,7 @@ mod tests {
             content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
             source_folder: None,
+            pinned: false,
         }
     }
 
@@ -240,6 +246,51 @@ mod tests {
         );
         assert_eq!(loaded.skills[0].tree_hash, "abc123");
         assert_eq!(loaded.skills[0].git_ref.as_deref(), Some("release/v2"));
+    }
+
+    #[test]
+    fn pinned_flag_roundtrips_and_is_omitted_when_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lock.json");
+
+        let mut lf = Lockfile::default();
+        let mut pinned_entry = make_entry("pinned-skill");
+        pinned_entry.pinned = true;
+        pinned_entry.source_folder = Some(".claude/skills/pinned-skill".to_string());
+        lf.upsert(pinned_entry);
+        lf.upsert(make_entry("unpinned-skill"));
+        lf.save(&path).unwrap();
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let skills = json["skills"].as_array().unwrap();
+        let pinned_json = skills
+            .iter()
+            .find(|entry| entry["name"] == "pinned-skill")
+            .unwrap();
+        assert_eq!(pinned_json["pinned"], true);
+        let unpinned_json = skills
+            .iter()
+            .find(|entry| entry["name"] == "unpinned-skill")
+            .unwrap();
+        assert!(
+            unpinned_json.get("pinned").is_none(),
+            "false pinned is omitted from the serialized entry"
+        );
+
+        let loaded = Lockfile::load(&path).unwrap();
+        let pinned = loaded
+            .skills
+            .iter()
+            .find(|entry| entry.name == "pinned-skill")
+            .unwrap();
+        assert!(pinned.pinned);
+        let unpinned = loaded
+            .skills
+            .iter()
+            .find(|entry| entry.name == "unpinned-skill")
+            .unwrap();
+        assert!(!unpinned.pinned);
     }
 
     #[test]

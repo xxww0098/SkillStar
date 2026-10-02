@@ -1,12 +1,26 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { McpServerForm } from "../../features/mcp/components/McpServerForm";
-import i18n from "../../i18n";
 import { ModalShell } from "../ui/ModalShell";
 import { KeepAliveOutlet } from "./KeepAliveOutlet";
 
 const KEEP = ["a", "b", "c"] as const;
+
+/** A form that owns its draft in local state, like the real page editors. */
+function DraftForm({ onSubmit }: { onSubmit: (name: string) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(name);
+      }}
+    >
+      <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      <button type="submit">Save draft</button>
+    </form>
+  );
+}
 
 function Harness({ active }: { active: string }) {
   return (
@@ -20,7 +34,7 @@ function Harness({ active }: { active: string }) {
 }
 
 describe("KeepAliveOutlet", () => {
-  it("deactivates a cached page's portal and preserves the MCP form's own draft on return", async () => {
+  it("deactivates a cached page's portal and preserves the form's own draft on return", async () => {
     const onSubmit = vi.fn();
     function Editor() {
       const [open, setOpen] = useState(false);
@@ -30,7 +44,7 @@ describe("KeepAliveOutlet", () => {
             Open editor
           </button>
           <ModalShell open={open} onClose={() => setOpen(false)} ariaLabel="Page editor">
-            <McpServerForm onSubmit={onSubmit} submitLabel="Save draft" />
+            <DraftForm onSubmit={onSubmit} />
           </ModalShell>
         </>
       );
@@ -40,11 +54,7 @@ describe("KeepAliveOutlet", () => {
     const trigger = screen.getByRole("button", { name: "Open editor" });
     trigger.focus();
     fireEvent.click(trigger);
-    fireEvent.change(screen.getByPlaceholderText(i18n.t("mcp.fieldNamePlaceholder")), {
-      target: { value: "Unsaved draft" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("npx"), { target: { value: "my-mcp-server" } });
-    fireEvent.change(screen.getByPlaceholderText("API_KEY=sk-xxx"), { target: { value: "MODE=draft" } });
+    fireEvent.change(screen.getByPlaceholderText("Name"), { target: { value: "Unsaved draft" } });
 
     rerender(<KeepAliveOutlet active="b" keep={KEEP} render={page} />);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Page editor" })).not.toBeInTheDocument());
@@ -55,17 +65,11 @@ describe("KeepAliveOutlet", () => {
 
     rerender(<KeepAliveOutlet active="a" keep={KEEP} render={page} />);
     await screen.findByRole("dialog", { name: "Page editor" });
-    const draft = screen.getByPlaceholderText(i18n.t("mcp.fieldNamePlaceholder"));
+    const draft = screen.getByPlaceholderText("Name");
     expect(draft).toHaveValue("Unsaved draft");
     expect(draft).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Unsaved draft",
-        command: "my-mcp-server",
-        env: { MODE: "draft" },
-      }),
-    );
+    expect(onSubmit).toHaveBeenCalledWith("Unsaved draft");
     fireEvent.keyDown(draft, { key: "Escape" });
     await waitFor(() => expect(trigger).toHaveFocus());
   });
