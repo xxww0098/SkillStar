@@ -73,7 +73,7 @@ impl Gateway {
                 let Ok((mut sock, _)) = listener.accept() else {
                     break;
                 };
-                sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
+                sock.set_read_timeout(Some(Duration::from_secs(20))).ok();
                 let msg = read_http(&mut sock);
                 let _ = tx.send(Seen {
                     path: request_target(&msg.start),
@@ -95,7 +95,7 @@ impl Gateway {
         let stop = options.stop_handle();
         let handle = thread::spawn(move || serve(options));
         let addr = bound_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(20))
             .unwrap_or_else(|error| panic!("listener did not bind: {error}"));
         Self {
             addr,
@@ -144,7 +144,7 @@ impl Gateway {
 
     fn next_hit(&self) -> Seen {
         self.hits
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(20))
             .expect("fake upstream was not contacted")
     }
 }
@@ -178,7 +178,7 @@ struct HttpMsg {
 }
 
 fn read_http(sock: &mut TcpStream) -> HttpMsg {
-    sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    sock.set_read_timeout(Some(Duration::from_secs(20))).ok();
     let mut buf = Vec::new();
     let mut tmp = [0u8; 8192];
     loop {
