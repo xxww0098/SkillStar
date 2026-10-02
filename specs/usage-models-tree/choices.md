@@ -58,3 +58,9 @@
 - **DocStoreError = Read/Parse/Write**（`doc_read`/`doc_parse`/`doc_write`）；严格 `open()` 对「已知字段形状坏」整体拒绝（旧 Value 写方按字段各自宽容）——01 锁未钉这类文件，差异记入 D-079 后果栏。
 - **测试经 `#[path] include` 够到 pub(crate)**（lib.rs 的 pub use 冻结）：doc.rs 保持自包含（无 crate:: 引用）；04/05 给 doc.rs 加 lens/内部类型时同步调整测试挂载。
 - **dead_code allow 是窗口期债务**：04/05 落调用方时删除。
+
+## T8 切片 08 落地时的实现裁决（banked 2026-10-02）
+
+- **真实 mod 挂载优先于 include! 平铺**：切片的「全路径零变化」与 orphan 门禁（新文件必须 mod 可达）+ 防火墙 5（baseline 零改动）在多文件结构下互斥——include! 可保逐字节一致但子文件成孤儿。取 mod 挂载：18 个搬移测试全路径多一段 `custody_tests::<tool>::`，留在 mod.rs 的 22 个逐字节不变；docs/errors.md 引用的那一个（grok_shares…）落在 mod.rs，路径原样可跑（choices C9 与 README 已知未知 #109 的权威口径）。叶子名集合 40/40 前后一致。
+- **pure.rs 经 mod.rs 中转引用**（`super::subscription_identity` 而非 `super::super::`），统一一种。
+- 顺手修正 docs/errors.md:198 的陈旧 self-check 前缀（-p skillstar-app → -p skillstar-usage，usage_switch 迁 crate 前的旧写法，拆分前就匹配不到）。
