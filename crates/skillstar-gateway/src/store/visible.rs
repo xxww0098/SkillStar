@@ -47,8 +47,10 @@ pub(crate) fn family_of(list: &str, id: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Every catalog id, provider models then saved groups.
-pub(crate) fn catalog_ids() -> Vec<String> {
+/// Every id the visible map can name: catalog models plus saved groups —
+/// wider than [`crate::catalog::catalog_ids`], which lists catalog models
+/// only.
+pub(crate) fn nameable_ids() -> Vec<String> {
     let mut ids = crate::catalog::catalog_ids();
     for id in crate::store::groups::stored_group_ids() {
         if id.is_empty() || id.contains('/') {

@@ -37,12 +37,9 @@ pub(crate) struct CatalogLimit {
     pub output: Option<u64>,
 }
 
-/// Price per million tokens as models.dev reports them.
-///
-/// No consumer reads them yet; they exist for the cost projections the
-/// evolution slices build on top of this parse.
+/// Price per million tokens as models.dev reports them. The cost
+/// projections read them through [`crate::cost::effective_price`].
 #[derive(Deserialize, Clone, Default)]
-#[allow(dead_code)]
 pub(crate) struct CatalogCost {
     #[serde(default)]
     pub input: Option<f64>,

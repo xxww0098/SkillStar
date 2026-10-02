@@ -79,6 +79,19 @@ pub struct Record {
     pub endpoint: String,
 }
 
+impl Record {
+    /// The model a record is charged under: the one the reply named, else
+    /// the one asked for. This is the billing key the cost projections
+    /// join on — the one rule, kept where the record lives.
+    pub fn served_model(&self) -> &str {
+        if self.model_answered.is_empty() {
+            &self.model_asked
+        } else {
+            &self.model_answered
+        }
+    }
+}
+
 /// The ledger-side account label for a presented key: `key:` plus the first
 /// eight hex chars of its sha256. Stable for one key, useless for guessing
 /// the key back.

@@ -3,7 +3,7 @@
 //! by `store::visible`.
 
 use crate::GROUP_PREFIX;
-use crate::store::visible::{catalog_ids, family_of, visible_names};
+use crate::store::visible::{family_of, nameable_ids, visible_names};
 
 /// Whether `agent` is shown `id`. An agent that is not narrowed sees every id.
 pub fn model_shown(agent: &str, id: &str) -> bool {
@@ -18,7 +18,7 @@ pub fn model_shown(agent: &str, id: &str) -> bool {
 
 /// Catalog ids this agent is shown, provider models then saved groups.
 pub fn shown_model_ids(agent: &str) -> Vec<String> {
-    catalog_ids()
+    nameable_ids()
         .into_iter()
         .filter(|id| model_shown(agent, id))
         .collect()
