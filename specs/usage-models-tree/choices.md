@@ -51,3 +51,10 @@
 - A：按工具（cursor/antigravity/opencode/codex），对齐 usage_switch/ 既有 per-tool `_tests.rs` 惯例。
 - C：按功能块（common/lifecycle/ide_targets/hygiene/pure）。
 - **裁决：A 的工具线为主、纯函数单列。** 与目录既有惯例一致；`docs/errors.md` 引用的全路径测试名以 `custody_tests::` 前缀保稳。
+
+## T3 切片 03 落地时的实现裁决（banked 2026-10-02）
+
+- **「序列化不 skip」按「缺席不造」实现**：已知字段带 `skip_serializing_if`（空集合/None/空串跳过）——不跳则 provider 行凭空多出 `"members": []`、无 routing 行多出 `null`，切片自己的 round-trip 测试不可能过。实际语义 = 载入的不丢、缺席的不造；`None`/空 = 键缺席，正是 05 的 Smart/Auto 删键 lens 需要的把手。`rest`/`extra` 无任何 skip。
+- **DocStoreError = Read/Parse/Write**（`doc_read`/`doc_parse`/`doc_write`）；严格 `open()` 对「已知字段形状坏」整体拒绝（旧 Value 写方按字段各自宽容）——01 锁未钉这类文件，差异记入 D-079 后果栏。
+- **测试经 `#[path] include` 够到 pub(crate)**（lib.rs 的 pub use 冻结）：doc.rs 保持自包含（无 crate:: 引用）；04/05 给 doc.rs 加 lens/内部类型时同步调整测试挂载。
+- **dead_code allow 是窗口期债务**：04/05 落调用方时删除。
