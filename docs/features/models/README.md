@@ -94,9 +94,9 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 ## 本机网关
 
-官方账号经本机网关转发是当前目标。「本轮不做 proxy takeover」不再描述它。监听地址、谁启动 serve、路由表、Codex 环回写入和 `agent_stash.json` 见 [运行架构](../../architecture.md#本机模型网关)。订阅侧 Claude 的进程桥也写在那里：本机 `claude`，access token 不进子进程。
+官方账号经本机网关转发已经接线（evolution 切片 10）：CLI `gateway serve` 与桌面后台在启动时注入同一份上游环境，转发按候选逐个签名、发送、失败坐窗轮转，并把胜选候选的 catalog 与账户归因写进账本。监听地址、谁启动 serve、路由表、Codex 环回写入和 `agent_stash.json` 见 [运行架构](../../architecture.md#本机模型网关)。订阅侧 Claude 的进程桥也写在那里：本机 `claude`，access token 不进子进程。
 
-能签上游的是 Usage 里已经保存的账户，catalog 与请求头以 `skillstar-gateway` 的签名模块及其 `sign_` 测试为准。`anthropic` 不签 HTTP。Gemini CLI、Devin、WorkBuddy、Command Code 没有 Usage 凭证行，出站只用 provider 快照里的 API 密钥，不读厂商自己的认证文件。没有注入的账户快照时不请求配额，该候选保持未知。
+能签上游的是 Usage 里已经保存的账户，catalog 与请求头以 `skillstar-gateway` 的签名模块及其 `sign_` 测试为准。`anthropic` 不签 HTTP（候选直接跳过，不发上游请求）。Gemini CLI、Devin、WorkBuddy、Command Code 没有 Usage 凭证行，出站只用 provider 快照里的 API 密钥，不读厂商自己的认证文件。没有注入的账户快照时不请求配额，该候选保持未知。候选解析在 app 侧：provider 存储里被采纳模型命中的行成为候选（OpenAI 根端点去掉尾部 `/v1` 后作为上游根），原生登录种子没有端点、不成候选。
 
 ## Models 工作台
 
@@ -110,7 +110,7 @@ Gateway 面板的配置列顶部是「接入端点」：OpenAI（`/v1/chat/compl
 
 Agent 名称旁边的小字是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`；名称下面一行 chip 是 `model_label`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
 
-选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 面板的配置列里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。监听转发仍打启动时的那一个上游根，不读这次写下的路由和亲和。
+选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 面板的配置列里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。转发不再打固定的上游根：候选来自注入的解析（provider 行 + 分组展开），按余量 smart 排序，失败坐窗后轮转下一候选；但页面写下的 `routing` 与 `affinity` 值仍未参与转发顺序，`rotate` 计数也未被读取。
 
 已保存的分组可以在 Gateway 面板里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
 

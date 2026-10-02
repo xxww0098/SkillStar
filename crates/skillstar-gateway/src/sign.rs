@@ -54,8 +54,10 @@ pub struct SignedUpstream {
 ///
 /// A missing account leaves `allowance` empty. Gemini CLI, Devin, WorkBuddy,
 /// and Command Code ignore the account book and use `provider` only.
+/// `?Sized` lets the caller pass a `dyn AccountBook`, which is how the
+/// injected turn state machine holds the app's book.
 pub fn sign_upstream(
-    book: &impl AccountBook,
+    book: &(impl AccountBook + ?Sized),
     input: &SignInput<'_>,
     _quota: &mut dyn FnMut(&str),
 ) -> SignedUpstream {
@@ -81,7 +83,7 @@ pub fn sign_upstream(
     }
 }
 
-fn sign_account(book: &impl AccountBook, input: &SignInput<'_>) -> SignedUpstream {
+fn sign_account(book: &(impl AccountBook + ?Sized), input: &SignInput<'_>) -> SignedUpstream {
     let Some(account) = book.account(input.catalog_id) else {
         return SignedUpstream {
             headers: Vec::new(),

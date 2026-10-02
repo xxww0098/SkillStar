@@ -145,25 +145,44 @@ impl std::fmt::Debug for TurnFacts<'_> {
     }
 }
 
+/// The response side of one finished turn, as the turn state machine hands
+/// it to the ledger. `won` carries the winning candidate's attribution;
+/// `error_kind` is the machine's word-list verdict, refining what the status
+/// and the body alone settle.
+pub(crate) struct TurnEnd<'a> {
+    pub status: u16,
+    pub body: &'a [u8],
+    /// The reply as the upstream sent it, or `None` for a refusal the
+    /// gateway generated itself.
+    pub upstream_raw: Option<&'a [u8]>,
+    /// `(catalog, account)` of the winning candidate, when routing ran and
+    /// a candidate answered.
+    pub won: Option<(&'a str, &'a str)>,
+    /// The refined error kind. `None` falls back to
+    /// [`ErrorKind::classify`](crate::ledger::ErrorKind::classify).
+    pub error_kind: Option<ErrorKind>,
+}
+
 /// Record one finished turn: the ring first (it stays green whatever the
 /// ledger does), then one ledger line. `upstream_raw` is the reply as the
 /// upstream sent it, kept from before the protocol translation back — usage
 /// and the answered model survive there even when the agent-side rebuild of
 /// the body failed. `None` marks a refusal the gateway generated itself.
-pub(crate) fn note_turn(
-    facts: &TurnFacts<'_>,
-    status: u16,
-    body: &[u8],
-    upstream_raw: Option<&[u8]>,
-) {
+pub(crate) fn note_turn(facts: &TurnFacts<'_>, end: &TurnEnd<'_>) {
     note_forward(
         facts.authorization,
         facts.user_agent,
         facts.inbound,
-        status,
-        body,
+        end.status,
+        end.body,
     );
-    let answered = answered_facts(body, upstream_raw);
+    let answered = answered_facts(end.body, end.upstream_raw);
+    let (catalog, account) = end.won.unwrap_or(("", ""));
+    let account = if account.is_empty() {
+        facts.account.to_string()
+    } else {
+        account.to_string()
+    };
     crate::ledger::append(&Record {
         at: facts.at,
         agent: request_agent(&Caller {
@@ -174,14 +193,15 @@ pub(crate) fn note_turn(
         session: facts.session.to_string(),
         model_asked: json_string(facts.inbound, "model"),
         model_answered: answered.model,
-        // The winning candidate is not chosen yet; routing lands with the
-        // upstream-wiring slice and fills this in.
-        catalog: String::new(),
-        account: facts.account.to_string(),
+        // The winning candidate's catalog; empty when routing did not run.
+        catalog: catalog.to_string(),
+        account,
         tokens: answered.tokens,
-        status,
+        status: end.status,
         latency_ms: facts.started.elapsed().as_millis() as u64,
-        error_kind: ErrorKind::classify(status, body, upstream_raw.is_none()),
+        error_kind: end
+            .error_kind
+            .or_else(|| ErrorKind::classify(end.status, end.body, end.upstream_raw.is_none())),
         endpoint: facts.endpoint.to_string(),
     });
 }

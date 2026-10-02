@@ -1,4 +1,7 @@
-//! `skillstar gateway` entry. The desktop process calls the same `serve`.
+//! `skillstar gateway` entry. The desktop process calls the same `serve`,
+//! and both inject the same upstream env: candidates from the provider
+//! store, signing from the usage account book, attribution from the winning
+//! credential (specs/usage-models-evolution slice 10).
 
 use std::io::{self, Write};
 
@@ -24,7 +27,7 @@ pub fn run_gateway_io(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn 
         return 2;
     }
     match ServeOptions::from_env() {
-        Ok(options) => match serve(options) {
+        Ok(options) => match serve(with_upstream(options)) {
             Ok(()) => 0,
             Err(error) => {
                 let _ = writeln!(stderr, "{error}");
@@ -36,6 +39,12 @@ pub fn run_gateway_io(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn 
             1
         }
     }
+}
+
+/// The routed upstream: the CLI and the desktop listener inject the same
+/// env, so a turn forwards through the same candidates either way.
+fn with_upstream(options: ServeOptions) -> ServeOptions {
+    options.env(crate::models::upstream_env())
 }
 
 /// Parsed clap form of [`run_gateway`].

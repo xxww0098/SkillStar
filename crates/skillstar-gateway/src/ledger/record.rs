@@ -95,9 +95,9 @@ pub fn key_fingerprint(secret: &str) -> String {
 /// Which account a turn is charged to, from the credential slots the request
 /// presented. The attribution and selection channels (`skillstar-<agent>`,
 /// `skillstar/<model>`) and the bare placeholder name no account, so the
-/// label is empty; any other presented key is fingerprinted. Until routing is
-/// wired this is the only account signal a turn has — the winning candidate's
-/// subscription id lands with the upstream-wiring slice.
+/// label is empty; any other presented key is fingerprinted. This is the
+/// request-side fallback: since the upstream wiring, a turn whose routing
+/// picked a winner carries that candidate's attribution instead.
 pub(crate) fn account_of(
     authorization: &str,
     api_key: &str,

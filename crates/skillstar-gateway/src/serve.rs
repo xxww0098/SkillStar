@@ -27,7 +27,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 
-use crate::translate::{Protocol, outbound_body, upstream_body};
+use crate::forward::UpstreamEnv;
 
 /// Listen address when `SKILLSTAR_GATEWAY_ADDR` is unset or empty.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:21847";
@@ -98,6 +98,7 @@ struct InboundLimits {
 pub struct ServeOptions {
     addr: SocketAddr,
     upstream: Option<String>,
+    env: Option<Arc<UpstreamEnv>>,
     stop_tx: watch::Sender<bool>,
     stop_rx: watch::Receiver<bool>,
     bound: Option<std::sync::mpsc::Sender<SocketAddr>>,
@@ -116,6 +117,7 @@ impl ServeOptions {
         Self {
             addr,
             upstream: None,
+            env: None,
             stop_tx,
             stop_rx,
             bound: None,
@@ -127,8 +129,17 @@ impl ServeOptions {
     }
 
     /// Chat Completions origin, without a path. `http://127.0.0.1:9`.
+    /// The legacy single-origin path; production injects an env instead.
     pub fn upstream(mut self, base: impl Into<String>) -> Self {
         self.upstream = Some(base.into());
+        self
+    }
+
+    /// The routed upstream: candidates, signing, and attribution, supplied
+    /// by the app. Takes precedence over [`Self::upstream`]; without either,
+    /// a forward answers 502 `no upstream`.
+    pub fn env(mut self, env: UpstreamEnv) -> Self {
+        self.env = Some(Arc::new(env));
         self
     }
 
@@ -205,6 +216,7 @@ async fn run(options: ServeOptions) -> Result<(), ServeError> {
         let _ = tx.send(bound);
     }
     let upstream = options.upstream.clone();
+    let env = options.env.clone();
     let mut stop = options.stop_rx;
     loop {
         tokio::select! {
@@ -219,15 +231,18 @@ async fn run(options: ServeOptions) -> Result<(), ServeError> {
                     Err(_) => continue,
                 };
                 let upstream = upstream.clone();
+                let env = env.clone();
                 let limits = options.limits;
                 tokio::spawn(async move {
                     let finished = Arc::new(AtomicBool::new(false));
                     let io = TokioIo::new(BudgetIo::new(stream, Arc::clone(&finished), limits));
                     let service = service_fn(move |request| {
                         let upstream = upstream.clone();
+                        let env = env.clone();
                         let finished = Arc::clone(&finished);
                         async move {
-                            let response = dispatch(request, upstream.as_deref(), peer).await;
+                            let response =
+                                dispatch(request, upstream.as_deref(), env.as_deref(), peer).await;
                             finished.store(true, Ordering::Relaxed);
                             Ok::<_, std::convert::Infallible>(response)
                         }
@@ -254,6 +269,7 @@ fn classify_bind(error: io::Error) -> ServeError {
 async fn dispatch(
     request: Request<Incoming>,
     upstream: Option<&str>,
+    env: Option<&UpstreamEnv>,
     peer: SocketAddr,
 ) -> Response<Full<Bytes>> {
     let started = Instant::now();
@@ -318,7 +334,8 @@ async fn dispatch(
                     let session = crate::trace::session_of(&sessions, &inbound);
                     let account =
                         crate::ledger::account_of(&authorization, &api_key, &goog_key, &query_key);
-                    forward_turn(
+                    crate::forward::turn(
+                        env,
                         upstream,
                         protocol,
                         &url_path,
@@ -339,151 +356,6 @@ async fn dispatch(
             }
         }
     }
-}
-
-struct Turn {
-    status: StatusCode,
-    body: Vec<u8>,
-    json: bool,
-    /// The reply as the upstream sent it, kept from before the protocol
-    /// translation back to the agent. Usage and the answered model are read
-    /// from it when the agent-side body has neither — tokens were spent even
-    /// when the rebuild failed. `None` marks a refusal generated here.
-    upstream: Option<Bytes>,
-}
-
-impl Turn {
-    fn text(status: StatusCode, message: &str) -> Self {
-        Self {
-            status,
-            body: message.as_bytes().to_vec(),
-            json: false,
-            upstream: None,
-        }
-    }
-
-    fn upstream(status: StatusCode, body: Vec<u8>, raw: Bytes) -> Self {
-        Self {
-            status,
-            body,
-            json: true,
-            upstream: Some(raw),
-        }
-    }
-}
-
-async fn forward_turn(
-    upstream: Option<&str>,
-    protocol: Option<Protocol>,
-    url_path: &str,
-    facts: &crate::trace::TurnFacts<'_>,
-    public_responses: bool,
-) -> Response<Full<Bytes>> {
-    let turned = forward_body(
-        upstream,
-        protocol,
-        url_path,
-        facts.inbound,
-        public_responses,
-    )
-    .await;
-    crate::trace::note_turn(
-        facts,
-        turned.status.as_u16(),
-        &turned.body,
-        turned.upstream.as_deref(),
-    );
-    let content_type = if turned.json {
-        "application/json"
-    } else {
-        "text/plain; charset=utf-8"
-    };
-    Response::builder()
-        .status(turned.status)
-        .header(hyper::header::CONTENT_TYPE, content_type)
-        .body(Full::new(Bytes::from(turned.body)))
-        .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "response"))
-}
-
-async fn forward_body(
-    upstream: Option<&str>,
-    protocol: Option<Protocol>,
-    url_path: &str,
-    inbound: &[u8],
-    public_responses: bool,
-) -> Turn {
-    let mut upstream_bytes = match protocol {
-        Some(protocol) => match upstream_body(protocol, inbound) {
-            Ok(body) => crate::effort::apply_upstream_effort(&body, ""),
-            Err(_) => return Turn::text(StatusCode::BAD_REQUEST, "bad request"),
-        },
-        None => inbound.to_vec(),
-    };
-    if public_responses {
-        upstream_bytes = crate::chatgpt::shape_responses(&upstream_bytes);
-    }
-    let Some(base) = upstream else {
-        return Turn::text(StatusCode::BAD_GATEWAY, "no upstream");
-    };
-    // After translation, before redaction. Raw image routes have no protocol
-    // and stay byte-for-byte; a missing vision id leaves the body alone.
-    let upstream_bytes = if protocol.is_some() {
-        match crate::vision::rewrite_forward(&upstream_bytes, base).await {
-            Ok(bytes) => bytes,
-            Err(reject) => {
-                let status = StatusCode::from_u16(reject.status).unwrap_or(StatusCode::BAD_GATEWAY);
-                return Turn::text(status, &reject.message);
-            }
-        }
-    } else {
-        upstream_bytes
-    };
-    let upstream_bytes = crate::redact::mask_outbound(&upstream_bytes);
-    let url = format!("{}{url_path}", base.trim_end_matches('/'));
-    crate::outbound::note_outbound(&url);
-    let client = match skillstar_core::infra::http_client::stream_http_client() {
-        Ok(client) => client,
-        Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream client"),
-    };
-    let mut pending = client
-        .post(url)
-        .header(hyper::header::CONTENT_TYPE, "application/json");
-    if public_responses {
-        pending = pending.header(hyper::header::ACCEPT, "application/json");
-    }
-    let pending = pending.body(upstream_bytes);
-    let response = match skillstar_core::infra::http_client::send_stream(pending).await {
-        Ok(response) => response,
-        Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream request"),
-    };
-    let status =
-        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let bytes = match response.bytes().await {
-        Ok(bytes) => bytes,
-        Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream body"),
-    };
-    let bytes = crate::redact::unmask_response(&bytes);
-    let outbound = match protocol {
-        Some(protocol) => match outbound_body(protocol, &bytes) {
-            Ok(body) => body,
-            // The agent-side rebuild failed, but the upstream reply is kept:
-            // what it spent still belongs in the ledger.
-            Err(_) => {
-                return Turn::upstream(
-                    StatusCode::BAD_GATEWAY,
-                    b"upstream body".to_vec(),
-                    Bytes::from(bytes),
-                );
-            }
-        },
-        None => bytes.to_vec(),
-    };
-    if public_responses
-        && let Some(replaced) = crate::chatgpt::quota_reply(status.as_u16(), &outbound)
-    {
-        return Turn::upstream(status, replaced, Bytes::from(bytes));
-    }
-    Turn::upstream(status, outbound, Bytes::from(bytes))
 }
 
 fn header_text(headers: &hyper::HeaderMap, name: hyper::header::HeaderName) -> String {
