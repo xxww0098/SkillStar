@@ -1,6 +1,6 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：open（5/13）
+状态：open（6/13）
 更新：2026-10-02
 关联：`specs/usage-models-tree/`（open，gateway crate 树重构，本 spec 多个切片有 ⛩ 前置）
 
@@ -23,7 +23,7 @@
 - [x] 03 账本 append 热路径（P1）— `ledger/`（record+append，5MB 轮转，O_APPEND+进程锁），TurnFacts 管道 + SSE 尾帧/JSON 双提取，上游原始字节入账（回译失败 token 不丢）
 - [ ] 04 账本读取面与前端换源（P1，⛩tree-07）
 - [x] 05 sessions 地基 + claude 系 parser（P2）— claude-desktop 实测走 entrypoint 前缀归因（`claude-desktop-3p`），Cowork glob 本机未命中但保留
-- [ ] 06 codex/opencode/pi/omp parser（P2）
+- [x] 06 codex/opencode/pi/omp parser（P2）— 每 parser 一 commit；ruzstd 实测成功（golden .zst）；口径矩阵：codex input 剥 cache / pi·omp 原样 / opencode output 加 reasoning
 - [x] 07 ConsumptionView 合并去重（P2/P3）— app/usage/consumption.rs 纯函数；Record.request_id 退化接口（record_request_id 恒 None，切片 10 补字段后换函数体激活主键级）
 - [ ] 08 价格源（P3，⛩tree-03+06）
 - [ ] 09 Summarize + 今日消耗（P3，⛩tree-09）

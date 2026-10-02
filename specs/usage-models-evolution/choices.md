@@ -97,3 +97,12 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **MatchMap = BTreeMap<call_index, record_index>**（1:1 严格配对，单向即可）。
 - **agent id 对齐**：精确字符串相等；UA 直推的 product 名（claude-cli 等）与 AGENT_SPECS id 的缺口归 gateway 侧归一（切片 10 落拒绝标记时一并 revisit）。
 - **UnifiedCall.error_kind 统一 Option<String>**（gateway 侧 snake_case 序列化与 JSONL 同源）；SessionFile 行 catalog 恒 "session-unknown"，Gateway 行原样（路由未落地时空串，不在本层补默认）。
+
+## S6 切片 06 落地时的实现裁决（banked 2026-10-02）
+
+- **ruzstd 成功，无降级**：zstd CLI v1.5.7 -19 实压 golden（729 字节真实帧）StreamingDecoder 完整解码；损坏帧降级 warn + 空视图重试。不记 docs/errors.md。
+- **口径矩阵**：codex `input -= cached_input_tokens`（saturating，magpie spent 同款）；pi/omp input 原样（本就不含 cacheRead）；opencode input 原样 + output 加 reasoning；v2 compaction 无模型记最后回复模型；子会话归并 root session（parent 链 ≤64 跳）。omp 的 task 工具 `details.usage` 不读——子会话已各自记账，读会双计。
+- **codex token_count 差分三态**：total 单调增长取差值（cache_write 钳 0）/ 回退或首帧取 last_token_usage / 重复 total 为零不算 call。
+- **codex 不做 task_complete 时长精化**（latency 用 magpie at-call 估算口径，2h 上限）——turns map+事后改写的 delta 覆盖复杂度不在契约内。
+- **pi 发现一层目录**（实证 pi 只写一层；递归会把 omp artifacts 误判）；**opencode 每次全量重读**（message 行原地重写，magpie 同款，checkpoint 只承载视图，from/to=0/0）；**.zst from/to 指解压后偏移且整读无 resume**（模块文档注明）。
+- **跨文件 dedup：四家 msg id 恒空**（magpie 只对 claude 家族按 msg id 去重；codex 靠差分、pi 靠 fork 时间跳过、opencode 靠 SQL NOT IN）。
