@@ -1,5 +1,6 @@
 //! The `model_gateway.json` store: one module per stored field family.
 
+pub(crate) mod doc;
 pub(crate) mod groups;
 pub(crate) mod listen;
 pub(crate) mod names;

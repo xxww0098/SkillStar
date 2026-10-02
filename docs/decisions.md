@@ -727,6 +727,15 @@
 - 后果：获得——LAN 暴露面从「任意占位 bearer 即可用」收敛到「持有 key 文件内容才可用」，环回上的既有 Agent 配置一个字节都不用改。承担——对同用户本机攻击者不设防（key 文件用户可读，严格校验环回 bearer 对其增益约 0）；没有鉴权槽的 Agent 在非 loopback 上不可用，OMP（`auth:none`，无法携带 key）仅 loopback 可用，人工检查点确认可接受；key 无进程级缓存，每次非环回请求读一次 key 文件（小文件、LAN 流量低，换取测试沙箱可隔离）。
 - 证据：`crates/skillstar-gateway/src/access.rs`、`crates/skillstar-gateway/src/serve.rs`（dispatch 门禁与 `ServeError::LanNeedsKey`）、`crates/skillstar-gateway/src/listen.rs`（`SaveListenError::Key`）、`crates/skillstar-gateway/src/codex.rs`（NAT bearer）、`crates/skillstar-gateway/tests/access.rs`、`crates/skillstar-gateway/tests/wsl_codex.rs`，参照 magpie `internal/gateway/lan.go`。
 
+## D-079：model_gateway.json 的 typed schema 归位 gateway 的 store/doc.rs
+
+- 日期：2026-10-02
+- 状态：accepted
+- 背景：`skillstar-gateway` 对 `model_gateway.json` 的 12 个接触点（5 写方 + 7 读方）各自打开文件、各自用 `serde_json::Value` 做行级手术，未知字段只靠「mutate 整个 Value」幸存；`family` 标签已被 stringly 读取，一等化在即，行形状再无主人就会二次迁移（spec `specs/usage-models-tree`）。
+- 决策：`store/doc.rs` 的 `ModelGatewayDoc` 是该文件的唯一 typed schema owner：外层 typed + 行内保留 Value 混合（D5），已知顶层键与 providers/groups 行的共享字段（id/members/routing/affinity/family）typed 承载，未知键经 `#[serde(flatten)]` 整段回写；已知字段只在偏离默认值时序列化，open→save 对「行均为对象」的文件是恒等变换（不凭空造 `members: []` 或 `routing: null`），删键语义（Smart/Auto）留给 lens setter。**family 落在 gateway 的 store/ 而不是 models crate**：`family` 是 `model_gateway.json` 里 providers/groups 行上的字段，文件的主人是 gateway（D-073：models 不打开该文件，gateway 只依赖 core）；若 typed 行形状放进 models，要么让 models 反向依赖 gateway 的文件、要么复制第二份解析，两个都比现状糟。models 侧消费经 gateway 的公共读函数与 app 投影获得（树 spec 07），families 一等化的唯一 schema 改动点是 `store/doc.rs`（见 `specs/usage-models-tree/slices/10-families-contract.md`）。**仍非事务（D7 重申）**：open→改→save 是无锁的读-改-写循环，两进程交错可丢写；收口前如此，收口后仍如此，不引入进程内锁，声明由 `store/doc.rs` 模块文档承载。
+- 后果：获得——行形状有单一权威定义，读写方改道（04/05）后任何「保字段」缺陷只在一处修；手编键（redact_*、vision、classifier、rules、note）的存活由 flatten 结构性保证而非测试运气。承担——严格 `open()` 对「已知字段形状坏」的文件整体拒绝（旧写方按字段各自宽容），这类文件在旧路径本就无人能安全写入；`model_efforts`/`visible` 无写方，容器不提供 setter；schema 形状是阶梯上唯一不可逆决策，改动即二次迁移。
+- 证据：`crates/skillstar-gateway/src/store/doc.rs`、`crates/skillstar-gateway/tests/store_doc.rs`（round-trip/缺文件/坏文件/重复与无 id 行四钉）、[usage-models-tree spec](../specs/usage-models-tree/README.md)（D5/D7/D8）。
+
 ## 新增记录格式
 
 
