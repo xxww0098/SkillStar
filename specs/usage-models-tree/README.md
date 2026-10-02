@@ -1,6 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（0/10）
+状态：open（1/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
@@ -8,14 +8,14 @@
 你是下一个接手本 spec 的实现者。从切片 01 开始，按编号顺序做；08/09 可与 03-07 并行，10 随时可做。
 
 - **先读本 README 的「已拍板决策」和「全局防火墙」**，再读你将做的切片文件。决策不重开讨论。
-- 当前状态：全部 10 片未动。第一片是纯加测试（行为锁矩阵），不碰产品代码。
+- 当前状态：01 已完成（tests/gateway_roundtrip.rs）。下一片是 02（树归位），注意与 evolution spec 的 gateway 泳道（serve.rs/ledger）协调——02 移动的文件含 affinity.rs（route/），等 evolution-03 合并后再动工。08/09（usage 线）随时可做。
 - 每片完成：跑该片「验证」小节列出的命令 + `bash scripts/internal/check_clippy_ratchet.sh`（ratchet=1，出现新诊断修代码、永不调 baseline），更新本节状态与 TODO，再做下一片。
 - 环境注意：本机若 21847 端口被占，`serve_binds_default_port` 会环境性失败（tests/serve.rs），验证命令统一加 `-- --skip serve_binds_default_port`，不是回归。
 - 结束你的 pass 前，把本节改写成下一个 agent 需要的样子。
 
 ### 全局 TODO
 
-- [ ] 01 行为锁矩阵（tests only）
+- [x] 01 行为锁矩阵（tests only）— `tests/gateway_roundtrip.rs` 5 测试 + `tests/fixtures/gateway/handwritten.json`；五写方交叉/profile 吞字段/幂等/坏文件拒写/缺文件默认全钉
 - [ ] 02 树归位：store/ route/ catalog/ 目录成形
 - [ ] 03 store/doc.rs schema owner
 - [ ] 04 读方改道（7 个读方走 lens）
