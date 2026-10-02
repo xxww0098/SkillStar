@@ -457,6 +457,7 @@ pub fn run() {
             commands::usage_commands::get_subscription_alerts,
             commands::usage_commands::dismiss_subscription_alert,
             commands::usage_commands::get_usage_summary,
+            commands::usage_commands::get_consumption_summary,
             commands::usage_commands::start_oauth_login,
             commands::usage_commands::await_oauth_completion,
             commands::usage_commands::submit_oauth_callback,

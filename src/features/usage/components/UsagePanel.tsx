@@ -101,6 +101,7 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
         allSubscriptions={data.subscriptions}
         catalog={data.catalog}
         filter={filter}
+        todayByCatalog={data.todayByCatalog}
         onReorder={(ids) => settled(data.reorder(ids))}
       />
       <UsageAlertBanner alerts={data.alerts} onDismiss={(id) => settled(data.dismissAlert(id))} />
@@ -118,6 +119,7 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
             subscriptions={filtered}
             allSubscriptions={data.subscriptions}
             catalog={data.catalog}
+            todayByCatalog={data.todayByCatalog}
             cliAccounts={data.cliAccounts}
             hideAccountEmails={hideAccountEmails}
             filter={filter}

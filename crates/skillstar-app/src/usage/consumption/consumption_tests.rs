@@ -3,11 +3,15 @@
 //! projection seam, since gateway `Record` cannot carry an id yet), the
 //! window floors with an injected clock, and the model-id normalization
 //! goldens.
+//!
+//! Slice 09 adds the summarize section: the UTC period floors, the
+//! auto-bucketed series, the four dimensions, unpriced counting, and the
+//! injected price table's arithmetic.
 
 use std::path::PathBuf;
 
 use super::*;
-use chrono::TimeZone;
+use chrono::{TimeZone, Utc};
 use skillstar_usage::sessions::SessionTokens;
 
 // ── fixtures ──────────────────────────────────────────────────────────
@@ -541,4 +545,201 @@ fn same_model_rejects_empty_ids() {
     assert!(!same_model("", ""));
     assert!(!same_model("", "gpt-5"));
     assert!(!same_model("[1m]", "[1m]"), "a bare suffix names no model");
+}
+
+// ── summarize (slice 09) ──────────────────────────────────────────────
+
+/// A gateway-source row with hand-picked attribution, straight on
+/// [`UnifiedCall`] — summarize reads the merged shape, not the sources.
+fn merged_row(at: i64, catalog: &str, model: &str, tokens: [u64; 4]) -> ConsumptionRow {
+    ConsumptionRow {
+        call: UnifiedCall {
+            at,
+            agent: "claude-code".to_string(),
+            session: "s1".to_string(),
+            model_asked: model.to_string(),
+            model_answered: String::new(),
+            tokens: counts(tokens),
+            effort: None,
+            request_id: None,
+            error_kind: None,
+            latency_ms: Some(LATENCY),
+            catalog: catalog.to_string(),
+            account: "key:0011aabb".to_string(),
+            status: Some(200),
+            endpoint: "/v1/messages".to_string(),
+            file: None,
+            from: None,
+            to: None,
+        },
+        source: CallSource::Gateway,
+    }
+}
+
+/// A clock fixed inside a day that is *not* the local one on any UTC+8
+/// machine: 2026-10-08 21:30 UTC reads as October 9 locally, so a floor
+/// computed on the local calendar would sit 2.5h late and fail the asserts.
+const NOW: i64 = 1_791_495_000_000;
+/// UTC midnight of [`NOW`]: 2026-10-08T00:00:00Z.
+const UTC_TODAY: i64 = 1_791_417_600_000;
+
+const HOUR: i64 = 3_600_000;
+
+fn no_price(_: &str, _: &str) -> Option<skillstar_gateway::ModelCost> {
+    None
+}
+
+fn input<'a>(rows: &'a [ConsumptionRow]) -> SummarizeInput<'a> {
+    SummarizeInput { now_ms: NOW, rows, price: &no_price }
+}
+
+fn labels(dimension: Dimension, summary: &Summary) -> Vec<&str> {
+    summary.by[&dimension].iter().map(|group| group.label.as_str()).collect()
+}
+
+#[test]
+fn period_floors_are_utc_midnight() {
+    // The floor of `now`'s day is 00:00:00 on the UTC calendar — pinned by
+    // value and by spelling the instant back in UTC.
+    assert_eq!(period_floor_ms(Period::Today, NOW), Some(UTC_TODAY));
+    let floor = Utc.timestamp_millis_opt(UTC_TODAY).single().expect("floor instant");
+    assert_eq!(floor.to_string(), "2026-10-08 00:00:00 UTC");
+    assert_eq!(period_floor_ms(Period::Week, NOW), Some(UTC_TODAY - 6 * DAY_MS));
+    assert_eq!(period_floor_ms(Period::Month, NOW), Some(UTC_TODAY - 29 * DAY_MS));
+    assert_eq!(period_floor_ms(Period::All, NOW), None);
+}
+
+#[test]
+fn the_utc_floor_is_inclusive_by_at() {
+    let rows = [
+        merged_row(UTC_TODAY - 1, "deepseek", "deepseek-chat", TOKENS),
+        merged_row(UTC_TODAY, "deepseek", "deepseek-chat", TOKENS),
+        merged_row(UTC_TODAY + HOUR, "deepseek", "deepseek-chat", TOKENS),
+    ];
+    let summary = summarize(&input(&rows), Period::Today);
+    assert_eq!(summary.totals.calls, 2, "yesterday's tail is out: {summary:?}");
+    // All keeps the pre-midnight row too.
+    assert_eq!(summarize(&input(&rows), Period::All).totals.calls, 3);
+}
+
+#[test]
+fn today_buckets_by_hour_aligned_to_the_utc_grid() {
+    let rows = [
+        merged_row(UTC_TODAY + 10 * HOUR + 5 * 60_000, "a", "m", TOKENS),
+        merged_row(UTC_TODAY + 10 * HOUR + 42 * 60_000, "a", "m", TOKENS),
+        merged_row(UTC_TODAY + 11 * HOUR, "a", "m", TOKENS),
+    ];
+    let summary = summarize(&input(&rows), Period::Today);
+    let starts: Vec<i64> = summary.series.iter().map(|point| point.bucket_start_ms).collect();
+    assert_eq!(starts, vec![UTC_TODAY + 10 * HOUR, UTC_TODAY + 11 * HOUR]);
+    assert_eq!(summary.series[0].totals.calls, 2);
+}
+
+#[test]
+fn week_and_month_bucket_by_utc_day() {
+    let rows = [
+        merged_row(UTC_TODAY, "a", "m", TOKENS),
+        merged_row(UTC_TODAY + 90_000, "a", "m", TOKENS),
+        merged_row(UTC_TODAY - DAY_MS, "a", "m", TOKENS),
+    ];
+    for period in [Period::Week, Period::Month] {
+        let summary = summarize(&input(&rows), period);
+        let starts: Vec<i64> = summary.series.iter().map(|point| point.bucket_start_ms).collect();
+        assert_eq!(starts, vec![UTC_TODAY - DAY_MS, UTC_TODAY], "{period:?}");
+    }
+}
+
+#[test]
+fn all_buckets_by_iso_week_starting_monday_utc() {
+    // UTC_TODAY is a Thursday (2026-10-08); its ISO week starts Monday
+    // 2026-10-05.
+    let monday = UTC_TODAY - 3 * DAY_MS;
+    assert_eq!(
+        Utc.timestamp_millis_opt(monday).single().expect("monday").format("%A").to_string(),
+        "Monday"
+    );
+    let rows = [
+        merged_row(monday, "a", "m", TOKENS),
+        merged_row(monday + 2 * DAY_MS, "a", "m", TOKENS),
+        merged_row(monday + 6 * DAY_MS + HOUR, "a", "m", TOKENS),
+        merged_row(monday - 1, "a", "m", TOKENS),
+    ];
+    let summary = summarize(&input(&rows), Period::All);
+    let starts: Vec<i64> = summary.series.iter().map(|point| point.bucket_start_ms).collect();
+    assert_eq!(
+        starts,
+        vec![monday - 7 * DAY_MS, monday],
+        "one bucket straddles the prior Monday, three share this week's"
+    );
+    assert_eq!(summary.series[0].totals.calls, 1);
+    assert_eq!(summary.series[1].totals.calls, 3);
+}
+
+#[test]
+fn the_four_dimensions_group_their_labels() {
+    let mut rows = vec![
+        merged_row(UTC_TODAY, "deepseek", "deepseek-chat", TOKENS),
+        merged_row(UTC_TODAY + 90_000, "openai", "gpt-5", TOKENS),
+        merged_row(UTC_TODAY + 2 * 90_000, "openai", "gpt-5", TOKENS),
+    ];
+    rows[0].call.session = "s1".to_string();
+    rows[1].call.session = "s2".to_string();
+    rows[2].call.session = "s2".to_string();
+    rows[2].call.account = String::new();
+    // The answered model outranks the asked one for grouping and billing.
+    rows[0].call.model_asked = "auto".to_string();
+    rows[0].call.model_answered = "deepseek-chat".to_string();
+    let summary = summarize(&input(&rows), Period::Today);
+
+    assert_eq!(summary.totals.calls, 3);
+    assert_eq!(labels(Dimension::Agent, &summary), vec!["claude-code"]);
+    assert_eq!(labels(Dimension::Model, &summary), vec!["deepseek-chat", "gpt-5"]);
+    // The row with no account attribution stays out of the breakdown.
+    assert_eq!(summary.by[&Dimension::Account][0].label, "key:0011aabb");
+    assert_eq!(summary.by[&Dimension::Account][0].totals.calls, 2);
+    assert_eq!(labels(Dimension::Session, &summary), vec!["s1", "s2"]);
+    assert_eq!(summary.by[&Dimension::Session][1].totals.calls, 2);
+    // Rows a label declines do not vanish from totals.
+    assert_eq!(summary.totals.calls, 3);
+}
+
+#[test]
+fn prices_are_injected_at_read_time_and_unpriced_counts_the_rest() {
+    let price = |catalog: &str, model: &str| {
+        (catalog == "deepseek" && model == "deepseek-chat").then_some(skillstar_gateway::ModelCost {
+            input: 0.27,
+            output: 1.10,
+            cache_read: 0.07,
+            cache_write: 0.0,
+        })
+    };
+    let rows = [
+        merged_row(UTC_TODAY, "deepseek", "deepseek-chat", [500_000, 500_000, 0, 0]),
+        merged_row(UTC_TODAY + 90_000, "stranger", "deepseek-chat", [1, 1, 0, 0]),
+    ];
+    let summary = summarize(
+        &SummarizeInput { now_ms: NOW, rows: &rows, price: &price },
+        Period::Today,
+    );
+    // 0.5M × ($0.27 + $1.10) per million = $0.685, the deepseek magnitude.
+    assert!((summary.totals.cost_usd - 0.685).abs() < 1e-9, "{}", summary.totals.cost_usd);
+    assert_eq!(summary.totals.unpriced, 1);
+    // An empty price table prices nothing but counts everything.
+    let bare = summarize(&input(&rows), Period::Today);
+    assert_eq!(bare.totals.cost_usd, 0.0);
+    assert_eq!(bare.totals.unpriced, 2);
+}
+
+#[test]
+fn errors_and_mean_latency_aggregate() {
+    let mut failed = merged_row(UTC_TODAY, "a", "m", TOKENS);
+    failed.call.error_kind = Some("upstream".to_string());
+    failed.call.latency_ms = Some(3_000);
+    let mut latencyless = merged_row(UTC_TODAY + 90_000, "a", "m", TOKENS);
+    latencyless.call.latency_ms = None;
+    let summary = summarize(&input(&[failed, latencyless]), Period::Today);
+    assert_eq!(summary.totals.calls, 2);
+    assert_eq!(summary.totals.errors, 1);
+    // Only the row that measured a duration entered the mean.
+    assert_eq!(summary.totals.mean_latency_ms, 3_000.0);
 }

@@ -58,6 +58,13 @@ use chrono::{Local, LocalResult, TimeZone};
 use skillstar_gateway::{ErrorKind, Record, TokenCounts};
 use skillstar_usage::sessions::SessionCall;
 
+mod summarize;
+
+pub use summarize::{
+    Dimension, Group, Period, SeriesPoint, SummarizeInput, Summary, Totals, groups,
+    period_floor_ms, summarize,
+};
+
 /// Catalog label for a call only the session file knows (magpie's
 /// `session-unknown`: no gateway attribution exists for bypass traffic).
 pub const SESSION_UNKNOWN_CATALOG: &str = "session-unknown";

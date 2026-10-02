@@ -12,8 +12,9 @@
 //     MonetaryBalance / CreditInfo / OpenCodeApiKey / DeepSeek* leaves),
 //     AlertSeverity, AlertKind come from `skillstar_usage::subscription`.
 //   - CatalogEntry, Subscription, SubscriptionAlert, SwitchOutcome, LinkMode,
-//     CliAccountState, UsageSummary, MonthlySpendEntry, OAuthStart,
-//     CreateSubscriptionInput,
+//     CliAccountState, UsageSummary, MonthlySpendEntry, ConsumptionPeriod,
+//     ConsumptionTotals, ConsumptionGroup, ConsumptionSeriesPoint,
+//     ConsumptionSummary, OAuthStart, CreateSubscriptionInput,
 //     UpdateSubscriptionInput are the DTO projections owned by
 //     `skillstar_app::usage::dto` (their Rust names carry a `Dto` suffix that
 //     `#[ts(rename)]` drops — on this side they are the only shapes).
@@ -48,6 +49,11 @@ export type { UpdateSubscriptionInput } from "@/types/generated/UpdateSubscripti
 export type { SubscriptionAlert } from "@/types/generated/SubscriptionAlert";
 export type { MonthlySpendEntry } from "@/types/generated/MonthlySpendEntry";
 export type { UsageSummary } from "@/types/generated/UsageSummary";
+export type { ConsumptionPeriod } from "@/types/generated/ConsumptionPeriod";
+export type { ConsumptionTotals } from "@/types/generated/ConsumptionTotals";
+export type { ConsumptionGroup } from "@/types/generated/ConsumptionGroup";
+export type { ConsumptionSeriesPoint } from "@/types/generated/ConsumptionSeriesPoint";
+export type { ConsumptionSummary } from "@/types/generated/ConsumptionSummary";
 export type { OAuthFlow } from "@/types/generated/OAuthFlow";
 export type { OAuthStart } from "@/types/generated/OAuthStart";
 

@@ -10,7 +10,8 @@ import {
   subscriptionHasSpend,
   totalSpendForSubscription,
 } from "../lib/pricing";
-import type { CatalogEntry, Subscription } from "../types";
+import { formatEstimateUsd } from "./card";
+import type { CatalogEntry, ConsumptionTotals, Subscription } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 
 const CHIP_MIN_WIDTH = 172;
@@ -20,6 +21,10 @@ interface UsageSpendSummaryProps {
   subscriptions: Subscription[];
   allSubscriptions: Subscription[];
   catalog: CatalogEntry[];
+  /** Today's gateway-metered totals per provider; adds the chips' today
+   *  column (cost, always marked as an estimate). Omitted while the summary
+   *  read is in flight. */
+  todayByCatalog?: Record<string, ConsumptionTotals>;
   onReorder: (orderedIds: string[]) => void;
   className?: string;
 }
@@ -28,6 +33,7 @@ export function UsageSpendSummary({
   subscriptions,
   allSubscriptions,
   catalog,
+  todayByCatalog,
   onReorder,
   className,
 }: UsageSpendSummaryProps) {
@@ -73,6 +79,7 @@ export function UsageSpendSummary({
               catalog={catalogById.get(sub.catalog_id)}
               total={totalSpendForSubscription(sub)}
               monthly={monthlyEquivalentPrice(sub)}
+              today={todayByCatalog === undefined ? undefined : (todayByCatalog[sub.catalog_id] ?? null)}
               showLabel={spendSubs.length > 1}
             />
           </Reorder.Item>
@@ -87,12 +94,15 @@ interface SubscriptionSpendChipProps {
   catalog: CatalogEntry | undefined;
   total: number;
   monthly: number | null;
+  /** `null` = read landed, no gateway traffic for this provider today. */
+  today?: ConsumptionTotals | null;
   showLabel: boolean;
 }
 
-function SubscriptionSpendChip({ sub, catalog, total, monthly, showLabel }: SubscriptionSpendChipProps) {
+function SubscriptionSpendChip({ sub, catalog, total, monthly, today, showLabel }: SubscriptionSpendChipProps) {
   const { t } = useTranslation();
   const title = sub.display_name || catalog?.display_name || sub.catalog_id;
+  const todayCost = today != null && today.calls > 0 ? today.cost_usd : null;
 
   return (
     <div
@@ -109,16 +119,27 @@ function SubscriptionSpendChip({ sub, catalog, total, monthly, showLabel }: Subs
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {showLabel && <span className="truncate text-[11px] font-medium leading-none text-foreground/80">{title}</span>}
         <div className="flex min-w-0 items-stretch">
-          {total > 0 && (
+          {todayCost != null && (
             <SpendStat
-              label={t("usage.totalSpendShort")}
-              value={formatCurrencyAmount(total, sub.currency)}
+              label={t("usage.todaySpendShort")}
+              value={formatEstimateUsd(todayCost)}
+              title={t("usage.todayConsumptionHint")}
               className="flex-1"
             />
           )}
+          {total > 0 && (
+            <>
+              {todayCost != null && <div className="my-1 w-px shrink-0 bg-border/45" aria-hidden />}
+              <SpendStat
+                label={t("usage.totalSpendShort")}
+                value={formatCurrencyAmount(total, sub.currency)}
+                className="flex-1"
+              />
+            </>
+          )}
           {monthly != null && monthly > 0 && (
             <>
-              {total > 0 && <div className="my-1 w-px shrink-0 bg-border/45" aria-hidden />}
+              {(total > 0 || todayCost != null) && <div className="my-1 w-px shrink-0 bg-border/45" aria-hidden />}
               <SpendStat
                 label={t("usage.monthlySpendShort")}
                 value={formatCurrencyAmount(monthly, sub.currency)}
@@ -137,15 +158,18 @@ function SpendStat({
   label,
   value,
   accent,
+  title,
   className,
 }: {
   label: string;
   value: string;
   accent?: boolean;
+  /** Hover explanation (the today column's estimate/scope note). */
+  title?: string;
   className?: string;
 }) {
   return (
-    <div className={cn("flex min-w-16 flex-col justify-center px-1.5 py-0.5", className)}>
+    <div className={cn("flex min-w-16 flex-col justify-center px-1.5 py-0.5", className)} title={title}>
       <span className="text-[10px] leading-none text-muted-foreground">{label}</span>
       <span
         className={cn(

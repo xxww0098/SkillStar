@@ -107,6 +107,37 @@ export const USAGE_HANDLERS: DevMockHandlers = {
   }),
   get_subscription_alerts: () => USAGE_ALERTS,
   get_usage_summary: () => USAGE_SUMMARY,
+  // Browser-dev sample for the today line: two gateway-metered providers,
+  // priced at read time, plus one bypass model no catalog owns.
+  get_consumption_summary: (args?: Record<string, unknown>) => {
+    const period = (args?.window as string | undefined) ?? "today";
+    const totals = (calls: number, input: number, cost: number) => ({
+      calls,
+      errors: 0,
+      input,
+      output: Math.round(input / 5),
+      cache_read: 0,
+      cache_write: 0,
+      reasoning: 0,
+      cost_usd: cost,
+      unpriced: 0,
+      mean_latency_ms: 1_450,
+    });
+    const group = (label: string, calls: number, input: number, cost: number) => ({
+      label,
+      totals: totals(calls, input, cost),
+    });
+    return {
+      period,
+      totals: totals(18, 240_000, 0.2137),
+      series: [],
+      by_agent: [group("claude-code", 18, 240_000, 0.2137)],
+      by_model: [group("deepseek-chat", 12, 180_000, 0.162), group("glm-4.7", 6, 60_000, 0.0517)],
+      by_account: [group("key:0011aabb", 18, 240_000, 0.2137)],
+      by_session: [group("s-demo", 18, 240_000, 0.2137)],
+      by_catalog: [group("deepseek", 12, 180_000, 0.162), group("zai", 6, 60_000, 0.0517)],
+    };
+  },
   // Returns full Subscription list (backend shape). Optional catalogId is
   // accepted for API parity; mock still returns every sample row.
   refresh_all_subscriptions: (_args?: Record<string, unknown>) => USAGE_SUBSCRIPTIONS,

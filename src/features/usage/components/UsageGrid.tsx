@@ -6,7 +6,14 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { mergeSubscriptionOrder } from "../lib/pricing";
 import { desktopAppsForFilter } from "../lib/desktopApps";
-import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type CliAccountState, type Subscription } from "../types";
+import {
+  FILTER_ALL,
+  type CatalogEntry,
+  type CatalogFilter,
+  type CliAccountState,
+  type ConsumptionTotals,
+  type Subscription,
+} from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { DesktopAppsSection } from "./instances/DesktopAppsSection";
@@ -17,6 +24,9 @@ interface UsageGridProps {
   subscriptions: Subscription[];
   allSubscriptions: Subscription[];
   catalog: CatalogEntry[];
+  /** Today's gateway-metered totals per provider; drives the cards' today
+   *  line. Omitted while the summary read is in flight. */
+  todayByCatalog?: Record<string, ConsumptionTotals>;
   /** `catalog_id -> which account that CLI is actually serving`; each card
    *  draws its "current" badge from this rather than from the pin. */
   cliAccounts?: Record<string, CliAccountState>;
@@ -63,6 +73,7 @@ export function UsageGrid({
   subscriptions,
   allSubscriptions,
   catalog,
+  todayByCatalog,
   cliAccounts,
   hideAccountEmails = false,
   filter,
@@ -161,6 +172,7 @@ export function UsageGrid({
           key={sub.id}
           subscription={sub}
           catalog={catalogById.get(sub.catalog_id)}
+          todayConsumption={todayByCatalog === undefined ? undefined : (todayByCatalog[sub.catalog_id] ?? null)}
           hideAccountEmails={hideAccountEmails}
           itemClassName={itemClassName}
           {...cardCallbacks}
@@ -325,12 +337,14 @@ function ProviderSubscriptionRow({
 const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
   subscription,
   catalog,
+  todayConsumption,
   hideAccountEmails,
   itemClassName,
   ...callbacks
 }: {
   subscription: Subscription;
   catalog: CatalogEntry | undefined;
+  todayConsumption?: ConsumptionTotals | null;
   hideAccountEmails: boolean;
   itemClassName?: string;
 } & CardCallbacks) {
@@ -353,6 +367,7 @@ const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
       <SubscriptionCard
         subscription={subscription}
         catalog={catalog}
+        todayConsumption={todayConsumption}
         hideAccountEmails={hideAccountEmails}
         onDragHandlePointerDown={onDragHandlePointerDown}
         {...callbacks}

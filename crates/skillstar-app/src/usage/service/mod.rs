@@ -1,6 +1,7 @@
 //! Application use cases for the Usage subscription tracker, split by use
 //! case: read projections, CRUD, usage refresh, OAuth flows, account
-//! switching, and the gateway's 401 self-heal, over a shared helper module.
+//! switching, the gateway's 401 self-heal, and the consumption summary, over
+//! a shared helper module.
 
 mod crud;
 mod helpers;
@@ -8,6 +9,7 @@ mod oauth;
 mod projections;
 mod reauth;
 mod refresh;
+mod summary;
 mod switching;
 
 pub use crud::*;
@@ -15,6 +17,7 @@ pub use oauth::*;
 pub use projections::*;
 pub use reauth::HealingBook;
 pub use refresh::*;
+pub use summary::get_consumption_summary;
 pub use switching::*;
 
 // Sibling modules inside `usage` address these helpers as

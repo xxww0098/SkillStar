@@ -116,6 +116,15 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - 当前覆盖 claude 家族（`claude-code` / `claude-desktop`，同 projects JSONL 解析、不同 discovery）。Claude 的行级规则由测试钉死：同 message id 后块 usage 覆盖前块且 `from` 取首块位置、synthetic 行只有 API 错误才算调用、行内 `entrypoint` 前缀 `claude-desktop` 归因 Desktop（含 `claude-desktop-3p`）。其余 Agent 家族按 spec 切片 06 追加到同一注册表。
 - discovery 遵守 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱（沙箱优先于 `$CLAUDE_CONFIG_DIR`）；claude-desktop 的 Cowork 目录布局（`local-agent-mode-sessions/*/*/local_*/.claude`）作为接口保留，本机未验证到该布局实际存在，Desktop 归因目前主要靠行内 entrypoint。
 
+## 今日消耗与汇总（consumption summary）
+
+- 数据链：`get_consumption_summary(window)` → `skillstar_app::usage::service::summary`（三源组装：gateway ledger `load` + `sessions::read_calls` + 切片 07 的 `consumption_view` 合并去重）→ `usage::consumption::summarize` 纯函数（时钟与价格全注入）。DTO 见 `ConsumptionSummary`（`period / totals / series / by_agent / by_model / by_account / by_session / by_catalog`，ts-rs 生成）。
+- **UTC 日界**：`Today` 的起点是 `now` 所在 UTC 日的 00:00（`Week`/`Month` 为截至今天的 7/30 个 UTC 日历日）。这是 wire 契约，与 `consumption_view` 的 `Window` 本地日界刻意不同——汇总要跨主机可比，窗口读文件只对本机负责。服务层按 `period_floor_ms − 24h` 读取网关池（配对缓冲），合并用 `Window::all`，可见窗口由 `summarize` 的 UTC 过滤裁定。
+- **读时计价**（spec D8）：账本只存 token，价格读当前表（`effective_price`：`model_gateway.json` 顶层 `prices` 覆盖 > models.dev 缓存）。价格表变更会在下一次读取时重述历史，UI 恒标「估算」；价格表查不到的调用计入 `unpriced`（未知，不是免费）。
+- **口径标注「经网关 / 全部」**：`by_catalog`（卡片与支出摘要条的今日行来源）只含网关记账的调用——绕过网关的调用没有 catalog 归属，只进 `totals`（「全部」口径）。前端文案随行标注（`todayConsumptionCost` 带「经网关」，悬浮说明写明两口径）。
+- 计价与分组的模型 id 取「应答模型优先、请求模型回退」；`errors` = 有错误类别或 HTTP ≥400；`mean_latency_ms` 只对带时长的调用取均值。`series` 分桶自动切换：Today 按小时、Week/Month 按 UTC 天、All 按 ISO 周（周一 00:00 UTC 对齐）。
+- 前端：`UsageSpendSummary` 每订阅 chip 的「今日（估算）」列与卡片主体底部的 `TodayConsumptionLine`（等宽数字、成本恒标估算、空态「还没有记录」、无动画）。今日数据随页面 reload 与 refreshAll 的本地读刷新；读取在途时整行隐藏，读到的空数据才显示空态。
+
 ## Usage 卡片与 active 状态
 
 - **「当前」badge 的真相是对账结果，不是 pin。** pin（`get_active_subscriptions`）记录用户点过哪张卡；`reconcile_cli_accounts` 返回每个 catalog 的三态，是 CLI 下次实际会读到的东西。两者冲突时文件赢。

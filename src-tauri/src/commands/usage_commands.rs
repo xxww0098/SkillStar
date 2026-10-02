@@ -7,8 +7,9 @@ use skillstar_core::infra::error::AppError;
 use tauri::AppHandle;
 
 pub use skillstar_app::usage::{
-    CatalogEntryDto, CliAccountStateDto, CreateSubscriptionInput, OAuthStartDto,
-    SubscriptionAlertDto, SubscriptionDto, SwitchOutcomeDto, UpdateSubscriptionInput, UsageSummary,
+    CatalogEntryDto, CliAccountStateDto, ConsumptionPeriodDto, ConsumptionSummaryDto,
+    CreateSubscriptionInput, OAuthStartDto, SubscriptionAlertDto, SubscriptionDto, SwitchOutcomeDto,
+    UpdateSubscriptionInput, UsageSummary,
 };
 
 #[tauri::command]
@@ -103,6 +104,14 @@ pub fn dismiss_subscription_alert(alert_id: String) -> Result<(), AppError> {
 #[tauri::command]
 pub fn get_usage_summary() -> Result<UsageSummary, AppError> {
     usage::get_usage_summary()
+}
+
+/// Read-time-priced consumption summary over the merged view (gateway
+/// ledger + session files). `window` picks the period; its day boundary is
+/// UTC, and costs are estimates under the price table as it reads *now*.
+#[tauri::command]
+pub fn get_consumption_summary(window: ConsumptionPeriodDto) -> ConsumptionSummaryDto {
+    usage::get_consumption_summary(window)
 }
 
 #[tauri::command]

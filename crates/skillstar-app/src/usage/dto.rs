@@ -16,6 +16,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::usage::consumption::{Group, Period, SeriesPoint, Totals};
 use skillstar_usage::catalog::{AuthMode, CatalogEntry, CatalogTier};
 use skillstar_usage::fetchers::oauth::OAuthFlow;
 use skillstar_usage::subscription::{
@@ -391,6 +392,139 @@ pub struct OAuthStartDto {
     pub user_code: Option<String>,
     pub verification_uri: Option<String>,
     pub interval_secs: Option<u32>,
+}
+
+// ── Consumption summary (slice 09) ────────────────────────────────────
+
+/// Which period a consumption summary covers. Wire spelling is lowercase
+/// (`"today"` …); the **UTC** day boundary is part of this contract — a
+/// summary must mean the same thing on every host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "ConsumptionPeriod.ts", rename = "ConsumptionPeriod")]
+pub enum ConsumptionPeriodDto {
+    Today,
+    Week,
+    Month,
+    All,
+}
+
+impl ConsumptionPeriodDto {
+    /// The domain period behind the wire period.
+    pub fn domain(self) -> Period {
+        match self {
+            Self::Today => Period::Today,
+            Self::Week => Period::Week,
+            Self::Month => Period::Month,
+            Self::All => Period::All,
+        }
+    }
+}
+
+/// Aggregated counts and read-time-priced cost. `cost_usd` is an estimate
+/// under the price table as it reads *now* — a price change restates
+/// history; `unpriced` counts the calls no table entry priced.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "ConsumptionTotals.ts", rename = "ConsumptionTotals")]
+pub struct ConsumptionTotalsDto {
+    #[ts(type = "number")]
+    pub calls: u64,
+    #[ts(type = "number")]
+    pub errors: u64,
+    #[ts(type = "number")]
+    pub input: u64,
+    #[ts(type = "number")]
+    pub output: u64,
+    #[ts(type = "number")]
+    pub cache_read: u64,
+    #[ts(type = "number")]
+    pub cache_write: u64,
+    #[ts(type = "number")]
+    pub reasoning: u64,
+    pub cost_usd: f64,
+    #[ts(type = "number")]
+    pub unpriced: u64,
+    pub mean_latency_ms: f64,
+}
+
+impl From<Totals> for ConsumptionTotalsDto {
+    fn from(totals: Totals) -> Self {
+        // Destructured, not `..`-spread: a field added to the domain totals
+        // must land as a compile error here rather than silently vanish
+        // from the frontend contract.
+        let Totals {
+            calls,
+            errors,
+            input,
+            output,
+            cache_read,
+            cache_write,
+            reasoning,
+            cost_usd,
+            unpriced,
+            mean_latency_ms,
+            ..
+        } = totals;
+        Self {
+            calls,
+            errors,
+            input,
+            output,
+            cache_read,
+            cache_write,
+            reasoning,
+            cost_usd,
+            unpriced,
+            mean_latency_ms,
+        }
+    }
+}
+
+/// One labeled breakdown group.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "ConsumptionGroup.ts", rename = "ConsumptionGroup")]
+pub struct ConsumptionGroupDto {
+    pub label: String,
+    pub totals: ConsumptionTotalsDto,
+}
+
+impl From<Group> for ConsumptionGroupDto {
+    fn from(group: Group) -> Self {
+        Self { label: group.label, totals: group.totals.into() }
+    }
+}
+
+/// One non-empty series bucket (UTC bucket start).
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "ConsumptionSeriesPoint.ts", rename = "ConsumptionSeriesPoint")]
+pub struct ConsumptionSeriesPointDto {
+    #[ts(type = "number")]
+    pub bucket_start_ms: i64,
+    pub totals: ConsumptionTotalsDto,
+}
+
+impl From<SeriesPoint> for ConsumptionSeriesPointDto {
+    fn from(point: SeriesPoint) -> Self {
+        Self { bucket_start_ms: point.bucket_start_ms, totals: point.totals.into() }
+    }
+}
+
+/// The read-time-priced summary of one period over the merged consumption
+/// view (gateway ledger + session files, deduplicated). `by_catalog` backs
+/// the per-provider "today" rows: only gateway-attributed rows carry a
+/// catalog, so those groups read as the「经网关」scope, while `totals`
+/// counts bypass traffic too (「全部」scope).
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "ConsumptionSummary.ts", rename = "ConsumptionSummary")]
+pub struct ConsumptionSummaryDto {
+    pub period: ConsumptionPeriodDto,
+    pub totals: ConsumptionTotalsDto,
+    pub series: Vec<ConsumptionSeriesPointDto>,
+    pub by_agent: Vec<ConsumptionGroupDto>,
+    pub by_model: Vec<ConsumptionGroupDto>,
+    pub by_account: Vec<ConsumptionGroupDto>,
+    pub by_session: Vec<ConsumptionGroupDto>,
+    pub by_catalog: Vec<ConsumptionGroupDto>,
 }
 
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`

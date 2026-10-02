@@ -6,6 +6,8 @@ import { describeUsageFailure } from "../lib/usageErrors";
 import type {
   CatalogEntry,
   CliAccountState,
+  ConsumptionSummary,
+  ConsumptionTotals,
   CreateSubscriptionInput,
   Subscription,
   SubscriptionAlert,
@@ -70,6 +72,9 @@ export function useUsageData() {
    *  pin" rather than as "nothing is current". */
   const [cliAccounts, setCliAccounts] = useState<Record<string, CliAccountState>>({});
   const [summary, setSummary] = useState<UsageSummary | null>(null);
+  /** Today's read-time-priced consumption over the merged view; `null` until
+   *  the first read lands (cards hide the today line rather than guessing). */
+  const [todaySummary, setTodaySummary] = useState<ConsumptionSummary | null>(null);
   const [alerts, setAlerts] = useState<SubscriptionAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +134,16 @@ export function useUsageData() {
     }
   }, []);
 
+  /** Best-effort local read (ledger + session files + price tables); a
+   *  failure keeps the last summary so the today line never flashes empty. */
+  const refreshTodayConsumption = useCallback(async () => {
+    try {
+      setTodaySummary(await usageApi.getConsumptionSummary("today"));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn("[usage] today consumption fetch failed", err);
+    }
+  }, []);
+
   const reload = useCallback(
     () =>
       enqueue(async () => {
@@ -160,8 +175,15 @@ export function useUsageData() {
               return null;
             },
           );
+          const todayP = usageApi.getConsumptionSummary("today").then(
+            (value) => value,
+            (err) => {
+              if (import.meta.env.DEV) console.warn("[usage] today consumption fetch failed", err);
+              return null;
+            },
+          );
 
-          const [catR, subsR, cli, pair] = await Promise.all([catalogP, subsP, cliP, summaryP]);
+          const [catR, subsR, cli, pair, today] = await Promise.all([catalogP, subsP, cliP, summaryP, todayP]);
           // Narrow each result on its own: TS cannot infer `subsR.ok === false`
           // from the combined `!catR.ok || !subsR.ok` guard.
           if (!catR.ok) {
@@ -179,6 +201,7 @@ export function useUsageData() {
             setSummary(pair[0]);
             setAlerts(pair[1]);
           }
+          if (today !== null) setTodaySummary(today);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           setError(msg);
@@ -186,7 +209,7 @@ export function useUsageData() {
           setLoading(false);
         }
       }),
-    [enqueue],
+    [enqueue, refreshTodayConsumption],
   );
 
   useEffect(() => {
@@ -273,7 +296,9 @@ export function useUsageData() {
 
   /** Refresh all subscriptions, or only those for `catalogId` when scoped to a
    *  provider page (e.g. `"xai"` on the Grok sidebar). Backend still returns
-   *  the full list so local state can be replaced in one shot. */
+   *  the full list so local state can be replaced in one shot. The today
+   *  consumption line rides along: it is a local read, so the auto-refresh
+   *  tick keeps it current too. */
   const refreshAll = useCallback(
     (catalogId?: string | null) =>
       enqueue(async () => {
@@ -281,8 +306,9 @@ export function useUsageData() {
         setSubscriptions(fresh);
         await loadCliAccounts();
         await refreshSummary();
+        await refreshTodayConsumption();
       }),
-    [enqueue, loadCliAccounts, refreshSummary],
+    [enqueue, loadCliAccounts, refreshSummary, refreshTodayConsumption],
   );
 
   const reorder = useCallback(
@@ -373,12 +399,26 @@ export function useUsageData() {
     [enqueue, loadCliAccounts],
   );
 
+  /** `catalog_id -> today's gateway-metered totals`. Derived, not fetched:
+   *  the page-wide summary is one read, and each card chips out its row.
+   *  Catalogs with no gateway traffic today are absent — callers render the
+   *  "no records yet" sentence for them. */
+  const todayByCatalog = useMemo(() => {
+    const map: Record<string, ConsumptionTotals> = {};
+    for (const group of todaySummary?.by_catalog ?? []) {
+      map[group.label] = group.totals;
+    }
+    return map;
+  }, [todaySummary]);
+
   return useMemo(
     () => ({
       catalog,
       subscriptions,
       cliAccounts,
       summary,
+      todaySummary,
+      todayByCatalog,
       alerts,
       loading,
       error,
@@ -401,6 +441,8 @@ export function useUsageData() {
       subscriptions,
       cliAccounts,
       summary,
+      todaySummary,
+      todayByCatalog,
       alerts,
       loading,
       error,

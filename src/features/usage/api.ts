@@ -2,6 +2,8 @@ import { tauriInvoke, tauriInvokeDynamic as invoke } from "../../lib/ipc/core";
 import type {
   CatalogEntry,
   CliAccountState,
+  ConsumptionPeriod,
+  ConsumptionSummary,
   CreateSubscriptionInput,
   DesktopAppId,
   OAuthStart,
@@ -31,6 +33,10 @@ export const usageApi = {
   getSubscriptionAlerts: () => invoke<SubscriptionAlert[]>("get_subscription_alerts"),
   dismissSubscriptionAlert: (alertId: string) => invoke<void>("dismiss_subscription_alert", { alertId }),
   getUsageSummary: () => invoke<UsageSummary>("get_usage_summary"),
+  /** Read-time-priced consumption summary (gateway ledger + session files).
+   *  Day boundary is UTC; costs are estimates under the current price table. */
+  getConsumptionSummary: (window: ConsumptionPeriod) =>
+    invoke<ConsumptionSummary>("get_consumption_summary", { window }),
   startOAuthLogin: (catalogId: string, region?: string, subscriptionId?: string) =>
     invoke<OAuthStart>("start_oauth_login", { catalogId, region, subscriptionId }),
   awaitOAuthCompletion: (pendingId: string) => invoke<Subscription>("await_oauth_completion", { pendingId }),

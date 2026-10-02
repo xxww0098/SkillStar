@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   listSubscriptions: vi.fn(),
   getUsageSummary: vi.fn(),
+  getConsumptionSummary: vi.fn(),
   getSubscriptionAlerts: vi.fn(),
   deleteSubscription: vi.fn(),
   reorderSubscriptions: vi.fn(),
@@ -80,6 +81,7 @@ describe("useUsageData mutations", () => {
     api.listCatalog.mockResolvedValue([]);
     api.listSubscriptions.mockResolvedValue([]);
     api.getUsageSummary.mockResolvedValue(null);
+    api.getConsumptionSummary.mockResolvedValue(null);
     api.getSubscriptionAlerts.mockResolvedValue([]);
     api.reconcileCliAccounts.mockResolvedValue({});
   });
