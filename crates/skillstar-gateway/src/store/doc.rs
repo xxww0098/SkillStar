@@ -16,7 +16,7 @@
 //! `None`/empty is exactly key-absent, which is the handle a setter uses.
 //!
 //! Open points. The reader reroute (spec slice 04) and the first writer
-//! reroutes have landed; `names, routing, groups, profiles` still write through their legacy
+//! reroutes have landed; `routing, groups, profiles` still write through their legacy
 //! per-module paths. They are migration backlog, not exemptions. The
 //! exemption list is empty
 //! and stays empty: no module gets a permanent private door into this
@@ -37,8 +37,8 @@ use skillstar_core::infra::fs_ops::atomic_write;
 
 // Slice 03 shipped the container before any reader or writer was rerouted
 // onto it. Slice 04 rerouted the readers; slice 05 has rerouted the
-// listen writer(s), so `save` has a live caller. The remaining writers
-// (names, routing, groups, profiles) stay on their legacy `load_object` paths until
+// listen and names writer(s), so `save` has a live caller. The remaining writers
+// (routing, groups, profiles) stay on their legacy `load_object` paths until
 // their reroute lands.
 
 /// Why a strict open or a save failed. The file is never modified on any
@@ -181,6 +181,19 @@ impl ModelGatewayDoc {
     #[allow(dead_code)]
     pub(crate) fn set_listen(&mut self, listen: Option<String>) {
         self.listen = listen;
+    }
+
+    /// The `model_names` map, read view.
+    #[allow(dead_code)]
+    pub(crate) fn model_names(&self) -> &BTreeMap<String, String> {
+        &self.model_names
+    }
+
+    /// The `model_names` map for the write lens; inserting here is adding
+    /// the key, removing here is deleting it.
+    #[allow(dead_code)]
+    pub(crate) fn model_names_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.model_names
     }
 
     /// The `providers` rows, in file order. Row lookup is the caller's rule.

@@ -2,15 +2,12 @@
 //!
 //! The object is `model_names`. A key is `provider/model`. The value is the
 //! name the picker shows. The models.dev cache is not opened for writing, and
-//! the translator does not read this object.
+//! the translator does not read this object. The file is opened only through
+//! [`ModelGatewayDoc`] (see `store::doc`).
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
-use skillstar_core::infra::fs_ops::atomic_write;
+use super::doc::ModelGatewayDoc;
 
 const NAME_CAP: usize = 80;
 
@@ -32,19 +29,7 @@ impl std::fmt::Display for SaveModelNameError {
 
 /// Names already stored. A missing file is empty and is not created.
 pub fn stored_model_names() -> BTreeMap<String, String> {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return BTreeMap::new();
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-        return BTreeMap::new();
-    };
-    let Some(object) = value.get("model_names").and_then(Value::as_object) else {
-        return BTreeMap::new();
-    };
-    object
-        .iter()
-        .filter_map(|(id, name)| name.as_str().map(|name| (id.clone(), name.to_string())))
-        .collect()
+    ModelGatewayDoc::open_lenient().model_names().clone()
 }
 
 /// The stored name, or `id` when there is nothing usable.
@@ -66,23 +51,14 @@ pub fn save_model_name(id: &str, name: &str) -> Result<(), SaveModelNameError> {
     if name.is_empty() || name.chars().count() > NAME_CAP || name_forbidden(name) || !catalog_lists(id) {
         return Err(SaveModelNameError::Name);
     }
-    let path = gateway_path();
-    let mut doc = load_object(&path)?;
-    let object = doc.as_object_mut().ok_or(SaveModelNameError::Store)?;
-    if let Some(value) = object.get("model_names") {
-        if !value.is_object() {
-            return Err(SaveModelNameError::Store);
-        }
-    } else {
-        object.insert("model_names".to_string(), json!({}));
-    }
-    let names = object
-        .get_mut("model_names")
-        .and_then(Value::as_object_mut)
-        .ok_or(SaveModelNameError::Store)?;
-    names.insert(id.to_string(), json!(name));
-    let bytes = serde_json::to_vec_pretty(&doc).map_err(|_| SaveModelNameError::Store)?;
-    atomic_write(&path, &bytes).map_err(|_| SaveModelNameError::Store)
+    let mut doc = ModelGatewayDoc::open().map_err(|_| SaveModelNameError::Store)?;
+    write_model_name(&mut doc, id, name);
+    doc.save().map_err(|_| SaveModelNameError::Store)
+}
+
+/// The display-name write lens: one `model_names` entry.
+pub(crate) fn write_model_name(doc: &mut ModelGatewayDoc, id: &str, name: &str) {
+    doc.model_names_mut().insert(id.to_string(), name.to_string());
 }
 
 fn name_forbidden(name: &str) -> bool {
@@ -97,19 +73,4 @@ fn catalog_lists(id: &str) -> bool {
         return false;
     };
     crate::catalog::serves(provider, model)
-}
-
-fn gateway_path() -> PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
-}
-
-fn load_object(path: &Path) -> Result<Value, SaveModelNameError> {
-    match fs::read(path) {
-        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-            Ok(value @ Value::Object(_)) => Ok(value),
-            _ => Err(SaveModelNameError::Store),
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(json!({})),
-        Err(_) => Err(SaveModelNameError::Store),
-    }
 }
