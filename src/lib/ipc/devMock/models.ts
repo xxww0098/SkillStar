@@ -19,6 +19,30 @@ const savedGroups: { id: string; members: string[] }[] = [{ id: "fast", members:
 
 let listenMode = "loopback";
 
+/** Newest-first fixture rows for the Gateway column (ledger-shaped). */
+const RECENT_CALLS = [
+  {
+    at: "2026-09-30 12:00:02",
+    agent: "codex",
+    model: "openai/gpt-test",
+    status: 200,
+    completion_tokens: "5",
+    in_tokens: "410",
+    session: "sess-codex-1",
+    latency: "842",
+  },
+  {
+    at: "2026-09-30 12:00:00",
+    agent: "pi",
+    model: "group/fast",
+    status: 502,
+    completion_tokens: "",
+    in_tokens: "",
+    session: "sess-pi-2",
+    latency: "1201",
+  },
+];
+
 const modelLabels = new Map<string, string>();
 
 const profiles: { name: string; agents: { id: string; modelRef: string }[] }[] = [
@@ -110,15 +134,14 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     modelLabels.set(id, name);
     return null;
   },
-  get_recent_calls: () => [
-    {
-      at: "12:00:00",
-      agent: "codex",
-      model: "openai/gpt-test",
-      status: 200,
-      completion_tokens: "5",
-    },
-  ],
+  get_recent_calls: () => [...RECENT_CALLS],
+  get_ledger_page: (args) => {
+    const agent = typeof args?.agent === "string" && args.agent ? args.agent : null;
+    const session = typeof args?.session === "string" && args.session ? args.session : null;
+    const offset = typeof args?.offset === "number" && args.offset > 0 ? args.offset : 0;
+    const rows = RECENT_CALLS.filter((row) => (!agent || row.agent === agent) && (!session || row.session === session));
+    return rows.slice(offset);
+  },
   get_routing_page: (args) => {
     const providerId = typeof args?.providerId === "string" ? args.providerId : "";
     return {

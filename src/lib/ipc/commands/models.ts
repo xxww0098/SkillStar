@@ -73,6 +73,21 @@ export interface ModelsCommands {
   get_model_choices: { args: { agentId: string }; result: ModelChoiceDto[] };
   /** Recent forwarded calls. No secrets and no upstream URLs. */
   get_recent_calls: { args: Record<string, never>; result: RecentCallDto[] };
+  /**
+   * One usage-ledger page, newest first. `None` dimensions filter nothing;
+   * `limit` defaults to the page size and `offset` walks from the newest
+   * end. Same row shape as `get_recent_calls`.
+   */
+  get_ledger_page: {
+    args: {
+      agent?: string | null;
+      session?: string | null;
+      catalog?: string | null;
+      limit?: number;
+      offset?: number;
+    };
+    result: RecentCallDto[];
+  };
   /** Routing and affinity for the selected provider and saved groups. */
   get_routing_page: { args: { providerId: string }; result: RoutingPage };
   /** Save one routing mode and one affinity. The words are the eight enums. */

@@ -1,11 +1,13 @@
 //! Recent calls for the Gateway column.
 //!
-//! The ring lives in `skillstar-gateway`. This projection copies the fields the
-//! page draws and nothing else: no secret, no upstream URL. A missing usage
-//! count stays an empty string rather than a zero.
+//! The source is the ledger view in [`super::ledger`]: the persistent
+//! ledger's newest page merged with the in-memory ring, so the column
+//! survives a restart. This projection keeps only the row shape the page
+//! draws: no secret, no upstream URL. A usage count the response did not
+//! name stays an empty string rather than a zero.
 
 use serde::{Deserialize, Serialize};
-use skillstar_gateway::RecentCall;
+use skillstar_gateway::LedgerQuery;
 use ts_rs::TS;
 
 /// One row of the Gateway column.
@@ -18,36 +20,38 @@ pub struct RecentCallDto {
     pub status: u16,
     /// Decimal completion-token count, or empty when the response had no usage.
     pub completion_tokens: String,
+    /// Decimal input-token count, or empty when the response had no usage.
+    /// Ring-sourced rows carry no input count and stay empty.
+    pub in_tokens: String,
+    /// The session the turn is affinitized to, or empty when unknown.
+    pub session: String,
+    /// Decimal turn latency in milliseconds, or empty when the source has
+    /// none. Ring-sourced rows stay empty.
+    pub latency: String,
 }
 
-/// The in-memory ring, oldest first. This does not open Usage or the provider store.
+/// The newest merged page, oldest last. This does not open Usage or the
+/// provider store.
 pub fn load_recent_calls() -> Vec<RecentCallDto> {
-    skillstar_gateway::recent_calls()
-        .into_iter()
-        .map(project_call)
-        .collect()
-}
-
-fn project_call(call: RecentCall) -> RecentCallDto {
-    RecentCallDto {
-        at: call.at,
-        agent: call.agent,
-        model: call.model,
-        status: call.status,
-        completion_tokens: call
-            .completion_tokens
-            .map(|count| count.to_string())
-            .unwrap_or_default(),
-    }
+    super::load_ledger_page(LedgerQuery::tail(super::PAGE_KEEP))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{ENV_LOCK, EnvGuard};
     use skillstar_gateway::{RecentCall, clear_recent_calls, note_recent_call};
 
-    #[test]
-    fn recent_call_dto_omits_secret_and_upstream_url() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn recent_call_dto_omits_secret_and_upstream_url() {
+        let _lock = ENV_LOCK.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("recent-dto");
+        std::fs::create_dir_all(&data).unwrap();
+        let _env = EnvGuard::set(&[
+            ("SKILLSTAR_DATA_DIR", &data),
+            ("SKILLSTAR_TOOL_SYNC_HOME", &data),
+        ]);
         clear_recent_calls();
         note_recent_call(RecentCall {
             at: "2026-09-30 12:00:00".to_string(),
@@ -68,10 +72,15 @@ mod tests {
         let blank = calls.iter().find(|call| call.model == "m2").unwrap();
         assert_eq!(five.completion_tokens, "5");
         assert_eq!(blank.completion_tokens, "");
+        // Ring-sourced rows: the fields only the ledger carries stay empty.
+        assert_eq!(five.in_tokens, "");
+        assert_eq!(five.session, "");
+        assert_eq!(five.latency, "");
         let text = serde_json::to_string(&[five.clone(), blank.clone()]).unwrap();
         assert!(text.contains("\"completion_tokens\":\"5\""), "{text}");
         assert!(text.contains("\"completion_tokens\":\"\""), "{text}");
         assert!(!text.contains("\"completion_tokens\":\"0\""), "{text}");
+        assert!(!text.contains("\"in_tokens\":\"0\""), "{text}");
         assert!(!text.contains("https://"), "{text}");
         assert!(!text.contains("sk-"), "{text}");
         assert!(!text.contains("api.openai.com"), "{text}");

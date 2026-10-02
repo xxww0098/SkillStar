@@ -1,12 +1,12 @@
 //! Local model gateway. This crate owns protocol translation, the stream hold,
 //! routing order, session affinity, upstream rest, routing groups and their
 //! rules, the intent classifier, secret redaction, vision transcription,
-//! subscription signing, the listener, the Claude process bridge, the
-//! Codex config writer, WSL Codex, the models.dev catalog cache, the
-//! file-agent loopback writer, named profiles, model display names, effort
-//! fitting, per-agent visible families, the install-level gateway key with the
-//! LAN inbound gate, the persistent usage ledger, the effective model price,
-//! and the in-memory ring of recent calls.
+//! subscription signing, the upstream turn state machine, the listener, the
+//! Claude process bridge, the Codex config writer, WSL Codex, the models.dev
+//! catalog cache, the file-agent loopback writer, named profiles, model
+//! display names, effort fitting, per-agent visible families, the
+//! install-level gateway key with the LAN inbound gate, the persistent usage
+//! ledger, the effective model price, and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod access;
@@ -53,6 +53,7 @@ pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MA
 pub use cost::{ModelCost, effective_price};
 pub use effort::{apply_upstream_effort, model_efforts};
 pub use ledger::{ErrorKind, Record, TokenCounts, append, key_fingerprint, load};
+pub use ledger::LedgerQuery;
 pub use outbound::{clear_outbound_log, outbound_log};
 pub use redact::{mask_outbound, unmask_response};
 pub use route::affinity::{

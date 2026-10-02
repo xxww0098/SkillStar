@@ -3,8 +3,10 @@
 //! appending never breaks a turn, and reading keeps complete lines only.
 
 mod append;
+mod query;
 mod record;
 
 pub use append::{append, load};
+pub use query::LedgerQuery;
 pub(crate) use record::account_of;
 pub use record::{ErrorKind, Record, TokenCounts, key_fingerprint};

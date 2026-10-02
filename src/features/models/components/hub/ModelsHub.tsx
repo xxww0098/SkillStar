@@ -73,27 +73,40 @@ function StatusPill({ status }: { status: number }) {
   );
 }
 
-/** Recent forwarded calls. Headers name the call. A vendor URL or a non-digit token is blank. */
+/**
+ * Recent forwarded calls from the ledger-backed view. Headers name the call;
+ * an unknown in-token count, session, or latency is blank, and a vendor URL
+ * or a non-digit token is blank.
+ */
 function RecentCalls({ calls }: { calls: RecentCallDto[] }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-      <table className="w-full min-w-[420px] table-fixed text-left text-xs text-foreground">
+      <table className="w-full min-w-[560px] table-fixed text-left text-xs text-foreground">
         <thead className="sticky top-0 bg-card">
           <tr className="border-b border-border/60 text-muted-foreground">
             <th className="w-[88px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
               Time
             </th>
-            <th className="w-24 whitespace-nowrap px-2 py-1 font-normal" scope="col">
+            <th className="w-20 whitespace-nowrap px-2 py-1 font-normal" scope="col">
               Agent
             </th>
             <th className="whitespace-nowrap px-2 py-1 font-normal" scope="col">
               Model
             </th>
-            <th className="w-[72px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
+            <th className="w-[64px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
+              Session
+            </th>
+            <th className="w-[56px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
               Status
             </th>
-            <th className="w-[72px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
+            <th className="w-[56px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
+              In
+            </th>
+            <th className="w-[56px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
               Tokens
+            </th>
+            <th className="w-[64px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
+              Latency
             </th>
           </tr>
         </thead>
@@ -106,11 +119,20 @@ function RecentCalls({ calls }: { calls: RecentCallDto[] }) {
               <td className="truncate px-2 py-1 font-mono tabular-nums text-muted-foreground">{plainCell(call.at)}</td>
               <td className="truncate px-2 py-1">{plainCell(call.agent)}</td>
               <td className="truncate px-2 py-1 font-mono">{plainCell(call.model)}</td>
+              <td className="truncate px-2 py-1 font-mono text-muted-foreground" title={call.session}>
+                {plainCell(call.session ?? "")}
+              </td>
               <td className="whitespace-nowrap px-2 py-1">
                 <StatusPill status={call.status} />
               </td>
               <td className="px-2 py-1 text-right font-mono tabular-nums text-muted-foreground">
+                {tokenCell(call.in_tokens ?? "")}
+              </td>
+              <td className="px-2 py-1 text-right font-mono tabular-nums text-muted-foreground">
                 {tokenCell(call.completion_tokens)}
+              </td>
+              <td className="px-2 py-1 text-right font-mono tabular-nums text-muted-foreground">
+                {tokenCell(call.latency ?? "")}
               </td>
             </tr>
           ))}

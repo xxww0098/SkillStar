@@ -7,4 +7,18 @@ export type RecentCallDto = { at: string, agent: string, model: string, status: 
 /**
  * Decimal completion-token count, or empty when the response had no usage.
  */
-completion_tokens: string, };
+completion_tokens: string, 
+/**
+ * Decimal input-token count, or empty when the response had no usage.
+ * Ring-sourced rows carry no input count and stay empty.
+ */
+in_tokens: string, 
+/**
+ * The session the turn is affinitized to, or empty when unknown.
+ */
+session: string, 
+/**
+ * Decimal turn latency in milliseconds, or empty when the source has
+ * none. Ring-sourced rows stay empty.
+ */
+latency: string, };
