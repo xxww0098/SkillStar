@@ -14,6 +14,8 @@
 //! belongs to. The gateway crate never sees a store (README D7); it only
 //! sees the closures handed to it here.
 
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use skillstar_core::providers::identity::identity_for_preset;
 use skillstar_gateway::key_fingerprint;
 use skillstar_gateway::{AccountBook, AccountSnapshot, AllowanceSnapshot, Upstream, UpstreamEnv};
@@ -211,7 +213,10 @@ impl AccountBook for UsageAccountBook {
         let row = stored_row(catalog_id)?;
         let snapshots = storage::list_usage_snapshots().ok()?;
         let usage = snapshots.get(&row.id)?;
-        written_used(usage).map(|used| AllowanceSnapshot { used })
+        tightest_window(usage).map(|(percent, reset_at)| AllowanceSnapshot {
+            percent,
+            renews_at: reset_at.map(unix_seconds),
+        })
     }
 }
 
@@ -238,13 +243,31 @@ fn pick<'a>(
     rows.iter().find(|row| row.catalog_id == catalog_id)
 }
 
-/// Largest percent Usage already wrote. Missing percents stay unknown.
-fn written_used(usage: &SubscriptionUsage) -> Option<f64> {
+/// The tightest window Usage already wrote: the largest percent wins, and
+/// the reset time rides along from that same window — a looser window's
+/// reset never leaks into the snapshot. Windows without a percent stay
+/// unknown and never decide. The window labels (`5h`, `7d`, `30d`) name
+/// vendor-specific scopes, so the percent is only comparable inside one
+/// catalog; the gateway snapshot carries no label because routing never
+/// compares across providers.
+fn tightest_window(usage: &SubscriptionUsage) -> Option<(f64, Option<i64>)> {
     [&usage.hourly, &usage.weekly, &usage.monthly]
         .into_iter()
-        .filter_map(|window| window.as_ref().and_then(|window| window.percent))
-        .max()
-        .map(|percent| percent as f64)
+        .filter_map(|window| window.as_ref().map(|window| (window.percent, window.reset_at)))
+        .filter_map(|(percent, reset_at)| percent.map(|percent| (percent, reset_at)))
+        .max_by_key(|(percent, _)| *percent)
+        .map(|(percent, reset_at)| (f64::from(percent), reset_at))
+}
+
+/// Epoch seconds, as Usage windows store `reset_at`, as the clock the
+/// gateway compares `renews_at` against.
+fn unix_seconds(secs: i64) -> SystemTime {
+    let duration = Duration::from_secs(secs.unsigned_abs());
+    if secs >= 0 {
+        UNIX_EPOCH + duration
+    } else {
+        UNIX_EPOCH - duration
+    }
 }
 
 #[cfg(test)]
@@ -304,13 +327,13 @@ mod tests {
         }
     }
 
-    fn window(percent: i32) -> UsageWindow {
+    fn window(percent: i32, reset_at: Option<i64>) -> UsageWindow {
         UsageWindow {
             label: "7d".to_string(),
             used: i64::from(percent),
             total: Some(100),
             percent: Some(percent),
-            reset_at: None,
+            reset_at,
             breakdown: Vec::new(),
         }
     }
@@ -333,12 +356,16 @@ mod tests {
         storage::set_active_subscription("codex", "codex-2").unwrap();
         let first = SubscriptionUsage {
             subscription_id: "codex-1".to_string(),
-            weekly: Some(window(90)),
+            weekly: Some(window(90, None)),
             ..Default::default()
         };
         let pinned = SubscriptionUsage {
             subscription_id: "codex-2".to_string(),
-            weekly: Some(window(40)),
+            // Weekly is looser but knows a reset; monthly is the tightest
+            // window, so its percent and its reset are what the snapshot
+            // carries — the weekly reset never leaks in.
+            weekly: Some(window(40, Some(1_700_003_600))),
+            monthly: Some(window(60, Some(1_700_007_200))),
             ..Default::default()
         };
         storage::save_usage_snapshot(first).unwrap();
@@ -354,7 +381,10 @@ mod tests {
         assert!(!rendered.contains("refresh-2"));
         assert_eq!(
             book.allowance("codex"),
-            Some(AllowanceSnapshot { used: 40.0 })
+            Some(AllowanceSnapshot {
+                percent: 60.0,
+                renews_at: Some(UNIX_EPOCH + Duration::from_secs(1_700_007_200)),
+            })
         );
         assert!(book.account("gemini-cli").is_none());
         assert!(book.allowance("gemini-cli").is_none());
