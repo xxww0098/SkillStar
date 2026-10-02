@@ -59,3 +59,12 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **WSL NAT bearer 收敛在 codex.rs**：`apply_codex_full` 按 origin 是否 loopback 决定占位/实际 key，key 写不出则整次接管失败（不写一个过不了门禁的配置）。wsl.rs 只传 origin。
 - **注释语言**：仓库代码注释一律英文（中文只在 Display/UI 字符串），切片 01 的中文注释在集成时已归一。
 - **omp 检查点关闭**：LAN 下不可用已按 D2 默认接受，写进 models README 与 D-078 承担段。
+
+## S5 切片 05 落地时的实现裁决（banked 2026-10-02）
+
+- **read_calls 返回全量视图**（每次经 `replay` 从 checkpoint 重建 + 跨文件 msg-id 去重），不是累计增量流；消费方（切片 07 合并）可幂等整体替换。`parse` 返回 delta，delta 自身按 msg id 幂等。
+- **trait 增补**：`PARSER_VERSION` 关联常量（checkpoint 全量重读的判据）与 `replay(checkpoint)` 方法（全量重建通道；`SessionCall` 无 msg 字段，msg id 经 replay 的返回对传递）。trait 带关联常量不可 dyn → 对象安全方法面 `SessionParserMethods` + blanket impl 分发，注册表在 `mod.rs::parsers()` 一处。
+- **checkpoint 指纹编码**：`head_hash = v1:<长度>:<hex>`（长度参与编码：短文件增长后头窗口变长，按记录长度截断比较）；`prefix_hash = sample-v1:<hex>`（≤64KiB 全量，否则 16×4KiB 均匀采样，magpie prefixHash 先例）。索引单文件 `data_root()/sessions/index.json`，store version + 每 parser version 双层失效。
+- **claude-desktop 归因走 entrypoint 前缀**：本机实测 Desktop 内嵌 Claude Code 会话在 `Claude-3p/title-gen/...` 且行内 `entrypoint: "claude-desktop-3p"`（magpie 未记录的后缀），归因用 `starts_with("claude-desktop")` 不依赖目录；Cowork glob 本机不命中但 discovery 保留。Desktop 主 Code 标签正文文件本机未找到——已知未知，不阻塞。
+- **未增长且头一致时不打开正文**（同长度替换被 head 校验拦下走全量）；正在写的半行不消费、offset 不推进。
+- **无 message id 的行不进 msgs map**（独立计数 calls_seen，不参与跨文件去重）；usage 缺失/全零的 assistant 行不算调用；`model_asked` 无 identity 信息时回落 `model_answered`（均 magpie 先例，测试钉死）。
