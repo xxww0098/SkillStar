@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use skillstar_gateway::{ModelCost, Record, TokenCounts, route_smart, RouteCandidate};
 
 use super::{ConsumptionRow, Window, consumption_view, groups, period_floor_ms, same_model};
-use super::summarize::{Period, Totals};
+use super::summarize::{Period, Totals, served_model};
 use crate::usage::dto::{
     ConsumptionTokensDto, RouteComparisonDto, RouteCostDto, SessionChipDto, TodayConsumptionDto,
 };
@@ -128,12 +128,12 @@ fn session_chips(
         chip.tokens.cache_read += call.tokens.cache_read;
         chip.tokens.cache_write += call.tokens.cache_write;
         chip.tokens.reasoning += call.tokens.reasoning;
-        if let Some(cost) = price(&call.catalog, served(call)) {
+        if let Some(cost) = price(&call.catalog, served_model(call)) {
             chip.cost_usd += cost.cost(&call.tokens);
             chip.priced += 1;
         }
         chip.via_gateway |= row.source == super::CallSource::Gateway;
-        if let Some(model) = non_empty(served(call)) {
+        if let Some(model) = non_empty(served_model(call)) {
             *chip.models.entry(model).or_default() += 1;
         }
     }
@@ -250,7 +250,7 @@ fn route_cost(
         if record.catalog != fact.catalog {
             continue;
         }
-        let served = served_record(record);
+        let served = record.served_model();
         if !models.iter().any(|model| same_model(model, served)) {
             continue;
         }
@@ -302,23 +302,6 @@ fn percentile(sorted: &[u64], percent: u64) -> u64 {
 }
 
 /// The model a merged row is grouped and billed under (summarize's rule).
-fn served(call: &super::UnifiedCall) -> &str {
-    if call.model_answered.is_empty() {
-        &call.model_asked
-    } else {
-        &call.model_answered
-    }
-}
-
-/// The same rule over a raw ledger record.
-fn served_record(record: &Record) -> &str {
-    if record.model_answered.is_empty() {
-        &record.model_asked
-    } else {
-        &record.model_answered
-    }
-}
-
 /// An owned copy of `value` unless it is empty.
 fn non_empty(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())

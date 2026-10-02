@@ -79,11 +79,7 @@ fn same_turn(record: &Record, call: &RecentCall) -> bool {
 }
 
 fn project_record(record: &Record, names: &BTreeMap<String, String>) -> RecentCallDto {
-    let served = if record.model_answered.is_empty() {
-        record.model_asked.as_str()
-    } else {
-        record.model_answered.as_str()
-    };
+    let served = record.served_model();
     RecentCallDto {
         at: utc_stamp(record.at),
         agent: record.agent.clone(),

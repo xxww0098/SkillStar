@@ -198,9 +198,9 @@ impl AccountBook for UsageAccountBook {
     fn account(&self, catalog_id: &str) -> Option<AccountSnapshot> {
         // Live-first: material and attribution (Freshness / subscription_id)
         // are decided by the seam. AccountSnapshot's fields and the sign.rs
-        // trait contract are untouched; ledger-side attribution signals (the
-        // key fingerprint, say) will be derived from subscription_id by the
-        // later ledger slices.
+        // trait contract are untouched; the ledger's account label comes
+        // from that subscription_id (or the row key's fingerprint, for the
+        // key-shaped rows) in `attribute_candidate` below.
         let material = signing_material(catalog_id)?;
         Some(AccountSnapshot {
             access_token: material.access_token,
@@ -225,22 +225,7 @@ fn stored_row(catalog_id: &str) -> Option<Subscription> {
     let active = storage::get_active_subscription(catalog_id)
         .ok()
         .flatten();
-    pick(&rows, catalog_id, active.as_deref()).cloned()
-}
-
-fn pick<'a>(
-    rows: &'a [Subscription],
-    catalog_id: &str,
-    active: Option<&str>,
-) -> Option<&'a Subscription> {
-    if let Some(active) = active
-        && let Some(row) = rows
-            .iter()
-            .find(|row| row.id == active && row.catalog_id == catalog_id)
-    {
-        return Some(row);
-    }
-    rows.iter().find(|row| row.catalog_id == catalog_id)
+    skillstar_usage::usage_switch::pinned_row(&rows, catalog_id, active.as_deref()).cloned()
 }
 
 /// The tightest window Usage already wrote: the largest percent wins, and

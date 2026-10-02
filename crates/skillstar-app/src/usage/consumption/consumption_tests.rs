@@ -372,8 +372,10 @@ fn call_request_id_with_idless_record_still_pairs_via_fallback() {
 }
 
 #[test]
-fn record_request_id_is_none_until_the_gateway_field_lands() {
-    // The degradation seam, pinned: today no record can enter stage 1.
+fn record_request_id_stays_none_until_an_upstream_echoes_ids() {
+    // The dormant stage, pinned: translated protocols never hand the
+    // gateway the id an agent writes to its session file, so no record
+    // enters stage 1 today.
     let record = record(1_000_000, "s1", TOKENS);
     assert_eq!(record_request_id(&record), None);
 }

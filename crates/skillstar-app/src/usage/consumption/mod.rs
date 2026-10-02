@@ -11,13 +11,12 @@
 //!
 //! Matching, two stages, first one that answers wins:
 //!
-//! 1. **request id** — the primary key. The gateway `Record` has no
-//!    `request_id` field yet (slice 03 landed without it), so
-//!    [`record_request_id`] currently answers `None` for every record and
-//!    this stage consumes nothing: pairing runs entirely on stage 2. When
-//!    the gateway lane adds the field (and the extraction pipeline fills
-//!    it), replacing that one accessor body activates stage 1 with no other
-//!    change here.
+//! 1. **request id** — the primary key. Both protocols being translated
+//!    apart, the ids never cross sides (see [`record_request_id`]), so this
+//!    stage consumes nothing today and pairing runs entirely on stage 2.
+//!    The stage itself is implemented and tested through the projection
+//!    seam; an upstream that echoes the agent's own request id activates
+//!    it with no other change here.
 //! 2. **session + tokens + time + failure** — same `(agent, session)`, the
 //!    four token counts equal, the file call's timestamp inside the
 //!    record's *end* (`at + latency_ms`) ± 2s, both sides agreeing on
@@ -29,10 +28,10 @@
 //! Deviations from magpie, deliberate:
 //!
 //! - magpie skips records it knows the gateway itself rejected before an
-//!   upstream was involved. SkillStar's `Record` has no rejection marker
-//!   yet (routing/attribution is still landing), so failed records
-//!   participate here and can only pair with calls that also failed.
-//!   Revisit when the gateway can mark self-generated refusals.
+//!   upstream was involved. SkillStar's `Record` has no rejection marker,
+//!   so failed records participate here and can only pair with calls that
+//!   also failed. Revisit when the gateway can mark self-generated
+//!   refusals.
 //! - matching never compares model ids, exactly like magpie: the tuple
 //!   above is already tight enough, and a wrong normalization would split
 //!   real pairs. [`same_model`] normalizes model ids for the slices that
