@@ -3,6 +3,8 @@
 //! Owns frontend-safe DTO projection and cross-domain subscription use cases.
 //! Framework adapters add only window/event behavior around this interface.
 
+pub mod consumption;
+
 mod dto;
 mod service;
 mod token_import;
