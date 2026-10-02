@@ -13,7 +13,7 @@ use skillstar_gateway::ApplyError;
 /// gateway maps it.
 pub fn save_agent(agent_id: &str, model_ref: &str) -> Result<(), ApplyError> {
     if agent_id == "codex" {
-        return crate::models::save_codex_model(model_ref);
+        return super::save_codex_model(model_ref);
     }
     skillstar_gateway::apply_gateway(agent_id, model_ref)
 }
