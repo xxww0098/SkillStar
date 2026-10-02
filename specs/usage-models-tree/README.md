@@ -1,6 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（7/10）
+状态：open（8/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
@@ -22,7 +22,7 @@
 - [ ] 05 写方改道（5 个写方走 lens，每写方一 commit）
 - [x] 06 catalog typed parse — catalog/{schema,ids,mod}；四份重复解析收口（visible×2/names/effort/picker）；CatalogCost 四元组为 evolution-08 预声明；serves/entry/effort_values crate 内、catalog_ids pub
 - [ ] 07 app/models/gateway/ 投影归位
-- [ ] 08 custody_tests 拆分
+- [x] 08 custody_tests 拆分 — 真实 mod 挂载（orphan 门禁优先于逐字节路径平铺）；叶子集合 40/40 一致；errors.md 引用路径原样可跑
 - [x] 09 usage service 拆分 — service/ 目录六块（helpers/projections/crud/refresh/oauth/switching），25 符号面冻结，service_tests.rs 字节级搬移
 - [x] 10 families 落点契约（只写契约）— 契约即 slices/10-families-contract.md（SSOT），models README 已加指针；FamilyRow 不内联 members（默认裁决，检查点关闭）
 
