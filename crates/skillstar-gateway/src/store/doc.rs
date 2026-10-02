@@ -16,7 +16,7 @@
 //! `None`/empty is exactly key-absent, which is the handle a setter uses.
 //!
 //! Open points. The reader reroute (spec slice 04) and the first writer
-//! reroutes have landed; `groups, profiles` still write through their legacy
+//! reroutes have landed; `profiles` still write through their legacy
 //! per-module paths. They are migration backlog, not exemptions. The
 //! exemption list is empty
 //! and stays empty: no module gets a permanent private door into this
@@ -37,8 +37,8 @@ use skillstar_core::infra::fs_ops::atomic_write;
 
 // Slice 03 shipped the container before any reader or writer was rerouted
 // onto it. Slice 04 rerouted the readers; slice 05 has rerouted the
-// listen, names and routing writer(s), so `save` has a live caller. The remaining writers
-// (groups, profiles) stay on their legacy `load_object` paths until
+// listen, names, routing and group writer(s), so `save` has a live caller. The remaining writers
+// (profiles) stay on their legacy `load_object` paths until
 // their reroute lands.
 
 /// Why a strict open or a save failed. The file is never modified on any
@@ -260,6 +260,12 @@ impl OwnerRow {
         self.extra.get(key)
     }
 
+    /// Remove one unknown key from this row; the group writer drops a
+    /// stale `auto` marker when it saves a real row over a derived one.
+    #[allow(dead_code)]
+    pub(crate) fn remove_extra(&mut self, key: &str) {
+        self.extra.remove(key);
+    }
 }
 
 fn gateway_path() -> PathBuf {

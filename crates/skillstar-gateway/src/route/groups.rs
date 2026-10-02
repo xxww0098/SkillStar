@@ -6,7 +6,8 @@
 //! in. It stays off disk until a save. The stored rows come from
 //! `crate::store::groups`; this module does not open the file itself.
 
-use crate::store::groups::{GROUP_PREFIX, Group, MAX_NEST, group_suffix, groups_in, read_doc};
+use crate::store::doc::ModelGatewayDoc;
+use crate::store::groups::{GROUP_PREFIX, Group, MAX_NEST, group_suffix, groups_in};
 
 /// One model a provider serves. Passed in by the caller. Not read from the key file.
 #[derive(Clone, Copy, Debug)]
@@ -34,7 +35,7 @@ pub fn expand_group(model_id: &str, models: &[ServedModel<'_>]) -> Vec<String> {
     let Some(id) = prefixed_group_id(model_id) else {
         return Vec::new();
     };
-    let stored = groups_in(&read_doc());
+    let stored = groups_in(&ModelGatewayDoc::open_lenient());
     let autos = auto_groups(models);
     let Some(group) = find_group(&stored, &autos, id) else {
         return Vec::new();

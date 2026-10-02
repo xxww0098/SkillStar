@@ -1,16 +1,16 @@
 //! Routing groups: the `groups` rows of `model_gateway.json`.
 //!
 //! A write that would make a group contain itself, or nest deeper than 8,
-//! does not change `model_gateway.json`. Expanding a saved group, and the
-//! same-name groups derived from a caller's list, live in `route::groups`.
-//! This module does not read the provider key file.
+//! does not change `model_gateway.json`. This module's save path also
+//! relies on the strict open refusing a `groups` value that is not an
+//! array (the container's parse, not a check of its own), which is why a
+//! file like `{"groups": 3}` is left untouched instead of being rewritten.
+//! Expanding a saved group, and the same-name groups derived from a
+//! caller's list, live in `route::groups`. This module does not read the
+//! provider key file and opens the gateway file only through
+//! [`ModelGatewayDoc`] (see `store::doc`).
 
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
-use serde_json::{Value, json};
-use skillstar_core::infra::fs_ops::atomic_write;
+use super::doc::{ModelGatewayDoc, OwnerRow};
 
 /// Prefix on a model id that names a group.
 pub const GROUP_PREFIX: &str = "group/";
@@ -47,7 +47,7 @@ pub(crate) struct Group {
 
 /// Group ids saved in `model_gateway.json`, without the `group/` prefix.
 pub fn stored_group_ids() -> Vec<String> {
-    groups_in(&read_doc())
+    groups_in(&ModelGatewayDoc::open_lenient())
         .into_iter()
         .map(|group| group.id)
         .collect()
@@ -62,7 +62,7 @@ pub struct SavedGroup {
 
 /// Saved groups and their members, in file order. This read does not create the file.
 pub fn stored_groups() -> Vec<SavedGroup> {
-    groups_in(&read_doc())
+    groups_in(&ModelGatewayDoc::open_lenient())
         .into_iter()
         .map(|group| SavedGroup {
             id: group.id,
@@ -81,42 +81,10 @@ pub fn save_group(id: &str, members: &[impl AsRef<str>]) -> Result<(), SaveGroup
         return Err(SaveGroupError::Store);
     };
     let members = clean_members(members);
-    let path = gateway_path();
-    let mut doc = load_object(&path)?;
+    let mut doc = ModelGatewayDoc::open().map_err(|_| SaveGroupError::Store)?;
     check_write(id, &members, &groups_in(&doc))?;
-    insert_group(&mut doc, id, &members)?;
-    let bytes = serde_json::to_vec_pretty(&doc).map_err(|_| SaveGroupError::Store)?;
-    atomic_write(&path, &bytes).map_err(|_| SaveGroupError::Store)
-}
-
-fn gateway_path() -> PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
-}
-
-/// The stored document as one `Value`, or an empty object.
-pub(crate) fn read_doc() -> Value {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return json!({});
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(Value::Object(map)) => Value::Object(map),
-        _ => json!({}),
-    }
-}
-
-fn load_object(path: &Path) -> Result<Value, SaveGroupError> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(json!({})),
-        Err(_) => return Err(SaveGroupError::Store),
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(value @ Value::Object(_)) => match value.get("groups") {
-            None | Some(Value::Array(_)) => Ok(value),
-            Some(_) => Err(SaveGroupError::Store),
-        },
-        _ => Err(SaveGroupError::Store),
-    }
+    write_group(&mut doc, id, &members);
+    doc.save().map_err(|_| SaveGroupError::Store)
 }
 
 fn check_write(id: &str, members: &[String], stored: &[Group]) -> Result<(), SaveGroupError> {
@@ -182,66 +150,50 @@ fn depth_of(all: &[Group], group: &Group, stack: &[String]) -> usize {
     depth
 }
 
-fn insert_group(doc: &mut Value, id: &str, members: &[String]) -> Result<(), SaveGroupError> {
-    let members_value = Value::Array(members.iter().cloned().map(Value::String).collect());
-    let list = doc
-        .as_object_mut()
-        .ok_or(SaveGroupError::Store)?
-        .entry("groups")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(list) = list.as_array_mut() else {
-        return Err(SaveGroupError::Store);
+/// The group write lens: first-match-by-id over the `groups` rows, a
+/// missing row is appended at the end. Replacing a row rewrites `id` and
+/// `members` and drops a stale `auto` marker; every other row field stays.
+pub(crate) fn write_group(doc: &mut ModelGatewayDoc, id: &str, members: &[String]) {
+    let rows = doc.groups_mut();
+    let row = match rows.iter_mut().find(|row| row.id.trim() == id) {
+        Some(row) => row,
+        None => {
+            rows.push(OwnerRow::from_id(id));
+            rows.last_mut().expect("just pushed")
+        }
     };
-    if let Some(existing) = list.iter_mut().find(|group| group_id(group) == Some(id)) {
-        let Some(object) = existing.as_object_mut() else {
-            return Err(SaveGroupError::Store);
-        };
-        object.insert("id".to_string(), Value::String(id.to_string()));
-        object.insert("members".to_string(), members_value);
-        object.remove("auto");
-        return Ok(());
-    }
-    list.push(json!({
-        "id": id,
-        "members": members,
-    }));
-    Ok(())
+    row.id = id.to_string();
+    row.members = members.to_vec();
+    row.remove_extra("auto");
 }
 
-pub(crate) fn groups_in(doc: &Value) -> Vec<Group> {
-    let Some(list) = doc.get("groups").and_then(Value::as_array) else {
-        return Vec::new();
-    };
+/// Groups held by an already-open document, in file order.
+///
+/// A row without a usable id, and repeats of an id already taken, are not
+/// groups; the container still keeps those rows exactly as they are.
+pub(crate) fn groups_in(doc: &ModelGatewayDoc) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
-    for value in list {
-        let Some(id) = group_id(value) else {
-            continue;
-        };
-        if groups.iter().any(|group| group.id == id) {
+    for row in doc.groups() {
+        let id = row.id.trim();
+        if id.is_empty() || groups.iter().any(|group| group.id == id) {
             continue;
         }
         groups.push(Group {
             id: id.to_string(),
-            members: member_list(value),
+            members: member_list(row),
         });
     }
     groups
 }
 
-fn member_list(group: &Value) -> Vec<String> {
+fn member_list(group: &OwnerRow) -> Vec<String> {
     group
-        .get("members")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|member| !member.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+        .members
+        .iter()
+        .map(|member| member.trim())
+        .filter(|member| !member.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn clean_members(members: &[impl AsRef<str>]) -> Vec<String> {
@@ -266,14 +218,6 @@ pub(crate) fn group_suffix(member: &str) -> Option<&str> {
     member
         .trim()
         .strip_prefix(GROUP_PREFIX)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-}
-
-fn group_id(group: &Value) -> Option<&str> {
-    group
-        .get("id")
-        .and_then(Value::as_str)
         .map(str::trim)
         .filter(|id| !id.is_empty())
 }
