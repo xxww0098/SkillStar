@@ -5,13 +5,10 @@
 
 ## Next Agent Prompt
 
-本 spec 全部 10 片已完成（2026-10-02）。从切片 01 开始，按编号顺序做；08/09 可与 03-07 并行，10 随时可做。
+本 spec 已关闭：10/10 切片全部完成（2026-10-02），没有进行中的工作，也不再有「下一片」。最终裁决账本是本目录的 `choices.md`——每片的实现裁决与分歧记录从那里读，不重开讨论。
 
-- **先读本 README 的「已拍板决策」和「全局防火墙」**，再读你将做的切片文件。决策不重开讨论。
-- 当前状态：01 已完成（tests/gateway_roundtrip.rs）。下一片是 02（树归位），注意与 evolution spec 的 gateway 泳道（serve.rs/ledger）协调——02 移动的文件含 affinity.rs（route/），等 evolution-03 合并后再动工。08/09（usage 线）随时可做。
-- 每片完成：跑该片「验证」小节列出的命令 + `bash scripts/internal/check_clippy_ratchet.sh`（ratchet=1，出现新诊断修代码、永不调 baseline），更新本节状态与 TODO，再做下一片。
+- 想知道某片落地了什么：先读下方「全局 TODO」的完成行与 `choices.md`，需要细节再进对应 `slices/` 文件。
 - 环境注意：本机若 21847 端口被占，`serve_binds_default_port` 会环境性失败（tests/serve.rs），验证命令统一加 `-- --skip serve_binds_default_port`，不是回归。
-- 结束你的 pass 前，把本节改写成下一个 agent 需要的样子。
 
 ### 全局 TODO
 
@@ -100,7 +97,7 @@ bash scripts/internal/check_file_size.sh
 
 ## 关联但出范围（勿在本 spec 内解决）
 
-Phase 0-5 演进（LAN 鉴权、网关持久账本、会话解析、凭据通道收敛、交叉视图）**已立 spec：`specs/usage-models-evolution/`（open，13 切片）**。它对树 spec 有多处 ⛩ 前置（03/04/05/06/07/09），两 spec 的并行纪律与前置表见其 README。第一轮对抗审查遗留给它的三个开放问题已在那边拍板：会话归因经 dispatch 头管道优先、首期解析受管 6 agent（zcode 出范围）、gateway key 安装级随机纯内部。
+Phase 0-5 演进（LAN 鉴权、网关持久账本、会话解析、凭据通道收敛、交叉视图）**已立 spec 并完成：`specs/usage-models-evolution/`（done，13/13）**。它对树 spec 有多处 ⛩ 前置（03/04/05/06/07/09），两 spec 的并行纪律与前置表见其 README。第一轮对抗审查遗留给它的三个开放问题已在那边拍板：会话归因经 dispatch 头管道优先、首期解析受管 6 agent（zcode 出范围）、gateway key 安装级随机纯内部。
 
 ## 已知未知
 

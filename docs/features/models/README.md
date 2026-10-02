@@ -102,7 +102,7 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 Models 页左侧是 Agents 和 Providers 两张列表卡，右侧是一块 Gateway 面板；面板内配置列（监听方式 → 配置档 → 路由与亲和 → 候选路由 → 分组成员）与最近调用表并排，窄屏时配置列收为单栏。从 Usage 页跳来的焦点（某个 Agent，或某个账号）会把候选路由区切到对应形态。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
 
-`get_models_board` 返回每一行的 id、name 和 `model_label`。`model_label` 是从该 Agent 配置文件读回的当前模型（gateway 的 `written_model_ref`，含 board 拼法到 writer 拼法的归一，如 `claude-code` 行读的是 `claude` 的 `settings.json`），读不到就是空串，页面显示「未选择模型」。Providers 行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏读最近一页调用：持久用量账本是真相（含时间、Agent、模型、状态、补全/输入 token、会话与延迟），进程内 60 条的环只为账本缺的行补位。没有用量时 token 为空。这一栏不显示上游 URL。账号册那边的配额数字不进这张表；要对照配额与实测，看下面的候选路由。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
+`get_models_board` 返回每一行的 id、name 和 `model_label`。`model_label` 是从该 Agent 配置文件读回的当前模型（gateway 的 `written_model_ref`，含 board 拼法到 writer 拼法的归一，如 `claude-code` 行读的是 `claude` 的 `settings.json`），读不到就是空串，页面显示「未选择模型」。Providers 行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏读最近一页调用：持久用量账本是真相（含时间、Agent、模型、状态、补全/输入 token、会话与延迟），进程内的环只为账本缺的行补位（环容量与页大小以代码常量为准：`crates/skillstar-gateway/src/trace.rs` 的 `TRACE_KEEP` 与 app 侧的 `PAGE_KEEP`）。没有用量时 token 为空。这一栏不显示上游 URL。账号册那边的配额数字不进这张表；要对照配额与实测，看下面的候选路由。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
 Gateway 面板的配置列顶部是「接入端点」：OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两行，各带复制按钮，来源是 `get_loopback_origin` 命令。展示时去掉 `http://` 前缀，复制的是完整地址。读取失败时这一区不渲染。
 
@@ -112,13 +112,13 @@ Agent 名称旁边的小字是已经写进该 Agent 文件的环回地址，形�
 
 选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 面板的配置列里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。转发不再打固定的上游根：候选来自注入的解析（provider 行 + 分组展开），按余量 smart 排序（有余量的在前，未知的居中，用尽的殿后），失败坐窗后轮转下一候选；但页面写下的 `routing` 与 `affinity` 值仍未参与转发顺序，`rotate` 计数也未被读取。
 
-选中 Agent 后，配置列的「候选路由」区按 `get_route_comparison` 画出该 Agent 当前模型的全部候选：`route_smart` 顺序、每个候选的余量百分比与重置时间（同一 provider 窗口口径，跨 provider 不比大小）、休息中标记，以及同一账本口径下的实测（调用数、失败率、p50/p95 延迟、token 叠加柱、恒标「估算」的成本）。读取为空时候选区写「还没有候选在服务这个模型。」。点「对照并切换模型」回到选择器，这是 usage 卡 → 网关候选 → 选择器三角的最后一跳。Usage 配额卡的今日行点进来时，这一区换成「路由到该账号的 Agent」清单：逐个 Agent 的当前模型解析一遍候选，留下归因命中该 catalog 的行，点行打开该 Agent 的选择器。
+选中 Agent 后，配置列的「候选路由」区按 `get_route_comparison` 画出该 Agent 当前模型的全部候选：`route_smart` 顺序、每个候选的余量百分比与重置时间（同一 provider 窗口口径，跨 provider 不比大小）、休息中标记，以及同一账本口径下的实测（调用数、失败率、p50/p95 延迟、token 叠加柱、恒标「估算」的成本）。读取为空时候选区写「没有候选在服务这个模型。」。点「对照并切换模型」回到选择器，这是 usage 卡 → 网关候选 → 选择器三角的最后一跳。Usage 配额卡的今日行点进来时，这一区换成「路由到该账号的 Agent」清单：逐个 Agent 的当前模型解析一遍候选，留下归因命中该 catalog 的行，点行打开该 Agent 的选择器。
 
 已保存的分组可以在 Gateway 面板里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
 
 Gateway 面板的配置列列出已经保存的配置档名字。保存写下名字和若干 Agent 的 model ref。点一个名字就按这份档调用已有的写入。超过 64 个字或写不进去时文件不变，界面留下返回的原因。未实现的 Agent 不写文件。
 
-Gateway 面板可以选择环回或局域网。局域网让进程听 `0.0.0.0` 和原来的端口。写给 Agent 的地址仍是 `127.0.0.1`。端口 `3425` 不会因为打开局域网而开始监听。局域网形态下，来自其它机器的请求必须携带安装级 gateway key（`config_dir()/gateway.key`，打开局域网时生成，Unix 权限 `0600`，内容 ≥32 字节随机数的 hex）：`Authorization`、`x-api-key`、`x-goog-api-key` 或 `?key=` 任一槽位匹配即可，否则一律 401，本地 GET 面也不例外；key 生成不出来时切换被拒绝（`listen_key`），网关也不在局域网上启动。本机环回访问完全不变，任意 bearer 照旧。OMP 的接入形态是 `auth:none`，带不了 key，因此 OMP 仅在环回监听下可用，局域网形态下不可用（D-078，可接受）。WSL NAT 形态的 Codex 配置自动写实际 key，mirrored 与本机仍是占位 bearer。
+Gateway 面板可以选择环回或局域网。局域网让进程听 `0.0.0.0` 和原来的端口。写给 Agent 的地址仍是 `127.0.0.1`。端口 `3425` 不会因为打开局域网而开始监听。局域网形态下，来自其它机器的请求必须携带安装级 gateway key，否则一律 401；key 在 `config_dir()/gateway.key`，需要时自动生成，界面不展示它。本机环回访问完全不变，任意 bearer 照旧。OMP 的接入形态是 `auth:none`，带不了 key，因此 OMP 仅在环回监听下可用，局域网形态下不可用（D-078，可接受）。WSL NAT 形态的 Codex 配置自动写实际 key，mirrored 与本机仍是占位 bearer。key 的槽位顺序、权限与生成语义见 [运行架构](../../architecture.md#本机模型网关)。
 
 人可以给目录里的模型一个显示名。选择器展示这个名字，没有时展示 id。出站请求的 `model` 仍是上游 id。空名字、换行、超过 80 个标量、含 `://` 或 `sk-`、或目录里没有这个 id 时不写文件。目录缓存不被改写。
 

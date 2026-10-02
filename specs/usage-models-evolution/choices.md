@@ -128,6 +128,16 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **S12 触点 4/5 无改动**：RoutingPage/RoutingControl DTO 与组件均不携带余量（spec 的条件分支不成立）。
 - **S12 提交形状**：五触点因 AllowanceSnapshot 类型改名横跨 order/forward/rest（编译原子性）并为 2 commit（gateway 原子 + app），触点 4/5 并入说明。
 
+## S13 切片 13 落地时的实现裁决（banked 2026-10-03）
+
+- **route_comparison 的口径封闭**：五列消耗数据（calls/error_rate/p50/p95/tokens/cost_usd）只聚合该候选 catalog 名下的账本 Record——用户对照的数字恒同范围；`resting` 与 allowance percent 是进程事实，经 `CandidateFact` 输入注入（它们活在运行中的网关，不在账本），不做第二真相。
+- **命令落位按数据归属**：`get_today_consumption` 进 usage_commands、`get_route_comparison` 进 models_commands board（模型路由域）。
+- **三角导航走 nav bridge**（focusModelsAgent/focusModelsCatalog 两个 focus 事件）而非路由参数——ModelsHub 与 Usage 页互跳不新增 URL 形状。
+- **StackedTokenBar 纯 CSS**（input 底/output 顶，magpie 同款），不引图表库；等宽数字、成本恒标「估算」、空态「还没有调用」。
+- **候选排序 = route_smart 原序**，不在前端二次排序；allowance percent 首次上 UI（chip 角标）。
+- **i18n 基线债一并清偿**：check_i18n_hardcoded 在基线上就红（5 个 hub 组件硬编码中文，休眠基线带入），本片迁移 useTranslation + locales（models.routes.* / usage.todaySessions.*），ratchet 转绿——属基线债清偿而非本片新功能，但同序列完成。
+- **today_consumption 复用 07 的合并视图**（Window::all + UTC 日界过滤）再切 session chip，不另建合并逻辑。
+
 ## S9 切片 09 落地时的实现裁决（banked 2026-10-03）
 
 - **UTC 日界为 wire 契约**：summarize 的 Today 按 UTC 00:00，与 07 Window 的本地日界刻意并存（服务层 Window::all 合并、UTC 过滤裁定可见窗口、读池 24h 缓冲）；UTC+8 跨日时钟测试钉死。Period（UTC）与 Window（本地）是两个概念，后续不混用。

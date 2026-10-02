@@ -1,20 +1,15 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：open（12/13）
-更新：2026-10-02
-关联：`specs/usage-models-tree/`（open，gateway crate 树重构，本 spec 多个切片有 ⛩ 前置）
+状态：done（13/13）
+更新：2026-10-03
+关联：`specs/usage-models-tree/`（done，10/10，gateway crate 树重构，本 spec 多个切片的 ⛩ 前置已全部先行完成）
 
 ## Next Agent Prompt
 
-你是下一个接手本 spec 的实现者。已完成：切片 01（LAN 门禁，D-078）、切片 05（sessions 地基 + claude 系 parser，`usage/src/sessions/`，trait 带 replay 全量重建 + `data_root()/sessions/index.json` 增量索引）。进行中：03（ledger）、02（custody 改道）、06（四 parser）。
+本 spec 已全部完成（含 ⛩ 前置的 tree spec 10 片）。终局账本（按裁决分组、含每片落地时的实现裁决）见 `choices.md`——那是本 spec 的最终交付面与分歧唯一记录，后续接手者从那里读，不重开讨论。
 
-- **先读本 README 的「头号事实」「已拍板决策」「全局防火墙」**，再读你将做的切片文件；分歧裁决见 `choices.md`，不重开讨论。
-- 下一切片按依赖：06（进行中）→ 07（需 03+06 数据形状）；04/08/09/10/11/12 等 ⛩ tree 前置（tree spec 全部未动工——完成本 spec 需先做 tree 的 02-09）。
-- 每片完成：跑该片验证 + `cargo check --workspace --locked` + `bash scripts/internal/check_clippy_ratchet.sh`（baseline 零改动，现为 1），更新本节与 TODO。
-- 环境注意：`serve_binds_default_port` 本机端口占用是环境性失败，gateway 测试统一 `-- --skip serve_binds_default_port`。
-- 涉及 DTO 的片：`bun run types:gen && git diff --exit-code src/types/generated/` 必须零意外 diff。
-- 代码注释一律英文（仓库约定；中文只在 Display/UI 字符串与 docs）。
-- 结束你的 pass 前，把本节改写成下一个 agent 需要的样子。
+- 全量门槛已过：`cargo test --workspace --locked`（2325 通过 / 0 失败）、`bun run lint && bun run build && bun run test`（670/670）、types:gen 零 diff、全部结构 ratchet（clippy ratchet baseline 1、file size、orphan、workspace deps、command boundaries、feature imports、i18n）绿。
+- 基线带来的 `rolling_backup` 毫秒碰撞 bug 已修（fac1277，非本 spec 范围但属全量门槛）。
 
 ### 全局 TODO
 
@@ -30,9 +25,11 @@
 - [x] 10 upstream 接线与 turn 状态机（P4，⛩tree-04+05）— forward.rs 状态机（env>静态测试源>502）；UpstreamEnv{resolve,book,attribute}；app resolve 最小实现（group 展开+openai_chat 端点）；401 透传+Auth 归因（11 前置）
 - [x] 11 401 自愈（P4，⛩tree-09）— D9 三限钉死；HealingBook 常驻 heal 线程桥（跨 runtime 探针通过，未触发队列降级）；AUTH_REST 30 分钟与 Verify 同档
 - [x] 12 AllowanceSnapshot 口径收敛（P5，⛩tree-04）— `{percent, renews_at}` 统一：语义漂移字段 `used` 改名 `percent`（钉死跨 provider 不可比）；rest.rs 的 renews 旁路注入删除，坐窗（≥98 且未来）统一读 snapshot；account_book 取最紧张窗口（max percent + 同窗 reset_at，延续 max 语义）
-- [ ] 13 交叉视图与文档收口（P5）
+- [x] 13 交叉视图与文档收口（P5）— crossview.rs 两个派生视图（今日会话 chip / 同模型路由对照 p50+p95+error_rate+resting+allowance）；三角导航 focusModelsAgent/focusModelsCatalog；StackedTokenBar 纯 CSS 叠加柱；i18n 基线债（5 个 hub 组件硬编码中文）一并清偿；D-079/D-080 入档
 
 ## 头号事实：路由编排未接线（三份草稿独立证实）
+
+> **立项时事实，已被切片 10 的接线改变，保留作背景**（它解释本 spec 为什么这样切）：两个启动点现在都注入 `UpstreamEnv`（`crates/skillstar-app/src/cli/gateway.rs` 的 `with_upstream` 同时服务 CLI 与桌面后台），`forward.rs` 的 turn 状态机在生产路径调用 `sign_upstream`。现状以代码为准。
 
 `ServeOptions::from_env()` 的 `upstream` 恒为 `None`（`crates/skillstar-gateway/src/serve.rs:105-123`），生产仅有的两个启动方（CLI `skillstar gateway serve` 与桌面后台，`app/src/cli/gateway.rs:26,53-63`）都不注入；`forward_body` 在无 upstream 时直接 502（serve.rs:374-376）。`route_smart` / `sign_upstream` / `UsageAccountBook` / `rest_after` 全部**已导出、已测试、未接线**（全仓 grep：sign_upstream 只有测试调用方）。
 

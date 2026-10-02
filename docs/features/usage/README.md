@@ -113,7 +113,7 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - `skillstar-usage::sessions` 只读解析受管 Agent 自己的会话文件（`crates/skillstar-usage/src/sessions/`），给度量面提供本地调用的 token 事实。**绝不写 Agent 目录**——写 Agent 目录的唯一路径仍是 `apply_gateway` 接管机制；解析器自身唯一落盘是 SkillStar 数据根下的增量索引 `data_root()/sessions/index.json`（`atomic_write`，删掉只是下次全量重读）。
 - 入口是 `read_calls(home, since)`：每次调用返回全量视图（消费方可幂等整体替换），`since` 为 epoch 毫秒下界。跨文件 message-id 去重按「最早文件优先」——resumed 会话拷贝旧文件内容，同一 message 只计一次。
 - 增量语义按文件 checkpoint（`FileCheckpoint`）：文件头指纹判「替换 vs 增长」、已读前缀采样哈希防原地改写，任一失配即从零重读；未增长且头一致时不再打开正文。解析器版本或索引版本变化同样全量重读，不做迁移。
-- 当前覆盖 claude 家族（`claude-code` / `claude-desktop`，同 projects JSONL 解析、不同 discovery）。Claude 的行级规则由测试钉死：同 message id 后块 usage 覆盖前块且 `from` 取首块位置、synthetic 行只有 API 错误才算调用、行内 `entrypoint` 前缀 `claude-desktop` 归因 Desktop（含 `claude-desktop-3p`）。其余 Agent 家族按 spec 切片 06 追加到同一注册表。
+- 覆盖哪些 Agent 家族以 `crates/skillstar-usage/src/sessions/mod.rs` 的 `parsers()` 注册表及其测试为准（SSOT），文档不手抄清单；受管 Agent 的本地会话文件都走同一注册表，新增解析器只加注册表行。Claude 的行级规则由测试钉死：同 message id 后块 usage 覆盖前块且 `from` 取首块位置、synthetic 行只有 API 错误才算调用、行内 `entrypoint` 前缀 `claude-desktop` 归因 Desktop（含 `claude-desktop-3p`）。
 - discovery 遵守 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱（沙箱优先于 `$CLAUDE_CONFIG_DIR`）；claude-desktop 的 Cowork 目录布局（`local-agent-mode-sessions/*/*/local_*/.claude`）作为接口保留，本机未验证到该布局实际存在，Desktop 归因目前主要靠行内 entrypoint。
 
 ## 今日消耗与汇总（consumption summary）

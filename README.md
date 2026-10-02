@@ -43,6 +43,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 
 - catalog 由代码和测试维护，按 OAuth、API Key 或手动录入模式接入。
 - 卡片显示 provider 原生配额窗口、余额、重置时间、套餐和计费周期。
+- Usage 页提供今日消耗行与会话 chips：汇总当日估算花费（区分「经网关」与「全部」口径），点会话 chip 可跳到 Models 工作台对照该 Agent 的模型路由。
 - OAuth 重新授权会原位更新既有订阅，避免生成重复账号。
 - 支持的 CLI 账号切换以事务方式更新 active 状态和磁盘凭证；失败时保留原可用账号。
 - 可在 Usage 里为已经验证过隔离的桌面应用创建实例（当前是 Cursor、Grok Bot 和 Antigravity，`~/.skillstar/instances/<app>/<id>/`）。Start 会用独立 `--user-data-dir` 拉起本机 macOS 应用，不改默认 profile。尚未实机验证的应用只登记启动形状，不出现在多开入口。Claude Desktop 和 Zed 无法隔离，不提供多开。
@@ -56,6 +57,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 工作台聚焦 Claude Code 客户端；可见入口与既有绑定的保留规则见 [Models 工作台](./docs/features/models/README.md#models-工作台)。
 - Claude Code CLI 支持按角色配置模型并写入原生配置，角色与回落规则见 [Models 角色路由](./docs/features/models/README.md#角色路由跨-agent)。
 - Tool sync 只修改 SkillStar 管理的字段，保留用户已有配置并在写入前备份。
+- Models 工作台的「候选路由」对照同一模型的所有候选：配额余量与休息状态，加上账本口径的实测（调用数、错误率、p50/p95 延迟、估算成本）。
 - 内置摘要共享 Models provider 配置，并以流式事件报告 route/fallback。
 
 ### 桌面体验与安全
@@ -153,6 +155,8 @@ skillstar gateway serve
 ```
 
 在 `127.0.0.1:21847` 上监听，不打开窗口。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 会拒绝并退出。桌面应用启动时会自己拉起同一份监听；地址已被占用时只在 stderr 报告，不关掉先启动的那份。
+
+在 Models 工作台把「监听方式」切到「局域网」后，局域网里其它机器必须携带这台电脑的 gateway key 才能使用网关，否则请求会被拒绝。key 会自动生成，存放在 `~/.skillstar/config/gateway.key`，界面不展示它。本机访问不受影响。
 
 `skillstar claude-mcp-helper` 是 Claude Code 拉起的内部命令，不打开窗口。stdout 只有 MCP 帧，日志在 stderr。
 
