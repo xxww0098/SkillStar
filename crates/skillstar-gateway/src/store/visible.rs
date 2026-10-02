@@ -51,25 +51,7 @@ pub(crate) fn family_of(list: &str, id: &str) -> Option<String> {
 
 /// Every catalog id, provider models then saved groups.
 pub(crate) fn catalog_ids() -> Vec<String> {
-    let mut ids = Vec::new();
-    if let Ok(Value::Object(providers)) =
-        serde_json::from_slice::<Value>(&crate::catalog::cache::models_dev_load())
-    {
-        for (provider, entry) in providers {
-            if provider.is_empty() || provider.contains('/') {
-                continue;
-            }
-            let Some(models) = entry.get("models").and_then(Value::as_object) else {
-                continue;
-            };
-            for model in models.keys() {
-                if model.is_empty() || model.contains('/') {
-                    continue;
-                }
-                ids.push(format!("{provider}/{model}"));
-            }
-        }
-    }
+    let mut ids = crate::catalog::catalog_ids();
     for id in crate::store::groups::stored_group_ids() {
         if id.is_empty() || id.contains('/') {
             continue;

@@ -40,6 +40,7 @@ pub use agents::{
 pub use catalog::cache::{
     MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,
 };
+pub use catalog::ids::catalog_ids;
 pub use claude::{
     AccountSnapshot, CallbackOutcome, ClaudeBridge, ClaudeError, ClaudeLaunch, ClaudeRun,
     ClaudeTool, IDLE_LONGEST, IDLE_MOST, PARK_LONGEST, STDERR_CAP, TEMP_PREFIX, TURN_ABORT,

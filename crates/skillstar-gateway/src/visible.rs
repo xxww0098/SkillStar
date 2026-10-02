@@ -2,8 +2,6 @@
 //! stored `visible` map. The map itself, and the `family` field, are read
 //! by `store::visible`.
 
-use serde_json::Value;
-
 use crate::GROUP_PREFIX;
 use crate::store::visible::{catalog_ids, family_of, visible_names};
 
@@ -65,18 +63,7 @@ pub fn catalog_serves(id: &str) -> bool {
     let Some((provider, model)) = id.split_once('/') else {
         return false;
     };
-    if provider.is_empty() || provider == "group" || model.is_empty() || model.contains('/') {
-        return false;
-    }
-    let Ok(value) = serde_json::from_slice::<Value>(&crate::catalog::cache::models_dev_load())
-    else {
-        return false;
-    };
-    value
-        .get(provider)
-        .and_then(|entry| entry.get("models"))
-        .and_then(Value::as_object)
-        .is_some_and(|models| models.contains_key(model))
+    crate::catalog::serves(provider, model)
 }
 
 fn names_of(id: &str) -> Vec<String> {

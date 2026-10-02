@@ -196,43 +196,12 @@ fn catalog_lists_exact(id: &str) -> bool {
     let Some((provider, model)) = id.split_once('/') else {
         return false;
     };
-    catalog_model(provider, model).is_some()
+    crate::catalog::serves(provider, model)
 }
 
 fn catalog_levels(model_id: &str) -> Vec<String> {
     let Some((provider, model)) = model_id.split_once('/') else {
         return Vec::new();
     };
-    if provider.is_empty() || provider == "group" || model.is_empty() || model.contains('/') {
-        return Vec::new();
-    }
-    let Some(entry) = catalog_model(provider, model) else {
-        return Vec::new();
-    };
-    entry
-        .get("reasoning_options")
-        .and_then(Value::as_array)
-        .and_then(|options| {
-            options.iter().find(|option| option.get("type").and_then(Value::as_str) == Some("effort"))
-        })
-        .and_then(|option| option.get("values"))
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn catalog_model(provider: &str, model: &str) -> Option<Value> {
-    let bytes = crate::catalog::cache::models_dev_load();
-    let value: Value = serde_json::from_slice(&bytes).ok()?;
-    value
-        .get(provider)?
-        .get("models")?
-        .get(model)
-        .cloned()
+    crate::catalog::effort_values(provider, model)
 }
