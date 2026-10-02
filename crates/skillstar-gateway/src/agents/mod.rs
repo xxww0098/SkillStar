@@ -184,9 +184,7 @@ fn quoted_field(text: &str, key: &str) -> Option<String> {
             rest = after_colon;
             continue;
         };
-        let Some(end) = after_quote.find('"') else {
-            return None;
-        };
+        let end = after_quote.find('"')?;
         if looks_like_model_ref(&after_quote[..end]) {
             return Some(after_quote[..end].to_string());
         }

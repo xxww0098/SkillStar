@@ -38,7 +38,7 @@ fn fingerprint_hits_and_misses_correctly() {
     let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
     set_env(guard.path());
 
-    let _outcome = (|| {
+    {
         // Mirror the real layout: repo caches live under hub/repos so the
         // resolved snapshot root stays inside the managed hub root.
         let repo = skillstar_core::infra::paths::hub_root().join("repos/demo-repo");
@@ -86,7 +86,7 @@ fn fingerprint_hits_and_misses_correctly() {
         )
         .unwrap();
         assert!(!baseline_unchanged("demo", &snapshot2.content_hash));
-    })();
+    }
     restore_env(previous_data, previous_hub);
     guard.close().unwrap();
 }
