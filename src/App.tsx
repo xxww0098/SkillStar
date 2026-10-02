@@ -249,6 +249,8 @@ function AppContent() {
           filter={nav.usageCatalogFilter}
           usageCreateRequest={nav.usageCreateRequest}
           clearUsageCreateRequest={nav.clearUsageCreateRequest}
+          onFocusModelsAgent={nav.focusModelsAgent}
+          onFocusModelsCatalog={nav.focusModelsCatalog}
         />
       );
     }
@@ -262,6 +264,8 @@ function AppContent() {
           setSelectedProviderId={nav.setSelectedProviderId}
           modelsDrawerRequest={nav.modelsDrawerRequest}
           clearModelsDrawerRequest={nav.clearModelsDrawerRequest}
+          modelsFocusRequest={nav.modelsFocusRequest}
+          clearModelsFocusRequest={nav.clearModelsFocusRequest}
         />
       );
     }

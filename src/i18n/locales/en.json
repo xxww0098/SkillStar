@@ -1805,6 +1805,16 @@
       "servingEmpty": "No agent's current model routes here yet.",
       "viaGateway": "via gateway",
       "openPicker": "Compare and switch models"
+    },
+    "recentCalls": {
+      "time": "Time",
+      "agent": "Agent",
+      "model": "Model",
+      "session": "Session",
+      "status": "Status",
+      "in": "In",
+      "tokens": "Tokens",
+      "latency": "Latency"
     }
   },
   "ssh": {

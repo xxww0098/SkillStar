@@ -1805,6 +1805,16 @@
       "servingEmpty": "还没有 Agent 的当前模型路由到这里。",
       "viaGateway": "经网关",
       "openPicker": "对照并切换模型"
+    },
+    "recentCalls": {
+      "time": "时间",
+      "agent": "Agent",
+      "model": "模型",
+      "session": "会话",
+      "status": "状态",
+      "in": "输入",
+      "tokens": "Tokens",
+      "latency": "延迟"
     }
   },
   "ssh": {

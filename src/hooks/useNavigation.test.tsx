@@ -74,6 +74,28 @@ describe("useNavigation - AppMode support", () => {
     expect(window.location.hash).toBe("#projects");
   });
 
+  it("focuses the Models hub on one agent from the Usage triangle", () => {
+    const { result } = renderHook(() => useNavigation(), { wrapper });
+    act(() => result.current.focusModelsAgent("claude-code"));
+    expect(result.current.appMode).toBe("models");
+    expect(window.location.hash).toBe("#models");
+    expect(result.current.modelsFocusRequest).toEqual({ nonce: 1, kind: "agent", agentId: "claude-code" });
+    // A second jump bumps the nonce so the hub re-consumes the same agent.
+    act(() => result.current.focusModelsAgent("claude-code"));
+    expect(result.current.modelsFocusRequest?.nonce).toBe(2);
+    act(() => result.current.clearModelsFocusRequest());
+    expect(result.current.modelsFocusRequest).toBeNull();
+  });
+
+  it("asks the Models hub which agents route to one catalog", () => {
+    const { result } = renderHook(() => useNavigation(), { wrapper });
+    act(() => result.current.focusModelsCatalog("deepseek"));
+    expect(result.current.appMode).toBe("models");
+    expect(result.current.modelsFocusRequest).toEqual({ nonce: 1, kind: "catalog", catalogId: "deepseek" });
+    act(() => result.current.clearModelsFocusRequest());
+    expect(result.current.modelsFocusRequest).toBeNull();
+  });
+
   it("navigateModels always lands on the hub (legacy API compat)", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 

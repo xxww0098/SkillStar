@@ -22,6 +22,16 @@ export interface ModelsDrawerRequest {
   autoBindToolId?: string;
 }
 
+/**
+ * Cross-view focus request into the Models hub (spec slice 13's triangle):
+ * either "this agent's model routes" (from a Usage session chip) or "which
+ * agents route to this catalog" (from a Usage quota card). Same
+ * request-nonce pattern as `ModelsDrawerRequest`.
+ */
+export type ModelsFocusRequest =
+  | { nonce: number; kind: "agent"; agentId: string }
+  | { nonce: number; kind: "catalog"; catalogId: string };
+
 const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
   "my-skills": ["marketplace", "skill-cards"],
   marketplace: ["my-skills", "skill-cards"],
@@ -140,6 +150,8 @@ interface NavigationState {
   usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
   /** Request-nonce event asking the Models hub to open its drawer. */
   modelsDrawerRequest: ModelsDrawerRequest | null;
+  /** Request-nonce event focusing the Models hub's route comparison. */
+  modelsFocusRequest: ModelsFocusRequest | null;
 }
 
 interface NavigationActions {
@@ -164,6 +176,11 @@ interface NavigationActions {
   clearUsageCreateRequest: () => void;
   openModelsDrawer: (req: Omit<ModelsDrawerRequest, "nonce">) => void;
   clearModelsDrawerRequest: () => void;
+  /** Jump to the Models hub focused on one agent's model routes (Usage → Models triangle). */
+  focusModelsAgent: (agentId: string) => void;
+  /** Jump to the Models hub asking which agents route to this catalog (Usage → Models triangle). */
+  focusModelsCatalog: (catalogId: string) => void;
+  clearModelsFocusRequest: () => void;
   /** Warm a page's lazy chunk before the user commits to it (hover/focus). */
   prefetchPage: (page: NavPage) => void;
 }
@@ -214,6 +231,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     preselectCatalogId: string | null;
   } | null>(null);
   const [modelsDrawerRequest, setModelsDrawerRequest] = useState<ModelsDrawerRequest | null>(null);
+  const [modelsFocusRequest, setModelsFocusRequest] = useState<ModelsFocusRequest | null>(null);
 
   const prefetchedPages = useRef<Set<NavPage>>(new Set([activePage]));
   const previousPage = useRef<NavPage>(activePage);
@@ -300,6 +318,23 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     setModelsDrawerRequest(null);
   }, []);
 
+  // ── Cross-view focus (Usage → Models triangle, slice 13) ────────
+  const focusModelsAgent = useCallback((agentId: string) => {
+    setAppModeState("models");
+    window.location.hash = MODELS_HASH;
+    setModelsFocusRequest((prev) => ({ kind: "agent" as const, agentId, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
+  const focusModelsCatalog = useCallback((catalogId: string) => {
+    setAppModeState("models");
+    window.location.hash = MODELS_HASH;
+    setModelsFocusRequest((prev) => ({ kind: "catalog" as const, catalogId, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
+  const clearModelsFocusRequest = useCallback(() => {
+    setModelsFocusRequest(null);
+  }, []);
+
   // ── Prefetching ─────────────────────────────────────────────────
   const prefetchPage = useCallback((page: NavPage) => {
     if (prefetchedPages.current.has(page)) return;
@@ -384,6 +419,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       usageCatalogFilter,
       usageCreateRequest,
       modelsDrawerRequest,
+      modelsFocusRequest,
       navigate,
       setSubPage,
       setAppMode,
@@ -402,6 +438,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clearUsageCreateRequest,
       openModelsDrawer,
       clearModelsDrawerRequest,
+      focusModelsAgent,
+      focusModelsCatalog,
+      clearModelsFocusRequest,
       prefetchPage,
     }),
     [
@@ -418,6 +457,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       usageCatalogFilter,
       usageCreateRequest,
       modelsDrawerRequest,
+      modelsFocusRequest,
       navigate,
       setAppMode,
       navigateModels,
@@ -428,6 +468,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clearUsageCreateRequest,
       openModelsDrawer,
       clearModelsDrawerRequest,
+      focusModelsAgent,
+      focusModelsCatalog,
+      clearModelsFocusRequest,
       prefetchPage,
     ],
   );

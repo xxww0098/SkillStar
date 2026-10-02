@@ -81,34 +81,35 @@ function StatusPill({ status }: { status: number }) {
  * or a non-digit token is blank.
  */
 function RecentCalls({ calls }: { calls: RecentCallDto[] }) {
+  const { t } = useTranslation();
   return (
     <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
       <table className="w-full min-w-[560px] table-fixed text-left text-xs text-foreground">
         <thead className="sticky top-0 bg-card">
           <tr className="border-b border-border/60 text-muted-foreground">
             <th className="w-[88px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
-              Time
+              {t(`models.recentCalls.time`)}
             </th>
             <th className="w-20 whitespace-nowrap px-2 py-1 font-normal" scope="col">
-              Agent
+              {t(`models.recentCalls.agent`)}
             </th>
             <th className="whitespace-nowrap px-2 py-1 font-normal" scope="col">
-              Model
+              {t(`models.recentCalls.model`)}
             </th>
             <th className="w-[64px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
-              Session
+              {t(`models.recentCalls.session`)}
             </th>
             <th className="w-[56px] whitespace-nowrap px-2 py-1 font-normal" scope="col">
-              Status
+              {t(`models.recentCalls.status`)}
             </th>
             <th className="w-[56px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
-              In
+              {t(`models.recentCalls.in`)}
             </th>
             <th className="w-[56px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
-              Tokens
+              {t(`models.recentCalls.tokens`)}
             </th>
             <th className="w-[64px] whitespace-nowrap px-2 py-1 text-right font-normal" scope="col">
-              Latency
+              {t(`models.recentCalls.latency`)}
             </th>
           </tr>
         </thead>

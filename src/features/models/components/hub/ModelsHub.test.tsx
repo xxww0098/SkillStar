@@ -209,10 +209,11 @@ describe("ModelsHub", () => {
       .getAllByRole("columnheader")
       .map((header) => header.textContent ?? "")
       .join(" ");
-    expect(headers).toMatch(/Agent/);
-    expect(headers).toMatch(/Model/);
-    expect(headers).toMatch(/Status/);
-    expect(headers).toMatch(/Token/);
+    // The zh-CN column words (models.recentCalls.*): the hub localizes.
+    expect(headers).toContain("Agent");
+    expect(headers).toContain("模型");
+    expect(headers).toContain("状态");
+    expect(headers).toContain("Tokens");
     expect(headers).not.toMatch(/quota|remaining|allowance|配额|剩余/i);
     const text = document.body.textContent ?? "";
     expect(text).not.toMatch(/https:\/\//);
