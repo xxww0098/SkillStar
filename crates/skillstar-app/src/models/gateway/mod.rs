@@ -29,7 +29,7 @@ pub mod profiles;
 pub mod recent;
 pub mod routing;
 
-pub use account_book::{UsageAccountBook, upstream_env};
+pub use account_book::{UsageAccountBook, attribute_candidate, resolve_upstreams, upstream_env};
 pub use codex_save::{CodexRoute, release_codex, save_codex, save_codex_model};
 pub use effort::model_efforts;
 pub use gateway_save::save_agent;

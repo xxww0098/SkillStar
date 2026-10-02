@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { tauriInvoke } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { modelsKeys } from "../../api/keys";
@@ -25,6 +26,7 @@ export function RoutingControl({
   routing: string;
   affinity: string;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const label = plainId(id);
   const heading = plainId(title ?? "") || label;
@@ -51,7 +53,7 @@ export function RoutingControl({
     >
       {heading ? <div className="truncate text-xs font-medium text-foreground">{heading}</div> : null}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="w-10 shrink-0 text-[11px] text-muted-foreground">路由</span>
+        <span className="w-10 shrink-0 text-[11px] text-muted-foreground">{t("models.gateway.routingLabel")}</span>
         <div role="group" aria-label="Routing" className="flex flex-wrap rounded-lg bg-muted/60 p-0.5">
           {ROUTING.map((mode) => (
             <button
@@ -72,7 +74,7 @@ export function RoutingControl({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="w-10 shrink-0 text-[11px] text-muted-foreground">亲和</span>
+        <span className="w-10 shrink-0 text-[11px] text-muted-foreground">{t("models.gateway.affinityLabel")}</span>
         <div role="group" aria-label="Affinity" className="flex flex-wrap rounded-lg bg-muted/60 p-0.5">
           {AFFINITY.map((mode) => (
             <button

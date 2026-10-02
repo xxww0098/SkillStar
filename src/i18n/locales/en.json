@@ -1420,7 +1420,12 @@
     "autoImportScanProvider": "Scan and import",
     "autoImportScanAll": "Scan and import local accounts",
     "autoImportNoCredentials": "No usable Codex / Antigravity / Cursor credentials detected locally",
-    "advancedBillingOptions": "Billing and advanced"
+    "advancedBillingOptions": "Billing and advanced",
+    "todaySessionsTitle": "Today's sessions",
+    "todaySessionsEmpty": "No records yet",
+    "todaySessionsCost": "{{cost}} est.",
+    "todaySessionsTokens": "{{input}} in · {{output}} out tokens",
+    "todaySessionsAgentEntry": "Open {{agent}} in Models"
   },
   "models": {
     "common": {
@@ -1767,7 +1772,39 @@
     },
     "gateway": {
       "endpoints": "Endpoints",
-      "copyEndpoint": "Copy {{protocol}} endpoint"
+      "copyEndpoint": "Copy {{protocol}} endpoint",
+      "listenTitle": "Listen mode",
+      "listenLoopback": "Loopback",
+      "listenLan": "LAN",
+      "listenNote": "The address agents use stays 127.0.0.1.",
+      "routingSection": "Routing · Affinity",
+      "routingPickProvider": "Select a provider on the left to adjust routing.",
+      "routingLabel": "Routing",
+      "affinityLabel": "Affinity",
+      "groupsTitle": "Groups",
+      "groupNamePlaceholder": "Group name",
+      "profilesTitle": "Profiles",
+      "profileNamePlaceholder": "Profile name",
+      "recentCalls": "Recent calls",
+      "emptyAgents": "No configurable agents detected yet",
+      "emptyProviders": "No keys yet",
+      "emptyCalls": "No calls yet"
+    },
+    "routes": {
+      "title": "Candidate routes",
+      "pickAgent": "Select an agent to compare its model's routes.",
+      "noCandidates": "No candidate serves this model.",
+      "empty": "No calls yet",
+      "calls": "{{count}} calls",
+      "errorRate": "{{rate}} err",
+      "latency": "p50 {{p50}}ms · p95 {{p95}}ms",
+      "resting": "resting",
+      "percentUsed": "{{percent}}% used",
+      "renewsAt": "renews {{time}}",
+      "servingTitle": "Agents routed to {{catalog}}",
+      "servingEmpty": "No agent's current model routes here yet.",
+      "viaGateway": "via gateway",
+      "openPicker": "Compare and switch models"
     }
   },
   "ssh": {

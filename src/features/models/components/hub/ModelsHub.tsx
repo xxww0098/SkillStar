@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Popover } from "radix-ui";
 import { useTranslation } from "react-i18next";
 import type { RecentCallDto } from "@/types/generated/RecentCallDto";
@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { tauriInvoke } from "@/lib/ipc";
 import { useModelsBoard } from "../../api/board";
 import { useRecentCalls } from "../../api/recent";
+import { useRouteComparison } from "../../api/routes";
 import { useRoutingPage } from "../../api/routing";
 import { getAgent } from "../../lib/agentRegistry";
 import type { ModelsNavBridge } from "../../lib/navBridge";
@@ -16,6 +17,7 @@ import { GroupMembers } from "./GroupMembers";
 import { LanListen } from "./LanListen";
 import { ModelPickerPopover } from "./ModelPickerPopover";
 import { ProfileNames } from "./ProfileNames";
+import { RouteCandidates, ServingAgents } from "./RouteCandidates";
 import { RoutingControl } from "./RoutingControl";
 
 /** Small caps label that groups one functional block inside the gateway panel. */
@@ -191,25 +193,22 @@ function ModelChip({ label }: { label: string }) {
   );
 }
 
-/** Shown only after that column's read succeeds with nothing in it. */
-const EMPTY_COLUMN = {
-  agents: "还没有探测到可配置的 Agent",
-  providers: "还没有密钥",
-  gateway: "还没有调用",
-} as const;
-
 /**
  * Models page: a left rail of Agents and Providers, and a wide Gateway panel
- * split by function — endpoints, listen mode, profiles, routing, group
- * members, and the recent-calls table. Clicking an agent opens the picker;
- * the row itself carries the model that agent is on. A drawer request from
- * the retired workbench is ignored.
+ * split by function — endpoints, listen mode, profiles, routing, candidate
+ * routes (slice 13's cross-view), group members, and the recent-calls
+ * table. Clicking an agent opens the picker; the row itself carries the
+ * model that agent is on. A drawer request from the retired workbench is
+ * ignored. A cross-view focus request (from the Usage page) either focuses
+ * one agent's routes or shows which agents route to one catalog.
  */
 export function ModelsHub({
   selectedProviderId,
   setSelectedProviderId,
   modelsDrawerRequest,
   clearModelsDrawerRequest,
+  modelsFocusRequest,
+  clearModelsFocusRequest,
 }: ModelsNavBridge) {
   const { t } = useTranslation();
   const boardQuery = useModelsBoard();
@@ -221,6 +220,8 @@ export function ModelsHub({
   const [pickerId, setPickerId] = useState<string | null>(null);
   const [choices, setChoices] = useState<{ id: string; label: string }[]>([]);
   const [choicesLoading, setChoicesLoading] = useState(false);
+  /** The catalog the Usage quota card jumped to, until dismissed. */
+  const [servingCatalogId, setServingCatalogId] = useState<string | null>(null);
   void modelsDrawerRequest;
   void clearModelsDrawerRequest;
 
@@ -229,6 +230,24 @@ export function ModelsHub({
   const gatewayRows = data?.gateway ?? [];
   const selectedProviderName = providers.find((row) => row.id === selectedProviderId)?.name ?? "";
   const pickerAgent = pickerId === null ? null : (agents.find((row) => row.id === pickerId) ?? null);
+
+  // Cross-view focus (Usage → Models triangle): an agent opens its picker
+  // (and its routes show below); a catalog switches the panel to the
+  // serving join. The request is consumed on arrival.
+  useEffect(() => {
+    if (!modelsFocusRequest) return;
+    if (modelsFocusRequest.kind === "agent") {
+      setServingCatalogId(null);
+      setPickerId(modelsFocusRequest.agentId);
+    } else {
+      setServingCatalogId(modelsFocusRequest.catalogId);
+    }
+    clearModelsFocusRequest();
+  }, [modelsFocusRequest, clearModelsFocusRequest]);
+
+  // The focused agent's model drives the candidate comparison.
+  const routeModel = (pickerAgent?.model_label ?? "").trim() || null;
+  const routeQuery = useRouteComparison(routeModel);
 
   const openPicker = (id: string) => {
     if (pickerId === id) {
@@ -258,7 +277,7 @@ export function ModelsHub({
             label={t("models.columns.agents")}
             count={agents.length}
             ready={boardQuery.isSuccess}
-            emptyText={EMPTY_COLUMN.agents}
+            emptyText={t("models.gateway.emptyAgents")}
           >
             {agents.map((row) => {
               const loopback = loopbackText(row.loopback_label ?? "");
@@ -318,7 +337,7 @@ export function ModelsHub({
             label={t("models.columns.providers")}
             count={providers.length}
             ready={boardQuery.isSuccess}
-            emptyText={EMPTY_COLUMN.providers}
+            emptyText={t("models.gateway.emptyProviders")}
           >
             {providers.map((row) => (
               <li key={row.id}>
@@ -361,7 +380,7 @@ export function ModelsHub({
               <LanListen />
               <ProfileNames />
               <div className="space-y-2">
-                <SectionLabel>路由 · 亲和</SectionLabel>
+                <SectionLabel>{t("models.gateway.routingSection")}</SectionLabel>
                 {routingPage?.provider && selectedProviderId ? (
                   <RoutingControl
                     owner="provider"
@@ -382,9 +401,30 @@ export function ModelsHub({
                   />
                 ))}
                 {!routingPage?.provider && groups.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">在左侧选择一个 Provider 后可调整路由。</p>
+                  <p className="text-xs text-muted-foreground">{t("models.gateway.routingPickProvider")}</p>
                 ) : null}
               </div>
+              {/* Cross-view (slice 13): the catalog jump target first (the
+               *  Usage quota card's "which agents"), then the focused
+               *  agent's candidate chips. */}
+              {servingCatalogId ? (
+                <ServingAgents
+                  catalogId={servingCatalogId}
+                  agents={agents}
+                  onOpenPicker={(agentId) => openPicker(agentId)}
+                />
+              ) : null}
+              {pickerAgent && routeModel ? (
+                <RouteCandidates
+                  agentName={pickerAgent.name}
+                  modelRef={routeModel}
+                  comparison={routeQuery.data}
+                  loading={routeQuery.isLoading}
+                  onOpenPicker={() => openPicker(pickerAgent.id)}
+                />
+              ) : !servingCatalogId ? (
+                <p className="text-xs text-muted-foreground">{t("models.routes.pickAgent")}</p>
+              ) : null}
               <GroupMembers />
             </div>
             {/* Calls column: gateway rows (rare) above the recent-calls table. */}
@@ -400,12 +440,12 @@ export function ModelsHub({
               ) : null}
               {recentQuery.isSuccess && calls.length === 0 ? (
                 <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-                  <p className="text-sm text-muted-foreground">{EMPTY_COLUMN.gateway}</p>
+                  <p className="text-sm text-muted-foreground">{t("models.gateway.emptyCalls")}</p>
                 </div>
               ) : calls.length > 0 ? (
                 <>
                   <div className="flex shrink-0 items-baseline gap-2 px-3 pb-1 pt-2.5">
-                    <SectionLabel>最近调用</SectionLabel>
+                    <SectionLabel>{t("models.gateway.recentCalls")}</SectionLabel>
                     <span className="text-[11px] tabular-nums text-muted-foreground">{calls.length}</span>
                   </div>
                   <RecentCalls calls={calls} />

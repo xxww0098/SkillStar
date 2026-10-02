@@ -16,15 +16,18 @@
 use std::path::PathBuf;
 
 use skillstar_core::infra::paths::{home_dir, tool_sync_home_override};
-use skillstar_gateway::{ModelCost, Record, effective_price, load};
+use skillstar_gateway::{
+    AccountBook, ModelCost, Record, effective_price, load, resting_until,
+};
 use skillstar_usage::sessions::{SessionCall, read_calls};
 
 use crate::usage::consumption::{
-    Dimension, SESSION_UNKNOWN_CATALOG, SummarizeInput, Summary, Window, consumption_view, groups,
-    period_floor_ms, summarize,
+    CandidateFact, Dimension, SESSION_UNKNOWN_CATALOG, SummarizeInput, Summary, Window,
+    consumption_view, groups, period_floor_ms, route_comparison, summarize, today_consumption,
 };
 use crate::usage::dto::{
     ConsumptionGroupDto, ConsumptionPeriodDto, ConsumptionSummaryDto, ConsumptionTotalsDto,
+    RouteComparisonDto, TodayConsumptionDto,
 };
 
 /// How much earlier than the period floor the sources are read: a turn
@@ -38,6 +41,47 @@ const PAIRING_BUFFER_MS: i64 = 86_400_000;
 /// an empty read.
 pub fn get_consumption_summary(period: ConsumptionPeriodDto) -> ConsumptionSummaryDto {
     read_and_assemble(period, chrono::Utc::now().timestamp_millis())
+}
+
+/// Today's consumption with session chips (slice 13): the same three
+/// sources as [`get_consumption_summary`], projected onto the Usage page's
+/// session drill-down. UTC day boundary, read-time pricing.
+pub fn get_today_consumption() -> TodayConsumptionDto {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let since = period_floor_ms(crate::usage::consumption::Period::Today, now_ms)
+        .map(|floor| floor - PAIRING_BUFFER_MS);
+    let records = load(since.unwrap_or(0));
+    let calls = read_calls(&agent_home(), since);
+    today_consumption(now_ms, &records, &calls, &effective_price)
+}
+
+/// One model ref's routable candidates compared over the whole ledger
+/// (slice 13): every candidate aggregates the same records, so the
+/// comparison is scope-consistent. Candidates come from the resolve seam
+/// (`models::gateway::account_book`), their allowance from the account
+/// book, and `resting` from the gateway's in-process seat table — a
+/// restart forgets rests, and so does this read.
+pub fn get_route_comparison(model_ref: &str) -> RouteComparisonDto {
+    let now = std::time::SystemTime::now();
+    let records = load(0);
+    let candidates: Vec<CandidateFact> = crate::models::resolve_upstreams(model_ref)
+        .into_iter()
+        .map(|upstream| {
+            let (catalog, _) = crate::models::attribute_candidate(&upstream.id);
+            let allowance = crate::models::UsageAccountBook.allowance(&upstream.catalog_id);
+            CandidateFact {
+                id: upstream.id.clone(),
+                catalog: if catalog.is_empty() { upstream.id.clone() } else { catalog },
+                percent: allowance.map(|snapshot| snapshot.percent),
+                renews_at_ms: allowance
+                    .and_then(|snapshot| snapshot.renews_at)
+                    .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_millis() as i64),
+                resting: resting_until(&upstream.id).is_some_and(|until| until > now),
+            }
+        })
+        .collect();
+    route_comparison(model_ref, &records, &candidates, &effective_price)
 }
 
 /// Read the three sources at `now_ms` and assemble the summary. The seams
@@ -273,5 +317,54 @@ mod tests {
         assert_eq!(dto.by_catalog.len(), 1);
         assert_eq!(dto.by_catalog[0].label, "deepseek");
         assert_eq!(dto.series.len(), 1, "one hour bucket: {dto:?}");
+    }
+
+    /// The route comparison read: candidates resolve from the stored
+    /// provider rows, aggregate the persistent ledger under their own
+    /// attribution catalog, and unknown allowances keep store order (the
+    /// smart band's stable tail).
+    #[tokio::test(flavor = "current_thread")]
+    async fn route_comparison_resolves_candidates_through_the_provider_store() {
+        let _lock = ENV_LOCK.lock().await;
+        let (_temp, _env) = isolated("route-comparison");
+        let mut first = skillstar_models::providers::Provider::new("relay-one", "Relay One");
+        first.endpoints.openai_chat = Some("https://one.example/v1".to_string());
+        first.credential = skillstar_models::providers::Credential::single_key("k1", "sk-one");
+        first.models = vec!["m-9".to_string()];
+        let mut second = skillstar_models::providers::Provider::new("relay-two", "Relay Two");
+        second.endpoints.openai_chat = Some("https://two.example".to_string());
+        second.credential = skillstar_models::providers::Credential::single_key("k1", "sk-two");
+        second.models = vec!["m-9".to_string()];
+        skillstar_models::providers::save_store(&skillstar_models::providers::ProvidersStoreV4 {
+            providers: vec![first, second],
+            ..Default::default()
+        })
+        .unwrap();
+
+        let now = 1_790_000_000_000;
+        let one = record(now, "relay-one", "m-9", [100, 10, 0, 0]);
+        let mut failed = record(now, "relay-two", "m-9", [0, 0, 0, 0]);
+        failed.status = 429;
+        failed.error_kind = Some(skillstar_gateway::ErrorKind::RateLimit);
+        append(&one);
+        append(&failed);
+
+        let dto = get_route_comparison("m-9");
+        assert_eq!(dto.model, "m-9");
+        assert_eq!(dto.candidates.len(), 2, "{dto:?}");
+        // No usage snapshots in the isolated root: both allowances unknown,
+        // so the smart band keeps store order.
+        assert_eq!(dto.candidates[0].catalog, "relay-one");
+        assert_eq!(dto.candidates[1].catalog, "relay-two");
+        let one = &dto.candidates[0];
+        assert_eq!(one.calls, 1);
+        assert_eq!(one.error_rate, 0.0);
+        assert_eq!(one.p50_latency_ms, 1_000);
+        assert_eq!(one.tokens.input, 100);
+        assert_eq!(one.cost_usd, None, "no price table: unknown, not free");
+        assert!(!one.resting, "the in-process rest table starts empty");
+        let two = &dto.candidates[1];
+        assert_eq!(two.calls, 1);
+        assert!((two.error_rate - 1.0).abs() < 1e-9);
     }
 }

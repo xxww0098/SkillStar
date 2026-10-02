@@ -43,7 +43,7 @@
 - **绑定按 wire protocol 校验**：注册表列从 `required_url` 换成 `required_wire`（`RequiredWire`）。`codex` 要求 `OpenaiResponses`，`claude-code` / `claude-desktop` 要求 `AnthropicMessages`，其余要求 `OpenaiChat`。`Credential::ExternalCli` 行豁免（空端点是它的语义）。`Tri::Unknown` 从不拒绝，只有探测得到的 `No` 才拒绝。
 - Agent descriptor 的 `kind` 是 UI 和后端能力的共同开关：single 只激活一个 provider；multi 原生保留多个条目并维护 active 指针。
 - Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、`required_wire`、**角色清单**、sync/unsync/探测 dispatch）的 SSOT 是 `tool_sync::agents` 注册表；写盘、卸载、resync 与配置目标枚举都经它路由，新增 Agent 只加一行 spec 及其 writer。这条目标是**可证伪的**，不是口号：`a_synthetic_agent_syncs_through_the_registry_alone` 用一个 dispatch 从没见过的合成 Agent 走完整条同步路径；`agent_ids_are_spelled_out_only_in_the_registry_and_the_writers` 给注册表和 writer 之外的每个文件钉死 Agent id 字面量预算。声明面通过 `list_agent_descriptors` 命令投影为 `AgentDescriptorDto` 供前端消费（`crates/skillstar-app/src/models/agents.rs`）；前端 `agentRegistry.ts` 只保留没有后端对应物的展示项（图标、tagline、安装文档链接）。
-- 托管模型配置的所有者是 `skillstar-gateway`。`tool_sync` 对六个受管 Agent 的 sync 不再写入厂商 base URL 或 API key。Codex 的环回地址只在用户保存时由网关写入。文件型 Agent 的环回地址在保存时由 `apply_gateway` 写入。哪些 id 在册，以 gateway 的 `apply_gateway_` 测试为准。Claude Code 的 `settings.json` 在保存时把 `ANTHROPIC_BASE_URL` 指到网关根，不带 `/v1`；`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token。进程桥不读这份文件。Claude Desktop 在保存时写入原生 `claude_desktop_config.json` 和 Claude-3p 配置档，不写 `skillstar-binding.json`。OpenHanako 在跑时走它本地 API，没在跑时写 catalog 和 agent 配置；地址是网关的 `/v1`，provider 名是 `skillstar`。Alma 在跑时经 `http://localhost:23001` 写入名为 `skillstar` 的 openai provider，地址是网关的 `/v1`；没在跑时不写文件。Cindy 只生成导入链接，密钥是 `skillstar-cindy`，数据库只读。WSL 里正在运行的 Codex 以 `codex@wsl:<发行版>` 写入，路径是 `\\wsl.localhost\<发行版>`；mirrored 用 `127.0.0.1`，NAT 用发行版看到的 Windows 地址，不启动已停止的发行版。models.dev 的目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，下载走 `probe_http_client`。失败时沿用已有缓存。不写 provider 的 `model_catalog`，也不写 `cache/model_catalog/`。Providers 栏的一行显示名称和掩码后的凭据摘要，摘要来自后端。这一行没有明文密钥，也没有厂商 base URL。
+- 托管模型配置的所有者是 `skillstar-gateway`。`tool_sync` 对六个受管 Agent 的 sync 不再写入厂商 base URL 或 API key。Codex 的环回地址只在用户保存时由网关写入。文件型 Agent 的环回地址在保存时由 `apply_gateway` 写入。哪些 id 在册，以 gateway 的 `apply_gateway_` 测试为准。Claude Code 的 `settings.json` 在保存时把 `ANTHROPIC_BASE_URL` 指到网关根，不带 `/v1`；`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token。进程桥不读这份文件。Claude Desktop 在保存时写入原生 `claude_desktop_config.json` 和 Claude-3p 配置档，不写 `skillstar-binding.json`。OpenHanako 在跑时走它本地 API，没在跑时写 catalog 和 agent 配置；地址是网关的 `/v1`，provider 名是 `skillstar`。Alma 在跑时经 `http://localhost:23001` 写入名为 `skillstar` 的 openai provider，地址是网关的 `/v1`；没在跑时不写文件。Cindy 只生成导入链接，密钥是 `skillstar-cindy`，数据库只读。WSL 里正在运行的 Codex 以 `codex@wsl:<发行版>` 写入，路径是 `\\wsl.localhost\<发行版>`；mirrored 用 `127.0.0.1`，NAT 用发行版看到的 Windows 地址，不启动已停止的发行版。models.dev 的目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，下载走 `probe_http_client`。失败时沿用已有缓存。不写 provider 的 `model_catalog`，也不写 `cache/model_catalog/`。Providers 栏的一行显示名称和掩码后的凭据摘要，摘要来自后端。这一行没有明文密钥，也没有厂商 base URL。Gateway 面板的候选路由与最近调用同样经 app 侧投影读取（账本、账户簿余量、rest 表的派生视图），不打开 provider 存储，也不把密钥带进任何一张 chip。
 - 启动和保存 provider 都不改 Agent 文件。已有文件里的厂商 URL 保持不动，直到用户保存 Codex；这次保存只改这一档声明的键。`repair_agent_configs` 不再从启动路径调用。
 - unsync 仍删除 SkillStar 已经写过的托管键（Claude 托管 env、Desktop marker、`skillstar` / `skillstar_*` 块，以及指向它们的指针）。那是解除托管，不是把厂商密钥写回去。
 - 所有测试把 `SKILLSTAR_TOOL_SYNC_HOME`、`SKILLSTAR_DATA_DIR` 和 `HOME` 指到临时目录。
@@ -96,13 +96,13 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 官方账号经本机网关转发已经接线（evolution 切片 10）：CLI `gateway serve` 与桌面后台在启动时注入同一份上游环境，转发按候选逐个签名、发送、失败坐窗轮转，并把胜选候选的 catalog 与账户归因写进账本。监听地址、谁启动 serve、路由表、Codex 环回写入和 `agent_stash.json` 见 [运行架构](../../architecture.md#本机模型网关)。订阅侧 Claude 的进程桥也写在那里：本机 `claude`，access token 不进子进程。
 
-能签上游的是 Usage 里已经保存的账户，catalog 与请求头以 `skillstar-gateway` 的签名模块及其 `sign_` 测试为准。`anthropic` 不签 HTTP（候选直接跳过，不发上游请求）。Gemini CLI、Devin、WorkBuddy、Command Code 没有 Usage 凭证行，出站只用 provider 快照里的 API 密钥，不读厂商自己的认证文件。没有注入的账户快照时不请求配额，该候选保持未知。候选解析在 app 侧：provider 存储里被采纳模型命中的行成为候选（OpenAI 根端点去掉尾部 `/v1` 后作为上游根），原生登录种子没有端点、不成候选。
+能签上游的是 Usage 里已经保存的账户，catalog 与请求头以 `skillstar-gateway` 的签名模块及其 `sign_` 测试为准。同一张账本也供给「候选路由」对照：`get_route_comparison` 以注入的解析闭包取候选、以账本归因为口径聚合实测、以账户簿余量与进程内 rest 表标注状态，全部是派生视图。`anthropic` 不签 HTTP（候选直接跳过，不发上游请求）。Gemini CLI、Devin、WorkBuddy、Command Code 没有 Usage 凭证行，出站只用 provider 快照里的 API 密钥，不读厂商自己的认证文件。没有注入的账户快照时不请求配额，该候选保持未知。候选解析在 app 侧：provider 存储里被采纳模型命中的行成为候选（OpenAI 根端点去掉尾部 `/v1` 后作为上游根），原生登录种子没有端点、不成候选。
 
 ## Models 工作台
 
-Models 页左侧是 Agents 和 Providers 两张列表卡，右侧是一块 Gateway 面板；面板内配置列（监听方式 → 配置档 → 路由与亲和 → 分组成员）与最近调用表并排，窄屏时配置列收为单栏。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
+Models 页左侧是 Agents 和 Providers 两张列表卡，右侧是一块 Gateway 面板；面板内配置列（监听方式 → 配置档 → 路由与亲和 → 候选路由 → 分组成员）与最近调用表并排，窄屏时配置列收为单栏。从 Usage 页跳来的焦点（某个 Agent，或某个账号）会把候选路由区切到对应形态。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
 
-`get_models_board` 返回每一行的 id、name 和 `model_label`。`model_label` 是从该 Agent 配置文件读回的当前模型（gateway 的 `written_model_ref`，含 board 拼法到 writer 拼法的归一，如 `claude-code` 行读的是 `claude` 的 `settings.json`），读不到就是空串，页面显示「未选择模型」。Providers 行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏另读进程内最近 60 条调用，含时间、Agent、模型、状态和补全 token；没有用法时 token 为空。这一栏不显示配额，也不显示上游 URL。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
+`get_models_board` 返回每一行的 id、name 和 `model_label`。`model_label` 是从该 Agent 配置文件读回的当前模型（gateway 的 `written_model_ref`，含 board 拼法到 writer 拼法的归一，如 `claude-code` 行读的是 `claude` 的 `settings.json`），读不到就是空串，页面显示「未选择模型」。Providers 行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏读最近一页调用：持久用量账本是真相（含时间、Agent、模型、状态、补全/输入 token、会话与延迟），进程内 60 条的环只为账本缺的行补位。没有用量时 token 为空。这一栏不显示上游 URL。账号册那边的配额数字不进这张表；要对照配额与实测，看下面的候选路由。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
 Gateway 面板的配置列顶部是「接入端点」：OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两行，各带复制按钮，来源是 `get_loopback_origin` 命令。展示时去掉 `http://` 前缀，复制的是完整地址。读取失败时这一区不渲染。
 
@@ -110,7 +110,9 @@ Gateway 面板的配置列顶部是「接入端点」：OpenAI（`/v1/chat/compl
 
 Agent 名称旁边的小字是已经写进该 Agent 文件的环回地址，形如 `127.0.0.1:21847`；名称下面一行 chip 是 `model_label`。没有写下环回地址时这一格为空。页面不使用 provider 存储里的端点来填它。
 
-选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 面板的配置列里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。转发不再打固定的上游根：候选来自注入的解析（provider 行 + 分组展开），按余量 smart 排序，失败坐窗后轮转下一候选；但页面写下的 `routing` 与 `affinity` 值仍未参与转发顺序，`rotate` 计数也未被读取。
+选中的提供商，以及已经保存在 `model_gateway.json` 里的分组，在 Gateway 面板的配置列里改路由和亲和。控件只提交 smart、order、rotate、usage 与 auto、session、turn、off。保存写这份文件。smart 和 auto 可以不落字段，读回来仍是这两项。这次保存不改 `model_providers.json` 的版本和列。转发不再打固定的上游根：候选来自注入的解析（provider 行 + 分组展开），按余量 smart 排序（有余量的在前，未知的居中，用尽的殿后），失败坐窗后轮转下一候选；但页面写下的 `routing` 与 `affinity` 值仍未参与转发顺序，`rotate` 计数也未被读取。
+
+选中 Agent 后，配置列的「候选路由」区按 `get_route_comparison` 画出该 Agent 当前模型的全部候选：`route_smart` 顺序、每个候选的余量百分比与重置时间（同一 provider 窗口口径，跨 provider 不比大小）、休息中标记，以及同一账本口径下的实测（调用数、失败率、p50/p95 延迟、token 叠加柱、恒标「估算」的成本）。读取为空时候选区写「还没有候选在服务这个模型。」。点「对照并切换模型」回到选择器，这是 usage 卡 → 网关候选 → 选择器三角的最后一跳。Usage 配额卡的今日行点进来时，这一区换成「路由到该账号的 Agent」清单：逐个 Agent 的当前模型解析一遍候选，留下归因命中该 catalog 的行，点行打开该 Agent 的选择器。
 
 已保存的分组可以在 Gateway 面板里增减成员。新建、加入和移除都调用分组写入。成环或超过 8 层时文件不变，界面留下这次返回的原因。还没被保存过的自动分组不出现在这张列表里。
 

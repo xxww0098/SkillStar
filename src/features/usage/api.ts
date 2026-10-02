@@ -10,6 +10,7 @@ import type {
   Subscription,
   SubscriptionAlert,
   SwitchOutcome,
+  TodayConsumption,
   UpdateSubscriptionInput,
   UsageSummary,
 } from "./types";
@@ -37,6 +38,9 @@ export const usageApi = {
    *  Day boundary is UTC; costs are estimates under the current price table. */
   getConsumptionSummary: (window: ConsumptionPeriod) =>
     invoke<ConsumptionSummary>("get_consumption_summary", { window }),
+  /** Today's consumption with one chip per session (slice 13): the
+   *  session-dimension entry into the agent that ran it. Derived views. */
+  getTodayConsumption: () => invoke<TodayConsumption>("get_today_consumption"),
   startOAuthLogin: (catalogId: string, region?: string, subscriptionId?: string) =>
     invoke<OAuthStart>("start_oauth_login", { catalogId, region, subscriptionId }),
   awaitOAuthCompletion: (pendingId: string) => invoke<Subscription>("await_oauth_completion", { pendingId }),

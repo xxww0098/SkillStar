@@ -648,6 +648,14 @@ fn rest_until(id: &str) -> Option<SystemTime> {
         .map(|rest| rest.until)
 }
 
+/// The deadline an upstream candidate's current rest runs to, when it sits
+/// one. Read-only projection of the in-process rest table (a restart forgets
+/// every seat) for the route comparison view; the table itself stays private
+/// to this module.
+pub fn resting_until(id: &str) -> Option<SystemTime> {
+    rest_until(id)
+}
+
 fn note_rest(id: &str, rest: &Rest) {
     RESTS.lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

@@ -149,6 +149,40 @@ export const MODELS_HANDLERS: DevMockHandlers = {
       groups: savedGroups.map((group) => ({ id: group.id, ...remembered("group", group.id) })),
     };
   },
+  // Browser-dev sample for the candidate chips (slice 13): one roomy
+  // candidate with a renewal, one used-up resting one — route_smart order.
+  get_route_comparison: (args) => {
+    const modelRef = typeof args?.modelRef === "string" ? args.modelRef : "";
+    return {
+      model: modelRef,
+      candidates: [
+        {
+          catalog: "deepseek",
+          calls: 12,
+          error_rate: 0.08,
+          p50_latency_ms: 842,
+          p95_latency_ms: 2_310,
+          tokens: { input: 180_000, output: 36_000, cache_read: 9_000, cache_write: 0, reasoning: 0 },
+          cost_usd: 0.162,
+          resting: false,
+          percent: 41,
+          renews_at_ms: Date.now() + 3_600_000,
+        },
+        {
+          catalog: "zai",
+          calls: 6,
+          error_rate: 0,
+          p50_latency_ms: 1_120,
+          p95_latency_ms: 2_940,
+          tokens: { input: 60_000, output: 12_000, cache_read: 0, cache_write: 0, reasoning: 0 },
+          cost_usd: 0.0517,
+          resting: true,
+          percent: 99,
+          renews_at_ms: Date.now() + 43_200_000,
+        },
+      ],
+    };
+  },
   model_efforts: (args) => {
     const id = typeof args?.id === "string" ? args.id : "";
     const bare = id.replace(/:(none|minimal|low|medium|high|xhigh|max)$/, "");

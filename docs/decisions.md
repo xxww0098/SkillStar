@@ -736,6 +736,15 @@
 - 后果：获得——行形状有单一权威定义，读写方改道（04/05）后任何「保字段」缺陷只在一处修；手编键（redact_*、vision、classifier、rules、note）的存活由 flatten 结构性保证而非测试运气。承担——严格 `open()` 对「已知字段形状坏」的文件整体拒绝（旧写方按字段各自宽容），这类文件在旧路径本就无人能安全写入；`model_efforts`/`visible` 无写方，容器不提供 setter；schema 形状是阶梯上唯一不可逆决策，改动即二次迁移。
 - 证据：`crates/skillstar-gateway/src/store/doc.rs`、`crates/skillstar-gateway/tests/store_doc.rs`（round-trip/缺文件/坏文件/重复与无 id 行四钉）、[usage-models-tree spec](../specs/usage-models-tree/README.md)（D5/D7/D8）。
 
+## D-080：持久用量账本是网关度量面的唯一真相，环只补缺、价格只在读时
+
+- 日期：2026-10-02
+- 状态：accepted
+- 背景：网关的「转发完成了什么」需要一张可对账的度量面：Usage 页要按 catalog/account/会话归因的今日消耗，Models 工作台要同一模型各候选路由的实测对照（specs/usage-models-evolution 切片 03/04/13）。三个候选真相源——进程内环、各 Agent 自己的会话文件、Usage 的订阅配额——各缺一角：环重启即忘，会话文件不知道网关归因，配额是厂商口径的份额不是实测调用。跨源直接相加会把一次经代理的回合记两遍（环一条 + 文件一行）。
+- 决策：持久账本（数据根 ledger JSONL，逐行带 agent/session/模型/token/状态/延迟/catalog/account 归因，无密钥无上游 URL）是网关度量面的唯一真相；进程内 60 条环只为账本缺的行补位（append 失败的那几笔），读取面合并两边（`load_ledger_page`）。上层视图全是账本与会话文件的**派生投影**：`consumption_view` 以两阶段配对（request id 主键，回退 会话+token+时间±2s+成败一致、双侧唯一）吞掉账本已代表的文件行；`summarize`/`crossview` 在其上做汇总与会话 chip；`get_route_comparison` 以账本归因为口径聚合各候选的实测（calls/错误率/p50/p95/token/成本），余量与 rest 状态作为进程事实随行标注、绝不与实测混算。账本只存 token：价格在读时查当前价格表（`effective_price`），价格变更重述历史，UI 恒标「估算」；查不到的调用计入 `unpriced`（未知，不是免费）。芯片、chip、对照卡不新增任何真相字段。
+- 后果：获得——「配额（厂商口径）× 实测消耗（网关+会话口径）× 成本」三角的全部数字可从两个源文件复算，对账有落点（docs/features/usage 的口径矩阵）；重启、多开、环丢失都不改变度量面。承担——成本永远是与「当时的」价格表相关的估算而非账单；rest 状态进程内即忘（重启后对照卡的休息标记消失，属诚实降级）；配对窗口 ±2s 与零 token 成功调用不配对是继承 magpie 的取舍，极高频同会话并发可能留下双记行（可见、可对账，优于静默吞行）。
+- 证据：`crates/skillstar-gateway/src/ledger/`（append/load/query）、`crates/skillstar-app/src/usage/consumption/`（mod/summarize/crossview 与配对测试）、`crates/skillstar-app/src/usage/service/summary.rs`、`crates/skillstar-app/src/models/gateway/ledger.rs`，参照 magpie `internal/usage`（`gatewayMatches`/`bareModel`）。
+
 ## 新增记录格式
 
 

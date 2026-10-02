@@ -13,6 +13,8 @@ export const modelsKeys = {
   profileNames: () => [...modelsKeys.all, "profile-names"] as const,
   listenMode: () => [...modelsKeys.all, "listen-mode"] as const,
   loopbackOrigin: () => [...modelsKeys.all, "loopback-origin"] as const,
+  routeComparison: (modelRef: string) => [...modelsKeys.all, "route-comparison", modelRef] as const,
+  servingAgents: (catalogId: string) => [...modelsKeys.all, "serving-agents", catalogId] as const,
 };
 
 /**

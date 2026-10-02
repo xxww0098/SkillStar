@@ -19,11 +19,15 @@ import type { ConsumptionTotals } from "../../types";
 export function TodayConsumptionLine({
   today,
   className,
+  onNavigate,
 }: {
   /** `null` = the read landed but this provider has no gateway traffic
    *  today; `undefined` (prop omitted) hides the line entirely. */
   today: ConsumptionTotals | null;
   className?: string;
+  /** When set (and the line has traffic), the whole line becomes the quiet
+   *  button into the cross-view: which agents route to this provider. */
+  onNavigate?: () => void;
 }) {
   const { t } = useTranslation();
   const empty = today === null || today.calls === 0;
@@ -31,13 +35,9 @@ export function TodayConsumptionLine({
   // them twice.
   const tokens = today === null ? 0 : today.input + today.output + today.cache_read + today.cache_write;
   const cost = today === null ? 0 : today.cost_usd;
-
-  return (
-    <div
-      className={cn("flex items-baseline justify-between gap-2 border-t border-zinc-100/80 px-1 pt-1.5", className)}
-      data-testid="today-consumption-line"
-      title={t("usage.todayConsumptionHint")}
-    >
+  const interactive = onNavigate !== undefined && !empty;
+  const body = (
+    <>
       <span className="shrink-0 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase">
         {t("usage.todayConsumptionLabel")}
       </span>
@@ -53,6 +53,24 @@ export function TodayConsumptionLine({
           </span>
         </span>
       )}
+    </>
+  );
+  const shell = cn(
+    "flex items-baseline justify-between gap-2 border-t border-zinc-100/80 px-1 pt-1.5",
+    interactive && "w-full cursor-pointer text-left transition-colors hover:bg-muted/30",
+    className,
+  );
+
+  if (interactive) {
+    return (
+      <button type="button" onClick={onNavigate} className={shell} data-testid="today-consumption-line">
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={shell} data-testid="today-consumption-line" title={t("usage.todayConsumptionHint")}>
+      {body}
     </div>
   );
 }

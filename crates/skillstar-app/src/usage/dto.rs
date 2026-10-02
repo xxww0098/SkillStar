@@ -527,5 +527,119 @@ pub struct ConsumptionSummaryDto {
     pub by_catalog: Vec<ConsumptionGroupDto>,
 }
 
+// ── Cross-view projections (slice 13) ────────────────────────────────
+
+/// The five token counts every consumption-side projection spells the same
+/// way (the gateway vocabulary; reasoning is billed inside output).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "ConsumptionTokens.ts", rename = "ConsumptionTokens")]
+pub struct ConsumptionTokensDto {
+    #[ts(type = "number")]
+    pub input: u64,
+    #[ts(type = "number")]
+    pub output: u64,
+    #[ts(type = "number")]
+    pub cache_read: u64,
+    #[ts(type = "number")]
+    pub cache_write: u64,
+    #[ts(type = "number")]
+    pub reasoning: u64,
+}
+
+impl From<skillstar_gateway::TokenCounts> for ConsumptionTokensDto {
+    fn from(tokens: skillstar_gateway::TokenCounts) -> Self {
+        // Destructured, not `..`-spread: a count added upstream must land as
+        // a compile error here rather than silently vanish from the wire.
+        let skillstar_gateway::TokenCounts {
+            input,
+            output,
+            cache_read,
+            cache_write,
+            reasoning,
+        } = tokens;
+        Self { input, output, cache_read, cache_write, reasoning }
+    }
+}
+
+/// Today's consumption with per-session entry chips (spec slice 13): the
+/// page-wide「today」numbers plus the session-dimension drill-down into
+/// which agent ran which session. Every field is a derived view over the
+/// merged consumption view — no new truth.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "TodayConsumption.ts", rename = "TodayConsumption")]
+pub struct TodayConsumptionDto {
+    pub totals: ConsumptionTotalsDto,
+    pub by_agent: Vec<ConsumptionGroupDto>,
+    /// Newest activity first; sessions without an id stay out (they are
+    /// counted in `totals` but have no session to enter).
+    pub chips: Vec<SessionChipDto>,
+}
+
+/// One session's today line: the entry from the Usage page into the agent
+/// that ran it. `cost_usd` is the read-time estimate (`None` when no call
+/// of the session priced); `via_gateway` is `true` when any of its calls
+/// went through the gateway (full attribution).
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "SessionChip.ts", rename = "SessionChip")]
+pub struct SessionChipDto {
+    pub agent: String,
+    pub session: String,
+    /// Derived label: the session's most-called served model. `None` only
+    /// when no call named one.
+    pub title: Option<String>,
+    /// Unix milliseconds of the session's newest call today.
+    #[ts(type = "number")]
+    pub last_active: i64,
+    pub tokens: ConsumptionTokensDto,
+    pub cost_usd: Option<f64>,
+    pub via_gateway: bool,
+}
+
+/// One model's routable candidates compared over the same ledger scope
+/// (spec slice 13): the「配额 × 实测消耗 × 成本」triangle's measurable leg.
+/// Candidates arrive in `route_smart` order — room first, then unknown,
+/// then used up.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "RouteComparison.ts", rename = "RouteComparison")]
+pub struct RouteComparisonDto {
+    /// The model ref the comparison was asked for, spelled as asked.
+    pub model: String,
+    pub candidates: Vec<RouteCostDto>,
+}
+
+/// One candidate's measured route cost. `calls` / `error_rate` / latency /
+/// tokens / `cost_usd` all aggregate the same ledger records (one scope,
+/// priced at read time). `resting` and the allowance (`percent`,
+/// `renews_at_ms`) are process facts, not ledger aggregates: whether the
+/// gateway currently parks this candidate, and the tightest usage window
+/// the account book reported for it (percent is only comparable inside one
+/// provider's own windows).
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "RouteCost.ts", rename = "RouteCost")]
+pub struct RouteCostDto {
+    /// The ledger attribution label of this candidate (the usage catalog a
+    /// preset maps to, else the provider row id) — the same column the
+    /// ledger lines carry.
+    pub catalog: String,
+    #[ts(type = "number")]
+    pub calls: u64,
+    /// Errors per call, `0.0` when there are no calls.
+    pub error_rate: f64,
+    #[ts(type = "number")]
+    pub p50_latency_ms: u64,
+    #[ts(type = "number")]
+    pub p95_latency_ms: u64,
+    pub tokens: ConsumptionTokensDto,
+    /// Read-time estimate over the priced calls; `None` when nothing priced.
+    pub cost_usd: Option<f64>,
+    pub resting: bool,
+    /// Share of the candidate's own usage window already spent (0-100), when
+    /// the account book reported one.
+    pub percent: Option<f64>,
+    /// When that window renews, Unix milliseconds, when known.
+    #[ts(optional = nullable, type = "number")]
+    pub renews_at_ms: Option<i64>,
+}
+
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`
 // metadata generator can see them.

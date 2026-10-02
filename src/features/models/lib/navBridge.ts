@@ -1,6 +1,6 @@
-import type { ModelsDrawerRequest } from "../../../hooks/useNavigation";
+import type { ModelsDrawerRequest, ModelsFocusRequest } from "../../../hooks/useNavigation";
 
-export type { ModelsDrawerRequest };
+export type { ModelsDrawerRequest, ModelsFocusRequest };
 
 /**
  * Navigation fields the Models hub needs from App-level NavigationProvider.
@@ -13,4 +13,8 @@ export type ModelsNavBridge = {
   setSelectedProviderId: (id: string | null) => void;
   modelsDrawerRequest: ModelsDrawerRequest | null;
   clearModelsDrawerRequest: () => void;
+  /** Cross-view focus (Usage → Models triangle): one agent's model routes,
+   *  or the agents routing to one catalog. Null once the hub consumed it. */
+  modelsFocusRequest: ModelsFocusRequest | null;
+  clearModelsFocusRequest: () => void;
 };

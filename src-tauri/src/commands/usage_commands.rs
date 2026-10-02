@@ -9,7 +9,7 @@ use tauri::AppHandle;
 pub use skillstar_app::usage::{
     CatalogEntryDto, CliAccountStateDto, ConsumptionPeriodDto, ConsumptionSummaryDto,
     CreateSubscriptionInput, OAuthStartDto, SubscriptionAlertDto, SubscriptionDto, SwitchOutcomeDto,
-    UpdateSubscriptionInput, UsageSummary,
+    TodayConsumptionDto, UpdateSubscriptionInput, UsageSummary,
 };
 
 #[tauri::command]
@@ -112,6 +112,14 @@ pub fn get_usage_summary() -> Result<UsageSummary, AppError> {
 #[tauri::command]
 pub fn get_consumption_summary(window: ConsumptionPeriodDto) -> ConsumptionSummaryDto {
     usage::get_consumption_summary(window)
+}
+
+/// Today's consumption with one chip per session (slice 13): the Usage
+/// page's session-dimension entry into the agent that ran it. Same sources
+/// and UTC day boundary as `get_consumption_summary`; all derived views.
+#[tauri::command]
+pub fn get_today_consumption() -> TodayConsumptionDto {
+    usage::get_today_consumption()
 }
 
 #[tauri::command]

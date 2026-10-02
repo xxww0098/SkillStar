@@ -5,6 +5,7 @@ use skillstar_app::models::{
     LedgerQuery, ModelChoiceDto, PAGE_KEEP, RecentCallDto, load_ledger_page, load_model_choices,
     load_recent_calls, save_agent,
 };
+use skillstar_app::usage::RouteComparisonDto;
 use skillstar_core::infra::error::AppError;
 
 #[tauri::command]
@@ -39,6 +40,14 @@ pub fn get_ledger_page(
         limit: limit.unwrap_or(PAGE_KEEP),
         skip: offset.unwrap_or(0),
     })
+}
+
+/// One model ref's routable candidates compared over the same ledger scope
+/// (slice 13): `route_smart` order, allowance percent, resting mark, and
+/// the per-catalog measured cost — all derived views.
+#[tauri::command]
+pub fn get_route_comparison(model_ref: String) -> RouteComparisonDto {
+    skillstar_app::usage::get_route_comparison(&model_ref)
 }
 
 #[tauri::command]

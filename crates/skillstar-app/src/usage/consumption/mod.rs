@@ -65,6 +65,10 @@ pub use summarize::{
     period_floor_ms, summarize,
 };
 
+mod crossview;
+
+pub use crossview::{CandidateFact, route_comparison, today_from_rows, today_consumption};
+
 /// Catalog label for a call only the session file knows (magpie's
 /// `session-unknown`: no gateway attribution exists for bypass traffic).
 pub const SESSION_UNKNOWN_CATALOG: &str = "session-unknown";

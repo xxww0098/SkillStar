@@ -53,7 +53,7 @@ pub use codex::{ApplyError, CodexRoute, apply_agent, apply_agent_with_model, rel
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use cost::{ModelCost, effective_price};
 pub use effort::{apply_upstream_effort, model_efforts};
-pub use forward::{Upstream, UpstreamEnv};
+pub use forward::{Upstream, UpstreamEnv, resting_until};
 pub use ledger::{ErrorKind, Record, TokenCounts, append, key_fingerprint, load};
 pub use ledger::LedgerQuery;
 pub use outbound::{clear_outbound_log, outbound_log};

@@ -9,6 +9,7 @@ import { isDegradedCopyBinding } from "../lib/cliCustody";
 import { readHideAccountEmails, writeHideAccountEmails } from "../lib/accountPrivacy";
 import { FILTER_ALL, type CatalogFilter, type Subscription } from "../types";
 import { SubscriptionEditDialog } from "./SubscriptionEditDialog";
+import { TodaySessions } from "./TodaySessions";
 import { UsageActionBar } from "./UsageActionBar";
 import { UsageAlertBanner } from "./UsageAlertBanner";
 import { UsageGrid } from "./UsageGrid";
@@ -18,9 +19,19 @@ interface UsagePanelProps {
   filter: CatalogFilter;
   usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
   clearUsageCreateRequest: () => void;
+  /** Cross-view navigation (Usage → Models triangle): one agent's model routes. */
+  onFocusModelsAgent: (agentId: string) => void;
+  /** Cross-view navigation (Usage → Models triangle): agents routing to a catalog. */
+  onFocusModelsCatalog: (catalogId: string) => void;
 }
 
-export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest }: UsagePanelProps) {
+export function UsagePanel({
+  filter,
+  usageCreateRequest,
+  clearUsageCreateRequest,
+  onFocusModelsAgent,
+  onFocusModelsCatalog,
+}: UsagePanelProps) {
   const { t } = useTranslation();
   const data = useUsageDataContext();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -105,6 +116,11 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
         onReorder={(ids) => settled(data.reorder(ids))}
       />
       <UsageAlertBanner alerts={data.alerts} onDismiss={(id) => settled(data.dismissAlert(id))} />
+      {/* Session chips: the today row's per-session companion (slice 13's
+       *  card → session → agent entry). Hidden until the read lands. */}
+      {!data.loading && !data.error ? (
+        <TodaySessions today={data.todayConsumption} onFocusAgent={onFocusModelsAgent} />
+      ) : null}
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {data.loading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -123,6 +139,7 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
             cliAccounts={data.cliAccounts}
             hideAccountEmails={hideAccountEmails}
             filter={filter}
+            onOpenRoutes={onFocusModelsCatalog}
             onReorder={(ids) => settled(data.reorder(ids))}
             onBrowseProviders={() => toast.info(t("usage.pickProviderFromSidebar"))}
             onRefresh={data.refreshOneWithUi}

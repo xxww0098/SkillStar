@@ -12,7 +12,7 @@
 - Provider 私有刷新上下文放在 `Subscription.provider_state_encrypted`（AES-GCM 的版本化 JSON）。它不进 DTO，也不放宽 `platform_token_encrypted`（那仍是 DeepSeek 平台 token）。refresh 的窄 patch 会轮换这个字段。
 - 不支持的旧 auth-mode 行在 load migration 中清理；文档不保留已删除 catalog 清单。
 - 远程请求统一使用 `skillstar_core::infra::http_client::probe_http_client`。
-- 本机网关读取这里已经保存的凭证和余量来签上游，不在 Usage 里实现第二套登录。上游 401 时网关回调 `AccountBook::reauthorize`（app 侧 `usage/service/reauth.rs`）自愈一次：复用 refresh 的锁序（catalog serialization domain → CLI refresh lease → adopt → refresh → sync），重签重发恰好一次；自愈失败或无刷新腿（Manual/API-key/Cookie 行）则透传 401，候选进 `AUTH_REST`（30 分钟）。自愈由常驻 heal 线程的自建 runtime 执行，turn 最多等 5 秒，超时同样透传并退避。
+- 本机网关读取这里已经保存的凭证和余量来签上游，不在 Usage 里实现第二套登录。度量面也走同一条闭环：网关的持久账本（catalog/account 归因）与各 Agent 会话文件合并去重后，供给本页的今日行、今日汇总与会话 chip（见「今日消耗与汇总」与「会话 chip 与三角导航」）；每张配额卡的今日行可点击，跳到 Models 工作台看「这个账号正在服务哪些 Agent」。上游 401 时网关回调 `AccountBook::reauthorize`（app 侧 `usage/service/reauth.rs`）自愈一次：复用 refresh 的锁序（catalog serialization domain → CLI refresh lease → adopt → refresh → sync），重签重发恰好一次；自愈失败或无刷新腿（Manual/API-key/Cookie 行）则透传 401，候选进 `AUTH_REST`（30 分钟）。自愈由常驻 heal 线程的自建 runtime 执行，turn 最多等 5 秒，超时同样透传并退避。
 - 除非用户明确要求，不修改完成态的 `fetchers/oauth/cursor.rs`。
 
 ## OAuth 与刷新
@@ -124,6 +124,13 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - **口径标注「经网关 / 全部」**：`by_catalog`（卡片与支出摘要条的今日行来源）只含网关记账的调用——绕过网关的调用没有 catalog 归属，只进 `totals`（「全部」口径）。前端文案随行标注（`todayConsumptionCost` 带「经网关」，悬浮说明写明两口径）。
 - 计价与分组的模型 id 取「应答模型优先、请求模型回退」；`errors` = 有错误类别或 HTTP ≥400；`mean_latency_ms` 只对带时长的调用取均值。`series` 分桶自动切换：Today 按小时、Week/Month 按 UTC 天、All 按 ISO 周（周一 00:00 UTC 对齐）。
 - 前端：`UsageSpendSummary` 每订阅 chip 的「今日（估算）」列与卡片主体底部的 `TodayConsumptionLine`（等宽数字、成本恒标估算、空态「还没有记录」、无动画）。今日数据随页面 reload 与 refreshAll 的本地读刷新；读取在途时整行隐藏，读到的空数据才显示空态。
+
+## 会话 chip 与三角导航（slice 13）
+
+- 数据链：`get_today_consumption` → 同一份三源组装 → `usage::consumption::crossview` 纯函数（时钟与价格全注入）。DTO 见 `TodayConsumption`（`totals / by_agent / chips`，chip 含 `agent / session / title / last_active / tokens / cost_usd / via_gateway`，ts-rs 生成）。UTC 日界与读时计价与汇总同口径。
+- chip 是派生视图，不新增真相：按 `(agent, session)` 折叠今日调用，最新活动在前；无会话 id 的调用只进 `totals` 不出 chip；`via_gateway` 表示该会话有任一调用经网关（有归因）；`title` 取该会话调用最多的应答模型；`cost_usd` 为 `null` 表示没有一条可计价（未知，不是免费）。
+- 前端 `TodaySessions`：支出摘要条下方的安静横条，等宽数字、成本恒标「估算」、input 底/output 顶的纯 CSS 叠加柱（`StackedTokenBar`，静态无动画，`prefers-reduced-motion` 无需分支）、空态固定「还没有调用」。点 chip 进入三角：Usage 会话 → Models 里该 Agent 的候选路由与选择器。
+- 三角导航（usage 卡 → 网关候选 → 选择器）：配额卡今日行（有流量时可点）→ Models 工作台「路由到该账号的 Agent」清单 → 点行打开该 Agent 的模型选择器。导航经 `useNavigation` 的请求-nonce 事件（`focusModelsAgent` / `focusModelsCatalog`）传入 Models 桥，不在懒加载的 Models chunk 里直接读导航上下文。
 
 ## Usage 卡片与 active 状态
 

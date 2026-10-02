@@ -14,7 +14,8 @@
 //   - CatalogEntry, Subscription, SubscriptionAlert, SwitchOutcome, LinkMode,
 //     CliAccountState, UsageSummary, MonthlySpendEntry, ConsumptionPeriod,
 //     ConsumptionTotals, ConsumptionGroup, ConsumptionSeriesPoint,
-//     ConsumptionSummary, OAuthStart, CreateSubscriptionInput,
+//     ConsumptionSummary, ConsumptionTokens, TodayConsumption, SessionChip,
+//     RouteComparison, RouteCost, OAuthStart, CreateSubscriptionInput,
 //     UpdateSubscriptionInput are the DTO projections owned by
 //     `skillstar_app::usage::dto` (their Rust names carry a `Dto` suffix that
 //     `#[ts(rename)]` drops — on this side they are the only shapes).
@@ -50,6 +51,11 @@ export type { SubscriptionAlert } from "@/types/generated/SubscriptionAlert";
 export type { MonthlySpendEntry } from "@/types/generated/MonthlySpendEntry";
 export type { UsageSummary } from "@/types/generated/UsageSummary";
 export type { ConsumptionPeriod } from "@/types/generated/ConsumptionPeriod";
+export type { ConsumptionTokens } from "@/types/generated/ConsumptionTokens";
+export type { TodayConsumption } from "@/types/generated/TodayConsumption";
+export type { SessionChip } from "@/types/generated/SessionChip";
+export type { RouteComparison } from "@/types/generated/RouteComparison";
+export type { RouteCost } from "@/types/generated/RouteCost";
 export type { ConsumptionTotals } from "@/types/generated/ConsumptionTotals";
 export type { ConsumptionGroup } from "@/types/generated/ConsumptionGroup";
 export type { ConsumptionSeriesPoint } from "@/types/generated/ConsumptionSeriesPoint";

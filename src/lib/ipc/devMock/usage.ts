@@ -138,6 +138,59 @@ export const USAGE_HANDLERS: DevMockHandlers = {
       by_catalog: [group("deepseek", 12, 180_000, 0.162), group("zai", 6, 60_000, 0.0517)],
     };
   },
+  // Browser-dev sample for the session chips (slice 13): two sessions, one
+  // gateway-metered and priced, one bypass and unknown-priced.
+  get_today_consumption: () => ({
+    totals: {
+      calls: 18,
+      errors: 0,
+      input: 240_000,
+      output: 48_000,
+      cache_read: 0,
+      cache_write: 0,
+      reasoning: 0,
+      cost_usd: 0.2137,
+      unpriced: 0,
+      mean_latency_ms: 1_450,
+    },
+    by_agent: [
+      {
+        label: "claude-code",
+        totals: {
+          calls: 18,
+          errors: 0,
+          input: 240_000,
+          output: 48_000,
+          cache_read: 0,
+          cache_write: 0,
+          reasoning: 0,
+          cost_usd: 0.2137,
+          unpriced: 0,
+          mean_latency_ms: 1_450,
+        },
+      },
+    ],
+    chips: [
+      {
+        agent: "claude-code",
+        session: "s-demo-1",
+        title: "deepseek-chat",
+        last_active: Date.now() - 120_000,
+        tokens: { input: 180_000, output: 36_000, cache_read: 9_000, cache_write: 0, reasoning: 0 },
+        cost_usd: 0.162,
+        via_gateway: true,
+      },
+      {
+        agent: "opencode",
+        session: "s-demo-2",
+        title: "glm-4.7",
+        last_active: Date.now() - 900_000,
+        tokens: { input: 45_000, output: 9_000, cache_read: 6_000, cache_write: 0, reasoning: 0 },
+        cost_usd: null,
+        via_gateway: false,
+      },
+    ],
+  }),
   // Returns full Subscription list (backend shape). Optional catalogId is
   // accepted for API parity; mock still returns every sample row.
   refresh_all_subscriptions: (_args?: Record<string, unknown>) => USAGE_SUBSCRIPTIONS,

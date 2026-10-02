@@ -22,6 +22,8 @@ function navigation(): ModelsNavBridge {
     setSelectedProviderId: vi.fn(),
     modelsDrawerRequest: { kind: "create", nonce: 1 },
     clearModelsDrawerRequest: vi.fn(),
+    modelsFocusRequest: null,
+    clearModelsFocusRequest: vi.fn(),
   };
 }
 
@@ -42,6 +44,25 @@ beforeEach(() => {
     if (cmd === "get_profile_names") return [];
     if (cmd === "get_listen_mode") return "loopback";
     if (cmd === "get_loopback_origin") return "http://127.0.0.1:21847";
+    if (cmd === "get_route_comparison") {
+      return {
+        model: "",
+        candidates: [
+          {
+            catalog: "deepseek",
+            calls: 12,
+            error_rate: 0.08,
+            p50_latency_ms: 842,
+            p95_latency_ms: 2310,
+            tokens: { input: 180_000, output: 36_000, cache_read: 9_000, cache_write: 0, reasoning: 0 },
+            cost_usd: 0.162,
+            resting: false,
+            percent: 41,
+            renews_at_ms: 1_790_003_600_000,
+          },
+        ],
+      };
+    }
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -641,7 +662,7 @@ describe("ModelsHub", () => {
     });
     renderHub(<ModelsHub {...navigation()} />);
 
-    const group = await screen.findByRole("group", { name: "lan listen" });
+    const group = await screen.findByRole("group", { name: "监听方式" });
     expect(await within(group).findByRole("button", { name: "环回", pressed: true })).toBeTruthy();
     expect(within(group).getByRole("button", { name: "局域网", pressed: false })).toBeTruthy();
     expect(group.textContent).toContain("127.0.0.1");
@@ -653,6 +674,106 @@ describe("ModelsHub", () => {
     });
     expect(await within(group).findByRole("button", { name: "局域网", pressed: true })).toBeTruthy();
     expect(within(group).getByRole("button", { name: "环回", pressed: false })).toBeTruthy();
+  });
+
+  it("shows the focused agent's candidate routes in route_smart order (triangle: agent leg)", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_models_board") {
+        return {
+          ...BOARD,
+          agents: [{ id: "codex", name: "Codex", credential_summary: "", model_label: "deepseek/deepseek-chat" }],
+        };
+      }
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      if (cmd === "get_loopback_origin") return "http://127.0.0.1:21847";
+      if (cmd === "get_route_comparison") {
+        return {
+          model: "deepseek/deepseek-chat",
+          candidates: [
+            {
+              catalog: "relay",
+              calls: 2,
+              error_rate: 0,
+              p50_latency_ms: 400,
+              p95_latency_ms: 500,
+              tokens: { input: 200, output: 40, cache_read: 0, cache_write: 0, reasoning: 0 },
+              cost_usd: null,
+              resting: false,
+              percent: 10,
+              renews_at_ms: 1_790_003_600_000,
+            },
+            {
+              catalog: "deepseek",
+              calls: 4,
+              error_rate: 0.5,
+              p50_latency_ms: 100,
+              p95_latency_ms: 300,
+              tokens: { input: 400, output: 80, cache_read: 20, cache_write: 0, reasoning: 0 },
+              cost_usd: 0.0001861,
+              resting: true,
+              percent: 99,
+              renews_at_ms: 1_790_043_200_000,
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const nav = navigation();
+    renderHub(<ModelsHub {...nav} modelsFocusRequest={{ nonce: 1, kind: "agent", agentId: "codex" }} />);
+
+    const chips = await screen.findAllByTestId("route-candidate-chip");
+    expect(chips[0].textContent).toContain("relay");
+    expect(chips[1].textContent).toContain("休息中");
+    // The request was consumed on arrival.
+    expect(nav.clearModelsFocusRequest).toHaveBeenCalled();
+  });
+
+  it("answers which agents route to a catalog (triangle: quota card leg)", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_models_board") {
+        return {
+          ...BOARD,
+          agents: [{ id: "codex", name: "Codex", credential_summary: "", model_label: "deepseek/deepseek-chat" }],
+        };
+      }
+      if (cmd === "get_recent_calls") return [];
+      if (cmd === "get_routing_page") return { provider: null, groups: [] };
+      if (cmd === "get_saved_groups") return [];
+      if (cmd === "get_profile_names") return [];
+      if (cmd === "get_listen_mode") return "loopback";
+      if (cmd === "get_loopback_origin") return "http://127.0.0.1:21847";
+      if (cmd === "get_route_comparison") {
+        return {
+          model: String((args as Record<string, unknown> | undefined)?.modelRef ?? ""),
+          candidates: [
+            {
+              catalog: "deepseek",
+              calls: 3,
+              error_rate: 0,
+              p50_latency_ms: 900,
+              p95_latency_ms: 1800,
+              tokens: { input: 100, output: 20, cache_read: 0, cache_write: 0, reasoning: 0 },
+              cost_usd: null,
+              resting: false,
+              percent: 50,
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const nav = navigation();
+    renderHub(<ModelsHub {...nav} modelsFocusRequest={{ nonce: 1, kind: "catalog", catalogId: "deepseek" }} />);
+
+    const section = await screen.findByTestId("serving-agents");
+    expect(section.textContent).toContain("路由到 deepseek 的 Agent");
+    await waitFor(() => expect(within(section).getAllByText("Codex").length).toBeGreaterThan(0));
+    expect(nav.clearModelsFocusRequest).toHaveBeenCalled();
   });
 
   it("leaves the pressed listen mode when the backend refuses", async () => {
@@ -668,7 +789,7 @@ describe("ModelsHub", () => {
     });
     renderHub(<ModelsHub {...navigation()} />);
 
-    const group = await screen.findByRole("group", { name: "lan listen" });
+    const group = await screen.findByRole("group", { name: "监听方式" });
     expect(await within(group).findByRole("button", { name: "环回", pressed: true })).toBeTruthy();
     fireEvent.click(within(group).getByRole("button", { name: "局域网" }));
 

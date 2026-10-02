@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { tauriInvoke } from "@/lib/ipc";
 import { modelsKeys } from "../../api/keys";
 import { useProfileNames } from "../../api/profiles";
@@ -10,6 +11,7 @@ import { useProfileNames } from "../../api/profiles";
  * outside it.
  */
 export function ProfileNames() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data } = useProfileNames();
   const names = data ?? [];
@@ -26,7 +28,9 @@ export function ProfileNames() {
 
   return (
     <div className="space-y-2">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">配置档</div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {t("models.gateway.profilesTitle")}
+      </div>
       <ul aria-label="profiles" className="space-y-0.5">
         {names.map((item) => {
           const shown = plainText(item);
@@ -80,7 +84,7 @@ export function ProfileNames() {
       >
         <input
           aria-label="profile name"
-          placeholder="配置档名称"
+          placeholder={t("models.gateway.profileNamePlaceholder")}
           value={name}
           onChange={(event) => setName(event.target.value)}
           className="w-full rounded-lg border border-border/60 bg-background px-2 py-1 text-xs"

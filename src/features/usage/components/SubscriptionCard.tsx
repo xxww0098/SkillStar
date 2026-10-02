@@ -50,6 +50,9 @@ interface SubscriptionCardProps {
   refreshDisabled?: boolean;
   /** Drag handle pointer-down; passed through to dnd lib. */
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
+  /** When set, the card's today line becomes the cross-view entry: which
+   *  agents route to this provider (Usage → Models triangle, slice 13). */
+  onOpenGatewayRoutes?: () => void;
 }
 
 /**
@@ -71,6 +74,7 @@ export function SubscriptionCard({
   onSwitchToCli,
   refreshDisabled = false,
   onDragHandlePointerDown,
+  onOpenGatewayRoutes,
 }: SubscriptionCardProps) {
   const reduceMotion = useReducedMotion();
   const [instancesOpen, setInstancesOpen] = useState(false);
@@ -132,8 +136,11 @@ export function SubscriptionCard({
       <div className={usageCardSlotClassName.body}>
         <UsageCardBody subscription={sub} brandColorHex={brandColorHex} density="comfortable" surface="grid" />
         {/* One quiet today line closes the body; the quota meters above it
-         *  stay the card's hero (card rhythm rule). */}
-        {todayConsumption !== undefined && <TodayConsumptionLine today={todayConsumption} />}
+         *  stay the card's hero (card rhythm rule). With traffic it doubles
+         *  as the cross-view entry into the agents this provider serves. */}
+        {todayConsumption !== undefined && (
+          <TodayConsumptionLine today={todayConsumption} onNavigate={onOpenGatewayRoutes} />
+        )}
       </div>
 
       <UsageCardFooter

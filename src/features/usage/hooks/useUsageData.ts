@@ -11,6 +11,7 @@ import type {
   CreateSubscriptionInput,
   Subscription,
   SubscriptionAlert,
+  TodayConsumption,
   UpdateSubscriptionInput,
   UsageSummary,
 } from "../types";
@@ -75,6 +76,9 @@ export function useUsageData() {
   /** Today's read-time-priced consumption over the merged view; `null` until
    *  the first read lands (cards hide the today line rather than guessing). */
   const [todaySummary, setTodaySummary] = useState<ConsumptionSummary | null>(null);
+  /** Today's consumption with session chips (slice 13); `null` until the
+   *  first read lands (the chips strip stays hidden rather than guessing). */
+  const [todayConsumption, setTodayConsumption] = useState<TodayConsumption | null>(null);
   const [alerts, setAlerts] = useState<SubscriptionAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +142,12 @@ export function useUsageData() {
    *  failure keeps the last summary so the today line never flashes empty. */
   const refreshTodayConsumption = useCallback(async () => {
     try {
-      setTodaySummary(await usageApi.getConsumptionSummary("today"));
+      const [summary, today] = await Promise.all([
+        usageApi.getConsumptionSummary("today"),
+        usageApi.getTodayConsumption(),
+      ]);
+      setTodaySummary(summary);
+      setTodayConsumption(today);
     } catch (err) {
       if (import.meta.env.DEV) console.warn("[usage] today consumption fetch failed", err);
     }
@@ -175,8 +184,8 @@ export function useUsageData() {
               return null;
             },
           );
-          const todayP = usageApi.getConsumptionSummary("today").then(
-            (value) => value,
+          const todayP = Promise.all([usageApi.getConsumptionSummary("today"), usageApi.getTodayConsumption()]).then(
+            (pair) => pair,
             (err) => {
               if (import.meta.env.DEV) console.warn("[usage] today consumption fetch failed", err);
               return null;
@@ -201,7 +210,10 @@ export function useUsageData() {
             setSummary(pair[0]);
             setAlerts(pair[1]);
           }
-          if (today !== null) setTodaySummary(today);
+          if (today !== null) {
+            setTodaySummary(today[0]);
+            setTodayConsumption(today[1]);
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           setError(msg);
@@ -418,6 +430,7 @@ export function useUsageData() {
       cliAccounts,
       summary,
       todaySummary,
+      todayConsumption,
       todayByCatalog,
       alerts,
       loading,
@@ -442,6 +455,7 @@ export function useUsageData() {
       cliAccounts,
       summary,
       todaySummary,
+      todayConsumption,
       todayByCatalog,
       alerts,
       loading,

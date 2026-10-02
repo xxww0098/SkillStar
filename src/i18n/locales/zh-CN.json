@@ -1420,7 +1420,12 @@
     "autoImportScanProvider": "扫描并导入",
     "autoImportScanAll": "扫描并导入本机账号",
     "autoImportNoCredentials": "未在本地环境中探测到任何可用的 Codex / Antigravity / Cursor 凭证",
-    "advancedBillingOptions": "付费与高级选项"
+    "advancedBillingOptions": "付费与高级选项",
+    "todaySessionsTitle": "今日会话",
+    "todaySessionsEmpty": "还没有调用",
+    "todaySessionsCost": "估算 {{cost}}",
+    "todaySessionsTokens": "输入 {{input}} · 输出 {{output}} token",
+    "todaySessionsAgentEntry": "在 Models 里打开 {{agent}}"
   },
   "models": {
     "common": {
@@ -1767,7 +1772,39 @@
     },
     "gateway": {
       "endpoints": "接入端点",
-      "copyEndpoint": "复制 {{protocol}} 端点"
+      "copyEndpoint": "复制 {{protocol}} 端点",
+      "listenTitle": "监听方式",
+      "listenLoopback": "环回",
+      "listenLan": "局域网",
+      "listenNote": "写给 Agent 的地址仍是 127.0.0.1。",
+      "routingSection": "路由 · 亲和",
+      "routingPickProvider": "在左侧选择一个 Provider 后可调整路由。",
+      "routingLabel": "路由",
+      "affinityLabel": "亲和",
+      "groupsTitle": "分组",
+      "groupNamePlaceholder": "分组名",
+      "profilesTitle": "配置档",
+      "profileNamePlaceholder": "配置档名称",
+      "recentCalls": "最近调用",
+      "emptyAgents": "还没有探测到可配置的 Agent",
+      "emptyProviders": "还没有密钥",
+      "emptyCalls": "还没有调用"
+    },
+    "routes": {
+      "title": "候选路由",
+      "pickAgent": "先选择一个 Agent，再对照它的模型路由。",
+      "noCandidates": "没有候选在服务这个模型。",
+      "empty": "还没有调用",
+      "calls": "{{count}} 次调用",
+      "errorRate": "{{rate}} 失败",
+      "latency": "p50 {{p50}}ms · p95 {{p95}}ms",
+      "resting": "休息中",
+      "percentUsed": "已用 {{percent}}%",
+      "renewsAt": "{{time}} 重置",
+      "servingTitle": "路由到 {{catalog}} 的 Agent",
+      "servingEmpty": "还没有 Agent 的当前模型路由到这里。",
+      "viaGateway": "经网关",
+      "openPicker": "对照并切换模型"
     }
   },
   "ssh": {

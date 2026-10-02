@@ -19,6 +19,7 @@ import type { AgentDescriptorDto } from "../../../types/generated/AgentDescripto
 import type { ModelChoiceDto } from "../../../types/generated/ModelChoiceDto";
 import type { ModelsBoardDto } from "../../../types/generated/ModelsBoardDto";
 import type { RecentCallDto } from "../../../types/generated/RecentCallDto";
+import type { RouteComparison } from "../../../types/generated/RouteComparison";
 
 /** The two words a routing control is showing. */
 export interface RoutingControl {
@@ -90,6 +91,13 @@ export interface ModelsCommands {
   };
   /** Routing and affinity for the selected provider and saved groups. */
   get_routing_page: { args: { providerId: string }; result: RoutingPage };
+  /**
+   * One model ref's routable candidates in `route_smart` order: allowance
+   * percent and renews time (the account book's tightest window), the
+   * resting mark, and the per-catalog measured cost over the same ledger
+   * scope. All derived views; local reads only.
+   */
+  get_route_comparison: { args: { modelRef: string }; result: RouteComparison };
   /** Save one routing mode and one affinity. The words are the eight enums. */
   save_routing: {
     args: { owner: string; id: string; routing: string; affinity: string };

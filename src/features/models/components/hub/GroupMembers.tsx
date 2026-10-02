@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { tauriInvoke } from "@/lib/ipc";
 import type { SavedGroup } from "@/lib/ipc/commands/models";
 import { modelsKeys } from "../../api/keys";
@@ -14,6 +15,7 @@ const ACTION =
  * writer. A refusal is shown as the returned text, and the list stays.
  */
 export function GroupMembers() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data } = useSavedGroups();
   const groups = data ?? [];
@@ -38,7 +40,9 @@ export function GroupMembers() {
 
   return (
     <div className="space-y-2">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">分组</div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {t("models.gateway.groupsTitle")}
+      </div>
       {groups.map((group) => (
         <GroupRow
           key={group.id}
@@ -86,7 +90,7 @@ export function GroupMembers() {
         <div className="flex gap-1.5">
           <input
             aria-label="new group id"
-            placeholder="分组名"
+            placeholder={t("models.gateway.groupNamePlaceholder")}
             value={newId}
             onChange={(event) => setNewId(event.target.value)}
             className={`min-w-0 flex-1 ${FIELD}`}

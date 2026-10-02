@@ -42,6 +42,9 @@ interface UsageGridProps {
   onSetActive?: (id: string) => Promise<void>;
   /** Re-push the active account's credentials to its CLI config (retry). */
   onSwitchToCli?: (catalogId: string) => Promise<void>;
+  /** Cross-view entry (Usage → Models triangle): the card's today line
+   *  opens "which agents route to this catalog" in the Models hub. */
+  onOpenRoutes?: (catalogId: string) => void;
   onReorder: (orderedIds: string[]) => void;
   onAddNew: (catalogId?: string) => void;
   onBrowseProviders?: () => void;
@@ -56,6 +59,7 @@ type CardCallbacks = Pick<
   | "onReauth"
   | "onSetActive"
   | "onSwitchToCli"
+  | "onOpenRoutes"
   | "refreshDisabled"
   | "cliAccounts"
 >;
@@ -85,6 +89,7 @@ export function UsageGrid({
   onReauth,
   onSetActive,
   onSwitchToCli,
+  onOpenRoutes,
   onReorder,
   onAddNew,
   onBrowseProviders,
@@ -152,9 +157,21 @@ export function UsageGrid({
       onReauth,
       onSetActive,
       onSwitchToCli,
+      onOpenRoutes,
       cliAccounts,
     }),
-    [onRefresh, onResetQuota, refreshDisabled, onEdit, onDelete, onReauth, onSetActive, onSwitchToCli, cliAccounts],
+    [
+      onRefresh,
+      onResetQuota,
+      refreshDisabled,
+      onEdit,
+      onDelete,
+      onReauth,
+      onSetActive,
+      onSwitchToCli,
+      onOpenRoutes,
+      cliAccounts,
+    ],
   );
 
   const gridClass = "grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";
@@ -340,6 +357,7 @@ const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
   todayConsumption,
   hideAccountEmails,
   itemClassName,
+  onOpenRoutes,
   ...callbacks
 }: {
   subscription: Subscription;
@@ -354,6 +372,12 @@ const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
       dragControls.start(event);
     },
     [dragControls],
+  );
+  // The card only needs "somewhere to jump"; the catalog it carries is the
+  // argument this wrapper owns.
+  const onOpenGatewayRoutes = useMemo(
+    () => (onOpenRoutes ? () => onOpenRoutes(subscription.catalog_id) : undefined),
+    [onOpenRoutes, subscription.catalog_id],
   );
 
   return (
@@ -370,6 +394,7 @@ const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
         todayConsumption={todayConsumption}
         hideAccountEmails={hideAccountEmails}
         onDragHandlePointerDown={onDragHandlePointerDown}
+        onOpenGatewayRoutes={onOpenGatewayRoutes}
         {...callbacks}
       />
     </Reorder.Item>
