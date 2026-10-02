@@ -119,8 +119,8 @@ pub struct UnifiedCall {
     pub tokens: TokenCounts,
     /// Effort hint, session files only.
     pub effort: Option<String>,
-    /// Request id, session files only — until [`record_request_id`] stops
-    /// answering `None`.
+    /// Request id, session files only (see [`record_request_id`] for why
+    /// gateway rows answer `None`).
     pub request_id: Option<String>,
     /// Failure category (`None` = the call succeeded). Gateway records the
     /// ledger's snake_case kind; files their free-form word.
@@ -370,13 +370,15 @@ pub fn gateway_matches(records: &[Record], calls: &[SessionCall]) -> MatchMap {
 
 /// The gateway record's request id, when the ledger line carries one.
 ///
-/// **Degraded seam:** gateway `Record` has no `request_id` field yet
-/// (slice 03 landed without it; magpie's primary-key stage matches on it).
-/// Until the gateway lane adds the field and the extraction pipeline fills
-/// it, this answers `None` for every record: stage-1 matching consumes
-/// nothing and pairing degrades to the session/tokens/time stage — which
-/// carries all of today's correlation on its own. Swap this body for the
-/// field read and stage 1 activates with no other change.
+/// **Degraded by design:** session files record the vendor's request id
+/// (`req_…`), which only a protocol-passthrough gateway ever sees (magpie's
+/// does). This gateway translates protocols, so the upstream ids its
+/// responses carry (`chatcmpl-…`/`msg_…`) never equal the id an agent writes
+/// to its session file — stage 1 has nothing to join and pairing runs on
+/// the session/tokens/time stage alone. Stage 1 itself is implemented and
+/// tested through the [`RecordSide`] projection seam; if a future upstream
+/// echoes the agent's own request id, feed it here and stage 1 activates
+/// with no other change.
 fn record_request_id(_record: &Record) -> Option<&str> {
     None
 }
