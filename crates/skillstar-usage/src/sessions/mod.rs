@@ -28,6 +28,7 @@ mod claude;
 mod claude_discovery;
 mod codex;
 mod codex_discovery;
+mod omp;
 mod opencode;
 mod opencode_discovery;
 mod pi;
@@ -39,12 +40,15 @@ mod claude_tests;
 #[cfg(test)]
 mod codex_tests;
 #[cfg(test)]
+mod omp_tests;
+#[cfg(test)]
 mod opencode_tests;
 #[cfg(test)]
 mod pi_tests;
 
 use claude::{ClaudeCodeParser, ClaudeDesktopParser};
 use codex::CodexParser;
+use omp::OmpParser;
 use opencode::OpenCodeParser;
 use pi::PiParser;
 use std::collections::HashSet;
@@ -229,6 +233,7 @@ fn parsers() -> &'static [Box<dyn SessionParserMethods>] {
                 Box::new(CodexParser),
                 Box::new(OpenCodeParser),
                 Box::new(PiParser),
+                Box::new(OmpParser),
             ]
         });
     &PARSERS
