@@ -4,14 +4,10 @@
 //! port it already resolved. Any other value, or a missing file, stays on the
 //! address from the environment. Switching to `lan` also makes sure the
 //! install-level gateway key exists (see `access`). This module does not bind
-//! a socket and does not choose the URL written into agent files.
+//! a socket and does not choose the URL written into agent files. The file is
+//! opened only through [`ModelGatewayDoc`] (see `store::doc`).
 
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
-use serde_json::{Value, json};
-use skillstar_core::infra::fs_ops::atomic_write;
+use super::doc::ModelGatewayDoc;
 
 /// The gateway file could not be replaced, or the mode is not one of the two.
 /// `Key` means `lan` was asked for while the install-level gateway key could
@@ -33,15 +29,8 @@ impl std::fmt::Display for SaveListenError {
 
 /// `lan` when the file asks for every interface. A missing file is loopback.
 pub fn listen_is_lan() -> bool {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-        return false;
-    };
-    value
-        .get("listen")
-        .and_then(Value::as_str)
+    ModelGatewayDoc::open_lenient()
+        .listen()
         .is_some_and(|mode| mode.trim() == "lan")
 }
 
@@ -65,29 +54,12 @@ pub fn save_listen(mode: &str) -> Result<(), SaveListenError> {
     if lan {
         crate::access::gateway_key().map_err(|_| SaveListenError::Key)?;
     }
-    let path = gateway_path();
-    let mut doc = load_object(&path)?;
-    let object = doc.as_object_mut().ok_or(SaveListenError::Store)?;
-    if lan {
-        object.insert("listen".to_string(), json!("lan"));
-    } else {
-        object.remove("listen");
-    }
-    let bytes = serde_json::to_vec_pretty(&doc).map_err(|_| SaveListenError::Store)?;
-    atomic_write(&path, &bytes).map_err(|_| SaveListenError::Store)
+    let mut doc = ModelGatewayDoc::open().map_err(|_| SaveListenError::Store)?;
+    write_listen(&mut doc, lan);
+    doc.save().map_err(|_| SaveListenError::Store)
 }
 
-fn gateway_path() -> PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
-}
-
-fn load_object(path: &Path) -> Result<Value, SaveListenError> {
-    match fs::read(path) {
-        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-            Ok(value @ Value::Object(_)) => Ok(value),
-            _ => Err(SaveListenError::Store),
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(json!({})),
-        Err(_) => Err(SaveListenError::Store),
-    }
+/// The listen write lens: `lan` sets the key, loopback removes it.
+pub(crate) fn write_listen(doc: &mut ModelGatewayDoc, lan: bool) {
+    doc.set_listen(if lan { Some("lan".to_string()) } else { None });
 }

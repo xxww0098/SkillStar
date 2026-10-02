@@ -15,11 +15,10 @@
 //! key ("Smart/Auto means the key is gone") stays a lens-setter concern —
 //! `None`/empty is exactly key-absent, which is the handle a setter uses.
 //!
-//! Open points. Once the reader and writer reroutes land (spec slices
-//! 04-05), [`ModelGatewayDoc::open`] and [`ModelGatewayDoc::open_lenient`]
-//! are the only places that open `model_gateway.json`. Until then the
-//! legacy per-module `read_doc`/`load_object` paths still open it directly;
-//! they are migration backlog, not exemptions. The exemption list is empty
+//! Open points. The reader reroute (spec slice 04) and the first writer
+//! reroutes have landed; `names, routing, groups, profiles` still write through their legacy
+//! per-module paths. They are migration backlog, not exemptions. The
+//! exemption list is empty
 //! and stays empty: no module gets a permanent private door into this
 //! file, and no top-level key is exempt from round-trip preservation.
 //!
@@ -37,13 +36,10 @@ use serde_json::{Map, Value};
 use skillstar_core::infra::fs_ops::atomic_write;
 
 // Slice 03 shipped the container before any reader or writer was rerouted
-// onto it. Slice 04 rerouted the readers: the read accessors below and
-// `open_lenient` have live callers in this crate, so they carry no
-// `#[allow(dead_code)]` here — but the `#[path]`-mounted test target
-// (tests/store_doc.rs) compiles this file without those callers, so the
-// accessors keep their allow for that compilation alone. The writer side
-// (`save`, `DocStoreError::Write`) stays allowed until slice 05 lands its
-// callers.
+// onto it. Slice 04 rerouted the readers; slice 05 has rerouted the
+// listen writer(s), so `save` has a live caller. The remaining writers
+// (names, routing, groups, profiles) stay on their legacy `load_object` paths until
+// their reroute lands.
 
 /// Why a strict open or a save failed. The file is never modified on any
 /// of these paths.
@@ -169,10 +165,22 @@ impl ModelGatewayDoc {
     }
 
     /// Replace the whole file at once: pretty JSON, atomic write.
-    #[allow(dead_code)]
     pub(crate) fn save(&self) -> Result<(), DocStoreError> {
         let bytes = serde_json::to_vec_pretty(self).map_err(|_| DocStoreError::Write)?;
         atomic_write(&gateway_path(), &bytes).map_err(|_| DocStoreError::Write)
+    }
+
+    /// The `listen` field as stored; `None` is a missing or absent field.
+    #[allow(dead_code)]
+    pub(crate) fn listen(&self) -> Option<&str> {
+        self.listen.as_deref()
+    }
+
+    /// Set or clear `listen`; `None` is key-absent, which is how
+    /// `save_listen("loopback")` removes the field.
+    #[allow(dead_code)]
+    pub(crate) fn set_listen(&mut self, listen: Option<String>) {
+        self.listen = listen;
     }
 
     /// The `providers` rows, in file order. Row lookup is the caller's rule.
@@ -214,6 +222,7 @@ impl OwnerRow {
     pub(crate) fn extra(&self, key: &str) -> Option<&Value> {
         self.extra.get(key)
     }
+
 }
 
 fn gateway_path() -> PathBuf {
