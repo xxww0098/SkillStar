@@ -60,6 +60,7 @@ rsa = "0.10.0-rc.18"
 # config) succeeds.
 reqwest = { version = "0.13.3", default-features = false, features = ["system-proxy"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
+ruzstd = "0.9.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"

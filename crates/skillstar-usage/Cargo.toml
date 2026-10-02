@@ -40,8 +40,9 @@ uuid = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 tempfile = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
-rusqlite = { workspace = true }
+rusqlite.workspace = true
 ts-rs = { workspace = true, features = ["serde-compat"] }
+ruzstd = { workspace = true }
 
 [dev-dependencies]
 dirs.workspace = true
