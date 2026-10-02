@@ -29,6 +29,7 @@ pub mod oauth_clients;
 pub mod protobuf_oauth;
 pub mod refresh_guard;
 pub mod request;
+pub mod sessions;
 pub mod storage;
 pub mod subscription;
 pub mod token_import;

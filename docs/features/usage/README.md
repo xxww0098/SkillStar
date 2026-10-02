@@ -108,6 +108,14 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - Grok 卡片页脚的“重置额度”是账号级、显式确认的上游 mutation：先调用 `ConsumerUiSvc.GetRemainingResets` 选择最早过期的未过期 token，再调用 `ConsumerUiSvc.RedeemReset(token_id)` 消耗一次真实 reset credit；成功后等待账单投影收敛并重新读取该卡。卡片同时展示这份接口返回的未过期 token 数量（`剩余 N 次`）；没有可用 token 时显示 `剩余 0 次` 并禁用操作。它不等同于刷新，也不允许在供应商分组层面模糊选择账号；没有可用 token 时直接报错且不改本地额度。
 - CLI snapshot 用稳定 subject/user identity 归属；冲突 identity fail closed。token 必须满足 Grok CLI scopes，写入前后均验证，并保护外部进程并发改写。
 
+## Agent 会话解析（sessions）
+
+- `skillstar-usage::sessions` 只读解析受管 Agent 自己的会话文件（`crates/skillstar-usage/src/sessions/`），给度量面提供本地调用的 token 事实。**绝不写 Agent 目录**——写 Agent 目录的唯一路径仍是 `apply_gateway` 接管机制；解析器自身唯一落盘是 SkillStar 数据根下的增量索引 `data_root()/sessions/index.json`（`atomic_write`，删掉只是下次全量重读）。
+- 入口是 `read_calls(home, since)`：每次调用返回全量视图（消费方可幂等整体替换），`since` 为 epoch 毫秒下界。跨文件 message-id 去重按「最早文件优先」——resumed 会话拷贝旧文件内容，同一 message 只计一次。
+- 增量语义按文件 checkpoint（`FileCheckpoint`）：文件头指纹判「替换 vs 增长」、已读前缀采样哈希防原地改写，任一失配即从零重读；未增长且头一致时不再打开正文。解析器版本或索引版本变化同样全量重读，不做迁移。
+- 当前覆盖 claude 家族（`claude-code` / `claude-desktop`，同 projects JSONL 解析、不同 discovery）。Claude 的行级规则由测试钉死：同 message id 后块 usage 覆盖前块且 `from` 取首块位置、synthetic 行只有 API 错误才算调用、行内 `entrypoint` 前缀 `claude-desktop` 归因 Desktop（含 `claude-desktop-3p`）。其余 Agent 家族按 spec 切片 06 追加到同一注册表。
+- discovery 遵守 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱（沙箱优先于 `$CLAUDE_CONFIG_DIR`）；claude-desktop 的 Cowork 目录布局（`local-agent-mode-sessions/*/*/local_*/.claude`）作为接口保留，本机未验证到该布局实际存在，Desktop 归因目前主要靠行内 entrypoint。
+
 ## Usage 卡片与 active 状态
 
 - **「当前」badge 的真相是对账结果，不是 pin。** pin（`get_active_subscriptions`）记录用户点过哪张卡；`reconcile_cli_accounts` 返回每个 catalog 的三态，是 CLI 下次实际会读到的东西。两者冲突时文件赢。
