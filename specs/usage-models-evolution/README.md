@@ -1,6 +1,6 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：open（2/13）
+状态：open（3/13）
 更新：2026-10-02
 关联：`specs/usage-models-tree/`（open，gateway crate 树重构，本 spec 多个切片有 ⛩ 前置）
 
@@ -19,7 +19,7 @@
 ### 全局 TODO
 
 - [x] 01 gateway key 与 LAN 门禁（P0）— D-078、errors.md 已记；omp 仅 loopback 可用已接受
-- [ ] 02 account_book 改道 custody（P0）
+- [x] 02 account_book 改道 custody（P0）— `usage_switch::signing_material` 三态（Live/Row/Diverged），AccountSnapshot 契约不变；probe 纯读实测无副作用
 - [ ] 03 账本 append 热路径（P1）
 - [ ] 04 账本读取面与前端换源（P1，⛩tree-07）
 - [x] 05 sessions 地基 + claude 系 parser（P2）— claude-desktop 实测走 entrypoint 前缀归因（`claude-desktop-3p`），Cowork glob 本机未命中但保留

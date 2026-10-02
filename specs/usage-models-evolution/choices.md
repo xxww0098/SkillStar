@@ -68,3 +68,12 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **claude-desktop 归因走 entrypoint 前缀**：本机实测 Desktop 内嵌 Claude Code 会话在 `Claude-3p/title-gen/...` 且行内 `entrypoint: "claude-desktop-3p"`（magpie 未记录的后缀），归因用 `starts_with("claude-desktop")` 不依赖目录；Cowork glob 本机不命中但 discovery 保留。Desktop 主 Code 标签正文文件本机未找到——已知未知，不阻塞。
 - **未增长且头一致时不打开正文**（同长度替换被 head 校验拦下走全量）；正在写的半行不消费、offset 不推进。
 - **无 message id 的行不进 msgs map**（独立计数 calls_seen，不参与跨文件去重）；usage 缺失/全零的 assistant 行不算调用；`model_asked` 无 identity 信息时回落 `model_answered`（均 magpie 先例，测试钉死）。
+
+## S2 切片 02 落地时的实现裁决（banked 2026-10-02）
+
+- **facade 形状**：自由函数 `signing_material` + 子模块 `usage_switch/signing.rs`（主文件已 717 行，避免逼近 800）。
+- **无 CLI target 的 catalog（含 IDE adapter）直接行回退 + Row**：没有 live 文件可以 disagreement，行即唯一真相；同时避开 IDE adapter reconcile 的读修复副作用。
+- **Live/Diverged 材料从 authoritative root 提取**（target.external_root 优先、否则 live 文件），而非 snapshot——CLI rename 顶掉链接并轮换 token 的场景下 live 才是 CLI 真正在发的 token。authoritative_root 判定按 target trait 在 signing.rs 内重现（custody.rs 当时在别人文件集；后续如动 custody 可考虑上提）。
+- **probe 出错（AmbiguousOwner 等）降级行回退 + tracing warn**，与 reconcile_cli_accounts 的降级模式一致。
+- **Row 态 subscription_id=Some(行 id)**（账本归因用），仅 Diverged 恒 None；freshness/subscription_id 不进 AccountSnapshot——后续账本切片需要归因时读 signing_material 而非快照。
+- **Custody::probe 纯读实测**：无副作用（open 只拼路径、keychain 只读查询、read_dir 容缺失），无需走 reconcile 轻量子集；「不建 CLI 家目录」纪律已有测试钉死。
