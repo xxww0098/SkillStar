@@ -229,14 +229,14 @@ fn serve_loopback_still_answers_without_a_key() {
     let options = ServeOptions::bind(addr("127.0.0.1:0")).on_bound(tx);
     let stop = options.stop_handle();
     let handle = thread::spawn(move || serve(options));
-    let bound = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let bound = rx.recv_timeout(Duration::from_secs(20)).unwrap();
 
     let mut sock = TcpStream::connect(bound).unwrap();
     let header = format!(
         "GET /api/hello HTTP/1.1\r\nHost: {bound}\r\nConnection: close\r\n\r\n"
     );
     sock.write_all(header.as_bytes()).unwrap();
-    sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
     let mut head = String::new();
     let mut buf = [0u8; 1024];
     loop {

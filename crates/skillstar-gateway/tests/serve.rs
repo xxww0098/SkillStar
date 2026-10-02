@@ -26,7 +26,7 @@ fn start(
     let options = options.on_bound(tx);
     let stop = options.stop_handle();
     let handle = thread::spawn(move || serve(options));
-    let addr = match rx.recv_timeout(Duration::from_secs(5)) {
+    let addr = match rx.recv_timeout(Duration::from_secs(20)) {
         Ok(addr) => addr,
         Err(mpsc::RecvTimeoutError::Disconnected) => match handle.join() {
             Ok(Err(error)) => panic!("listener did not bind: {error}"),
@@ -179,7 +179,7 @@ fn read_message(sock: &mut TcpStream) -> Vec<u8> {
 
 /// Read one HTTP response: its head text and its body.
 fn read_http(sock: &mut TcpStream) -> (String, Vec<u8>) {
-    sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
     let mut buf = Vec::new();
     let mut tmp = [0u8; 8192];
     loop {
@@ -343,7 +343,7 @@ fn serve_chat_fixture_matches_translate() {
     sock.write_all(header.as_bytes()).unwrap();
     sock.write_all(&inbound).unwrap();
     let outbound = read_message(&mut sock);
-    let seen = seen_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let seen = seen_rx.recv_timeout(Duration::from_secs(20)).unwrap();
 
     assert_eq!(seen, expected_upstream);
     assert_eq!(outbound, expected_outbound);

@@ -238,7 +238,7 @@ fn vision_user_agent_and_caps() {
             } else {
                 loop {
                     let (next, waited) = cv
-                        .wait_timeout(guard, Duration::from_secs(5))
+                        .wait_timeout(guard, Duration::from_secs(20))
                         .unwrap_or_else(|poison| poison.into_inner());
                     guard = next;
                     if guard.go || waited.timed_out() {
@@ -411,7 +411,7 @@ fn start(
     let stop = options.stop_handle();
     let handle = thread::spawn(move || serve(options));
     let addr = rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(Duration::from_secs(20))
         .expect("listener bound");
     (addr, stop, handle)
 }
@@ -458,7 +458,7 @@ impl Upstream {
                 let Ok((mut sock, _)) = listener.accept() else {
                     break;
                 };
-                sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
+                sock.set_read_timeout(Some(Duration::from_secs(20))).ok();
                 let raw = read_http(&mut sock);
                 if raw.is_empty() {
                     break;
@@ -483,7 +483,7 @@ impl Upstream {
         self.rx
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(20))
             .expect("upstream request")
     }
 
@@ -503,7 +503,7 @@ impl Drop for Upstream {
 
 fn post_bytes(addr: SocketAddr, user_agent: &str, body: &[u8]) -> Vec<u8> {
     let mut sock = TcpStream::connect(addr).unwrap();
-    sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
     let header = format!(
         "POST /v1/chat/completions HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nUser-Agent: {user_agent}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()

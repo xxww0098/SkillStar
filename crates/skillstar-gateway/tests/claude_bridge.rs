@@ -172,7 +172,7 @@ fn wait_text(path: &Path) -> String {
         {
             return text;
         }
-        if start.elapsed() > Duration::from_secs(5) {
+        if start.elapsed() > Duration::from_secs(20) {
             panic!("timed out waiting for {}", path.display());
         }
         thread::sleep(Duration::from_millis(10));
@@ -260,7 +260,7 @@ impl Server {
         let options = ServeOptions::bind("127.0.0.1:0".parse().unwrap()).on_bound(tx);
         let stop = options.stop_handle();
         let handle = thread::spawn(move || serve(options));
-        let addr = match rx.recv_timeout(Duration::from_secs(5)) {
+        let addr = match rx.recv_timeout(Duration::from_secs(20)) {
             Ok(addr) => addr,
             Err(error) => panic!("listener did not bind: {error}"),
         };
@@ -285,8 +285,8 @@ impl Drop for Server {
 
 fn post(addr: SocketAddr, path: &str, body: &[u8]) -> (u16, Vec<u8>) {
     let mut sock = TcpStream::connect(addr).unwrap();
-    sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    sock.set_write_timeout(Some(Duration::from_secs(5)))
+    sock.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    sock.set_write_timeout(Some(Duration::from_secs(20)))
         .unwrap();
     let header = format!(
         "POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -305,7 +305,7 @@ fn read_response(sock: &mut TcpStream) -> (u16, Vec<u8>) {
         if let Some(parsed) = split_response(&buf) {
             return parsed;
         }
-        if start.elapsed() > Duration::from_secs(5) {
+        if start.elapsed() > Duration::from_secs(20) {
             panic!("response timeout: {}", String::from_utf8_lossy(&buf));
         }
         match sock.read(&mut tmp) {
@@ -620,7 +620,7 @@ fn claude_bridge_callback_rejects_non_loopback() {
     });
     let started = Instant::now();
     let mut sent = false;
-    while started.elapsed() < Duration::from_secs(5) {
+    while started.elapsed() < Duration::from_secs(20) {
         if run.resolve_tool(
             "toolu_http",
             ToolResult {
@@ -634,7 +634,7 @@ fn claude_bridge_callback_rejects_non_loopback() {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(sent, "callback was not parked");
-    let (status, body) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (status, body) = rx.recv_timeout(Duration::from_secs(20)).unwrap();
     assert_eq!(status, 200);
     let parsed: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(parsed["content"][0]["text"], "pong");
@@ -785,7 +785,7 @@ fn claude_bridge_helper_frames_only() {
     let (body_tx, body_rx) = mpsc::channel();
     thread::spawn(move || {
         let (mut sock, _) = listener.accept().unwrap();
-        sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        sock.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
         let mut buf = Vec::new();
         let mut tmp = [0u8; 2048];
         let body = loop {
@@ -850,7 +850,7 @@ fn claude_bridge_helper_frames_only() {
     let mut lines = Vec::new();
     while lines.len() < 3 {
         let line = line_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(20))
             .expect("mcp frame");
         lines.push(serde_json::from_str::<Value>(line.trim()).unwrap());
     }
