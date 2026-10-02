@@ -80,6 +80,11 @@ impl std::fmt::Debug for UpstreamEnv {
 static RESTS: LazyLock<Mutex<HashMap<String, Rest>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Rotate phase, shared by every turn: `route_mode` advances it and hands
+/// the next value back. Process state like the rests — a restart resets the
+/// phase, never the stored policy.
+static ROTATE_TURN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// One finished candidate send: the reply as it left the upstream, or why
 /// it never became one.
 enum Sent {
@@ -288,7 +293,11 @@ async fn routed(
             refined: None,
         };
     }
-    // Smart order: whoever has room first, then unknown, then used up. The
+    // Stored order: a group ref carries the group's routing mode — the knob
+    // the routing control persists — and rotate turns a process-lifetime
+    // counter (a restart resets the phase, not the policy). Every other
+    // resolve — one provider, or several providers picked by a bare model
+    // ref — has no single owner row to read, and stays smart. The
     // allowances come from the book — the same place signing reads them.
     let ranked: Vec<RouteCandidate<'_>> = candidates
         .iter()
@@ -297,7 +306,9 @@ async fn routed(
             allowance: env.book.allowance(&candidate.catalog_id),
         })
         .collect();
-    let order = crate::route::order::route_smart(&ranked);
+    let turn = ROTATE_TURN.load(std::sync::atomic::Ordering::Relaxed);
+    let (order, next_turn) = order_for(model, &ranked, turn);
+    ROTATE_TURN.store(next_turn, std::sync::atomic::Ordering::Relaxed);
     let ordered: Vec<&Upstream> = order
         .iter()
         .filter_map(|id| candidates.iter().find(|candidate| candidate.id == *id))
@@ -694,6 +705,23 @@ pub(crate) fn clear_rests() {
         .clear();
 }
 
+/// The stored order of one resolve. A `group/<id>` ref reads that group's
+/// routing row — the knob the routing control persists; every other resolve
+/// (a single provider, or the provider set a bare model ref picks) has no
+/// one owner row to read and stays smart. Only rotate advances `turn`.
+fn order_for(model: &str, ranked: &[RouteCandidate<'_>], turn: u64) -> (Vec<String>, u64) {
+    let mode = model
+        .strip_prefix("group/")
+        .map(|group| {
+            crate::store::routing::stored_route_mode(
+                crate::store::routing::RouteOwner::Group,
+                group,
+            )
+        })
+        .unwrap_or(crate::route::order::RouteMode::Smart);
+    crate::route::order::route_mode(mode, ranked, turn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -806,5 +834,82 @@ mod tests {
         clear_rest("seat-a");
         assert_eq!(rest_until("seat-a"), None);
         assert_eq!(failures_next("seat-a"), 1);
+    }
+
+    fn ranked<'a>(ids: &[&'a str]) -> Vec<RouteCandidate<'a>> {
+        ids.iter()
+            .map(|id| RouteCandidate {
+                id,
+                allowance: None,
+            })
+            .collect()
+    }
+
+    /// A resolve with no owner row — single provider or a bare model ref —
+    /// keeps the listed order and never advances the rotate phase.
+    #[test]
+    fn unowned_resolves_stay_smart() {
+        let (order, turn) = order_for("glm-4.7", &ranked(&["a", "b"]), 7);
+        assert_eq!(order, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(turn, 7);
+    }
+
+    /// A group ref reads the group's stored routing row: rotate spreads the
+    /// turns over the members and advances the shared phase.
+    #[test]
+    fn a_group_ref_follows_its_stored_routing_mode() {
+        let _lock = crate::TEST_PATH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "skillstar-forward-order-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        // `config_dir()` is `data_root()/config`, so one data root carries
+        // the store file.
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::write(
+            root.join("config").join("model_gateway.json"),
+            r#"{"groups":[{"id":"fast","routing":"rotate"}]}"#,
+        )
+        .unwrap();
+        let pairs = [("SKILLSTAR_DATA_DIR", Some(root.clone()))];
+        let saved: Vec<_> = pairs
+            .iter()
+            .map(|(key, value)| {
+                let previous = std::env::var_os(key);
+                // SAFETY: tests touching these vars hold the lock above.
+                unsafe {
+                    std::env::set_var(
+                        key,
+                        value.clone().unwrap().to_string_lossy().into_owned(),
+                    )
+                };
+                (*key, previous)
+            })
+            .collect();
+        let first = order_for("group/fast", &ranked(&["a", "b", "c"]), 0);
+        let second = order_for("group/fast", &ranked(&["a", "b", "c"]), first.1);
+        let bare = order_for("glm-4.7", &ranked(&["a", "b", "c"]), 0);
+        for (key, previous) in saved {
+            // SAFETY: see above.
+            unsafe {
+                match previous {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            };
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(first.0, vec!["a", "b", "c"]);
+        assert_eq!(first.1, 1, "rotate advances the shared phase");
+        assert_eq!(second.0, vec!["b", "c", "a"]);
+        // The bare ref never reads the row, even though the file has one.
+        assert_eq!(bare.0, vec!["a", "b", "c"]);
+        assert_eq!(bare.1, 0);
     }
 }
