@@ -102,9 +102,9 @@ bash scripts/internal/check_file_size.sh
 
 gateway 片：`cargo test -p skillstar-gateway --locked -- --skip serve_binds_default_port`；usage 片：`cargo test -p skillstar-usage --locked`；app/前端片：`cargo test -p skillstar-app --locked` + `bun run types:gen`（零 diff）+ `bun run lint && bun run build`。
 
-## 已知未知
+## 已知未知（立项时四问，全部已在落地中解决）
 
-- omp 是否能在 models.yml 携带任何鉴权字段（切片 01 检查点；D2 模型下 loopback omp 不受影响，仅 LAN 下不可用——写进文档即可）。
-- 网关线程跨 runtime 进 usage 异步锁（切片 11 探针测试；死锁则降级异步自愈，见该切片）。
-- ruzstd 解 codex .zst 的完整性（切片 06；不行换 zstd，再不行 .zst 首期不支持并记 docs/errors.md）。
-- claude-desktop 的 Code 标签会话实际路径（切片 05 验证；与 claude-code 不同则独立 discovery、同 parser）。
+- omp models.yml 无鉴权字段：按 D2 接受，LAN 下不可用已写进 models README 与 D-078。
+- 网关线程跨 runtime 进 usage 异步锁：切片 11 探针通过，未触发降级。
+- ruzstd 解 codex .zst：成功（golden .zst 实测），无降级。
+- claude-desktop 会话路径：Desktop 内嵌会话在 `Claude-3p/` 且行内 entrypoint 带 `claude-desktop-3p`，归因走 entrypoint 前缀。
