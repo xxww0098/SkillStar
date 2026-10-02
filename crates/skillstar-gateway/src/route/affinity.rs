@@ -250,7 +250,7 @@ fn why_of(
 fn spent(candidate: &RouteCandidate<'_>) -> bool {
     candidate
         .allowance
-        .is_some_and(|snapshot| snapshot.used >= USED_SHARE)
+        .is_some_and(|snapshot| snapshot.percent >= USED_SHARE)
 }
 
 fn age(now: SystemTime, at: SystemTime) -> Duration {

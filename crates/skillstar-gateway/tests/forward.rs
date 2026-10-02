@@ -202,7 +202,10 @@ impl AccountBook for FakeBook {
         self.allowances
             .iter()
             .find(|(catalog, _)| *catalog == catalog_id)
-            .map(|(_, used)| AllowanceSnapshot { used: *used })
+            .map(|(_, percent)| AllowanceSnapshot {
+                percent: *percent,
+                renews_at: None,
+            })
     }
 }
 
@@ -706,7 +709,10 @@ impl AccountBook for HealBook {
     }
 
     fn allowance(&self, _catalog_id: &str) -> Option<AllowanceSnapshot> {
-        Some(AllowanceSnapshot { used: 10.0 })
+        Some(AllowanceSnapshot {
+            percent: 10.0,
+            renews_at: None,
+        })
     }
 
     fn reauthorize(&self, _catalog_id: &str) -> Option<AccountSnapshot> {

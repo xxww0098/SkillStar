@@ -2,7 +2,8 @@ use std::io::Write;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use skillstar_gateway::{
-    HoldWriter, Rest, RestSeat, UpstreamFailure, next_candidate, rest_after, verify_held,
+    AllowanceSnapshot, HoldWriter, Rest, RestSeat, UpstreamFailure, next_candidate, rest_after,
+    verify_held,
 };
 
 fn now() -> SystemTime {
@@ -16,8 +17,7 @@ fn plain(status: u16, body: &str) -> Rest {
         headers: &[],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     })
 }
 
@@ -111,8 +111,10 @@ fn rest_quota_sits_out_for_15_minutes() {
         headers: &[],
         now: now(),
         failures: 1,
-        used: Some(97.0),
-        renews: Some(now() + Duration::from_secs(50 * 60 * 60)),
+        snapshot: Some(AllowanceSnapshot {
+            percent: 97.0,
+            renews_at: Some(now() + Duration::from_secs(50 * 60 * 60)),
+        }),
     });
     assert_eq!(early.by, "quota");
     assert_eq!(spell(&early), Duration::from_secs(quarter));
@@ -154,8 +156,7 @@ fn rest_rate_limit_is_not_quota() {
         headers: &[("X-Skillstar-Resets-At", "1700013500")],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     });
     assert_eq!(noted.why, "rate");
     assert_eq!(noted.by, "cooldown");
@@ -172,8 +173,7 @@ fn rest_retry_after_is_capped_at_one_hour() {
             headers,
             now: now(),
             failures: 1,
-            used: None,
-            renews: None,
+            snapshot: None,
         })
     };
     let long = rate(&[("Retry-After", "36000")]);
@@ -216,8 +216,7 @@ fn rest_retry_after_is_capped_at_one_hour() {
         headers: &[("Retry-After", "36000")],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     });
     assert_eq!(quota.why, "quota");
     assert_eq!(quota.by, "retry-after");
@@ -234,8 +233,7 @@ fn rest_quota_reset_is_capped_at_eight_days() {
         headers: &[],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     });
     assert_eq!(month.why, "quota");
     assert_eq!(month.by, "resets");
@@ -277,8 +275,7 @@ fn rest_quota_reset_is_capped_at_eight_days() {
         ],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     });
     assert_eq!(noted.why, "quota");
     assert_eq!(noted.by, "resets");
@@ -290,8 +287,7 @@ fn rest_quota_reset_is_capped_at_eight_days() {
         headers: &[("X-Magpie-Resets-At", "1700013500")],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     });
     assert_eq!(magpie.by, "quota");
     assert_eq!(spell(&magpie), Duration::from_secs(15 * 60));
@@ -302,8 +298,10 @@ fn rest_quota_reset_is_capped_at_eight_days() {
         headers: &[("Retry-After", "600")],
         now: now(),
         failures: 1,
-        used: Some(100.0),
-        renews: Some(now() + Duration::from_secs(50 * 60 * 60)),
+        snapshot: Some(AllowanceSnapshot {
+            percent: 100.0,
+            renews_at: Some(now() + Duration::from_secs(50 * 60 * 60)),
+        }),
     });
     assert_eq!(window.by, "window");
     assert_eq!(spell(&window), Duration::from_secs(50 * 60 * 60));
@@ -314,8 +312,10 @@ fn rest_quota_reset_is_capped_at_eight_days() {
         headers: &[],
         now: now(),
         failures: 1,
-        used: Some(98.0),
-        renews: Some(now() + Duration::from_secs(10 * day)),
+        snapshot: Some(AllowanceSnapshot {
+            percent: 98.0,
+            renews_at: Some(now() + Duration::from_secs(10 * day)),
+        }),
     });
     assert_eq!(long_window.by, "window");
     assert_eq!(spell(&long_window), Duration::from_secs(eight));
@@ -326,8 +326,10 @@ fn rest_quota_reset_is_capped_at_eight_days() {
         headers: &[("X-Skillstar-Resets-At", "1700003600")],
         now: now(),
         failures: 1,
-        used: Some(100.0),
-        renews: Some(now() + Duration::from_secs(50 * 60 * 60)),
+        snapshot: Some(AllowanceSnapshot {
+            percent: 100.0,
+            renews_at: Some(now() + Duration::from_secs(50 * 60 * 60)),
+        }),
     });
     assert_eq!(in_body.by, "resets");
     assert_eq!(spell(&in_body), Duration::from_secs(3 * 60 * 60 + 45 * 60));
@@ -343,8 +345,7 @@ fn rest_backoff_is_capped_at_ten_minutes() {
             headers: &[],
             now: now(),
             failures,
-            used: None,
-            renews: None,
+            snapshot: None,
         })
     };
     let first = failed(1);
@@ -370,8 +371,7 @@ fn rest_backoff_is_capped_at_ten_minutes() {
         headers: &[("X-Skillstar-Resets-At", "1700013500")],
         now: now(),
         failures: 1,
-        used: None,
-        renews: None,
+        snapshot: None,
     });
     assert_eq!(noted.by, "backoff");
     assert_eq!(spell(&noted), Duration::from_secs(60));
@@ -382,8 +382,10 @@ fn rest_backoff_is_capped_at_ten_minutes() {
         headers: &[],
         now: now(),
         failures: 1,
-        used: Some(100.0),
-        renews: Some(now() + Duration::from_secs(3 * 60 * 60)),
+        snapshot: Some(AllowanceSnapshot {
+            percent: 100.0,
+            renews_at: Some(now() + Duration::from_secs(3 * 60 * 60)),
+        }),
     });
     assert_eq!(window.why, "other");
     assert_eq!(window.by, "window");
@@ -397,8 +399,10 @@ fn rest_backoff_is_capped_at_ten_minutes() {
         headers: &[],
         now: now(),
         failures: 3,
-        used: Some(100.0),
-        renews: Some(now() + Duration::from_secs(nine_days)),
+        snapshot: Some(AllowanceSnapshot {
+            percent: 100.0,
+            renews_at: Some(now() + Duration::from_secs(nine_days)),
+        }),
     });
     assert_eq!(uncapped.by, "window");
     assert_eq!(uncapped.failures, 3);

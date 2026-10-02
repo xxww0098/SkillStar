@@ -354,8 +354,7 @@ async fn routed(
                     headers: &[],
                     now,
                     failures: failures_next(&id),
-                    used: signed.allowance.map(|allowance| allowance.used),
-                    renews: None,
+                    snapshot: signed.allowance,
                 };
                 let decided = rest::rest_after(&failure);
                 note_rest(&id, &decided);
@@ -390,8 +389,7 @@ async fn routed(
                     headers: &header_pairs,
                     now,
                     failures: failures_next(&id),
-                    used: signed.allowance.map(|allowance| allowance.used),
-                    renews: None,
+                    snapshot: signed.allowance,
                 };
                 let decided = rest::rest_after(&failure);
                 if !rotates(status) {
@@ -792,8 +790,7 @@ mod tests {
             headers: &[],
             now: SystemTime::UNIX_EPOCH,
             failures: 1,
-            used: None,
-            renews: None,
+            snapshot: None,
         });
         note_rest("seat-a", &rest);
         assert_eq!(rest_until("seat-a"), Some(rest.until));

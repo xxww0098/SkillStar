@@ -5,15 +5,24 @@
 //! Least-used reads the snapshot it was given and does not ask for quota.
 //! The stored `routing` field is read by `store::routing`.
 
+use std::time::SystemTime;
+
 /// Share of a window at which a candidate is treated as used up.
 pub const USED_SHARE: f64 = 98.0;
 
 /// What an injected usage snapshot says about one candidate.
 ///
-/// `used` is the percent of the window already spent, from 0 to 100.
+/// `percent` is the share of one provider's own window already spent,
+/// from 0 to 100. Vendors count their windows differently, so the number
+/// is only comparable between candidates of the same provider:
+/// `route_smart` and `usage_order` use it to rank within one resolve,
+/// never to compare across providers. `renews_at` is when that window
+/// resets, when the stored window knew; `None` means the reset time is
+/// unknown and only the percent can act.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AllowanceSnapshot {
-    pub used: f64,
+    pub percent: f64,
+    pub renews_at: Option<SystemTime>,
 }
 
 /// One routable candidate. `allowance` is `None` when no snapshot was injected.
@@ -31,7 +40,7 @@ pub fn route_smart(candidates: &[RouteCandidate<'_>]) -> Vec<String> {
     for candidate in candidates {
         let id = candidate.id.to_string();
         match candidate.allowance {
-            Some(snapshot) if snapshot.used >= USED_SHARE => spent.push(id),
+            Some(snapshot) if snapshot.percent >= USED_SHARE => spent.push(id),
             None => unknown.push(id),
             Some(_) => room.push(id),
         }
@@ -139,6 +148,6 @@ fn usage_order(candidates: &[RouteCandidate<'_>]) -> Vec<String> {
 fn share(candidate: &RouteCandidate<'_>) -> f64 {
     candidate
         .allowance
-        .map(|snapshot| snapshot.used)
+        .map(|snapshot| snapshot.percent)
         .unwrap_or(0.0)
 }

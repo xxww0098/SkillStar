@@ -135,7 +135,10 @@ fn affinity_resting_is_not_skipped() {
 fn affinity_spent_is_not_kept() {
     let now = epoch();
     let mut candidates = pair();
-    candidates[1].allowance = Some(AllowanceSnapshot { used: 98.0 });
+    candidates[1].allowance = Some(AllowanceSnapshot {
+        percent: 98.0,
+        renews_at: None,
+    });
     let stick = stick_at("b", now, 4096);
     let choice = affinity(
         AffinityMode::Session,
@@ -146,7 +149,10 @@ fn affinity_spent_is_not_kept() {
     );
     assert_eq!(choice.why, AffinityWhy::Spent);
     assert!(!choice.kept);
-    candidates[1].allowance = Some(AllowanceSnapshot { used: 97.0 });
+    candidates[1].allowance = Some(AllowanceSnapshot {
+        percent: 97.0,
+        renews_at: None,
+    });
     let choice = affinity(
         AffinityMode::Session,
         &candidates,
@@ -309,7 +315,10 @@ fn candidates_of(fixture: &Value) -> Vec<RouteCandidate<'_>> {
             allowance: candidate
                 .get("used")
                 .and_then(Value::as_f64)
-                .map(|used| AllowanceSnapshot { used }),
+                .map(|used| AllowanceSnapshot {
+                    percent: used,
+                    renews_at: None,
+                }),
         })
         .collect()
 }

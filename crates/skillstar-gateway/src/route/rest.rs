@@ -1,6 +1,6 @@
 //! How long a failed upstream sits out, and which seat the next plan may ask.
 //!
-//! The clock, the allowance share, and the in-a-row count are injected.
+//! The clock, the usage snapshot, and the in-a-row count are injected.
 //! Nothing here reads Usage or opens a socket. A rate-limit 429 is not the
 //! 15-minute quota rest. A quota reset named by the body or
 //! `X-Skillstar-Resets-At` can run past an hour, up to 8 days. `Retry-After`
@@ -13,7 +13,7 @@ use regex::bytes::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::order::USED_SHARE;
+use super::order::{AllowanceSnapshot, USED_SHARE};
 
 /// Out of credit, until someone tops it up.
 pub const CREDIT_REST: Duration = Duration::from_secs(30 * 60);
@@ -48,10 +48,10 @@ pub struct UpstreamFailure<'a> {
     /// Failures in a row, including this one. Zero counts as the first.
     /// A later success is the caller's to forget.
     pub failures: u32,
-    /// Injected allowance share, 0 to 100. The renew time applies only at
-    /// or above 98, and only when `renews` is still in the future.
-    pub used: Option<f64>,
-    pub renews: Option<SystemTime>,
+    /// The injected usage snapshot, when the account book had one. The
+    /// window rest applies only at or above 98 percent, and only when
+    /// `renews_at` is still in the future.
+    pub snapshot: Option<AllowanceSnapshot>,
 }
 
 /// Why a candidate sits out, and until when.
@@ -276,12 +276,11 @@ fn backoff(failures: u32) -> (Duration, u32) {
 }
 
 fn full_window(failure: &UpstreamFailure<'_>) -> Option<Duration> {
-    let used = failure.used?;
-    if !used.is_finite() || used < USED_SHARE {
+    let snapshot = failure.snapshot?;
+    if !snapshot.percent.is_finite() || snapshot.percent < USED_SHARE {
         return None;
     }
-    let renews = failure.renews?;
-    let spell = renews.duration_since(failure.now).ok()?;
+    let spell = snapshot.renews_at?.duration_since(failure.now).ok()?;
     if spell.is_zero() { None } else { Some(spell) }
 }
 

@@ -21,7 +21,10 @@ impl AccountBook for Fixed {
     }
 
     fn allowance(&self, _catalog_id: &str) -> Option<AllowanceSnapshot> {
-        self.used.map(|used| AllowanceSnapshot { used })
+        self.used.map(|used| AllowanceSnapshot {
+            percent: used,
+            renews_at: None,
+        })
     }
 }
 
@@ -65,7 +68,13 @@ fn sign_codex_sends_bearer_without_an_account_header() {
     let (signed, asked) = sign(&book, "codex", b"{}");
     assert_eq!(asked, 0);
     assert!(!signed.bridge);
-    assert_eq!(signed.allowance, Some(AllowanceSnapshot { used: 12.0 }));
+    assert_eq!(
+        signed.allowance,
+        Some(AllowanceSnapshot {
+            percent: 12.0,
+            renews_at: None
+        })
+    );
     assert_eq!(
         signed.headers,
         vec![
@@ -219,7 +228,10 @@ fn sign_missing_snapshot_makes_no_quota_request() {
         }
 
         fn allowance(&self, _catalog_id: &str) -> Option<AllowanceSnapshot> {
-            Some(AllowanceSnapshot { used: 100.0 })
+            Some(AllowanceSnapshot {
+                percent: 100.0,
+                renews_at: None,
+            })
         }
     }
 
@@ -230,7 +242,10 @@ fn sign_missing_snapshot_makes_no_quota_request() {
     let order = route_smart(&[
         RouteCandidate {
             id: "room",
-            allowance: Some(AllowanceSnapshot { used: 1.0 }),
+            allowance: Some(AllowanceSnapshot {
+                percent: 1.0,
+                renews_at: None,
+            }),
         },
         RouteCandidate {
             id: "codex",
@@ -238,7 +253,10 @@ fn sign_missing_snapshot_makes_no_quota_request() {
         },
         RouteCandidate {
             id: "spent",
-            allowance: Some(AllowanceSnapshot { used: 99.0 }),
+            allowance: Some(AllowanceSnapshot {
+                percent: 99.0,
+                renews_at: None,
+            }),
         },
     ]);
     assert_eq!(
@@ -263,7 +281,10 @@ fn sign_gemini_cli_has_no_account_path() {
         }
 
         fn allowance(&self, _catalog_id: &str) -> Option<AllowanceSnapshot> {
-            Some(AllowanceSnapshot { used: 3.0 })
+            Some(AllowanceSnapshot {
+                percent: 3.0,
+                renews_at: None,
+            })
         }
     }
 

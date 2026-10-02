@@ -252,7 +252,10 @@ fn candidates_of(fixture: &Value) -> Vec<RouteCandidate<'_>> {
             allowance: candidate
                 .get("used")
                 .and_then(Value::as_f64)
-                .map(|used| AllowanceSnapshot { used }),
+                .map(|used| AllowanceSnapshot {
+                    percent: used,
+                    renews_at: None,
+                }),
         })
         .collect()
 }
