@@ -8,12 +8,11 @@
 //! verdict. This function does not ask a classifier. No match, or a rule
 //! that names nobody on the list, leaves the expanded order alone.
 
-use std::fs;
-
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::PLACEHOLDER_BEARER;
+use crate::store::doc::ModelGatewayDoc;
 
 const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -86,25 +85,12 @@ pub fn order_with_rules(
 /// Rules saved on `group/<id>` or a bare id. A missing file is an empty list.
 /// This does not create or rewrite the file.
 pub fn stored_rules(group_id: &str) -> Vec<GroupRule> {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return Vec::new();
-    };
-    let Ok(doc) = serde_json::from_slice::<Value>(&bytes) else {
-        return Vec::new();
-    };
-    let Some(groups) = doc.get("groups").and_then(Value::as_array) else {
-        return Vec::new();
-    };
+    let doc = ModelGatewayDoc::open_lenient();
     let id = bare_id(group_id);
-    groups
+    doc.groups()
         .iter()
-        .find(|group| {
-            group
-                .get("id")
-                .and_then(Value::as_str)
-                .is_some_and(|stored| stored.trim() == id)
-        })
-        .map(rules_in)
+        .find(|group| group.id.trim() == id)
+        .map(|group| rules_in(group.extra("rules")))
         .unwrap_or_default()
 }
 
@@ -160,9 +146,10 @@ fn agent_ok(agents: &[String], agent: &str) -> bool {
     agents.is_empty() || agents.iter().any(|name| name.eq_ignore_ascii_case(agent))
 }
 
-fn rules_in(group: &Value) -> Vec<GroupRule> {
-    group
-        .get("rules")
+/// The row-level `rules` value, shaped into rules. Entries that do not
+/// deserialize are dropped, as they always were.
+fn rules_in(rules: Option<&Value>) -> Vec<GroupRule> {
+    rules
         .and_then(Value::as_array)
         .map(|rules| {
             rules
@@ -219,8 +206,4 @@ fn bare_id(group_id: &str) -> &str {
         .strip_prefix(crate::GROUP_PREFIX)
         .unwrap_or(group_id.trim())
         .trim()
-}
-
-fn gateway_path() -> std::path::PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
 }

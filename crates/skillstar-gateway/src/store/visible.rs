@@ -8,8 +8,7 @@
 //! read this map. A display name is not a name. The projections built on
 //! this map live in `crate::visible`.
 
-use serde_json::Value;
-
+use super::doc::ModelGatewayDoc;
 use crate::GROUP_PREFIX;
 
 /// Names that narrow `agent`. `None` means the agent sees every row.
@@ -18,17 +17,14 @@ pub fn visible_names(agent: &str) -> Option<Vec<String>> {
     if agent.is_empty() {
         return None;
     }
-    let doc = read_doc();
-    let map = doc.get("visible")?.as_object()?;
-    let value = map
+    let doc = ModelGatewayDoc::open_lenient();
+    let (_, stored) = doc
+        .visible()
         .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(agent))
-        .map(|(_, value)| value)?;
-    let list = value.as_array()?;
-    let names: Vec<String> = list
+        .find(|(key, _)| key.eq_ignore_ascii_case(agent))?;
+    let names: Vec<String> = stored
         .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
+        .map(|name| name.trim())
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .collect();
@@ -37,13 +33,15 @@ pub fn visible_names(agent: &str) -> Option<Vec<String>> {
 
 /// The `family` field on one provider or group row, trimmed. Empty is `None`.
 pub(crate) fn family_of(list: &str, id: &str) -> Option<String> {
-    read_doc()
-        .get(list)?
-        .as_array()?
-        .iter()
-        .find(|row| row.get("id").and_then(Value::as_str) == Some(id))
-        .and_then(|row| row.get("family"))
-        .and_then(Value::as_str)
+    let doc = ModelGatewayDoc::open_lenient();
+    let rows = match list {
+        "providers" => doc.providers(),
+        "groups" => doc.groups(),
+        _ => return None,
+    };
+    rows.iter()
+        .find(|row| row.id == id)
+        .and_then(|row| row.family.as_deref())
         .map(str::trim)
         .filter(|family| !family.is_empty())
         .map(str::to_string)
@@ -59,15 +57,4 @@ pub(crate) fn catalog_ids() -> Vec<String> {
         ids.push(format!("{GROUP_PREFIX}{id}"));
     }
     ids
-}
-
-fn read_doc() -> Value {
-    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
-    let Ok(bytes) = std::fs::read(path) else {
-        return serde_json::json!({});
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(value @ Value::Object(_)) => value,
-        _ => serde_json::json!({}),
-    }
 }

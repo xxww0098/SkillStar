@@ -9,7 +9,7 @@
 mod json;
 mod rules;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -17,7 +17,9 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use regex::{Captures, Regex};
-use serde_json::{Map, Value};
+use serde_json::Value;
+
+use crate::store::doc::ModelGatewayDoc;
 
 const MAX_VALUES: usize = 200_000;
 const MAX_REGEX: usize = 300;
@@ -98,34 +100,19 @@ pub fn unmask_response(body: &[u8]) -> Vec<u8> {
 }
 
 fn settings() -> Opts {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return Opts::off();
-    };
-    let Ok(Value::Object(map)) = serde_json::from_slice::<Value>(&bytes) else {
-        return Opts::off();
-    };
+    let doc = ModelGatewayDoc::open_lenient();
+    let rest = doc.rest();
     Opts {
-        secrets: flag(&map, "redact"),
-        personal: flag(&map, "redact_personal"),
-        words_on: flag(&map, "redact_words"),
-        rules_on: flag(&map, "redact_rules"),
-        words: strings(&map, "redact_word_list"),
-        rules: user_rules(&map, "redact_rule_list"),
+        secrets: flag(rest, "redact"),
+        personal: flag(rest, "redact_personal"),
+        words_on: flag(rest, "redact_words"),
+        rules_on: flag(rest, "redact_rules"),
+        words: strings(rest, "redact_word_list"),
+        rules: user_rules(rest, "redact_rule_list"),
     }
 }
 
 impl Opts {
-    fn off() -> Self {
-        Self {
-            secrets: false,
-            personal: false,
-            words_on: false,
-            rules_on: false,
-            words: Vec::new(),
-            rules: Vec::new(),
-        }
-    }
-
     fn active(&self) -> bool {
         self.secrets
             || self.personal
@@ -134,11 +121,11 @@ impl Opts {
     }
 }
 
-fn flag(map: &Map<String, Value>, key: &str) -> bool {
+fn flag(map: &BTreeMap<String, Value>, key: &str) -> bool {
     map.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn strings(map: &Map<String, Value>, key: &str) -> Vec<String> {
+fn strings(map: &BTreeMap<String, Value>, key: &str) -> Vec<String> {
     map.get(key)
         .and_then(Value::as_array)
         .map(|items| {
@@ -150,7 +137,7 @@ fn strings(map: &Map<String, Value>, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn user_rules(map: &Map<String, Value>, key: &str) -> Vec<UserRule> {
+fn user_rules(map: &BTreeMap<String, Value>, key: &str) -> Vec<UserRule> {
     let Some(items) = map.get(key).and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -714,10 +701,6 @@ fn lock() -> std::sync::MutexGuard<'static, Memory> {
     MEMORY
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn gateway_path() -> PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
 }
 
 fn key_path() -> PathBuf {

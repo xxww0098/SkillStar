@@ -10,6 +10,8 @@
 
 use serde_json::{Value, json};
 
+use crate::store::doc::ModelGatewayDoc;
+
 const KNOWN: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RANK: &[&str] = &[
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
@@ -130,31 +132,15 @@ fn kept_in_catalog(model: &str, catalog: &[String]) -> Option<Vec<String>> {
 }
 
 fn stored_names(model: &str) -> Option<Vec<String>> {
-    let doc = read_gateway();
-    let list = doc
-        .get("model_efforts")
-        .and_then(Value::as_object)
-        .and_then(|map| map.get(model))
-        .and_then(Value::as_array)?;
+    let doc = ModelGatewayDoc::open_lenient();
+    let list = doc.model_efforts().get(model)?;
     Some(
         list.iter()
-            .filter_map(Value::as_str)
-            .map(str::trim)
+            .map(|name| name.trim())
             .filter(|name| !name.is_empty())
             .map(str::to_string)
             .collect(),
     )
-}
-
-fn read_gateway() -> Value {
-    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
-    let Ok(bytes) = std::fs::read(path) else {
-        return json!({});
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(value @ Value::Object(_)) => value,
-        _ => json!({}),
-    }
 }
 
 fn fit_effort(want: &str, levels: &[String]) -> String {

@@ -8,10 +8,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use skillstar_core::infra::fs_ops::atomic_write;
 
+use super::doc::ModelGatewayDoc;
 use super::groups::GROUP_PREFIX;
 use crate::route::affinity::AffinityMode;
 use crate::route::order::RouteMode;
@@ -34,7 +34,7 @@ pub fn routing_state(
     id: &str,
 ) -> Result<(RouteMode, AffinityMode), SaveRoutingError> {
     let id = normalize(owner, id)?;
-    Ok((stored_route_mode(owner, &id), affinity_of(owner, &id)))
+    Ok(read_routing(&ModelGatewayDoc::open_lenient(), owner, &id))
 }
 
 /// Write `mode` and `affinity` onto this provider or group.
@@ -154,25 +154,6 @@ fn apply(object: &mut Map<String, Value>, mode: RouteMode, affinity: AffinityMod
     }
 }
 
-fn affinity_of(owner: RouteOwner, id: &str) -> AffinityMode {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return AffinityMode::Auto;
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-        return AffinityMode::Auto;
-    };
-    let Some(list) = value.get(list_key(owner)).and_then(Value::as_array) else {
-        return AffinityMode::Auto;
-    };
-    let Some(row) = list
-        .iter()
-        .find(|row| row.get("id").and_then(Value::as_str) == Some(id))
-    else {
-        return AffinityMode::Auto;
-    };
-    AffinityMode::parse(row.get("affinity").and_then(Value::as_str).unwrap_or(""))
-}
-
 /// Whose `routing` field to read in `model_gateway.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RouteOwner {
@@ -186,34 +167,30 @@ pub enum RouteOwner {
 /// unknown string, or a file that is not JSON is smart. This does not
 /// create or rewrite the file.
 pub fn stored_route_mode(owner: RouteOwner, id: &str) -> RouteMode {
-    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
-    let Ok(bytes) = std::fs::read(&path) else {
-        return RouteMode::Smart;
-    };
-    let Ok(file) = serde_json::from_slice::<GatewayFile>(&bytes) else {
-        return RouteMode::Smart;
-    };
+    read_routing(&ModelGatewayDoc::open_lenient(), owner, id).0
+}
+
+/// Mode and affinity stored on one row of an already-open document.
+///
+/// The row lookup is first-match-by-id over the owner's list; a missing
+/// row, a missing field, or an unknown string reads as the default
+/// (smart/auto), which is also what a key-absent row means.
+fn read_routing(
+    doc: &ModelGatewayDoc,
+    owner: RouteOwner,
+    id: &str,
+) -> (RouteMode, AffinityMode) {
     let rows = match owner {
-        RouteOwner::Provider => &file.providers,
-        RouteOwner::Group => &file.groups,
+        RouteOwner::Provider => doc.providers(),
+        RouteOwner::Group => doc.groups(),
     };
-    rows.iter()
-        .find(|row| row.id == id)
-        .map(|row| RouteMode::parse(row.routing.as_deref().unwrap_or("")))
-        .unwrap_or(RouteMode::Smart)
-}
-
-#[derive(Deserialize)]
-struct GatewayFile {
-    #[serde(default)]
-    providers: Vec<GatewayRow>,
-    #[serde(default)]
-    groups: Vec<GatewayRow>,
-}
-
-#[derive(Deserialize)]
-struct GatewayRow {
-    #[serde(default)]
-    id: String,
-    routing: Option<String>,
+    let row = rows.iter().find(|row| row.id == id);
+    (
+        row.and_then(|row| row.routing.as_deref())
+            .map(RouteMode::parse)
+            .unwrap_or(RouteMode::Smart),
+        row.and_then(|row| row.affinity.as_deref())
+            .map(AffinityMode::parse)
+            .unwrap_or(AffinityMode::Auto),
+    )
 }

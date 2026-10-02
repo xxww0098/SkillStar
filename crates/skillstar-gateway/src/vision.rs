@@ -6,13 +6,14 @@
 //! request is not described again.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs;
 use std::hash::{Hash, Hasher};
 use std::sync::{Condvar, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
+
+use crate::store::doc::ModelGatewayDoc;
 
 /// System prompt sent with every description. No trailing newline.
 pub const VISION_SYSTEM: &str = "You describe images for an AI model that cannot see them. It will answer the user from your description alone, so leave nothing out that it may need.\n- Transcribe all text exactly as written, keeping its layout: code, terminal output, error messages, logs, UI labels, menus, file names, numbers.\n- For a screenshot of an app or page: which app or page it is, its layout, and the state of what is on it (selected, disabled, checked, highlighted, error states).\n- For a chart or table: its kind, axes and labels, and every value you can read.\n- For a diagram: its elements and how they are connected.\n- For a photo or drawing: what it shows, with the details that matter.\nDescribe only what is there. Don't guess at what can't be read, say it can't be read. Don't answer questions or give advice. No preamble.";
@@ -484,19 +485,14 @@ fn names_model(body: &[u8], model: &str) -> bool {
 }
 
 fn stored_vision() -> Option<String> {
-    let bytes = fs::read(gateway_path()).ok()?;
-    let doc: Value = serde_json::from_slice(&bytes).ok()?;
-    let raw = doc.get("vision").and_then(Value::as_str)?;
+    let doc = ModelGatewayDoc::open_lenient();
+    let raw = doc.rest().get("vision").and_then(Value::as_str)?;
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "off" {
         None
     } else {
         Some(trimmed.to_string())
     }
-}
-
-fn gateway_path() -> std::path::PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
 }
 
 fn cache_key(model: &str, src: &str) -> u64 {

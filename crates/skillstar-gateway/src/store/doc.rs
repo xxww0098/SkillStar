@@ -36,14 +36,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use skillstar_core::infra::fs_ops::atomic_write;
 
-// Slice 03 ships the container before any reader or writer is rerouted onto
-// it (slices 04-05 do that). Until a caller lands inside the crate, rustc
-// would read everything here as dead code; each item carries an
-// `#[allow(dead_code)]` for that window only — drop them when callers land.
+// Slice 03 shipped the container before any reader or writer was rerouted
+// onto it. Slice 04 rerouted the readers: the read accessors below and
+// `open_lenient` have live callers in this crate, so they carry no
+// `#[allow(dead_code)]` here — but the `#[path]`-mounted test target
+// (tests/store_doc.rs) compiles this file without those callers, so the
+// accessors keep their allow for that compilation alone. The writer side
+// (`save`, `DocStoreError::Write`) stays allowed until slice 05 lands its
+// callers.
 
 /// Why a strict open or a save failed. The file is never modified on any
 /// of these paths.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DocStoreError {
     /// The file exists but its bytes could not be read.
@@ -71,7 +74,6 @@ impl std::fmt::Display for DocStoreError {
 /// `model_efforts` and `visible` have no code writer today; they are
 /// carried for the read view only and this container exposes no setter
 /// for them.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ModelGatewayDoc {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -100,7 +102,6 @@ pub(crate) struct ModelGatewayDoc {
 /// Row lookup is first-match-by-id for callers; the container itself keeps
 /// duplicate-id rows and rows without an `id` exactly as they are, in file
 /// order, without deduplicating or dropping.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct OwnerRow {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -144,7 +145,6 @@ pub(crate) struct ProfileAgentRow {
     extra: Map<String, Value>,
 }
 
-#[allow(dead_code)]
 impl ModelGatewayDoc {
     /// The document as it stands, for the write path.
     ///
@@ -169,9 +169,50 @@ impl ModelGatewayDoc {
     }
 
     /// Replace the whole file at once: pretty JSON, atomic write.
+    #[allow(dead_code)]
     pub(crate) fn save(&self) -> Result<(), DocStoreError> {
         let bytes = serde_json::to_vec_pretty(self).map_err(|_| DocStoreError::Write)?;
         atomic_write(&gateway_path(), &bytes).map_err(|_| DocStoreError::Write)
+    }
+
+    /// The `providers` rows, in file order. Row lookup is the caller's rule.
+    #[allow(dead_code)]
+    pub(crate) fn providers(&self) -> &[OwnerRow] {
+        &self.providers
+    }
+
+    /// The `groups` rows, in file order. Row lookup is the caller's rule.
+    #[allow(dead_code)]
+    pub(crate) fn groups(&self) -> &[OwnerRow] {
+        &self.groups
+    }
+
+    /// The `model_efforts` subset map, read view only (no writer today).
+    #[allow(dead_code)]
+    pub(crate) fn model_efforts(&self) -> &BTreeMap<String, Vec<String>> {
+        &self.model_efforts
+    }
+
+    /// The agent-to-names `visible` map, read view only (no writer today).
+    #[allow(dead_code)]
+    pub(crate) fn visible(&self) -> &BTreeMap<String, Vec<String>> {
+        &self.visible
+    }
+
+    /// Top-level keys this crate does not interpret (`redact_*`, `vision`,
+    /// handwritten keys), as stored.
+    #[allow(dead_code)]
+    pub(crate) fn rest(&self) -> &BTreeMap<String, Value> {
+        &self.rest
+    }
+}
+
+impl OwnerRow {
+    /// One unknown key inside this row (`note`, `classifier`, `rules`, …),
+    /// exactly as stored. Known-row-schema modules do not go through here.
+    #[allow(dead_code)]
+    pub(crate) fn extra(&self, key: &str) -> Option<&Value> {
+        self.extra.get(key)
     }
 }
 

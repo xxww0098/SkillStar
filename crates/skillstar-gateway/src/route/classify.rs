@@ -8,13 +8,13 @@
 //! is not one of the intents names nothing.
 
 use std::collections::HashMap;
-use std::fs;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
 use crate::STICK_KEEP;
+use crate::store::doc::ModelGatewayDoc;
 use super::rules::{GroupRule, RuleRequest, matches_now, order_with_rules};
 
 /// How sure the classifier must be before an intent counts.
@@ -81,25 +81,13 @@ enum Read {
 
 /// Model id saved on `group/<id>` or a bare id. Missing means do not ask.
 pub fn stored_classifier(group_id: &str) -> String {
-    let Ok(bytes) = fs::read(gateway_path()) else {
-        return String::new();
-    };
-    let Ok(doc) = serde_json::from_slice::<Value>(&bytes) else {
-        return String::new();
-    };
-    let Some(groups) = doc.get("groups").and_then(Value::as_array) else {
-        return String::new();
-    };
+    let doc = ModelGatewayDoc::open_lenient();
     let id = bare_id(group_id);
-    groups
+    doc.groups()
         .iter()
-        .find(|group| {
-            group
-                .get("id")
-                .and_then(Value::as_str)
-                .is_some_and(|stored| stored.trim() == id)
-        })
-        .and_then(|group| group.get("classifier").and_then(Value::as_str))
+        .find(|group| group.id.trim() == id)
+        .and_then(|group| group.extra("classifier"))
+        .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or("")
         .to_string()
@@ -310,10 +298,6 @@ fn lock() -> std::sync::MutexGuard<'static, Memory> {
     MEMORY
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn gateway_path() -> std::path::PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
 }
 
 fn bare_id(group_id: &str) -> &str {
