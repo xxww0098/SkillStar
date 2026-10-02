@@ -64,7 +64,7 @@ const ADDED_ENV: &[(&str, &str)] = &[
 
 /// Account material copied in by the app. The bridge does not read a store,
 /// and none of these fields is copied into the child environment.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct AccountSnapshot {
     pub access_token: Option<String>,
     /// ChatGPT account id copied in with the login. Codex signing does not
@@ -72,6 +72,21 @@ pub struct AccountSnapshot {
     pub account_id: Option<String>,
     /// ZCode's own key. Other catalogs leave it empty.
     pub api_key: Option<String>,
+}
+
+/// Debug without the token and the key. Presence is printable; values are
+/// secrets (the `SigningMaterial` precedent).
+impl std::fmt::Debug for AccountSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountSnapshot")
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("account_id", &self.account_id)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 /// One tool the helper will advertise to Claude Code.

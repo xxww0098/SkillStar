@@ -19,9 +19,18 @@ const ANTIGRAVITY_HUB: &str = "antigravity/hub/3.1.4";
 const COPILOT_INTEGRATION_ID: &str = "vscode-chat";
 
 /// API key for a provider row. Accounts are not read for this path.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct ProviderSnapshot {
     pub api_key: Option<String>,
+}
+
+/// Debug without the key. The value is a secret; presence is not.
+impl std::fmt::Debug for ProviderSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderSnapshot")
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 /// Read an account and the allowance Usage already stored.
@@ -54,13 +63,32 @@ pub struct SignInput<'a> {
 }
 
 /// Headers to put on the upstream request, plus the already-written allowance.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct SignedUpstream {
     pub headers: Vec<(String, String)>,
     /// `None` means the candidate stays unknown. This is not a quota fetch.
     pub allowance: Option<AllowanceSnapshot>,
     /// Anthropic stays on the process bridge. `headers` is empty.
     pub bridge: bool,
+}
+
+/// Debug without the header values. The names say what was signed; the
+/// values carry bearer tokens and keys.
+impl std::fmt::Debug for SignedUpstream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignedUpstream")
+            .field(
+                "headers",
+                &self
+                    .headers
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .field("allowance", &self.allowance)
+            .field("bridge", &self.bridge)
+            .finish()
+    }
 }
 
 /// Sign `input` from `book`. `quota` is never called.
