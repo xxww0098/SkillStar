@@ -5,8 +5,8 @@
 //! Codex config writer, WSL Codex, the models.dev catalog cache, the
 //! file-agent loopback writer, named profiles, model display names, effort
 //! fitting, per-agent visible families, the install-level gateway key with the
-//! LAN inbound gate, the persistent usage ledger, and the in-memory ring of
-//! recent calls.
+//! LAN inbound gate, the persistent usage ledger, the effective model price,
+//! and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod access;
@@ -16,6 +16,7 @@ mod chatgpt;
 mod claude;
 mod codex;
 mod codex_prompt;
+mod cost;
 mod effort;
 mod ledger;
 mod outbound;
@@ -49,6 +50,7 @@ pub use claude::{
 };
 pub use codex::{ApplyError, CodexRoute, apply_agent, apply_agent_with_model, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
+pub use cost::{ModelCost, effective_price};
 pub use effort::{apply_upstream_effort, model_efforts};
 pub use ledger::{ErrorKind, Record, TokenCounts, append, key_fingerprint, load};
 pub use outbound::{clear_outbound_log, outbound_log};

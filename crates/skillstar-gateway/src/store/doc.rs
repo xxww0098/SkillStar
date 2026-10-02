@@ -6,6 +6,10 @@
 //! section until it is promoted, handwritten keys, row-level `note`,
 //! `classifier`, `rules` — rides in `rest`/`extra` and is written back
 //! verbatim. There is no `deny_unknown_fields` and nothing is dropped.
+//! The top-level `prices` map is typed as [`PriceRow`]s (slice 08): same
+//! rules at row level — zero unit prices serialize as key-absent, unknown
+//! row keys ride `extra`, and a row whose shape the typed view cannot
+//! carry fails the whole open like any other known field.
 //!
 //! Known fields serialize only when they differ from their default, so
 //! `open()` followed by `save()` is an identity on every file whose rows
@@ -87,6 +91,10 @@ pub(crate) struct ModelGatewayDoc {
     model_efforts: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     profiles: Vec<ProfileRow>,
+    /// User price overrides (slice 08), keyed by exact `"<catalog>/<model>"`
+    /// or the `"<catalog>"` wildcard.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    prices: BTreeMap<String, PriceRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     listen: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -116,6 +124,31 @@ pub(crate) struct OwnerRow {
     pub affinity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family: Option<String>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+/// One `prices` row: per-million-token unit prices under one override key.
+///
+/// The map key is the id — an exact `"<catalog>/<model>"` or a `"<catalog>"`
+/// wildcard — so the row itself carries only prices. A unit the row leaves
+/// out bills zero; an explicit `0` normalizes to key-absent on save while
+/// the row stays a valid all-zero price. Unknown row keys (`note`, future
+/// scope extensions) ride `extra` and are written back as they were.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PriceRow {
+    #[serde(default, skip_serializing_if = "price_unit_is_zero")]
+    pub input: f64,
+    #[serde(default, skip_serializing_if = "price_unit_is_zero")]
+    pub output: f64,
+    #[serde(default, skip_serializing_if = "price_unit_is_zero")]
+    pub cache_read: f64,
+    #[serde(default, skip_serializing_if = "price_unit_is_zero")]
+    pub cache_write: f64,
+    /// Reserved for a future multi-currency extension. `None` (key absent)
+    /// means USD; no consumer reads it yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
     #[serde(flatten)]
     extra: Map<String, Value>,
 }
@@ -267,6 +300,14 @@ impl ModelGatewayDoc {
         &self.groups
     }
 
+    /// The `prices` rows, read view only (no writer today). Lookup — exact
+    /// `catalog/model` key first, then the catalog wildcard — is the
+    /// caller's rule.
+    #[allow(dead_code)]
+    pub(crate) fn prices(&self) -> &BTreeMap<String, PriceRow> {
+        &self.prices
+    }
+
     /// The `model_efforts` subset map, read view only (no writer today).
     #[allow(dead_code)]
     pub(crate) fn model_efforts(&self) -> &BTreeMap<String, Vec<String>> {
@@ -311,6 +352,12 @@ impl OwnerRow {
     pub(crate) fn remove_extra(&mut self, key: &str) {
         self.extra.remove(key);
     }
+}
+
+/// Whether a unit price serializes as key-absent: zero is the typed
+/// default, and defaults are never fabricated on save.
+fn price_unit_is_zero(unit: &f64) -> bool {
+    *unit == 0.0
 }
 
 fn gateway_path() -> PathBuf {
