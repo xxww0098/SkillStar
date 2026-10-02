@@ -1,6 +1,6 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：open（11/13）
+状态：open（12/13）
 更新：2026-10-02
 关联：`specs/usage-models-tree/`（open，gateway crate 树重构，本 spec 多个切片有 ⛩ 前置）
 
@@ -26,7 +26,7 @@
 - [x] 06 codex/opencode/pi/omp parser（P2）— 每 parser 一 commit；ruzstd 实测成功（golden .zst）；口径矩阵：codex input 剥 cache / pi·omp 原样 / opencode output 加 reasoning
 - [x] 07 ConsumptionView 合并去重（P2/P3）— app/usage/consumption.rs 纯函数；Record.request_id 退化接口（record_request_id 恒 None，切片 10 补字段后换函数体激活主键级）
 - [x] 08 价格源（P3，⛩tree-03+06）— cost.rs 三级（prices 键 > catalog cost > None）；PriceRow 带.currency 预留；形状不符=整文件拒绝（对齐 doc.rs 语义）
-- [ ] 09 Summarize + 今日消耗（P3，⛩tree-09）
+- [x] 09 Summarize + 今日消耗（P3，⛩tree-09）— consumption/summarize.rs 纯函数（UTC 日界）+ service/summary.rs 三源组装 + get_consumption_summary + Usage 页今日行；by_catalog=经网关口径
 - [x] 10 upstream 接线与 turn 状态机（P4，⛩tree-04+05）— forward.rs 状态机（env>静态测试源>502）；UpstreamEnv{resolve,book,attribute}；app resolve 最小实现（group 展开+openai_chat 端点）；401 透传+Auth 归因（11 前置）
 - [x] 11 401 自愈（P4，⛩tree-09）— D9 三限钉死；HealingBook 常驻 heal 线程桥（跨 runtime 探针通过，未触发队列降级）；AUTH_REST 30 分钟与 Verify 同档
 - [x] 12 AllowanceSnapshot 口径收敛（P5，⛩tree-04）— `{percent, renews_at}` 统一：语义漂移字段 `used` 改名 `percent`（钉死跨 provider 不可比）；rest.rs 的 renews 旁路注入删除，坐窗（≥98 且未来）统一读 snapshot；account_book 取最紧张窗口（max percent + 同窗 reset_at，延续 max 语义）

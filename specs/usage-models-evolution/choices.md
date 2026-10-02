@@ -127,3 +127,11 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **S12 行为收敛点（有意）**：生产路径原来 renews 恒 None 坐窗从不触发；现在 snapshot 整体透传，percent≥98 且 renews_at 在未来才真正坐窗（封顶不变）。Auth 不走 full_window。
 - **S12 触点 4/5 无改动**：RoutingPage/RoutingControl DTO 与组件均不携带余量（spec 的条件分支不成立）。
 - **S12 提交形状**：五触点因 AllowanceSnapshot 类型改名横跨 order/forward/rest（编译原子性）并为 2 commit（gateway 原子 + app），触点 4/5 并入说明。
+
+## S9 切片 09 落地时的实现裁决（banked 2026-10-03）
+
+- **UTC 日界为 wire 契约**：summarize 的 Today 按 UTC 00:00，与 07 Window 的本地日界刻意并存（服务层 Window::all 合并、UTC 过滤裁定可见窗口、读池 24h 缓冲）；UTC+8 跨日时钟测试钉死。Period（UTC）与 Window（本地）是两个概念，后续不混用。
+- **by_catalog 即「经网关」口径**：bypass 行（session-unknown）只进 totals（「全部」），不进 provider 组；前端文案与悬浮已标注。
+- **查价键 = (catalog, 应答模型优先)**；查不到计 unpriced（≠免费）；deepseek 数量级测试钉死。
+- **浮窗（UsageCardWindow）不显示今日行**：它组合 UsageCardBody 而非 SubscriptionCard；切片范围只覆盖主网格与支出摘要条，浮窗接入需另加一次 today 读取（未做，记录边界）。
+- **consumption.rs 目录化**（749 行贴近 1000 线）：mod.rs + summarize.rs + consumption_tests.rs 移动挂载。
