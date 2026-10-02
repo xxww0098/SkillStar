@@ -15,9 +15,11 @@
 //! key ("Smart/Auto means the key is gone") stays a lens-setter concern —
 //! `None`/empty is exactly key-absent, which is the handle a setter uses.
 //!
-//! Open points. The reader reroute (spec slice 04) and the first writer
-//! reroutes have landed; `profiles` still write through their legacy
-//! per-module paths. They are migration backlog, not exemptions. The
+//! Open points. With the reader and writer reroutes landed (spec slices
+//! 04-05), [`ModelGatewayDoc::open`] and [`ModelGatewayDoc::open_lenient`]
+//! are the only places that open `model_gateway.json`: every read goes
+//! through `open_lenient` and one of the lens read functions, every write
+//! through `open`, a lens write and [`ModelGatewayDoc::save`]. The
 //! exemption list is empty
 //! and stays empty: no module gets a permanent private door into this
 //! file, and no top-level key is exempt from round-trip preservation.
@@ -36,10 +38,13 @@ use serde_json::{Map, Value};
 use skillstar_core::infra::fs_ops::atomic_write;
 
 // Slice 03 shipped the container before any reader or writer was rerouted
-// onto it. Slice 04 rerouted the readers; slice 05 has rerouted the
-// listen, names, routing and group writer(s), so `save` has a live caller. The remaining writers
-// (profiles) stay on their legacy `load_object` paths until
-// their reroute lands.
+// onto it. Slice 04 rerouted the readers and slice 05 the writers: the
+// accessors below, `open_lenient` and `save` have live callers in this
+// crate, so they carry no `#[allow(dead_code)]` here — but the
+// `#[path]`-mounted test target (tests/store_doc.rs) compiles this file
+// without most of those callers, so the accessors keep their allow for that
+// compilation alone (`save` is called by that target directly and needs no
+// allow).
 
 /// Why a strict open or a save failed. The file is never modified on any
 /// of these paths.
@@ -141,6 +146,32 @@ pub(crate) struct ProfileAgentRow {
     extra: Map<String, Value>,
 }
 
+impl ProfileRow {
+    /// A row carrying a name and agent selections; the profile writer's
+    /// starting point. Its rebuild never carries `extra`, which is the
+    /// documented unknown-field drop.
+    #[allow(dead_code)]
+    pub(crate) fn new(name: String, agents: Vec<ProfileAgentRow>) -> Self {
+        Self {
+            name,
+            agents,
+            ..Self::default()
+        }
+    }
+}
+
+impl ProfileAgentRow {
+    /// One selection carrying only `id` and `model_ref`.
+    #[allow(dead_code)]
+    pub(crate) fn new(id: String, model_ref: String) -> Self {
+        Self {
+            id,
+            model_ref,
+            ..Self::default()
+        }
+    }
+}
+
 impl ModelGatewayDoc {
     /// The document as it stands, for the write path.
     ///
@@ -208,6 +239,20 @@ impl ModelGatewayDoc {
     #[allow(dead_code)]
     pub(crate) fn groups_mut(&mut self) -> &mut Vec<OwnerRow> {
         &mut self.groups
+    }
+
+    /// The `profiles` rows, in file order, read view.
+    #[allow(dead_code)]
+    pub(crate) fn profiles(&self) -> &[ProfileRow] {
+        &self.profiles
+    }
+
+    /// Replace the whole `profiles` array; the profile writer rebuilds it
+    /// from name and agents only, which is how unknown row fields die
+    /// (the behavior-lock test pins that drop).
+    #[allow(dead_code)]
+    pub(crate) fn set_profiles(&mut self, profiles: Vec<ProfileRow>) {
+        self.profiles = profiles;
     }
 
     /// The `providers` rows, in file order. Row lookup is the caller's rule.
