@@ -35,6 +35,21 @@ use crate::usage::dto::{
 /// it, so the pairing must see yesterday's records (magpie's buffer).
 const PAIRING_BUFFER_MS: i64 = 86_400_000;
 
+/// [`effective_price`] behind a per-command memo. One summary folds a row
+/// once per bucket, so the same (catalog, model) is looked up many times a
+/// command; the memo reads the two price files once per distinct key, not
+/// once per lookup.
+fn price_table() -> impl Fn(&str, &str) -> Option<ModelCost> {
+    let cache: std::cell::RefCell<std::collections::HashMap<(String, String), Option<ModelCost>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    move |catalog, model| {
+        *cache
+            .borrow_mut()
+            .entry((catalog.to_string(), model.to_string()))
+            .or_insert_with_key(|(catalog, model)| effective_price(catalog, model))
+    }
+}
+
 /// The consumption summary of `period`, assembled from the three sources at
 /// the current time. Reads local files only — the ledger, the session
 /// files, and the price tables — and cannot fail: every source degrades to
@@ -52,7 +67,8 @@ pub fn get_today_consumption() -> TodayConsumptionDto {
         .map(|floor| floor - PAIRING_BUFFER_MS);
     let records = load(since.unwrap_or(0));
     let calls = read_calls(&agent_home(), since);
-    today_consumption(now_ms, &records, &calls, &effective_price)
+    let price = price_table();
+    today_consumption(now_ms, &records, &calls, &price)
 }
 
 /// One model ref's routable candidates compared over the whole ledger
@@ -81,7 +97,8 @@ pub fn get_route_comparison(model_ref: &str) -> RouteComparisonDto {
             }
         })
         .collect();
-    route_comparison(model_ref, &records, &candidates, &effective_price)
+    let price = price_table();
+    route_comparison(model_ref, &records, &candidates, &price)
 }
 
 /// Read the three sources at `now_ms` and assemble the summary. The seams
@@ -95,7 +112,7 @@ fn read_and_assemble(period: ConsumptionPeriodDto, now_ms: i64) -> ConsumptionSu
     let since = period_floor_ms(domain, now_ms).map(|floor| floor - PAIRING_BUFFER_MS);
     let records = load(since.unwrap_or(0));
     let calls = read_calls(&agent_home(), since);
-    let price = |catalog: &str, model: &str| effective_price(catalog, model);
+    let price = price_table();
     assemble(period, now_ms, &records, &calls, &price)
 }
 

@@ -107,10 +107,7 @@ pub(super) async fn reauthorize_catalog(catalog_id: &str) -> Option<AccountSnaps
 fn healable_row(catalog_id: &str) -> Option<String> {
     let rows = storage::list_subscriptions().ok()?;
     let active = storage::get_active_subscription(catalog_id).ok().flatten();
-    let row = rows
-        .iter()
-        .find(|row| Some(row.id.as_str()) == active.as_deref() && row.catalog_id == catalog_id)
-        .or_else(|| rows.iter().find(|row| row.catalog_id == catalog_id))?;
+    let row = usage_switch::pinned_row(&rows, catalog_id, active.as_deref())?;
     matches!(row.auth_mode, AuthMode::OAuth | AuthMode::TokenImport)
         .then(|| row.id.clone())
 }
@@ -135,18 +132,22 @@ struct HealRequest {
 
 /// The heal bridge: one long-lived thread with its own runtime, serving the
 /// sync hook from any calling context. A single thread also single-flights
-/// heals — a burst of 401s from several turns renews once and queues,
-/// instead of racing the vendor's token endpoint — and serializes heals
-/// with nothing else, because the chain itself takes Usage's own locks.
+/// heals — a burst of 401s from several turns renews once; the losing turns
+/// pass their 401 through and park in the auth rest, instead of queueing
+/// and racing the vendor's token endpoint — and serializes heals with
+/// nothing else, because the chain itself takes Usage's own locks.
 struct HealBridge {
-    requests: std::sync::mpsc::Sender<HealRequest>,
+    requests: std::sync::mpsc::SyncSender<HealRequest>,
     /// The turn's wait budget.
     wait: Duration,
 }
 
 impl HealBridge {
     fn spawn(wait: Duration, hard_stop: Duration) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel::<HealRequest>();
+        // Capacity one: an idle bridge takes the request at once, a busy
+        // bridge keeps at most one waiting, and a burst beyond that is
+        // refused on the spot — the queue can never grow with 401s.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<HealRequest>(1);
         std::thread::Builder::new()
             .name("skillstar-gateway-heal".to_string())
             .spawn(move || {
@@ -175,11 +176,13 @@ impl HealBridge {
 
     /// Ask for one heal and wait at most the turn's budget. `None` covers
     /// every give-up: no healable row, a dead grant, a busy serialization
-    /// domain, a slow vendor.
+    /// domain, a slow vendor, or a queue already holding one request —
+    /// the losing turn passes the 401 through and parks in the auth rest
+    /// like any give-up, instead of queueing behind the running heal.
     fn heal(&self, catalog_id: &str) -> Option<AccountSnapshot> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.requests
-            .send(HealRequest {
+            .try_send(HealRequest {
                 catalog_id: catalog_id.to_string(),
                 reply: tx,
             })
