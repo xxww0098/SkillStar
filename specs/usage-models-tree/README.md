@@ -1,6 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（3/10）
+状态：open（4/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
@@ -16,7 +16,7 @@
 ### 全局 TODO
 
 - [x] 01 行为锁矩阵（tests only）— `tests/gateway_roundtrip.rs` 5 测试 + `tests/fixtures/gateway/handwritten.json`；五写方交叉/profile 吞字段/幂等/坏文件拒写/缺文件默认全钉
-- [ ] 02 树归位：store/ route/ catalog/ 目录成形
+- [x] 02 树归位：store/ route/ catalog/ 目录成形 — 12 rename（5 个 R100 整文件）；183 符号逐一相同；测试 240↔240 等价
 - [ ] 03 store/doc.rs schema owner
 - [ ] 04 读方改道（7 个读方走 lens）
 - [ ] 05 写方改道（5 个写方走 lens，每写方一 commit）
