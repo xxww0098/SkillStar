@@ -1,24 +1,24 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：open（0/13）
+状态：open（1/13）
 更新：2026-10-02
 关联：`specs/usage-models-tree/`（open，gateway crate 树重构，本 spec 多个切片有 ⛩ 前置）
 
 ## Next Agent Prompt
 
-你是下一个接手本 spec 的实现者。默认从切片 01 开始；05-07（usage 线）可与 01-04（gateway 线）并行，但两线**永不同提交**。
+你是下一个接手本 spec 的实现者。已完成：切片 01（gateway key 与 LAN 门禁，`access.rs` + dispatch 门禁 + `ServeError::LanNeedsKey`/`SaveListenError::Key` + WSL NAT bearer 带实际 key，D-078 已入 decisions）。进行中的并行泳道见 git log 近期提交。
 
 - **先读本 README 的「头号事实」「已拍板决策」「全局防火墙」**，再读你将做的切片文件；分歧裁决见 `choices.md`，不重开讨论。
-- 当前状态：全部 13 片未动。第一片是 P0 安全止血（网关 key + LAN 门禁），最小、独立、可单独 revert。
-- ⛩ 标记的切片必须 rebase 在 `specs/usage-models-tree/` 对应切片之后（见「与树 spec 的前置表」）；tree 尚未开工时，先做无 ⛩ 的切片（01/02/03/05/06）。
-- 每片完成：跑该片验证 + `cargo check --workspace --locked` + `bash scripts/internal/check_clippy_ratchet.sh`（baseline 零改动），更新本节与 TODO。
+- 下一切片按依赖：03（进行中）→ 05/06 → 07；04/08/09/10/11/12 等 ⛩ tree 前置（tree spec 全部未动工——完成本 spec 需先做 tree 的 02-09，见其 README）。
+- 每片完成：跑该片验证 + `cargo check --workspace --locked` + `bash scripts/internal/check_clippy_ratchet.sh`（baseline 零改动，现为 1），更新本节与 TODO。
 - 环境注意：`serve_binds_default_port` 本机端口占用是环境性失败，gateway 测试统一 `-- --skip serve_binds_default_port`。
 - 涉及 DTO 的片：`bun run types:gen && git diff --exit-code src/types/generated/` 必须零意外 diff。
+- 代码注释一律英文（仓库约定；中文只在 Display/UI 字符串）。
 - 结束你的 pass 前，把本节改写成下一个 agent 需要的样子。
 
 ### 全局 TODO
 
-- [ ] 01 gateway key 与 LAN 门禁（P0）
+- [x] 01 gateway key 与 LAN 门禁（P0）— D-078、errors.md 已记；omp 仅 loopback 可用已接受
 - [ ] 02 account_book 改道 custody（P0）
 - [ ] 03 账本 append 热路径（P1）
 - [ ] 04 账本读取面与前端换源（P1，⛩tree-07）
@@ -26,7 +26,7 @@
 - [ ] 06 codex/opencode/pi/omp parser（P2）
 - [ ] 07 ConsumptionView 合并去重（P2/P3）
 - [ ] 08 价格源（P3，⛩tree-03+06）
-- [ ] 09 Summarize + 今日消耗（P3）
+- [ ] 09 Summarize + 今日消耗（P3，⛩tree-09）
 - [ ] 10 upstream 接线与 turn 状态机（P4，⛩tree-04+05）
 - [ ] 11 401 自愈（P4，⛩tree-09）
 - [ ] 12 AllowanceSnapshot 口径收敛（P5，⛩tree-04）

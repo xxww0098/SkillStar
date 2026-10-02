@@ -47,3 +47,15 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 ## C10 AllowanceSnapshot 口径改动的时机
 
 草稿 B 警告「若成本依赖跨 provider 可比则提前」。裁决：不提前——成本（08/09）按 catalog 分组天然可比，无需跨 provider 排序；口径收敛（12）保持 P5，与交叉视图（13）同期收口。rest.rs:44-49 已有的 renews 旁路注入在 12 里统一进 `AllowanceSnapshot{percent, renews_at}`。
+
+## S1 切片 01 落地时的实现裁决（banked 2026-10-02）
+
+- **无路径白名单**：非 loopback 对所有非 callback 请求强制 key（`GET /`、`/api/hello`、`/v1/models` 一并拦）。切片给的自由度里选了 magpie lanGuard 同款全拦——最简模型，无白名单漏洞面。验证方（另一台机）也必须带 key，属预期。
+- **`gateway_key() -> io::Result<String>`**：切片草图的 `-> String` 与「失败即拒绝」的已定决策矛盾，改 Result；serve/save_listen 各自映射为自己的变体。
+- **key 写入照抄 redact::write_key 先例**（OpenOptions mode 0600 + set_permissions，非 temp+rename）。切片说「0600 原子写」但援引的先例本身非原子；按先例实现，崩溃留下的最长风险是一个截断文件——读回时 <32 字符视为无效会自动重新生成，语义自愈。
+- **无进程级 key 缓存**：每次非环回请求读一次 key 文件（loopback 根本不读）。换取测试沙箱可隔离（OnceLock 会串沙箱），LAN 流量低下成本可忽略。
+- **常数时间比较**（长度差折进同一累加器）与 **精确 `Bearer ` 前缀剥离**（大小写敏感，magpie callerKey 同款）。
+- **读回校验**：trim 后 <32 字符视为无效（生成侧 64 hex）；`check_inbound` 只读不建，缺失即拒。
+- **WSL NAT bearer 收敛在 codex.rs**：`apply_codex_full` 按 origin 是否 loopback 决定占位/实际 key，key 写不出则整次接管失败（不写一个过不了门禁的配置）。wsl.rs 只传 origin。
+- **注释语言**：仓库代码注释一律英文（中文只在 Display/UI 字符串），切片 01 的中文注释在集成时已归一。
+- **omp 检查点关闭**：LAN 下不可用已按 D2 默认接受，写进 models README 与 D-078 承担段。
