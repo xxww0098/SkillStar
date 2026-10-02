@@ -88,3 +88,12 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **gateway 新增依赖 tracing + sha2**（cargo add，workspace 归一）：防火墙 1 要求 tracing warn 而 gateway 原无任何日志手段；指纹用 sha256（custody orphan_id 先例）。
 - **内存环每 turn 都喂**（UI 尾缓存连续），append 失败时 warn + 环即降级面。
 - **Anthropic 回译 SSE 仍是 502**（既有 bug 未修，需 translate.rs SSE 聚合，不属本片）；本片保证该场景 usage 不丢。
+
+## S7 切片 07 落地时的实现裁决（banked 2026-10-02）
+
+- **Record.request_id 退化接口**：gateway Record 暂无该字段（切片 03 未含，gateway crate 被 tree-02 泳道持有不能交叉改）。`record_request_id(&Record) -> Option<&str> { None }` 占位，切片 10 给 Record 补 request_id 字段后换函数体即激活主键级匹配；byID 索引、双 id 冲突禁回退、first-unused 语义已实现并有测试（投影结构体可注入）。
+- **匹配本体不比较模型 id**（magpie 同款；规则列表即契约），`matching_ignores_model_ids` 测试钉住防将来顺手加强；`same_model(a,b)` 归一函数公开供切片 10 用（手工移植 magpie bareModel：context 尾巴/vendor 前缀 13 厂商/version atom 链；1-2 位数字不是 atom——deepseek-v3 ≠ v2）。
+- **两处与 magpie 的刻意偏差**（模块文档已记）：无 IsRejected 跳过（Record 无拒绝标记，失败 Record 只配失败 call）；窄窗口跨界 turn 不可见（24h 缓冲解决配对，见专门测试）。
+- **MatchMap = BTreeMap<call_index, record_index>**（1:1 严格配对，单向即可）。
+- **agent id 对齐**：精确字符串相等；UA 直推的 product 名（claude-cli 等）与 AGENT_SPECS id 的缺口归 gateway 侧归一（切片 10 落拒绝标记时一并 revisit）。
+- **UnifiedCall.error_kind 统一 Option<String>**（gateway 侧 snake_case 序列化与 JSONL 同源）；SessionFile 行 catalog 恒 "session-unknown"，Gateway 行原样（路由未落地时空串，不在本层补默认）。
