@@ -185,9 +185,7 @@ pub fn serve(options: ServeOptions) -> Result<(), ServeError> {
     if options.addr.port() == REFUSED_PORT {
         return Err(ServeError::RefusedPort);
     }
-    if !options.addr.ip().is_loopback()
-        && crate::access::gateway_key().is_err()
-    {
+    if !options.addr.ip().is_loopback() && crate::access::gateway_key().is_err() {
         return Err(ServeError::LanNeedsKey);
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -258,6 +256,8 @@ async fn dispatch(
     upstream: Option<&str>,
     peer: SocketAddr,
 ) -> Response<Full<Bytes>> {
+    let started = Instant::now();
+    let at = crate::trace::unix_millis();
     let authorization = header_text(request.headers(), hyper::header::AUTHORIZATION);
     let user_agent = header_text(request.headers(), hyper::header::USER_AGENT);
     if request.method() == Method::POST
@@ -301,6 +301,9 @@ async fn dispatch(
     match crate::surface::plan(method.as_str(), &path, upgrade.as_deref(), &agent) {
         crate::surface::Plan::Local(local) => respond_local(local, head),
         crate::surface::Plan::WithBody(kind) => {
+            // Taken while the request is still owned; the session pipe
+            // needs them after the body has been collected.
+            let sessions = crate::trace::session_headers(request.headers());
             let inbound = match request.into_body().collect().await {
                 Ok(collected) => collected.to_bytes(),
                 Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
@@ -312,13 +315,23 @@ async fn dispatch(
                     url_path,
                     public_responses,
                 } => {
+                    let session = crate::trace::session_of(&sessions, &inbound);
+                    let account =
+                        crate::ledger::account_of(&authorization, &api_key, &goog_key, &query_key);
                     forward_turn(
                         upstream,
                         protocol,
                         &url_path,
-                        inbound,
-                        &authorization,
-                        &user_agent,
+                        &crate::trace::TurnFacts {
+                            at,
+                            started,
+                            authorization: &authorization,
+                            user_agent: &user_agent,
+                            session: &session,
+                            account: &account,
+                            endpoint: &path,
+                            inbound: &inbound,
+                        },
                         public_responses,
                     )
                     .await
@@ -332,6 +345,11 @@ struct Turn {
     status: StatusCode,
     body: Vec<u8>,
     json: bool,
+    /// The reply as the upstream sent it, kept from before the protocol
+    /// translation back to the agent. Usage and the answered model are read
+    /// from it when the agent-side body has neither — tokens were spent even
+    /// when the rebuild failed. `None` marks a refusal generated here.
+    upstream: Option<Bytes>,
 }
 
 impl Turn {
@@ -340,14 +358,16 @@ impl Turn {
             status,
             body: message.as_bytes().to_vec(),
             json: false,
+            upstream: None,
         }
     }
 
-    fn json(status: StatusCode, body: Vec<u8>) -> Self {
+    fn upstream(status: StatusCode, body: Vec<u8>, raw: Bytes) -> Self {
         Self {
             status,
             body,
             json: true,
+            upstream: Some(raw),
         }
     }
 }
@@ -356,18 +376,22 @@ async fn forward_turn(
     upstream: Option<&str>,
     protocol: Option<Protocol>,
     url_path: &str,
-    inbound: Bytes,
-    authorization: &str,
-    user_agent: &str,
+    facts: &crate::trace::TurnFacts<'_>,
     public_responses: bool,
 ) -> Response<Full<Bytes>> {
-    let turned = forward_body(upstream, protocol, url_path, &inbound, public_responses).await;
-    crate::trace::note_forward(
-        authorization,
-        user_agent,
-        &inbound,
+    let turned = forward_body(
+        upstream,
+        protocol,
+        url_path,
+        facts.inbound,
+        public_responses,
+    )
+    .await;
+    crate::trace::note_turn(
+        facts,
         turned.status.as_u16(),
         &turned.body,
+        turned.upstream.as_deref(),
     );
     let content_type = if turned.json {
         "application/json"
@@ -385,7 +409,7 @@ async fn forward_body(
     upstream: Option<&str>,
     protocol: Option<Protocol>,
     url_path: &str,
-    inbound: &Bytes,
+    inbound: &[u8],
     public_responses: bool,
 ) -> Turn {
     let mut upstream_bytes = match protocol {
@@ -442,16 +466,24 @@ async fn forward_body(
     let outbound = match protocol {
         Some(protocol) => match outbound_body(protocol, &bytes) {
             Ok(body) => body,
-            Err(_) => return Turn::text(StatusCode::BAD_GATEWAY, "upstream body"),
+            // The agent-side rebuild failed, but the upstream reply is kept:
+            // what it spent still belongs in the ledger.
+            Err(_) => {
+                return Turn::upstream(
+                    StatusCode::BAD_GATEWAY,
+                    b"upstream body".to_vec(),
+                    Bytes::from(bytes),
+                );
+            }
         },
         None => bytes.to_vec(),
     };
     if public_responses
         && let Some(replaced) = crate::chatgpt::quota_reply(status.as_u16(), &outbound)
     {
-        return Turn::json(status, replaced);
+        return Turn::upstream(status, replaced, Bytes::from(bytes));
     }
-    Turn::json(status, outbound)
+    Turn::upstream(status, outbound, Bytes::from(bytes))
 }
 
 fn header_text(headers: &hyper::HeaderMap, name: hyper::header::HeaderName) -> String {

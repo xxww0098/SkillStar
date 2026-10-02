@@ -24,7 +24,10 @@ pub const CACHE_COLD: Duration = Duration::from_secs(5 * 60);
 /// How long the last answerer is remembered.
 pub const STICK_KEEP: Duration = Duration::from_secs(24 * 60 * 60);
 
-const SESSION_HEADERS: &[&str] = &[
+/// Header names a session can arrive under, in precedence order:
+/// `X-Skillstar-Session` wins, then the agent-native headers in list order.
+/// The dispatch-side session pipe reads the same list.
+pub(crate) const SESSION_HEADERS: &[&str] = &[
     "X-Skillstar-Session",
     "x-opencode-session",
     "x-session-affinity",

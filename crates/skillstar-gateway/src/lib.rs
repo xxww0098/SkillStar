@@ -5,7 +5,8 @@
 //! Codex config writer, WSL Codex, the models.dev catalog cache, the
 //! file-agent loopback writer, named profiles, model display names, effort
 //! fitting, per-agent visible families, the install-level gateway key with the
-//! LAN inbound gate, and the in-memory ring of recent calls.
+//! LAN inbound gate, the persistent usage ledger, and the in-memory ring of
+//! recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod access;
@@ -19,6 +20,7 @@ mod codex_prompt;
 mod effort;
 mod group;
 mod hold;
+mod ledger;
 mod listen;
 mod models_dev;
 mod names;
@@ -39,14 +41,14 @@ mod vision;
 mod wsl;
 
 pub use access::{check_inbound, gateway_key};
+pub use affinity::{
+    AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
+    CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,
+};
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
     desktop_alias, desktop_dirs, desktop_effort_alias, token_for, written_loopback_label,
     written_model_ref,
-};
-pub use affinity::{
-    AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
-    CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,
 };
 pub use classify::{
     CLASSIFY_KEEP, CLASSIFY_REST, CLASSIFY_TIMEOUT, ClassifyCall, ClassifyReply, ClassifyTurn,
@@ -66,6 +68,8 @@ pub use group::{
     stored_group_ids, stored_groups,
 };
 pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
+pub use ledger::{ErrorKind, Record, TokenCounts, append, key_fingerprint, load};
+pub use listen::{SaveListenError, listen_label, save_listen};
 pub use models_dev::{
     MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,
 };
@@ -87,15 +91,14 @@ pub use route::{
 };
 pub use routing_file::{SaveRoutingError, routing_state, save_routing};
 pub use rules::{Caller, GroupRule, RuleRequest, order_with_rules, request_agent, stored_rules};
-pub use sign::{AccountBook, ProviderSnapshot, SignInput, SignedUpstream, sign_upstream};
-pub use listen::{SaveListenError, listen_label, save_listen};
 pub use serve::{
     ADDR_ENV, DEFAULT_ADDR, HEADER_READ_TIMEOUT, IDLE_TIMEOUT, PLACEHOLDER_BEARER, REFUSED_PORT,
     ServeError, ServeOptions, Stop, published_origin, resolve_addr, serve,
 };
-pub use trace::{TRACE_KEEP, RecentCall, clear_recent_calls, note_recent_call, recent_calls};
-pub use visible::{catalog_serves, listed_ids, model_shown, shown_model_ids};
+pub use sign::{AccountBook, ProviderSnapshot, SignInput, SignedUpstream, sign_upstream};
+pub use trace::{RecentCall, TRACE_KEEP, clear_recent_calls, note_recent_call, recent_calls};
 pub use translate::{Protocol, TranslateError, outbound_body, upstream_body};
+pub use visible::{catalog_serves, listed_ids, model_shown, shown_model_ids};
 pub use vision::{
     VISION_CACHE, VISION_PARALLEL, VISION_SYSTEM, VISION_TIMEOUT, VISION_USER_AGENT, VisionCall,
     VisionReject, VisionReply, apply_vision,
