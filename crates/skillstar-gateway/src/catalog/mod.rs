@@ -65,8 +65,9 @@ mod tests {
 
     /// Env-sandboxed catalog lookups; the cache path follows the data root.
     fn with_env_cache(body: &[u8], probe: impl FnOnce()) {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _lock = LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = crate::TEST_PATH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let root = std::env::temp_dir().join(format!(
             "skillstar-catalog-{}-{}",
             std::process::id(),

@@ -12,7 +12,7 @@
 //! is dropped.
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -26,6 +26,10 @@ const LEDGER_DIR: &str = "gateway";
 const LEDGER_FILE: &str = "usage.jsonl";
 /// A live file at or past this size is rolled over before the next append.
 const ROTATE_AT_BYTES: u64 = 5 * 1024 * 1024;
+/// Archives kept beyond the live file. A rotation that would exceed this
+/// drops the oldest archive first: the ledger is a metering face, not an
+/// archive, and old lines may go (spec D10).
+const KEEP_ARCHIVES: u32 = 6;
 /// Ceiling for the archive-number search, so a full disk of archives cannot
 /// spin the loop.
 const MAX_ARCHIVES: u32 = 10_000;
@@ -99,26 +103,51 @@ fn write_line(line: &[u8]) -> io::Result<()> {
     fs::create_dir_all(&dir)?;
     let path = dir.join(LEDGER_FILE);
     rotate_if_full(&dir, &path)?;
-    let mut file = OpenOptions::new().append(true).create(true).open(&path)?;
+    let mut file = OpenOptions::new()
+        .append(true)
+        .read(true)
+        .create(true)
+        .open(&path)?;
+    // A crash mid-write leaves a tail without its newline, which reads
+    // drop. Start this line on a fresh boundary so the append does not
+    // glue itself onto that tail and lose both lines.
+    let len = file.metadata()?.len();
+    if len > 0 {
+        let mut last = [0u8; 1];
+        file.seek(SeekFrom::Start(len - 1))?;
+        file.read_exact(&mut last)?;
+        if last[0] != b'\n' {
+            file.write_all(b"\n")?;
+        }
+    }
     file.write_all(line)
 }
 
-/// Move a live file that reached the cap out of the append path. A rename
-/// failure is the caller's warning and nothing worse: the line then still
-/// lands in the oversized live file.
+/// Move a live file that reached the cap out of the append path. When the
+/// retained set is full, the oldest archive dies and the rest shift down a
+/// number, so the no-gap numbering [`archive_paths`] walks stays true and
+/// the ledger stays bounded. A rename failure is the caller's warning and
+/// nothing worse: the line then still lands in the oversized live file.
 fn rotate_if_full(dir: &Path, path: &Path) -> io::Result<()> {
     let len = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
     if len < ROTATE_AT_BYTES {
         return Ok(());
     }
-    for number in 1..MAX_ARCHIVES {
-        let archived = archive_path(dir, number);
-        if !archived.exists() {
-            fs::rename(path, archived)?;
-            return Ok(());
+    let existing = archive_paths(dir).len() as u32;
+    let target = if existing >= KEEP_ARCHIVES {
+        let _ = fs::remove_file(archive_path(dir, 1));
+        for number in 2..=existing {
+            let from = archive_path(dir, number);
+            if !from.exists() {
+                break;
+            }
+            fs::rename(from, archive_path(dir, number - 1))?;
         }
-    }
-    Ok(())
+        existing
+    } else {
+        existing + 1
+    };
+    fs::rename(path, archive_path(dir, target.min(MAX_ARCHIVES)))
 }
 
 /// The parseable records of one file's text, at or after `since`.
@@ -194,5 +223,102 @@ mod tests {
         // A torn tail on the last record loses that record, not the file.
         let torn = format!("{}\n{{\"at\":3", serde_json::to_string(&first).unwrap());
         assert_eq!(records_from_text(&torn, 0), vec![first]);
+    }
+
+    /// Env-sandboxed ledger directory; `data_root()` follows the var.
+    fn with_env_data(probe: impl FnOnce(&Path)) {
+        let _lock = crate::TEST_PATH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "skillstar-ledger-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        // SAFETY: tests touching this var hold the lock above.
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", &root) };
+        std::fs::create_dir_all(ledger_dir()).unwrap();
+        probe(ledger_dir().as_path());
+        // SAFETY: see above.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+            }
+        };
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A full live file with every archive slot taken: the oldest archive
+    /// dies, the rest shift down, and the live file takes the top slot —
+    /// the retained set never grows past KEEP_ARCHIVES.
+    #[test]
+    fn rotation_drops_the_oldest_archive_past_the_keep() {
+        with_env_data(|dir| {
+            for number in 1..=KEEP_ARCHIVES {
+                std::fs::write(
+                    archive_path(dir, number),
+                    format!("archive-{number}"),
+                )
+                .unwrap();
+            }
+            let live = dir.join(LEDGER_FILE);
+            std::fs::File::create(&live)
+                .unwrap()
+                .set_len(ROTATE_AT_BYTES)
+                .unwrap();
+            rotate_if_full(dir, &live).unwrap();
+            assert!(!live.exists());
+            for number in 1..KEEP_ARCHIVES {
+                let text = std::fs::read_to_string(archive_path(dir, number)).unwrap();
+                assert_eq!(text, format!("archive-{}", number + 1));
+            }
+            let top = std::fs::metadata(archive_path(dir, KEEP_ARCHIVES)).unwrap();
+            assert_eq!(top.len(), ROTATE_AT_BYTES);
+        });
+    }
+
+    /// Below the cap the rotation only claims the next free slot.
+    #[test]
+    fn rotation_below_the_keep_claims_the_next_slot() {
+        with_env_data(|dir| {
+            std::fs::write(archive_path(dir, 1), "archive-1").unwrap();
+            let live = dir.join(LEDGER_FILE);
+            std::fs::write(&live, "old live").unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&live)
+                .unwrap()
+                .set_len(ROTATE_AT_BYTES)
+                .unwrap();
+            rotate_if_full(dir, &live).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(archive_path(dir, 1)).unwrap(),
+                "archive-1"
+            );
+            assert!(archive_path(dir, 2).exists());
+            assert!(!archive_path(dir, 3).exists());
+        });
+    }
+
+    /// A crash mid-write leaves a torn tail; the next append starts a fresh
+    /// line instead of gluing itself onto the fragment, so both the fragment
+    /// (dropped) and the new record (kept) behave as complete lines.
+    #[test]
+    fn append_repairs_a_torn_tail() {
+        with_env_data(|dir| {
+            std::fs::create_dir_all(dir).unwrap();
+            let live = dir.join(LEDGER_FILE);
+            std::fs::write(&live, "{\"at\":1").unwrap();
+            append(&sample(2_000, "codex"));
+            let records = load(0);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].at, 2_000);
+        });
     }
 }

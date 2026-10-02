@@ -24,7 +24,8 @@ pub fn get_recent_calls() -> Vec<RecentCallDto> {
 }
 
 /// One ledger page, newest first. `None` dimensions filter nothing; the
-/// limit defaults to the page size and the offset walks from the newest end.
+/// limit defaults to the page size and the offset walks from the newest
+/// end. The page reads everything retention keeps (`since: None`).
 #[tauri::command]
 pub fn get_ledger_page(
     agent: Option<String>,
@@ -39,6 +40,7 @@ pub fn get_ledger_page(
         catalog,
         limit: limit.unwrap_or(PAGE_KEEP),
         skip: offset.unwrap_or(0),
+        since: None,
     })
 }
 

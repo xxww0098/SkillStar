@@ -13,7 +13,9 @@ use super::record::Record;
 /// A dimension set to `None` or the empty string matches every record.
 /// `skip` walks from the newest end and `limit` caps the page; a `limit` of
 /// `0` keeps everything past the skip, which only whole-history callers
-/// want.
+/// want. `since` (Unix milliseconds, inclusive) is pushed down to the file
+/// read, so time-bounded callers never hold the whole ledger in memory;
+/// `None` reads everything the retention keeps.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LedgerQuery {
     pub agent: Option<String>,
@@ -21,6 +23,7 @@ pub struct LedgerQuery {
     pub catalog: Option<String>,
     pub limit: usize,
     pub skip: usize,
+    pub since: Option<i64>,
 }
 
 impl LedgerQuery {
@@ -32,6 +35,7 @@ impl LedgerQuery {
             catalog: None,
             limit,
             skip: 0,
+            since: None,
         }
     }
 
@@ -47,7 +51,7 @@ impl LedgerQuery {
     /// Run over everything the ledger currently holds and return the page,
     /// newest first. A missing or unreadable ledger reads as empty.
     pub fn run(&self) -> Vec<Record> {
-        page(super::load(i64::MIN), self)
+        page(super::load(self.since.unwrap_or(i64::MIN)), self)
     }
 }
 
@@ -116,7 +120,46 @@ mod tests {
             catalog: catalog.map(str::to_string),
             limit,
             skip,
+            since: None,
         }
+    }
+
+    /// `since` reaches the file read through `run`, so a time-bounded page
+    /// never holds what the floor already excluded.
+    #[test]
+    fn run_pushes_since_into_the_file_read() {
+        use crate::ledger::append::append;
+        let _lock = crate::TEST_PATH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "skillstar-ledger-query-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        // SAFETY: tests touching this var hold the lock above.
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", &root) };
+        append(&record(1_000, "codex", "", ""));
+        append(&record(2_000, "codex", "", ""));
+        let mut bounded = query(None, None, None, 0, 0);
+        bounded.since = Some(1_500);
+        let bounded_page = bounded.run();
+        let whole_page = query(None, None, None, 0, 0).run();
+        // SAFETY: see above.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+            }
+        };
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(bounded_page, vec![record(2_000, "codex", "", "")]);
+        assert_eq!(whole_page.len(), 2);
     }
 
     #[test]

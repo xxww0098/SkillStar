@@ -33,6 +33,12 @@ mod visible;
 mod vision;
 mod wsl;
 
+/// The one lock every lib test that repoints `SKILLSTAR_DATA_DIR` (or any
+/// path env var) must hold, so parallel test binaries cannot read another
+/// test's data root mid-flight.
+#[cfg(test)]
+pub(crate) static TEST_PATH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub use access::{check_inbound, gateway_key};
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
