@@ -1,6 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（8/10）
+状态：open（9/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
@@ -19,7 +19,7 @@
 - [x] 02 树归位：store/ route/ catalog/ 目录成形 — 12 rename（5 个 R100 整文件）；183 符号逐一相同；测试 240↔240 等价
 - [x] 03 store/doc.rs schema owner — ModelGatewayDoc/OwnerRow + rest/extra 整段保留；已知字段「缺席不造」skip 语义（D-079）；DocStoreError doc_read/doc_parse/doc_write
 - [x] 04 读方改道（7 个读方走 lens）— 终态 grep 仅剩 5 处注释；C8 收编 GatewayFile；routing_state 双读顺手修；route/ 无 fs 可 grep 验证
-- [ ] 05 写方改道（5 个写方走 lens，每写方一 commit）
+- [x] 05 写方改道（5 个写方走 lens，每写方一 commit）— listen/names/routing/group/profile 五 commit；终态 model_gateway.json 只在 store/doc.rs 一处打开；01 交叉矩阵全程绿
 - [x] 06 catalog typed parse — catalog/{schema,ids,mod}；四份重复解析收口（visible×2/names/effort/picker）；CatalogCost 四元组为 evolution-08 预声明；serves/entry/effort_values crate 内、catalog_ids pub
 - [ ] 07 app/models/gateway/ 投影归位
 - [x] 08 custody_tests 拆分 — 真实 mod 挂载（orphan 门禁优先于逐字节路径平铺）；叶子集合 40/40 一致；errors.md 引用路径原样可跑
