@@ -26,13 +26,18 @@
 mod checkpoint;
 mod claude;
 mod claude_discovery;
+mod codex;
+mod codex_discovery;
 
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
 mod claude_tests;
+#[cfg(test)]
+mod codex_tests;
 
 use claude::{ClaudeCodeParser, ClaudeDesktopParser};
+use codex::CodexParser;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -212,6 +217,7 @@ fn parsers() -> &'static [Box<dyn SessionParserMethods>] {
             vec![
                 Box::new(ClaudeCodeParser),
                 Box::new(ClaudeDesktopParser),
+                Box::new(CodexParser),
             ]
         });
     &PARSERS
