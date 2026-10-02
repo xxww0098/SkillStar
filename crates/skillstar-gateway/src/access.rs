@@ -53,7 +53,7 @@ pub fn check_inbound(
     goog_key: &str,
     query_key: &str,
 ) -> bool {
-    if peer.ip().is_loopback() {
+    if normalize(peer.ip()).is_loopback() {
         return true;
     }
     let Some(key) = stored_key() else {
@@ -63,6 +63,19 @@ pub fn check_inbound(
     [bearer, api_key.trim(), goog_key.trim(), query_key.trim()]
         .iter()
         .any(|slot| !slot.is_empty() && same_secret(slot, &key))
+}
+
+/// Unfold IPv4-mapped IPv6 (`::ffff:127.0.0.1`), which dual-stack sockets
+/// hand out for IPv4 peers, so mapped loopback counts as loopback and every
+/// other mapped address — a LAN peer included — stays non-loopback.
+pub(crate) fn normalize(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(IpAddr::from)
+            .unwrap_or(IpAddr::V6(v6)),
+        v4 @ IpAddr::V4(_) => v4,
+    }
 }
 
 /// Whether an origin like `http://127.0.0.1:21847` points at this computer.
@@ -84,6 +97,7 @@ pub(crate) fn origin_is_loopback(origin: &str) -> bool {
         return true;
     }
     host.parse::<IpAddr>()
+        .map(normalize)
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)
 }
@@ -125,9 +139,9 @@ fn strip_bearer_prefix(authorization: &str) -> &str {
 /// way, nothing returns early.
 fn same_secret(left: &str, right: &str) -> bool {
     let (left, right) = (left.as_bytes(), right.as_bytes());
-    // The length difference folds into the same accumulator, so the compare
-    // takes constant time.
-    let mut diff = (left.len() ^ right.len()) as u8;
+    // The length difference folds into the same accumulator as a plain
+    // inequality, so no XOR of the lengths can cancel byte differences.
+    let mut diff = (left.len() != right.len()) as u8;
     for index in 0..left.len().max(right.len()) {
         diff |= left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0);
     }

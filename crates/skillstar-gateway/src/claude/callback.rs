@@ -37,7 +37,8 @@ pub fn begin_callback(
     token: &str,
     body: &[u8],
 ) -> CallbackOutcome {
-    if !peer.ip().is_loopback() {
+    // Same loopback rule as the LAN gate, IPv4-mapped peers included.
+    if !crate::access::normalize(peer.ip()).is_loopback() {
         return ready(403, "forbidden");
     }
     let Some(run) = bridge.lookup(token) else {
