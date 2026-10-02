@@ -458,15 +458,23 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
 /// always be rolled back to the previous on-disk state.
 pub fn create_rolling_backup(path: &Path) -> anyhow::Result<PathBuf> {
     let path_str = path.to_string_lossy().to_string();
-    let timestamp = std::time::SystemTime::now()
+    // Millisecond names collide when backups are taken inside one tick — two
+    // calls in the same millisecond would silently overwrite each other's
+    // backup. Nudge the stamp forward until the name is free; the suffix
+    // stays plain digits so `cleanup_old_backups` keeps parsing and ordering
+    // it (the nudge is at most a millisecond ahead of the real clock).
+    let mut timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let backup_name = format!("{}.bak.{}", path_str, timestamp);
-    let backup_path = PathBuf::from(&backup_name);
+    let mut backup_path = PathBuf::from(format!("{}.bak.{}", path_str, timestamp));
+    while backup_path.exists() {
+        timestamp += 1;
+        backup_path = PathBuf::from(format!("{}.bak.{}", path_str, timestamp));
+    }
 
     std::fs::copy(path, &backup_path)
-        .with_context(|| format!("Failed to create backup at {}", backup_name))?;
+        .with_context(|| format!("Failed to create backup at {}", backup_path.display()))?;
 
     // Clean up old backups — keep only the 5 most recent
     cleanup_old_backups(path, 5)?;
