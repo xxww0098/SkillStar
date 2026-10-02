@@ -1,6 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（2/10）
+状态：open（3/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
@@ -24,7 +24,7 @@
 - [ ] 07 app/models/gateway/ 投影归位
 - [ ] 08 custody_tests 拆分
 - [x] 09 usage service 拆分 — service/ 目录六块（helpers/projections/crud/refresh/oauth/switching），25 符号面冻结，service_tests.rs 字节级搬移
-- [ ] 10 families 落点契约（只写契约）
+- [x] 10 families 落点契约（只写契约）— 契约即 slices/10-families-contract.md（SSOT），models README 已加指针；FamilyRow 不内联 members（默认裁决，检查点关闭）
 
 ## 目标
 

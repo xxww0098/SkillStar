@@ -122,7 +122,7 @@ Gateway 面板可以选择环回或局域网。局域网让进程听 `0.0.0.0` �
 
 分组成员可以固定一个 effort。可选等级来自目录缓存，不在界面里另写一份。请求里的等级在出站前收成最接近的一项；目录没有这个模型时保持原样。成员上的固定值优先。
 
-每个 Agent 可以有一份可见名单，写在 `model_gateway.json` 的 `visible`。项是家族标签、provider id 或 group id，家族写在 provider 或分组的 `family`。没有名单时看到全部模型。名单收窄这个 Agent 的 `/v1/models`、选择器，以及写进它文件的模型目录。已经保存的 model ref 留在原字段。名单外的 id 仍可以请求。
+每个 Agent 可以有一份可见名单，写在 `model_gateway.json` 的 `visible`。项是家族标签、provider id 或 group id，家族写在 provider 或分组的 `family`。没有名单时看到全部模型。名单收窄这个 Agent 的 `/v1/models`、选择器，以及写进它文件的模型目录。已经保存的 model ref 留在原字段。名单外的 id 仍可以请求。家族目前只是行上的字符串标签；把它一等化（`families` 定义表 + 引用完整性）的落点契约见 `specs/usage-models-tree/slices/10-families-contract.md`，实现时另立 spec 引用该契约，行为此处不变。
 
 一个 `provider/model` 可以留下目录等级的子集，写在 `model_gateway.json` 的 `model_efforts`。没有这份子集时，选择器和出站收束仍用目录里的全部等级。有子集时，这两处只提供子集里的等级；未固定的请求按目录顺序收进子集。成员上的固定 effort 仍优先。
 
