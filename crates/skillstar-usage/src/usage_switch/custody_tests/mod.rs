@@ -8,15 +8,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
-use serde_json::{Value, json};
 use crate::subscription::Subscription;
 use crate::{crypto, storage};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::custody::{Custody, LinkMode, LinkState};
 use super::error::{CustodyError, MaterializeError};
-use super::target::{CliCredentialTarget, codex::CodexTarget, opencode::OpenCodeTarget};
+use super::target::{
+    CliCredentialTarget, codex::CodexTarget, opencode::OpenCodeTarget, subscription_identity,
+};
 use super::{
     CliAccountState, acquire_cli_refresh_lease, activate_subscription,
     adopt_active_cli_session_before_refresh, forget_subscription_session, reconcile_cli_account,
@@ -24,6 +25,16 @@ use super::{
     target_for,
 };
 use crate::test_support::EnvGuard;
+
+// Per-tool suites live in the sibling files and share the harness below;
+// this file keeps the core custody semantics (activate / reconcile / badge /
+// Windows copy / forget / resync / file invariants). The children are plain
+// modules, so their test paths gain one segment: `custody_tests::cursor::…`.
+mod antigravity;
+mod codex;
+mod cursor;
+mod opencode;
+mod pure;
 
 // Full Grok CLI scopes; identity alice.
 const ALICE_CLI_TOKEN: &str = concat!(
@@ -46,11 +57,6 @@ const BOB_CLI_TOKEN: &str = concat!(
 const BILLING_ONLY_TOKEN: &str = concat!(
     "e30.",
     "eyJzY29wZSI6Im9wZW5pZCBwcm9maWxlIGVtYWlsIG9mZmxpbmVfYWNjZXNzIGFwaTphY2Nlc3MiLCJlbWFpbCI6ImNhcm9sQGV4YW1wbGUuY29tIiwic3ViIjoidWlkLWNhcm9sIiwiZXhwIjoxOTk5OTk5OTk5fQ",
-    "."
-);
-const CODEX_ID_TOKEN: &str = concat!(
-    "e30.",
-    "eyJlbWFpbCI6ImRhbmFAZXhhbXBsZS5jb20iLCJzdWIiOiJ1aWQtZGFuYSIsImV4cCI6MTk5OTk5OTk5OX0",
     "."
 );
 
@@ -120,86 +126,6 @@ fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
 }
 
-fn cursor_state_db(home: &Path) -> PathBuf {
-    let root = if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/Cursor")
-    } else if cfg!(target_os = "windows") {
-        home.join("AppData/Roaming/Cursor")
-    } else {
-        home.join(".config/Cursor")
-    };
-    root.join("User/globalStorage/state.vscdb")
-}
-
-fn write_cursor_state(home: &Path, access_token: &str, refresh_token: &str, email: &str) {
-    let path = cursor_state_db(home);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let conn = Connection::open(path).unwrap();
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)",
-        [],
-    )
-    .unwrap();
-    for (key, value) in [
-        ("cursorAuth/accessToken", access_token),
-        ("cursorAuth/refreshToken", refresh_token),
-        ("cursorAuth/cachedEmail", email),
-        ("cursor/accessToken", access_token),
-        ("cursor/email", email),
-    ] {
-        conn.execute(
-            "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
-            (key, value),
-        )
-        .unwrap();
-    }
-}
-
-fn read_cursor_state(home: &Path, key: &str) -> String {
-    let conn = Connection::open(cursor_state_db(home)).unwrap();
-    conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |row| {
-        row.get(0)
-    })
-    .unwrap()
-}
-
-fn antigravity_state_db(home: &Path) -> PathBuf {
-    let root = if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/Antigravity IDE")
-    } else if cfg!(target_os = "windows") {
-        home.join("AppData/Roaming/Antigravity IDE")
-    } else {
-        home.join(".config/Antigravity IDE")
-    };
-    root.join("User/globalStorage/state.vscdb")
-}
-
-fn write_antigravity_state(home: &Path, access_token: &str, refresh_token: &str, email: &str) {
-    let path = antigravity_state_db(home);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let conn = Connection::open(&path).unwrap();
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)",
-        [],
-    )
-    .unwrap();
-    drop(conn);
-    crate::vscdb::write_antigravity_oauth_token(
-        &path,
-        access_token,
-        refresh_token,
-        2_000_000_000,
-        Some(email),
-    )
-    .unwrap();
-}
-
-fn read_antigravity_state(home: &Path) -> crate::vscdb::AntigravityOAuthSession {
-    crate::vscdb::read_antigravity_oauth_session(&antigravity_state_db(home))
-        .unwrap()
-        .unwrap()
-}
-
 fn is_symlink(path: &Path) -> bool {
     path.symlink_metadata()
         .map(|meta| meta.file_type().is_symlink())
@@ -251,15 +177,6 @@ fn grok_account(id: &str, token: &str, expires_at: i64) -> Subscription {
     sub.access_token_encrypted = Some(crypto::encrypt(token));
     sub.refresh_token_encrypted = Some(crypto::encrypt(&format!("{id}-refresh")));
     sub.access_token_expires_at = Some(expires_at);
-    storage::upsert_subscription(sub).unwrap()
-}
-
-fn cursor_account(id: &str, access_token: &str, refresh_token: &str, email: &str) -> Subscription {
-    let mut sub = subscription(id, "cursor");
-    sub.display_name = email.into();
-    sub.access_token_encrypted = Some(crypto::encrypt(access_token));
-    sub.refresh_token_encrypted = Some(crypto::encrypt(refresh_token));
-    sub.oauth_account_id = Some(email.into());
     storage::upsert_subscription(sub).unwrap()
 }
 
@@ -634,20 +551,6 @@ async fn a_login_nobody_owns_reads_as_diverged_not_as_logged_out() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn cursor_without_local_state_reports_missing_instead_of_trusting_the_pin() {
-    let _sb = sandbox();
-    assert_eq!(
-        reconcile_cli_account("cursor").await.unwrap(),
-        Some(CliAccountState::Missing),
-        "Cursor state.vscdb is the live source of truth"
-    );
-    assert_eq!(
-        reconcile_cli_accounts().await.unwrap().get("cursor"),
-        Some(&CliAccountState::Missing)
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn catalogs_without_a_switch_adapter_are_absent_from_reconcile() {
     let _sb = sandbox();
     assert!(reconcile_cli_account("deepseek").await.unwrap().is_none());
@@ -828,459 +731,6 @@ async fn the_refresh_window_is_a_no_op_for_an_account_that_is_not_current() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn cursor_switch_writes_the_selected_account_into_state_vscdb() {
-    let sb = sandbox();
-    let mut alice = subscription("cursor-alice", "cursor");
-    alice.display_name = "alice@example.com".into();
-    alice.access_token_encrypted = Some(crypto::encrypt("alice-access"));
-    alice.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh"));
-    alice.oauth_account_id = Some("alice@example.com".into());
-    storage::upsert_subscription(alice).unwrap();
-    write_cursor_state(
-        sb.home.path(),
-        "old-access",
-        "old-refresh",
-        "old@example.com",
-    );
-
-    let result = activate_subscription("cursor-alice").await.unwrap();
-
-    assert!(
-        result.switch_result.success,
-        "Cursor 切号必须写入并回读 state.vscdb: {:?}",
-        result.switch_result.error
-    );
-    assert_eq!(
-        read_cursor_state(sb.home.path(), "cursorAuth/accessToken"),
-        "alice-access"
-    );
-    assert_eq!(
-        read_cursor_state(sb.home.path(), "cursorAuth/refreshToken"),
-        "alice-refresh"
-    );
-    assert_eq!(
-        storage::get_active_subscription("cursor")
-            .unwrap()
-            .as_deref(),
-        Some("cursor-alice")
-    );
-    assert_eq!(
-        reconcile_cli_account("cursor").await.unwrap(),
-        Some(CliAccountState::LinkedTo {
-            subscription_id: "cursor-alice".into()
-        })
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn cursor_switch_changes_the_real_session_between_two_accounts() {
-    let sb = sandbox();
-    cursor_account(
-        "cursor-alice",
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-    cursor_account("cursor-bob", "bob-access", "bob-refresh", "bob@example.com");
-    write_cursor_state(
-        sb.home.path(),
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-
-    activate_subscription("cursor-alice").await.unwrap();
-    let result = activate_subscription("cursor-bob").await.unwrap();
-
-    assert!(result.switch_result.success);
-    assert_eq!(
-        read_cursor_state(sb.home.path(), "cursorAuth/accessToken"),
-        "bob-access"
-    );
-    assert_eq!(
-        read_cursor_state(sb.home.path(), "cursorAuth/refreshToken"),
-        "bob-refresh"
-    );
-    assert_eq!(
-        reconcile_cli_account("cursor").await.unwrap(),
-        Some(CliAccountState::LinkedTo {
-            subscription_id: "cursor-bob".into()
-        })
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn cursor_switch_failure_does_not_move_the_active_pin() {
-    let _sb = sandbox();
-    cursor_account(
-        "cursor-alice",
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-    cursor_account("cursor-bob", "bob-access", "bob-refresh", "bob@example.com");
-    storage::set_active_subscription("cursor", "cursor-alice").unwrap();
-
-    let result = activate_subscription("cursor-bob").await.unwrap();
-
-    assert!(!result.switch_result.success);
-    assert!(result.switch_result.error.is_some());
-    assert_eq!(
-        storage::get_active_subscription("cursor")
-            .unwrap()
-            .as_deref(),
-        Some("cursor-alice")
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn cursor_refresh_window_adopts_and_projects_the_live_session() {
-    let sb = sandbox();
-    cursor_account(
-        "cursor-alice",
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-    write_cursor_state(
-        sb.home.path(),
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-    activate_subscription("cursor-alice").await.unwrap();
-
-    write_cursor_state(
-        sb.home.path(),
-        "alice-access-rotated",
-        "alice-refresh-rotated",
-        "alice@example.com",
-    );
-    let lease = acquire_cli_refresh_lease("cursor").await.unwrap();
-    let mut row = storage::get_subscription("cursor-alice").unwrap();
-    adopt_active_cli_session_before_refresh(&mut row, &lease).unwrap();
-    assert_eq!(
-        crypto::decrypt(row.access_token_encrypted.as_deref().unwrap()),
-        "alice-access-rotated"
-    );
-    assert_eq!(
-        crypto::decrypt(row.refresh_token_encrypted.as_deref().unwrap()),
-        "alice-refresh-rotated"
-    );
-
-    row.access_token_encrypted = Some(crypto::encrypt("alice-access-from-skillstar"));
-    row.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh-from-skillstar"));
-    let mut row = storage::patch_oauth_credentials(&row).unwrap();
-    let outcome = sync_refreshed_active_subscription(&mut row, &lease)
-        .unwrap()
-        .expect("active Cursor account must be projected");
-
-    assert!(outcome.success, "{:?}", outcome.error);
-    assert_eq!(
-        read_cursor_state(sb.home.path(), "cursorAuth/accessToken"),
-        "alice-access-from-skillstar"
-    );
-    assert_eq!(
-        read_cursor_state(sb.home.path(), "cursorAuth/refreshToken"),
-        "alice-refresh-from-skillstar"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn antigravity_refresh_window_adopts_and_projects_the_live_session() {
-    let sb = sandbox();
-    let mut account = subscription("antigravity-alice", "antigravity");
-    account.display_name = "alice@example.com".into();
-    account.access_token_encrypted = Some(crypto::encrypt("alice-access"));
-    account.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh"));
-    storage::upsert_subscription(account).unwrap();
-    write_antigravity_state(
-        sb.home.path(),
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-    activate_subscription("antigravity-alice").await.unwrap();
-
-    write_antigravity_state(
-        sb.home.path(),
-        "alice-access-rotated",
-        "alice-refresh-rotated",
-        "alice@example.com",
-    );
-    let lease = acquire_cli_refresh_lease("antigravity").await.unwrap();
-    let mut row = storage::get_subscription("antigravity-alice").unwrap();
-    adopt_active_cli_session_before_refresh(&mut row, &lease).unwrap();
-    assert_eq!(
-        crypto::decrypt(row.access_token_encrypted.as_deref().unwrap()),
-        "alice-access-rotated"
-    );
-    assert_eq!(
-        crypto::decrypt(row.refresh_token_encrypted.as_deref().unwrap()),
-        "alice-refresh-rotated"
-    );
-
-    row.access_token_encrypted = Some(crypto::encrypt("alice-access-from-skillstar"));
-    row.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh-from-skillstar"));
-    let mut row = storage::patch_oauth_credentials(&row).unwrap();
-    let outcome = sync_refreshed_active_subscription(&mut row, &lease)
-        .unwrap()
-        .expect("active Antigravity account must be projected");
-
-    assert!(outcome.success, "{:?}", outcome.error);
-    let live = read_antigravity_state(sb.home.path());
-    assert_eq!(live.access_token, "alice-access-from-skillstar");
-    assert_eq!(live.refresh_token, "alice-refresh-from-skillstar");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn antigravity_switch_failure_does_not_move_the_active_pin() {
-    let _sb = sandbox();
-    let mut alice = subscription("antigravity-alice", "antigravity");
-    alice.access_token_encrypted = Some(crypto::encrypt("alice-access"));
-    alice.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh"));
-    storage::upsert_subscription(alice).unwrap();
-    let mut bob = subscription("antigravity-bob", "antigravity");
-    bob.access_token_encrypted = Some(crypto::encrypt("bob-access"));
-    bob.refresh_token_encrypted = Some(crypto::encrypt("bob-refresh"));
-    storage::upsert_subscription(bob).unwrap();
-    storage::set_active_subscription("antigravity", "antigravity-alice").unwrap();
-
-    let result = activate_subscription("antigravity-bob").await.unwrap();
-
-    assert!(!result.switch_result.success);
-    assert_eq!(
-        storage::get_active_subscription("antigravity")
-            .unwrap()
-            .as_deref(),
-        Some("antigravity-alice")
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn antigravity_switch_changes_the_real_session_between_two_accounts() {
-    let sb = sandbox();
-    for (id, access, refresh, email) in [
-        (
-            "antigravity-alice",
-            "alice-access",
-            "alice-refresh",
-            "alice@example.com",
-        ),
-        (
-            "antigravity-bob",
-            "bob-access",
-            "bob-refresh",
-            "bob@example.com",
-        ),
-    ] {
-        let mut account = subscription(id, "antigravity");
-        account.display_name = email.into();
-        account.access_token_encrypted = Some(crypto::encrypt(access));
-        account.refresh_token_encrypted = Some(crypto::encrypt(refresh));
-        storage::upsert_subscription(account).unwrap();
-    }
-    write_antigravity_state(
-        sb.home.path(),
-        "alice-access",
-        "alice-refresh",
-        "alice@example.com",
-    );
-
-    activate_subscription("antigravity-alice").await.unwrap();
-    let result = activate_subscription("antigravity-bob").await.unwrap();
-
-    assert!(
-        result.switch_result.success,
-        "{:?}",
-        result.switch_result.error
-    );
-    let live = read_antigravity_state(sb.home.path());
-    assert_eq!(live.access_token, "bob-access");
-    assert_eq!(live.refresh_token, "bob-refresh");
-    assert_eq!(
-        reconcile_cli_account("antigravity").await.unwrap(),
-        Some(CliAccountState::LinkedTo {
-            subscription_id: "antigravity-bob".into()
-        })
-    );
-}
-
-// ── OpenCode: the auth_mode deadlock is gone ─────────────────────────────
-
-#[tokio::test(flavor = "current_thread")]
-async fn opencode_switches_by_capturing_the_cli_login_without_any_api_key() {
-    let sb = sandbox();
-    // Cookie auth mode, so `api_key_encrypted` can never be populated — this
-    // is the account shape that made the old switch path unreachable.
-    let mut sub = subscription("oc-go", "opencode");
-    sub.auth_mode = crate::AuthMode::Cookie;
-    storage::upsert_subscription(sub).unwrap();
-    write_json(
-        &sb.live("opencode"),
-        &json!({
-            "opencode": { "type": "api", "key": "sk-from-opencode-auth-login" },
-            "anthropic": { "type": "oauth", "refresh": "r", "access": "a", "expires": 1 },
-        }),
-    );
-
-    let result = activate_subscription("oc-go").await.unwrap();
-
-    assert!(
-        result.switch_result.success,
-        "{:?}",
-        result.switch_result.error
-    );
-    assert!(is_symlink(&sb.live("opencode")));
-    let snapshot = read_json(&sb.snapshot("opencode", "oc-go"));
-    assert_eq!(snapshot["opencode"]["key"], "sk-from-opencode-auth-login");
-    assert_eq!(
-        snapshot["anthropic"]["refresh"], "r",
-        "another provider's login travels with the snapshot"
-    );
-    assert_eq!(
-        storage::get_active_subscription("opencode")
-            .unwrap()
-            .as_deref(),
-        Some("oc-go")
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn opencode_still_projects_an_api_key_when_the_row_has_one() {
-    let sb = sandbox();
-    let mut sub = subscription("oc-key", "opencode");
-    sub.auth_mode = crate::AuthMode::ApiKey;
-    sub.api_key_encrypted = Some(crypto::encrypt("sk-from-skillstar"));
-    storage::upsert_subscription(sub).unwrap();
-    write_json(
-        &sb.live("opencode"),
-        &json!({ "anthropic": { "type": "api", "key": "sk-anthropic" } }),
-    );
-
-    let result = activate_subscription("oc-key").await.unwrap();
-
-    assert!(
-        result.switch_result.success,
-        "{:?}",
-        result.switch_result.error
-    );
-    let live = read_json(&sb.live("opencode"));
-    assert_eq!(live["opencode"]["type"], "api");
-    assert_eq!(live["opencode"]["key"], "sk-from-skillstar");
-    assert_eq!(live["anthropic"]["key"], "sk-anthropic");
-    assert!(
-        live.get("skillstar").is_none(),
-        "the invented provider key must stay gone"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn opencode_reports_the_missing_credential_instead_of_a_silent_dead_end() {
-    let _sb = sandbox();
-    let mut sub = subscription("oc-empty", "opencode");
-    sub.auth_mode = crate::AuthMode::Cookie;
-    storage::upsert_subscription(sub).unwrap();
-
-    let result = activate_subscription("oc-empty").await.unwrap();
-
-    assert!(!result.switch_result.success);
-    assert_eq!(
-        result.switch_result.error.as_deref(),
-        Some(
-            MaterializeError::NoCapturedSession { tool: "OpenCode" }
-                .to_string()
-                .as_str()
-        ),
-        "the dead end has to name the CLI the user must log into"
-    );
-}
-
-// ── Codex ────────────────────────────────────────────────────────────────
-
-#[tokio::test(flavor = "current_thread")]
-async fn codex_activation_writes_the_cli_token_schema() {
-    let sb = sandbox();
-    let mut sub = subscription("codex-dana", "codex");
-    sub.access_token_encrypted = Some(crypto::encrypt("codex-access"));
-    sub.id_token_encrypted = Some(crypto::encrypt(CODEX_ID_TOKEN));
-    sub.refresh_token_encrypted = Some(crypto::encrypt("codex-refresh"));
-    sub.oauth_account_id = Some("uid-dana".into());
-    storage::upsert_subscription(sub).unwrap();
-
-    let result = activate_subscription("codex-dana").await.unwrap();
-
-    assert!(
-        result.switch_result.success,
-        "{:?}",
-        result.switch_result.error
-    );
-    let live = read_json(&sb.live("codex"));
-    assert!(live["OPENAI_API_KEY"].is_null());
-    assert_eq!(live["tokens"]["access_token"], "codex-access");
-    assert_eq!(live["tokens"]["id_token"], CODEX_ID_TOKEN);
-    assert_eq!(live["tokens"]["refresh_token"], "codex-refresh");
-    assert_eq!(live["tokens"]["account_id"], "uid-dana");
-    assert!(live["last_refresh"].is_string());
-    assert!(is_symlink(&sb.live("codex")));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn codex_missing_id_token_fails_without_moving_the_pin() {
-    let _sb = sandbox();
-    let mut sub = subscription("codex-dana", "codex");
-    sub.access_token_encrypted = Some(crypto::encrypt("codex-access"));
-    storage::upsert_subscription(sub).unwrap();
-
-    let result = activate_subscription("codex-dana").await.unwrap();
-
-    assert!(!result.switch_result.success);
-    assert_eq!(
-        result.switch_result.error.as_deref(),
-        Some(
-            MaterializeError::MissingSecret {
-                tool: "Codex",
-                field: "id_token",
-                remedy: "请重新登录该账号补充凭证",
-            }
-            .to_string()
-            .as_str()
-        )
-    );
-    assert!(storage::get_active_subscription("codex").unwrap().is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn codex_absorbs_a_rotation_the_cli_wrote_into_the_snapshot() {
-    let sb = sandbox();
-    let mut sub = subscription("codex-dana", "codex");
-    sub.access_token_encrypted = Some(crypto::encrypt("codex-access"));
-    sub.id_token_encrypted = Some(crypto::encrypt(CODEX_ID_TOKEN));
-    sub.refresh_token_encrypted = Some(crypto::encrypt("codex-refresh"));
-    storage::upsert_subscription(sub).unwrap();
-    activate_subscription("codex-dana").await.unwrap();
-
-    let mut root = read_json(&sb.live("codex"));
-    root["tokens"]["access_token"] = json!("codex-access-v2");
-    root["tokens"]["refresh_token"] = json!("codex-refresh-v2");
-    fs::write(sb.live("codex"), serde_json::to_vec_pretty(&root).unwrap()).unwrap();
-
-    assert_eq!(
-        sb.custody("codex").reconcile().unwrap(),
-        LinkState::LinkedTo("codex-dana".into())
-    );
-    let row = storage::get_subscription("codex-dana").unwrap();
-    assert_eq!(
-        crypto::decrypt(row.access_token_encrypted.as_deref().unwrap()),
-        "codex-access-v2"
-    );
-    assert_eq!(
-        crypto::decrypt(row.refresh_token_encrypted.as_deref().unwrap()),
-        "codex-refresh-v2"
-    );
-}
-
 // ── resync ───────────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "current_thread")]
@@ -1358,59 +808,4 @@ async fn a_cli_without_an_official_lock_gets_a_private_one() {
             .join("auth.json.skillstar.lock")
             .exists()
     );
-}
-
-// ── target-level units (no filesystem) ───────────────────────────────────
-
-#[test]
-fn codex_access_token_covers_both_oauth_and_api_key_shapes() {
-    let target = CodexTarget;
-    assert_eq!(
-        target
-            .access_token(&json!({ "tokens": { "access_token": "at" } }))
-            .as_deref(),
-        Some("at")
-    );
-    assert_eq!(
-        target
-            .access_token(&json!({ "OPENAI_API_KEY": "sk-1" }))
-            .as_deref(),
-        Some("sk-1")
-    );
-    assert!(
-        target
-            .access_token(&json!({ "OPENAI_API_KEY": null }))
-            .is_none()
-    );
-}
-
-#[test]
-fn opencode_expiry_is_read_as_milliseconds() {
-    let target = OpenCodeTarget;
-    let root =
-        json!({ "opencode": { "type": "oauth", "access": "a", "expires": 1_700_000_000_000i64 } });
-    assert_eq!(target.expires_at(&root), Some(1_700_000_000));
-    assert!(
-        target
-            .expires_at(&json!({ "opencode": { "type": "api", "key": "k" } }))
-            .is_none()
-    );
-}
-
-#[test]
-fn an_opencode_credential_has_no_identity_so_it_can_never_falsely_conflict() {
-    let target = OpenCodeTarget;
-    let identity = target.identity(&json!({ "opencode": { "type": "api", "key": "k" } }));
-    assert!(identity.is_empty());
-    assert!(
-        !identity.conflicts(&super::target::subscription_identity(&subscription(
-            "x", "opencode"
-        )))
-    );
-}
-
-#[test]
-fn link_mode_names_are_stable() {
-    assert_eq!(LinkMode::Symlink.as_str(), "symlink");
-    assert_eq!(LinkMode::Copy.as_str(), "copy");
 }

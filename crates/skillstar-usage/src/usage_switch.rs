@@ -585,7 +585,6 @@ pub fn sync_refreshed_active_subscription(
 }
 
 #[cfg(test)]
-#[path = "usage_switch/custody_tests.rs"]
 mod custody_tests;
 
 #[cfg(test)]
