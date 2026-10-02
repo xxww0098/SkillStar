@@ -19,7 +19,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 
 use crate::ledger::{ErrorKind, Record, TokenCounts};
-use crate::rules::{Caller, request_agent};
+use crate::route::rules::{Caller, request_agent};
 
 /// How many forwarded calls the ring keeps.
 pub const TRACE_KEEP: usize = 60;
@@ -89,7 +89,7 @@ pub(crate) fn note_forward(
 /// The session-candidate header values, taken while the request is still
 /// owned. `affinity::session_id` applies its precedence over the pairs.
 pub(crate) fn session_headers(headers: &hyper::HeaderMap) -> Vec<(&'static str, String)> {
-    crate::affinity::SESSION_HEADERS
+    crate::route::affinity::SESSION_HEADERS
         .iter()
         .filter_map(|name| {
             headers
@@ -107,7 +107,7 @@ pub(crate) fn session_of(sessions: &[(&'static str, String)], body: &[u8]) -> St
         .iter()
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
-    crate::affinity::session_id(&pairs, body)
+    crate::route::affinity::session_id(&pairs, body)
 }
 
 /// What dispatch knew when a turn started. The response side — status, the

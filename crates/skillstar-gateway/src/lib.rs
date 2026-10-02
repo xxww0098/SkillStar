@@ -10,29 +10,20 @@
 //! It does not own provider keys, usage accounts, or the decision model.
 
 mod access;
-mod affinity;
 mod agents;
+mod catalog;
 mod chatgpt;
-mod classify;
 mod claude;
 mod codex;
 mod codex_prompt;
 mod effort;
-mod group;
-mod hold;
 mod ledger;
-mod listen;
-mod models_dev;
-mod names;
 mod outbound;
-mod profile;
 mod redact;
-mod rest;
 mod route;
-mod routing_file;
-mod rules;
 mod serve;
 mod sign;
+mod store;
 mod surface;
 mod trace;
 mod translate;
@@ -41,18 +32,13 @@ mod vision;
 mod wsl;
 
 pub use access::{check_inbound, gateway_key};
-pub use affinity::{
-    AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
-    CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,
-};
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
     desktop_alias, desktop_dirs, desktop_effort_alias, token_for, written_loopback_label,
     written_model_ref,
 };
-pub use classify::{
-    CLASSIFY_KEEP, CLASSIFY_REST, CLASSIFY_TIMEOUT, ClassifyCall, ClassifyReply, ClassifyTurn,
-    JEV_SURE, ROUTER_USER_AGENT, order_with_classifier, stored_classifier,
+pub use catalog::cache::{
+    MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,
 };
 pub use claude::{
     AccountSnapshot, CallbackOutcome, ClaudeBridge, ClaudeError, ClaudeLaunch, ClaudeRun,
@@ -63,39 +49,47 @@ pub use claude::{
 pub use codex::{ApplyError, CodexRoute, apply_agent, apply_agent_with_model, release_agent};
 pub use codex_prompt::{CODEX_COMPACT_PROMPT, CODEX_SUMMARY_PREFIX, COMPACTION_MARKER};
 pub use effort::{apply_upstream_effort, model_efforts};
-pub use group::{
-    GROUP_PREFIX, MAX_NEST, SaveGroupError, SavedGroup, ServedModel, expand_group, save_group,
-    stored_group_ids, stored_groups,
-};
-pub use hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
 pub use ledger::{ErrorKind, Record, TokenCounts, append, key_fingerprint, load};
-pub use listen::{SaveListenError, listen_label, save_listen};
-pub use models_dev::{
-    MODELS_DEV_URL, ModelsDevError, models_dev_cache_path, models_dev_load, models_dev_sync,
-};
-pub use names::{SaveModelNameError, model_label, save_model_name, stored_model_names};
 pub use outbound::{clear_outbound_log, outbound_log};
-pub use profile::{
-    ApplyProfileError, ProfileAgent, ProfileApply, SaveProfileError, apply_profile, profile_names,
-    save_profile,
-};
 pub use redact::{mask_outbound, unmask_response};
-pub use rest::{
+pub use route::affinity::{
+    AffinityChoice, AffinityMode, AffinityStick, AffinityTurn, AffinityWhy, CACHE_COLD,
+    CACHE_WORTH, STICK_KEEP, affinity, keep_first, session_id,
+};
+pub use route::classify::{
+    CLASSIFY_KEEP, CLASSIFY_REST, CLASSIFY_TIMEOUT, ClassifyCall, ClassifyReply, ClassifyTurn,
+    JEV_SURE, ROUTER_USER_AGENT, order_with_classifier, stored_classifier,
+};
+pub use route::groups::{ServedModel, expand_group};
+pub use route::hold::{HOLD_LONGEST, HOLD_MOST, HoldWriter};
+pub use route::order::{
+    AllowanceSnapshot, RouteCandidate, RouteMode, USED_SHARE, route_mode, route_smart,
+};
+pub use route::rest::{
     CREDIT_REST, FALLBACK_COOLDOWN, LONGEST_QUOTA, LONGEST_RETRY, LONGEST_WAIT, QUOTA_REST,
     RESETS_HEADER, Rest, RestSeat, UpstreamFailure, VERIFY_HOLD, VERIFY_REST, next_candidate,
     rest_after, verify_held,
 };
-pub use route::{
-    AllowanceSnapshot, RouteCandidate, RouteMode, RouteOwner, USED_SHARE, route_mode, route_smart,
-    stored_route_mode,
+pub use route::rules::{
+    Caller, GroupRule, RuleRequest, order_with_rules, request_agent, stored_rules,
 };
-pub use routing_file::{SaveRoutingError, routing_state, save_routing};
-pub use rules::{Caller, GroupRule, RuleRequest, order_with_rules, request_agent, stored_rules};
 pub use serve::{
     ADDR_ENV, DEFAULT_ADDR, HEADER_READ_TIMEOUT, IDLE_TIMEOUT, PLACEHOLDER_BEARER, REFUSED_PORT,
     ServeError, ServeOptions, Stop, published_origin, resolve_addr, serve,
 };
 pub use sign::{AccountBook, ProviderSnapshot, SignInput, SignedUpstream, sign_upstream};
+pub use store::groups::{
+    GROUP_PREFIX, MAX_NEST, SaveGroupError, SavedGroup, save_group, stored_group_ids, stored_groups,
+};
+pub use store::listen::{SaveListenError, listen_label, save_listen};
+pub use store::names::{SaveModelNameError, model_label, save_model_name, stored_model_names};
+pub use store::profiles::{
+    ApplyProfileError, ProfileAgent, ProfileApply, SaveProfileError, apply_profile, profile_names,
+    save_profile,
+};
+pub use store::routing::{
+    RouteOwner, SaveRoutingError, routing_state, save_routing, stored_route_mode,
+};
 pub use trace::{RecentCall, TRACE_KEEP, clear_recent_calls, note_recent_call, recent_calls};
 pub use translate::{Protocol, TranslateError, outbound_body, upstream_body};
 pub use visible::{catalog_serves, listed_ids, model_shown, shown_model_ids};

@@ -58,7 +58,7 @@ SkillStar/
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场 | 技能安装实现 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理 | Usage 订阅、Marketplace 快照 |
 | `skillstar-decision` | 本地 AgentJev-0.6B 决策模型：checkpoint 的文件规格/下载/校验、`agentjev.decision.v1` 请求校验与答案整形、Qwen3-0.6B 主干与候选集合头的前向（共享前缀 KV 复用）；workspace 内唯一允许引入 ML 运行时（candle / tokenizers）的 crate | Provider store、tool sync、App AI 的 chat/summarize 路径、任何 Tauri 类型；不拥有业务闸门/路由的判定策略（由调用方决定阈值与后果） |
-| `skillstar-gateway` | 本机模型网关：协议翻译、环回监听、Claude 进程桥、用注入的账户快照签上游，以及 Agent 配置写入 | 密钥表、Usage 订阅、决策模型。不读取 `model_providers.json`，不打开 Usage 存储，不发起配额请求 |
+| `skillstar-gateway` | 本机模型网关：协议翻译、环回监听、Claude 进程桥、用注入的账户快照签上游，以及 Agent 配置写入。crate 内分 `store/`（`model_gateway.json` schema 属主）、`route/`（路由决策组，不开文件）、`catalog/`（models.dev 目录缓存） | 密钥表、Usage 订阅、决策模型。不读取 `model_providers.json`，不打开 Usage 存储，不发起配额请求 |
 | `skillstar-usage` | catalog、OAuth/API-key/Cookie/TokenImport fetcher、加密 token、`tool_paths` / `tool_store` 本地存储基元、请求构建器；Agent 会话文件只读解析（`sessions`：增量 checkpoint 落 `data_root()/sessions/`，claude-code/claude-desktop projects JSONL 家族）；CLI 凭证切换引擎（`usage_switch`：软链快照 custody、逐 CLI target、IDE 凭据写回注册表，D-077）；桌面应用多开（`instances`，按 D-054 不绑定 Usage catalog 数据） | Models provider store；`sessions` 只读 Agent 自己的会话文件，不写 Agent 目录 |
 | `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
 | `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；Usage 前端 facade 与 DTO 投影（`usage/dto`，D-034）；启动本机模型网关 | Tauri command 宏或窗口对象。网关协议不放在这里；不再承载单域 Usage 切换/多开实现（D-077） |

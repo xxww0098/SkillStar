@@ -3,12 +3,7 @@
 //! Smart puts whoever has room first, then unknown, then used up.
 //! Listed order, a caller-owned turn, and least-used sit beside that.
 //! Least-used reads the snapshot it was given and does not ask for quota.
-//!
-//! The mode is the `routing` field on a provider or group row in
-//! `config_dir()/model_gateway.json`. A missing file is smart. This module
-//! does not create or rewrite that file.
-
-use serde::Deserialize;
+//! The stored `routing` field is read by `store::routing`.
 
 /// Share of a window at which a candidate is treated as used up.
 pub const USED_SHARE: f64 = 98.0;
@@ -91,13 +86,6 @@ impl RouteMode {
     }
 }
 
-/// Whose `routing` field to read in `model_gateway.json`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RouteOwner {
-    Provider,
-    Group,
-}
-
 /// Order `candidates` and report the rotate counter to store next.
 ///
 /// Fewer than two candidates leave both the list and `turn` alone. Only
@@ -116,29 +104,6 @@ pub fn route_mode(
         RouteMode::Rotate => rotate(candidates, turn),
         RouteMode::Usage => (usage_order(candidates), turn),
     }
-}
-
-/// Routing stored for one provider or group.
-///
-/// A missing file, a missing row, a missing or empty `routing` field, an
-/// unknown string, or a file that is not JSON is smart. This does not
-/// create or rewrite the file.
-pub fn stored_route_mode(owner: RouteOwner, id: &str) -> RouteMode {
-    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
-    let Ok(bytes) = std::fs::read(&path) else {
-        return RouteMode::Smart;
-    };
-    let Ok(file) = serde_json::from_slice::<GatewayFile>(&bytes) else {
-        return RouteMode::Smart;
-    };
-    let rows = match owner {
-        RouteOwner::Provider => &file.providers,
-        RouteOwner::Group => &file.groups,
-    };
-    rows.iter()
-        .find(|row| row.id == id)
-        .map(|row| RouteMode::parse(row.routing.as_deref().unwrap_or("")))
-        .unwrap_or(RouteMode::Smart)
 }
 
 fn ids(candidates: &[RouteCandidate<'_>]) -> Vec<String> {
@@ -176,19 +141,4 @@ fn share(candidate: &RouteCandidate<'_>) -> f64 {
         .allowance
         .map(|snapshot| snapshot.used)
         .unwrap_or(0.0)
-}
-
-#[derive(Deserialize)]
-struct GatewayFile {
-    #[serde(default)]
-    providers: Vec<GatewayRow>,
-    #[serde(default)]
-    groups: Vec<GatewayRow>,
-}
-
-#[derive(Deserialize)]
-struct GatewayRow {
-    #[serde(default)]
-    id: String,
-    routing: Option<String>,
 }

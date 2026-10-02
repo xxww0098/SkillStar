@@ -13,7 +13,7 @@ use regex::bytes::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::route::USED_SHARE;
+use super::order::USED_SHARE;
 
 /// Out of credit, until someone tops it up.
 pub const CREDIT_REST: Duration = Duration::from_secs(30 * 60);

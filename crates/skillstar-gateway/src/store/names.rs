@@ -99,7 +99,8 @@ fn catalog_lists(id: &str) -> bool {
     if provider.is_empty() || provider == "group" || model.is_empty() || model.contains('/') {
         return false;
     }
-    let Ok(value) = serde_json::from_slice::<Value>(&crate::models_dev::models_dev_load()) else {
+    let Ok(value) = serde_json::from_slice::<Value>(&crate::catalog::cache::models_dev_load())
+    else {
         return false;
     };
     value

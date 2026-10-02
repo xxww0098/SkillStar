@@ -8,12 +8,13 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use skillstar_core::infra::fs_ops::atomic_write;
 
-use crate::affinity::AffinityMode;
-use crate::group::GROUP_PREFIX;
-use crate::route::{RouteMode, RouteOwner, stored_route_mode};
+use super::groups::GROUP_PREFIX;
+use crate::route::affinity::AffinityMode;
+use crate::route::order::RouteMode;
 
 /// The gateway file could not be read or replaced, or the id is empty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,4 +171,49 @@ fn affinity_of(owner: RouteOwner, id: &str) -> AffinityMode {
         return AffinityMode::Auto;
     };
     AffinityMode::parse(row.get("affinity").and_then(Value::as_str).unwrap_or(""))
+}
+
+/// Whose `routing` field to read in `model_gateway.json`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteOwner {
+    Provider,
+    Group,
+}
+
+/// Routing stored for one provider or group.
+///
+/// A missing file, a missing row, a missing or empty `routing` field, an
+/// unknown string, or a file that is not JSON is smart. This does not
+/// create or rewrite the file.
+pub fn stored_route_mode(owner: RouteOwner, id: &str) -> RouteMode {
+    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
+    let Ok(bytes) = std::fs::read(&path) else {
+        return RouteMode::Smart;
+    };
+    let Ok(file) = serde_json::from_slice::<GatewayFile>(&bytes) else {
+        return RouteMode::Smart;
+    };
+    let rows = match owner {
+        RouteOwner::Provider => &file.providers,
+        RouteOwner::Group => &file.groups,
+    };
+    rows.iter()
+        .find(|row| row.id == id)
+        .map(|row| RouteMode::parse(row.routing.as_deref().unwrap_or("")))
+        .unwrap_or(RouteMode::Smart)
+}
+
+#[derive(Deserialize)]
+struct GatewayFile {
+    #[serde(default)]
+    providers: Vec<GatewayRow>,
+    #[serde(default)]
+    groups: Vec<GatewayRow>,
+}
+
+#[derive(Deserialize)]
+struct GatewayRow {
+    #[serde(default)]
+    id: String,
+    routing: Option<String>,
 }

@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 use crate::claude::AccountSnapshot;
-use crate::route::AllowanceSnapshot;
+use crate::route::order::AllowanceSnapshot;
 
 /// Grok CLI version magpie sends when it has not probed a newer binary.
 const GROK_CLIENT_VERSION: &str = "1.0.41";

@@ -71,7 +71,7 @@ fn member_source(explicit: &str, body_model: &str) -> String {
     }
     if let Some(id) = body_model.trim().strip_prefix("group/") {
         let id = id.trim();
-        if let Some(member) = crate::group::stored_groups()
+        if let Some(member) = crate::store::groups::stored_groups()
             .into_iter()
             .find(|group| group.id == id)
             .and_then(|group| group.members.into_iter().next())
@@ -228,7 +228,7 @@ fn catalog_levels(model_id: &str) -> Vec<String> {
 }
 
 fn catalog_model(provider: &str, model: &str) -> Option<Value> {
-    let bytes = crate::models_dev::models_dev_load();
+    let bytes = crate::catalog::cache::models_dev_load();
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     value
         .get(provider)?

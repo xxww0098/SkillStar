@@ -162,7 +162,7 @@ pub fn resolve_addr() -> Result<SocketAddr, ServeError> {
     if addr.port() == REFUSED_PORT {
         return Err(ServeError::RefusedPort);
     }
-    if crate::listen::listen_is_lan() {
+    if crate::store::listen::listen_is_lan() {
         addr.set_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     }
     Ok(addr)
@@ -293,10 +293,10 @@ async fn dispatch(
         .map(str::to_string);
     let method = request.method().clone();
     let path = request.uri().path().to_string();
-    let agent = crate::rules::request_agent(&crate::rules::Caller {
+    let agent = crate::route::rules::request_agent(&crate::route::rules::Caller {
         authorization: &authorization,
         user_agent: &user_agent,
-        ..crate::rules::Caller::default()
+        ..crate::route::rules::Caller::default()
     });
     match crate::surface::plan(method.as_str(), &path, upgrade.as_deref(), &agent) {
         crate::surface::Plan::Local(local) => respond_local(local, head),

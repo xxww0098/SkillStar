@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
-use crate::route::{RouteCandidate, USED_SHARE};
+use super::order::{RouteCandidate, USED_SHARE};
 
 /// Tokens read from the vendor cache that make a conversation worth keeping
 /// across turns.

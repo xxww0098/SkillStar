@@ -1,37 +1,11 @@
-//! Which catalog rows an agent is shown.
-//!
-//! `visible` in `model_gateway.json` maps an agent id to names. A name is a
-//! family tag, a provider id, or a group id (`group/<id>` counts as that
-//! group). `family` is a field on a provider or group row in the same file.
-//! A missing agent and an empty list both show every row. Routing does not
-//! read this map. A display name is not a name.
+//! Which catalog rows an agent is shown: the projections built on the
+//! stored `visible` map. The map itself, and the `family` field, are read
+//! by `store::visible`.
 
 use serde_json::Value;
 
 use crate::GROUP_PREFIX;
-
-/// Names that narrow `agent`. `None` means the agent sees every row.
-pub fn visible_names(agent: &str) -> Option<Vec<String>> {
-    let agent = agent.trim();
-    if agent.is_empty() {
-        return None;
-    }
-    let doc = read_doc();
-    let map = doc.get("visible")?.as_object()?;
-    let value = map
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(agent))
-        .map(|(_, value)| value)?;
-    let list = value.as_array()?;
-    let names: Vec<String> = list
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .collect();
-    if names.is_empty() { None } else { Some(names) }
-}
+use crate::store::visible::{catalog_ids, family_of, visible_names};
 
 /// Whether `agent` is shown `id`. An agent that is not narrowed sees every id.
 pub fn model_shown(agent: &str, id: &str) -> bool {
@@ -39,11 +13,9 @@ pub fn model_shown(agent: &str, id: &str) -> bool {
         return true;
     };
     let aliases = names_of(id);
-    allowed.iter().any(|name| {
-        aliases
-            .iter()
-            .any(|alias| alias.eq_ignore_ascii_case(name))
-    })
+    allowed
+        .iter()
+        .any(|name| aliases.iter().any(|alias| alias.eq_ignore_ascii_case(name)))
 }
 
 /// Catalog ids this agent is shown, provider models then saved groups.
@@ -86,7 +58,9 @@ pub fn catalog_serves(id: &str) -> bool {
         let bare = bare.trim();
         return !bare.is_empty()
             && !bare.contains('/')
-            && crate::group::stored_group_ids().iter().any(|saved| saved == bare);
+            && crate::store::groups::stored_group_ids()
+                .iter()
+                .any(|saved| saved == bare);
     }
     let Some((provider, model)) = id.split_once('/') else {
         return false;
@@ -94,7 +68,8 @@ pub fn catalog_serves(id: &str) -> bool {
     if provider.is_empty() || provider == "group" || model.is_empty() || model.contains('/') {
         return false;
     }
-    let Ok(value) = serde_json::from_slice::<Value>(&crate::models_dev::models_dev_load()) else {
+    let Ok(value) = serde_json::from_slice::<Value>(&crate::catalog::cache::models_dev_load())
+    else {
         return false;
     };
     value
@@ -128,57 +103,4 @@ fn names_of(id: &str) -> Vec<String> {
         names.push(family);
     }
     names
-}
-
-fn family_of(list: &str, id: &str) -> Option<String> {
-    read_doc()
-        .get(list)?
-        .as_array()?
-        .iter()
-        .find(|row| row.get("id").and_then(Value::as_str) == Some(id))
-        .and_then(|row| row.get("family"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|family| !family.is_empty())
-        .map(str::to_string)
-}
-
-fn catalog_ids() -> Vec<String> {
-    let mut ids = Vec::new();
-    if let Ok(Value::Object(providers)) =
-        serde_json::from_slice::<Value>(&crate::models_dev::models_dev_load())
-    {
-        for (provider, entry) in providers {
-            if provider.is_empty() || provider.contains('/') {
-                continue;
-            }
-            let Some(models) = entry.get("models").and_then(Value::as_object) else {
-                continue;
-            };
-            for model in models.keys() {
-                if model.is_empty() || model.contains('/') {
-                    continue;
-                }
-                ids.push(format!("{provider}/{model}"));
-            }
-        }
-    }
-    for id in crate::group::stored_group_ids() {
-        if id.is_empty() || id.contains('/') {
-            continue;
-        }
-        ids.push(format!("{GROUP_PREFIX}{id}"));
-    }
-    ids
-}
-
-fn read_doc() -> Value {
-    let path = skillstar_core::infra::paths::config_dir().join("model_gateway.json");
-    let Ok(bytes) = std::fs::read(path) else {
-        return serde_json::json!({});
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(value @ Value::Object(_)) => value,
-        _ => serde_json::json!({}),
-    }
 }

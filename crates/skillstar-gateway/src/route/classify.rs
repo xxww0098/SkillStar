@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 use serde_json::Value;
 
 use crate::STICK_KEEP;
-use crate::rules::{GroupRule, RuleRequest, matches_now, order_with_rules};
+use super::rules::{GroupRule, RuleRequest, matches_now, order_with_rules};
 
 /// How sure the classifier must be before an intent counts.
 pub const JEV_SURE: f64 = 0.4;

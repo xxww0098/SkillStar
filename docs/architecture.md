@@ -58,7 +58,7 @@ flowchart LR
 | 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `skillstar-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
 | Models provider 与工具同步状态 | `~/.skillstar/config/model_providers.json`（v4：`providers` + `bindings`）及 Agent 配置文件 | `skillstar-models` |
-| 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走。缺文件、空的 `routing`，以及读不出来的文件，都是 smart。启动不创建、不改写这个文件 |
+| 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走；crate 内读写归 `store/`，models.dev 目录缓存在 `catalog/`。缺文件、空的 `routing`，以及读不出来的文件，都是 smart。启动不创建、不改写这个文件 |
 | 本地决策模型 checkpoint（AgentJev-0.6B，1.2 GB） | 默认 `~/.skillstar/models/agentjev-0.6b/`；`SKILLSTAR_DECISION_MODEL_DIR` 覆盖目录，`SKILLSTAR_HF_ENDPOINT` / `HF_ENDPOINT` 覆盖下载源 | `skillstar-decision`；四个文件按固定 revision + SHA-256 校验，缺一个都不能加载。权重不进仓库，也不进 rolling 清理之外的位置 |
 | 迁移前的 provider store 快照 | `~/.skillstar/config/model_providers.v3.json` | `skillstar-models::providers::store_v4`；**不进 rolling 清理**，它是迁移报告「撤销」按钮的依据 |
 | Provider 自身 `/v1/models` 返回的模型目录 | `~/.skillstar/cache/model_catalog/<provider_id>.json` | `skillstar-models::providers::catalog_cache`；从 provider 行搬出来的——目录可重新拉取、绑定不可，两者不该共享同一份持久性保证，也不该让几百个模型的原始 JSON 反复重写进存着凭据的文件 |
