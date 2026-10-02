@@ -4,9 +4,11 @@
 //! subscription signing, the listener, the Claude process bridge, the
 //! Codex config writer, WSL Codex, the models.dev catalog cache, the
 //! file-agent loopback writer, named profiles, model display names, effort
-//! fitting, per-agent visible families, and the in-memory ring of recent calls.
+//! fitting, per-agent visible families, the install-level gateway key with the
+//! LAN inbound gate, and the in-memory ring of recent calls.
 //! It does not own provider keys, usage accounts, or the decision model.
 
+mod access;
 mod affinity;
 mod agents;
 mod chatgpt;
@@ -36,6 +38,7 @@ mod visible;
 mod vision;
 mod wsl;
 
+pub use access::{check_inbound, gateway_key};
 pub use agents::{
     DESKTOP_PROFILE_ID, FILE_AGENTS, apply_gateway, cindy_imported, cindy_link, desktop_accepts,
     desktop_alias, desktop_dirs, desktop_effort_alias, token_for, written_loopback_label,

@@ -2,16 +2,19 @@
 
 use skillstar_gateway::{SaveListenError, listen_label, save_listen};
 
-/// Why the listen mode was not saved.
+/// Why the listen mode was not saved. `Key` means `lan` was refused because the
+/// install-level gateway key could not be loaded or created.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveListenControlError {
     Store,
+    Key,
 }
 
 impl std::fmt::Display for SaveListenControlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Store => "listen_store",
+            Self::Key => "listen_key",
         })
     }
 }
@@ -31,5 +34,6 @@ pub fn loopback_origin() -> String {
 pub fn save_listen_mode(mode: &str) -> Result<(), SaveListenControlError> {
     save_listen(mode).map_err(|error| match error {
         SaveListenError::Store => SaveListenControlError::Store,
+        SaveListenError::Key => SaveListenControlError::Key,
     })
 }

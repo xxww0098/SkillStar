@@ -3,6 +3,8 @@
 //! Logged-in sets `openai_base_url` to `{origin}/backend-api/codex`. API mode
 //! writes `[model_providers.skillstar]`, points `model_provider` and
 //! `model_catalog_json` at it, and writes an empty `skillstar-models.json`.
+//! The table's bearer is the placeholder on a loopback origin, and the
+//! install-level gateway key when the origin is off-loopback (WSL NAT).
 //! The provider table and the catalog file stay after release: a thread opened
 //! on that provider still has to find the table. This module does not read
 //! Usage, `auth.json`, or the provider store. The caller names the route.
@@ -126,7 +128,19 @@ fn apply_codex_full(
     let origin = origin.trim_end_matches('/');
     match route {
         CodexRoute::LoggedIn => apply_logged_in(agent, origin, home),
-        CodexRoute::Api => apply_api(agent, origin, home, catalog_native, model),
+        CodexRoute::Api => {
+            // A loopback origin (this machine and WSL mirrored) keeps the
+            // placeholder bearer; a NAT origin's peer is not loopback, so the
+            // real gateway key must be written — and when it cannot be, the
+            // takeover fails rather than writing a placeholder the LAN gate
+            // would reject.
+            let bearer = if crate::access::origin_is_loopback(origin) {
+                PLACEHOLDER_BEARER.to_string()
+            } else {
+                crate::access::gateway_key()?
+            };
+            apply_api(agent, origin, home, catalog_native, model, &bearer)
+        }
     }
 }
 
@@ -160,6 +174,7 @@ fn apply_api(
     home: &Path,
     catalog_native: Option<&str>,
     model: Option<&str>,
+    bearer: &str,
 ) -> Result<(), ApplyError> {
     let base = format!("{origin}/v1");
     let catalog = home.join(".codex").join(CATALOG_FILE);
@@ -171,7 +186,7 @@ fn apply_api(
     let path = config_path(home);
     let mut doc = read_doc(&path)?;
     let mut stash = load_stash()?;
-    doc.set_provider_table(&base);
+    doc.set_provider_table(&base, bearer);
     take_over(agent, &mut doc, &mut stash, "model_provider", PROVIDER_NAME);
     take_over(
         agent,
@@ -389,17 +404,16 @@ impl Doc {
         }
     }
 
-    fn set_provider_table(&mut self, base_url: &str) {
+    /// `bearer` is the placeholder for a loopback origin, and the install-level
+    /// gateway key for a NAT one.
+    fn set_provider_table(&mut self, base_url: &str, bearer: &str) {
         let header = format!("[model_providers.{PROVIDER_NAME}]");
         let block = vec![
             format!("{header}\n"),
             format!("name = {}\n", quote_basic(PROVIDER_NAME)),
             format!("base_url = {}\n", quote_basic(base_url)),
             "wire_api = \"responses\"\n".to_string(),
-            format!(
-                "experimental_bearer_token = {}\n",
-                quote_basic(PLACEHOLDER_BEARER)
-            ),
+            format!("experimental_bearer_token = {}\n", quote_basic(bearer)),
         ];
         if let Some(start) = self
             .lines

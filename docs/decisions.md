@@ -718,6 +718,15 @@
 - 后果：获得——Usage 块单 crate 自洽（凭证读写同屋檐），`skillstar-app` 缩回纯跨域层；滚动备份与 sandbox 变量名不再三处漂移。承担——skillstar-usage 编译单元变大；凭证路径语义在 models 与 usage 仍各持一份（core 只收敛无域属性部分），以注释互指；app 的 tokio 测试锁与 usage 的 std 测试锁合并为一把 std Mutex（`EnvGuard` 自持锁，跨 await 由 guard 结构体包裹）；fetcher 的 `codex_auth_path()` 刻意保持旧语义（默认安装路径读取），与 `switch_codex_auth_path()` 的差异留待后续统一。
 - 证据：`crates/skillstar-usage/src/usage_switch/`、`crates/skillstar-usage/src/instances/`、`crates/skillstar-usage/src/tool_paths.rs`、`crates/skillstar-usage/src/test_support.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-core/src/infra/paths.rs`、`crates/skillstar-models/src/tool_sync/backup_merge.rs`、`src-tauri/src/commands/instances.rs`、[boundaries.md](./boundaries.md)。
 
+## D-078：LAN 门禁采用 loopback 放行 + 非 loopback 强制安装级 gateway key
+
+- 日期：2026-10-02
+- 状态：accepted
+- 背景：网关把 `listen` 写成 `lan` 后听 `0.0.0.0`，而写进 Agent 文件的 bearer 全是可预测占位（`skillstar`、`skillstar-<id>`），局域网上任何人都能拿任意占位 bearer 使用这台机器的网关，等于无鉴权（详见 [errors.md](./errors.md)）。对照 magpie `internal/gateway/lan.go` 的 `callerKey`/`local` 模式，需要选定鉴权模型（choices C2）。
+- 决策：loopback peer 对任意 bearer 放行，行为零变化（归因通道 `skillstar-<agent>`、选择通道 `skillstar/<model>`、本地 GET 面、Claude MCP callback 自带的环回 + token 双门全部不动）；非 loopback peer（LAN、WSL NAT）对除 callback 外的所有请求强制安装级 gateway key，不做路径白名单（`GET /`、`/api/hello`、`/v1/models` 一并拦），槽位顺序 `Authorization`（剥 `Bearer `）→ `x-api-key` → `x-goog-api-key` → `?key=`，任一匹配即过。key 是 `config_dir()/gateway.key`，≥32 字节随机数的 hex，Unix `0600` 惰性生成（先例 `redact.key`），无 UI、无轮换、不进 DTO/日志/账本。`save_listen("lan")` 与非 loopback `serve` 启动先确保 key 可用，否则拒绝且不产生副作用。WSL NAT 的 Codex 配置写实际 key，mirrored/本机写占位。
+- 后果：获得——LAN 暴露面从「任意占位 bearer 即可用」收敛到「持有 key 文件内容才可用」，环回上的既有 Agent 配置一个字节都不用改。承担——对同用户本机攻击者不设防（key 文件用户可读，严格校验环回 bearer 对其增益约 0）；没有鉴权槽的 Agent 在非 loopback 上不可用，OMP（`auth:none`，无法携带 key）仅 loopback 可用，人工检查点确认可接受；key 无进程级缓存，每次非环回请求读一次 key 文件（小文件、LAN 流量低，换取测试沙箱可隔离）。
+- 证据：`crates/skillstar-gateway/src/access.rs`、`crates/skillstar-gateway/src/serve.rs`（dispatch 门禁与 `ServeError::LanNeedsKey`）、`crates/skillstar-gateway/src/listen.rs`（`SaveListenError::Key`）、`crates/skillstar-gateway/src/codex.rs`（NAT bearer）、`crates/skillstar-gateway/tests/access.rs`、`crates/skillstar-gateway/tests/wsl_codex.rs`，参照 magpie `internal/gateway/lan.go`。
+
 ## 新增记录格式
 
 

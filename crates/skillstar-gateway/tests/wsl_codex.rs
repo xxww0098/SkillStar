@@ -162,7 +162,7 @@ fn write_both(distro: &WslCodex, root: &Path) -> (String, String) {
     )
 }
 
-fn assert_urls(logged: &str, api: &str, host: &str) {
+fn assert_urls(logged: &str, api: &str, host: &str, bearer: &str) {
     let origin = format!("http://{host}:21847");
     assert!(
         logged.contains(&format!("openai_base_url = \"{origin}/backend-api/codex\"\n")),
@@ -176,7 +176,7 @@ fn assert_urls(logged: &str, api: &str, host: &str) {
     assert!(api.contains("name = \"skillstar\"\n"), "{api}");
     assert!(api.contains("wire_api = \"responses\"\n"), "{api}");
     assert!(
-        api.contains("experimental_bearer_token = \"skillstar\"\n"),
+        api.contains(&format!("experimental_bearer_token = \"{bearer}\"\n")),
         "{api}"
     );
     assert!(
@@ -217,9 +217,15 @@ fn wsl_codex_mirrored_url_is_loopback() {
         assert!(distro.mirrored);
         assert_eq!(distro.gateway, "172.20.0.1");
         let (logged, api) = write_both(distro, root);
-        assert_urls(&logged, &api, "127.0.0.1");
+        assert_urls(&logged, &api, "127.0.0.1", "skillstar");
         assert!(!logged.contains("172.20.0.1"), "{logged}");
         assert!(!api.contains("172.20.0.1"), "{api}");
+        // A loopback origin never touches the key file: mirrored keeps the
+        // placeholder bearer.
+        assert!(
+            !root.join("data").join("config").join("gateway.key").exists(),
+            "a loopback write must not generate a gateway key"
+        );
         let saved = fs::read_to_string(&stash).unwrap();
         assert!(
             saved.contains("\"codex.openai_base_url\": \"https://vendor.example/v1\""),
@@ -239,7 +245,19 @@ fn wsl_codex_nat_url_uses_windows_host() {
         let distro = &listed.distros[0];
         assert!(!distro.mirrored);
         let (logged, api) = write_both(distro, root);
-        assert_urls(&logged, &api, "172.20.0.1");
+        // A NAT form's peer is not loopback: the bearer must be the real
+        // gateway key generated in the sandbox; the placeholder would not
+        // pass the LAN gate.
+        let key = fs::read_to_string(root.join("data").join("config").join("gateway.key"))
+            .unwrap()
+            .trim()
+            .to_string();
+        assert!(key.len() >= 64, "the gateway key is hex of >=32 bytes: {key}");
+        assert_urls(&logged, &api, "172.20.0.1", &key);
+        assert!(
+            !api.contains("experimental_bearer_token = \"skillstar\"\n"),
+            "{api}"
+        );
         assert!(!logged.contains("127.0.0.1"), "{logged}");
         assert!(!api.contains("127.0.0.1"), "{api}");
     });

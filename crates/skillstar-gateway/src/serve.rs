@@ -55,6 +55,9 @@ pub enum ServeError {
     Busy,
     Bind(io::Error),
     Runtime(io::Error),
+    /// A non-loopback listen needs the install-level gateway key, and it
+    /// could not be generated or read.
+    LanNeedsKey,
 }
 
 impl std::fmt::Display for ServeError {
@@ -65,6 +68,7 @@ impl std::fmt::Display for ServeError {
             Self::Busy => f.write_str("地址已被占用"),
             Self::Bind(error) => write!(f, "监听失败: {error}"),
             Self::Runtime(error) => write!(f, "网关运行时失败: {error}"),
+            Self::LanNeedsKey => f.write_str("局域网监听需要网关密钥，但密钥无法生成或读取"),
         }
     }
 }
@@ -173,10 +177,18 @@ pub fn published_origin() -> String {
 /// Bind and answer the gateway route table until [`Stop::stop`].
 ///
 /// A second bind of the same address returns [`ServeError::Busy`] and leaves
-/// the first listener running. stdout is not used.
+/// the first listener running. stdout is not used. A non-loopback listen
+/// address (LAN, WSL NAT) requires the install-level gateway key; when it
+/// cannot be loaded or created, `serve` returns [`ServeError::LanNeedsKey`]
+/// before binding anything.
 pub fn serve(options: ServeOptions) -> Result<(), ServeError> {
     if options.addr.port() == REFUSED_PORT {
         return Err(ServeError::RefusedPort);
+    }
+    if !options.addr.ip().is_loopback()
+        && crate::access::gateway_key().is_err()
+    {
+        return Err(ServeError::LanNeedsKey);
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
@@ -257,6 +269,21 @@ async fn dispatch(
             Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request"),
         };
         return claude_callback(peer, &token, &body).await;
+    }
+    // The LAN gate. The Claude callback returned above behind its own
+    // loopback-plus-token doors; every other request from a non-loopback peer
+    // must carry the gateway key, the local GET surface included.
+    let api_key = header_text(
+        request.headers(),
+        hyper::header::HeaderName::from_static("x-api-key"),
+    );
+    let goog_key = header_text(
+        request.headers(),
+        hyper::header::HeaderName::from_static("x-goog-api-key"),
+    );
+    let query_key = query_key_value(request.uri().query());
+    if !crate::access::check_inbound(&peer, &authorization, &api_key, &goog_key, &query_key) {
+        return plain(StatusCode::UNAUTHORIZED, "gateway key required");
     }
     let head = request.method() == Method::HEAD;
     let upgrade = request
@@ -433,6 +460,17 @@ fn header_text(headers: &hyper::HeaderMap, name: hyper::header::HeaderName) -> S
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string()
+}
+
+/// The `?key=` query parameter's value, empty when absent. The key is hex,
+/// so no percent-decoding is done.
+fn query_key_value(query: Option<&str>) -> String {
+    for pair in query.unwrap_or("").split('&') {
+        if let Some(value) = pair.strip_prefix("key=") {
+            return value.to_string();
+        }
+    }
+    String::new()
 }
 
 fn respond_local(local: crate::surface::Local, head: bool) -> Response<Full<Bytes>> {

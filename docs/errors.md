@@ -2,6 +2,13 @@
 
 状态：active
 
+## 2026-10-02 - 占位 bearer + 0.0.0.0 监听：局域网上网关无鉴权（P0）
+
+- Symptom: 把 `model_gateway.json` 的 `listen` 写成 `lan` 后，同一局域网里的任何机器都能直接使用这台机器的网关：`curl http://<LAN-IP>:21847/v1/models` 返回 200，POST 转发也照常接受，不需要任何凭据。
+- Root cause: LAN 监听把 bind 地址换成 `0.0.0.0`，但网关的鉴权语义是为环回设计的——写进 Agent 文件的 bearer 全是可预测占位（`skillstar`、`skillstar-<id>`），而 `dispatch` 只把 bearer 用于归因（`request_agent`），从不校验；占位字符串是公开常量，等于把「认识调用方」当成了「授权调用方」。两条叠加，非环回 peer 与本机进程拿到完全相同的待遇。
+- Fix: 切片 01（D-078）加入 LAN 门禁：非 loopback peer 的请求（Claude MCP callback 除外）必须携带安装级 gateway key（`config_dir()/gateway.key`，≥32 字节随机数的 hex，`0600` 惰性生成），`Authorization`/`x-api-key`/`x-goog-api-key`/`?key=` 任一槽位匹配即过，否则 401；`save_listen("lan")` 与非 loopback `serve` 启动先确保 key 可用。loopback 行为零变化。这是「门先于线」的前提：upstream 转发接线（切片 10）之前门必须先存在。
+- Self-check: `cargo test -p skillstar-gateway --locked -- --skip serve_binds_default_port`（`tests/access.rs` 覆盖槽位匹配、key 缺失拒绝、`LanNeedsKey`、环回 200 回归与错误输出不泄漏 key）；实机开 LAN 后从另一台机器无 key `curl /v1/models` 应得 401，带 `Authorization: Bearer <gateway.key 内容>` 应得 200。
+
 ## 2026-09-29 - 卡片轮播点新 Agent 图标要卡 ~3 秒才点亮（impeccable 式复合包）
 
 - Symptom: 已装的 `pbakaus/impeccable` 式复合包（同一技能在仓库里按 harness 各放一份），点轮播上一个还没链过的 Agent 图标（如第一次点 Cursor），要停顿数秒才从灰变亮；单技能仓库不会。D-046 已经把这条路径改成「只扫描现有 checkout，不 clone、不 fetch」，但停顿仍在。

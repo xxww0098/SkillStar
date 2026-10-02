@@ -2,8 +2,9 @@
 //!
 //! The field is `listen`. `lan` asks `serve` to bind every interface on the
 //! port it already resolved. Any other value, or a missing file, stays on the
-//! address from the environment. This module does not bind a socket and does
-//! not choose the URL written into agent files.
+//! address from the environment. Switching to `lan` also makes sure the
+//! install-level gateway key exists (see `access`). This module does not bind
+//! a socket and does not choose the URL written into agent files.
 
 use std::fs;
 use std::io;
@@ -13,14 +14,20 @@ use serde_json::{Value, json};
 use skillstar_core::infra::fs_ops::atomic_write;
 
 /// The gateway file could not be replaced, or the mode is not one of the two.
+/// `Key` means `lan` was asked for while the install-level gateway key could
+/// not be loaded or created — LAN listening is refused before any write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SaveListenError {
     Store,
+    Key,
 }
 
 impl std::fmt::Display for SaveListenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("listen_store")
+        match self {
+            Self::Store => f.write_str("listen_store"),
+            Self::Key => f.write_str("listen_key"),
+        }
     }
 }
 
@@ -44,12 +51,20 @@ pub fn listen_label() -> &'static str {
 }
 
 /// Write `lan` or remove the field for `loopback`. Other keys stay.
+///
+/// Switching to `lan` also loads or lazily creates the install-level gateway
+/// key first: without a usable key the gateway would refuse to serve anyway,
+/// so the write is rejected with [`SaveListenError::Key`] and the file is left
+/// alone.
 pub fn save_listen(mode: &str) -> Result<(), SaveListenError> {
     let lan = match mode.trim() {
         "lan" => true,
         "loopback" => false,
         _ => return Err(SaveListenError::Store),
     };
+    if lan {
+        crate::access::gateway_key().map_err(|_| SaveListenError::Key)?;
+    }
     let path = gateway_path();
     let mut doc = load_object(&path)?;
     let object = doc.as_object_mut().ok_or(SaveListenError::Store)?;

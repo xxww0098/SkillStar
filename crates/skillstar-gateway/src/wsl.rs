@@ -3,7 +3,9 @@
 //! Each running distro is its own agent, `codex@wsl:<distro>`. Its config is
 //! opened through `\\wsl.localhost\<distro>`. A stopped distro is not started.
 //! Mirrored networking writes `127.0.0.1`. NAT writes the Windows address that
-//! distro sees. `wsl.exe` runs only on Windows.
+//! distro sees, and the provider table then carries the install-level gateway
+//! key instead of the placeholder bearer — that peer is not loopback.
+//! `wsl.exe` runs only on Windows.
 
 use std::collections::HashSet;
 use std::io;
