@@ -12,7 +12,7 @@
 - Provider 私有刷新上下文放在 `Subscription.provider_state_encrypted`（AES-GCM 的版本化 JSON）。它不进 DTO，也不放宽 `platform_token_encrypted`（那仍是 DeepSeek 平台 token）。refresh 的窄 patch 会轮换这个字段。
 - 不支持的旧 auth-mode 行在 load migration 中清理；文档不保留已删除 catalog 清单。
 - 远程请求统一使用 `skillstar_core::infra::http_client::probe_http_client`。
-- 本机网关读取这里已经保存的凭证和余量来签上游，不在 Usage 里实现第二套登录。
+- 本机网关读取这里已经保存的凭证和余量来签上游，不在 Usage 里实现第二套登录。上游 401 时网关回调 `AccountBook::reauthorize`（app 侧 `usage/service/reauth.rs`）自愈一次：复用 refresh 的锁序（catalog serialization domain → CLI refresh lease → adopt → refresh → sync），重签重发恰好一次；自愈失败或无刷新腿（Manual/API-key/Cookie 行）则透传 401，候选进 `AUTH_REST`（30 分钟）。自愈由常驻 heal 线程的自建 runtime 执行，turn 最多等 5 秒，超时同样透传并退避。
 - 除非用户明确要求，不修改完成态的 `fetchers/oauth/cursor.rs`。
 
 ## OAuth 与刷新

@@ -27,6 +27,11 @@ pub const LONGEST_QUOTA: Duration = Duration::from_secs(8 * 24 * 60 * 60);
 pub const LONGEST_RETRY: Duration = Duration::from_secs(10 * 60);
 /// An account the vendor wants verified sits out this long.
 pub const VERIFY_REST: Duration = Duration::from_secs(30 * 60);
+/// A candidate whose credentials died sits out this long: once the turn's
+/// single self-heal resend also met a 401, only a re-login or a gateway
+/// restart can change the answer, so the seat parks for the same spell a
+/// verification refusal gets. Same tier as [`VERIFY_REST`] on purpose.
+pub const AUTH_REST: Duration = Duration::from_secs(30 * 60);
 /// How long that verification refusal is answered again without asking.
 pub const VERIFY_HOLD: Duration = Duration::from_secs(60);
 /// A rate limit with no `Retry-After`, and the first step of a backoff.
@@ -130,6 +135,14 @@ fn decide(failure: &UpstreamFailure<'_>) -> Decision {
             hold: None,
             link: String::new(),
         },
+        Kind::Auth => Decision {
+            why: "auth",
+            by: "auth",
+            spell: AUTH_REST,
+            failures: 0,
+            hold: None,
+            link: String::new(),
+        },
         Kind::Quota => quota_decision(failure),
         Kind::Rate => rate_decision(failure),
         Kind::Verify { link } => Decision {
@@ -213,6 +226,9 @@ fn other_decision(failure: &UpstreamFailure<'_>) -> Decision {
 
 enum Kind {
     Credit,
+    /// Dead credentials: a 401 that is not a verification refusal. The
+    /// self-heal slice's rest class.
+    Auth,
     Quota,
     Rate,
     Verify { link: String },
@@ -227,6 +243,12 @@ fn kind(status: u16, body: &[u8]) -> Kind {
         && let Some(link) = verification(body)
     {
         return Kind::Verify { link };
+    }
+    // Only a 401 is dead credentials — `is_auth_error` is 401-only, and a
+    // 403 can hit a valid credential (Cloudflare, region blocks). The
+    // verification check above wins for the bodies that name themselves.
+    if status == 401 {
+        return Kind::Auth;
     }
     let lists = lists();
     let insufficient_quota = contains_slice(body, b"insufficient_quota");

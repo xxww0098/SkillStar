@@ -31,6 +31,19 @@ pub struct ProviderSnapshot {
 pub trait AccountBook {
     fn account(&self, catalog_id: &str) -> Option<AccountSnapshot>;
     fn allowance(&self, catalog_id: &str) -> Option<AllowanceSnapshot>;
+    /// The 401 self-heal hook (evolution slice 11, spec D9): run whatever can
+    /// renew this catalog's credentials and write the result back where
+    /// [`Self::account`] reads it, returning fresh material so this turn may
+    /// re-sign and re-send exactly once. `None` gives up: the 401 is passed
+    /// through and the candidate parks in the auth rest.
+    ///
+    /// The gateway only ever calls the hook; adopting CLI rotations, taking
+    /// refresh locks, and the refresh itself all live in the app
+    /// implementation. The default `None` keeps every test fake book and any
+    /// book that cannot heal unchanged.
+    fn reauthorize(&self, _catalog_id: &str) -> Option<AccountSnapshot> {
+        None
+    }
 }
 
 /// What to sign. `body` is only read for Grok's model and conversation id.

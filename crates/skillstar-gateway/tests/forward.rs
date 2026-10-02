@@ -441,7 +441,10 @@ fn a_401_is_passed_through_once_and_lands_an_auth_line() {
     let (listen, stop, handle) = start(env(candidates, book));
 
     let (status, body) = post_turn(listen);
-    assert_eq!(status, 401, "no adopt retry in this slice");
+    assert_eq!(
+        status, 401,
+        "the default reauthorize hook gives up: no resend, plain pass-through"
+    );
     assert_eq!(body, refusal);
 
     let hits = hits
@@ -642,4 +645,446 @@ fn a_bridge_candidate_sends_no_http() {
     assert!(!text.contains("sk-ant-not-sent"), "{text}");
     stop.stop();
     handle.join().unwrap().unwrap();
+}
+
+// ── the 401 self-heal (evolution slice 11, spec D9) ────────────────────────
+
+/// A book whose `reauthorize` hook answers. `Rotate` swaps the signing token
+/// and hands the fresh material back (the production shape: the app writes
+/// the renewed credentials where `account()` reads them); `GiveUp` models a
+/// heal that could not produce material — a busy serialization domain, a
+/// dead refresh grant — and answers `None`. Clones share the counters, so a
+/// clone held by the test watches what the turn did to the book it kept.
+struct HealBook {
+    token: Arc<Mutex<String>>,
+    healed: Arc<std::sync::atomic::AtomicU32>,
+    gives_up: bool,
+}
+
+impl HealBook {
+    fn rotating(stale: &str) -> Self {
+        Self {
+            token: Arc::new(Mutex::new(stale.to_string())),
+            healed: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            gives_up: false,
+        }
+    }
+
+    fn refusing(stale: &str) -> Self {
+        Self {
+            gives_up: true,
+            ..Self::rotating(stale)
+        }
+    }
+
+    fn heal_calls(&self) -> u32 {
+        self.healed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Clone for HealBook {
+    fn clone(&self) -> Self {
+        Self {
+            token: Arc::clone(&self.token),
+            healed: Arc::clone(&self.healed),
+            gives_up: self.gives_up,
+        }
+    }
+}
+
+impl AccountBook for HealBook {
+    fn account(&self, _catalog_id: &str) -> Option<AccountSnapshot> {
+        let token = self
+            .token
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        Some(AccountSnapshot {
+            access_token: Some(token),
+            ..AccountSnapshot::default()
+        })
+    }
+
+    fn allowance(&self, _catalog_id: &str) -> Option<AllowanceSnapshot> {
+        Some(AllowanceSnapshot { used: 10.0 })
+    }
+
+    fn reauthorize(&self, _catalog_id: &str) -> Option<AccountSnapshot> {
+        self.healed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.gives_up {
+            return None;
+        }
+        let mut token = self.token.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *token = "tok-fresh".to_string();
+        Some(AccountSnapshot {
+            access_token: Some(token.clone()),
+            ..AccountSnapshot::default()
+        })
+    }
+}
+
+fn refused(body: Vec<u8>) -> Reply {
+    Reply {
+        status: "401 Unauthorized",
+        body,
+    }
+}
+
+/// The happy heal: the upstream refuses the stale token, the hook rotates
+/// it, and the same candidate is re-signed and re-sent exactly once. The
+/// resent request carries the new token, and the turn lands one 200 ledger
+/// line — the retry belongs to the same turn, not a new one.
+#[test]
+fn a_401_self_heal_resigns_and_resends_the_new_token_once() {
+    let _guard = env_lock();
+    let data = LedgerSandbox::new("fwd-heal");
+    let answer = Arc::new(|captured: &Captured| {
+        if captured.authorization.contains("tok-stale") {
+            refused(br#"{"error":{"message":"token expired"}}"#.to_vec())
+        } else {
+            always_ok(captured)
+        }
+    });
+    let (addr, hits) = fake_provider(2, answer);
+    let book = HealBook::rotating("tok-stale");
+    let seen = book.clone();
+    let candidates = vec![upstream("heal-row", "codex", format!("http://{addr}"), None)];
+    let env = UpstreamEnv {
+        resolve: Box::new(move |_model_ref: &str| candidates.clone()),
+        book: Box::new(book),
+        attribute: Box::new(|id: &str| (format!("cat-{id}"), format!("sub-{id}"))),
+    };
+    let (listen, stop, handle) = start(env);
+
+    let (status, body) = post_turn(listen);
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+
+    let hits = hits
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert_eq!(hits.len(), 2, "one original send, one healed resend");
+    assert_eq!(hits[0].authorization, "Bearer tok-stale");
+    assert_eq!(
+        hits[1].authorization, "Bearer tok-fresh",
+        "the resend carries the material the hook wrote back"
+    );
+    assert_eq!(
+        seen.heal_calls(),
+        1,
+        "the hook is asked exactly once per turn"
+    );
+
+    let lines = data.usage_lines();
+    assert_eq!(lines.len(), 1, "the healed retry is part of the same turn");
+    assert_eq!(lines[0]["status"], 200);
+    assert_eq!(lines[0]["catalog"], "cat-heal-row");
+    assert_eq!(lines[0]["account"], "sub-heal-row");
+    let text = format!("{}", lines[0]);
+    assert!(!text.contains("tok-stale"), "no signing secret: {text}");
+    assert!(!text.contains("tok-fresh"), "{text}");
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+/// A 401 that survives the heal: exactly one resend, then the refusal is
+/// passed through, the ledger names it auth, and the candidate sits in the
+/// auth rest — the next turn does not ask it again.
+#[test]
+fn a_401_that_survives_the_heal_passes_through_and_parks_the_seat() {
+    let _guard = env_lock();
+    let data = LedgerSandbox::new("fwd-heal-dead");
+    let refusal = br#"{"error":{"message":"still invalid"}}"#.to_vec();
+    let scripted = refusal.clone();
+    let answer = Arc::new(move |_captured: &Captured| Reply {
+        status: "401 Unauthorized",
+        body: scripted.clone(),
+    });
+    let (addr, hits) = fake_provider(2, answer);
+    let book = HealBook::rotating("tok-stale");
+    let seen = book.clone();
+    let candidates = vec![upstream("dead-row", "codex", format!("http://{addr}"), None)];
+    let env = UpstreamEnv {
+        resolve: Box::new(move |_model_ref: &str| candidates.clone()),
+        book: Box::new(book),
+        attribute: Box::new(|id: &str| (format!("cat-{id}"), format!("sub-{id}"))),
+    };
+    let (listen, stop, handle) = start(env);
+
+    let (status, body) = post_turn(listen);
+    assert_eq!(status, 401);
+    assert_eq!(body, refusal);
+    let hits_after_turn = hits
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len();
+    assert_eq!(hits_after_turn, 2, "one send, exactly one healed resend");
+    assert_eq!(seen.heal_calls(), 1);
+    let lines = data.usage_lines();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["status"], 401);
+    assert_eq!(lines[0]["error_kind"], "auth");
+    assert_eq!(lines[0]["catalog"], "cat-dead-row");
+
+    // The auth rest holds the seat: the next turn is the plain no-upstream
+    // 502, and no third upstream call leaves the gateway.
+    let (status, body) = post_turn(listen);
+    assert_eq!(status, 502);
+    assert_eq!(body, b"no upstream");
+    assert_eq!(
+        hits.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len(),
+        2,
+        "the rested seat is not asked again"
+    );
+    assert_eq!(seen.heal_calls(), 1, "no second heal without a send");
+    let lines = data.usage_lines();
+    assert_eq!(lines[1]["status"], 502);
+    assert_eq!(lines[1]["error_kind"], "upstream");
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+/// A hook with no material to give (the degraded path: a busy serialization
+/// domain, or a catalog nothing can renew): no resend at all, the 401 is
+/// passed through, and the seat still backs off into the auth rest.
+#[test]
+fn a_401_the_hook_cannot_heal_passes_through_with_backoff() {
+    let _guard = env_lock();
+    let data = LedgerSandbox::new("fwd-heal-none");
+    let refusal = br#"{"error":{"message":"invalid key"}}"#.to_vec();
+    let scripted = refusal.clone();
+    let answer = Arc::new(move |_captured: &Captured| Reply {
+        status: "401 Unauthorized",
+        body: scripted.clone(),
+    });
+    let (addr, hits) = fake_provider(2, answer);
+    let book = HealBook::refusing("tok-stale");
+    let seen = book.clone();
+    let candidates = vec![upstream("stuck-row", "codex", format!("http://{addr}"), None)];
+    let env = UpstreamEnv {
+        resolve: Box::new(move |_model_ref: &str| candidates.clone()),
+        book: Box::new(book),
+        attribute: Box::new(|id: &str| (format!("cat-{id}"), format!("sub-{id}"))),
+    };
+    let (listen, stop, handle) = start(env);
+
+    let (status, body) = post_turn(listen);
+    assert_eq!(status, 401);
+    assert_eq!(body, refusal);
+    let hits = hits
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len();
+    assert_eq!(hits, 1, "no material, no resend");
+    assert_eq!(seen.heal_calls(), 1, "the hook was still asked once");
+    let lines = data.usage_lines();
+    assert_eq!(lines[0]["status"], 401);
+    assert_eq!(lines[0]["error_kind"], "auth");
+
+    // The give-up still backs off: a later turn does not hammer the dead
+    // login while the heal machinery is stuck.
+    let (status, body) = post_turn(listen);
+    assert_eq!(status, 502);
+    assert_eq!(body, b"no upstream");
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+/// 403 is not an auth failure (`is_auth_error` is 401-only): the hook is
+/// never asked, the refusal passes through, and no rest is noted for it.
+#[test]
+fn a_403_never_reaches_the_heal_hook() {
+    let _guard = env_lock();
+    let data = LedgerSandbox::new("fwd-403");
+    let refusal = br#"{"error":{"message":"forbidden","type":"forbidden"}}"#.to_vec();
+    let scripted = refusal.clone();
+    let answer = Arc::new(move |_captured: &Captured| Reply {
+        status: "403 Forbidden",
+        body: scripted.clone(),
+    });
+    let (addr, hits) = fake_provider(2, answer);
+    let book = HealBook::rotating("tok-stale");
+    let seen = book.clone();
+    let candidates = vec![upstream("denied-row", "codex", format!("http://{addr}"), None)];
+    let env = UpstreamEnv {
+        resolve: Box::new(move |_model_ref: &str| candidates.clone()),
+        book: Box::new(book),
+        attribute: Box::new(|id: &str| (format!("cat-{id}"), format!("sub-{id}"))),
+    };
+    let (listen, stop, handle) = start(env);
+
+    let (status, body) = post_turn(listen);
+    assert_eq!(status, 403);
+    assert_eq!(body, refusal);
+    let seen_hits = hits
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len();
+    assert_eq!(seen_hits, 1);
+    assert_eq!(seen.heal_calls(), 0, "403 never triggers the heal");
+
+    // 403 is the request's fault, not a rest: the next turn asks again.
+    let (status, _) = post_turn(listen);
+    assert_eq!(status, 403);
+    assert_eq!(
+        hits.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len(),
+        2,
+        "no rest seat was noted for a 403"
+    );
+    assert_eq!(seen.heal_calls(), 0);
+    let lines = data.usage_lines();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["error_kind"], "auth", "the ledger's classify reads 401|403 as auth");
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+/// A rotating failure never triggers the heal either: the 429 moves to the
+/// next candidate (or, alone, ends the turn) without asking the hook.
+#[test]
+fn a_429_rotates_without_asking_the_heal_hook() {
+    let _guard = env_lock();
+    let data = LedgerSandbox::new("fwd-429-no-heal");
+    let rate = br#"{"error":{"message":"Too many requests","type":"rate_limit_error"}}"#.to_vec();
+    let scripted = rate.clone();
+    let answer = Arc::new(move |_captured: &Captured| Reply {
+        status: "429 Too Many Requests",
+        body: scripted.clone(),
+    });
+    let (addr, hits) = fake_provider(1, answer);
+    let book = HealBook::rotating("tok-stale");
+    let seen = book.clone();
+    let candidates = vec![upstream("rate-row", "codex", format!("http://{addr}"), None)];
+    let env = UpstreamEnv {
+        resolve: Box::new(move |_model_ref: &str| candidates.clone()),
+        book: Box::new(book),
+        attribute: Box::new(|id: &str| (format!("cat-{id}"), format!("sub-{id}"))),
+    };
+    let (listen, stop, handle) = start(env);
+
+    let (status, _) = post_turn(listen);
+    assert_eq!(status, 429);
+    let hits = hits
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len();
+    assert_eq!(hits, 1, "a single-candidate 429 asks once");
+    assert_eq!(seen.heal_calls(), 0, "429 never triggers the heal");
+    let lines = data.usage_lines();
+    assert_eq!(lines[0]["error_kind"], "rate_limit");
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+/// The cross-runtime probe (slice 11): the sync heal hook is called from a
+/// turn riding the listener's own multi-thread runtime. The hook here does
+/// what the production bridge does — hands the work to a thread that owns
+/// its own runtime and blocks on it through a bounded channel — so this
+/// test fails by hanging if that shape ever deadlocks or panics on runtime
+/// nesting. `post_turn` returning 200 is the proof the resend completed.
+#[test]
+fn the_heal_hook_blocks_across_runtimes_from_inside_the_serve_thread() {
+    let _guard = env_lock();
+    let data = LedgerSandbox::new("fwd-heal-probe");
+    let answer = Arc::new(|captured: &Captured| {
+        if captured.authorization.contains("stale") {
+            refused(br#"{"error":{"message":"token expired"}}"#.to_vec())
+        } else {
+            always_ok(captured)
+        }
+    });
+    let (addr, hits) = fake_provider(2, answer);
+    let book = BridgeProbeBook::default();
+    let calls = Arc::clone(&book.calls);
+    let candidates = vec![upstream("probe-row", "codex", format!("http://{addr}"), None)];
+    let env = UpstreamEnv {
+        resolve: Box::new(move |_model_ref: &str| candidates.clone()),
+        book: Box::new(book),
+        attribute: Box::new(|id: &str| (format!("cat-{id}"), format!("sub-{id}"))),
+    };
+    let (listen, stop, handle) = start(env);
+
+    let (status, body) = post_turn(listen);
+    assert_eq!(
+        status, 200,
+        "{} (hook calls: {})",
+        String::from_utf8_lossy(&body),
+        calls.load(std::sync::atomic::Ordering::SeqCst)
+    );
+    let hits = hits
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[1].authorization, "Bearer tok-probe-fresh");
+    let lines = data.usage_lines();
+    assert_eq!(lines[0]["status"], 200);
+    stop.stop();
+    handle.join().unwrap().unwrap();
+}
+
+/// The probe's book: `reauthorize` runs an async lock acquisition on a
+/// thread with its own current-thread runtime and blocks the turn on the
+/// result through a channel — the exact bridge shape the app injects.
+struct BridgeProbeBook {
+    token: Mutex<String>,
+    calls: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl Default for BridgeProbeBook {
+    fn default() -> Self {
+        Self {
+            token: Mutex::new("tok-probe-stale".to_string()),
+            calls: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        }
+    }
+}
+
+impl AccountBook for BridgeProbeBook {
+    fn account(&self, _catalog_id: &str) -> Option<AccountSnapshot> {
+        let token = self
+            .token
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        Some(AccountSnapshot {
+            access_token: Some(token),
+            ..AccountSnapshot::default()
+        })
+    }
+
+    fn allowance(&self, _catalog_id: &str) -> Option<AllowanceSnapshot> {
+        None
+    }
+
+    fn reauthorize(&self, _catalog_id: &str) -> Option<AccountSnapshot> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let fresh = "tok-probe-fresh".to_string();
+        // The production bridge: hand the async work (here a tokio Mutex,
+        // standing in for Usage's per-catalog serialization domain) to a
+        // thread that owns its own runtime, then block the turn on the
+        // answer through a bounded channel wait. The renewed material is
+        // also written back where account() reads it — that write-back is
+        // the contract the turn's re-sign relies on.
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("probe runtime");
+            let gate = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+            let _guard = runtime.block_on(async { gate.lock().await });
+            let _ = tx.send(fresh);
+        });
+        let fresh = rx.recv_timeout(Duration::from_secs(10)).ok()?;
+        *self.token.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh.clone();
+        Some(AccountSnapshot {
+            access_token: Some(fresh),
+            ..AccountSnapshot::default()
+        })
+    }
 }

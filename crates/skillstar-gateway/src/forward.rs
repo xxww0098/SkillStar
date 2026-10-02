@@ -9,9 +9,11 @@
 //!
 //! When no env is injected the listener keeps its old shape: a single
 //! static origin from [`ServeOptions`](crate::ServeOptions) — the legacy
-//! test path — or the plain 502 `no upstream`. The 401 adopt retry is not
-//! here (spec D9); a 401 is passed through and lands as `auth` in the
-//! ledger.
+//! test path — or the plain 502 `no upstream`. A 401 with an env consumes
+//! the turn's single self-heal (spec D9): the book's `reauthorize` hook may
+//! renew the credentials, and the same candidate is then re-signed and
+//! re-sent exactly once. A 401 that survives the heal is passed through,
+//! lands as `auth` in the ledger, and parks the candidate in the auth rest.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -90,6 +92,77 @@ enum Sent {
         headers: Vec<(String, String)>,
         bytes: Bytes,
     },
+}
+
+/// The 401 self-heal turn state (spec D9): whether this turn already spent
+/// its single re-sign-and-resend. A plain stack flag the candidate loop
+/// hands to [`attempt`]; single-shot by construction, because every path
+/// that spends it either returns the turn's answer or re-sends exactly once.
+struct TurnAuth {
+    retried: bool,
+}
+
+/// The D9 gate, kept alone so its three limits stay testable: only a 401
+/// reply, only once per turn, only before anything was committed to the
+/// agent. 403/429/5xx never reach the hook (`is_auth_error` is 401-only).
+fn may_self_heal(sent: &Sent, auth: &TurnAuth, committed: bool) -> bool {
+    matches!(sent, Sent::Reply { status: 401, .. }) && !auth.retried && !committed
+}
+
+/// The turn-static pieces of one send: what leaves the gateway and how it
+/// is translated, fixed for every candidate of one turn.
+struct Outbound<'a> {
+    protocol: Option<Protocol>,
+    url_path: &'a str,
+    body: &'a [u8],
+    public_responses: bool,
+}
+
+/// Sign and send one candidate. A 401 spends the turn's single self-heal
+/// (spec D9): the hook is asked at most once per turn, and when it answers
+/// with fresh material — already written back where the book reads it — the
+/// same candidate is re-signed and re-sent exactly once, then the result is
+/// final whatever it is. `None` marks the process-bridge skip, which is not
+/// a failure.
+async fn attempt(
+    env: &UpstreamEnv,
+    candidate: &Upstream,
+    outbound: &Outbound<'_>,
+    auth: &mut TurnAuth,
+    committed: bool,
+) -> Option<(crate::sign::SignedUpstream, Sent)> {
+    loop {
+        let signed = sign_upstream(
+            &*env.book,
+            &SignInput {
+                catalog_id: &candidate.catalog_id,
+                provider: candidate.provider.as_ref(),
+                body: outbound.body,
+            },
+            &mut |_url| {},
+        );
+        if signed.bridge {
+            return None;
+        }
+        let sent = send_upstream(
+            &candidate.endpoint,
+            outbound.protocol,
+            outbound.url_path,
+            outbound.body,
+            outbound.public_responses,
+            &signed.headers,
+        )
+        .await;
+        if may_self_heal(&sent, auth, committed)
+            && env.book.reauthorize(&candidate.catalog_id).is_some()
+        {
+            // Spend the flag before the resend, so a second heal is
+            // structurally impossible even if the resent reply 401s again.
+            auth.retried = true;
+            continue;
+        }
+        return Some((signed, sent));
+    }
 }
 
 /// The reply the agent receives for one turn, plus what the ledger adds.
@@ -237,9 +310,20 @@ async fn routed(
         })
         .collect();
     let mut last: Option<Answer> = None;
+    // `committed` is the word the rest table's next_candidate gates on: this
+    // loop returns replies whole, so nothing is ever committed mid-turn and
+    // the self-heal gate below shares that same fact.
+    let committed = false;
+    let mut auth = TurnAuth { retried: false };
+    let outbound = Outbound {
+        protocol,
+        url_path,
+        body: translated,
+        public_responses,
+    };
     loop {
         let now = SystemTime::now();
-        let Some(seat) = rest::next_candidate(false, &seats, now) else {
+        let Some(seat) = rest::next_candidate(committed, &seats, now) else {
             break;
         };
         let id = seat.to_string();
@@ -247,30 +331,13 @@ async fn routed(
         let Some(candidate) = ordered.iter().find(|candidate| candidate.id == id) else {
             continue;
         };
-        let signed = sign_upstream(
-            &*env.book,
-            &SignInput {
-                catalog_id: &candidate.catalog_id,
-                provider: candidate.provider.as_ref(),
-                body: translated,
-            },
-            &mut |_url| {},
-        );
-        if signed.bridge {
+        let Some((signed, sent)) = attempt(env, candidate, &outbound, &mut auth, committed).await
+        else {
             // `anthropic` stays on the process bridge: no HTTP from this
             // path, and no rest either — skipping is not a failure. The
             // seat is already dropped, so the loop cannot pick it again.
             continue;
-        }
-        let sent = send_upstream(
-            &candidate.endpoint,
-            protocol,
-            url_path,
-            translated,
-            public_responses,
-            &signed.headers,
-        )
-        .await;
+        };
         match sent {
             Sent::Reject { status, message } => {
                 let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -328,10 +395,17 @@ async fn routed(
                 };
                 let decided = rest::rest_after(&failure);
                 if !rotates(status) {
-                    // 401 passes through untouched (the adopt retry is a
-                    // later slice); a 4xx the request itself earned would
-                    // fail the same way on the next candidate. The refusal
-                    // is still classified, for the ledger's error kind.
+                    if status == 401 {
+                        // The heal was refused, not attempted, or resent
+                        // into another 401: the credentials are dead for
+                        // this process. Park the seat so later turns do not
+                        // hammer a dead login — a re-login or a restart is
+                        // what can change the answer.
+                        note_rest(&id, &decided);
+                    }
+                    // A 401 the turn could not heal, or a 4xx the request
+                    // itself earned, would fail the same way on the next
+                    // candidate. Pass it through, classified for the ledger.
                     return Answer {
                         turn: finish_reply(protocol, public_responses, status, bytes),
                         won: attribution(env, &id),
@@ -640,11 +714,46 @@ mod tests {
         assert!(rotates(503));
         assert!(!rotates(200));
         assert!(!rotates(301));
-        // 401 is the adopt-retry slice; other 4xx are the request's fault.
+        // 401 heals in place instead of rotating; other 4xx are the request's
+        // fault.
         assert!(!rotates(401));
         assert!(!rotates(400));
         assert!(!rotates(403));
         assert!(!rotates(404));
+    }
+
+    /// The D9 three limits, on the gate itself: only a 401, only once per
+    /// turn, only before anything was committed. 403/429/5xx never qualify.
+    #[test]
+    fn the_self_heal_gate_holds_the_d9_limits() {
+        let reply = |status: u16| Sent::Reply {
+            status,
+            headers: Vec::new(),
+            bytes: Bytes::new(),
+        };
+        let fresh = TurnAuth { retried: false };
+        let spent = TurnAuth { retried: true };
+        assert!(may_self_heal(&reply(401), &fresh, false));
+        assert!(!may_self_heal(&reply(401), &spent, false), "once per turn");
+        assert!(
+            !may_self_heal(&reply(401), &fresh, true),
+            "a committed turn never retries"
+        );
+        for status in [200, 403, 429, 500] {
+            assert!(
+                !may_self_heal(&reply(status), &fresh, false),
+                "{status} never reaches the hook"
+            );
+        }
+        assert!(!may_self_heal(&Sent::Transport, &fresh, false));
+        assert!(!may_self_heal(
+            &Sent::Reject {
+                status: 401,
+                message: "vision".to_string(),
+            },
+            &fresh,
+            false
+        ));
     }
 
     #[test]

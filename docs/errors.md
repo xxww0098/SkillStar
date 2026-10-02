@@ -2,6 +2,15 @@
 
 状态：active
 
+## 2026-10-02 - 网关 401 自愈：跨 runtime 桥、降级语义与退避（evolution 切片 11）
+
+- Symptom: 上游 401（凭证轮换窗口内签到了旧 token、access token 过期）会直接透传给 Agent，用户看到的是整轮失败；而 CLI 或后台刷新可能已经把新 token 落在本地，差一次重签。
+- Root cause: 网关此前只读凭证（`AccountBook::account`），没有任何「问一句 Usage 能不能续」的通道。续期本身有历史雷区：后台刷新若不走 catalog serialization domain + CLI refresh lease + adopt 锁序，会花掉 Codex CLI 即将使用的 refresh-token generation，把 CLI 踢下线（防火墙 7）；且网关 serve 自建 runtime，同步 hook 直接 `block_on` Usage 的异步锁属于跨 runtime 调用（README 已知未知 #2），形状不对会死锁或 panic。
+- Fix: 网关侧 `AccountBook::reauthorize` 默认 `None`（假 book 免改），`forward.rs` 的 turn 状态机持 `TurnAuth { retried }` 栈变量：仅 401、仅一次、仅未 committed 时调钩子，钩子给了新材料就重签重发同一候选恰好一次；仍 401 则透传、账本 `error_kind=auth`、候选进 `AUTH_REST`（30 分钟，与 `VERIFY_REST` 同档）。app 侧 `usage/service/reauth.rs` 完整复用 refresh 锁序模板（`with_catalog_refresh` → `acquire_cli_refresh_lease` → `adopt_active_cli_session_before_refresh` → `fetchers::refresh` → `sync_refreshed_active_subscription`），不新造锁；仅 OAuth/TokenImport 行可自愈，AuthRequired 是唯一「放弃」裁决（照 `refresh_failure` 规则落 latch 与空卡）。
+- 跨 runtime 探针结论: 不需要队列降级。探针（gateway `tests/forward.rs::the_heal_hook_blocks_across_runtimes…` + app `reauth` 测试）证实：常驻 heal 线程持有自己的 current-thread runtime，turn 侧只做 `sync_channel` + `recv_timeout`，从 serve 线程与从 current-thread 测试上下文调用都不嵌套 runtime、不死锁；共享 HTTP client 的连接绑定在与进程同寿的 runtime 上，不会出现悬空 driver。
+- 降级语义: turn 最多等 `HEAL_WAIT`（5 秒）。占用中的 serialization domain、慢 vendor、无可自愈行、死 grant 都让钩子答 `None`——当次 turn 透传 401，并且**同样进 `AUTH_REST` 退避**（这是有意的：不给退避会让死登录被逐 turn 重放）。排队的自愈不会被取消，domain 释放后在 turn 之外完成（latch 落库，下一次调用可见）；heal 线程自身有 `HEAL_HARD_STOP`（30 秒）兜底，楔死的链不会堵住下一个自愈。清退 `AUTH_REST` 的途径：30 分钟自然到期，或网关重启（rest 是进程态）；用户重新登录后如仍被 seat 挡住，重启网关即可。
+- Self-check: `cargo test -p skillstar-gateway --locked -- --skip serve_binds_default_port`（`tests/forward.rs` 的 401→200 自愈、401→401 恰一次重试、403/429 不触发、None 透传退避、跨 runtime 探针）；`cargo test -p skillstar-app --locked usage::service::reauth`（真实链路探针、busy domain 降级与 off-turn 完成、无刷新腿门禁、包装 delegation）。人工灰度：把 codex token 人为置过期，观察一次 adopt+重试成功且 CLI 不被踢下线。
+
 ## 2026-10-02 - 占位 bearer + 0.0.0.0 监听：局域网上网关无鉴权（P0）
 
 - Symptom: 把 `model_gateway.json` 的 `listen` 写成 `lan` 后，同一局域网里的任何机器都能直接使用这台机器的网关：`curl http://<LAN-IP>:21847/v1/models` 返回 200，POST 转发也照常接受，不需要任何凭据。

@@ -72,9 +72,9 @@ pub use route::order::{
     AllowanceSnapshot, RouteCandidate, RouteMode, USED_SHARE, route_mode, route_smart,
 };
 pub use route::rest::{
-    CREDIT_REST, FALLBACK_COOLDOWN, LONGEST_QUOTA, LONGEST_RETRY, LONGEST_WAIT, QUOTA_REST,
-    RESETS_HEADER, Rest, RestSeat, UpstreamFailure, VERIFY_HOLD, VERIFY_REST, next_candidate,
-    rest_after, verify_held,
+    AUTH_REST, CREDIT_REST, FALLBACK_COOLDOWN, LONGEST_QUOTA, LONGEST_RETRY, LONGEST_WAIT,
+    QUOTA_REST, RESETS_HEADER, Rest, RestSeat, UpstreamFailure, VERIFY_HOLD, VERIFY_REST,
+    next_candidate, rest_after, verify_held,
 };
 pub use route::rules::{
     Caller, GroupRule, RuleRequest, order_with_rules, request_agent, stored_rules,

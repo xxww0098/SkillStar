@@ -42,9 +42,15 @@ pub fn run_gateway_io(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn 
 }
 
 /// The routed upstream: the CLI and the desktop listener inject the same
-/// env, so a turn forwards through the same candidates either way.
+/// env, so a turn forwards through the same candidates either way. The
+/// usage book is wrapped with the 401 self-heal (evolution slice 11):
+/// signing and allowances delegate unchanged, while a 401 can renew the
+/// credentials and resend exactly once.
 fn with_upstream(options: ServeOptions) -> ServeOptions {
-    options.env(crate::models::upstream_env())
+    let mut env = crate::models::upstream_env();
+    let plain_book = env.book;
+    env.book = Box::new(crate::usage::HealingBook::wrap(plain_book));
+    options.env(env)
 }
 
 /// Parsed clap form of [`run_gateway`].
