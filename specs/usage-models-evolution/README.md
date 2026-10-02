@@ -1,6 +1,6 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：open（7/13）
+状态：open（9/13）
 更新：2026-10-02
 关联：`specs/usage-models-tree/`（open，gateway crate 树重构，本 spec 多个切片有 ⛩ 前置）
 
@@ -21,13 +21,13 @@
 - [x] 01 gateway key 与 LAN 门禁（P0）— D-078、errors.md 已记；omp 仅 loopback 可用已接受
 - [x] 02 account_book 改道 custody（P0）— `usage_switch::signing_material` 三态（Live/Row/Diverged），AccountSnapshot 契约不变；probe 纯读实测无副作用
 - [x] 03 账本 append 热路径（P1）— `ledger/`（record+append，5MB 轮转，O_APPEND+进程锁），TurnFacts 管道 + SSE 尾帧/JSON 双提取，上游原始字节入账（回译失败 token 不丢）
-- [ ] 04 账本读取面与前端换源（P1，⛩tree-07）
+- [x] 04 账本读取面与前端换源（P1，⛩tree-07）— LedgerQuery + get_ledger_page + ModelsHub 三新列；账本为准、环补缺（(agent,model_asked,status,output) 匹配）
 - [x] 05 sessions 地基 + claude 系 parser（P2）— claude-desktop 实测走 entrypoint 前缀归因（`claude-desktop-3p`），Cowork glob 本机未命中但保留
 - [x] 06 codex/opencode/pi/omp parser（P2）— 每 parser 一 commit；ruzstd 实测成功（golden .zst）；口径矩阵：codex input 剥 cache / pi·omp 原样 / opencode output 加 reasoning
 - [x] 07 ConsumptionView 合并去重（P2/P3）— app/usage/consumption.rs 纯函数；Record.request_id 退化接口（record_request_id 恒 None，切片 10 补字段后换函数体激活主键级）
 - [x] 08 价格源（P3，⛩tree-03+06）— cost.rs 三级（prices 键 > catalog cost > None）；PriceRow 带.currency 预留；形状不符=整文件拒绝（对齐 doc.rs 语义）
 - [ ] 09 Summarize + 今日消耗（P3，⛩tree-09）
-- [ ] 10 upstream 接线与 turn 状态机（P4，⛩tree-04+05）
+- [x] 10 upstream 接线与 turn 状态机（P4，⛩tree-04+05）— forward.rs 状态机（env>静态测试源>502）；UpstreamEnv{resolve,book,attribute}；app resolve 最小实现（group 展开+openai_chat 端点）；401 透传+Auth 归因（11 前置）
 - [ ] 11 401 自愈（P4，⛩tree-09）
 - [ ] 12 AllowanceSnapshot 口径收敛（P5，⛩tree-04）
 - [ ] 13 交叉视图与文档收口（P5）

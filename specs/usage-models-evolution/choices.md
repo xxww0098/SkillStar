@@ -106,3 +106,13 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **codex 不做 task_complete 时长精化**（latency 用 magpie at-call 估算口径，2h 上限）——turns map+事后改写的 delta 覆盖复杂度不在契约内。
 - **pi 发现一层目录**（实证 pi 只写一层；递归会把 omp artifacts 误判）；**opencode 每次全量重读**（message 行原地重写，magpie 同款，checkpoint 只承载视图，from/to=0/0）；**.zst from/to 指解压后偏移且整读无 resume**（模块文档注明）。
 - **跨文件 dedup：四家 msg id 恒空**（magpie 只对 claude 家族按 msg id 去重；codex 靠差分、pi 靠 fork 时间跳过、opencode 靠 SQL NOT IN）。
+
+## S4+S10 切片 04/10 落地时的实现裁决（banked 2026-10-02）
+
+- **S10 UpstreamEnv 形状**：`resolve: Fn(&str) -> Vec<Upstream>`（Upstream 为 owned，带 id/catalog_id/endpoint/provider）——切片草图的 `Fn(&ModelRef) -> Vec<RouteCandidate>` 借用无法从 Box<dyn Fn> 返回；catalog_id 随候选走（逐候选签名都要），`attribute` 闭包只对胜选者惰性求值（subscription_id 探测一次）。Send+Sync 加在 Box 上，AccountBook trait 零改动。
+- **S10 上游优先级**：env > ServeOptions::upstream（静态单源降级为纯测试路径，14 个既有 serve 测试零改动）> 502。两路径共用 send_upstream/finish_reply 机体。
+- **S10 轮转谓词** rotates = 402|408|429|5xx；其余 4xx 不轮转（请求自身的错）；传输失败 → backoff rest → 下一候选；bridge 候选不发 HTTP。rest 进程内 HashMap（重启即忘）。error_kind 词表细化：quota→Quota、verify→Verify（兑现 S3）。
+- **S10 app resolve 边界**：endpoint 仅取 openai_chat 且剥尾 /v1；glm /v4 根等异形端点暂不成候选（注释与文档声明）；订阅账户等 catalog↔账户模型映射是后续工作（原生种子无端点）。
+- **S4 合并语义**：一 turn 先进环后 append 账本；账本尾页为准、环只补账本没有的行；覆盖判定不用时间（环记完成时刻、账本记派发时刻差一个 latency）而用 (agent, model_asked, status, output tokens) 匹配；过滤或翻页读不合并环。
+- **S4 DTO 语义**：新字段全 string 缺失=空串（不打印 "0"）；model 列优先 model_answered（经 label join）。
+- **S4 契约偏差**：切片写 load(since: Option<i64>)，切片 03 落地是 load(i64)——保留 03 签名，Option 语义由 LedgerQuery::run 内部 i64::MIN 承担。
