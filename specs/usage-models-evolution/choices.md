@@ -116,3 +116,14 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **S4 合并语义**：一 turn 先进环后 append 账本；账本尾页为准、环只补账本没有的行；覆盖判定不用时间（环记完成时刻、账本记派发时刻差一个 latency）而用 (agent, model_asked, status, output tokens) 匹配；过滤或翻页读不合并环。
 - **S4 DTO 语义**：新字段全 string 缺失=空串（不打印 "0"）；model 列优先 model_answered（经 label join）。
 - **S4 契约偏差**：切片写 load(since: Option<i64>)，切片 03 落地是 load(i64)——保留 03 签名，Option 语义由 LedgerQuery::run 内部 i64::MIN 承担。
+
+## S11+S12 切片 11/12 落地时的实现裁决（banked 2026-10-03）
+
+- **S11 reauthorize 注入形状**：trait 默认方法（None）+ cli/gateway.rs 装配处包 HealingBook（持 Box<dyn AccountBook>，account/allowance 纯委托、reauthorize 走桥）——对 account_book.rs 零依赖（当时并行泳道持有）；未选 env 加闭包（与 trait 钩子重复）。
+- **S11 跨 runtime 结论**：探针通过，未触发「队列降级」——常驻 heal 线程持自己的 current-thread runtime，turn 侧只 sync_channel + recv_timeout（5s 软等 / 30s 硬停），不嵌套 runtime。降级语义（busy domain → None → 透传且同样进 AUTH_REST 退避，off-turn 完成落 latch）写入 docs/errors.md。
+- **S11 AUTH_REST 落座的取舍**：锁被占超时也退避 30 分钟（防死登录逐 turn 重放；代价：一次瞬态锁竞争停 30 分钟，重启即清）——errors.md 已载，灰度反馈不佳可缩短。
+- **S12 renews_at 用 Option<SystemTime>**（与 forward/rest 内部时钟一致；usage 存储的 reset_at epoch 秒在 app 侧转换）。语义注释钉死「跨 provider 不可比」。
+- **S12 同窗语义**：tightest_window 取已知 percent 的最大窗口，renews_at 取**同一最紧张窗口**的 reset_at（较松窗口的 reset 不外漏），测试钉死。
+- **S12 行为收敛点（有意）**：生产路径原来 renews 恒 None 坐窗从不触发；现在 snapshot 整体透传，percent≥98 且 renews_at 在未来才真正坐窗（封顶不变）。Auth 不走 full_window。
+- **S12 触点 4/5 无改动**：RoutingPage/RoutingControl DTO 与组件均不携带余量（spec 的条件分支不成立）。
+- **S12 提交形状**：五触点因 AllowanceSnapshot 类型改名横跨 order/forward/rest（编译原子性）并为 2 commit（gateway 原子 + app），触点 4/5 并入说明。
