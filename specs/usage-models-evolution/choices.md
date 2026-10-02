@@ -77,3 +77,14 @@ workspace 无 zstd。zstd-sys 需 C 工具链（Windows CI/npm 链风险）；�
 - **probe 出错（AmbiguousOwner 等）降级行回退 + tracing warn**，与 reconcile_cli_accounts 的降级模式一致。
 - **Row 态 subscription_id=Some(行 id)**（账本归因用），仅 Diverged 恒 None；freshness/subscription_id 不进 AccountSnapshot——后续账本切片需要归因时读 signing_material 而非快照。
 - **Custody::probe 纯读实测**：无副作用（open 只拼路径、keychain 只读查询、read_dir 容缺失），无需走 reconcile 轻量子集；「不建 CLI 家目录」纪律已有测试钉死。
+
+## S3 切片 03 落地时的实现裁决（banked 2026-10-02）
+
+- **note_turn 签名**：`note_turn(&TurnFacts, status, body, upstream_raw)`——响应侧字段作参数而非塞进 facts（forward_turn 局部响应体的生命周期短于请求侧借用，单生命周期 struct 装不下）。
+- **Turn 带上游原始字节**（`upstream: Option<Bytes>`，回译前保留）：Anthropic 入站被 translate 重建 stream、回译失败 502 时 agent 无回复但 token 已耗——账本从 raw 字节记账（有测试钉死）；该字段 None 同时是 classify 的 `local` 判据。
+- **轮转**：按大小 5MB，活文件 rename 到 `usage.<n>.jsonl` 最低空位；load 按编号序+活文件读完整行（torn tail 丢弃）。进程内 static Mutex 与 O_APPEND 双保险防并发交错。
+- **account 语义（未接线世界）**：四槽位第一个非空 key；`skillstar`/`skillstar-<agent>`/`skillstar/<model>` 通道记空，真 key 记 `key:<sha256 前 8 hex>`；切片 10 后由胜选 candidate 的订阅 id 替换。
+- **ErrorKind::Quota/Verify 暂不产出**（区分需 rest.rs 私有词表，不在文件集）；schema 一次定形含全部 8 变体，切片 10 状态机细化。
+- **gateway 新增依赖 tracing + sha2**（cargo add，workspace 归一）：防火墙 1 要求 tracing warn 而 gateway 原无任何日志手段；指纹用 sha256（custody orphan_id 先例）。
+- **内存环每 turn 都喂**（UI 尾缓存连续），append 失败时 warn + 环即降级面。
+- **Anthropic 回译 SSE 仍是 502**（既有 bug 未修，需 translate.rs SSE 聚合，不属本片）；本片保证该场景 usage 不丢。
