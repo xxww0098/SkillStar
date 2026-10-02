@@ -1,6 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（5/10）
+状态：open（6/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
@@ -20,7 +20,7 @@
 - [x] 03 store/doc.rs schema owner — ModelGatewayDoc/OwnerRow + rest/extra 整段保留；已知字段「缺席不造」skip 语义（D-079）；DocStoreError doc_read/doc_parse/doc_write
 - [ ] 04 读方改道（7 个读方走 lens）
 - [ ] 05 写方改道（5 个写方走 lens，每写方一 commit）
-- [ ] 06 catalog typed parse
+- [x] 06 catalog typed parse — catalog/{schema,ids,mod}；四份重复解析收口（visible×2/names/effort/picker）；CatalogCost 四元组为 evolution-08 预声明；serves/entry/effort_values crate 内、catalog_ids pub
 - [ ] 07 app/models/gateway/ 投影归位
 - [ ] 08 custody_tests 拆分
 - [x] 09 usage service 拆分 — service/ 目录六块（helpers/projections/crud/refresh/oauth/switching），25 符号面冻结，service_tests.rs 字节级搬移
