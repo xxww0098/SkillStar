@@ -1,11 +1,11 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：open（9/10）
+状态：done（10/10）
 更新：2026-10-02
 
 ## Next Agent Prompt
 
-你是下一个接手本 spec 的实现者。从切片 01 开始，按编号顺序做；08/09 可与 03-07 并行，10 随时可做。
+本 spec 全部 10 片已完成（2026-10-02）。从切片 01 开始，按编号顺序做；08/09 可与 03-07 并行，10 随时可做。
 
 - **先读本 README 的「已拍板决策」和「全局防火墙」**，再读你将做的切片文件。决策不重开讨论。
 - 当前状态：01 已完成（tests/gateway_roundtrip.rs）。下一片是 02（树归位），注意与 evolution spec 的 gateway 泳道（serve.rs/ledger）协调——02 移动的文件含 affinity.rs（route/），等 evolution-03 合并后再动工。08/09（usage 线）随时可做。
@@ -21,7 +21,7 @@
 - [x] 04 读方改道（7 个读方走 lens）— 终态 grep 仅剩 5 处注释；C8 收编 GatewayFile；routing_state 双读顺手修；route/ 无 fs 可 grep 验证
 - [x] 05 写方改道（5 个写方走 lens，每写方一 commit）— listen/names/routing/group/profile 五 commit；终态 model_gateway.json 只在 store/doc.rs 一处打开；01 交叉矩阵全程绿
 - [x] 06 catalog typed parse — catalog/{schema,ids,mod}；四份重复解析收口（visible×2/names/effort/picker）；CatalogCost 四元组为 evolution-08 预声明；serves/entry/effort_values crate 内、catalog_ids pub
-- [ ] 07 app/models/gateway/ 投影归位
+- [x] 07 app/models/gateway/ 投影归位 — 11 文件移动（R100），33 名 re-export 逐字不变，types:gen 零 diff，投影规约落 gateway/mod.rs
 - [x] 08 custody_tests 拆分 — 真实 mod 挂载（orphan 门禁优先于逐字节路径平铺）；叶子集合 40/40 一致；errors.md 引用路径原样可跑
 - [x] 09 usage service 拆分 — service/ 目录六块（helpers/projections/crud/refresh/oauth/switching），25 符号面冻结，service_tests.rs 字节级搬移
 - [x] 10 families 落点契约（只写契约）— 契约即 slices/10-families-contract.md（SSOT），models README 已加指针；FamilyRow 不内联 members（默认裁决，检查点关闭）
