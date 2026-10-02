@@ -46,6 +46,11 @@ mod opencode_tests;
 #[cfg(test)]
 mod pi_tests;
 
+/// The latency guard every session parser shares: a gap longer than two
+/// hours between the ask and the answer is a pause, not a call's duration,
+/// so the call reports no latency instead of an inflated one.
+pub(crate) const MAX_LATENCY_MS: i64 = 2 * 60 * 60 * 1000;
+
 use claude::{ClaudeCodeParser, ClaudeDesktopParser};
 use codex::CodexParser;
 use omp::OmpParser;

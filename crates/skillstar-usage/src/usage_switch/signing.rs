@@ -171,7 +171,7 @@ fn row_material(catalog_id: &str, freshness: Freshness) -> Option<SigningMateria
     let active = storage::get_active_subscription(catalog_id)
         .ok()
         .flatten();
-    let row = pick_row(&rows, catalog_id, active.as_deref())?.clone();
+    let row = pinned_row(&rows, catalog_id, active.as_deref())?.clone();
     let subscription_id = row.id.clone();
     Some(SigningMaterial {
         access_token: super::target::secret(row.access_token_encrypted.as_deref()),
@@ -182,7 +182,11 @@ fn row_material(catalog_id: &str, freshness: Freshness) -> Option<SigningMateria
     })
 }
 
-fn pick_row<'a>(
+/// The row catalog selection works from: the pinned (active) row when it
+/// belongs to this catalog, else the catalog's first row. One rule shared
+/// by signing, the gateway account book, and the heal's row pick, so
+/// pinning semantics cannot drift between them.
+pub fn pinned_row<'a>(
     rows: &'a [Subscription],
     catalog_id: &str,
     active: Option<&str>,

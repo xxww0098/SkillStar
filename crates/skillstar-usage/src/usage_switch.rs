@@ -76,7 +76,7 @@ use custody::{Activated, Custody, CustodyLease, LinkState};
 use target::CliCredentialTarget;
 
 pub use custody::LinkMode;
-pub use signing::{Freshness, SigningMaterial, signing_material};
+pub use signing::{Freshness, SigningMaterial, pinned_row, signing_material};
 
 /// Outcome of a single account-switch attempt. Always serialised to the DTO
 /// so the UI can show success / failure / "not a CLI provider" distinctly.

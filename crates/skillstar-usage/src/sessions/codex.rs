@@ -55,10 +55,6 @@ const USER_ROLE_MARK: &[u8] = br#""role":"user""#;
 const TOOL_OUT_MARK: &[u8] = br#""type":"function_call_output""#;
 const CUSTOM_OUT_MARK: &[u8] = br#""type":"custom_tool_call_output""#;
 
-/// The latency guard: a gap longer than this between the ask and the count is
-/// not the call's duration (magpie precedent).
-const MAX_LATENCY_MS: i64 = 2 * 60 * 60 * 1000;
-
 /// Session parser for the Codex CLI.
 pub(crate) struct CodexParser;
 
@@ -510,7 +506,7 @@ fn codex_line(
             let Some(at) = line_timestamp(line) else { return };
             // It took from what asked for it, or the call before it.
             let asked = state.last_in_ms.max(state.last_call_ms);
-            let latency_ms = (asked > 0 && at > asked && at - asked < MAX_LATENCY_MS)
+            let latency_ms = (asked > 0 && at > asked && at - asked < super::MAX_LATENCY_MS)
                 .then_some((at - asked) as u64);
             state.calls.push(SessionCall {
                 at,

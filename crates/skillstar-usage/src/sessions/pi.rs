@@ -40,10 +40,6 @@ use super::{FileCheckpoint, SessionCall, SessionFile, SessionParser, SessionToke
 /// Parser-private version: bump when pi family parsing semantics change.
 pub(crate) const PI_PARSER_VERSION: u32 = 1;
 
-/// The latency guard: a gap longer than this between the previous entry and
-/// this one is not the call's duration.
-const MAX_LATENCY_MS: i64 = 2 * 60 * 60 * 1000;
-
 /// Session parser for the Pi coding agent.
 pub(crate) struct PiParser;
 
@@ -583,7 +579,7 @@ fn pi_emit(
     }
     // Measured from the previous entry (the prompt that asked, the tool
     // result that came back); the line's own time is noted afterwards.
-    let latency_ms = (state.last_ms > 0 && at > state.last_ms && at - state.last_ms < MAX_LATENCY_MS)
+    let latency_ms = (state.last_ms > 0 && at > state.last_ms && at - state.last_ms < super::MAX_LATENCY_MS)
         .then_some((at - state.last_ms) as u64);
     let call = SessionCall {
         at,
