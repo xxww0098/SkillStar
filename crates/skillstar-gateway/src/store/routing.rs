@@ -2,16 +2,10 @@
 //!
 //! The fields live on that row in `config_dir()/model_gateway.json`.
 //! Smart and auto are left out of the file. A missing file reads as those
-//! two. This module does not open `model_providers.json`.
+//! two. The file is opened only through [`ModelGatewayDoc`] (see
+//! `store::doc`). This module does not open `model_providers.json`.
 
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
-use serde_json::{Map, Value, json};
-use skillstar_core::infra::fs_ops::atomic_write;
-
-use super::doc::ModelGatewayDoc;
+use super::doc::{ModelGatewayDoc, OwnerRow};
 use super::groups::GROUP_PREFIX;
 use crate::route::affinity::AffinityMode;
 use crate::route::order::RouteMode;
@@ -49,11 +43,9 @@ pub fn save_routing(
     affinity: AffinityMode,
 ) -> Result<(), SaveRoutingError> {
     let id = normalize(owner, id)?;
-    let path = gateway_path();
-    let mut doc = load_object(&path)?;
-    write_row(&mut doc, owner, &id, mode, affinity)?;
-    let bytes = serde_json::to_vec_pretty(&doc).map_err(|_| SaveRoutingError::Store)?;
-    atomic_write(&path, &bytes).map_err(|_| SaveRoutingError::Store)
+    let mut doc = ModelGatewayDoc::open().map_err(|_| SaveRoutingError::Store)?;
+    write_routing(&mut doc, owner, &id, mode, affinity);
+    doc.save().map_err(|_| SaveRoutingError::Store)
 }
 
 fn normalize(owner: RouteOwner, id: &str) -> Result<String, SaveRoutingError> {
@@ -74,84 +66,39 @@ fn normalize(owner: RouteOwner, id: &str) -> Result<String, SaveRoutingError> {
     Ok(bare.to_string())
 }
 
-fn list_key(owner: RouteOwner) -> &'static str {
-    match owner {
-        RouteOwner::Provider => "providers",
-        RouteOwner::Group => "groups",
-    }
-}
-
-fn gateway_path() -> PathBuf {
-    skillstar_core::infra::paths::config_dir().join("model_gateway.json")
-}
-
-fn load_object(path: &Path) -> Result<Value, SaveRoutingError> {
-    match fs::read(path) {
-        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-            Ok(value @ Value::Object(_)) => Ok(value),
-            _ => Err(SaveRoutingError::Store),
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(json!({})),
-        Err(_) => Err(SaveRoutingError::Store),
-    }
-}
-
-fn write_row(
-    doc: &mut Value,
+/// The routing write lens: first-match-by-id over the owner's rows, a
+/// missing row is appended at the end (see `store::doc`).
+pub(crate) fn write_routing(
+    doc: &mut ModelGatewayDoc,
     owner: RouteOwner,
     id: &str,
     mode: RouteMode,
     affinity: AffinityMode,
-) -> Result<(), SaveRoutingError> {
-    let key = list_key(owner);
-    let list = doc
-        .as_object_mut()
-        .ok_or(SaveRoutingError::Store)?
-        .entry(key)
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(list) = list.as_array_mut() else {
-        return Err(SaveRoutingError::Store);
+) {
+    let rows = match owner {
+        RouteOwner::Provider => doc.providers_mut(),
+        RouteOwner::Group => doc.groups_mut(),
     };
-    if let Some(existing) = list
-        .iter_mut()
-        .find(|row| row.get("id").and_then(Value::as_str) == Some(id))
-    {
-        let Some(object) = existing.as_object_mut() else {
-            return Err(SaveRoutingError::Store);
-        };
-        apply(object, mode, affinity);
-        return Ok(());
-    }
-    let mut object = Map::new();
-    object.insert("id".to_string(), Value::String(id.to_string()));
-    apply(&mut object, mode, affinity);
-    list.push(Value::Object(object));
-    Ok(())
+    let row = match rows.iter_mut().find(|row| row.id == id) {
+        Some(row) => row,
+        None => {
+            rows.push(OwnerRow::from_id(id));
+            rows.last_mut().expect("just pushed")
+        }
+    };
+    apply(row, mode, affinity);
 }
 
-fn apply(object: &mut Map<String, Value>, mode: RouteMode, affinity: AffinityMode) {
-    match mode {
-        RouteMode::Smart => {
-            object.remove("routing");
-        }
-        other => {
-            object.insert(
-                "routing".to_string(),
-                Value::String(other.as_str().to_string()),
-            );
-        }
-    }
-    match affinity {
-        AffinityMode::Auto => {
-            object.remove("affinity");
-        }
-        other => {
-            object.insert(
-                "affinity".to_string(),
-                Value::String(other.as_str().to_string()),
-            );
-        }
-    }
+/// Smart means the `routing` key is gone, Auto means `affinity` is gone.
+fn apply(row: &mut OwnerRow, mode: RouteMode, affinity: AffinityMode) {
+    row.routing = match mode {
+        RouteMode::Smart => None,
+        other => Some(other.as_str().to_string()),
+    };
+    row.affinity = match affinity {
+        AffinityMode::Auto => None,
+        other => Some(other.as_str().to_string()),
+    };
 }
 
 /// Whose `routing` field to read in `model_gateway.json`.

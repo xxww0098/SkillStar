@@ -16,7 +16,7 @@
 //! `None`/empty is exactly key-absent, which is the handle a setter uses.
 //!
 //! Open points. The reader reroute (spec slice 04) and the first writer
-//! reroutes have landed; `routing, groups, profiles` still write through their legacy
+//! reroutes have landed; `groups, profiles` still write through their legacy
 //! per-module paths. They are migration backlog, not exemptions. The
 //! exemption list is empty
 //! and stays empty: no module gets a permanent private door into this
@@ -37,8 +37,8 @@ use skillstar_core::infra::fs_ops::atomic_write;
 
 // Slice 03 shipped the container before any reader or writer was rerouted
 // onto it. Slice 04 rerouted the readers; slice 05 has rerouted the
-// listen and names writer(s), so `save` has a live caller. The remaining writers
-// (routing, groups, profiles) stay on their legacy `load_object` paths until
+// listen, names and routing writer(s), so `save` has a live caller. The remaining writers
+// (groups, profiles) stay on their legacy `load_object` paths until
 // their reroute lands.
 
 /// Why a strict open or a save failed. The file is never modified on any
@@ -196,6 +196,20 @@ impl ModelGatewayDoc {
         &mut self.model_names
     }
 
+    /// The `providers` rows for the write lens. Row lookup and creation is
+    /// the lens's rule (first-match-by-id, new rows appended).
+    #[allow(dead_code)]
+    pub(crate) fn providers_mut(&mut self) -> &mut Vec<OwnerRow> {
+        &mut self.providers
+    }
+
+    /// The `groups` rows for the write lens, same rule as
+    /// [`Self::providers_mut`].
+    #[allow(dead_code)]
+    pub(crate) fn groups_mut(&mut self) -> &mut Vec<OwnerRow> {
+        &mut self.groups
+    }
+
     /// The `providers` rows, in file order. Row lookup is the caller's rule.
     #[allow(dead_code)]
     pub(crate) fn providers(&self) -> &[OwnerRow] {
@@ -229,6 +243,16 @@ impl ModelGatewayDoc {
 }
 
 impl OwnerRow {
+    /// A row carrying only an id; the write lenses' starting point for a
+    /// row the file does not have yet.
+    #[allow(dead_code)]
+    pub(crate) fn from_id(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            ..Self::default()
+        }
+    }
+
     /// One unknown key inside this row (`note`, `classifier`, `rules`, …),
     /// exactly as stored. Known-row-schema modules do not go through here.
     #[allow(dead_code)]
