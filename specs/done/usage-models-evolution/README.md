@@ -1,8 +1,7 @@
 # usage/models 演进 Phase 0-5（度量面与安全）— Spec
 
-状态：done（13/13）
-更新：2026-10-03
-关联：`specs/usage-models-tree/`（done，10/10，gateway crate 树重构，本 spec 多个切片的 ⛩ 前置已全部先行完成）
+状态：已归档。最后更新：2026-10-03。当前行为以 `docs/features/usage/README.md`、`docs/features/models/README.md` 和 `docs/architecture.md` 为准。本目录是落地后的理由记录，不是实施入口；分歧终态读 [choices.md](choices.md)。
+关联：`specs/done/usage-models-tree/`（已归档，gateway crate 树重构，本 spec 多个切片的 ⛩ 前置先行完成）
 
 ## Next Agent Prompt
 

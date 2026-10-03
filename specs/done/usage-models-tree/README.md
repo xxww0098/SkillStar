@@ -1,7 +1,6 @@
 # usage/models 项目树重构（family-ready）— Spec
 
-状态：done（10/10）
-更新：2026-10-02
+状态：已归档。最后更新：2026-10-03。当前行为以 `docs/features/models/README.md` 和 `docs/architecture.md` 为准。本目录是落地后的理由记录，不是实施入口；分歧终态读 [choices.md](choices.md)。
 
 ## Next Agent Prompt
 
@@ -97,7 +96,7 @@ bash scripts/internal/check_file_size.sh
 
 ## 关联但出范围（勿在本 spec 内解决）
 
-Phase 0-5 演进（LAN 鉴权、网关持久账本、会话解析、凭据通道收敛、交叉视图）**已立 spec 并完成：`specs/usage-models-evolution/`（done，13/13）**。它对树 spec 有多处 ⛩ 前置（03/04/05/06/07/09），两 spec 的并行纪律与前置表见其 README。第一轮对抗审查遗留给它的三个开放问题已在那边拍板：会话归因经 dispatch 头管道优先、首期解析受管 6 agent（zcode 出范围）、gateway key 安装级随机纯内部。
+Phase 0-5 演进（LAN 鉴权、网关持久账本、会话解析、凭据通道收敛、交叉视图）**已立 spec 并完成：`specs/done/usage-models-evolution/`（已归档，13/13）**。它对树 spec 有多处 ⛩ 前置（03/04/05/06/07/09），两 spec 的并行纪律与前置表见其 README。第一轮对抗审查遗留给它的三个开放问题已在那边拍板：会话归因经 dispatch 头管道优先、首期解析受管 6 agent（zcode 出范围）、gateway key 安装级随机纯内部。
 
 ## 已知未知
 
