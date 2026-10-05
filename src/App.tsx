@@ -26,6 +26,9 @@ const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ defa
 const SettingsPage = lazy(() => import("./pages/Settings").then((mod) => ({ default: mod.Settings })));
 
 // Usage mode (single page: subscription tracker)
+const AccountsPage = lazy(() => import("./pages/Accounts").then((mod) => ({ default: mod.Accounts })));
+
+// Usage mode (single page: subscription tracker)
 const UsagePage = lazy(() => import("./pages/Usage").then((mod) => ({ default: mod.Usage })));
 
 function PageFallback() {
@@ -49,9 +52,11 @@ const MAIN_CONTENT_PAD_COLLAPSED_PX = SHELL_GAP_PX + SIDEBAR_COLLAPSED_PX + SHEL
 /** Skills-mode list pages whose search/scroll should survive a sidebar hop. */
 const SKILLS_KEEP_PAGES = ["my-skills", "marketplace", "skill-cards", "projects", "settings"] as const;
 
-function UsageModeShell({ children }: { children: React.ReactNode }) {
+/** Both the Usage and Accounts modes read subscription data; one provider
+ * covers whichever is mounted. */
+function UsageDataShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
-  if (appMode === "usage") {
+  if (appMode === "usage" || appMode === "accounts") {
     return <UsageDataProvider>{children}</UsageDataProvider>;
   }
   return children;
@@ -79,7 +84,8 @@ function AppContent() {
   // Routes the link to the matching page; unknown targets are ignored.
   useTauriEvent<{ host?: string | null; path?: string }>("skillstar://deep-link", (payload) => {
     const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
-    if (target) nav.navigate(target);
+    if (target === "accounts") nav.setAppMode("accounts");
+    else if (target) nav.navigate(target);
   });
 
   // ── Sidebar collapsed ──────────────────────────────────────────
@@ -114,6 +120,11 @@ function AppContent() {
     },
     [nav],
   );
+
+  const handleEnterAccountsMode = useCallback(() => {
+    nav.setAppMode("accounts");
+    setCommandPaletteOpen(false);
+  }, [nav]);
 
   const handleEnterUsageMode = useCallback(() => {
     nav.setAppMode("usage");
@@ -235,14 +246,18 @@ function AppContent() {
   };
 
   const renderPage = () => {
-    if (nav.appMode === "usage") {
+    if (nav.appMode === "accounts") {
       return (
-        <UsagePage
+        <AccountsPage
           filter={nav.usageCatalogFilter}
-          usageCreateRequest={nav.usageCreateRequest}
-          clearUsageCreateRequest={nav.clearUsageCreateRequest}
+          accountsCreateRequest={nav.accountsCreateRequest}
+          clearAccountsCreateRequest={nav.clearAccountsCreateRequest}
         />
       );
+    }
+
+    if (nav.appMode === "usage") {
+      return <UsagePage filter={nav.usageCatalogFilter} />;
     }
 
     return <KeepAliveOutlet active={skillsOutletId} keep={SKILLS_KEEP_PAGES} render={renderSkillsPage} />;
@@ -254,7 +269,7 @@ function AppContent() {
   );
 
   return (
-    <UsageModeShell>
+    <UsageDataShell>
       <div className="relative h-screen w-screen overflow-hidden bg-background">
         <a
           href="#main-content"
@@ -295,7 +310,7 @@ function AppContent() {
               transition={{ duration: prefersReducedMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }}
               className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             >
-              <Suspense fallback={nav.appMode === "usage" ? <UsagePageSkeleton /> : <PageFallback />}>
+              <Suspense fallback={nav.appMode === "skills" ? <PageFallback /> : <UsagePageSkeleton />}>
                 {renderPage()}
               </Suspense>
             </motion.div>
@@ -305,11 +320,12 @@ function AppContent() {
           open={commandPaletteOpen}
           onClose={handleCloseCommandPalette}
           onNavigate={handleCommandPaletteNavigate}
+          onEnterAccountsMode={handleEnterAccountsMode}
           onEnterUsageMode={handleEnterUsageMode}
         />
         <Toaster />
       </div>
-    </UsageModeShell>
+    </UsageDataShell>
   );
 }
 

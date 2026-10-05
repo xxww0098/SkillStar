@@ -58,6 +58,7 @@
     "groups": "Decks",
     "projects": "Projects",
     "usage": "Usage",
+    "accounts": "Accounts",
     "settings": "Settings",
     "githubSignIn": "Sign in to GitHub",
     "githubAuthorizing": "Waiting for GitHub…",
@@ -1560,5 +1561,11 @@
     "filesScanned": "Repository ID {{id}} · {{count}} files scanned",
     "alreadyRegistered": " · already registered",
     "noEligibleRepositories": "No eligible private repositories are selected for the App."
+  },
+  "accounts": {
+    "panelSubtitle": "Switch, add, and manage provider accounts",
+    "allAccounts": "All accounts",
+    "addAccount": "Add account",
+    "pickProviderFromSidebar": "Pick a provider from the sidebar first"
   }
 }

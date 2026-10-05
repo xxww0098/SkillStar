@@ -33,7 +33,7 @@ vi.mock("../context/UsageDataContext", () => ({
 
 describe("UsagePanel loading", () => {
   it("renders the card skeleton before usage data arrives", () => {
-    render(<UsagePanel filter={FILTER_ALL} usageCreateRequest={null} clearUsageCreateRequest={() => undefined} />);
+    render(<UsagePanel filter={FILTER_ALL} />);
 
     const status = screen.getByRole("status", { name: "usage.loading" });
     expect(status.querySelectorAll(".grid > div")).toHaveLength(6);

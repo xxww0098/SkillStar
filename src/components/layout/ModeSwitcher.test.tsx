@@ -14,11 +14,19 @@ vi.mock("framer-motion", () => ({
 }));
 
 describe("ModeSwitcher", () => {
-  it("renders Skills and Usage buttons", () => {
+  it("renders Skills, Accounts, and Usage buttons", () => {
     render(<ModeSwitcher currentMode="skills" onModeChange={vi.fn()} collapsed={false} />);
 
     expect(screen.getByRole("button", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accounts" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Usage" })).toBeInTheDocument();
+  });
+
+  it("highlights Accounts button when accounts mode is active", () => {
+    render(<ModeSwitcher currentMode="accounts" onModeChange={vi.fn()} collapsed={false} />);
+
+    expect(screen.getByRole("button", { name: "Accounts" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Usage" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("highlights the active mode button with aria-pressed", () => {

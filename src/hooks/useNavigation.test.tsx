@@ -51,6 +51,22 @@ describe("useNavigation - AppMode support", () => {
     expect(window.location.hash).toBe("#projects");
   });
 
+  it("switches to accounts mode and updates hash to #accounts", () => {
+    const { result } = renderHook(() => useNavigation(), { wrapper });
+    act(() => result.current.setAppMode("accounts"));
+    expect(result.current.appMode).toBe("accounts");
+    expect(window.location.hash).toBe("#accounts");
+  });
+
+  it("handles hashchange into accounts mode", () => {
+    const { result } = renderHook(() => useNavigation(), { wrapper });
+    window.location.hash = "#accounts";
+    act(() => {
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(result.current.appMode).toBe("accounts");
+  });
+
   it("handles hashchange into usage mode", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 

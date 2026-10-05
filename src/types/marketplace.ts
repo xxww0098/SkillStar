@@ -55,7 +55,7 @@ export type SortOption = "stars-desc" | "updated" | "name";
 export type ViewMode = "grid" | "list";
 
 /** Top-level application mode — the sidebar's world switch. */
-export type AppMode = "skills" | "usage";
+export type AppMode = "skills" | "accounts" | "usage";
 
 export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "settings";
 

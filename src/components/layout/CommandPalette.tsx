@@ -4,6 +4,7 @@ import {
   Download,
   FolderKanban,
   Gauge,
+  Users,
   Globe,
   Layers,
   Package,
@@ -30,6 +31,7 @@ interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onNavigate: (page: NavPage) => void;
+  onEnterAccountsMode?: () => void;
   onEnterUsageMode?: () => void;
   onImport?: () => void;
   onRefresh?: () => void;
@@ -39,6 +41,7 @@ export function CommandPalette({
   open,
   onClose,
   onNavigate,
+  onEnterAccountsMode,
   onEnterUsageMode,
   onImport,
   onRefresh,
@@ -98,6 +101,19 @@ export function CommandPalette({
               section: t("commandPalette.navigation"),
               onSelect: onEnterUsageMode,
               keywords: ["usage", "subscription", "quota", "billing", "用量", "订阅"],
+            } satisfies CommandPaletteAction,
+          ]
+        : []),
+      ...(onEnterAccountsMode
+        ? [
+            {
+              id: "nav-accounts",
+              label: t("sidebar.accounts"),
+              icon: <Users className="w-4 h-4" />,
+              shortcut: "⌘5",
+              section: t("commandPalette.navigation"),
+              onSelect: onEnterAccountsMode,
+              keywords: ["accounts", "login", "switch", "subscription", "账号", "订阅"],
             } satisfies CommandPaletteAction,
           ]
         : []),

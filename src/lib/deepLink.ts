@@ -7,7 +7,7 @@ import type { NavPage } from "../types";
  * targets return `null` and are ignored — the backend keeps emitting so the
  * OS link still wakes the app, but we never guess a destination.
  */
-export type DeepLinkTarget = NavPage | null;
+export type DeepLinkTarget = NavPage | "accounts" | null;
 
 export function deepLinkNavTarget(host: string | null, path: string): DeepLinkTarget {
   const first = (host ?? path.split("/")[1] ?? "").toLowerCase();
@@ -24,6 +24,8 @@ export function deepLinkNavTarget(host: string | null, path: string): DeepLinkTa
       return "projects";
     case "settings":
       return "settings";
+    case "accounts":
+      return "accounts";
     default:
       return null;
   }

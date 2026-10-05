@@ -10,6 +10,7 @@ const importPublisherDetailPage = () => import("../pages/PublisherDetail");
 const importSkillCardsPage = () => import("../pages/SkillCards");
 const importProjectsPage = () => import("../pages/Projects");
 const importSettingsPage = () => import("../pages/Settings");
+const importAccountsPage = () => import("../pages/Accounts");
 const importUsagePage = () => import("../pages/Usage");
 
 const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "settings"];
@@ -46,7 +47,12 @@ const HASH_TO_PAGE: Record<string, NavPage> = Object.fromEntries(
   Object.entries(PAGE_TO_HASH).map(([page, hash]) => [hash, page as NavPage]),
 );
 
+const ACCOUNTS_HASH = "accounts";
 const USAGE_HASH = "usage";
+
+function isAccountsHash(hash: string): boolean {
+  return hash === ACCOUNTS_HASH;
+}
 
 function isUsageHash(hash: string): boolean {
   return hash === USAGE_HASH;
@@ -54,7 +60,7 @@ function isUsageHash(hash: string): boolean {
 
 function pageFromHash(): NavPage {
   const hash = window.location.hash.slice(1);
-  if (isUsageHash(hash)) return "my-skills";
+  if (isUsageHash(hash) || isAccountsHash(hash)) return "my-skills";
   if (hash === "ssh" || hash === "learn") return "my-skills";
   return HASH_TO_PAGE[hash] ?? "my-skills";
 }
@@ -62,6 +68,7 @@ function pageFromHash(): NavPage {
 function appModeFromHash(): AppMode {
   const hash = window.location.hash.slice(1);
   if (isUsageHash(hash)) return "usage";
+  if (isAccountsHash(hash)) return "accounts";
   return "skills";
 }
 
@@ -76,7 +83,7 @@ interface NavigationState {
   marketplaceTab: MarketplaceTabId;
   clipboardShareCode: string | null;
   usageCatalogFilter: CatalogFilter;
-  usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
+  accountsCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
 }
 
 interface NavigationActions {
@@ -95,8 +102,8 @@ interface NavigationActions {
   /** Navigate to my-skills and focus a skill */
   goToMySkillsFocus: (skill: string) => void;
   setUsageCatalogFilter: (filter: CatalogFilter) => void;
-  openUsageCreate: (preselectCatalogId?: string | null) => void;
-  clearUsageCreateRequest: () => void;
+  openAccountsCreate: (preselectCatalogId?: string | null) => void;
+  clearAccountsCreateRequest: () => void;
   /** Warm a page's lazy chunk before the user commits to it (hover/focus). */
   prefetchPage: (page: NavPage) => void;
 }
@@ -133,7 +140,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
   const [marketplaceTab, setMarketplaceTab] = useState<MarketplaceTabId>("all");
   const [clipboardShareCode, setClipboardShareCode] = useState<string | null>(null);
   const [usageCatalogFilter, setUsageCatalogFilter] = useState<CatalogFilter>(FILTER_ALL);
-  const [usageCreateRequest, setUsageCreateRequest] = useState<{
+  const [accountsCreateRequest, setAccountsCreateRequest] = useState<{
     nonce: number;
     preselectCatalogId: string | null;
   } | null>(null);
@@ -159,6 +166,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       if (mode === "usage") {
         window.location.hash = USAGE_HASH;
         void importUsagePage();
+      } else if (mode === "accounts") {
+        window.location.hash = ACCOUNTS_HASH;
+        void importAccountsPage();
       } else {
         window.location.hash = PAGE_TO_HASH[activePage];
       }
@@ -191,15 +201,18 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     [navigate],
   );
 
-  const openUsageCreate = useCallback((preselectCatalogId?: string | null) => {
-    setUsageCreateRequest((prev) => ({
+  const openAccountsCreate = useCallback((preselectCatalogId?: string | null) => {
+    setAppModeState("accounts");
+    window.location.hash = ACCOUNTS_HASH;
+    void importAccountsPage();
+    setAccountsCreateRequest((prev) => ({
       nonce: (prev?.nonce ?? 0) + 1,
       preselectCatalogId: preselectCatalogId ?? null,
     }));
   }, []);
 
-  const clearUsageCreateRequest = useCallback(() => {
-    setUsageCreateRequest(null);
+  const clearAccountsCreateRequest = useCallback(() => {
+    setAccountsCreateRequest(null);
   }, []);
 
   // ── Prefetching ─────────────────────────────────────────────────
@@ -257,6 +270,8 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       const hash = window.location.hash.slice(1);
       if (isUsageHash(hash)) {
         setAppModeState("usage");
+      } else if (isAccountsHash(hash)) {
+        setAppModeState("accounts");
       } else {
         const page = pageFromHash();
         setAppModeState("skills");
@@ -278,7 +293,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       marketplaceTab,
       clipboardShareCode,
       usageCatalogFilter,
-      usageCreateRequest,
+      accountsCreateRequest,
       navigate,
       setSubPage,
       setAppMode,
@@ -291,8 +306,8 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       goToSkillCardsWithSkills,
       goToMySkillsFocus,
       setUsageCatalogFilter,
-      openUsageCreate,
-      clearUsageCreateRequest,
+      openAccountsCreate,
+      clearAccountsCreateRequest,
       prefetchPage,
     }),
     [
@@ -305,14 +320,14 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       marketplaceTab,
       clipboardShareCode,
       usageCatalogFilter,
-      usageCreateRequest,
+      accountsCreateRequest,
       navigate,
       setAppMode,
       goToProjectsWithSkills,
       goToSkillCardsWithSkills,
       goToMySkillsFocus,
-      openUsageCreate,
-      clearUsageCreateRequest,
+      openAccountsCreate,
+      clearAccountsCreateRequest,
       prefetchPage,
     ],
   );

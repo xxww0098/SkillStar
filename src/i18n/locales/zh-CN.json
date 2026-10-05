@@ -58,6 +58,7 @@
     "groups": "卡组",
     "projects": "项目",
     "usage": "用量",
+    "accounts": "账号",
     "settings": "设置",
     "githubSignIn": "登录 GitHub",
     "githubAuthorizing": "等待 GitHub 授权…",
@@ -1560,5 +1561,11 @@
     "filesScanned": "仓库 ID {{id}} · 已扫描 {{count}} 个文件",
     "alreadyRegistered": " · 已注册",
     "noEligibleRepositories": "没有为 App 选择符合条件的私有仓库。"
+  },
+  "accounts": {
+    "panelSubtitle": "切换、添加和管理各平台账号",
+    "allAccounts": "全部账号",
+    "addAccount": "添加账号",
+    "pickProviderFromSidebar": "请先在侧边栏选择一个平台"
   }
 }

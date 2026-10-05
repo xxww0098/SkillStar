@@ -44,7 +44,7 @@ vi.mock("../../../hooks/useNavigation", () => ({
     navigate: vi.fn(),
     usageCatalogFilter: "__all__",
     setUsageCatalogFilter: vi.fn(),
-    openUsageCreate: vi.fn(),
+    openAccountsCreate: vi.fn(),
   }),
 }));
 

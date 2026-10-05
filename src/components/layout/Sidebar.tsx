@@ -26,6 +26,7 @@ import type { NavPage } from "../../types";
 import { GitHubAccountMenu } from "@/features/settings";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SkillsNav } from "./SkillsNav";
+import { AccountsNav } from "@/features/accounts";
 import { UsageNav } from "./UsageNav";
 
 interface SidebarProps {
@@ -449,7 +450,9 @@ export function Sidebar({
 
       {/* ── Navigation (conditional based on appMode) ── */}
       <nav className={cn("flex-1 py-2 overflow-y-auto", collapsed ? "px-1.5" : "px-2")}>
-        {appMode === "usage" ? (
+        {appMode === "accounts" ? (
+          <AccountsNav selected={usageCatalogFilter} onSelect={setUsageCatalogFilter} collapsed={collapsed} />
+        ) : appMode === "usage" ? (
           <UsageNav selected={usageCatalogFilter} onSelect={setUsageCatalogFilter} collapsed={collapsed} />
         ) : (
           <SkillsNav activePage={activePage} onNavigate={onNavigate} onPrefetch={onPrefetch} collapsed={collapsed} />
