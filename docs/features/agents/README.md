@@ -22,8 +22,8 @@ Kilo 全局目录为 `~/.kilo/skills`，`~/.kilocode` 仅上游用于安装检�
 目录（`.grok`、`.kilo`、`.kimchi`、`.minimax`、`.posit/assistant`、`.zcode`）
 随同步补齐。
 
-**Gemini 的三轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已随上游
-进入同步区（全局目录 `~/.gemini/skills`，项目级共享 `.agents/skills`）；轴②Models 工具同步**仍未接入**。
+**Gemini 的两轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已随上游
+进入同步区（全局目录 `~/.gemini/skills`，项目级共享 `.agents/skills`）。
 Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 Gemini CLI 是不同
 产品，两个 profile 互不顶替。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
 **一个** Agent profile，部署时再扇出到三份 `builtin/skills`，见下面的[镜像目录](#镜像目录一个-profile多份技能目录)。Usage/Cloud Code 中的 Gemini **模型名**
@@ -33,8 +33,9 @@ Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 G
 | 轴 | 作用 | 必做？ |
 |---|---|---|
 | ① Skills 分发 | Agent 出现在 Settings / Projects / My Skills，技能可链接到它 | ✅ 核心 |
-| ② Models 工具同步 | 在 Models 工作台把 Provider 配置写入该 Agent 的磁盘配置文件 | 可选 |
-| ③ Usage 订阅 | 在 Usage 面板聚合该厂商的订阅 / 配额 / 余额 | 可选 |
+| ② 订阅 / 账号 | 在 Accounts/Usage 面板聚合该厂商的订阅配额，必要时接入账号切换 | 可选 |
+
+原「Models 工具同步」轴（把 Provider 配置写入 Agent 磁盘配置）已随模型域整体移除（[D-082](../../decisions.md)）。
 
 ---
 
@@ -170,16 +171,10 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
 - `~/.omp/agent/managed-skills` 是 OMP Auto-Learn 的自动生成目录（`manage_skill`
   工具写入），**不纳入** SkillStar 的发现、部署与卸载——工具生成内容不当作
   用户技能，避免噪音与误清理。
-- 目前轴①（Skills 分发）与轴②（Models 工具同步）都已接入：OMP 的 provider 注入走
-  `~/.omp/agent/models.yml`（YAML `providers.skillstar_*` 块，schema 与 Pi 同构）+
-  `~/.omp/agent/config.yml` 的 `modelRoles` 角色指针；tool-sync 以
-  `format: "yaml"` 文件规格读写（见 decisions.md D-018、D-025）。OMP 不读
-  `~/.pi/agent/models.json` / `settings.json`，与 Pi 的绑定互不影响。
-- **角色路由是每个 Agent 自己声明的能力**，分三档：无角色（Pi / Codex / OpenCode /
-  Claude Desktop）、单角色 + 兜底（Claude Code 的 5 条 env 键）、多角色（OMP 的 10 条
-  `modelRoles`）。声明写在 `tool_sync::agents` 注册表的 `roles` 列，UI 与 writer 都读它。
-  角色词表、回落语义、写盘跳过回报与能力裁剪见
-  [models/README.md](../models/README.md#角色路由跨-agent)，不在此重复。
+- 轴①（Skills 分发）已接入。历史上的「Models 工具同步」注入（OMP 的
+  `~/.omp/agent/models.yml`、Pi 的 `~/.pi/agent/models.json` provider 块、角色路由的
+  `modelRoles` 指针）已随模型域移除（[D-082](../../decisions.md)），此处仅存历史记录。
+  OMP 不读 Pi 的配置，与 Pi 互不影响。
 
 ### WorkBuddy 注册说明
 
@@ -188,7 +183,7 @@ WorkBuddy 是腾讯的办公 Agent，技能目录与 CodeBuddy 同构（`~/.work
 `vercel-labs/skills` 上游清单里，所以落在 `BUILTIN_AGENT_DEFS` 的 extension 区。
 Lobe Icons 没有对应品牌字形，图标走通用 `LobeHubMono`。
 
-轴①已接入。WorkBuddy 没有 Models 工具同步。
+轴①已接入。
 
 ### Devin 注册说明
 
@@ -198,62 +193,20 @@ Devin 是 Cognition 的软件工程 Agent，`devin` 行与 `vercel-labs/skills` 
 
 轴①已接入。Windsurf 已改名 Devin Desktop，但同属 Cognition 不代表两个 profile 可以互相顶替。
 
-Devin **没有 Models 工具同步**：模型由 Cognition 托管，`~/.config/devin/config.json` 的
-`agent.model` 只在自家模型名之间选择，没有 base URL / API Key 之类的自带 provider 配置，
-因此不注册 `tool_sync::agents` 的 `AgentSpec`。Usage 订阅同理由公开 API 决定，未接入。
+Devin 的模型由 Cognition 托管，`~/.config/devin/config.json` 的
+`agent.model` 只在自家模型名之间选择，没有 base URL / API Key 之类的自带 provider 配置。
+Usage 订阅同理由公开 API 决定，未接入。
 
-## 轴②：Models 工具同步（可选）
+## 轴②（historical）：Models 工具同步
 
-仅当该 Agent 有自己的磁盘配置文件、且希望在 Models 工作台一键写入
-Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code`、`claude-desktop`、`codex`、
-`opencode`、`pi`。Claude CLI 与 Claude Desktop 是独立 tool id / 独立绑定
-（矩阵分列、Official 开关与映射互不影响）；Desktop 原生应用配置投影可后续
-增强，但不要再合并回单一 `claude-code`。
-
-全部改动在 `crates/skillstar-models/src/tool_sync/` + 少量前端：
-
-1. **注册表** `agents.rs`：在 `AGENT_SPECS` 加一行 `AgentSpec`
-   （id / display_name / binary_name / config_dir_probes / **kind** /
-   required_url / 文件清单：每个文件带 file_id、label、format、沙箱 resolver
-   和编辑器默认内容）。路径解析、文件清单、config target 列表、安装探测、
-   激活时的 URL 校验、`agent_supports_multiple_providers` 的 kind 判定和
-   deactivate 分发（`unsync_tool`）全部由这张表驱动——不再有散布的
-   per-agent `match` 需要接线。表驱动一致性测试（`agents.rs` 内联）会
-   自动覆盖新行。
-2. **写入/卸载** `sync.rs`（single 型）或 `multi_provider.rs`（multi 型）：
-   实现 writer 与对应的 unsync，返回 `ToolSyncResultFlat`，并作为
-   `AgentSpec.sync_binding` / `unsync` 函数指针挂进上一步的注册表行——
-   `sync_tool_binding` / `resync_active_tools` / `unsync_tool` 已表驱动，
-   **不要**再加 per-agent `match` 分支。必须遵守的语义：
-   - 只增删**自己管理的字段**，保留用户已有配置（参考各 `*_MANAGED_*` 常量，
-     定义在 `types.rs`；multi 型使用 `skillstar_<id8>` 托管键约定）；
-   - 写前备份（backup_path 语义与现有实现一致）。
-3. **沙箱安全**：所有路径必须经 `tool_sync` 的 home 解析（受
-   `SKILLSTAR_TOOL_SYNC_HOME` 重定向）。**测试绝不能写真实 `$HOME`**
-   —— 集成测试必须设置该环境变量（历史事故见 mod.rs 顶部注释）。
-4. **前端**（注册表驱动，只需两处）：
-   - `src/features/models/lib/agentRegistry.ts`：在 `PROVIDER_AGENTS` 加一条
-     `AgentDescriptor`（toolId / displayName / requiredUrlField / **kind** /
-     installDocsUrl / tagline / disabledTooltip / configPathDisplay），并视情况
-     扩展 `CONFIG_FILE_TOOLS`。**`kind` 记录绑定语义**：`"single"`（全局 env，
-     仅一个激活供应商，如 Claude Code）与 `"multi"`（配置文件原生并存多个供应商
-     + 指针，如 Codex / OpenCode / Pi）。当前渲染方是 `hub/matrix/` 的矩阵列，
-     单/多绑定的差异体现在单元格形态上；早期的 `AgentHeroCard` /
-     `MultiProviderCard` / `AgentSettingsDialog` 卡片岛已随 Models 重设计 WP-0
-     删除（零引用死代码），新的 Agent 详情形态由 WP-4 提供。
-     前后端注册表各自钉住同一份 toolId 字面量清单
-     （`agentRegistry.test.ts` ↔ `agents.rs` 一致性测试），加行时两侧同步；
-     矩阵列、状态汇总和工具配置检查全部由该注册表驱动，无需新组件；
-   - `src/features/models/components/shared/AgentToolIcon.tsx`：
-     `AgentToolIconId` 对齐 `ProviderToolId`，并为每个 tool 挂 `@lobehub/icons` 字形
-     （经 `lobe.ts`）；gallery 徽章经 `getAgent(toolId).iconId` 渲染，勿再维护身份映射表；
-5. 跑 `cargo test -p skillstar-models`（含属性测试 `tool_sync_prop_tests`）。
+已随模型域整体移除（[D-082](../../decisions.md)）：`crates/skillstar-models/src/tool_sync/`
+与 `src/features/models/` 均已删除。支持一个新 Agent 不再包含「写 Provider 配置」步骤。
 
 ---
 
-## 轴③：Usage 订阅（可选）
+## 轴②：订阅 / 账号（可选）
 
-仅当要在 Usage 面板展示该厂商的配额/余额时才做。全部在
+仅当要在 Accounts/Usage 面板展示该厂商的配额/余额（或接入账号切换）时才做。全部在
 `crates/skillstar-usage/`：
 
 1. `catalog.rs`：在 `catalog()` 固定目录中加一个 `CatalogEntry`
@@ -284,13 +237,7 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
   [ ] README.md 用户能力描述 / i18n 枚举文案（如涉及）
   [ ] 特殊性质 → builtin.rs 守卫测试 + Agents/Skills 功能文档
 
-轴②（可选）
-  [ ] agents.rs AGENT_SPECS +1 AgentSpec（含 sync_binding / unsync，勿加 match）
-  [ ] sync.rs 或 multi_provider.rs 的 writer / unsync（含备份 + managed-keys 语义）
-  [ ] lib/agentRegistry.ts +1 AgentDescriptor + shared/AgentToolIcon.tsx 品牌字形
-  [ ] cargo test -p skillstar-models 全绿（测试必须走 SKILLSTAR_TOOL_SYNC_HOME）
-
-轴③（可选）
+轴②（可选，订阅/账号）
   [ ] catalog.rs +1 entry（含 AuthMode，Cookie 见 fetchers/cookie/）
   [ ] fetchers/<auth_mode>/<vendor>.rs + dispatch 注册
   [ ] cargo test -p skillstar-usage 全绿

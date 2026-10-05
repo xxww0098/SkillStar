@@ -75,7 +75,6 @@ pub(super) fn read(codex_home: &Path) -> Option<Value> {
 /// Disabled: SkillStar strictly stores all credentials in local encrypted JSON,
 /// never writing secrets to the macOS Keychain.
 #[allow(dead_code)]
-
 #[cfg(test)]
 mod tests {
     use super::*;

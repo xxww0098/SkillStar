@@ -244,7 +244,6 @@ fn skill_name_from_path(path: &Path) -> Option<String> {
 
 /// Path of one canonical skill folder, when it exists (test/patrol helper).
 #[allow(dead_code)]
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -12,30 +12,29 @@ Tauri v2 + React + TypeScript + Tailwind CSS v4 (theme tokens in src/index.css) 
 
 ## Users
 
-Inferred (interview unanswered — ask_user_question timed out): developers who run several CLI/desktop coding agents (Claude Code, Codex, OpenCode, Pi…) and want one place to wire each agent to model providers through a local gateway, watch usage/cost, and manage skills.
+Developers who run several CLI/desktop coding agents (Claude Code, Codex, OpenCode, Cursor…) across multiple login accounts and subscriptions, and want one place to install and distribute skills, switch the account a CLI is actually serving, and watch usage — without configuring or wiring models (the model domain was removed wholesale, D-082).
 
 ## Product Purpose
 
-SkillStar is the control surface around the user's agent fleet: bind each agent to a provider/model via the local gateway, group and route providers, track spend, and install/sync skills. Success = an agent is connected and calling through the gateway with the routing the user chose, observable in the recent-calls ledger.
+SkillStar is the control surface around the user's agent fleet for three jobs: install/distribute skills, manage and switch multiple login accounts per provider, and display usage (quota windows, today's sessions, estimated cost). Success = an agent is serving the account the user picked, its skills are where they should be, and the usage page explains what was spent.
 
 ## Positioning
 
-One local loopback gateway (127.0.0.1) fronts every provider: agents only ever see local endpoints, while provider credentials, routing policy, and profile presets live in SkillStar. Neighboring tools configure one agent or one provider; this one brokers the whole set.
+Neighboring tools manage one tool's accounts or one skill directory; SkillStar brokers the whole set — per-provider multi-account switching against the tools' real credential stores, plus a local-first skill marketplace and deployment. It deliberately does not route, configure, or serve models anymore.
 
 ## Operating Context
 
-Desktop app living next to the user's terminals and agents; Chinese-first UI with English fallback (mixed-locale copy is a known defect, not a choice). Dense technical data (endpoints, model refs, status codes, latencies) is the norm; JetBrains Mono is reserved for code/ids/numbers, DM Sans for prose.
+Desktop app living next to the user's terminals and agents; Chinese-first UI with English fallback (mixed-locale copy is a known defect, not a choice). Dense technical data (quota windows, token counts, paths) is the norm; JetBrains Mono is reserved for code/ids/numbers, DM Sans for prose.
 
 ## Capabilities and Constraints
 
-- Surfaces: My Skills, Marketplace, Skill Cards, Projects, Settings (skills mode); Models hub (agents/providers/gateway); Usage (subscription tracker); plus lightweight usage card windows.
-- Security: never render raw credentials or vendor URLs — masked summaries and loopback addresses only (enforced by tests).
+- Surfaces: My Skills, Marketplace, Skill Cards, Projects, Settings (skills mode); Accounts (multi-account management: add/switch/import); Usage (read-only consumption view); plus lightweight usage card windows.
+- Security: never render raw credentials; keys live in local AES-256-GCM JSON, never the system keychain (D-072). Claude account switching is file-based off macOS and unavailable on macOS by that same policy.
 - Accessibility: existing keyboard shortcuts, command palette, focus rings, and reduced-motion handling must survive any visual change.
-- Undecided (inferred, not confirmed): full-app redesign vs. the Models page first — the Models page is the confirmed pain point.
 
 ## Product Principles
 
-- Local and legible: agents talk to 127.0.0.1; the UI explains where traffic goes without exposing secrets.
-- One concept per surface: pick (rail), configure (gateway), observe (calls) — no card soup.
+- Local and legible: the UI explains which account a CLI is serving (disk truth, not a cached pin) without exposing secrets.
+- One concept per surface: skills (install/distribute), accounts (who is logged in), usage (what was spent) — no card soup.
 - Copy is part of the product: controls name their action in the user's locale.
 - The page must earn its density: technical data stays compact; chrome stays quiet.

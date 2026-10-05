@@ -73,13 +73,12 @@ pub fn fetch_source(spec: &Source, session: &GitOperationSession) -> Result<Chec
 pub fn local_source_dir(repo_url: &str) -> Option<PathBuf> {
     let rest = repo_url.strip_prefix("file://")?;
     let rest = rest.strip_prefix("//").unwrap_or(rest);
-    let path = if cfg!(windows) && rest.len() >= 2 && rest.as_bytes()[1] == b':' {
-        PathBuf::from(rest)
-    } else if rest.starts_with('/') {
-        PathBuf::from(rest)
-    } else {
+    let absolute = (cfg!(windows) && rest.len() >= 2 && rest.as_bytes()[1] == b':')
+        || rest.starts_with('/');
+    if !absolute {
         return None;
-    };
+    }
+    let path = PathBuf::from(rest);
     path.is_dir().then_some(path)
 }
 

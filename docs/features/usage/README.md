@@ -12,7 +12,7 @@
 - Provider 私有刷新上下文放在 `Subscription.provider_state_encrypted`（AES-GCM 的版本化 JSON）。它不进 DTO，也不放宽 `platform_token_encrypted`（那仍是 DeepSeek 平台 token）。refresh 的窄 patch 会轮换这个字段。
 - 不支持的旧 auth-mode 行在 load migration 中清理；文档不保留已删除 catalog 清单。
 - 远程请求统一使用 `skillstar_core::infra::http_client::probe_http_client`。
-- 本机网关读取这里已经保存的凭证和余量来签上游，不在 Usage 里实现第二套登录。度量面也走同一条闭环：网关的持久账本（catalog/account 归因）与各 Agent 会话文件合并去重后，供给本页的今日行、今日汇总与会话 chip（见「今日消耗与汇总」与「会话 chip 与三角导航」）；每张配额卡的今日行可点击，跳到 Models 工作台看「这个账号正在服务哪些 Agent」。上游 401 时网关回调 `AccountBook::reauthorize`（app 侧 `usage/service/reauth.rs`）自愈一次：复用 refresh 的锁序（catalog serialization domain → CLI refresh lease → adopt → refresh → sync），重签重发恰好一次；自愈失败或无刷新腿（Manual/API-key/Cookie 行）则透传 401，候选进 `AUTH_REST`（30 分钟）。自愈由常驻 heal 线程的自建 runtime 执行，turn 最多等 5 秒，超时同样透传并退避。
+- 度量面是会话文件单源（D-082 移除了网关与它的账本合并、路由对比和 401 自愈）：各 Agent 会话文件解析出的调用直接供给今日行、今日汇总与会话 chip（见「今日消耗与汇总」）。账号的增删改切移入 Accounts 工作台（见 [accounts README](../accounts/README.md)）；Usage 模式是只读消费视图。
 - 除非用户明确要求，不修改完成态的 `fetchers/oauth/cursor.rs`。
 
 ## OAuth 与刷新
@@ -29,7 +29,7 @@
 - Antigravity 额度先调用 `loadCodeAssist` 获取 plan、credits 和 `cloudaicompanionProject`，再把项目 ID 传给 Cloud Code。项目字段同时兼容字符串和 `{ "id": ... }` 对象。Cloud Code 请求按 daily → daily sandbox → production 回退；优先使用 `retrieveUserQuotaSummary` 返回的用户可见 5h/weekly buckets，只有摘要接口没有可用窗口时才回退到 `fetchAvailableModels` 的模型 quota。汇总卡按最紧张（消耗百分比最高）的窗口计算，`UsageWindow.used` 与 `percent` 始终表示已消耗比例，不能把剩余比例写入 `used`。
 - Antigravity 模型列表不是固定枚举：已知模型按产品分组，新增的 Gemini/Claude/GPT/Image 模型只要带 `quotaInfo.remainingFraction` 也必须显示；无法抓取模型额度时保留 plan/credits，同时在 `usage.error` 显示原因，401 仍按认证失效处理。配额刷新优先调用 `retrieveUserQuotaSummary`；只有该 endpoint 明确返回 404/405 时才回退 `fetchAvailableModels`，有效但为空的 summary 不再额外发起模型目录请求。卡片在窄宽度下把已知的 Gemini、Claude/GPT 周额度与 5 小时额度压缩为可扫描的短标签，并保留完整原始标签作为悬浮说明；重置倒计时与进度条同行，避免四个窗口把卡片纵向拉长。
 
-### Anthropic Claude 特例：只读采纳，不参与轮换
+### Anthropic Claude 特例：只读采纳（登录）；切换仅限凭证文件平台
 
 - 凭证来源是 Claude Code 自己的登录态：macOS 读钥匙串 `Claude Code-credentials`（account = `$USER` / `$LOGNAME`，取不到时回退字面量 `claude-code-user`），其它平台读 `~/.claude/.credentials.json`。取 JSON 的 `claudeAiOauth.accessToken`。
 - **`claudeAiOauth.expiresAt` 是 epoch 毫秒**，与本 crate 其它所有 provider 的秒不同；统一经 `expires_at_seconds()` 归一，禁止直接使用该字段。
@@ -37,6 +37,7 @@
 - 因为不写回，也就不存在钥匙串 read-modify-write：同一条目里的 `mcpOAuth` 不会被覆盖，用户不会被登出所有 MCP server。
 - 钥匙串读取 shell out 到 `/usr/bin/security` 而不是链 `security-framework`：钥匙串 ACL 授权绑定调用方二进制签名，重新编译后授权会失效。
 - 没有浏览器腿。`start_login("anthropic")` 就地采纳本地凭证并立即兑现 pending-login 通道；没有本地登录态时在 `start_login` 当场失败，用户看到“先跑一次 `claude`”而不是卡住的等待面板。
+- 多账号切换（Accounts 工作台）在**非 macOS** 平台可用：`usage_switch::claude` 适配器对 `$CLAUDE_CONFIG_DIR/.credentials.json` 做 read-modify-write——只替换 `claudeAiOauth` 键、保留 `mcpOAuth` 等其它键、回读一致才移动 pin；刷新前 `adopt_before_refresh` 先吸收 CLI 轮转出的新 token。**macOS 受 D-072（禁止写系统钥匙串）约束不提供切换**：Claude Code 在 macOS 的权威存储是钥匙串，SkillStar 不写它，也不写一个没人读的文件假装切换成功。
 - 额度端点 `GET https://api.anthropic.com/api/oauth/usage`，头 `Authorization: Bearer <access_token>` + `anthropic-beta: oauth-2025-04-20`。非公开文档端点，schema 会漂：`limits[]`（`kind` 为 `session` / `weekly_all` / `weekly_scoped`）是权威来源，顶层 `five_hour` / `seven_day` 是逐窗口回落，两者都读。
 - **解析失败的粒度是「这条窗口缺失」，不是「这个账号失败」**：未知 `kind`、读不出的百分比、形状不定的 `used_dollars` / `limit_dollars`、无法解析的 `resets_at`，都只让对应的那一条额度条消失。
 - 同 host 相邻请求间隔 ≥5s，由 fetcher 内的进程级 gate 串行化（这层在 `refresh_guard` 的 per-catalog 间隔之上）。
@@ -110,7 +111,7 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 
 ## Agent 会话解析（sessions）
 
-- `skillstar-usage::sessions` 只读解析受管 Agent 自己的会话文件（`crates/skillstar-usage/src/sessions/`），给度量面提供本地调用的 token 事实。**绝不写 Agent 目录**——写 Agent 目录的唯一路径仍是 `apply_gateway` 接管机制；解析器自身唯一落盘是 SkillStar 数据根下的增量索引 `data_root()/sessions/index.json`（`atomic_write`，删掉只是下次全量重读）。
+- `skillstar-usage::sessions` 只读解析受管 Agent 自己的会话文件（`crates/skillstar-usage/src/sessions/`），给度量面提供本地调用的 token 事实。**绝不写 Agent 目录**（该目录归 Agent 自己与账号切换引擎）；解析器自身唯一落盘是 SkillStar 数据根下的增量索引 `data_root()/sessions/index.json`（`atomic_write`，删掉只是下次全量重读）。
 - 入口是 `read_calls(home, since)`：每次调用返回全量视图（消费方可幂等整体替换），`since` 为 epoch 毫秒下界。跨文件 message-id 去重按「最早文件优先」——resumed 会话拷贝旧文件内容，同一 message 只计一次。
 - 增量语义按文件 checkpoint（`FileCheckpoint`）：文件头指纹判「替换 vs 增长」、已读前缀采样哈希防原地改写，任一失配即从零重读；未增长且头一致时不再打开正文。解析器版本或索引版本变化同样全量重读，不做迁移。
 - 覆盖哪些 Agent 家族以 `crates/skillstar-usage/src/sessions/mod.rs` 的 `parsers()` 注册表及其测试为准（SSOT），文档不手抄清单；受管 Agent 的本地会话文件都走同一注册表，新增解析器只加注册表行。Claude 的行级规则由测试钉死：同 message id 后块 usage 覆盖前块且 `from` 取首块位置、synthetic 行只有 API 错误才算调用、行内 `entrypoint` 前缀 `claude-desktop` 归因 Desktop（含 `claude-desktop-3p`）。
@@ -118,19 +119,18 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 
 ## 今日消耗与汇总（consumption summary）
 
-- 数据链：`get_consumption_summary(window)` → `skillstar_app::usage::service::summary`（三源组装：gateway ledger `load` + `sessions::read_calls` + 切片 07 的 `consumption_view` 合并去重）→ `usage::consumption::summarize` 纯函数（时钟与价格全注入）。DTO 见 `ConsumptionSummary`（`period / totals / series / by_agent / by_model / by_account / by_session / by_catalog`，ts-rs 生成）。
-- **UTC 日界**：`Today` 的起点是 `now` 所在 UTC 日的 00:00（`Week`/`Month` 为截至今天的 7/30 个 UTC 日历日）。这是 wire 契约，与 `consumption_view` 的 `Window` 本地日界刻意不同——汇总要跨主机可比，窗口读文件只对本机负责。服务层按 `period_floor_ms − 24h` 读取网关池（配对缓冲），合并用 `Window::all`，可见窗口由 `summarize` 的 UTC 过滤裁定。
-- **读时计价**（spec D8）：账本只存 token，价格读当前表（`effective_price`：`model_gateway.json` 顶层 `prices` 覆盖 > models.dev 缓存）。价格表变更会在下一次读取时重述历史，UI 恒标「估算」；价格表查不到的调用计入 `unpriced`（未知，不是免费）。
-- **口径标注「经网关 / 全部」**：`by_catalog`（卡片与支出摘要条的今日行来源）只含网关记账的调用——绕过网关的调用没有 catalog 归属，只进 `totals`（「全部」口径）。前端文案随行标注（`todayConsumptionCost` 带「经网关」，悬浮说明写明两口径）。
+- 数据链：`get_consumption_summary(window)` → `skillstar_app::usage::service::summary`（会话单源：`sessions::read_calls` → `consumption_view` 投影）→ `usage::consumption::summarize` 纯函数（时钟与价格全注入）。DTO 见 `ConsumptionSummary`（`period / totals / series / by_agent / by_model / by_session`，ts-rs 生成；`by_account`/`by_catalog` 随网关归因一并移除）。
+- **UTC 日界**：`Today` 的起点是 `now` 所在 UTC 日的 00:00（`Week`/`Month` 为截至今天的 7/30 个 UTC 日历日）。这是 wire 契约；服务层从 `period_floor_ms` 起读会话文件，可见窗口由 `summarize` 的 UTC 过滤裁定。
+- **读时计价**（spec D8）：会话行只存 token，价格读当前表（`skillstar-usage::pricing`：遗留 `model_gateway.json` 顶层 `prices` 覆盖 > models.dev 缓存，按模型 id 反查 provider）。价格表变更会在下一次读取时重述历史，UI 恒标「估算」；价格表查不到的调用计入 `unpriced`（未知，不是免费）。缓存不再在线刷新，价格冻结在最后一次 models.dev 同步（D-082 的已知承担）。
+- 会话行没有 provider 归属，计价按模型 id 在价格表内反查（`effective_price_by_model`）；查不到即 `unpriced`，不猜 provider。
 - 计价与分组的模型 id 取「应答模型优先、请求模型回退」；`errors` = 有错误类别或 HTTP ≥400；`mean_latency_ms` 只对带时长的调用取均值。`series` 分桶自动切换：Today 按小时、Week/Month 按 UTC 天、All 按 ISO 周（周一 00:00 UTC 对齐）。
 - 前端：`UsageSpendSummary` 每订阅 chip 的「今日（估算）」列与卡片主体底部的 `TodayConsumptionLine`（等宽数字、成本恒标估算、空态「还没有记录」、无动画）。今日数据随页面 reload 与 refreshAll 的本地读刷新；读取在途时整行隐藏，读到的空数据才显示空态。
 
-## 会话 chip 与三角导航（slice 13）
+## 会话 chip（slice 13）
 
-- 数据链：`get_today_consumption` → 同一份三源组装 → `usage::consumption::crossview` 纯函数（时钟与价格全注入）。DTO 见 `TodayConsumption`（`totals / by_agent / chips`，chip 含 `agent / session / title / last_active / tokens / cost_usd / via_gateway`，ts-rs 生成）。UTC 日界与读时计价与汇总同口径。
-- chip 是派生视图，不新增真相：按 `(agent, session)` 折叠今日调用，最新活动在前；无会话 id 的调用只进 `totals` 不出 chip；`via_gateway` 表示该会话有任一调用经网关（有归因）；`title` 取该会话调用最多的应答模型；`cost_usd` 为 `null` 表示没有一条可计价（未知，不是免费）。
-- 前端 `TodaySessions`：支出摘要条下方的安静横条，等宽数字、成本恒标「估算」、input 底/output 顶的纯 CSS 叠加柱（`StackedTokenBar`，静态无动画，`prefers-reduced-motion` 无需分支）、空态固定「还没有调用」。点 chip 进入三角：Usage 会话 → Models 里该 Agent 的候选路由与选择器。
-- 三角导航（usage 卡 → 网关候选 → 选择器）：配额卡今日行（有流量时可点）→ Models 工作台「路由到该账号的 Agent」清单 → 点行打开该 Agent 的模型选择器。导航经 `useNavigation` 的请求-nonce 事件（`focusModelsAgent` / `focusModelsCatalog`）传入 Models 桥，不在懒加载的 Models chunk 里直接读导航上下文。
+- 数据链：`get_today_consumption` → 同一份会话单源组装 → `usage::consumption::crossview` 纯函数（时钟与价格全注入）。DTO 见 `TodayConsumption`（`totals / by_agent / chips`，chip 含 `agent / session / title / last_active / tokens / cost_usd`，ts-rs 生成；`via_gateway` 随网关移除）。UTC 日界与读时计价与汇总同口径。
+- chip 是派生视图，不新增真相：按 `(agent, session)` 折叠今日调用，最新活动在前；无会话 id 的调用只进 `totals` 不出 chip；`title` 取该会话调用最多的应答模型；`cost_usd` 为 `null` 表示没有一条可计价（未知，不是免费）。
+- 前端 `TodaySessions`：支出摘要条下方的安静横条，等宽数字、成本恒标「估算」、input 底/output 顶的纯 CSS 叠加柱（`StackedTokenBar`，静态无动画，`prefers-reduced-motion` 无需分支）、空态固定「还没有调用」。chip 为纯展示（Usage → Models 的三角导航已随 Models 模式移除）。
 
 ## Usage 卡片与 active 状态
 

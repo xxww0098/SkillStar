@@ -353,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_reports_changed_and_removed_via_clone_fallback() {
-        let _guard = crate::lock_test_env();
+        let _guard = crate::lock_test_env_async();
         let sandbox = tempfile::tempdir().unwrap();
         let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
         unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", sandbox.path().join("data")) };

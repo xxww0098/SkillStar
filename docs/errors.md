@@ -2,7 +2,9 @@
 
 状态：active
 
-## 2026-10-02 - 网关 401 自愈：跨 runtime 桥、降级语义与退避（evolution 切片 11）
+> **D-082 注记（2026-10-05）**：模型域（`skillstar-models` / `skillstar-gateway` / `skillstar-decision`）已整体移除。以下条目凡只涉及该域的，其代码已不存在、不可经由原路径复发；根因教训（如 Windows 只读目录、持锁文件、测试并发）仍适用，故保留为历史记录。
+
+## 2026-10-02 - 网关 401 自愈：跨 runtime 桥、降级语义与退避（evolution 切片 11）（historical：代码已随 D-082 移除）
 
 - Symptom: 上游 401（凭证轮换窗口内签到了旧 token、access token 过期）会直接透传给 Agent，用户看到的是整轮失败；而 CLI 或后台刷新可能已经把新 token 落在本地，差一次重签。
 - Root cause: 网关此前只读凭证（`AccountBook::account`），没有任何「问一句 Usage 能不能续」的通道。续期本身有历史雷区：后台刷新若不走 catalog serialization domain + CLI refresh lease + adopt 锁序，会花掉 Codex CLI 即将使用的 refresh-token generation，把 CLI 踢下线（防火墙 7）；且网关 serve 自建 runtime，同步 hook 直接 `block_on` Usage 的异步锁属于跨 runtime 调用（README 已知未知 #2），形状不对会死锁或 panic。
@@ -11,7 +13,7 @@
 - 降级语义: turn 最多等 `HEAL_WAIT`（5 秒）。占用中的 serialization domain、慢 vendor、无可自愈行、死 grant 都让钩子答 `None`——当次 turn 透传 401，并且**同样进 `AUTH_REST` 退避**（这是有意的：不给退避会让死登录被逐 turn 重放）。排队的自愈不会被取消，domain 释放后在 turn 之外完成（latch 落库，下一次调用可见）；heal 线程自身有 `HEAL_HARD_STOP`（30 秒）兜底，楔死的链不会堵住下一个自愈。清退 `AUTH_REST` 的途径：30 分钟自然到期，或网关重启（rest 是进程态）；用户重新登录后如仍被 seat 挡住，重启网关即可。
 - Self-check: `cargo test -p skillstar-gateway --locked -- --skip serve_binds_default_port`（`tests/forward.rs` 的 401→200 自愈、401→401 恰一次重试、403/429 不触发、None 透传退避、跨 runtime 探针）；`cargo test -p skillstar-app --locked usage::service::reauth`（真实链路探针、busy domain 降级与 off-turn 完成、无刷新腿门禁、包装 delegation）。人工灰度：把 codex token 人为置过期，观察一次 adopt+重试成功且 CLI 不被踢下线。
 
-## 2026-10-02 - 占位 bearer + 0.0.0.0 监听：局域网上网关无鉴权（P0）
+## 2026-10-02 - 占位 bearer + 0.0.0.0 监听：局域网上网关无鉴权（P0）（historical：代码已随 D-082 移除）
 
 - Symptom: 把 `model_gateway.json` 的 `listen` 写成 `lan` 后，同一局域网里的任何机器都能直接使用这台机器的网关：`curl http://<LAN-IP>:21847/v1/models` 返回 200，POST 转发也照常接受，不需要任何凭据。
 - Root cause: LAN 监听把 bind 地址换成 `0.0.0.0`，但网关的鉴权语义是为环回设计的——写进 Agent 文件的 bearer 全是可预测占位（`skillstar`、`skillstar-<id>`），而 `dispatch` 只把 bearer 用于归因（`request_agent`），从不校验；占位字符串是公开常量，等于把「认识调用方」当成了「授权调用方」。两条叠加，非环回 peer 与本机进程拿到完全相同的待遇。
@@ -137,7 +139,7 @@
 - Files: `Cargo.lock`。
 - Self-check: `cargo deny check advisories --config src-tauri/deny.toml` 必须还是 ok（忽略项不得增加这条）。
 
-## 2026-08-31 - Windows 目录只读挡不住 store-v4 备份，迁移照样写盘
+## 2026-08-31 - Windows 目录只读挡不住 store-v4 备份，迁移照样写盘（historical：代码已随 D-082 移除）
 
 - Symptom: Windows CI 在频道 hash / proxy 变绿之后，`providers::tests::store_v4::migration_aborts_when_the_backup_cannot_be_written` 期望 `BackupFailed`，实际 `Ok(LoadedStore { version: 4 })`。Linux/macOS 同测试绿。此前被 fail-fast 挡住。
 - Root cause: 夹具用 unix-only `set_mode(0o500)` 把 scratch 目录设成只读。Windows 上目录 readonly 位不阻止在该目录里 `fs::copy` 出新文件。`take_migration_backups` 又用 `exists()` 判断永久快照：若把备份路径占成目录，会当成「已有快照」跳过 copy，照样迁移。
@@ -255,7 +257,7 @@
 - Fix: 按"入口 → 域实现 → 命令 → IPC 声明 → devMock → locale key → 文档"整条链一次性删净,并摘掉掩盖信号的 `#![allow(dead_code)]`。
 - Self-check: 删除任何 UI 调用点后,反向追一遍它独占的后端链路。判断"是废弃还是没接线"用 `git log -S '<命令名>' -- src/`:前端历史上出现过则是被删的功能(继续删干净),从未出现过则是没接线的脚手架(同样删,但要在功能文档里写清缺口)。
 
-## 2026-08-27 - tool-sync 把解析失败的用户配置静默重建成仅含托管块的骨架
+## 2026-08-27 - tool-sync 把解析失败的用户配置静默重建成仅含托管块的骨架（historical：代码已随 D-082 移除）
 
 - Symptom: 用户的 `~/.codex/config.toml`（或 OpenCode/Pi/OMP/Claude 的 JSON/YAML 配置）里有一个语法错误后,下一次 provider 同步"成功",但文件里只剩 SkillStar 托管块——用户自己的 MCP servers、profiles、OAuth token 全部消失。滚动备份只保留 5 份,后续自动 resync 会把最后一份好备份也轮换掉。
 - Root cause: 同步写入路径在读现有文件时用 `unwrap_or_default()` / `unwrap_or_else(|_| init_root())` 把解析失败当成"文件不存在",随后整文件重写。这正是 store_v4 模块文档点名要终结的 v3 缺陷,且同文件的 unsync 路径早已 fail-closed(`with_context(...)?`),形成双标。
@@ -322,7 +324,7 @@
 - Files: `crates/skillstar-skills/src/github_auth/gateway.rs`、`.env.example`、`docs/features/skills/README.md`。
 - Self-check: 不 `export`、只在仓库根 `.env` 写 Client ID，重启 `tauri dev` 后「开始登录」必须进入设备码界面而不是这条 Unavailable；解析测试覆盖注释行、空值、引号，以及从 `crates/skillstar-skills` 子目录向上找到祖先 `.env`。
 
-## 2026-08-15 - 声明了却没人写：角色面板收下用户输入然后丢掉，UI 与磁盘长期不一致
+## 2026-08-15 - 声明了却没人写：角色面板收下用户输入然后丢掉，UI 与磁盘长期不一致（historical：代码已随 D-082 移除）
 
 - Symptom: 三种表现，同一个根因。① Claude Code 的模型映射面板可以填 Sonnet/Opus/Haiku，保存后 `~/.claude/settings.json` 里没有任何 `ANTHROPIC_DEFAULT_*_MODEL`；重开面板值还在，因为它从来只活在渲染进程。② OMP 角色面板里一个角色显示 `某 provider/某模型`，`~/.omp/agent/config.yml` 的 `modelRoles` 里却没有该条目，且同步结果是绿色成功。③ 面板给每个模型都列出 9 个 thinking 等级，选了对没有推理档的模型无效的等级，也不会有任何提示。
 - Root cause: 「角色」这个概念在 v3 有两处互不相通的实现——Claude 的层级模型在 `provider.meta`、OMP 的角色在 binding 的无 schema settings 袋——因此没有任何一层能回答「这个 Agent 支持哪些角色」。于是三件事各自失配：前端 Claude 面板只有 `useState`（后端契约其实早就就绪，断链在前端）；OMP 写盘函数 `resolve_omp_roles` 对「provider 未绑定 / 无端点 / 无模型」三种情况各有一个裸 `continue`，调用方拿不到任何差异信息；thinking 等级是一个全局 9 元常量，与模型能力无关。共同点是**声明与写盘之间没有约束**：UI 可以提供一个写盘侧根本不会处理的设置，而且没有任何机制会发现。
@@ -380,7 +382,7 @@
   - 回归判据：任何新增的"清理/取消部署/清空目录"路径，必须先回答"这个目录还有没有别的已启用 Agent 解析到它"。用 `crates/skillstar-skills/src/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS` 按 `resolve_global_dir` 与 `project_skills_rel` 分组即可枚举出全部共享组；今天共 3 组 global 与 4 组 project 共享目录。
   - 反例警告：不要把 `deploy_modes` 当遗留字段。`docs/features/skills/README.md` 曾声称它"只为兼容旧 manifest"，实际 `projects/sync.rs:78-84,227,461-463` 正在读写它决定 symlink/copy。
 
-## 2026-08-12 - tool-sync 单元测试并行必挂：所有测试共用同一个 sandbox HOME
+## 2026-08-12 - tool-sync 单元测试并行必挂：所有测试共用同一个 sandbox HOME（historical：代码已随 D-082 移除）
 
 - Symptom: `cargo test --workspace`（默认并行）随机挂 1–2 个 skillstar-models 测试，`--test-threads=1` 必过。典型是 `tool_sync::tests::part1::test_codex_official_sync_oauth_preserves_auth_json` 断言 `access_token` 拿到别的测试写的值，以及 `tool_sync::agents::tests::registry_paths_match_legacy_resolvers` 比较两个 home 解析结果时左右不一致（一个是 `skillstar-toolsync-test-<pid>` 回退目录，一个是 sandbox TempDir）。
 - Root cause: `tool_sync/tests/mod.rs` 的 `use_sandbox_home()` 用一个 `LazyLock<TempDir>` + `std::env::set_var(SKILLSTAR_TOOL_SYNC_HOME, ...)`，所有测试共享**同一个** sandbox HOME，于是共享同一个 `~/.codex/auth.json` 并互相覆盖；而 `set_var` 是进程级的，在 `LazyLock` 首次初始化的那一刻翻转，正在并行跑的其它测试会在同一个测试体内前后读到两个不同的 home。“设了临时目录”不等于“隔离”。
@@ -600,7 +602,7 @@
 - Files: `crates/skillstar-usage/src/fetchers/oauth/xai.rs`, `crates/skillstar-app/src/usage_switch.rs`, `src-tauri/src/commands/usage_commands.rs`, `src/features/usage/components/{UsageCardWindow,SubscriptionCard}.tsx`, `docs/features/usage/README.md`.
 - Self-check: `cargo test -p skillstar-app usage_switch` + `cargo test -p skillstar-usage oauth_scopes_include_conversations_for_grok_cli`; decode a stored token's JWT `scope` claim and confirm it includes `conversations:read`; switch two Grok rows and confirm `~/.grok/auth.json` OIDC entry `email`/`user_id`/`key` match the target (close running `grok` sessions if verify fails with "写入被覆盖").
 
-## 2026-06-15 - GUI/Tauri command core logic lacked direct test coverage
+## 2026-06-15 - GUI/Tauri command core logic lacked direct test coverage（historical：代码已随 D-082 移除）
 
 > Historical coverage snapshot. The project-path assertions below were superseded on 2026-07-14 by the shared `.agents/skills` design in D-007: Codex now participates in an ambiguous universal group, and OpenClaw supports its upstream project-level `skills` directory.
 
@@ -748,7 +750,7 @@
   - Bundle extraction now uses a shared `is_unsafe_archive_path` predicate that also rejects backslash separators and Windows drive-letter prefixes (`C:`, `c:`). Both extraction sites (single-skill and multi-skill import) route through it. 3 new tests in `skill_bundle.rs` cover safe relative paths, Unix absolute/traversal, and Windows-style paths.
 - Verified: `cargo test -p skillstar-skills` 58 passed (was 53; +5 new), `cargo clippy -p skillstar-skills` introduces no new warnings, `cargo check --workspace` clean. Windows-specific branches are exercised by the interpreter-selection unit tests on every platform.
 
-## 2026-06-25 - Models workbench: Claude Code wrote empty ANTHROPIC_MODEL; ZCode removed as provider tool
+## 2026-06-25 - Models workbench: Claude Code wrote empty ANTHROPIC_MODEL; ZCode removed as provider tool（historical：代码已随 D-082 移除）
 
 - Symptom: 模型工作台 (Models Hub) 功能异常。用户机器上 `~/.claude/settings.json` 的 `env` 块出现 `"ANTHROPIC_MODEL": ""`（空字符串），导致 Claude Code 模型解析失效。
 - Root cause: `sync_to_claude_code_inner` 无条件把 `model` 参数写进 `ANTHROPIC_MODEL`。当 provider 未设 `default_model` 且激活时未显式指定 model 时，链路（前端 `useAgentActivation.activate` → `activate_tool` 命令 → `crud::activate_tool` 的 model resolution → `sync_to_claude_code`）会让 model 解析成空字符串 `""`，原样写入，产生无效配置。同一次还移除了 ZCode 作为模型工作台 provider tool（`sync_to_zcode`/`unsync_zcode` 及相关分支），但保留 `tool_sync::resolve_zcode_config_path()` —— 它当时被 MCP 子系统（`zcode_v2_opencode_mcp_remove`，已随 D-074 删除）和 Usage 子系统（`switch_zcode`）跨子系统复用，删除会破坏编译。
@@ -757,7 +759,7 @@
   - 模型工作台范围移除 ZCode：前端 `agentRegistry.ts`（`ProviderToolId` 联合、`PROVIDER_AGENTS`、`CONFIG_FILE_TOOLS`）、`AgentToolIcon.tsx`；后端 `tool_sync` 的 `sync_to_zcode`/`unsync_zcode`、`paths_files.rs` 各 `zcode` 分支、`backup_merge.rs` 的 `resync_active_tools` 分支、`types.rs` 注释；`providers/crud.rs` `activate_tool` 校验分支；Tauri 命令层 `tools.rs`（activate/deactivate/update_tool_settings/push_provider_to_tool_config/resync_tool/detect_tool_installation）。MCP/Usage/Projects/SSH/providers-balance 等子系统的 zcode 引用**全部保留**。
 - Verified: `cargo check -p skillstar-models` 通过；`cargo test -p skillstar-models tool_sync` 51 passed（含新增 `test_sync_to_claude_code_inner_empty_model_skips_key`）；`cargo check --workspace` 通过；改动的两个前端文件 `biome check` 干净。`tool_sync::tests` 里 3 个 zcode 专用测试已删，`test_get_tool_config_targets_returns_both_tools` 的 `targets.len()` 由 5 改为 4。
 
-## 2026-06-25 - 模型工作台所有 agent 卡片显示"未接入"（FlatProvidersResponse camelCase 序列化不匹配）
+## 2026-06-25 - 模型工作台所有 agent 卡片显示"未接入"（FlatProvidersResponse camelCase 序列化不匹配）（historical：代码已随 D-082 移除）
 
 - Symptom: 在模型工作台激活 Claude（或任意 agent）后，toast 提示"已同步到配置文件"（后端 sync 确实成功，`~/.claude/settings.json` 写入正确），但卡片状态胶囊始终显示"未接入"（inactive），provider 下拉与模型选择也不出现。后端 store（`~/.skillstar/config/model_providers.json`）的 `tool_activations["claude-code"]` 数据完全正确（含 provider_id 和 model）。
 - Root cause: `FlatProvidersResponse`（`src-tauri/src/commands/models_commands/mod.rs`）标注了 `#[serde(rename_all = "camelCase")]`，导致 `tool_activations` 字段被序列化成 `toolActivations` 返回给前端。而前端类型 `FlatProvidersResponse.tool_activations`（`src/types/models.ts`）及所有消费者（`activations.ts`、`providers.ts`、`useProvidersFlat.ts`、`useAgentActivation.ts`、`ModelsHub.tsx`、`devMockData.ts`）一律读 snake_case 的 `tool_activations`。于是 `data.tool_activations` 永远是 `undefined`，`toolActivations` 退化成 `{}`，`activation = data?.tool_activations?.[toolId]` 恒为 `null` → `computeAgentStatus` 走 `!activation` 分支返回 `inactive`。注意 `ProviderEntryFlat` 和 `ToolActivation` 本身**没有** `rename_all`（字段保持 snake_case），所以 provider 列表能正常工作——只有包了 `rename_all` 的 `FlatProvidersResponse` 这一层把 `tool_activations` 这个多词字段改了名，单个词的 `version`/`providers` 因 camelCase==snake_case 而未暴露问题。

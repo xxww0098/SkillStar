@@ -40,6 +40,9 @@ impl SourceType {
     }
 }
 
+/// Lock entries grouped by their `(source_url, git_ref)` update unit.
+pub type SourceGroups = BTreeMap<(String, Option<String>), Vec<(String, SkillLockEntry)>>;
+
 /// One installed skill, mirroring vercel's per-skill lock fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,11 +147,8 @@ impl SkillLock {
     /// Entries grouped by `(source_url, git_ref)` — the update-check unit:
     /// one upstream tree per group, skills on different refs never compared
     /// against the wrong tree.
-    pub fn by_source_group(
-        entries: &[(String, SkillLockEntry)],
-    ) -> BTreeMap<(String, Option<String>), Vec<(String, SkillLockEntry)>> {
-        let mut groups: BTreeMap<(String, Option<String>), Vec<(String, SkillLockEntry)>> =
-            BTreeMap::new();
+    pub fn by_source_group(entries: &[(String, SkillLockEntry)]) -> SourceGroups {
+        let mut groups: SourceGroups = BTreeMap::new();
         for (name, entry) in entries {
             groups
                 .entry((entry.source_url.clone(), entry.git_ref.clone()))

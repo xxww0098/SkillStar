@@ -9,6 +9,7 @@
 | [roadmap.md](./roadmap.md) | active | 保留 | 尚未完成的结构债、顺序和验收；结构事实仍归 boundaries |
 | [workspace-migration-wave1.md](./workspace-migration-wave1.md) | historical | 冻结 | 已完成的 Skills/Projects、facade、单 binary 迁移；当前结构见 boundaries |
 | [workspace-migration-wave2.md](./workspace-migration-wave2.md) | historical | 冻结 | 已完成的 fingerprint/AI/SSH crate 吸收；当前结构见 boundaries |
+| [historical/models-feature.md](./historical/models-feature.md) | historical | 冻结 | 已移除的模型域（Provider/网关/工具同步/应用内 AI）行为契约；移除决策见 D-082 |
 | [usage-card-refactor-2026-07.md](./usage-card-refactor-2026-07.md) | historical | 冻结 | 已实施设计与审查过程；当前 Usage 契约见 `features/usage` |
 | [mcp-modern-design-research.md](./mcp-modern-design-research.md) | historical | 冻结 | 2026-08 一次性外部调研快照（MCP 2026-07-28 规范、官方 registry、客户端配置矩阵）；MCP 管理与商店已按 [D-074](../decisions.md#d-074删除-mcp-管理与-mcp-商店) 删除，本稿不再对应产品契约 |
 | [mcp-current-state-audit.md](./mcp-current-state-audit.md) | historical | 冻结 | 2026-08 一次性代码盘点快照；其 B.4-a/F1/F2/A.3-f 与 R1 第 1 条曾被 P0 修复实现；MCP 管理与商店已按 [D-074](../decisions.md#d-074删除-mcp-管理与-mcp-商店) 删除，本稿不再对应产品契约 |

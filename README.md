@@ -6,7 +6,7 @@
 
 ### _Your Second Brain for Agent CLIs_
 
-**统一管理 Skill、模型供应商与 AI 订阅，并把它们可靠地分发到不同 Agent 和项目。**
+**统一管理 Skill 的安装分发、多登录账号的切换与用量展示，并把它们可靠地交付到不同 Agent 和项目。**
 
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-blue?logo=tauri&logoColor=white)](https://v2.tauri.app)
 [![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
@@ -17,11 +17,13 @@
 
 ## SkillStar 是什么
 
-SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的开发者。它是一个 Tauri 桌面应用，也提供同二进制 CLI，围绕三个工作区组织能力：
+SkillStar 面向同时使用多个 Agent CLI 与多个订阅账号的开发者。它是一个 Tauri 桌面应用，也提供同二进制 CLI，围绕三个工作区组织能力：
 
 - **Skills**：发现、安装、创作和组合 Skill；按 Agent 或项目分发；管理本机、SSH 远端与 GitHub 共享频道；团队协作走共享频道，个人服务器部署走 SSH。
-- **Usage**：聚合 OAuth/API Key 订阅的额度、余额、重置周期和续费信息，并在支持时切换真实 CLI 账号。
-- **Models**：集中管理 Provider、模型与 Agent binding，检测连接状态并同步目标工具配置。
+- **Accounts**：按平台管理多个登录账号——添加（OAuth / API Key / Cookie / 导入）、一键切换到真实 CLI/IDE、当前账号徽标与分歧检测。
+- **Usage**：聚合各订阅的额度、余额、重置周期与今日消耗（会话、token、读时估算成本），只读展示。
+
+模型路由与模型接入（Provider 配置、本机模型网关、Agent 模型写入、应用内 AI）已随 [D-082](./docs/decisions.md) 整体移除，SkillStar 不再配置或接入模型。
 
 产品追求 Precise、Unified、Effortless：高信息密度，但不把安全边界、失败状态和用户控制隐藏在“自动化”后面。
 
@@ -43,22 +45,13 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 
 - catalog 由代码和测试维护，按 OAuth、API Key 或手动录入模式接入。
 - 卡片显示 provider 原生配额窗口、余额、重置时间、套餐和计费周期。
-- Usage 页提供今日消耗行与会话 chips：汇总当日估算花费（区分「经网关」与「全部」口径），点会话 chip 可跳到 Models 工作台对照该 Agent 的模型路由。
+- Usage 页提供今日会话 chips 与花费摘要：当日 token 消耗与按模型估值的读时成本（价格表来自 models.dev 缓存与用户覆盖，见 D-082）。
 - OAuth 重新授权会原位更新既有订阅，避免生成重复账号。
-- 支持的 CLI 账号切换以事务方式更新 active 状态和磁盘凭证；失败时保留原可用账号。
+- 账号切换在 **Accounts** 工作台以事务方式完成：更新 active 状态与磁盘凭证，失败时保留原可用账号。
 - 可在 Usage 里为已经验证过隔离的桌面应用创建实例（当前是 Cursor、Grok Bot 和 Antigravity，`~/.skillstar/instances/<app>/<id>/`）。Start 会用独立 `--user-data-dir` 拉起本机 macOS 应用，不改默认 profile。尚未实机验证的应用只登记启动形状，不出现在多开入口。Claude Desktop 和 Zed 无法隔离，不提供多开。
 - 所有密钥（API key、access token、refresh token、SSH secret 等）全部使用本地 AES-256-GCM 加密 JSON 存储，不写入系统钥匙串（macOS Keychain）。
 
 > Provider 私有接口可能随上游升级变化。SkillStar 会区分“需要重新授权”“暂时无数据”和普通请求失败，不把所有错误伪装成空额度。
-
-### Models 与 AI
-
-- Claude 工作台按连接方式组织配置：先选择官方登录或 API 连接，显式应用后再编辑模型角色；供应商编辑、模型目录与诊断保留在配置抽屉。
-- 工作台聚焦 Claude Code 客户端；可见入口与既有绑定的保留规则见 [Models 工作台](./docs/features/models/README.md#models-工作台)。
-- Claude Code CLI 支持按角色配置模型并写入原生配置，角色与回落规则见 [Models 角色路由](./docs/features/models/README.md#角色路由跨-agent)。
-- Tool sync 只修改 SkillStar 管理的字段，保留用户已有配置并在写入前备份。
-- Models 工作台的「候选路由」对照同一模型的所有候选：配额余量与休息状态，加上账本口径的实测（调用数、错误率、p50/p95 延迟、估算成本）。
-- 内置摘要共享 Models provider 配置，并以流式事件报告 route/fallback。
 
 ### 桌面体验与安全
 
@@ -117,7 +110,6 @@ binary、桌面应用或配置目录来自动启用 Agent；内置注册表同�
 1. 在 Marketplace 搜索并安装 Skill。
 2. 在 My Skills 选择本机 Agent，或切换到 SSH 远端 / GitHub 共享频道 scope。
 3. 在 Projects 注册工程并 reconciliation 项目级技能。
-4. 在 Models 创建 Provider，并把 binding 同步到目标 Agent。
 5. 在 Usage 添加订阅，查看额度或切换支持的 CLI 账号。
 
 ## CLI 快速用法
@@ -148,50 +140,6 @@ skillstar remove <name> [name...]
 skillstar remove --all
 ```
 
-### 本机模型网关
-
-```bash
-skillstar gateway serve
-```
-
-在 `127.0.0.1:21847` 上监听，不打开窗口。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 会拒绝并退出。桌面应用启动时会自己拉起同一份监听；地址已被占用时只在 stderr 报告，不关掉先启动的那份。
-
-在 Models 工作台把「监听方式」切到「局域网」后，局域网里其它机器必须携带这台电脑的 gateway key 才能使用网关，否则请求会被拒绝。key 会自动生成，存放在 `~/.skillstar/config/gateway.key`，界面不展示它。本机访问不受影响。
-
-`skillstar claude-mcp-helper` 是 Claude Code 拉起的内部命令，不打开窗口。stdout 只有 MCP 帧，日志在 stderr。
-
-### 本地决策模型（AgentJev-0.6B）
-
-本地跑的系统一（System One）决策模型：给一段状态（diff、日志、工单、JSON）和若干结构化问题，一次前向返回每个选项的校准概率，不生成任何文本。权重 1.2 GB，首次使用需下载。
-
-```bash
-skillstar decide --status                       # 看 checkpoint 是否就绪
-skillstar decide --download                     # 下载 1.2 GB 权重（支持断点续传）
-skillstar decide --verify                       # 逐个核对固定 SHA-256
-skillstar decide --file decision.json           # 跑一次决策
-cat decision.json | skillstar decide -f - --json
-```
-
-`decision.json` 就是 `agentjev.decision.v1` 契约，例如：
-
-```json
-{
-  "state": "Repo diff: renames a public helper and updates 12 call sites.",
-  "questions": [
-    { "id": "needs_review", "type": "boolean",
-      "question": "Does this change need a human review before merge?" },
-    { "id": "risk", "type": "choice",
-      "question": "How risky is merging this without review?",
-      "options": ["mechanical rename", "public API touched", "irreversible"] },
-    { "id": "confidence", "type": "score",
-      "question": "How confident is the author?",
-      "levels": ["guessing", "fairly confident", "certain, verified"] }
-  ]
-}
-```
-
-镜像与目录可用 `SKILLSTAR_HF_ENDPOINT`（如 `https://hf-mirror.com`）和 `SKILLSTAR_DECISION_MODEL_DIR` 覆盖；`--device` / `--dtype` 可切换 Metal/CPU 与精度。图形界面里的同一能力在 设置 → 本地决策模型。
-
 ### 团队智能（本机 Context / Improvement）
 
 检索已安装 Skill 与本地摩擦笔记，不是 Marketplace 搜索，也不是已移除的教程功能。
@@ -208,7 +156,7 @@ skillstar team used pr-review
 
 ### 项目技能 MCP
 
-`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。可选的技能优选读取 `~/.skillstar/models/laya/`，第一次推荐时用 CPU 加载；`SKILLSTAR_LAYA_ONNX` 可以改指向别的导出目录。目录不完整或加载失败时，顺序仍是 BM25。应用不下载模型。
+`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。候选排序为 BM25 透传（本地神经重排器已随 D-082 移除）。
 
 ```bash
 skillstar mcp serve --stdio

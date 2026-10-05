@@ -209,7 +209,6 @@ mod tests {
         let _lock = ENV_LOCK.lock().await;
         let (_temp, _env) = isolated("summary-sessions");
         let now = 1_790_000_000_000;
-        let day = utc_day(now);
         // No price table in the isolated root: every call reads unpriced.
         let dto = read_and_assemble(ConsumptionPeriodDto::Today, now);
         assert_eq!(dto.period, ConsumptionPeriodDto::Today);

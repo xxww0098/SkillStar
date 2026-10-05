@@ -83,3 +83,14 @@ pub(crate) fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
+
+/// Same lock as [`lock_test_env`], wrapped so `await_holding_lock` stays
+/// quiet in async tests that must hold it across `.await` points (the env
+/// stays pinned for the whole test; usage crate precedent).
+#[cfg(test)]
+pub(crate) struct TestEnvLock(std::sync::MutexGuard<'static, ()>);
+
+#[cfg(test)]
+pub(crate) fn lock_test_env_async() -> TestEnvLock {
+    TestEnvLock(lock_test_env())
+}

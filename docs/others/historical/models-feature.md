@@ -1,6 +1,6 @@
-# Models 与 AI
+# Models 与 AI（historical）
 
-状态：active
+状态：historical（模型域已随 D-082 整体移除；本文冻结迁移前的行为契约）
 
 本文件维护 Provider store、Agent tool sync、Models 工作台和应用内 AI 的当前契约。
 

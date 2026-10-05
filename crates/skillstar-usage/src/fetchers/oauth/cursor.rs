@@ -716,7 +716,7 @@ fn parse_total_with_breakdown(usage: &Value) -> Option<UsageWindow> {
 
 /// Resolve the plan node across Cursor's known `usage-summary` shapes.
 /// Order mirrors what the in-app Dashboard currently ships first.
-fn pick_plan_node<'a>(usage: &'a Value) -> Option<&'a Value> {
+fn pick_plan_node(usage: &Value) -> Option<&Value> {
     usage
         .pointer("/individualUsage/plan")
         .or_else(|| usage.pointer("/individual_usage/plan"))

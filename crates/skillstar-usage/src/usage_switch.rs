@@ -22,6 +22,7 @@
 //!
 //! | catalog_id | CLI       | live path                                  |
 //! |------------|-----------|--------------------------------------------|
+//! | `anthropic` | Claude Code | `$CLAUDE_CONFIG_DIR/.credentials.json`（非 macOS；macOS 钥匙串受 D-072 约束不写） |
 //! | `codex`    | Codex CLI | `$CODEX_HOME/auth.json` + macOS keychain    |
 //! | `xai`      | Grok CLI  | `$GROK_HOME/auth.json`                      |
 //! | `opencode` | OpenCode  | `$XDG_DATA_HOME/opencode/auth.json`         |
@@ -50,6 +51,7 @@
 //! resolution and rolling backups) without either depending on the other.
 
 mod antigravity;
+mod claude;
 mod codebuddy;
 mod cursor;
 mod custody;
@@ -237,6 +239,11 @@ pub fn supports_cli_switch(catalog_id: &str) -> bool {
 /// file has to be rewritten too. Codex and OpenCode stay out: their login
 /// paths already write the CLI file themselves.
 pub fn oauth_completion_rewrites_live_store(catalog_id: &str) -> bool {
+    // Claude's login is read-only adoption; its live file is rewritten by
+    // switch/sync, never by OAuth completion.
+    if catalog_id == "anthropic" {
+        return false;
+    }
     catalog_id == "xai" || ide::ide_adapter_for(catalog_id).is_some()
 }
 
@@ -621,6 +628,13 @@ mod tests {
             assert_eq!(adapter.catalog_id(), catalog);
             assert!(adapter.available(), "{catalog}");
         }
+        // Claude's adapter is availability-gated like Zed's (macOS: D-072),
+        // so it is not in the always-true loop above either.
+        assert!(supports_switch("anthropic"));
+        assert!(target_for("anthropic").is_none());
+        assert_eq!(ide::ide_adapter_for("anthropic").unwrap().catalog_id(), "anthropic");
+        assert!(!oauth_completion_rewrites_live_store("anthropic"));
+
         assert!(oauth_completion_rewrites_live_store("xai"));
         assert!(!oauth_completion_rewrites_live_store("codex"));
         assert!(!oauth_completion_rewrites_live_store("opencode"));
@@ -643,6 +657,7 @@ mod tests {
         assert_eq!(
             ide_ids,
             [
+                "anthropic",
                 "antigravity",
                 "codebuddy",
                 "codebuddy-cn",
@@ -674,9 +689,10 @@ mod tests {
         }
 
         // Other IDEs keep their credentials outside an implemented adapter.
-        // `anthropic` is out of scope for a second reason: the fetcher only
-        // ever reads Claude Code's own login, so there is no snapshot to take.
-        for catalog in ["deepseek", "glm", "stepfun", "anthropic"] {
+        // `anthropic` switches via the credentials file off macOS; on macOS
+        // its adapter exists but reports unavailable (D-072: the keychain is
+        // Claude Code's store there and must not be written).
+        for catalog in ["deepseek", "glm", "stepfun"] {
             assert!(!supports_switch(catalog), "{catalog}");
             assert!(!supports_cli_switch(catalog), "{catalog}");
             assert!(ide::ide_adapter_for(catalog).is_none(), "{catalog}");

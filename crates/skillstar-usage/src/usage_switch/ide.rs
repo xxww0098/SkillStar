@@ -34,6 +34,7 @@ pub(super) trait IdeCredentialAdapter: Send + Sync {
 
 const IDE_ADAPTERS: &[&'static dyn IdeCredentialAdapter] = &[
     &super::antigravity::Adapter,
+    &super::claude::Adapter,
     &super::cursor::Adapter,
     &super::kiro::Adapter,
     &super::qoder::Adapter,

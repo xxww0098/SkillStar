@@ -20,11 +20,10 @@
 
 消费者到全部内部依赖（`→`；normal 边由 `Cargo.toml` 决定，0 条 dev-only、0 条 build）：
 
-- `skillstar → {app, channels, sync, skills, models, marketplace, usage, git, core}`
-- `skillstar-app → {channels, skills, models, marketplace, usage, git, core}`
+- `skillstar → {app, channels, sync, skills, marketplace, usage, git, core}`
+- `skillstar-app → {channels, skills, marketplace, usage, git, core}`
 - `skillstar-channels → {skills, git, core}`；`skillstar-sync → {core}`
-- `skillstar-skills → {git, core}`
-- `skillstar-models → {core}`；`skillstar-usage → {core}`
+- `skillstar-skills → {git, core}`；`skillstar-usage → {core}`
 - `skillstar-marketplace → core`；`skillstar-git → core`
 - 内部依赖出度 0：`skillstar-core`
 
@@ -36,7 +35,7 @@
 
 - `src-tauri`：GUI/CLI 组合根；`commands/` 仅做 Tauri DTO、State、错误与事件适配，`core/` 保存 Tauri 生命周期胶水。
 - `skillstar-app`：跨域 use case 与共享 CLI 解析；`skillstar-core`：路径、配置、共享契约与基础设施。
-- 业务域：`skillstar-skills`（技能/项目/部署/Agent profile/GitHub App 身份）、`skillstar-channels`（共享频道/patrol）、`skillstar-marketplace`（市场/MCP catalog）、`skillstar-models`（provider/AI/MCP/tool sync）、`skillstar-usage`（订阅/OAuth/配额）、`skillstar-sync`（SSH/SFTP）。
+- 业务域：`skillstar-skills`（技能/项目/部署/Agent profile/GitHub App 身份）、`skillstar-channels`（共享频道/patrol）、`skillstar-marketplace`（市场/MCP catalog）、`skillstar-usage`（订阅/OAuth/配额/账号切换）、`skillstar-sync`（SSH/SFTP）。模型域 crate 已随 D-082 移除。
 - 叶子能力：`skillstar-git`（Git transport/ops）、`skillstar-core::providers`（Provider identity/balance 元数据，无产品域依赖）。完整所有权与依赖红线的 SSOT 是 `docs/boundaries.md`，运行和数据所有权的 SSOT 是 `docs/architecture.md`。
 - 布局以业务域 crate 为主，crate 内再按内聚模块拆分；不是横跨 workspace 的技术层目录。
 - 测试：单元测试主要贴近实现或放同模块文件；有 6 个 package-level integration test roots，无 `tests/common.rs`/`tests/common/mod.rs`。项目模块门禁检查 435 个 `.rs`，结果为 0 个新孤儿、0 个基线孤儿、0 个过期基线项。
@@ -44,7 +43,6 @@
 ## 债务清单
 
 - [ ] `debt:ERR-03:crates/skillstar-marketplace` · production facet 下仍有 2 个裸 unwrap（`remote/publisher_repos.rs:161,424`）；ERR-03 要求生产路径不用裸 unwrap。
-- [ ] `debt:ERR-03:crates/skillstar-models` · production facet 下仍有 1 个裸 unwrap（`tool_sync/omp_provider.rs:198`）。
 - [ ] `debt:ERR-03:crates/skillstar-skills` · production facet 下仍有 1 个裸 unwrap（`skill_group.rs:166`）。
 - [ ] `debt:ERR-03:crates/skillstar-usage` · production facet 下仍有 1 个裸 unwrap（`oauth/local_server.rs:269`）。
 - [ ] `debt:ERR-03:src-tauri` · production facet 下仍有 2 个裸 unwrap（`core/acp_client/runner.rs:158,159`）。

@@ -176,10 +176,10 @@ pub fn uninstall_canonical(name: &str) -> Result<()> {
 
 /// Copy a skill folder's payload (exclusions per [COPY_EXCLUDES]).
 fn copy_skill_folder(source: &Path, dest: &Path) -> Result<()> {
-    copy_dir_filtered(source, dest, 0)
+    copy_dir_filtered(source, dest)
 }
 
-fn copy_dir_filtered(source: &Path, dest: &Path, depth: usize) -> Result<()> {
+fn copy_dir_filtered(source: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
@@ -192,7 +192,7 @@ fn copy_dir_filtered(source: &Path, dest: &Path, depth: usize) -> Result<()> {
         let to = dest.join(&name);
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            copy_dir_filtered(&from, &to, depth + 1)?;
+            copy_dir_filtered(&from, &to)?;
         } else if file_type.is_symlink() {
             // Broken or escaping symlinks are skipped silently (vercel parity:
             // copies dereference; a broken link has nothing to copy).

@@ -2,7 +2,7 @@
 
 状态：active
 
-本文件是 React 前端的共享边界、交互范式和视觉约定。具体 Models、Usage、Skills 等产品行为由相邻功能文档维护；完整目录树见 [../../boundaries.md](../../boundaries.md)。
+本文件是 React 前端的共享边界、交互范式和视觉约定。具体 Accounts、Usage、Skills 等产品行为由相邻功能文档维护；完整目录树见 [../../boundaries.md](../../boundaries.md)。
 
 ## 结构与数据流
 
@@ -19,7 +19,7 @@
 
 - Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
 - Skills 模式的列表页（我的技能 / 市场 / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。`Activity` 不是 DOM Element，不能作为 `Dialog.Portal` asChild 的直接子节点——Presence 会对其调用 `getComputedStyle`，WKWebView 会抛错。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
-- 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Usage / Models 模式之间淡入。
+- 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Accounts / Usage 模式之间淡入。
 - `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
 
 `scripts/internal/check_feature_imports.sh` 阻止新增跨 feature 深层导入，但允许从目标 feature 根 `index.ts` 导入。存量基线只能减少；跨域协作优先由 page 组合，确需依赖时只消费目标 feature 的公开入口；若组件确实无业务语义且通用，应先提升到 shared/lib，再改调用方。
@@ -83,7 +83,7 @@
 - 后端解析的路径直接展示；不要在浏览器重建数据目录。可编辑 Agent 路径显示平台分隔符，持久化的 `project_skills_rel` 仍规范为 `/`。
 - tray 与 Settings 的后台运行开关消费同一状态和事件；动作标签必须反映 Start/Stop 当前状态。
 - GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态（含「等待授权」和「登录已失效」），点击打开设备授权面板。关闭面板不取消进行中的设备流。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
-- Marketplace、Models、Usage 等跨页面 request 使用带 nonce 的显式导航事件，避免用不可观察的模块变量传递。
+- Marketplace、Accounts、Usage 等跨页面 request 使用带 nonce 的显式导航事件，避免用不可观察的模块变量传递。
 - Overlay titlebar 下，顶栏空白只有**被点中的那个**带 `data-tauri-drag-region` 的元素才能拖窗口（bare 属性不向子树继承）。沿用 `PageToolbar` 的 `flex-1` filler 吃掉中间松弛；新的顶栏 chrome（分段条、自定义 header）同样必须给空白处一段 filler，不要只把属性放在外层容器上。按钮和输入框不要标该属性。
 
 ## 生成类型
@@ -94,7 +94,7 @@
 bun run types:gen
 ```
 
-当前生成来源位于 `skillstar-models`、`skillstar-marketplace` 和 `src-tauri` package。CI 的 generated-types 检查负责发现漂移；精确类型清单以 Rust `#[derive(TS)]` 和生成脚本为准。
+当前生成来源位于 `skillstar-marketplace`、`skillstar-usage`、`skillstar-app` 和 `src-tauri` package。CI 的 generated-types 检查负责发现漂移；精确类型清单以 Rust `#[derive(TS)]` 和生成脚本为准。
 
 ## 验证
 
