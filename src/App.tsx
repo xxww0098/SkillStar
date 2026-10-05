@@ -25,9 +25,6 @@ const SkillCardsPage = lazy(() => import("./pages/SkillCards").then((mod) => ({ 
 const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ default: mod.Projects })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((mod) => ({ default: mod.Settings })));
 
-// Models mode (single hub page that merges agent connections / providers / health / tool configs)
-const ModelsPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.Models })));
-
 // Usage mode (single page: subscription tracker)
 const UsagePage = lazy(() => import("./pages/Usage").then((mod) => ({ default: mod.Usage })));
 
@@ -82,8 +79,7 @@ function AppContent() {
   // Routes the link to the matching page; unknown targets are ignored.
   useTauriEvent<{ host?: string | null; path?: string }>("skillstar://deep-link", (payload) => {
     const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
-    if (target === "models") nav.setAppMode("models");
-    else if (target) nav.navigate(target);
+    if (target) nav.navigate(target);
   });
 
   // ── Sidebar collapsed ──────────────────────────────────────────
@@ -118,11 +114,6 @@ function AppContent() {
     },
     [nav],
   );
-
-  const handleEnterModelsMode = useCallback(() => {
-    nav.setAppMode("models");
-    setCommandPaletteOpen(false);
-  }, [nav]);
 
   const handleEnterUsageMode = useCallback(() => {
     nav.setAppMode("usage");
@@ -250,23 +241,6 @@ function AppContent() {
           filter={nav.usageCatalogFilter}
           usageCreateRequest={nav.usageCreateRequest}
           clearUsageCreateRequest={nav.clearUsageCreateRequest}
-          onFocusModelsAgent={nav.focusModelsAgent}
-          onFocusModelsCatalog={nav.focusModelsCatalog}
-        />
-      );
-    }
-
-    // Models mode (single hub page). Pass nav fields from this (eager) tree so
-    // the lazy Models chunk never calls useNavigation / NavContext itself.
-    if (nav.appMode === "models") {
-      return (
-        <ModelsPage
-          selectedProviderId={nav.selectedProviderId}
-          setSelectedProviderId={nav.setSelectedProviderId}
-          modelsDrawerRequest={nav.modelsDrawerRequest}
-          clearModelsDrawerRequest={nav.clearModelsDrawerRequest}
-          modelsFocusRequest={nav.modelsFocusRequest}
-          clearModelsFocusRequest={nav.clearModelsFocusRequest}
         />
       );
     }
@@ -331,7 +305,6 @@ function AppContent() {
           open={commandPaletteOpen}
           onClose={handleCloseCommandPalette}
           onNavigate={handleCommandPaletteNavigate}
-          onEnterModelsMode={handleEnterModelsMode}
           onEnterUsageMode={handleEnterUsageMode}
         />
         <Toaster />

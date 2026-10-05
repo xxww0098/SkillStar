@@ -16,7 +16,6 @@ const pages = [
   { id: "cards", hash: "#cards" },
   { id: "projects", hash: "#projects" },
   { id: "settings", hash: "#settings" },
-  { id: "models", hash: "#models" },
   { id: "usage", hash: "#usage" },
 ];
 

@@ -1,4 +1,4 @@
-import type { AiConfig, GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig } from "../../types";
+import type { GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig } from "../../types";
 
 export type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -25,23 +25,6 @@ export function isSameMirrorConfig(a: GitHubMirrorConfig, b: GitHubMirrorConfig)
 
 export function isSameMarketplaceMirrorConfig(a: MarketplaceMirrorConfig, b: MarketplaceMirrorConfig): boolean {
   return a.enabled === b.enabled && JSON.stringify(a.hosts ?? []) === JSON.stringify(b.hosts ?? []);
-}
-
-export function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
-  return (
-    a.enabled === b.enabled &&
-    a.api_format === b.api_format &&
-    (a.provider_ref?.agent_id ?? "") === (b.provider_ref?.agent_id ?? "") &&
-    (a.provider_ref?.provider_id ?? "") === (b.provider_ref?.provider_id ?? "") &&
-    a.base_url === b.base_url &&
-    a.api_key === b.api_key &&
-    a.model === b.model &&
-    a.context_window_k === b.context_window_k &&
-    a.max_concurrent_requests === b.max_concurrent_requests &&
-    JSON.stringify(a.openai_preset) === JSON.stringify(b.openai_preset) &&
-    JSON.stringify(a.anthropic_preset) === JSON.stringify(b.anthropic_preset) &&
-    JSON.stringify(a.local_preset) === JSON.stringify(b.local_preset)
-  );
 }
 
 // ── Initial config values (used as useAutoSaveConfig's `fallback`) ───────────

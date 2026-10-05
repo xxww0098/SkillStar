@@ -28,9 +28,6 @@ function buildInput(overrides: Partial<DisplaySkillsInput> = {}): DisplaySkillsI
     sortBy: "stars-desc",
     searchQuery: "",
     activeTab: "all",
-    aiKeywords: null,
-    aiActiveKeywords: new Set(),
-    aiKeywordSkillMap: {},
     ...overrides,
   };
 }
@@ -76,88 +73,6 @@ describe("computeDisplaySkills", () => {
     });
 
     expect(computeDisplaySkills(input).map((s) => s.name)).toEqual(["leaderboard-only"]);
-  });
-
-  describe("AI keyword mode", () => {
-    it("is active whenever aiKeywords and results are both present, even with an empty searchQuery", () => {
-      const matched = skill({ name: "matched", stars: 5 });
-      const input = buildInput({
-        results: { skills: [matched] },
-        searchQuery: "",
-        aiKeywords: ["planning"],
-        aiActiveKeywords: new Set(["planning"]),
-        aiKeywordSkillMap: { planning: ["matched"] },
-      });
-
-      expect(computeDisplaySkills(input).map((s) => s.name)).toEqual(["matched"]);
-    });
-
-    it("filters to only skills matching at least one active keyword", () => {
-      const a = skill({ name: "a" });
-      const b = skill({ name: "b" });
-      const c = skill({ name: "c" });
-      const input = buildInput({
-        results: { skills: [a, b, c] },
-        aiKeywords: ["kw1", "kw2"],
-        aiActiveKeywords: new Set(["kw1"]),
-        aiKeywordSkillMap: { kw1: ["a", "b"], kw2: ["c"] },
-      });
-
-      expect(
-        computeDisplaySkills(input)
-          .map((s) => s.name)
-          .sort(),
-      ).toEqual(["a", "b"]);
-    });
-
-    it("unions matches across multiple active keywords", () => {
-      const a = skill({ name: "a" });
-      const b = skill({ name: "b" });
-      const c = skill({ name: "c" });
-      const input = buildInput({
-        results: { skills: [a, b, c] },
-        aiKeywords: ["kw1", "kw2"],
-        aiActiveKeywords: new Set(["kw1", "kw2"]),
-        aiKeywordSkillMap: { kw1: ["a"], kw2: ["c"] },
-      });
-
-      expect(
-        computeDisplaySkills(input)
-          .map((s) => s.name)
-          .sort(),
-      ).toEqual(["a", "c"]);
-    });
-
-    it("returns an empty result set when all AI keywords are deselected", () => {
-      const a = skill({ name: "a" });
-      const input = buildInput({
-        results: { skills: [a] },
-        aiKeywords: ["kw1"],
-        aiActiveKeywords: new Set(),
-        aiKeywordSkillMap: { kw1: ["a"] },
-      });
-
-      expect(computeDisplaySkills(input)).toEqual([]);
-    });
-
-    it("skips the filter (shows all search results) when the keyword-skill map is still empty", () => {
-      const a = skill({ name: "a" });
-      const b = skill({ name: "b" });
-      const input = buildInput({
-        results: { skills: [a, b] },
-        aiKeywords: ["kw1"],
-        aiActiveKeywords: new Set(["kw1"]),
-        aiKeywordSkillMap: {},
-      });
-
-      // aiKeywordSkillMap is empty (e.g. not hydrated yet) — the guard on
-      // Object.keys(aiKeywordSkillMap).length > 0 means no filtering happens.
-      expect(
-        computeDisplaySkills(input)
-          .map((s) => s.name)
-          .sort(),
-      ).toEqual(["a", "b"]);
-    });
   });
 
   describe("sorting", () => {

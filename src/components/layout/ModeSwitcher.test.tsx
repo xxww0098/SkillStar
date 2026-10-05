@@ -14,35 +14,34 @@ vi.mock("framer-motion", () => ({
 }));
 
 describe("ModeSwitcher", () => {
-  it("renders Skills, Usage, and Models buttons", () => {
+  it("renders Skills and Usage buttons", () => {
     render(<ModeSwitcher currentMode="skills" onModeChange={vi.fn()} collapsed={false} />);
 
     expect(screen.getByRole("button", { name: "Skills" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Usage" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Models" })).toBeInTheDocument();
   });
 
   it("highlights the active mode button with aria-pressed", () => {
     render(<ModeSwitcher currentMode="skills" onModeChange={vi.fn()} collapsed={false} />);
 
     expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Models" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Usage" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("highlights Models button when models mode is active", () => {
-    render(<ModeSwitcher currentMode="models" onModeChange={vi.fn()} collapsed={false} />);
+  it("highlights Usage button when usage mode is active", () => {
+    render(<ModeSwitcher currentMode="usage" onModeChange={vi.fn()} collapsed={false} />);
 
     expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Models" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Usage" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("calls onModeChange with the correct mode when clicking inactive button", () => {
     const onModeChange = vi.fn();
     render(<ModeSwitcher currentMode="skills" onModeChange={onModeChange} collapsed={false} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    fireEvent.click(screen.getByRole("button", { name: "Usage" }));
 
-    expect(onModeChange).toHaveBeenCalledWith("models");
+    expect(onModeChange).toHaveBeenCalledWith("usage");
     expect(onModeChange).toHaveBeenCalledTimes(1);
   });
 
@@ -59,18 +58,18 @@ describe("ModeSwitcher", () => {
     render(<ModeSwitcher currentMode="skills" onModeChange={vi.fn()} collapsed={true} />);
 
     expect(screen.queryByText("Skills")).not.toBeInTheDocument();
-    expect(screen.queryByText("Models")).not.toBeInTheDocument();
+    expect(screen.queryByText("Usage")).not.toBeInTheDocument();
   });
 
   it("does not show text labels in expanded state", () => {
     const { rerender } = render(<ModeSwitcher currentMode="skills" onModeChange={vi.fn()} collapsed={false} />);
 
     expect(screen.queryByText("Skills")).not.toBeInTheDocument();
-    expect(screen.queryByText("Models")).not.toBeInTheDocument();
+    expect(screen.queryByText("Usage")).not.toBeInTheDocument();
 
-    rerender(<ModeSwitcher currentMode="models" onModeChange={vi.fn()} collapsed={false} />);
+    rerender(<ModeSwitcher currentMode="usage" onModeChange={vi.fn()} collapsed={false} />);
 
     expect(screen.queryByText("Skills")).not.toBeInTheDocument();
-    expect(screen.queryByText("Models")).not.toBeInTheDocument();
+    expect(screen.queryByText("Usage")).not.toBeInTheDocument();
   });
 });

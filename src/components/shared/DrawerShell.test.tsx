@@ -28,7 +28,7 @@ describe("DrawerShell", () => {
       </DrawerShell>,
     );
 
-    // i18n setup defaults to zh-CN → models.drawer.close = "关闭"
+    // i18n setup defaults to zh-CN → common.close = "关闭"
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

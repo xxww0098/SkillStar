@@ -34,7 +34,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 // Mock useNavigation hook — appMode controlled per test
-let mockAppMode: "skills" | "usage" | "models" = "skills";
+let mockAppMode: "skills" | "usage" = "skills";
 const mockSetAppMode = vi.fn();
 
 vi.mock("../../../hooks/useNavigation", () => ({
@@ -42,8 +42,6 @@ vi.mock("../../../hooks/useNavigation", () => ({
     appMode: mockAppMode,
     setAppMode: mockSetAppMode,
     navigate: vi.fn(),
-    selectedProviderId: null,
-    setSelectedProviderId: vi.fn(),
     usageCatalogFilter: "__all__",
     setUsageCatalogFilter: vi.fn(),
     openUsageCreate: vi.fn(),
@@ -59,10 +57,6 @@ vi.mock("../../../lib/backgroundStyle", () => ({
 // Mock the per-mode nav strips to verify conditional rendering
 vi.mock("../SkillsNav", () => ({
   SkillsNav: () => <div data-testid="skills-nav">SkillsNav</div>,
-}));
-
-vi.mock("../ModelsSidebar", () => ({
-  ModelsSidebar: () => <div data-testid="models-sidebar">ModelsSidebar</div>,
 }));
 
 vi.mock("../UsageNav", () => ({
@@ -96,15 +90,6 @@ describe("Sidebar", () => {
     render(<Sidebar {...defaultProps} />);
 
     expect(screen.getByTestId("skills-nav")).toBeInTheDocument();
-    expect(screen.queryByTestId("models-sidebar")).not.toBeInTheDocument();
-  });
-
-  it("renders ModelsSidebar when appMode is 'models'", () => {
-    mockAppMode = "models";
-    render(<Sidebar {...defaultProps} />);
-
-    expect(screen.getByTestId("models-sidebar")).toBeInTheDocument();
-    expect(screen.queryByTestId("skills-nav")).not.toBeInTheDocument();
     expect(screen.queryByTestId("usage-nav")).not.toBeInTheDocument();
   });
 
@@ -114,7 +99,6 @@ describe("Sidebar", () => {
 
     expect(screen.getByTestId("usage-nav")).toBeInTheDocument();
     expect(screen.queryByTestId("skills-nav")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("models-sidebar")).not.toBeInTheDocument();
   });
 
   it("always renders the logo regardless of mode", () => {
@@ -122,7 +106,7 @@ describe("Sidebar", () => {
     const { rerender } = render(<Sidebar {...defaultProps} />);
     expect(screen.getByAltText("SkillStar")).toBeInTheDocument();
 
-    mockAppMode = "models";
+    mockAppMode = "usage";
     rerender(<Sidebar {...defaultProps} />);
     expect(screen.getByAltText("SkillStar")).toBeInTheDocument();
   });
@@ -132,15 +116,15 @@ describe("Sidebar", () => {
     const { rerender } = render(<Sidebar {...defaultProps} />);
     expect(screen.getByTestId("mode-switcher")).toBeInTheDocument();
 
-    mockAppMode = "models";
+    mockAppMode = "usage";
     rerender(<Sidebar {...defaultProps} />);
     expect(screen.getByTestId("mode-switcher")).toBeInTheDocument();
   });
 
   it("passes current appMode to ModeSwitcher", () => {
-    mockAppMode = "models";
+    mockAppMode = "usage";
     render(<Sidebar {...defaultProps} />);
 
-    expect(screen.getByTestId("mode-switcher")).toHaveAttribute("data-mode", "models");
+    expect(screen.getByTestId("mode-switcher")).toHaveAttribute("data-mode", "usage");
   });
 });

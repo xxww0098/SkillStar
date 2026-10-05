@@ -2,8 +2,6 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast as sonnerToast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { AiProviderSection } from "../features/models/components/settings/AiProviderSection";
-import { DecisionModelSection } from "../features/models/components/settings/DecisionModelSection";
 import { DevModeBanner } from "../features/settings/components/DevModeBanner";
 import { globalSkillsTargetKey } from "../features/settings/lib/agentSkillSync";
 import { GlobalSkillsTargetReadGuard } from "../features/settings/lib/globalSkillsTargetReadGuard";
@@ -23,7 +21,6 @@ import { NetworkDoctorSection } from "../features/settings/sections/NetworkDocto
 import { ProxySection } from "../features/settings/sections/ProxySection";
 import { StorageSection } from "../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
-import { useAiConfig } from "../hooks/useAiConfig";
 import { useAutoSaveConfig } from "../hooks/useAutoSaveConfig";
 import { setLanguage } from "../i18n";
 import { supportsGlobalDeploy } from "../lib/agentProfiles";
@@ -33,7 +30,7 @@ import { tauriInvoke } from "../lib/ipc";
 import type { AgentManagedSkillsState } from "../lib/ipc/commands/agents";
 import { toast } from "../lib/toast";
 import type { SettingsFocusTarget } from "../lib/utils";
-import type { AiConfig, GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig, StorageOverview } from "../types";
+import type { GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig, StorageOverview } from "../types";
 import {
   agentReducer,
   FORCE_DELETE_SLOW_HINT_MS,
@@ -42,7 +39,6 @@ import {
   initialMarketplaceMirrorConfig,
   initialMirrorConfig,
   initialProxyConfig,
-  isSameAiConfig,
   isSameMarketplaceMirrorConfig,
   isSameMirrorConfig,
   isSameProxyConfig,
@@ -125,33 +121,6 @@ export function Settings({
     ),
   });
 
-  // AI auto-save (config sourced from useAiConfig, which owns its own load/cache).
-  // `load` never resolves on its own — `hydrate()` below is the sole source of the
-  // initial/re-synced config, matching the previous LOAD-on-aiConfig-change effect
-  // (aiAutoSave.loaded stays false until useAiConfig's own load actually finishes).
-  const { config: aiConfig, loading: aiLoading, saveConfig: saveAiConfig, testConnection } = useAiConfig();
-  const [aiExpanded, setAiExpanded] = useState(false);
-  const [aiTesting, setAiTesting] = useState(false);
-  const [aiTestResult, setAiTestResult] = useState<"success" | "error" | null>(null);
-  const [aiTestLatency, setAiTestLatency] = useState<number | null>(null);
-  const neverResolves = useCallback(() => new Promise<AiConfig>(() => {}), []);
-  const aiAutoSave = useAutoSaveConfig<AiConfig>({
-    load: neverResolves,
-    fallback: aiConfig,
-    save: saveAiConfig,
-    isEqual: isSameAiConfig,
-    skip: aiTesting,
-    onSaveError: useCallback(() => toast.error(t("settings.saveAiFailed")), [t]),
-  });
-
-  // Re-sync from useAiConfig's own load (mirrors the previous LOAD-on-aiConfig-change effect).
-  // `aiAutoSave.hydrate` has a stable identity, so this only re-runs when aiConfig/aiLoading change.
-  useEffect(() => {
-    if (!aiLoading) {
-      aiAutoSave.hydrate(aiConfig);
-    }
-  }, [aiConfig, aiLoading, aiAutoSave.hydrate]);
-
   // Agent connections reducer
   const [agentState, dispatchAgent] = useReducer(agentReducer, {
     expandedAgentId: null,
@@ -198,30 +167,23 @@ export function Settings({
       .catch(() => setGhInstalled(false));
   }, []);
 
-  const focusSettingsSection = useCallback(
-    (target: SettingsFocusTarget) => {
-      if (target === "ai-provider" && !aiExpanded) {
-        setAiExpanded(true);
-      }
+  const focusSettingsSection = useCallback((target: SettingsFocusTarget) => {
+    const sectionId = SETTINGS_FOCUS_TO_SECTION_ID[target];
 
-      const sectionId = SETTINGS_FOCUS_TO_SECTION_ID[target];
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const scrollRoot = document.getElementById("settings-scroll-container");
+        const section = document.getElementById(sectionId);
+        if (!scrollRoot || !section) return;
 
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          const scrollRoot = document.getElementById("settings-scroll-container");
-          const section = document.getElementById(sectionId);
-          if (!scrollRoot || !section) return;
-
-          const rootRect = scrollRoot.getBoundingClientRect();
-          const sectionRect = section.getBoundingClientRect();
-          const offset = 12;
-          const targetTop = scrollRoot.scrollTop + (sectionRect.top - rootRect.top) - offset;
-          scrollRoot.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-        }, 100);
-      });
-    },
-    [aiExpanded],
-  );
+        const rootRect = scrollRoot.getBoundingClientRect();
+        const sectionRect = section.getBoundingClientRect();
+        const offset = 12;
+        const targetTop = scrollRoot.scrollTop + (sectionRect.top - rootRect.top) - offset;
+        scrollRoot.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+      }, 100);
+    });
+  }, []);
 
   // ── Settings section focus from navigation intents ───────────────────────
 
@@ -229,7 +191,7 @@ export function Settings({
     const applyStoredFocus = () => {
       try {
         const focus = localStorage.getItem("skillstar:settings-focus");
-        if (focus === "ai-provider" || focus === "storage") {
+        if (focus === "storage") {
           localStorage.removeItem("skillstar:settings-focus");
           focusSettingsSection(focus);
         }
@@ -240,7 +202,7 @@ export function Settings({
 
     const handleFocusEvent = (event: Event) => {
       const target = (event as CustomEvent<{ target?: SettingsFocusTarget }>).detail?.target;
-      if (target === "ai-provider" || target === "storage") {
+      if (target === "storage") {
         focusSettingsSection(target);
       }
     };
@@ -539,41 +501,6 @@ export function Settings({
     }
   }, []);
 
-  // ── AI handlers ───────────────────────────────────────────────────────────
-
-  const handleAiTestConnection = useCallback(async () => {
-    setAiTesting(true);
-    setAiTestResult(null);
-    setAiTestLatency(null);
-    try {
-      await saveAiConfig(aiAutoSave.config);
-      aiAutoSave.markSaved(aiAutoSave.config);
-      const latency = await testConnection();
-      setAiTesting(false);
-      setAiTestResult("success");
-      setAiTestLatency(latency);
-      setTimeout(() => {
-        setAiTestResult(null);
-        setAiTestLatency(null);
-      }, 3000);
-    } catch (e) {
-      setAiTesting(false);
-      setAiTestResult("error");
-      toast.error(t("settings.connectionFailed", { error: e }));
-      setTimeout(() => {
-        setAiTestResult(null);
-        setAiTestLatency(null);
-      }, 5000);
-    }
-  }, [aiAutoSave.config, aiAutoSave.markSaved, saveAiConfig, testConnection, t]);
-
-  const handleAiEnabledChange = useCallback(
-    (enabled: boolean) => {
-      aiAutoSave.setConfig({ ...aiAutoSave.config, enabled });
-    },
-    [aiAutoSave.config, aiAutoSave.setConfig],
-  );
-
   // ── Storage handlers ───────────────────────────────────────────────────────
 
   const handleCleanAllCaches = useCallback(async () => {
@@ -749,12 +676,9 @@ export function Settings({
   const handleProxyConfigChange = proxyAutoSave.setConfig;
   const handleMirrorConfigChange = mirrorAutoSave.setConfig;
   const handleMarketplaceMirrorConfigChange = marketplaceMirrorAutoSave.setConfig;
-  const handleAiConfigChange = aiAutoSave.setConfig;
-
   const handleToggleProxyExpanded = useCallback(() => setProxyExpanded((prev) => !prev), []);
   const handleToggleMirrorExpanded = useCallback(() => setMirrorExpanded((prev) => !prev), []);
   const handleToggleMarketplaceMirrorExpanded = useCallback(() => setMarketplaceMirrorExpanded((prev) => !prev), []);
-  const handleToggleAiExpanded = useCallback(() => setAiExpanded((prev) => !prev), []);
 
   const handleForceDeleteHub = useCallback(() => handleForceDelete("hub"), [handleForceDelete]);
   const handleForceDeleteCache = useCallback(() => handleForceDelete("cache"), [handleForceDelete]);
@@ -844,27 +768,6 @@ export function Settings({
 
               <section id="settings-network-doctor" className="scroll-mt-3">
                 <NetworkDoctorSection />
-              </section>
-
-              <section id="settings-ai" className="scroll-mt-3">
-                <AiProviderSection
-                  localAiConfig={aiAutoSave.config}
-                  ready={aiAutoSave.loaded}
-                  aiExpanded={aiExpanded}
-                  aiSaving={aiAutoSave.saving}
-                  aiSaved={aiAutoSave.showSaved}
-                  aiTesting={aiTesting}
-                  aiTestResult={aiTestResult}
-                  aiTestLatency={aiTestLatency}
-                  onToggleExpanded={handleToggleAiExpanded}
-                  onEnabledChange={handleAiEnabledChange}
-                  onConfigChange={handleAiConfigChange}
-                  onTestConnection={handleAiTestConnection}
-                />
-              </section>
-
-              <section id="settings-decision" className="scroll-mt-3">
-                <DecisionModelSection />
               </section>
 
               <section id="settings-background" className="scroll-mt-3">

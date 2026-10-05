@@ -7,7 +7,6 @@ import type {
   CatalogEntry,
   CliAccountState,
   ConsumptionSummary,
-  ConsumptionTotals,
   CreateSubscriptionInput,
   Subscription,
   SubscriptionAlert,
@@ -411,18 +410,6 @@ export function useUsageData() {
     [enqueue, loadCliAccounts],
   );
 
-  /** `catalog_id -> today's gateway-metered totals`. Derived, not fetched:
-   *  the page-wide summary is one read, and each card chips out its row.
-   *  Catalogs with no gateway traffic today are absent — callers render the
-   *  "no records yet" sentence for them. */
-  const todayByCatalog = useMemo(() => {
-    const map: Record<string, ConsumptionTotals> = {};
-    for (const group of todaySummary?.by_catalog ?? []) {
-      map[group.label] = group.totals;
-    }
-    return map;
-  }, [todaySummary]);
-
   return useMemo(
     () => ({
       catalog,
@@ -431,7 +418,6 @@ export function useUsageData() {
       summary,
       todaySummary,
       todayConsumption,
-      todayByCatalog,
       alerts,
       loading,
       error,
@@ -456,7 +442,6 @@ export function useUsageData() {
       summary,
       todaySummary,
       todayConsumption,
-      todayByCatalog,
       alerts,
       loading,
       error,

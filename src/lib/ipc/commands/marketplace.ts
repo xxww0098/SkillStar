@@ -1,5 +1,5 @@
+/** Marketplace (skills.sh) discovery — local snapshot first, remote sync on demand. */
 import type {
-  AiKeywordSearchResult,
   LocalFirstResult,
   MarketplaceSkillDetails,
   OfficialPublisher,
@@ -8,16 +8,12 @@ import type {
   SyncStateEntry,
 } from "../../../types";
 
-/** Marketplace (skills.sh) discovery — local snapshot first, remote sync on demand. */
 export interface MarketplaceCommands {
   // Source resolution (map skill name → git url) used by share-code export
   resolve_skill_sources: {
     args: { names: string[]; existingSources: Record<string, string> };
     result: Record<string, string>;
   };
-
-  // AI-assisted search
-  ai_extract_search_keywords: { args: { query: string }; result: string[] };
 
   // Local-first (preferred)
   get_leaderboard_local: { args: { category: string }; result: LocalFirstResult<Skill[]> };
@@ -38,10 +34,6 @@ export interface MarketplaceCommands {
   get_skill_detail_local: {
     args: { source: string; name: string };
     result: LocalFirstResult<MarketplaceSkillDetails>;
-  };
-  ai_search_marketplace_local: {
-    args: { keywords: string[]; limit?: number };
-    result: LocalFirstResult<AiKeywordSearchResult>;
   };
 
   // Snapshot maintenance

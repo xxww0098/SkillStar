@@ -16,7 +16,6 @@ vi.mock("../context/UsageDataContext", () => ({
     subscriptions: [],
     catalog: [],
     alerts: [],
-    todayByCatalog: undefined,
     todayConsumption: null,
     refreshingAll: false,
     refreshBusy: false,
@@ -34,15 +33,7 @@ vi.mock("../context/UsageDataContext", () => ({
 
 describe("UsagePanel loading", () => {
   it("renders the card skeleton before usage data arrives", () => {
-    render(
-      <UsagePanel
-        filter={FILTER_ALL}
-        usageCreateRequest={null}
-        clearUsageCreateRequest={() => undefined}
-        onFocusModelsAgent={() => undefined}
-        onFocusModelsCatalog={() => undefined}
-      />,
-    );
+    render(<UsagePanel filter={FILTER_ALL} usageCreateRequest={null} clearUsageCreateRequest={() => undefined} />);
 
     const status = screen.getByRole("status", { name: "usage.loading" });
     expect(status.querySelectorAll(".grid > div")).toHaveLength(6);

@@ -56,9 +56,7 @@ interface ToolbarProps {
   /** Whether batch update-all is in progress */
   isUpdatingAll?: boolean;
   /** Optional callback for AI marketplace search */
-  onAiSearch?: () => void;
   /** Whether AI search is in progress */
-  aiSearching?: boolean;
   /** Optional title node to render at the start of the toolbar */
   titleNode?: React.ReactNode;
   /** Prepended inside the filters row (e.g. remote host picker) */
@@ -127,8 +125,6 @@ export function Toolbar({
   countText,
   pendingUpdateCount,
   hideStarsSort,
-  onAiSearch,
-  aiSearching,
   titleNode,
   filtersLead,
   actionsLead,
@@ -313,8 +309,6 @@ export function Toolbar({
           onSearchSelect?.(id);
         }}
         placeholder={searchPlaceholder}
-        onAiSearch={onAiSearch}
-        aiSearching={aiSearching}
       />
     </>
   ) : (

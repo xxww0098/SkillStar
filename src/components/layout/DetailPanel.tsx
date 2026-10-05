@@ -9,17 +9,14 @@ import {
   GitBranch,
   Loader2,
   RefreshCw,
-  Sparkles,
-  Square,
   Star,
   Trash2,
   X,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { degradedDeploys, useDeployStatus } from "../../features/my-skills/hooks/useDeployStatus";
-import { useAiStream } from "../../hooks/useAiStream";
-import { formatAiErrorMessage, formatInstalls, navigateToAiSettings } from "../../lib/utils";
+import { formatInstalls } from "../../lib/utils";
 import type { MarketplaceSkillDetails, Skill, SkillContent } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -81,19 +78,8 @@ export function DetailPanel({
     return () => window.removeEventListener("keydown", handleKey);
   }, [skill, editing, reading, onClose]);
 
-  // ── AI Quick Read ─────────────────────────────────────────────
-  // Streaming state machine, AI readiness, cancellation and the safety
-  // timeout all live in the shared hook (same surface as SkillReader/Editor).
-  const quickRead = useAiStream({
-    command: "ai_summarize_skill_stream",
-    eventChannel: "ai://summarize-stream",
-  });
-  const summaryAiConfigured = quickRead.aiConfigured;
-  const locale = quickRead.locale;
-
   // Marketplace detail fetching
   const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
-  const quickReadCacheRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     setSkillDetails(null);
@@ -128,63 +114,10 @@ export function DetailPanel({
 
   // Reset state when skill changes
   useEffect(() => {
-    // Drop any in-flight stream for the previous skill, then restore the
-    // cached quick-read for this one.
-    quickRead.cancel();
-    const cacheKey = `${locale}::${skill?.name ?? ""}`;
-    quickRead.hydrate(quickReadCacheRef.current.get(cacheKey) ?? null, null);
-    quickRead.setVisible(false);
-    quickRead.setError(null);
-
     setReading(false);
     setReaderContent(null);
     setOpeningRead(false);
-  }, [
-    skill?.name,
-    skill?.description,
-    skill?.localized_description,
-    skill?.installed,
-    skill?.source,
-    locale,
-    quickRead.cancel,
-    quickRead.hydrate,
-    quickRead.setVisible,
-    quickRead.setError,
-  ]);
-
-  const handleQuickRead = async () => {
-    // Cancel in-progress
-    if (quickRead.loading) {
-      quickRead.cancel();
-      if (!quickRead.content) quickRead.setVisible(false);
-      return;
-    }
-
-    if (quickRead.visible) {
-      quickRead.dismiss();
-      return;
-    }
-
-    if (quickRead.content) {
-      quickRead.setVisible(true);
-      return;
-    }
-
-    if (!skill || !onReadContent || !summaryAiConfigured) return;
-
-    try {
-      const skillContent = await onReadContent(skill.name);
-      const result = await quickRead.execute(skillContent.content);
-      if (result != null) {
-        // Cache completed summary (language-aware)
-        quickReadCacheRef.current.set(`${locale}::${skill.name}`, result);
-      }
-    } catch (e) {
-      // onReadContent failed before the stream started; execute reports its
-      // own errors through the hook state.
-      quickRead.setError(String(e));
-    }
-  };
+  }, [skill?.name, skill?.description, skill?.localized_description, skill?.installed, skill?.source]);
 
   const canEdit = skill?.installed && onReadContent && onSaveContent;
   // Installed skills view the live SKILL.md; others fall back to the
@@ -222,7 +155,6 @@ export function DetailPanel({
   // Use enriched summary from detail fetch when available
   const enrichedDescription = skillDetails?.summary?.trim() || rawDescription;
   const hasDescription = enrichedDescription.length > 0;
-  const localizedQuickReadError = formatAiErrorMessage(quickRead.error, t);
   const displayDescription = enrichedDescription;
 
   return (
@@ -414,79 +346,7 @@ export function DetailPanel({
                     <p className="text-body leading-relaxed">{t("detailPanel.noDescription")}</p>
                   )}
                 </div>
-                {/* AI Actions Row */}
-                <div className="flex items-center gap-2">
-                  {skill.installed && onReadContent && summaryAiConfigured && (
-                    <button
-                      onClick={handleQuickRead}
-                      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
-                        quickRead.loading
-                          ? "bg-destructive/10 text-destructive border border-destructive/20"
-                          : quickRead.visible
-                            ? "bg-primary/10 text-primary border border-primary/20"
-                            : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                      {quickRead.loading ? (
-                        <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
-                      ) : (
-                        <Sparkles className="w-3.5 h-3.5 relative z-10" />
-                      )}
-                      <span className="relative z-10">
-                        {quickRead.loading
-                          ? t("common.cancel")
-                          : quickRead.visible
-                            ? t("detailPanel.hideQuickRead")
-                            : t("detailPanel.aiQuickRead")}
-                      </span>
-                    </button>
-                  )}
-                </div>
               </div>
-
-              {/* AI Quick Read Content */}
-              {skill.installed &&
-                onReadContent &&
-                summaryAiConfigured &&
-                (quickRead.error || quickRead.loading || quickRead.visible) && (
-                  <div className="space-y-2">
-                    {localizedQuickReadError && (
-                      <div className="text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2">
-                        {localizedQuickReadError}
-                      </div>
-                    )}
-
-                    {!quickRead.loading && quickRead.visible && quickRead.content && quickRead.wasNonStreaming && (
-                      <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border">
-                        {t("detailPanel.nonStreamingQuickReadNotice")}
-                      </div>
-                    )}
-
-                    {quickRead.visible && quickRead.content && (
-                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                        <Markdown
-                          streaming={quickRead.loading}
-                          className="text-xs [&_p]:my-1 [&_strong]:text-primary/90"
-                        >
-                          {quickRead.content}
-                        </Markdown>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-              {skill.installed && onReadContent && !summaryAiConfigured && (
-                <div className="rounded-lg border border-border bg-card px-3 py-2 flex items-center gap-2">
-                  <p className="text-xs text-muted-foreground flex-1">{t("detailPanel.aiPromptHint")}</p>
-                  <button
-                    onClick={navigateToAiSettings}
-                    className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-muted transition-colors cursor-pointer focus-ring"
-                  >
-                    {t("detailPanel.goToAiConfig")}
-                  </button>
-                </div>
-              )}
 
               {/* skills.sh link */}
               {skillsShUrl && (

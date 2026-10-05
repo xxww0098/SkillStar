@@ -2,9 +2,9 @@
 # Anti-staleness guard for the Rust -> TypeScript generated types.
 #
 # `src/types/generated/*.ts` is produced by ts-rs from five crates
-# (`bun run types:gen`, i.e. `cargo test -p skillstar-models
+# (`bun run types:gen`, i.e. `cargo test
 # -p skillstar-marketplace -p skillstar-usage -p skillstar-app
-# -p skillstar-decision export_bindings`).
+# export_bindings`).
 # The source files below are the ones that currently carry `#[derive(TS)]`;
 # the list is a navigation aid, not an SSOT — the authority is the derives
 # themselves, and this script fails on any drift regardless of what is listed
@@ -29,7 +29,6 @@
 #   - `crates/skillstar-app/src/models/dto.rs` (the Models page's frontend
 #     contract; `ProviderDto` exists so the plaintext API key on `Provider`
 #     has nowhere to travel to)
-#   - `crates/skillstar-decision/` (the local decision model's checkpoint
 #     status, download progress, engine info and typed answers; `src/types/
 #     decision.ts` re-exports them and hand-mirrors nothing)
 # Nothing enforces that a developer who edits a `#[derive(TS)]` struct
@@ -62,7 +61,7 @@ trap 'rm -rf "$SCRATCH_DIR"' EXIT
 # absolute path sidesteps that entirely. (See .cargo/config.toml for the
 # same concern affecting the committed, non-override TS_RS_EXPORT_DIR.)
 echo "regenerating TS bindings into scratch dir..."
-if ! TS_RS_EXPORT_DIR="$SCRATCH_DIR" cargo test -p skillstar-models -p skillstar-marketplace -p skillstar-usage -p skillstar-app -p skillstar-decision export_bindings --quiet 2>&1; then
+if ! TS_RS_EXPORT_DIR="$SCRATCH_DIR" cargo test -p skillstar-marketplace -p skillstar-usage -p skillstar-app export_bindings --quiet 2>&1; then
   echo "✗ ts-rs export_bindings tests failed to run — cannot verify freshness."
   exit 1
 fi
@@ -75,7 +74,7 @@ fi
 # Compare file sets and contents. `diff -r` reports both missing/extra files
 # and content differences in one pass.
 if diff -r "$COMMITTED_DIR" "$SCRATCH_DIR" >/tmp/check_generated_types.diff 2>&1; then
-  echo "✓ $COMMITTED_DIR is up to date with every #[derive(TS)] in skillstar-models, skillstar-marketplace, skillstar-usage, skillstar-app, and skillstar-decision."
+  echo "✓ $COMMITTED_DIR is up to date with every #[derive(TS)] in skillstar-marketplace, skillstar-usage, and skillstar-app."
   rm -f /tmp/check_generated_types.diff
   exit 0
 fi

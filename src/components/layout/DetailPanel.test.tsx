@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { invalidateAiConfigCache } from "../../hooks/useAiConfig";
 import type { LocalFirstResult, MarketplaceSkillDetails, Skill } from "../../types";
 import { DetailPanel } from "./DetailPanel";
 
@@ -24,14 +23,12 @@ function detail(summary: string | null): DetailResult {
 }
 
 function defaultResponse(command: string) {
-  if (command === "get_ai_config") return { enabled: false };
   if (command === "get_skill_deploy_status") return [];
   if (command === "get_skill_detail_local") return detail(null);
   throw new Error(`Unexpected IPC: ${command}`);
 }
 
 beforeEach(() => {
-  invalidateAiConfigCache();
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(async (command) => defaultResponse(command));
 });

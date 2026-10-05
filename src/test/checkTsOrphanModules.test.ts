@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(ROOT, "scripts/internal/check_ts_orphan_modules.sh");
-const FIXTURE_DIR = path.join(ROOT, "src/features/models/__orphan_fixture__");
+const FIXTURE_DIR = path.join(ROOT, "src/features/usage/__orphan_fixture__");
 const PLANTED = path.join(FIXTURE_DIR, "plantedOrphan.ts");
 const PLANTED_REL = path.relative(ROOT, PLANTED);
 // The gate is normally sub-second, but its synchronous child can be starved

@@ -3,12 +3,10 @@ import {
   agentIconCls,
   cn,
   detectPlatform,
-  formatAiErrorMessage,
   formatGlobalPathForDisplay,
   formatInstalls,
   formatPlatformPath,
   inferUserHomeRoot,
-  navigateToAiSettings,
   navigateToSettingsSection,
   resolveSkillstarDataPath,
 } from "./utils";
@@ -110,31 +108,6 @@ describe("formatInstalls", () => {
   });
 });
 
-describe("formatAiErrorMessage", () => {
-  const mockT = (key: string, opts?: Record<string, unknown>) => (opts?.defaultValue as string) ?? key;
-
-  it("should return null for empty errors", () => {
-    expect(formatAiErrorMessage(null, mockT)).toBeNull();
-    expect(formatAiErrorMessage(undefined, mockT)).toBeNull();
-    expect(formatAiErrorMessage("", mockT)).toBeNull();
-  });
-
-  it("should detect AI not configured errors", () => {
-    const result = formatAiErrorMessage("AI provider is disabled", mockT);
-    expect(result).toContain("not configured");
-  });
-
-  it("should detect network errors", () => {
-    const result = formatAiErrorMessage("Failed to send request", mockT);
-    expect(result).toContain("Network");
-  });
-
-  it("should return raw message for unknown errors", () => {
-    const result = formatAiErrorMessage("Some unknown error", mockT);
-    expect(result).toBe("Some unknown error");
-  });
-});
-
 describe("settings navigation helpers", () => {
   const storage = new Map<string, string>();
   const localStorageMock = {
@@ -184,22 +157,6 @@ describe("settings navigation helpers", () => {
     expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({ target: "storage" });
 
     window.removeEventListener("skillstar:navigate", handleNavigate as EventListener);
-    window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
-  });
-
-  it("should keep AI navigation focused on the AI section", () => {
-    const handleFocus = vi.fn();
-
-    window.addEventListener("skillstar:settings-focus", handleFocus as EventListener);
-
-    navigateToAiSettings();
-
-    expect(localStorage.getItem("skillstar:settings-focus")).toBe("ai-provider");
-    expect(handleFocus).toHaveBeenCalledTimes(1);
-    expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({
-      target: "ai-provider",
-    });
-
     window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
   });
 });

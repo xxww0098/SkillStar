@@ -1,13 +1,11 @@
 import {
   Activity,
-  BrainCircuit,
   EyeOff,
   Globe,
   HardDrive,
   Languages as LanguagesIcon,
   type LucideIcon,
   Paintbrush,
-  Sparkles,
   Terminal,
   Unlink,
   Zap,
@@ -23,8 +21,6 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
   { id: "settings-marketplace-mirror", labelKey: "settings.marketplaceMirror", icon: Store },
   { id: "settings-network-doctor", labelKey: "settings.networkDoctor", icon: Activity },
-  { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
-  { id: "settings-decision", labelKey: "settings.decisionModel", icon: BrainCircuit },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },
   { id: "settings-appearance", labelKey: "settings.backgroundStyle", icon: Paintbrush },
   { id: "settings-language", labelKey: "settings.language", icon: LanguagesIcon },
@@ -33,7 +29,6 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
 ];
 
 export const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
-  "ai-provider": "settings-ai",
   storage: "settings-storage",
 };
 

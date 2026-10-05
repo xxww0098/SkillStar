@@ -26,7 +26,6 @@ import type { NavPage } from "../../types";
 import { GitHubAccountMenu } from "@/features/settings";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SkillsNav } from "./SkillsNav";
-import { ModelsSidebar } from "./ModelsSidebar";
 import { UsageNav } from "./UsageNav";
 
 interface SidebarProps {
@@ -322,15 +321,7 @@ export function Sidebar({
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
   const isDev = import.meta.env.DEV;
-  const {
-    appMode,
-    setAppMode,
-    navigate,
-    selectedProviderId,
-    setSelectedProviderId,
-    usageCatalogFilter,
-    setUsageCatalogFilter,
-  } = useNavigation();
+  const { appMode, setAppMode, navigate, usageCatalogFilter, setUsageCatalogFilter } = useNavigation();
 
   const isSettingsActive = appMode === "skills" && activePage === "settings";
 
@@ -347,13 +338,6 @@ export function Sidebar({
       if (import.meta.env.DEV) console.warn("[Sidebar] Failed to toggle devtools from logo click", error);
     }
   };
-
-  const handleSelectProvider = useCallback(
-    (id: string) => {
-      setSelectedProviderId(id);
-    },
-    [setSelectedProviderId],
-  );
 
   const isMacDesktop = detectPlatform() === "macos";
 
@@ -465,13 +449,7 @@ export function Sidebar({
 
       {/* ── Navigation (conditional based on appMode) ── */}
       <nav className={cn("flex-1 py-2 overflow-y-auto", collapsed ? "px-1.5" : "px-2")}>
-        {appMode === "models" ? (
-          <ModelsSidebar
-            selectedProviderId={selectedProviderId}
-            onSelectProvider={handleSelectProvider}
-            collapsed={collapsed}
-          />
-        ) : appMode === "usage" ? (
+        {appMode === "usage" ? (
           <UsageNav selected={usageCatalogFilter} onSelect={setUsageCatalogFilter} collapsed={collapsed} />
         ) : (
           <SkillsNav activePage={activePage} onNavigate={onNavigate} onPrefetch={onPrefetch} collapsed={collapsed} />

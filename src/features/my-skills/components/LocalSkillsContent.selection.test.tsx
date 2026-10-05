@@ -12,22 +12,6 @@ vi.mock("../../../hooks/useAgentProfiles", () => ({
 vi.mock("../hooks/useSkillCards", () => ({
   useSkillCards: () => ({ groups: [], createGroup: vi.fn() }),
 }));
-vi.mock("../../../hooks/useAiStream", () => {
-  const state = {
-    content: null,
-    visible: false,
-    loading: false,
-    error: null,
-    aiConfigured: false,
-    locale: "zh-CN",
-    cancel: vi.fn(),
-    hydrate: vi.fn(),
-    setVisible: vi.fn(),
-    setError: vi.fn(),
-    dismiss: vi.fn(),
-  };
-  return { useAiStream: () => state };
-});
 vi.mock("../../../lib/toast", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }));

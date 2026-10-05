@@ -8,16 +8,14 @@ describe("deepLinkNavTarget", () => {
     expect(deepLinkNavTarget("skill-cards", "")).toBe("skill-cards");
     expect(deepLinkNavTarget("projects", "")).toBe("projects");
     expect(deepLinkNavTarget("settings", "")).toBe("settings");
-    expect(deepLinkNavTarget("models", "")).toBe("models");
   });
 
   it("maps the first path segment when host is absent", () => {
     expect(deepLinkNavTarget(null, "/marketplace/skill")).toBe("marketplace");
-    expect(deepLinkNavTarget(null, "/models/cloud-sync")).toBe("models");
   });
 
   it("accepts case variations", () => {
-    expect(deepLinkNavTarget("Models", "")).toBe("models");
+    expect(deepLinkNavTarget("Marketplace", "")).toBe("marketplace");
     expect(deepLinkNavTarget(null, "/MY-SKILLS")).toBe("my-skills");
   });
 

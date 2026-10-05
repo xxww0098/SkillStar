@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUp, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowUp, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DetailPanel } from "../components/layout/DetailPanel";
@@ -21,7 +21,6 @@ import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
-import { toast } from "../lib/toast";
 import { cn } from "../lib/utils";
 import type { OfficialPublisher, Skill, SortOption } from "../types";
 
@@ -54,14 +53,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     retrySnapshot,
     search,
     searchOnline,
-    aiSearch,
-    aiSearching,
-    aiPhase,
-    aiKeywords,
-    aiKeywordSkillMap,
-    aiActiveKeywords,
-    toggleAiKeyword,
-    clearAiSearch,
+    clearSearch,
     notePendingSearchQuery,
     fetchLeaderboard,
     fetchOfficialPublishers,
@@ -91,9 +83,9 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       setActiveTab(tab);
       setSearchQuery("");
       setSelectedSkill(null);
-      clearAiSearch();
+      clearSearch();
     },
-    [clearAiSearch, onTabChange],
+    [clearSearch, onTabChange],
   );
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
@@ -119,15 +111,14 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     }
   }, [activeTab, fetchOfficialPublishers, fetchLeaderboard]);
 
-  // Search (debounced) — skip when AI search is active
+  // Search (debounced)
   useEffect(() => {
     if (!searchQuery.trim()) return;
-    if (aiSearching || aiKeywords) return; // Don't run normal search during/after AI search
     const timer = setTimeout(() => {
       search(searchQuery);
     }, 400);
     return () => clearTimeout(timer);
-  }, [searchQuery, search, aiSearching, aiKeywords]);
+  }, [searchQuery, search]);
 
   const displaySkills = useMemo(
     () =>
@@ -137,11 +128,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
         sortBy,
         searchQuery,
         activeTab,
-        aiKeywords,
-        aiActiveKeywords,
-        aiKeywordSkillMap,
       }),
-    [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap],
+    [activeTab, results, leaderboard, sortBy, searchQuery],
   );
 
   const spotlightItems = useMemo(
@@ -182,36 +170,19 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     t,
   });
 
-  const handleAiSearch = useCallback(() => {
-    if (!searchQuery.trim()) {
-      toast.error(
-        t("marketplace.aiSearchEmptyQuery", {
-          defaultValue: "Enter a search query first",
-        }),
-      );
-      return;
-    }
-    aiSearch(searchQuery);
-  }, [searchQuery, aiSearch, t]);
-
-  const handleClearAiSearch = useCallback(() => {
-    clearAiSearch();
-    setSearchQuery("");
-  }, [clearAiSearch]);
-
   const toolbarSearchQuery = searchQuery;
   const handleToolbarSearchChange = useCallback(
     (value: string) => {
       setSearchQuery(value);
       if (!value.trim()) {
-        clearAiSearch();
+        clearSearch();
         return;
       }
       // Typing past a finished query must not leave that query's freshness
       // label / error banner attached to the one being typed.
       notePendingSearchQuery(value);
     },
-    [clearAiSearch, notePendingSearchQuery],
+    [clearSearch, notePendingSearchQuery],
   );
 
   const totalCount = displaySkills.length;
@@ -220,14 +191,12 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
   // status/error are per-scope, so publishers can no longer describe (or fail
   // on behalf of) the skills tab.
   const snapshotScope: MarketplaceScope =
-    activeTab === "official" ? "publishers" : searchQuery.trim() || aiKeywords ? "search" : "leaderboard";
+    activeTab === "official" ? "publishers" : searchQuery.trim() ? "search" : "leaderboard";
   const snapshot = snapshots[snapshotScope];
 
   // `search` recovers by re-running the online search against the query on
-  // screen. Reaching this scope always means there is one: `aiKeywords` cannot
-  // outlive the input that produced them (clearing the box and switching tabs
-  // both run `clearAiSearch`), so the retry action is never inert and needs no
-  // disabled variant.
+  // screen. Reaching this scope always means there is one, so the retry
+  // action is never inert and needs no disabled variant.
   const handleSnapshotRetry = useCallback(() => {
     if (snapshotScope === "search") {
       void searchOnline(searchQuery);
@@ -246,12 +215,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       : null;
   const snapshotTitle = snapshot.updatedAt ?? undefined;
   const showOnlineSupplement =
-    Boolean(searchQuery.trim()) &&
-    !aiKeywords &&
-    !loading &&
-    !aiSearching &&
-    displaySkills.length === 0 &&
-    snapshot.status === "miss";
+    Boolean(searchQuery.trim()) && !loading && displaySkills.length === 0 && snapshot.status === "miss";
   // A seeding snapshot is a loading state, not an
   // empty market. Only take over the viewport while there is nothing to show.
   const showSeedingLoader = snapshot.status === "seeding" && displaySkills.length === 0;
@@ -307,8 +271,6 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           onSortChange={setSortBy}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          onAiSearch={handleAiSearch}
-          aiSearching={aiSearching}
           filtersLead={
             <div className="flex min-w-0 items-center gap-2 shrink-0" role="tablist" aria-label={t("sidebar.market")}>
               <div
@@ -349,54 +311,6 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           <SnapshotErrorBanner error={snapshot.error} refreshing={refreshing} onRetry={handleSnapshotRetry} />
         )}
 
-        {/* AI Keywords toggle filter bar */}
-        <AnimatePresence>
-          {aiKeywords && aiKeywords.length > 0 && !aiSearching && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <div className="flex items-center gap-2 px-6 py-2 border-b border-border bg-sidebar/50 backdrop-blur-sm">
-                <Sparkles className="w-3.5 h-3.5 shrink-0 text-ai-text" />
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {aiKeywords.map((kw) => {
-                    const isActive = aiActiveKeywords.has(kw);
-                    const count = aiKeywordSkillMap[kw]?.length ?? 0;
-                    return (
-                      <button
-                        key={kw}
-                        onClick={() => toggleAiKeyword(kw)}
-                        className={cn(
-                          "inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-medium border transition-all duration-200 cursor-pointer gap-1",
-                          isActive
-                            ? "bg-ai-bg-hover/60 text-ai-text border-ai-border/40 shadow-[0_0_4px_var(--color-ai-shadow)]"
-                            : "bg-transparent text-muted-foreground/50 border-border/30 line-through",
-                        )}
-                      >
-                        {kw}
-                        <span className={cn("text-[10px] opacity-60", !isActive && "no-underline")}>{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <span className="text-xs text-muted-foreground ml-1">
-                  {displaySkills.length} {t("marketplace.aiResultsFound", { defaultValue: "results" })}
-                </span>
-                <button
-                  onClick={handleClearAiSearch}
-                  className="ml-auto w-5 h-5 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-sidebar-hover transition-colors cursor-pointer shrink-0"
-                  title={t("common.clear")}
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         <motion.main
           ref={scrollRef}
           role="tabpanel"
@@ -421,75 +335,12 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
                 onPublisherClick={onNavigateToPublisher}
               />
             )
-          ) : loading || aiSearching || showSeedingLoader ? (
+          ) : loading || showSeedingLoader ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <LoadingLogo
                 size="lg"
-                label={
-                  aiSearching
-                    ? t("marketplace.aiSearching", {
-                        defaultValue: "AI is analyzing your query...",
-                      })
-                    : showSeedingLoader && !loading
-                      ? t("marketplace.seedingSnapshot")
-                      : t("marketplace.loading")
-                }
+                label={showSeedingLoader && !loading ? t("marketplace.seedingSnapshot") : t("marketplace.loading")}
               />
-              {aiSearching && (
-                <div className="flex flex-col items-center gap-3 w-full max-w-md">
-                  {/* Stage 1: Extracting keywords */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-2 text-xs text-muted-foreground"
-                  >
-                    {aiPhase === "extracting" ? (
-                      <Loader2 className="w-3 h-3 animate-spin text-ai-text" />
-                    ) : (
-                      <Sparkles className="w-3 h-3 text-ai-text" />
-                    )}
-                    {t("marketplace.aiPhaseExtract", {
-                      defaultValue: "Extracting search keywords...",
-                    })}
-                  </motion.div>
-
-                  {/* Keywords appear after extraction */}
-                  <AnimatePresence>
-                    {aiKeywords && aiKeywords.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center gap-1.5 flex-wrap justify-center"
-                      >
-                        {aiKeywords.map((kw) => (
-                          <span
-                            key={kw}
-                            className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-medium bg-ai-bg-hover/60 text-ai-text border border-ai-border/40 shadow-[0_0_4px_var(--color-ai-shadow)]"
-                          >
-                            {kw}
-                          </span>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Stage 2: Concurrent searching */}
-                  <AnimatePresence>
-                    {aiPhase === "searching" && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center gap-2 text-xs text-muted-foreground"
-                      >
-                        <Loader2 className="w-3 h-3 animate-spin text-ai-text" />
-                        {t("marketplace.aiPhaseSearch", {
-                          defaultValue: "Searching concurrently...",
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              )}
             </div>
           ) : showOnlineSupplement ? (
             <EmptyState
@@ -536,9 +387,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
               onToggleAgent={toggleSkillForAgent}
               pendingAgentToggleKeys={pendingAgentToggleKeys}
               selectedSkills={selectedSkill ? new Set([selectedSkill.name]) : undefined}
-              emptyMessage={
-                searchQuery.trim() || aiKeywords ? t("marketplace.noResultsSearch") : t("marketplace.noResults")
-              }
+              emptyMessage={searchQuery.trim() ? t("marketplace.noResultsSearch") : t("marketplace.noResults")}
             />
           )}
         </motion.main>

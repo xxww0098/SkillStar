@@ -9,12 +9,9 @@ export { tauriInvoke, tauriInvokeDynamic, useTauriMutation, useTauriQuery, useTa
 export type {
   AgentCommands,
   AgentDeployStatus,
-  AiCommands,
   DeployKind,
-  ConfigConflict,
   GitHubCommands,
   MarketplaceCommands,
-  ModelsCommands,
   PatrolStatus,
   ProjectCommands,
   SkillCommands,
@@ -22,6 +19,5 @@ export type {
   StorageCommands,
   SystemCommands,
   TauriCommands,
-  ToolInstallStatus,
   UpdateCheckResult,
 } from "./commands";

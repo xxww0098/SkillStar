@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useUsageSpendExpanded } from "../hooks/useUsageSpendExpanded";
 import { subscriptionHasSpend } from "../lib/pricing";
-import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type ConsumptionTotals, type Subscription } from "../types";
+import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type Subscription } from "../types";
 import { UsageSpendSummary } from "./UsageSpendSummary";
 
 interface UsageActionBarProps {
@@ -14,18 +14,10 @@ interface UsageActionBarProps {
   filter: CatalogFilter;
   /** Today's gateway-metered totals per provider; drives the chips' today
    *  column. Omitted while the summary read is in flight. */
-  todayByCatalog?: Record<string, ConsumptionTotals>;
   onReorder: (orderedIds: string[]) => void;
 }
 
-export function UsageActionBar({
-  subscriptions,
-  allSubscriptions,
-  catalog,
-  filter,
-  todayByCatalog,
-  onReorder,
-}: UsageActionBarProps) {
+export function UsageActionBar({ subscriptions, allSubscriptions, catalog, filter, onReorder }: UsageActionBarProps) {
   const { t } = useTranslation();
   const { expanded, toggle } = useUsageSpendExpanded();
 
@@ -47,7 +39,6 @@ export function UsageActionBar({
           subscriptions={visibleSubs}
           allSubscriptions={allSubscriptions}
           catalog={catalog}
-          todayByCatalog={todayByCatalog}
           onReorder={onReorder}
           className="min-w-0 flex-1"
         />

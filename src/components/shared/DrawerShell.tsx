@@ -109,7 +109,7 @@ export function DrawerShell({
                   <Dialog.Close asChild>
                     <button
                       type="button"
-                      aria-label={t("models.drawer.close")}
+                      aria-label={t("common.close")}
                       className="shrink-0 cursor-pointer rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted/50 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                     >
                       <X className="h-4 w-4" />

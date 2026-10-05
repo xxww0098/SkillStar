@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Cpu, Gauge, LayoutGrid } from "lucide-react";
+import { Gauge, LayoutGrid } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { AppMode } from "../../types";
 
@@ -12,12 +12,11 @@ interface ModeSwitcherProps {
 const modes: { id: AppMode; label: string; icon: React.ElementType }[] = [
   { id: "skills", label: "Skills", icon: LayoutGrid },
   { id: "usage", label: "Usage", icon: Gauge },
-  { id: "models", label: "Models", icon: Cpu },
 ];
 
 // Shared expanded-track styling — defined, crisp segmented control.
 const expandedTrack = cn(
-  "relative grid w-full grid-cols-3 gap-0 rounded-xl p-1",
+  "relative grid w-full grid-cols-2 gap-0 rounded-xl p-1",
   "bg-muted/60 ring-1 ring-inset ring-border/40 shadow-inner",
 );
 

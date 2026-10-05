@@ -5,7 +5,7 @@ export const queryClient = new QueryClient({
     queries: {
       // Desktop: opening a file picker, OAuth window or another app blurs the
       // Tauri webview. Refetch-on-focus turned every blur into a full skills /
-      // marketplace / models round trip. Explicit refresh buttons and
+      // marketplace round trip. Explicit refresh buttons and
       // per-feature intervals still exist; 60s staleTime covers "I just did
       // something elsewhere".
       staleTime: 60_000,

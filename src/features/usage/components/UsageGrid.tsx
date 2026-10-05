@@ -6,14 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { mergeSubscriptionOrder } from "../lib/pricing";
 import { desktopAppsForFilter } from "../lib/desktopApps";
-import {
-  FILTER_ALL,
-  type CatalogEntry,
-  type CatalogFilter,
-  type CliAccountState,
-  type ConsumptionTotals,
-  type Subscription,
-} from "../types";
+import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type CliAccountState, type Subscription } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { DesktopAppsSection } from "./instances/DesktopAppsSection";
@@ -26,7 +19,6 @@ interface UsageGridProps {
   catalog: CatalogEntry[];
   /** Today's gateway-metered totals per provider; drives the cards' today
    *  line. Omitted while the summary read is in flight. */
-  todayByCatalog?: Record<string, ConsumptionTotals>;
   /** `catalog_id -> which account that CLI is actually serving`; each card
    *  draws its "current" badge from this rather than from the pin. */
   cliAccounts?: Record<string, CliAccountState>;
@@ -44,7 +36,6 @@ interface UsageGridProps {
   onSwitchToCli?: (catalogId: string) => Promise<void>;
   /** Cross-view entry (Usage → Models triangle): the card's today line
    *  opens "which agents route to this catalog" in the Models hub. */
-  onOpenRoutes?: (catalogId: string) => void;
   onReorder: (orderedIds: string[]) => void;
   onAddNew: (catalogId?: string) => void;
   onBrowseProviders?: () => void;
@@ -59,7 +50,6 @@ type CardCallbacks = Pick<
   | "onReauth"
   | "onSetActive"
   | "onSwitchToCli"
-  | "onOpenRoutes"
   | "refreshDisabled"
   | "cliAccounts"
 >;
@@ -77,7 +67,6 @@ export function UsageGrid({
   subscriptions,
   allSubscriptions,
   catalog,
-  todayByCatalog,
   cliAccounts,
   hideAccountEmails = false,
   filter,
@@ -89,7 +78,6 @@ export function UsageGrid({
   onReauth,
   onSetActive,
   onSwitchToCli,
-  onOpenRoutes,
   onReorder,
   onAddNew,
   onBrowseProviders,
@@ -157,21 +145,9 @@ export function UsageGrid({
       onReauth,
       onSetActive,
       onSwitchToCli,
-      onOpenRoutes,
       cliAccounts,
     }),
-    [
-      onRefresh,
-      onResetQuota,
-      refreshDisabled,
-      onEdit,
-      onDelete,
-      onReauth,
-      onSetActive,
-      onSwitchToCli,
-      onOpenRoutes,
-      cliAccounts,
-    ],
+    [onRefresh, onResetQuota, refreshDisabled, onEdit, onDelete, onReauth, onSetActive, onSwitchToCli, cliAccounts],
   );
 
   const gridClass = "grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";
@@ -189,7 +165,6 @@ export function UsageGrid({
           key={sub.id}
           subscription={sub}
           catalog={catalogById.get(sub.catalog_id)}
-          todayConsumption={todayByCatalog === undefined ? undefined : (todayByCatalog[sub.catalog_id] ?? null)}
           hideAccountEmails={hideAccountEmails}
           itemClassName={itemClassName}
           {...cardCallbacks}
@@ -354,15 +329,12 @@ function ProviderSubscriptionRow({
 const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
   subscription,
   catalog,
-  todayConsumption,
   hideAccountEmails,
   itemClassName,
-  onOpenRoutes,
   ...callbacks
 }: {
   subscription: Subscription;
   catalog: CatalogEntry | undefined;
-  todayConsumption?: ConsumptionTotals | null;
   hideAccountEmails: boolean;
   itemClassName?: string;
 } & CardCallbacks) {
@@ -375,10 +347,6 @@ const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
   );
   // The card only needs "somewhere to jump"; the catalog it carries is the
   // argument this wrapper owns.
-  const onOpenGatewayRoutes = useMemo(
-    () => (onOpenRoutes ? () => onOpenRoutes(subscription.catalog_id) : undefined),
-    [onOpenRoutes, subscription.catalog_id],
-  );
 
   return (
     <Reorder.Item
@@ -391,10 +359,8 @@ const DraggableSubscriptionCard = memo(function DraggableSubscriptionCard({
       <SubscriptionCard
         subscription={subscription}
         catalog={catalog}
-        todayConsumption={todayConsumption}
         hideAccountEmails={hideAccountEmails}
         onDragHandlePointerDown={onDragHandlePointerDown}
-        onOpenGatewayRoutes={onOpenGatewayRoutes}
         {...callbacks}
       />
     </Reorder.Item>

@@ -8,10 +8,9 @@ import { monthlyEquivalentPrice } from "../lib/pricing";
 import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
 import { displayAccountIdentity } from "../lib/accountPrivacy";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
-import type { CatalogEntry, CliAccountState, ConsumptionTotals, CreditInfo, Subscription } from "../types";
+import type { CatalogEntry, CliAccountState, CreditInfo, Subscription } from "../types";
 import { priorityCardClass } from "./ResetCountdown";
 import {
-  TodayConsumptionLine,
   UsageCardBody,
   UsageCardFooter,
   UsageCardHeader,
@@ -26,10 +25,6 @@ import { AppInstancesOverlay } from "./instances/AppInstancesOverlay";
 interface SubscriptionCardProps {
   subscription: Subscription;
   catalog: CatalogEntry | undefined;
-  /** Today's gateway-metered consumption for this card's provider, from the
-   *  page-wide `by_catalog` summary. `undefined` (summary not loaded yet)
-   *  hides the line; `null` renders the "no records yet" sentence. */
-  todayConsumption?: ConsumptionTotals | null;
   /** `catalog_id -> which account that CLI is actually serving`. The "current"
    *  badge is drawn from this, not from the `is_active` pin, which is only a
    *  cache of it. Absent entries fall back to the pin. */
@@ -52,7 +47,6 @@ interface SubscriptionCardProps {
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
   /** When set, the card's today line becomes the cross-view entry: which
    *  agents route to this provider (Usage → Models triangle, slice 13). */
-  onOpenGatewayRoutes?: () => void;
 }
 
 /**
@@ -62,7 +56,6 @@ interface SubscriptionCardProps {
 export function SubscriptionCard({
   subscription: sub,
   catalog,
-  todayConsumption,
   cliAccounts,
   hideAccountEmails = false,
   onRefresh,
@@ -74,7 +67,6 @@ export function SubscriptionCard({
   onSwitchToCli,
   refreshDisabled = false,
   onDragHandlePointerDown,
-  onOpenGatewayRoutes,
 }: SubscriptionCardProps) {
   const reduceMotion = useReducedMotion();
   const [instancesOpen, setInstancesOpen] = useState(false);
@@ -135,12 +127,6 @@ export function SubscriptionCard({
 
       <div className={usageCardSlotClassName.body}>
         <UsageCardBody subscription={sub} brandColorHex={brandColorHex} density="comfortable" surface="grid" />
-        {/* One quiet today line closes the body; the quota meters above it
-         *  stay the card's hero (card rhythm rule). With traffic it doubles
-         *  as the cross-view entry into the agents this provider serves. */}
-        {todayConsumption !== undefined && (
-          <TodayConsumptionLine today={todayConsumption} onNavigate={onOpenGatewayRoutes} />
-        )}
       </div>
 
       <UsageCardFooter

@@ -261,92 +261,7 @@ describe("useMarketplace snapshot state", () => {
     expect(result.current.snapshots.search.error).toBeNull();
   });
 
-  // Keyword extraction is an LLM call, so an AI search is out for seconds while
-  // the user keeps editing the toolbar. Nothing starts a second AI search in
-  // that window, so the sequence counter still matches when it answers — only
-  // the query check can tell that "foo"'s chips, results and verdict no longer
-  // describe what is on screen.
-  it("ignores a late AI-search success that belongs to an abandoned query", async () => {
-    let releaseFoo = () => {};
-    const fooInFlight = new Promise<void>((resolve) => {
-      releaseFoo = resolve;
-    });
-
-    mockedInvoke.mockImplementation(async (command) => {
-      if (command === "ai_extract_search_keywords") {
-        await fooInFlight;
-        return ["foo", "planning"];
-      }
-      if (command === "ai_search_marketplace_local") {
-        return localFirst(
-          { skills: [SKILL], keyword_skill_map: { foo: [SKILL.name] } },
-          "remote_error",
-          "upstream 502",
-        );
-      }
-      return undefined;
-    });
-
-    const { result } = renderHook(() => useMarketplace(), { wrapper });
-
-    let pending!: Promise<void>;
-    act(() => {
-      pending = result.current.aiSearch("foo");
-    });
-    // The user types past the AI search while it is still extracting keywords.
-    act(() => {
-      result.current.notePendingSearchQuery("bar");
-    });
-
-    await act(async () => {
-      releaseFoo();
-      await pending;
-    });
-
-    expect(result.current.aiKeywords).toBeNull();
-    expect(result.current.results).toBeNull();
-    expect(result.current.snapshots.search.status).toBeNull();
-    expect(result.current.snapshots.search.error).toBeNull();
-    expect(result.current.snapshots.search.updatedAt).toBeNull();
-    // The spinner still belongs to this invocation, so it must stop regardless.
-    expect(result.current.aiSearching).toBe(false);
-  });
-
-  it("ignores a late AI-search failure that belongs to an abandoned query", async () => {
-    let releaseFoo = () => {};
-    const fooInFlight = new Promise<void>((resolve) => {
-      releaseFoo = resolve;
-    });
-
-    mockedInvoke.mockImplementation(async (command) => {
-      if (command === "ai_extract_search_keywords") {
-        await fooInFlight;
-        throw new Error("model provider unreachable");
-      }
-      return undefined;
-    });
-
-    const { result } = renderHook(() => useMarketplace(), { wrapper });
-
-    let pending!: Promise<void>;
-    act(() => {
-      pending = result.current.aiSearch("foo").catch(() => {});
-    });
-    act(() => {
-      result.current.notePendingSearchQuery("bar");
-    });
-
-    await act(async () => {
-      releaseFoo();
-      await pending;
-    });
-
-    expect(result.current.snapshots.search.error).toBeNull();
-    expect(result.current.snapshots.search.status).toBeNull();
-    expect(result.current.aiSearching).toBe(false);
-  });
-
-  it("clears the search verdict when the AI search is cleared", async () => {
+  it("clears the search verdict when the search is cleared", async () => {
     mockedInvoke.mockImplementation(async (command) => {
       if (command === "search_marketplace_local") return localFirst([SKILL], "remote_error", "upstream 502");
       return undefined;
@@ -359,7 +274,7 @@ describe("useMarketplace snapshot state", () => {
     expect(result.current.snapshots.search.error?.kind).toBe("remote_error");
 
     act(() => {
-      result.current.clearAiSearch();
+      result.current.clearSearch();
     });
     expect(result.current.snapshots.search.error).toBeNull();
     expect(result.current.snapshots.search.status).toBeNull();

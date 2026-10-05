@@ -1,30 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
 import fc from "fast-check";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { NavPage } from "../types";
 import { NavigationProvider, useAppMode, useNavigation } from "./useNavigation";
-
-// jsdom's localStorage stub is incomplete in this test runner — provide
-// a full mock so persistence-related tests can `.clear()` cleanly.
-const storage = new Map<string, string>();
-Object.defineProperty(globalThis, "localStorage", {
-  writable: true,
-  value: {
-    getItem: vi.fn((key: string) => storage.get(key) ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      storage.set(key, value);
-    }),
-    removeItem: vi.fn((key: string) => {
-      storage.delete(key);
-    }),
-    clear: vi.fn(() => storage.clear()),
-    key: vi.fn((index: number) => Array.from(storage.keys())[index] ?? null),
-    get length() {
-      return storage.size;
-    },
-  },
-});
 
 function wrapper({ children }: { children: ReactNode }) {
   return <NavigationProvider>{children}</NavigationProvider>;
@@ -33,25 +12,23 @@ function wrapper({ children }: { children: ReactNode }) {
 describe("useNavigation - AppMode support", () => {
   beforeEach(() => {
     window.location.hash = "";
-    localStorage.clear();
   });
 
   it("defaults to skills mode", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
     expect(result.current.appMode).toBe("skills");
     expect(result.current.activePage).toBe("my-skills");
-    expect(result.current.modelsActivePage).toBe("hub");
   });
 
-  it("switches to models mode and updates hash to single hub URL", () => {
+  it("switches to usage mode and updates hash to #usage", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
-      result.current.setAppMode("models");
+      result.current.setAppMode("usage");
     });
 
-    expect(result.current.appMode).toBe("models");
-    expect(window.location.hash).toBe("#models");
+    expect(result.current.appMode).toBe("usage");
+    expect(window.location.hash).toBe("#usage");
   });
 
   it("switches back to skills mode and restores skills hash", () => {
@@ -63,9 +40,9 @@ describe("useNavigation - AppMode support", () => {
     expect(window.location.hash).toBe("#projects");
 
     act(() => {
-      result.current.setAppMode("models");
+      result.current.setAppMode("usage");
     });
-    expect(window.location.hash).toBe("#models");
+    expect(window.location.hash).toBe("#usage");
 
     act(() => {
       result.current.setAppMode("skills");
@@ -74,72 +51,19 @@ describe("useNavigation - AppMode support", () => {
     expect(window.location.hash).toBe("#projects");
   });
 
-  it("focuses the Models hub on one agent from the Usage triangle", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-    act(() => result.current.focusModelsAgent("claude-code"));
-    expect(result.current.appMode).toBe("models");
-    expect(window.location.hash).toBe("#models");
-    expect(result.current.modelsFocusRequest).toEqual({ nonce: 1, kind: "agent", agentId: "claude-code" });
-    // A second jump bumps the nonce so the hub re-consumes the same agent.
-    act(() => result.current.focusModelsAgent("claude-code"));
-    expect(result.current.modelsFocusRequest?.nonce).toBe(2);
-    act(() => result.current.clearModelsFocusRequest());
-    expect(result.current.modelsFocusRequest).toBeNull();
-  });
-
-  it("asks the Models hub which agents route to one catalog", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-    act(() => result.current.focusModelsCatalog("deepseek"));
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsFocusRequest).toEqual({ nonce: 1, kind: "catalog", catalogId: "deepseek" });
-    act(() => result.current.clearModelsFocusRequest());
-    expect(result.current.modelsFocusRequest).toBeNull();
-  });
-
-  it("navigateModels always lands on the hub (legacy API compat)", () => {
+  it("handles hashchange into usage mode", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
-      result.current.navigateModels("hub");
-    });
-
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("hub");
-    expect(window.location.hash).toBe("#models");
-  });
-
-  it("initializes from models hash in URL", () => {
-    window.location.hash = "#models";
-
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("hub");
-  });
-
-  it("normalizes legacy `#models/<sub>` hash to the hub", () => {
-    window.location.hash = "#models/providers";
-
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("hub");
-  });
-
-  it("handles hashchange into models mode", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    act(() => {
-      window.location.hash = "#models";
+      window.location.hash = "#usage";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
 
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("hub");
+    expect(result.current.appMode).toBe("usage");
   });
 
-  it("handles hashchange from models to skills hash", () => {
-    window.location.hash = "#models";
+  it("handles hashchange from usage to skills hash", () => {
+    window.location.hash = "#usage";
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
@@ -155,9 +79,9 @@ describe("useNavigation - AppMode support", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
-      result.current.setAppMode("models");
+      result.current.setAppMode("usage");
     });
-    expect(result.current.appMode).toBe("models");
+    expect(result.current.appMode).toBe("usage");
 
     act(() => {
       result.current.navigate("settings");
@@ -170,7 +94,6 @@ describe("useNavigation - AppMode support", () => {
 describe("useAppMode convenience hook", () => {
   beforeEach(() => {
     window.location.hash = "";
-    localStorage.clear();
   });
 
   it("returns mode and derived booleans", () => {
@@ -178,80 +101,19 @@ describe("useAppMode convenience hook", () => {
 
     expect(result.current.mode).toBe("skills");
     expect(result.current.isSkillsMode).toBe(true);
-    expect(result.current.isModelsMode).toBe(false);
+    expect(result.current.isUsageMode).toBe(false);
   });
 
-  it("setMode switches to models", () => {
+  it("setMode switches to usage", () => {
     const { result } = renderHook(() => useAppMode(), { wrapper });
 
     act(() => {
-      result.current.setMode("models");
+      result.current.setMode("usage");
     });
 
-    expect(result.current.mode).toBe("models");
+    expect(result.current.mode).toBe("usage");
     expect(result.current.isSkillsMode).toBe(false);
-    expect(result.current.isModelsMode).toBe(true);
-  });
-});
-
-describe("useNavigation - last edited provider persistence", () => {
-  const STORAGE_KEY = "skillstar.lastEditedProviderId";
-
-  beforeEach(() => {
-    window.location.hash = "";
-    localStorage.clear();
-  });
-
-  it("starts with no selected provider when storage is empty", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-    expect(result.current.selectedProviderId).toBeNull();
-  });
-
-  it("rehydrates the last edited provider from localStorage on mount", () => {
-    localStorage.setItem(STORAGE_KEY, "provider-xyz");
-
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-    expect(result.current.selectedProviderId).toBe("provider-xyz");
-  });
-
-  it("persists the selected provider id to localStorage on change", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    act(() => {
-      result.current.setSelectedProviderId("provider-abc");
-    });
-
-    expect(result.current.selectedProviderId).toBe("provider-abc");
-    expect(localStorage.getItem(STORAGE_KEY)).toBe("provider-abc");
-  });
-
-  it("removes the persisted id when cleared with null", () => {
-    localStorage.setItem(STORAGE_KEY, "provider-old");
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-    expect(result.current.selectedProviderId).toBe("provider-old");
-
-    act(() => {
-      result.current.setSelectedProviderId(null);
-    });
-
-    expect(result.current.selectedProviderId).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-  });
-
-  it("clicking Models with a persisted provider reopens it (mode switch keeps selection)", () => {
-    localStorage.setItem(STORAGE_KEY, "provider-deepseek");
-
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-    expect(result.current.appMode).toBe("skills");
-    expect(result.current.selectedProviderId).toBe("provider-deepseek");
-
-    act(() => {
-      result.current.setAppMode("models");
-    });
-
-    expect(result.current.appMode).toBe("models");
-    // Selection survives the mode switch — providers page will auto-open it.
-    expect(result.current.selectedProviderId).toBe("provider-deepseek");
+    expect(result.current.isUsageMode).toBe(true);
   });
 });
 
@@ -268,10 +130,9 @@ describe("Property: Mode Switch Page Preservation (Round-Trip)", () => {
 
   beforeEach(() => {
     window.location.hash = "";
-    localStorage.clear();
   });
 
-  it("skills page is preserved after switching to models and back", () => {
+  it("skills page is preserved after switching to usage and back", () => {
     fc.assert(
       fc.property(skillsPages, (skillsPage) => {
         window.location.hash = "";
@@ -283,42 +144,15 @@ describe("Property: Mode Switch Page Preservation (Round-Trip)", () => {
         expect(result.current.activePage).toBe(skillsPage);
 
         act(() => {
-          result.current.setAppMode("models");
+          result.current.setAppMode("usage");
         });
-        expect(result.current.appMode).toBe("models");
-        expect(result.current.modelsActivePage).toBe("hub");
+        expect(result.current.appMode).toBe("usage");
 
         act(() => {
           result.current.setAppMode("skills");
         });
         expect(result.current.appMode).toBe("skills");
         expect(result.current.activePage).toBe(skillsPage);
-      }),
-      { numRuns: 50 },
-    );
-  });
-
-  it("models mode collapses to the hub page across round trips", () => {
-    fc.assert(
-      fc.property(skillsPages, (skillsPage) => {
-        window.location.hash = "";
-        const { result } = renderHook(() => useNavigation(), { wrapper });
-
-        act(() => {
-          result.current.setAppMode("models");
-        });
-        expect(result.current.modelsActivePage).toBe("hub");
-
-        act(() => {
-          result.current.navigate(skillsPage);
-        });
-        expect(result.current.appMode).toBe("skills");
-
-        act(() => {
-          result.current.setAppMode("models");
-        });
-        expect(result.current.appMode).toBe("models");
-        expect(result.current.modelsActivePage).toBe("hub");
       }),
       { numRuns: 50 },
     );
@@ -345,17 +179,6 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
 
   beforeEach(() => {
     window.location.hash = "";
-    localStorage.clear();
-  });
-
-  it("navigating to models always produces the single #models hash", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    act(() => {
-      result.current.navigateModels("hub");
-    });
-
-    expect(window.location.hash).toBe("#models");
   });
 
   it("navigating to any skills page produces correct hash matching PAGE_TO_HASH", () => {
@@ -374,16 +197,16 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
     );
   });
 
-  it("switching back to models mode reproduces the hub hash", () => {
+  it("switching back to usage mode reproduces the usage hash", () => {
     fc.assert(
       fc.property(skillsPages, (skillsPage) => {
         window.location.hash = "";
         const { result } = renderHook(() => useNavigation(), { wrapper });
 
         act(() => {
-          result.current.setAppMode("models");
+          result.current.setAppMode("usage");
         });
-        expect(window.location.hash).toBe("#models");
+        expect(window.location.hash).toBe("#usage");
 
         act(() => {
           result.current.navigate(skillsPage);
@@ -391,9 +214,9 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
         expect(window.location.hash).toBe(`#${PAGE_TO_HASH[skillsPage]}`);
 
         act(() => {
-          result.current.setAppMode("models");
+          result.current.setAppMode("usage");
         });
-        expect(window.location.hash).toBe("#models");
+        expect(window.location.hash).toBe("#usage");
       }),
       { numRuns: 50 },
     );

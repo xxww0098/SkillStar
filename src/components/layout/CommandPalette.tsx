@@ -9,7 +9,6 @@ import {
   Package,
   RefreshCw,
   Search,
-  Server,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -31,7 +30,6 @@ interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onNavigate: (page: NavPage) => void;
-  onEnterModelsMode?: () => void;
   onEnterUsageMode?: () => void;
   onImport?: () => void;
   onRefresh?: () => void;
@@ -41,7 +39,6 @@ export function CommandPalette({
   open,
   onClose,
   onNavigate,
-  onEnterModelsMode,
   onEnterUsageMode,
   onImport,
   onRefresh,
@@ -117,17 +114,6 @@ export function CommandPalette({
 
     const actionItems: CommandPaletteAction[] = [];
 
-    if (onEnterModelsMode) {
-      navActions.push({
-        id: "nav-models",
-        label: t("commandPalette.modelsWorkbench"),
-        icon: <Server className="w-4 h-4" />,
-        section: t("sidebar.models"),
-        onSelect: onEnterModelsMode,
-        keywords: ["providers", "models", "ai", "provider", "agent", "claude", "codex", "模型"],
-      });
-    }
-
     if (onImport) {
       actionItems.push({
         id: "action-import",
@@ -153,7 +139,7 @@ export function CommandPalette({
     }
 
     return [...navActions, ...actionItems];
-  }, [t, onNavigate, onEnterModelsMode, onEnterUsageMode, onImport, onRefresh]);
+  }, [t, onNavigate, onEnterUsageMode, onImport, onRefresh]);
 
   // Filter actions by query
   const filteredActions = useMemo(() => {

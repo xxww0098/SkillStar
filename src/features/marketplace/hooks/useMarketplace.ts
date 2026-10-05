@@ -1,14 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tauriInvoke } from "../../../lib/ipc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AiKeywordSearchResult,
-  LocalFirstResult,
-  MarketplaceResult,
-  OfficialPublisher,
-  Skill,
-  SnapshotStatus,
-} from "../../../types";
+import type { LocalFirstResult, MarketplaceResult, OfficialPublisher, Skill, SnapshotStatus } from "../../../types";
 import {
   deriveSnapshotState,
   EMPTY_SNAPSHOT_STATE,
@@ -17,8 +10,6 @@ import {
   type MarketplaceSnapshotState,
   toErrorDetail,
 } from "../lib/snapshotState";
-
-export type AiSearchPhase = "extracting" | "searching" | null;
 
 const MARKETPLACE_STALE_TIME_MS = 5 * 60 * 1000;
 const MARKETPLACE_QUERY_ROOT = ["marketplace"] as const;
@@ -92,15 +83,8 @@ export function useMarketplace() {
   const [requestedLeaderboardCategory, setRequestedLeaderboardCategory] = useState<LeaderboardCategory>("all");
   const [leaderboardEnabled, setLeaderboardEnabled] = useState(false);
   const [publishersEnabled, setPublishersEnabled] = useState(false);
-  const [aiKeywords, setAiKeywords] = useState<string[] | null>(null);
-  const [aiSearching, setAiSearching] = useState(false);
-  const [aiPhase, setAiPhase] = useState<AiSearchPhase>(null);
-  const [aiAllSkills, setAiAllSkills] = useState<Skill[]>([]);
-  const [aiKeywordSkillMap, setAiKeywordSkillMap] = useState<Record<string, string[]>>({});
-  const [aiActiveKeywords, setAiActiveKeywords] = useState<Set<string>>(new Set());
   const staleRefreshRef = useRef<Map<string, StaleRefreshEntry>>(new Map());
   const inFlightRefreshesRef = useRef(0);
-  const aiSearchSeqRef = useRef(0);
   /**
    * Normalized query the current search snapshot meta describes, or `null` when
    * no search has been executed since the last reset. Search state is per-query,
@@ -117,7 +101,7 @@ export function useMarketplace() {
    * types the next character. Without this, the slow response for the abandoned
    * query lands afterwards and unconditionally parks its results, freshness
    * label and error banner on the query now on screen — the exact mirror of the
-   * `aiSearchSeqRef` guard, at query granularity instead of call granularity.
+   * per-call sequence guard, at query granularity instead.
    */
   const activeSearchQueryRef = useRef<string | null>(null);
   const requestedLeaderboardCategoryRef = useRef(requestedLeaderboardCategory);
@@ -404,27 +388,6 @@ export function useMarketplace() {
     },
   });
 
-  const aiSearchMutation = useMutation({
-    mutationFn: async ({ query, limit }: { query: string; limit: number }) => {
-      const keywords = await tauriInvoke("ai_extract_search_keywords", {
-        query,
-      });
-
-      const keywordKey = [...keywords].sort().join("\u001f");
-      const result = await queryClient.fetchQuery({
-        queryKey: ["marketplace", "ai-search", keywordKey, limit],
-        queryFn: () =>
-          tauriInvoke("ai_search_marketplace_local", {
-            keywords,
-            limit,
-          }),
-        staleTime: MARKETPLACE_STALE_TIME_MS,
-      });
-
-      return { keywords, result };
-    },
-  });
-
   const loading = useMemo(
     () =>
       searchMutation.isPending ||
@@ -457,84 +420,10 @@ export function useMarketplace() {
     [searchOnlineMutation],
   );
 
-  const aiSearch = useCallback(
-    async (query: string, limit = 50) => {
-      if (!query.trim()) return;
-
-      // Stale-response guard: only the most recent invocation may touch state
-      // (overlapping searches would otherwise let the slower, older response
-      // overwrite the newer results and flip aiSearching off prematurely).
-      const seq = ++aiSearchSeqRef.current;
-      // The search scope now targets this query, so any plain search still in
-      // flight for the previous one is stale.
-      activeSearchQueryRef.current = normalizeSearchKeyQuery(query);
-
-      setAiSearching(true);
-      setScopeError("search", null);
-      setAiKeywords(null);
-      setAiAllSkills([]);
-      setAiKeywordSkillMap({});
-      setAiActiveKeywords(new Set());
-      setAiPhase("extracting");
-
-      try {
-        const { keywords, result } = await aiSearchMutation.mutateAsync({
-          query,
-          limit,
-        });
-        if (aiSearchSeqRef.current !== seq) return;
-        // Keyword extraction is an LLM round-trip, so the toolbar text routinely
-        // moves on while this call is out. The sequence check alone does not see
-        // that (typing does not start a new AI search), so the query the scope
-        // now targets is what decides whether this answer still belongs here.
-        if (!isActiveSearchQuery(query)) return;
-        setAiKeywords(keywords);
-        setAiPhase("searching");
-        setAiAllSkills(result.data.skills);
-        setAiKeywordSkillMap(result.data.keyword_skill_map);
-        setAiActiveKeywords(new Set(keywords));
-        setResults(toMarketplaceResult(result.data.skills));
-        applySearchSnapshotMeta(query, result);
-      } catch (e) {
-        if (aiSearchSeqRef.current === seq && isActiveSearchQuery(query)) {
-          executedSearchQueryRef.current = normalizeSearchKeyQuery(query);
-          reportScopeError("search", "search_failed", e);
-        }
-      } finally {
-        if (aiSearchSeqRef.current === seq) {
-          setAiSearching(false);
-          setAiPhase(null);
-        }
-      }
-    },
-    [aiSearchMutation, applySearchSnapshotMeta, isActiveSearchQuery, reportScopeError, setScopeError],
-  );
-
-  const toggleAiKeyword = useCallback((keyword: string) => {
-    setAiActiveKeywords((prev) => {
-      const next = new Set(prev);
-      if (next.has(keyword)) {
-        next.delete(keyword);
-      } else {
-        next.add(keyword);
-      }
-      return next;
-    });
-  }, []);
-
-  const clearAiSearch = useCallback(() => {
-    // Invalidate any in-flight aiSearch so its late response can't resurrect
-    // the cleared state.
-    aiSearchSeqRef.current += 1;
-    setAiSearching(false);
-    setAiKeywords(null);
-    setAiPhase(null);
-    setAiAllSkills([]);
-    setAiKeywordSkillMap({});
-    setAiActiveKeywords(new Set());
+  const clearSearch = useCallback(() => {
     // The search scope is being abandoned, so its freshness verdict and error
     // banner go with it — otherwise they survive into the next query. Dropping
-    // the target query also disowns every plain search still in flight.
+    // the target query also disowns every search still in flight.
     activeSearchQueryRef.current = null;
     clearSearchSnapshot();
   }, [clearSearchSnapshot]);
@@ -548,9 +437,7 @@ export function useMarketplace() {
    * This also re-targets the scope, so a request still in flight for the
    * previous query cannot re-park its verdict, results or keywords here when it
    * answers — every response path checks `isActiveSearchQuery` first. It does
-   * not cancel that request: an AI search keeps its spinner until its own
-   * response lands (only `clearAiSearch` or a newer AI search retires that),
-   * and it stays a no-op on the rest of the state.
+   * not cancel that request, and it stays a no-op on the rest of the state.
    */
   const notePendingSearchQuery = useCallback(
     (query: string) => {
@@ -641,7 +528,6 @@ export function useMarketplace() {
             }
           : prev,
       );
-      setAiAllSkills((prev) => apply(prev));
 
       queryClient.setQueriesData<LocalFirstResult<Skill[]>>(
         { queryKey: [...MARKETPLACE_QUERY_ROOT, "leaderboard"] },
@@ -664,20 +550,6 @@ export function useMarketplace() {
               }
             : prev,
       );
-
-      queryClient.setQueriesData<LocalFirstResult<AiKeywordSearchResult>>(
-        { queryKey: [...MARKETPLACE_QUERY_ROOT, "ai-search"] },
-        (prev) =>
-          prev
-            ? {
-                ...prev,
-                data: {
-                  ...prev.data,
-                  skills: apply(prev.data.skills),
-                },
-              }
-            : prev,
-      );
     },
     [queryClient],
   );
@@ -690,17 +562,9 @@ export function useMarketplace() {
     refreshing: refreshing || searchOnlineMutation.isPending,
     /** Per-scope snapshot status/updatedAt/error. The page picks the scope it renders. */
     snapshots,
-    aiKeywords,
-    aiSearching,
-    aiPhase,
-    aiAllSkills,
-    aiKeywordSkillMap,
-    aiActiveKeywords,
     search,
     searchOnline,
-    aiSearch,
-    toggleAiKeyword,
-    clearAiSearch,
+    clearSearch,
     notePendingSearchQuery,
     fetchLeaderboard,
     fetchOfficialPublishers,

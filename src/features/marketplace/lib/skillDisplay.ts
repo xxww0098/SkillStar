@@ -1,7 +1,7 @@
 import type { Skill, SortOption } from "../../../types";
 
 export interface DisplaySkillsInput {
-  /** Search/AI-search results, when a query is active. */
+  /** Search results, when a query is active. */
   results: { skills: Skill[] } | null;
   /** Leaderboard skills for the active (non-official) tab. */
   leaderboard: Skill[];
@@ -11,18 +11,12 @@ export interface DisplaySkillsInput {
   searchQuery: string;
   /** Currently active tab id; "official" never falls back to the leaderboard. */
   activeTab: string;
-  /** AI-extracted keywords, or null when AI search is not active. */
-  aiKeywords: string[] | null;
-  /** Which AI keywords are toggled on. */
-  aiActiveKeywords: Set<string>;
-  /** Maps each AI keyword to the skill names it matched. */
-  aiKeywordSkillMap: Record<string, string[]>;
 }
 
 /**
  * Computes the skill list to render in the marketplace grid: resolves
- * search-vs-leaderboard precedence, applies the AI-keyword toggle filter,
- * sorts, and recomputes rank numbers for stars-desc display.
+ * search-vs-leaderboard precedence, sorts, and recomputes rank numbers for
+ * stars-desc display.
  *
  * Extracted verbatim from `Marketplace.tsx`'s `displaySkills` useMemo — see
  * that file's git history for the original inline version.
@@ -33,35 +27,15 @@ export function computeDisplaySkills({
   sortBy,
   searchQuery,
   activeTab,
-  aiKeywords,
-  aiActiveKeywords,
-  aiKeywordSkillMap,
 }: DisplaySkillsInput): Skill[] {
   let skills: Skill[] = [];
-  const isAiMode = Boolean(aiKeywords && results);
-  const isSearchMode = Boolean(searchQuery.trim() && results) || isAiMode;
+  const isSearchMode = Boolean(searchQuery.trim() && results);
 
   // Search results override
   if (isSearchMode && results) {
     skills = [...results.skills];
   } else if (activeTab !== "official") {
     skills = [...leaderboard];
-  }
-
-  // AI keyword toggle filter: only show skills matching active keywords
-  if (isAiMode) {
-    if (aiActiveKeywords.size === 0) {
-      // Allow deselecting all AI keywords; show empty result set.
-      skills = [];
-    } else if (Object.keys(aiKeywordSkillMap).length > 0) {
-      // Build set of skill names matching any active keyword
-      const allowedNames = new Set<string>();
-      for (const kw of aiActiveKeywords) {
-        const names = aiKeywordSkillMap[kw];
-        if (names) names.forEach((n) => allowedNames.add(n));
-      }
-      skills = skills.filter((s) => allowedNames.has(s.name));
-    }
   }
 
   // Sort

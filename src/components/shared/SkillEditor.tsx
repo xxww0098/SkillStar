@@ -1,25 +1,11 @@
-import {
-  Eye,
-  FileText,
-  Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  RotateCcw,
-  Save,
-  Sparkles,
-  Square,
-  X,
-} from "lucide-react";
+import { Eye, FileText, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAiStream } from "../../hooks/useAiStream";
 import { normalizeSkillMarkdownForPreview, parseFrontmatterEntries, splitFrontmatter } from "../../lib/frontmatter";
-import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
 import type { SkillContent } from "../../types";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
-import { AiErrorBanner } from "./AiBanners";
 
 interface SkillEditorProps {
   skillName: string;
@@ -40,39 +26,9 @@ export function SkillEditor({ skillName, onClose, onCancel, onRead, onSave }: Sk
   const [hasChanges, setHasChanges] = useState(false);
   const [isLeftPaneOpen, setIsLeftPaneOpen] = useState(false);
 
-  // AI summary via shared hook
-  const summaryStream = useAiStream({
-    command: "ai_summarize_skill_stream",
-    eventChannel: "ai://summarize-stream",
-  });
-
-  const summaryContent = summaryStream.content;
-  const summaryVisible = summaryStream.visible;
-  const summarizing = summaryStream.loading;
-  const summaryHasDelta = summaryStream.hasDelta;
-  const summaryAiConfigured = summaryStream.aiConfigured;
-  const aiError = summaryStream.error;
-  const localizedAiError = formatAiErrorMessage(aiError, t);
-
   const previewSource = normalizeSkillMarkdownForPreview(editedContent);
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
-
-  const handleSummarize = async () => {
-    if (!summaryAiConfigured || loadError) return;
-
-    if (summarizing) {
-      summaryStream.cancel();
-      return;
-    }
-
-    clearAiError();
-    await summaryStream.execute(editedContent);
-  };
-
-  const clearAiError = () => {
-    summaryStream.setError(null);
-  };
 
   useEffect(() => {
     const loadContent = async () => {
@@ -113,7 +69,6 @@ export function SkillEditor({ skillName, onClose, onCancel, onRead, onSave }: Sk
   const handleContentChange = (value: string) => {
     setEditedContent(value);
     setHasChanges(value !== content?.content);
-    if (summaryVisible) summaryStream.setVisible(false);
   };
 
   if (loading) {
@@ -175,57 +130,7 @@ export function SkillEditor({ skillName, onClose, onCancel, onRead, onSave }: Sk
               <Eye className="w-3.5 h-3.5 text-muted-foreground" />
               <span className="text-xs font-medium text-muted-foreground">{t("skillEditor.preview")}</span>
             </div>
-
-            {/* AI Action Buttons */}
-            <div className="ml-auto flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  if (loadError) return;
-                  if (!summaryAiConfigured) {
-                    navigateToAiSettings();
-                    return;
-                  }
-                  void handleSummarize();
-                }}
-                disabled={!!loadError}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
-                  summarizing
-                    ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
-                    : summaryContent
-                      ? "bg-primary/15 text-primary"
-                      : summaryAiConfigured && !loadError
-                        ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                        : loadError
-                          ? "text-muted-foreground/50 cursor-not-allowed"
-                          : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
-                }`}
-                title={
-                  loadError
-                    ? t("skillEditor.loadFailed")
-                    : summaryAiConfigured
-                      ? summarizing
-                        ? "Click to cancel"
-                        : summaryContent && summaryVisible
-                          ? "Hide summary"
-                          : "AI quick summary"
-                      : "AI not configured (optional). Editing is still available."
-                }
-              >
-                {summarizing ? <Square className="w-3 h-3 fill-current" /> : <Sparkles className="w-3 h-3" />}
-                {summarizing
-                  ? t("common.cancel")
-                  : summaryContent
-                    ? summaryVisible
-                      ? t("skillEditor.hideSummary")
-                      : t("skillEditor.summary")
-                    : t("skillEditor.summary")}
-              </button>
-            </div>
           </div>
-
-          {/* AI Error Banner */}
-          <AiErrorBanner error={localizedAiError} onDismiss={clearAiError} />
 
           {loadError && (
             <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20">
@@ -235,31 +140,6 @@ export function SkillEditor({ skillName, onClose, onCancel, onRead, onSave }: Sk
           )}
 
           <div className="markdown-content flex-1 p-4 overflow-y-auto overscroll-y-contain prose prose-sm dark:prose-invert max-w-none">
-            {/* AI Summary Card */}
-            {summaryVisible && summaryContent !== null && (
-              <div className="not-prose mb-4 rounded-lg border border-primary/20 bg-primary/5 p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-medium text-primary">{t("skillEditor.aiSummary")}</span>
-                  {summarizing && summaryHasDelta && (
-                    <span className="text-micro text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded">
-                      {t("skillEditor.streamingPreview")}
-                    </span>
-                  )}
-                </div>
-                {summaryContent ? (
-                  <Markdown streaming={summarizing} className="text-sm">
-                    {summaryContent}
-                  </Markdown>
-                ) : summarizing ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>{t("skillEditor.summarizing")}</span>
-                  </div>
-                ) : null}
-              </div>
-            )}
-
             {previewFrontmatterEntries.length > 0 && (
               <div className="not-prose mb-4 overflow-hidden rounded-lg border border-border bg-card/60">
                 <table className="w-full border-collapse text-sm">

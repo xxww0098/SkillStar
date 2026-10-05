@@ -20,19 +20,9 @@ interface UsagePanelProps {
   filter: CatalogFilter;
   usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
   clearUsageCreateRequest: () => void;
-  /** Cross-view navigation (Usage → Models triangle): one agent's model routes. */
-  onFocusModelsAgent: (agentId: string) => void;
-  /** Cross-view navigation (Usage → Models triangle): agents routing to a catalog. */
-  onFocusModelsCatalog: (catalogId: string) => void;
 }
 
-export function UsagePanel({
-  filter,
-  usageCreateRequest,
-  clearUsageCreateRequest,
-  onFocusModelsAgent,
-  onFocusModelsCatalog,
-}: UsagePanelProps) {
+export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest }: UsagePanelProps) {
   const { t } = useTranslation();
   const data = useUsageDataContext();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -113,15 +103,12 @@ export function UsagePanel({
         allSubscriptions={data.subscriptions}
         catalog={data.catalog}
         filter={filter}
-        todayByCatalog={data.todayByCatalog}
         onReorder={(ids) => settled(data.reorder(ids))}
       />
       <UsageAlertBanner alerts={data.alerts} onDismiss={(id) => settled(data.dismissAlert(id))} />
       {/* Session chips: the today row's per-session companion (slice 13's
        *  card → session → agent entry). Hidden until the read lands. */}
-      {!data.loading && !data.error ? (
-        <TodaySessions today={data.todayConsumption} onFocusAgent={onFocusModelsAgent} />
-      ) : null}
+      {!data.loading && !data.error ? <TodaySessions today={data.todayConsumption} /> : null}
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {data.loading ? (
           <UsageGridSkeleton />
@@ -134,11 +121,9 @@ export function UsagePanel({
             subscriptions={filtered}
             allSubscriptions={data.subscriptions}
             catalog={data.catalog}
-            todayByCatalog={data.todayByCatalog}
             cliAccounts={data.cliAccounts}
             hideAccountEmails={hideAccountEmails}
             filter={filter}
-            onOpenRoutes={onFocusModelsCatalog}
             onReorder={(ids) => settled(data.reorder(ids))}
             onBrowseProviders={() => toast.info(t("usage.pickProviderFromSidebar"))}
             onRefresh={data.refreshOneWithUi}

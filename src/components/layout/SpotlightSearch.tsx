@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Command, Loader2, Search, Sparkles, X } from "lucide-react";
+import { Command, Search, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -22,8 +22,6 @@ export interface SpotlightSearchProps {
   onSelect: (id: string) => void;
   placeholder?: string;
   /** Optional AI search action shown next to the input (e.g. Marketplace). */
-  onAiSearch?: () => void;
-  aiSearching?: boolean;
   /** Max rows shown (default 40). */
   maxResults?: number;
 }
@@ -94,8 +92,6 @@ export function SpotlightSearch({
   items,
   onSelect,
   placeholder,
-  onAiSearch,
-  aiSearching,
   maxResults = 40,
 }: SpotlightSearchProps) {
   const { t } = useTranslation();
@@ -252,29 +248,6 @@ export function SpotlightSearch({
                     aria-label={t("common.clear", { defaultValue: "Clear" })}
                   >
                     <X className="h-3.5 w-3.5" />
-                  </button>
-                ) : null}
-                {onAiSearch ? (
-                  <button
-                    type="button"
-                    onClick={onAiSearch}
-                    disabled={aiSearching || !query.trim()}
-                    className={cn(
-                      "flex h-7 items-center gap-1 rounded-lg border px-2.5 text-[11px] font-semibold cursor-pointer shrink-0 focus-ring",
-                      aiSearching
-                        ? "border-ai-border bg-ai-bg-hover text-ai-text-hover animate-pulse"
-                        : query.trim()
-                          ? "border-ai-border bg-ai-bg-hover/50 text-ai-text hover:bg-ai-bg-hover hover:text-ai-text-hover"
-                          : "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60",
-                    )}
-                    title={t("marketplace.aiSearch", { defaultValue: "AI Search" })}
-                  >
-                    {aiSearching ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
-                    )}
-                    <span className="hidden sm:inline">{t("marketplace.aiSearch", { defaultValue: "AI" })}</span>
                   </button>
                 ) : null}
                 <kbd className="hidden shrink-0 items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[10px] font-medium text-foreground/70 sm:inline-flex">

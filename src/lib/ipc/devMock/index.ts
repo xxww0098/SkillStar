@@ -20,10 +20,8 @@
  */
 
 import { APP_SHELL_HANDLERS } from "./appShell";
-import { DECISION_HANDLERS } from "./decision";
 import { GITHUB_HANDLERS } from "./github";
 import { MARKETPLACE_HANDLERS } from "./marketplace";
-import { MODELS_HANDLERS } from "./models";
 import { SHARED_CHANNEL_HANDLERS } from "./sharedChannels";
 import { SETTINGS_HANDLERS } from "./settings";
 import { mergeHandlerFragments } from "./shared";
@@ -33,10 +31,8 @@ import { USAGE_HANDLERS } from "./usage";
 
 const HANDLERS = mergeHandlerFragments([
   APP_SHELL_HANDLERS,
-  DECISION_HANDLERS,
   SKILLS_HANDLERS,
   MARKETPLACE_HANDLERS,
-  MODELS_HANDLERS,
   SETTINGS_HANDLERS,
   GITHUB_HANDLERS,
   USAGE_HANDLERS,

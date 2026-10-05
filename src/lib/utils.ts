@@ -122,7 +122,7 @@ export function formatInstalls(count: number): string {
   return count.toLocaleString();
 }
 
-export type SettingsFocusTarget = "ai-provider" | "storage";
+export type SettingsFocusTarget = "storage";
 
 /** Event that opens the sidebar's GitHub account panel. */
 export const GITHUB_ACCOUNT_MENU_EVENT = "skillstar:open-github-account";
@@ -138,45 +138,9 @@ export function navigateToSettingsSection(target: SettingsFocusTarget) {
   window.dispatchEvent(new CustomEvent("skillstar:settings-focus", { detail: { target } }));
 }
 
-/** Navigate to AI settings page via custom event */
-export function navigateToAiSettings() {
-  navigateToSettingsSection("ai-provider");
-}
-
 /** Open the sidebar GitHub account panel used by shared-channel sign-in. */
 export function openGithubAccountMenu() {
   window.dispatchEvent(new CustomEvent(GITHUB_ACCOUNT_MENU_EVENT));
-}
-
-type Translator = (key: string, options?: Record<string, unknown>) => string;
-
-export function formatAiErrorMessage(error: string | null | undefined, t: Translator): string | null {
-  if (!error) return null;
-  const msg = String(error).trim();
-  const lower = msg.toLowerCase();
-
-  if (
-    lower.includes("ai provider is disabled") ||
-    lower.includes("ai provider is not configured") ||
-    lower.includes("api key is empty")
-  ) {
-    return t("skillEditor.aiNotConfigured", {
-      defaultValue: "AI is not configured. Please configure it in Settings.",
-    });
-  }
-
-  if (
-    lower.includes("failed to send request") ||
-    lower.includes("timed out") ||
-    lower.includes("connection") ||
-    lower.includes("dns")
-  ) {
-    return t("detailPanel.networkError", {
-      defaultValue: "Network request failed. Please check your network or proxy settings.",
-    });
-  }
-
-  return msg;
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
