@@ -1,8 +1,0 @@
-{
-  "content_at": null,
-  "swaps": 0,
-  "lead": "event: ping\ndata: {\"type\":\"ping\"}\n\n",
-  "hold_ms": 15000,
-  "hold_bytes": 1048576,
-  "error_after_release": "event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"Overloaded\"}}\n\n"
-}

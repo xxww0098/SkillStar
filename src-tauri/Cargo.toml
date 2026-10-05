@@ -46,7 +46,6 @@ tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
 skillstar-marketplace = { path = "../crates/skillstar-marketplace" }
 url = { workspace = true }
 which = { workspace = true }
-skillstar-models = { path = "../crates/skillstar-models" }
 skillstar-skills = { path = "../crates/skillstar-skills" }
 tauri-plugin-deep-link = "2"
 skillstar-core = { path = "../crates/skillstar-core" }
@@ -55,7 +54,6 @@ skillstar-usage = { path = "../crates/skillstar-usage" }
 skillstar-sync = { path = "../crates/skillstar-sync" }
 skillstar-git = { path = "../crates/skillstar-git" }
 skillstar-channels = { path = "../crates/skillstar-channels" }
-skillstar-decision = { version = "0.0.0", path = "../crates/skillstar-decision" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

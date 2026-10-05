@@ -28,7 +28,6 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 skillstar-core = { path = "../skillstar-core" }
 skillstar-marketplace = { path = "../skillstar-marketplace" }
-skillstar-models = { path = "../skillstar-models" }
 skillstar-skills = { path = "../skillstar-skills" }
 skillstar-git = { path = "../skillstar-git" }
 skillstar-channels = { path = "../skillstar-channels" }
@@ -39,14 +38,9 @@ uuid.workspace = true
 ts-rs = { workspace = true, features = ["serde-compat"] }
 thiserror.workspace = true
 base64.workspace = true
-skillstar-decision = { version = "0.0.0", path = "../skillstar-decision" }
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-async-rw"] }
 tracing-subscriber.workspace = true
 schemars = { workspace = true }
-ort = { workspace = true, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "api-27", "tls-rustls"] }
-ndarray = { workspace = true }
-tokenizers = { workspace = true, features = ["fancy-regex"] }
-skillstar-gateway = { version = "0.0.0", path = "../skillstar-gateway" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

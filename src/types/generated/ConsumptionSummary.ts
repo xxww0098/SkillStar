@@ -5,10 +5,7 @@ import type { ConsumptionSeriesPoint } from "./ConsumptionSeriesPoint";
 import type { ConsumptionTotals } from "./ConsumptionTotals";
 
 /**
- * The read-time-priced summary of one period over the merged consumption
- * view (gateway ledger + session files, deduplicated). `by_catalog` backs
- * the per-provider "today" rows: only gateway-attributed rows carry a
- * catalog, so those groups read as the「经网关」scope, while `totals`
- * counts bypass traffic too (「全部」scope).
+ * The read-time-priced summary of one period over the consumption view
+ * (session files).
  */
-export type ConsumptionSummary = { period: ConsumptionPeriod, totals: ConsumptionTotals, series: Array<ConsumptionSeriesPoint>, by_agent: Array<ConsumptionGroup>, by_model: Array<ConsumptionGroup>, by_account: Array<ConsumptionGroup>, by_session: Array<ConsumptionGroup>, by_catalog: Array<ConsumptionGroup>, };
+export type ConsumptionSummary = { period: ConsumptionPeriod, totals: ConsumptionTotals, series: Array<ConsumptionSeriesPoint>, by_agent: Array<ConsumptionGroup>, by_model: Array<ConsumptionGroup>, by_session: Array<ConsumptionGroup>, };

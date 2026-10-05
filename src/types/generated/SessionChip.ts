@@ -4,8 +4,7 @@ import type { ConsumptionTokens } from "./ConsumptionTokens";
 /**
  * One session's today line: the entry from the Usage page into the agent
  * that ran it. `cost_usd` is the read-time estimate (`None` when no call
- * of the session priced); `via_gateway` is `true` when any of its calls
- * went through the gateway (full attribution).
+ * of the session priced).
  */
 export type SessionChip = { agent: string, session: string, 
 /**
@@ -16,4 +15,4 @@ title: string | null,
 /**
  * Unix milliseconds of the session's newest call today.
  */
-last_active: number, tokens: ConsumptionTokens, cost_usd: number | null, via_gateway: boolean, };
+last_active: number, tokens: ConsumptionTokens, cost_usd: number | null, };

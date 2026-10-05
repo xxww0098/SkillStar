@@ -23,7 +23,7 @@ use skillstar_skills::projects::{ProjectDeployMode, SkillDiskKind};
 use super::apply::{self, ApplyOutcome, Receipt};
 use super::approval;
 use super::inspect::{self, LoadHint, RuntimeVisibility};
-use super::ort_cpu::active_reranker;
+use super::ranker::PassthroughReranker;
 use super::plan::{self, DeploymentPlan, PlanAction};
 use super::recommend::{self, RecommendRequest, Selection};
 
@@ -226,7 +226,7 @@ fn run_recommend(args: RecommendArgs) -> CallToolResult {
         }),
     };
     let recommendation =
-        match recommend::recommend_project_skills(request, &active_reranker(), Utc::now()) {
+        match recommend::recommend_project_skills(request, &PassthroughReranker, Utc::now()) {
             Ok(recommendation) => recommendation,
             Err(err) => return failed(err),
         };

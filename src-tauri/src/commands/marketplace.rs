@@ -1,11 +1,9 @@
-use super::ai::ensure_ai_config;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::snapshot;
 use skillstar_marketplace::{
-    AiKeywordSearchResult, LocalFirstResult, MarketplaceSkillDetails, OfficialPublisher,
-    PublisherRepo, Skill, SyncStateEntry,
+    LocalFirstResult, MarketplaceSkillDetails, OfficialPublisher, PublisherRepo, Skill,
+    SyncStateEntry,
 };
-use skillstar_models::ai_provider;
 use std::collections::HashMap;
 use tracing::{debug, info};
 
@@ -21,22 +19,6 @@ pub async fn resolve_skill_sources(
         .map_err(|e| AppError::Other(e.to_string()))?;
     info!(target: "marketplace", resolved = resolved.len(), total = total, "resolve_skill_sources done");
     Ok(resolved)
-}
-
-#[tauri::command]
-pub async fn ai_extract_search_keywords(query: String) -> Result<Vec<String>, AppError> {
-    debug!(target: "marketplace", query = %query, "ai_extract_search_keywords called");
-    let resolved = ensure_ai_config().await?;
-    let keywords = ai_provider::extract_search_keywords(&resolved, &query)
-        .await
-        .map_err(|e| AppError::Other(format!("AI keyword extraction failed: {}", e)))?;
-    info!(
-        target: "marketplace",
-        count = keywords.len(),
-        keywords = ?keywords,
-        "ai_extract_search_keywords success"
-    );
-    Ok(keywords)
 }
 
 #[tauri::command]
@@ -96,16 +78,6 @@ pub async fn get_skill_detail_local(
     name: String,
 ) -> Result<LocalFirstResult<MarketplaceSkillDetails>, AppError> {
     snapshot::get_skill_detail_local(&source, &name)
-        .await
-        .map_err(|e| AppError::Other(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn ai_search_marketplace_local(
-    keywords: Vec<String>,
-    limit: Option<u32>,
-) -> Result<LocalFirstResult<AiKeywordSearchResult>, AppError> {
-    snapshot::ai_search_local(&keywords, limit)
         .await
         .map_err(|e| AppError::Other(e.to_string()))
 }

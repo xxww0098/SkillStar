@@ -754,6 +754,15 @@
 - 后果：获得——与 `npx skills` 目录与锁互通、约一万行自研复杂度删除、跨源同名冲突语义变成 vercel 的「覆盖安装」、更新行为可预期。承担——本地修改会被更新覆盖（与 npx skills 一致）；无持久缓存后每次安装/更新都要网络获取；旧安装需要用户重装一次；ghost 提醒与「上游已移除/更名」迁移流程移除。
 - 证据：`crates/skillstar-skills/src/{skill_lock,fetch,installer,update}.rs`、`docs/features/skills/README.md`。
 
+## D-082：移除模型域，收敛到 Skills 安装管理 + Usage 展示 + 多账号切换
+
+- 日期：2026-10-05
+- 状态：accepted
+- 背景：SkillStar 曾同时承载技能管理与模型接入（Provider store、本机模型网关、Agent 配置写入、应用内 AI、本地决策模型），模型域累计约五万行且与技能域几乎无共享。用户决策：产品重新定域为「技能安装管理 + 用量展示 + 多登录账号切换」，不再配置模型、接入模型。
+- 决策：整体删除 `skillstar-models`、`skillstar-gateway`、`skillstar-decision` 三个 crate 及其命令组（`models_commands`、`ai`、`decision`）、`skillstar gateway` / `skillstar decide` CLI、`claude-mcp-helper` 入口、桌面启动时的网关监听、消费汇总的网关账本合并与 401 自愈、路由对比与应用内 AI（skill 摘要、marketplace AI 关键词搜索、MCP 神经重排器）。计价下沉为 `skillstar-usage::pricing`（只读 `model_gateway.json` 的 `prices` 覆盖与 models.dev 缓存，按模型 id 反查），消费汇总改为会话文件单源；`skillstar-core::providers`（identity/balance）与 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱保留。磁盘上的模型域用户数据不主动清理。
+- 后果：获得——代码面收敛约五万行，产品语义单一，账号切换成为一等能力。承担——经网关流量的归因/计价维度消失（账本数据留存磁盘但不再展示）；会话行只能按模型 id 估值（无法区分中转）；价格表冻结在最后一次 models.dev 同步，不再刷新；应用内 AI 摘要与 AI 搜索不再提供；决策模型推荐退化为透传排序。
+- 证据：`crates/skillstar-usage/src/pricing.rs`、`crates/skillstar-app/src/usage/consumption/`、`docs/boundaries.md`、`docs/architecture.md`。
+
 ## 新增记录格式
 
 

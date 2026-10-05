@@ -1,1 +1,0 @@
-{"id":"c1","model":"m1","choices":[{"message":{"role":"assistant","content":"Hi there","reasoning_content":"hmm","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}

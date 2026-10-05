@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -8,7 +8,6 @@ use tracing::{debug, warn};
 use ts_rs::TS;
 
 use super::*;
-use crate::Skill;
 
 // ── Skill Detail Page Fetching ─────────────────────────────────────────
 
@@ -282,17 +281,6 @@ fn extract_security_audits(html: &str) -> Vec<SecurityAudit> {
     audits
 }
 
-// ── AI Marketplace Search ───────────────────────────────────────────
-
-/// Result of AI-powered keyword search, including per-keyword attribution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiKeywordSearchResult {
-    /// Merged, deduplicated skills sorted by installs.
-    pub skills: Vec<Skill>,
-    pub total_count: u32,
-    /// Maps each keyword → list of skill names it found.
-    pub keyword_skill_map: HashMap<String, Vec<String>>,
-}
 
 // ── Tests ───────────────────────────────────────────────────────────
 //

@@ -1,9 +1,0 @@
-{
-  "providers": [
-    {"id": "keep", "routing": "order", "note": "stay"}
-  ],
-  "groups": [
-    {"id": "inner", "members": ["b/m", "c/m"], "routing": "rotate"},
-    {"id": "outer", "members": ["a/m", "group/inner", "c/m"], "routing": "order"}
-  ]
-}

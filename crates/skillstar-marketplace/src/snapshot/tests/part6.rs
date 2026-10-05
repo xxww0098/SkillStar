@@ -131,20 +131,11 @@ async fn search_reports_stale_while_any_leaderboard_scope_is_degraded() {
         || -> InstalledSkillsFuture { Box::pin(async { Ok(Vec::new()) }) },
     ));
 
-    // Three hits: enough coverage that `ai_search_local` never reaches for the
-    // network (this test must stay hermetic).
     seed_named_skills(&["demo", "demo-two", "demo-three"]);
 
     let status = || async {
         let plain = search_local("demo", Some(10)).await.expect("search");
-        let ai = ai_search_local(&["demo".to_string()], Some(10))
-            .await
-            .expect("ai search");
-        assert_eq!(plain.data.len(), 3, "the rows are served either way");
-        assert_eq!(
-            plain.snapshot_status, ai.snapshot_status,
-            "search and AI search answer the same question"
-        );
+        assert_eq!(plain.data.len(), 3, "the rows are served");
         plain.snapshot_status
     };
 

@@ -2,23 +2,17 @@
 
 use clap::{Parser, Subcommand};
 
-mod claude_mcp;
 mod commands;
-mod decide;
-mod gateway;
 mod install;
 mod manage;
 mod mcp_approve;
 mod team;
 
 pub use commands::*;
-pub use decide::{DecideOpts, cmd_decide};
 pub use install::cmd_install;
 pub use manage::{cmd_publish, cmd_remove, cmd_update};
 
 mod helpers;
-pub use claude_mcp::run_claude_mcp_helper;
-pub use gateway::{run_gateway, start_desktop_gateway};
 pub use helpers::*;
 
 /// CLI root type — owned by this crate.
@@ -130,38 +124,6 @@ pub enum Commands {
     Team {
         #[command(subcommand)]
         command: TeamCommand,
-    },
-    /// Local decision model (AgentJev-0.6B): answer typed questions about a state
-    Decide {
-        /// JSON payload file (`-` for stdin)
-        #[arg(long, short = 'f', conflicts_with_all = ["stdin", "download", "verify", "status"])]
-        file: Option<String>,
-        /// Read the payload from stdin
-        #[arg(long, conflicts_with_all = ["download", "verify", "status"])]
-        stdin: bool,
-        /// Download the checkpoint into the data directory, then exit
-        #[arg(long)]
-        download: bool,
-        /// Re-check every checkpoint digest, then exit
-        #[arg(long)]
-        verify: bool,
-        /// Print the checkpoint state, then exit
-        #[arg(long)]
-        status: bool,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-        /// Device: auto (Metal on macOS), cpu, or metal
-        #[arg(long, default_value = "auto")]
-        device: String,
-        /// Dtype: auto, f32, f16, or bf16
-        #[arg(long, default_value = "auto")]
-        dtype: String,
-    },
-    /// Loopback model gateway. Does not open a window.
-    Gateway {
-        #[command(subcommand)]
-        command: Option<gateway::GatewayCli>,
     },
 }
 
@@ -349,31 +311,6 @@ pub fn run(args: Vec<String>, migrate_and_run: fn()) {
             ),
             TeamCommand::Used { name } => team::cmd_used(&name),
         },
-        Commands::Decide {
-            file,
-            stdin,
-            download,
-            verify,
-            status,
-            json,
-            device,
-            dtype,
-        } => cmd_decide(DecideOpts {
-            file: file.as_deref(),
-            stdin,
-            download,
-            verify,
-            status,
-            json,
-            device: &device,
-            dtype: &dtype,
-        }),
-        Commands::Gateway { command } => {
-            let code = gateway::run_parsed(command);
-            if code != 0 {
-                std::process::exit(code);
-            }
-        }
     }
 }
 
@@ -397,9 +334,6 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "publish"
             | "mcp"
             | "team"
-            | "decide"
-            | "gateway"
-            | "claude-mcp-helper"
             | "help"
             | "-h"
             | "--help"
@@ -495,9 +429,6 @@ mod mode_tests {
             "publish",
             "mcp",
             "team",
-            "decide",
-            "gateway",
-            "claude-mcp-helper",
             "help",
             "-h",
             "--help",
@@ -519,37 +450,5 @@ mod mode_tests {
     fn unknown_args_do_not_look_like_cli() {
         assert!(!is_cli_subcommand("totally-unknown"));
         assert!(!is_cli_subcommand("--some-os-flag"));
-    }
-
-    #[test]
-    fn gateway_is_a_cli_subcommand_and_not_gui() {
-        assert!(is_cli_subcommand("gateway"));
-        assert!(!is_gui_force_arg("gateway"));
-
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let code = super::gateway::run_gateway_io(
-            &["skillstar".to_string(), "gateway".to_string()],
-            &mut stdout,
-            &mut stderr,
-        );
-        assert_ne!(code, 0);
-        assert!(stdout.is_empty());
-        assert!(!stderr.is_empty());
-
-        stdout.clear();
-        stderr.clear();
-        let code = super::gateway::run_gateway_io(
-            &[
-                "skillstar".to_string(),
-                "gateway".to_string(),
-                "nope".to_string(),
-            ],
-            &mut stdout,
-            &mut stderr,
-        );
-        assert_ne!(code, 0);
-        assert!(stdout.is_empty());
-        assert!(!stderr.is_empty());
     }
 }

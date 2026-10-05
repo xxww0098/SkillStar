@@ -1,10 +1,7 @@
 pub mod agents;
-pub mod ai;
-pub mod decision;
 pub mod github;
 pub mod instances;
 pub mod marketplace;
-pub mod models_commands;
 pub mod network;
 pub mod patrol;
 pub mod project_host;

@@ -10,7 +10,6 @@ mod gateway;
 pub mod host;
 pub mod inspect;
 mod laya_pack;
-pub mod ort_cpu;
 pub mod plan;
 pub mod protocol;
 pub mod ranker;

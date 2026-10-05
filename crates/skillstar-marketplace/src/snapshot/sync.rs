@@ -704,10 +704,9 @@ pub async fn sync_scope_skill_detail(source: &str, name: &str) -> Result<()> {
 /// record that we asked, under `search_seed:<query>`.
 ///
 /// The record is the point, not a side effect: it is the only thing that can
-/// answer "have we ever asked the remote about *this* keyword", which is what
-/// [`ai_search_local`](super::local_first::ai_search_local) needs to decide
-/// whether a thin result means "the remote has little for this keyword" or
-/// "we never looked". Row counts cannot answer that question — the whole
+/// answer "have we ever asked the remote about *this* query", so a later
+/// search can tell "the remote has little for this query" from "we never
+/// looked". Row counts cannot answer that question — the whole
 /// snapshot is populated by leaderboard syncs that know nothing about any
 /// particular keyword.
 ///

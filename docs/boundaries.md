@@ -31,9 +31,6 @@ SkillStar/
 │   ├── skillstar-skills/        # 技能、项目、部署、Agent profile、GitHub App 身份
 │   ├── skillstar-channels/      # 共享频道与 patrol
 │   ├── skillstar-marketplace/   # 本地技能市场快照与 FTS
-│   ├── skillstar-models/        # Provider store、AI、tool sync
-│   ├── skillstar-decision/      # 本地 AgentJev-0.6B 决策模型：权重、tokenizer、candle 前向
-│   ├── skillstar-gateway/       # 本机模型网关：协议翻译、环回监听、Claude 进程桥、注入快照签名，以及 Agent 配置写入
 │   ├── skillstar-usage/         # 订阅、OAuth、配额、CLI/IDE 账号切换与桌面应用多开
 │   ├── skillstar-sync/          # SSH 远端技能传输
 │   └── skillstar-app/           # 跨域 use case 与共享 CLI 解析
@@ -53,15 +50,12 @@ SkillStar/
 | `skill-spec` | 公开 Agent Skills `SKILL.md` 的 frontmatter 解析与诊断（issue code、阻塞/咨询分级、manifest 大小上限） | SkillStar 安装编排、Hub/lockfile、discovery、bundle，或任何 `skillstar-*` 产品依赖 |
 | `skillstar-core` | 路径、文件操作、DB pool/migration、共享错误和配置、HTTP client、共享 `Skill` 契约、Provider identity/鉴权/余额端点元数据（`providers`） | 任一产品域的业务流程 |
 | `skillstar-git` | Git 子进程 transport（认证材料、代理、取消、进度、脱敏）、临时目录浅克隆与 ref/folder tree-hash 等操作级 Git 辅助、repo history | 依赖 content/lock/channels 的 GitHub 仓库管理（`gh_manager` 留在 `skillstar-skills::git`） |
-| `skillstar-channels` | 组织共享频道（GitHub REST 编排、权限投影、descriptor、registry、成员/邀请、registration、release manifest/publish、subscription store、精确发布安装、逐 Skill 升级事务、自动升级策略）与 patrol；`policy::ChannelAwarePolicy` 实现 skills 的 mutation gate | 技能安装/更新核心实现、Marketplace、Usage、Models |
-| `skillstar-skills` | vercel 语义安装核心（[D-081](./decisions.md#d-081技能安装锁与更新整体同步-vercel-labsskills删除自研管线)：`skill_lock` 锁、`fetch` 临时浅克隆、`installer` canonical 复制与相对链接、`update` tree-SHA 对比重装、`installed_skill` 读侧）、bundle、本地创作、`GitSkillFacade`、GitHub 仓库管理（`git::gh_manager` 编排 + `git::gh_rest` 发布 REST）、项目 manifest、deployment；SKILL.md 安装门禁适配（`validation::ensure_installable`，解析委托 `skill-spec`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub Trees API 更新检测（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝；Agent spec/registry/custom profile 与 profile storage（`agents`）；GitHub App 设备授权、token 生命周期、凭据存储与网关（`github_auth`）；本机团队智能（`team`：installed-skill BM25 recall、friction notes、skill health、digest） | Marketplace 搜索、Usage、Models，或拆出叶子的业务编排；不再拥有 SKILL.md frontmatter 解析实现；不拥有已删除的 Learn/教程域 |
+| `skillstar-channels` | 组织共享频道（GitHub REST 编排、权限投影、descriptor、registry、成员/邀请、registration、release manifest/publish、subscription store、精确发布安装、逐 Skill 升级事务、自动升级策略）与 patrol；`policy::ChannelAwarePolicy` 实现 skills 的 mutation gate | 技能安装/更新核心实现、Marketplace、Usage |
+| `skillstar-skills` | vercel 语义安装核心（[D-081](./decisions.md#d-081技能安装锁与更新整体同步-vercel-labsskills删除自研管线)：`skill_lock` 锁、`fetch` 临时浅克隆、`installer` canonical 复制与相对链接、`update` tree-SHA 对比重装、`installed_skill` 读侧）、bundle、本地创作、`GitSkillFacade`、GitHub 仓库管理（`git::gh_manager` 编排 + `git::gh_rest` 发布 REST）、项目 manifest、deployment；SKILL.md 安装门禁适配（`validation::ensure_installable`，解析委托 `skill-spec`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub Trees API 更新检测（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝；Agent spec/registry/custom profile 与 profile storage（`agents`）；GitHub App 设备授权、token 生命周期、凭据存储与网关（`github_auth`）；本机团队智能（`team`：installed-skill BM25 recall、friction notes、skill health、digest） | Marketplace 搜索、Usage，或拆出叶子的业务编排；不再拥有 SKILL.md frontmatter 解析实现；不拥有已删除的 Learn/教程域 |
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场 | 技能安装实现 |
-| `skillstar-models` | Provider store/preset、tool sync、AI 推理 | Usage 订阅、Marketplace 快照 |
-| `skillstar-decision` | 本地 AgentJev-0.6B 决策模型：checkpoint 的文件规格/下载/校验、`agentjev.decision.v1` 请求校验与答案整形、Qwen3-0.6B 主干与候选集合头的前向（共享前缀 KV 复用）；workspace 内唯一允许引入 ML 运行时（candle / tokenizers）的 crate | Provider store、tool sync、App AI 的 chat/summarize 路径、任何 Tauri 类型；不拥有业务闸门/路由的判定策略（由调用方决定阈值与后果） |
-| `skillstar-gateway` | 本机模型网关：协议翻译、环回监听、Claude 进程桥、用注入的账户快照签上游，以及 Agent 配置写入。crate 内分 `store/`（`model_gateway.json` schema 属主）、`route/`（路由决策组，不开文件）、`catalog/`（models.dev 目录缓存）、`ledger/`（持久用量账本）、`access.rs`（LAN 入站门禁）、`forward.rs`（turn 转发状态机）、`cost.rs`（读时计价） | 密钥表、Usage 订阅、决策模型。不读取 `model_providers.json`，不打开 Usage 存储，不发起配额请求 |
-| `skillstar-usage` | catalog、OAuth/API-key/Cookie/TokenImport fetcher、加密 token、`tool_paths` / `tool_store` 本地存储基元、请求构建器；Agent 会话文件只读解析（`sessions`：增量 checkpoint 落 `data_root()/sessions/`，覆盖的 Agent 家族以 `sessions::parsers()` 注册表及其测试为准，文档不手抄清单）；CLI 凭证切换引擎（`usage_switch`：软链快照 custody、逐 CLI target、IDE 凭据写回注册表，D-077）；桌面应用多开（`instances`，按 D-054 不绑定 Usage catalog 数据） | Models provider store；`sessions` 只读 Agent 自己的会话文件，不写 Agent 目录 |
+| `skillstar-usage` | catalog、OAuth/API-key/Cookie/TokenImport fetcher、加密 token、`tool_paths` / `tool_store` 本地存储基元、请求构建器；Agent 会话文件只读解析（`sessions`：增量 checkpoint 落 `data_root()/sessions/`，覆盖的 Agent 家族以 `sessions::parsers()` 注册表及其测试为准，文档不手抄清单）；CLI 凭证切换引擎（`usage_switch`：软链快照 custody、逐 CLI target、IDE 凭据写回注册表，D-077）；只读模型价格表（`pricing`：model_gateway.json 覆盖 + models.dev 缓存，D-082 随模型域移除下沉）；桌面应用多开（`instances`，按 D-054 不绑定 Usage catalog 数据） | Models provider store；`sessions` 只读 Agent 自己的会话文件，不写 Agent 目录 |
 | `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
-| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；Usage 前端 facade 与 DTO 投影（`usage/dto`，D-034）；启动本机模型网关 | Tauri command 宏或窗口对象。网关协议不放在这里；不再承载单域 Usage 切换/多开实现（D-077） |
+| `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别；Usage 前端 facade 与 DTO 投影（`usage/dto`，D-034）；消费汇总装配（会话单源 + 读时计价，D-082） | Tauri command 宏或窗口对象。不再承载单域 Usage 切换/多开实现（D-077）；模型域已整体移除（D-082），不得回流 |
 
 ## 允许的依赖方向
 
@@ -75,18 +69,12 @@ flowchart LR
   skills["skillstar-skills"]
   channels["skillstar-channels"]
   market["skillstar-marketplace"]
-  models["skillstar-models"]
-  decision["skillstar-decision"]
-  gateway["skillstar-gateway"]
   usage["skillstar-usage"]
   sync["skillstar-sync"]
   app["skillstar-app"]
   tauri["src-tauri"]
 
   market --> core
-  models --> core
-  decision --> core
-  gateway --> core
   skills --> spec
   skills --> core
   skills --> git
@@ -101,32 +89,21 @@ flowchart LR
   app --> git
   app --> channels
   app --> market
-  app --> models
-  app --> decision
   app --> usage
-  app --> gateway
   tauri --> app
   tauri --> core
   tauri --> skills
   tauri --> git
   tauri --> channels
   tauri --> market
-  tauri --> models
-  tauri --> decision
   tauri --> usage
   tauri --> sync
 ```
 
-- `skillstar-models::providers` 的模块归属：`provider.rs` / `credential.rs` / `binding.rs` / `catalog.rs` / `roles.rs` 是 v4 域类型（`roles.rs` 拥有跨 Agent 的角色词表、`RoleDef` 注册表行类型与写盘跳过原因，因此 `tool_sync` 的 Agent 注册表依赖 `providers`，而不是反过来）；`crud_v4.rs` 拥有 v4 的 provider 行与绑定命令；`migrate/` 拥有 v3→v4 纯函数与迁移报告；`store_v4.rs` 拥有 v4 读写与备份/校验外壳；`catalog_cache.rs` 拥有 provider 自身模型目录的磁盘缓存（`<data_root>/cache/model_catalog/`，一 provider 一文件）；`types.rs` 降级为只供迁移读的 v1/v2/v3 历史形状，新代码不得引用。前端 DTO 投影（剥离明文凭据）在 `skillstar-app/src/models/dto.rs`，Agent 注册表的声明面投影（`AgentDescriptorDto`，剥离函数指针）在 `skillstar-app/src/models/agents.rs`，都不在域 crate。
-- `skillstar-models::tool_sync` 只接受 v4 类型：writer 签名是 `(&AgentBinding, &[Provider])`，`view.rs` 是把 v4 可选端点与 `Credential` 投影成 writer 需要的平字符串的**唯一**地方。`migrate_configs.rs` 拥有「迁移那一次运行修复已写坏的 Agent 配置文件」这条接缝——它是 `providers` 与 `tool_sync` 之间唯一一处由 store 侧调用写盘侧的方向。
-- `src-tauri/src/commands/models_commands/compat.rs` 是 v4 域类型与仍为 v3 形状的 IPC 之间的唯一翻译层，随前端 IA 重写一并删除。除它以外，命令层不得出现 v3 类型。
-- `skillstar-decision` 独立成 crate 的理由是**依赖集合**，不是域边界：`candle-core` / `candle-nn` / `tokenizers` 只被它使用，放进 `skillstar-models` 会让没有任何张量需求的 Provider/CRUD/tool-sync 路径一起编译 ML 运行时（根 `Cargo.toml` 的 workspace 依赖表因此不收这三个版本，由该 crate 自己固定）。它只依赖 `skillstar-core`（HTTP client、路径、错误），不允许依赖任何产品域；Metal 支持按 `target_os = "macos"` 在该 crate 的 manifest 内开启，不通过 feature 向上传染。
-
 禁止：
 
 - `skillstar-core` 依赖任一产品域。
-- `skills ↔ marketplace`、`usage → models`、域 crate → `src-tauri`。
-- `skillstar-gateway` 的 skillstar 依赖只有 `skillstar-core`。它不依赖 models、usage、decision、app。models、usage、decision、core 不依赖它。`skillstar-app` 依赖它来启动监听；`src-tauri`（包名 `skillstar`）不直接依赖它。从 workspace 拿掉这个 crate 之后，`skillstar-models` 与 `skillstar-usage` 仍必须能单独编译。
+- `skills ↔ marketplace`、域 crate → `src-tauri`。
 - 命令层为绕过边界而直接拼装跨域事务。
 - leaf crate 用 default feature 隐式决定最终二进制的重 feature；由 `src-tauri` 显式选择。
 - 协议叶子（如 `skill-spec`）依赖任一 `skillstar-*` crate、Tauri、业务 HTTP/DB 运行时或打包库。它们只解析外部技术规范，由产品 crate 做薄 adapter。
@@ -147,7 +124,6 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 - 通用技能 mutation gate 是依赖倒置接缝：`skillstar-skills::skill_mutation::SkillMutationPolicy` 定义查询接口（默认 allow-all），`skillstar-channels::policy::ChannelAwarePolicy` 查订阅注册表实现它；组合根（Tauri setup、CLI 入口）必须调用 `install_global_policy`，任何新的可执行入口都要注册后才能执行技能写路径。
 - `scripts/internal/check_feature_imports.sh` 允许通过目标 feature 根 `index.ts` 的显式依赖，对新跨 feature 深层导入直接失败；既有基线只能缩减。
 - `scripts/internal/check_ts_orphan_modules.sh` 是 `check_no_orphan_modules.sh` 的 TypeScript 对偶：`src/features/` 下每个 `.ts`/`.tsx` 必须能从 `src/main.tsx` 或 `src/pages/` 走静态与动态 import 抵达。只被测试或只被另一个孤儿引用都算孤儿——lint/build/test 全绿并不能证明文件在生产路径上。基线 `ts_orphan_modules_baseline.txt` 为空且应保持为空。
-- Models 页的生产入口是 `src/features/models/components/hub/ModelsHub.tsx`，三栏为 Agents、Providers、Gateway。页面数据是 `get_models_board`（只有 id 和 name）。`compat.rs` 仍只服务 Settings 的 `get_providers_flat`。旧 `hub/matrix/` 与 `hub/prototype/` 均不作为生产代码落点。
 
 ## 关键接缝
 
@@ -156,7 +132,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | React → Rust | 只通过集中 IPC wrapper 调用 Tauri command | `src/lib/ipc/`、`src-tauri/src/commands/mod.rs` |
 | Tauri → 域 | command 做参数/State/事件适配后调用 facade | `src-tauri/src/commands/` |
 | 跨域事务 | 放入 `skillstar-app`，由窄 facade 组合 | `crates/skillstar-app/src/` |
-| 项目技能 MCP | 本机 stdio 服务、项目技能推荐与批准编排在 `skillstar_app::project_skills_mcp`。工具参数在 `protocol`，不接收批准字段。`rmcp`、`ort` 和 `tokenizers` 只加入 `skillstar-app` | `crates/skillstar-app/src/project_skills_mcp/` |
+| 项目技能 MCP | 本机 stdio 服务、项目技能推荐与批准编排在 `skillstar_app::project_skills_mcp`。工具参数在 `protocol`，不接收批准字段。`rmcp` 只加入 `skillstar-app` | `crates/skillstar-app/src/project_skills_mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/skillstar-core/src/infra/http_client.rs` |
 | 生成类型 | Rust struct → ts-rs → `src/types/generated/` | `package.json` 的 `types:gen` |
 | 远端 SSH | `skillstar-sync` 只依赖 `skillstar-core`；SFTP 列出远端 hub，不消费 skills 域契约 | `crates/skillstar-sync/Cargo.toml` |

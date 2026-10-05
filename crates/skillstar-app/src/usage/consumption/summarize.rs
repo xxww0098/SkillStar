@@ -1,4 +1,4 @@
-//! Read-time-priced summaries over the merged consumption view (slice 09).
+//! Read-time-priced summaries over the consumption view (slice 09).
 //!
 //! [`summarize`] is pure: the clock arrives as `now_ms` and the price table
 //! as a closure, so a summary is a function of the rows it was handed and
@@ -7,12 +7,8 @@
 //! every cost here reads as an estimate of "what those tokens would cost
 //! under today's table".
 //!
-//! Day boundaries are **UTC**. That deliberately differs from [`Window`]'s
-//! local-day floors: a summary is a wire contract shared by every host and
-//! CI runner, so it pins one calendar, while [`Window`] stays local because
-//! it reads files on this machine. The service layer therefore reads the
-//! gateway pool with the 24h pairing buffer and hands [`Window::all`] to
-//! the merge — the period filter runs here, on UTC.
+//! Day boundaries are **UTC** — a summary is a wire contract shared by
+//! every host and CI runner, so it pins one calendar.
 //!
 //! Series buckets switch with the period: hours inside a day, days inside a
 //! week or month, ISO weeks over all time, each aligned to the Unix epoch
@@ -20,16 +16,18 @@
 
 use std::collections::BTreeMap;
 
-use skillstar_gateway::ModelCost;
+use skillstar_usage::pricing::ModelCost;
 
-use super::{ConsumptionRow, UnifiedCall, DAY_MS};
+use super::UnifiedCall;
 
 /// One hour in milliseconds.
 const HOUR_MS: i64 = 3_600_000;
+/// One day in milliseconds.
+const DAY_MS: i64 = 86_400_000;
 /// One week in milliseconds.
 const WEEK_MS: i64 = 7 * DAY_MS;
 
-/// Which slice of the merged view a summary covers.
+/// Which slice of the view a summary covers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Period {
     /// The UTC day containing `now_ms`.
@@ -43,8 +41,7 @@ pub enum Period {
 }
 
 /// The period start in Unix milliseconds (inclusive, UTC), or `None` for
-/// all time. Callers read the gateway pool with `floor − 24h` — the
-/// pairing buffer, see the module docs of [`super`].
+/// all time. Callers read the session files from here.
 pub fn period_floor_ms(period: Period, now_ms: i64) -> Option<i64> {
     let today = utc_midnight_ms(now_ms);
     match period {
@@ -65,7 +62,6 @@ fn utc_midnight_ms(now_ms: i64) -> i64 {
 pub enum Dimension {
     Agent,
     Model,
-    Account,
     Session,
 }
 
@@ -94,11 +90,12 @@ pub struct Totals {
 
 impl Totals {
     /// Fold one call in, billing through `price` at read time. The price is
-    /// looked up as `(catalog, served model)`; a lookup that answers `None`
-    /// bumps [`Totals::unpriced`] instead of billing zero.
-    pub fn add_call(&mut self, call: &UnifiedCall, price: &dyn Fn(&str, &str) -> Option<ModelCost>) {
+    /// looked up by served model alone — a session row does not name the
+    /// provider that served it — so a lookup that answers `None` bumps
+    /// [`Totals::unpriced`] instead of billing zero.
+    pub fn add_call(&mut self, call: &UnifiedCall, price: &dyn Fn(&str) -> Option<ModelCost>) {
         self.calls += 1;
-        if call.error_kind.is_some() || call.status.is_some_and(|status| status >= 400) {
+        if call.error_kind.is_some() {
             self.errors += 1;
         }
         self.input += call.tokens.input;
@@ -106,7 +103,7 @@ impl Totals {
         self.cache_read += call.tokens.cache_read;
         self.cache_write += call.tokens.cache_write;
         self.reasoning += call.tokens.reasoning;
-        match price(call.catalog.as_str(), served_model(call)) {
+        match price(served_model(call)) {
             Some(cost) => self.cost_usd += cost.cost(&call.tokens),
             None => self.unpriced += 1,
         }
@@ -158,26 +155,25 @@ pub struct Summary {
 /// network.
 pub struct SummarizeInput<'a> {
     pub now_ms: i64,
-    pub rows: &'a [ConsumptionRow],
-    pub price: &'a dyn Fn(&str, &str) -> Option<ModelCost>,
+    pub rows: &'a [UnifiedCall],
+    pub price: &'a dyn Fn(&str) -> Option<ModelCost>,
 }
 
 /// Summarize `input.rows` over `period`: totals, an auto-bucketed series,
-/// and the four `by` breakdowns. Rows are kept by when they *began* (`at`),
+/// and the three `by` breakdowns. Rows are kept by when they *began* (`at`),
 /// floor inclusive, on the UTC calendar.
 pub fn summarize(input: &SummarizeInput<'_>, period: Period) -> Summary {
     let floor = period_floor_ms(period, input.now_ms);
-    let kept: Vec<&ConsumptionRow> = input
+    let kept: Vec<&UnifiedCall> = input
         .rows
         .iter()
-        .filter(|row| floor.is_none_or(|floor| row.call.at >= floor))
+        .filter(|call| floor.is_none_or(|floor| call.at >= floor))
         .collect();
 
     let mut totals = Totals::default();
     let mut series: BTreeMap<i64, Totals> = BTreeMap::new();
     let bucket = bucket_ms(period);
-    for row in &kept {
-        let call = &row.call;
+    for call in &kept {
         totals.add_call(call, input.price);
         series
             .entry(bucket_start_ms(call.at, bucket))
@@ -190,10 +186,6 @@ pub fn summarize(input: &SummarizeInput<'_>, period: Period) -> Summary {
         (
             Dimension::Model,
             groups(kept.iter().copied(), |call| Some(served_model(call).to_string()), input.price),
-        ),
-        (
-            Dimension::Account,
-            groups(kept.iter().copied(), |call| non_empty(&call.account), input.price),
         ),
         (
             Dimension::Session,
@@ -212,19 +204,18 @@ pub fn summarize(input: &SummarizeInput<'_>, period: Period) -> Summary {
 }
 
 /// Group `rows` by a caller-chosen label and total each group; rows the
-/// label function declines (`None`) stay out of that breakdown (a
-/// session-file row has no account, an idless call has no session). This is
-/// the engine behind [`summarize`]'s four dimensions, reused by the service
-/// layer for its per-catalog rows.
+/// label function declines (`None`) stay out of that breakdown (an idless
+/// call has no session). This is the engine behind [`summarize`]'s
+/// dimensions.
 pub fn groups<'a>(
-    rows: impl IntoIterator<Item = &'a ConsumptionRow>,
+    rows: impl IntoIterator<Item = &'a UnifiedCall>,
     label: impl Fn(&UnifiedCall) -> Option<String>,
-    price: &dyn Fn(&str, &str) -> Option<ModelCost>,
+    price: &dyn Fn(&str) -> Option<ModelCost>,
 ) -> Vec<Group> {
     let mut by: BTreeMap<String, Totals> = BTreeMap::new();
-    for row in rows {
-        if let Some(label) = label(&row.call) {
-            by.entry(label).or_default().add_call(&row.call, price);
+    for call in rows {
+        if let Some(label) = label(call) {
+            by.entry(label).or_default().add_call(call, price);
         }
     }
     by.into_iter().map(|(label, totals)| Group { label, totals }).collect()

@@ -2,6 +2,6 @@
 
 /**
  * The five token counts every consumption-side projection spells the same
- * way (the gateway vocabulary; reasoning is billed inside output).
+ * way (the shared vocabulary; reasoning is billed inside output).
  */
 export type ConsumptionTokens = { input: number, output: number, cache_read: number, cache_write: number, reasoning: number, };

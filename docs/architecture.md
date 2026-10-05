@@ -37,8 +37,6 @@ flowchart LR
 
 当前实现使用 React/TypeScript/Vite/Tailwind、Tauri/Rust/Tokio、SQLite、JSON/TOML 配置、gitoxide/git 子进程，以及 SSH 传输。精确版本只从 manifest 读取。
 
-本地决策模型是唯一在进程内跑张量计算的能力，因此它的运行时是一个**被隔离的技术选择**：`skillstar-decision` 用 candle 直接读官方 bf16 safetensors（没有 ONNX 中间产物、没有 Python sidecar），在 macOS 上按 `target_os` 开启 Metal、其余平台走 CPU。默认精度是 f32：candle 0.11 的 Metal 后端对 f16 缺少部分算子核，而逐算子回退到 CPU 会把一次前向静默串行化。这条选择及其后果见 [D-064](./decisions.md#d-064本地决策模型用-candle-直读-safetensors不引入-onnx-或-python)。
-
 ## 数据所有权
 
 默认数据根为 `~/.skillstar/`，可通过环境变量覆盖。路径解析必须来自 `skillstar-core`，调用方不能自行拼接另一个“默认路径”。
@@ -56,12 +54,7 @@ flowchart LR
 | 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；只保存每技能 `update_available/checked_at` 投影，刷新与更新完成都写穿它，UI 与事件只是投影 |
 | 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `skillstar-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
 | Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；部署以 `~/.agents/skills` 为 canonical source 创建相对链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
-| Models provider 与工具同步状态 | `~/.skillstar/config/model_providers.json`（v4：`providers` + `bindings`）及 Agent 配置文件 | `skillstar-models` |
-| 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走；crate 内读写归 `store/`，models.dev 目录缓存在 `catalog/`。缺文件、空的 `routing`，以及读不出来的文件，都是 smart。启动不创建、不改写这个文件 |
-| 网关持久用量账本 | `~/.skillstar/gateway/usage.jsonl`，满 5 MB 轮转为 `usage.<n>.jsonl` 归档 | `skillstar-gateway::ledger`（append/load/query；轮转阈值是 `ledger/append.rs` 的 `ROTATE_AT_BYTES`）；度量面唯一真相（[D-080](./decisions.md#d-080持久用量账本是网关度量面的唯一真相环只补缺价格只在读时)），逐行只存 token 与归因，无密钥、无上游 URL |
-| 本地决策模型 checkpoint（AgentJev-0.6B，1.2 GB） | 默认 `~/.skillstar/models/agentjev-0.6b/`；`SKILLSTAR_DECISION_MODEL_DIR` 覆盖目录，`SKILLSTAR_HF_ENDPOINT` / `HF_ENDPOINT` 覆盖下载源 | `skillstar-decision`；四个文件按固定 revision + SHA-256 校验，缺一个都不能加载。权重不进仓库，也不进 rolling 清理之外的位置 |
-| 迁移前的 provider store 快照 | `~/.skillstar/config/model_providers.v3.json` | `skillstar-models::providers::store_v4`；**不进 rolling 清理**，它是迁移报告「撤销」按钮的依据 |
-| Provider 自身 `/v1/models` 返回的模型目录 | `~/.skillstar/cache/model_catalog/<provider_id>.json` | `skillstar-models::providers::catalog_cache`；从 provider 行搬出来的——目录可重新拉取、绑定不可，两者不该共享同一份持久性保证，也不该让几百个模型的原始 JSON 反复重写进存着凭据的文件 |
+| 模型域遗留数据（provider store、网关配置/账本、决策权重） | `~/.skillstar/config/model_providers*.json`、`model_gateway.json`、`~/.skillstar/gateway/usage.jsonl`、`~/.skillstar/models/`、`cache/{model_catalog,gateway-catalog}/` | 模型域已整体移除（[D-082](./decisions.md)）：这些文件不再被写入，留在磁盘不主动清理；`model_gateway.json` 的 `prices` 覆盖与 `cache/gateway-catalog/models.dev.json` 仍被 `skillstar-usage::pricing` 只读，用于消费汇总的读时计价 |
 | Usage 订阅和 OAuth/token 状态 | `~/.skillstar/config/usage/` | `skillstar-usage`；跨域 CLI 激活由 `skillstar-app` 编排 |
 | Agent 会话解析增量 checkpoint 索引 | `~/.skillstar/sessions/index.json` | `skillstar-usage::sessions`（`sessions/checkpoint.rs`，原子替换）；纯派生缓存，删掉只是下次全量重读，不写 Agent 目录 |
 | 桌面应用多开 profile 与清单 | `~/.skillstar/instances/<app>/<instance-id>/`；清单 `~/.skillstar/config/app_instances.json` | `skillstar-core` 解析路径；`skillstar-app::instances` 拥有清单、argv 与 PID 匹配。启动走 `--user-data-dir`，不改默认 `~/Library/Application Support/*` 或 `~/.grok` |
@@ -111,42 +104,7 @@ flowchart LR
 - 频道成员、有效角色和 open invitations 的运行时真相只位于 GitHub。SkillStar 用当前 GitHub App user identity 调用 collaborator/invitation API，管理动作先按稳定 repository ID 刷新路由并重新验证 Admin；本地不持久化成员、邀请历史或 share code。接受 invitation 是可恢复的跨系统事务：先落非敏感 `awaiting_invitation_acceptance` descriptor，再修改 GitHub，最后转 active；最后落盘失败或 GitHub 响应丢失/5xx 导致结果不确定时保留 marker，后续从当前用户可见私有仓库库存按 repository ID 和远端读权限恢复，不能要求已经被 GitHub 消费的 invitation 再次出现。只有明确远端拒绝才回滚 marker。邀请 inbox 只能依据 GitHub 返回的组织私有仓库 invitation 让用户显式导入，因为 GitHub invitation 没有承载 SkillStar 自定义元数据的字段。
 - 认证 Git 操作绕过第三方 GitHub 镜像，防止凭据转发；公开操作可以继续使用镜像回退。`skillstar-git` 子进程使用当前 SkillStar 代理配置（SOCKS 为 `socks5h`），不读取或修改用户的全局 Git 凭据状态。
 - GitHub mirror 改写 GitHub 族 origin（含 raw/codeload/objects/gist），只影响单次 Git 命令，不修改用户全局 Git 配置；传输失败允许直接 GitHub fallback 和熔断。
-- 决策模型 checkpoint 的下载同样经 `probe_http_client`（用户代理与 bypass 生效），走 Hugging Face 的 `resolve/<pinned-revision>/<file>`；中断的传输用 Range 续传，落地前逐个核对固定 SHA-256，校验失败删除临时文件而不是留一份看似完整的权重。除这条下载外，决策模型不再发起任何网络请求：推理完全在本进程内。
 - SSH 在发送认证材料前完成 host-key gate；远端命令检查退出码并设置超时，SFTP 路径显式解析为绝对路径。
-
-### 本机模型网关
-
-- 桌面进程在打开窗口之前，用后台线程调用 `skillstar_gateway::serve`。`skillstar gateway serve` 走同一个函数，不打开窗口。其它 CLI 子命令不启动它。`src-tauri` 只认 argv，不直接依赖网关 crate。
-- 默认听 `127.0.0.1:21847`。`SKILLSTAR_GATEWAY_ADDR` 可以改地址。端口 `3425` 直接拒绝，不绑定。地址已经被占用时，后启动的那一份把「地址已被占用」写到 stderr，不关掉先启动的那份，也不往 stdout 打日志。
-- `model_gateway.json` 的 `listen` 写成 `lan` 时，`serve` 听 `0.0.0.0` 和原来的端口。没写或写成别的，仍按环境变量或默认环回。写进 Agent 文件的地址仍是 `http://127.0.0.1:<端口>`。端口 `3425` 在局域网打开时也拒绝绑定。已经绑上的套接字留到下一次 `serve`。
-- 局域网门禁：来自非 loopback peer（LAN、WSL NAT）的请求，除 Claude MCP callback（自带环回 + token 双门）外一律要求安装级 gateway key，包括 `GET /`、`/api/hello` 和 `/v1/models`；`Authorization`（剥 `Bearer ` 前缀）、`x-api-key`、`x-goog-api-key`、`?key=` 任一槽位匹配即过，否则 401。key 是 `config_dir()/gateway.key`，首次需要时惰性生成：≥32 字节随机数的 hex，Unix 权限 `0600`（父目录 `0700`，先例 `redact.key`）。`save_listen("lan")` 与非 loopback 的 `serve` 启动先确保 key 可用，不可用分别返回 `listen_key` 和局域网密钥错误，不写文件也不绑定。loopback peer 零变化：任意 bearer 照旧放行，也不读 key 文件。key 不进 DTO、事件、日志、账本或错误输出。
-- `model_gateway.json` 的 `model_names` 以 `provider/model` 为键保存显示名。选择器展示这个名字，没有时展示 id。出站 `model` 仍是上游 id。空名字、换行、超过 80 个标量、含 `://` 或 `sk-`、或目录里没有这个 id 时不写文件。目录缓存不被改写。
-- 出站前，请求里的 `reasoning_effort` 收成该上游 id 在目录缓存里的等级。缓存没有这个 id 时，原来的等级原样通过。分组成员可以写成 `provider/model:<等级>`，这个等级优先，再按目录收束。显示名不参与查找。Claude 进程的 `xhigh` → `max` 只发生在启动参数上。
-- `model_gateway.json` 的 `model_efforts` 以 `provider/model` 为键保存目录等级的子集。缺省和空数组都用目录里的全部等级。选择器只列出子集里的等级。未固定的请求按目录顺序收进子集。成员上的固定等级仍按整个目录收束，子集不改它。显示名不是键。
-- `model_gateway.json` 的 `visible` 把 Agent id 映到一份名单。名单项是家族标签、provider id 或 group id。`family` 写在 provider 或分组行上。缺省和空数组都是看到全部。`GET /v1/models`、选择器，以及写进该 Agent 文件的模型目录，都只留名单允许的项。已经保存的 model ref 留在原来的字段。路由顺序不读这份名单。
-- 这一个 `serve` 应答网关的 HTTP 路由表。`GET /api/hello` 的 `name` 是 `skillstar`，版本字是 `dev`。不提供配额路径。转发完成的调用记进持久用量账本（位置、轮转与所有者见上方数据所有权表，逐行带 Agent、会话、模型、token、状态、延迟与 catalog/account 归因；没有密钥，没有上游 URL）。进程内最多 60 条的环（容量常量 `crates/skillstar-gateway/src/trace.rs` 的 `TRACE_KEEP`）只为账本缺的行补位（append 失败的那几笔，重启即忘），读取面把两边合并成一张最新页（页大小是 app 侧的 `PAGE_KEEP`）。目录里没有的模型 id，含 `/` 时仍是本机错误，请求不转给厂商。目录里有的 id，即使不在该 Agent 的可见名单里，仍转给上游。
-- 转发走注入的上游环境（`forward.rs` 的 turn 状态机）：`skillstar-app` 在 CLI 与桌面两个启动点注入同一份 `UpstreamEnv`（候选解析、签名账户簿、账本归属三个闭包）。这条路上有协议翻译、effort 收束、视觉转述、脱敏、候选排序（`route_smart`，余量取自账户簿）、逐候选 `sign_upstream`、发送与 rest 坐窗（进程内按候选 id 记 seat，重启即忘）。402/408/429/5xx 轮转到下一候选；401 先回调 `AccountBook::reauthorize` 自愈一次（app 侧复用 refresh 锁序，重签重发恰好一次，turn 最多等 5 秒），自愈失败或无刷新腿则透传并让该候选坐 `AUTH_REST`；其它 4xx 视为请求自身的错，透传不轮转。`anthropic` 候选签成进程桥形态，不发 HTTP，直接跳过。未注入环境时退回旧的单一上游根（`ServeOptions::upstream`，现为测试路径）或 502 `no upstream`。分类器、亲和、保持写者，以及页面写下的 `routing`/`affinity` 模式与 `rotate` 计数，仍未参与转发。
-- 路由模式放在 `model_gateway.json` 里 provider 或分组的 `routing`。空字符串和缺省是 smart。启动只在文件已经存在时读取，不创建、不改写它。路由控件另写这一行的 `routing` 与 `affinity`；smart 和 auto 可以不落字段，读回来仍是这两项。控件不打开 `model_providers.json`。密钥仍在那份 v4 文件里，配额仍在 Usage。网关 crate 的转发不直接打开这两处；候选端点与签名材料经 `skillstar-app` 注入（app 侧的解析闭包读 provider 存储，账户簿读 Usage 的已存行）。页面写下的模式值仍未参与转发顺序，转发一律按余量 smart 排序。
-- 亲和在路由顺序之前决定要不要留下上次的回答者。留下时，那一名排到已经算出的顺序最前；`off` 时顺序不变。空模式在回合内留下，跨回合只在厂商缓存还值得、而且还没冷的时候留下。会话从 `X-Skillstar-Session` 认起，不认 `X-Magpie-Session`。休息中的回答者标成 `resting`，这一步不换人。模式、上次的 stick 和时钟由调用方传入。
-- 一次失败休息多久，只看这次的状态码和正文。时钟、已用份额和窗口恢复时间由调用方传入，不向 Usage 拉取。频率限制不按配额的缺省时长休息。配额自己写明的恢复时间可以长过一小时，厂商的 Retry-After 仍最多信一小时。验证失败在更短的一段时间里用上一次的拒绝回答，不再问上游。内容字节已经写下之后，下一次挑选不再叫另一条上游。未到期的候选从这次挑选里拿掉。不认 `X-Magpie-Resets-At`。
-- 模型 id `group/<id>` 展开成该分组的成员，成员也可以是另一个分组。会让分组包含自己、或嵌套深过 8 层的写入不改 `model_gateway.json`。同名模型的自动分组在调用方列出模型时推导，用户编辑之前不写入。不读密钥表。
-- 命名配置档在同一份 `model_gateway.json` 的 `profiles` 数组里。每条是一个名字，加上若干 Agent id 和 `model_ref`。名字超过 64 个 Unicode 标量，或名字、id、model ref 里出现密钥形状，就不写文件。应用时只调用 `apply_gateway`。这个写者不实现的 id 出现在结果里，不为它打开文件。配置档不是技能库，不同步 MCP，也不做 WebDAV。
-- 分组上的规则按书写顺序匹配。token 数、图像、effort 和来源 Agent 都满足才算命中。第一条命中的成员排到已经展开的顺序最前，其余不动。没有命中时展开顺序保持原样。来源 Agent 先看占位 bearer `skillstar-<id>`，认不出再用 User-Agent。
-- 带 intent 的规则只在分类器于回合开始点名、且置信度达到 0.4 时命中。模型 id 写在分组的 `classifier`，可以是 `provider/model` 或 `group/<id>`。没写时不命中，也不另找本机模型。失败、超时或答非所问都没有 intent 命中。相同消息 10 分钟内沿用上次的回答；失败后 30 秒内不再问。回合中途不再问。问询带上 User-Agent `skillstar-router/1`，期限 8 秒。这一步不加载决策模型。
-- 脱敏默认关闭。开关在 `model_gateway.json` 顶层：`redact`、`redact_personal`、`redact_words`、`redact_rules`，词表和自定义规则是 `redact_word_list`、`redact_rule_list`。打开后，正文在翻译之后、发给上游之前换成占位符；上游响应在译回 Agent 之前还原。密钥文件是 `config_dir()/redact.key`，新建时 Unix 权限 `0600`。文件缺失或读不出来时正文原样离开，不创建密钥文件。
-- 视觉转述默认关闭。`model_gateway.json` 顶层的 `vision` 为空、`off` 或缺省时，带图请求按原文转发。写成模型 id 之后，目标不是这个 id、正文里有 Chat 图片，就先请这个 id 把图写成文字，再把文字交给目标。提示词固定，User-Agent 是 `skillstar-vision/1`，单次 2 分钟，同时最多 4 张，成功的描述保留 256 条。描述请求本身不再转述。调用方明确目标不能看图、且转述关着时，当前这张图被拒绝，不会发出描述请求。
-- 上游签名只用调用方注入的账户快照和 Usage 已经写好的余量；余量快照统一为 `{ percent, renews_at }`：percent 是同一 provider 自己窗口内的已用百分比（跨 provider 不可比，`route_smart`/`usage_order` 只做 provider 内排序），rest 坐窗（used ≥ 98 且 renews 在未来）也从这份快照读。app 侧另有一张只读投影把候选按 `route_smart` 顺序连同余量、rest 状态与账本实测（`get_route_comparison`）摆上 Models 工作台，全部派生视图。`skillstar-app` 注入的 `UsageAccountBook`（live-first，custody 决定当前凭证）填这份快照；网关不打开 Usage 的存储，不刷新令牌，不请求配额。没有快照时候选保持未知。`anthropic` 不产生 Anthropic HTTP，生成仍走进程桥。没有 Usage 行的 provider 行只用注入快照里的 API 密钥（通用的 provider-key 签名形态）。候选解析与账本归属同样经注入供给：provider 存储的行给候选端点（OpenAI 根去掉尾部 `/v1`），胜选候选的 `catalog`/`account` 列从注入的归属闭包读（订阅 id，或密钥指纹），gateway crate 不依赖 models/usage。
-- 保存 Codex 只写环回。已登录：`openai_base_url` 指向 `{origin}/backend-api/codex`。API 形态：`[model_providers.skillstar]`，`base_url` 是 `{origin}/v1`，`wire_api = "responses"`，bearer 在环回 origin 是占位 `skillstar`、在非环回 origin（WSL NAT）是实际 gateway key，目录文件 `skillstar-models.json`。接管字段之前，旧值进 `config_dir()/agent_stash.json`（Unix `0600`，原子替换）。取消托管按 stash 写回。表和目录文件留下。网关不推断登录态，调用方传入形态。`skillstar-models` 不依赖网关。
-- 这条环回上的 `/responses` 离开本机之前收成公开 Responses 的形状：这路不接受的字段去掉，`system` 消息改成 `developer`，`store` 为 false，`stream` 为 true，缓存键留在正文里。这路认得的 `<id>-fast` 收成该 id 并带上 priority；认不出的后缀留在 id 上，调用方自己写的 tier 去掉。用量上限那一种 429 在回答里带上 ChatGPT 的用量设置页，其它错误原样回去。不发 `chatgpt-account-id`，也不发 Codex 的亲和头。主机是胜选候选的端点。`/responses/compact` 不走这套改写。
-- 保存文件型 Agent 走 `apply_gateway`。写出的地址总是 `http://127.0.0.1:<端口>` 加上该 Agent 的路径后缀，占位 bearer 是 `skillstar` 或 `skillstar-<id>`。取消托管把接管前的整份文件从同一份 `agent_stash.json` 放回。Goose、Cursor CLI、Copilot CLI、Devin 不写环回地址，调用返回未托管。在册的 id 以 `apply_gateway_` 测试为准。看板从这些已经写下的文件里读回 `127.0.0.1:<端口>`。文件里没有这台主机时为空。provider 存储里的端点不进这一行。
-- Claude Code 的 `~/.claude/settings.json` 由 `apply_gateway("claude", …)` 写入。`ANTHROPIC_BASE_URL` 是网关根，不带 `/v1`。`ANTHROPIC_AUTH_TOKEN` 是占位 `skillstar`，不是 Usage 的 access token，文件里也不写 `CLAUDE_CODE_OAUTH_TOKEN`。各档跟随这一次的模型。取消托管放回接管前的整份文件。进程桥不读这份文件，保存时不启动 `claude`。
-- Claude Desktop 由 `apply_gateway("claude-desktop", …)` 写入两份 `claude_desktop_config.json` 和 Claude-3p 配置档。配置档 id 是 `00000000-0000-4000-8000-736b696c6c73`。`inferenceGatewayBaseUrl` 是网关根，不带 `/v1`。`inferenceGatewayApiKey` 是 `skillstar-claude-desktop`。不写 `skillstar-binding.json`。取消托管放回接管前的整份文件。
-- OpenHanako 由 `apply_gateway("hanako", …)` 写入。进程在跑时，先确认 `server-info.json` 里的本地 API，再 `PUT /api/config` 和 `PUT /api/agents/<id>/config`。没在跑时写 catalog 和该 agent 的配置。provider 名是 `skillstar`，地址是网关的 `/v1`，密钥是占位 `skillstar-hanako`。没有已有 agent 时不写文件。
-- Alma 由 `apply_gateway("alma", …)` 经 `http://localhost:23001` 写入。provider 名是 `skillstar`，类型是 openai，地址是网关的 `/v1`。默认模型是 Alma 返回的 provider id、一个冒号、再加所选 id。没在跑时成功返回，不写文件。
-- Cindy 不写自己的数据库。`cindy_link` 生成 `cindy://provider/import?v=1&data=...`。Claude Code 的端点是网关根，Codex 和 Pi 是网关的 `/v1`。密钥是 `skillstar-cindy`。是否已经导入，只读那份数据库来判断。
-- WSL 里正在运行的 Codex 是单独的 Agent，id 是 `codex@wsl:<发行版>`。配置经 `\\wsl.localhost\<发行版>` 打开。已停止的发行版不启动。mirrored 写 `127.0.0.1`，NAT 写该发行版看到的 Windows 地址，该形态 provider 表的 bearer 是实际 gateway key（peer 非 loopback），mirrored 仍是占位。toml 形态与本机 Codex 相同。非 Windows 不调用 `wsl.exe`。
-- models.dev 目录缓存在数据根的 `cache/gateway-catalog/models.dev.json`，正文是下载到的 `https://models.dev/api.json`。下载走 `probe_http_client`。失败时留下已有文件；没有文件时读出来是空的，不放入手写模型表。不写 provider 的 `model_catalog`，也不写 `cache/model_catalog/`。选择器由 `skillstar-app` 读这份缓存和已保存的分组做投影。投影不携带密钥或厂商 URL，也不经过环回的模型列表。
-- 订阅侧的 Claude 启动本机 `claude`。Usage 里的 access token 不进子进程，进程也不请求 Anthropic 的令牌地址或 `/v1/messages`。`claude-mcp-helper` 在窗口和 Git askpass 之前进入，stdout 只有 MCP 帧。
 
 ### 本机项目技能 MCP
 

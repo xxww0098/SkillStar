@@ -21,7 +21,7 @@ use crate::models::{
     MarketplaceTagUpsert, MarketplaceUpdateNotification, MarketplaceUpdateNotificationUpsert,
 };
 use crate::remote::{
-    self, AiKeywordSearchResult, FetchMeta, MarketplaceResult, MarketplaceSkillDetails,
+    self, FetchMeta, MarketplaceResult, MarketplaceSkillDetails,
     PublisherRepo, SecurityAudit,
 };
 use crate::{OfficialPublisher, Skill, SkillType, extract_github_source_from_url};
@@ -32,7 +32,6 @@ const PUBLISHER_TTL_HOURS: i64 = 24;
 const DETAIL_TTL_HOURS: i64 = 48;
 const SEARCH_SEED_LIMIT: u32 = 50;
 const STALE_SKILL_RETENTION_DAYS: i64 = 30;
-const AI_SEARCH_REMOTE_SEED_MIN_HITS: usize = 3;
 /// How long a recorded `search_seed:<query>` answer counts as "we already
 /// asked the remote about this query".
 ///

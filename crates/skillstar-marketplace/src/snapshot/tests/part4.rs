@@ -430,17 +430,11 @@ async fn search_reports_stale_while_the_shared_table_is_degraded() {
     ));
 
     let scope = leaderboard_scope("all");
-    // Three hits: enough that `ai_search_local` sees the coverage it needs and
-    // does not reach for the network (this test must stay hermetic).
     seed_named_skills(&["demo", "demo-two", "demo-three"]);
 
     // No degraded marker: a hit is a hit.
     let result = search_local("demo", Some(10)).await.expect("search");
     assert_eq!(result.data.len(), 3);
-    assert_eq!(result.snapshot_status, SnapshotStatus::Fresh);
-    let result = ai_search_local(&["demo".to_string()], Some(10))
-        .await
-        .expect("ai search");
     assert_eq!(result.snapshot_status, SnapshotStatus::Fresh);
 
     // The leaderboard degrades; the rows search returns are now suspect.
@@ -452,10 +446,6 @@ async fn search_reports_stale_while_the_shared_table_is_degraded() {
         SnapshotStatus::Stale,
         "…but never as fresh"
     );
-    let result = ai_search_local(&["demo".to_string()], Some(10))
-        .await
-        .expect("ai search");
-    assert_eq!(result.snapshot_status, SnapshotStatus::Stale);
 
     // A complete leaderboard sync clears it for search too.
     commit_success(&scope, &sample_meta(&"b".repeat(64)), false);

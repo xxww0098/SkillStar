@@ -12,6 +12,7 @@
 //! - [`alerts`]       — Threshold-based alert computation
 //! - [`oauth`]        — PKCE / local-server / poll-flow / device-flow primitives
 //! - [`fetchers`]     — Per-provider quota fetchers (API key + OAuth)
+//! - [`pricing`]      — Read-only model price table (overrides + models.dev cache)
 
 pub mod alerts;
 pub mod antigravity_oauth_config;
@@ -26,6 +27,7 @@ pub mod instances;
 pub mod local_import;
 pub mod oauth;
 pub mod oauth_clients;
+pub mod pricing;
 pub mod protobuf_oauth;
 pub mod refresh_guard;
 pub mod request;

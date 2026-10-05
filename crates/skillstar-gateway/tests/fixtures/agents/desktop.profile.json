@@ -1,8 +1,0 @@
-{
-  "inferenceProvider": "gateway",
-  "inferenceGatewayBaseUrl": "http://127.0.0.1:21847",
-  "inferenceGatewayApiKey": "skillstar-claude-desktop",
-  "inferenceGatewayAuthScheme": "bearer",
-  "disableDeploymentModeChooser": true,
-  "coworkEgressAllowedHosts": ["*"]
-}

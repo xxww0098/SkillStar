@@ -13,7 +13,7 @@ pub use models::{
     MarketplaceTagUpsert, MarketplaceUpdateNotification, MarketplaceUpdateNotificationUpsert,
 };
 pub use remote::{
-    AiKeywordSearchResult, MarketplaceResult, MarketplaceSkillDetails, PublisherRepo,
+    MarketplaceResult, MarketplaceSkillDetails, PublisherRepo,
     PublisherRepoSkill, SecurityAudit,
 };
 pub use skillstar_core::types::skill::{
