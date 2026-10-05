@@ -12,20 +12,19 @@
 //! | Priority dirs | Checked first; falls back to full scan if empty | Skipped |
 //! | Recursive scan | Only if priority dirs are empty | Always performed |
 //!
-//! This matches `npx skills add` behavior, with one pack-layout exception:
-//! a repo-root `SKILL.md` that merely mirrors a nested catalog **or**
-//! harness copy (same identity) is a one-level-scanner shim, not the
-//! install unit. See `pack_layout`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::pack_layout::{CopyRequest, choose_copy};
-pub use crate::pack_layout::{
-    folder_matches_harness, is_canonical_skill_folder, is_harness_skill_folder,
-    missing_skill_payload_error, pack_harness_prefix,
-};
+/// Directory names whose subtrees are never scanned for skills (build
+/// outputs, dependency trees, test fixtures). A directory with one of these
+/// names may itself be a skill; nothing below it is scanned.
+pub const IGNORED_DIR_NAMES: &[&str] = &[
+    "node_modules", ".git", "dist", "build", "out", "target", "vendor", "__pycache__",
+    "__pypackages__", ".venv", "venv", "tests", "test", "__tests__", "fixtures", "e2e",
+    "examples", "example",
+];
 
 // ── Data Types ──────────────────────────────────────────────────────
 
@@ -167,7 +166,6 @@ impl<'a> SkillDiscovery<'a> {
     }
 
     fn normalize_candidates(&self, candidates: Vec<SkillCandidate>) -> Vec<DiscoveredSkill> {
-        let candidates = Self::strip_root_pack_shim(candidates);
         let candidates = if self.full_depth {
             candidates
         } else {
@@ -180,30 +178,10 @@ impl<'a> SkillDiscovery<'a> {
             .collect()
     }
 
-    /// Drop a repo-root SKILL.md that only exists so one-level scanners can
-    /// load the pack. A nested catalog **or** harness copy of the same
-    /// identity is the install unit — otherwise the hub links the whole clone.
-    fn strip_root_pack_shim(candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
-        let Some(root_id) = candidates
-            .iter()
-            .find(|candidate| candidate.is_repo_root())
-            .map(SkillCandidate::identity)
-        else {
-            return candidates;
-        };
-        let has_nested_twin = candidates.iter().any(|candidate| {
-            !candidate.is_repo_root() && candidate.identity().eq_ignore_ascii_case(&root_id)
-        });
-        if has_nested_twin {
-            candidates
-                .into_iter()
-                .filter(|candidate| !candidate.is_repo_root())
-                .collect()
-        } else {
-            candidates
-        }
-    }
 
+    /// Normal (non-full-depth) mode is root-first, vercel parity: a repo-root
+    /// `SKILL.md` is the skill and nested copies are not scanned further.
+    /// Full depth sees everything.
     fn limit_to_root_candidate(&self, candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
         let Some(root_skill) = candidates
             .iter()
@@ -212,14 +190,6 @@ impl<'a> SkillDiscovery<'a> {
         else {
             return candidates;
         };
-        if candidates.iter().any(|candidate| {
-            !candidate.is_repo_root()
-                && candidate
-                    .identity()
-                    .eq_ignore_ascii_case(&root_skill.identity())
-        }) {
-            return candidates;
-        }
         vec![root_skill]
     }
 
@@ -259,12 +229,16 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".gemini/skills",
     ".github/skills",
     ".goose/skills",
+    ".grok/skills",
     ".iflow/skills",
     ".junie/skills",
+    ".kilo/skills",
     ".kilocode/skills",
     ".kiro/skills",
+    ".kimchi/skills",
     ".kode/skills",
     ".mcpjam/skills",
+    ".minimax/skills",
     ".mux/skills",
     ".neovate/skills",
     ".omp/skills",
@@ -272,6 +246,7 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".openhands/skills",
     ".pi/skills",
     ".pochi/skills",
+    ".posit/assistant/skills",
     ".qoder/skills",
     ".qwen/skills",
     ".roo/skills",
@@ -279,6 +254,7 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".vibe/skills",
     ".windsurf/skills",
     ".workbuddy/skills",
+    ".zcode/skills",
     ".zencoder/skills",
     ".adal/skills",
 ];
@@ -358,47 +334,6 @@ fn walk_skill_container(dir: &Path, results: &mut Vec<PathBuf>, depth: usize, ma
     }
 }
 
-/// Would root-first discovery accept a `SKILL.md` at `folder_path`, judged
-/// from a tree listing instead of the filesystem?
-///
-/// Mirrors [`scan_priority_skill_dirs`] for paths that are not checked out:
-/// the folder must sit inside a priority container at most
-/// [`SKILL_CONTAINER_MAX_DEPTH`] levels down, and no ancestor inside that
-/// container may itself be a skill (shadowing). `tree_contains` answers
-/// whether a repository-relative file path exists at the revision.
-/// Plugin-manifest-declared directories are not consulted here.
-pub(crate) fn is_container_skill_dir(
-    folder_path: &str,
-    tree_contains: impl Fn(&str) -> bool,
-) -> bool {
-    PRIORITY_SKILL_DIRS
-        .iter()
-        .filter(|container| **container != ".")
-        .any(|container| {
-            let Some(rest) = folder_path
-                .strip_prefix(container)
-                .and_then(|rest| rest.strip_prefix('/'))
-            else {
-                return false;
-            };
-            let segments: Vec<&str> = rest.split('/').collect();
-            if segments.len() > SKILL_CONTAINER_MAX_DEPTH
-                || segments.iter().any(|segment| segment.is_empty())
-            {
-                return false;
-            }
-            let mut ancestor = (*container).to_string();
-            for segment in &segments[..segments.len() - 1] {
-                ancestor.push('/');
-                ancestor.push_str(segment);
-                if tree_contains(&format!("{ancestor}/SKILL.md")) {
-                    return false;
-                }
-            }
-            true
-        })
-}
-
 fn is_safe_repository_directory(base_dir: &Path, directory: &Path) -> bool {
     let Ok(relative) = directory.strip_prefix(base_dir) else {
         return false;
@@ -428,84 +363,6 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
     SkillDiscovery::new(repo_dir, full_depth).discover()
 }
 
-/// What a harness- or pin-driven install lookup wants out of a checkout.
-///
-/// `scope` restricts discovery to a repo-relative subtree (a pinned
-/// subpath); `name` filters by requested identity; `copy` is the ranking
-/// request handed to `pack_layout::choose_copy`. A default query (no scope,
-/// no name, default `copy`) takes the root-first/catalog fallback path
-/// instead of the harness/pin ranking below.
-pub(crate) struct InstallQuery<'a> {
-    pub scope: Option<&'a str>,
-    pub name: Option<&'a str>,
-    pub copy: CopyRequest<'a>,
-}
-
-/// Resolve which discovered folders to install from a fetched checkout.
-///
-/// When `q.copy` has neither a harness nor a pinned folder, catalog folders
-/// win and a remaining root `SKILL.md` is dropped if any nested copy exists.
-///
-/// When `q.copy.harness` is set, that `.<harness>/` tree wins even if
-/// `skills/` also exists; otherwise the fallback order is the harness column
-/// of `pack_layout::choose_copy` (catalog, `installed`, `.agents`, …).
-///
-/// When `q.copy.pinned` is set, only that exact folder qualifies; `q.scope`
-/// (normally the same folder) restricts the scan to its subtree, so a pin
-/// inside an otherwise-ignored directory (`tests/…`) is still discovered.
-///
-/// Never selects the repo root outside a pin. Fails only when no nested
-/// SKILL.md exists.
-pub(crate) fn resolve_install_skills(
-    repo_dir: &Path,
-    q: &InstallQuery<'_>,
-) -> Result<Vec<DiscoveredSkill>, String> {
-    if q.copy.harness.is_some() || q.copy.pinned.is_some() {
-        let discovery = SkillDiscovery::new(repo_dir, true);
-        let discovery = match q.scope {
-            Some(scope) => discovery.within(scope),
-            None => discovery,
-        };
-        let mut all: Vec<DiscoveredSkill> = discovery
-            .collect_candidates()
-            .into_iter()
-            .map(SkillCandidate::discovered_skill)
-            .collect();
-        if let Some(name) = q.name {
-            all.retain(|skill| skill.id.eq_ignore_ascii_case(name));
-        }
-        let manifest_dirs = crate::plugin_manifest::declared_skill_dir_names(repo_dir);
-        if let Some(skill) = choose_copy(&all, |skill| &skill.folder_path, q.copy, &manifest_dirs) {
-            return Ok(vec![skill.clone()]);
-        }
-        return Err(match q.copy.pinned {
-            Some(pinned) => {
-                format!("No installable SKILL.md was found at the pinned path '{pinned}'.")
-            }
-            None => crate::pack_layout::missing_skill_payload_error(
-                q.copy.harness.unwrap_or_default(),
-                q.name,
-            ),
-        });
-    }
-
-    let mut skills = discover_skills(repo_dir, false);
-    if skills.iter().any(|skill| skill.folder_path.is_empty()) {
-        let all = discover_skills_without_dedup(repo_dir, true, None);
-        if all.iter().any(|skill| !skill.folder_path.is_empty()) {
-            skills.retain(|skill| !skill.folder_path.is_empty());
-            if skills.is_empty() {
-                skills = dedupe_discovered_skills(
-                    all.into_iter()
-                        .filter(|skill| !skill.folder_path.is_empty())
-                        .collect(),
-                    &crate::plugin_manifest::declared_skill_dir_names(repo_dir),
-                );
-            }
-        }
-    }
-    Ok(skills)
-}
 
 /// Full discovery without identity deduplication, for integrity-sensitive
 /// callers that must reject collisions instead of selecting one candidate.
@@ -536,80 +393,51 @@ pub fn discover_skills_without_dedup(
 
 // ── Deduplication ───────────────────────────────────────────────────
 
-/// Collapse catalog + harness copies of the same identity into one install
-/// unit. Two independent (non-harness) folders that share an identity are
-/// still a collision — callers that must not guess should fail closed.
-pub fn collapse_pack_identity_copies(
-    skills: Vec<DiscoveredSkill>,
-) -> Result<Vec<DiscoveredSkill>, String> {
-    let mut groups: HashMap<String, Vec<DiscoveredSkill>> = HashMap::new();
-    for skill in skills {
-        groups
-            .entry(skill.id.to_lowercase())
-            .or_default()
-            .push(skill);
-    }
-    let mut collapsed = Vec::with_capacity(groups.len());
-    let mut collisions = Vec::new();
-    for (identity, group) in groups {
-        let independents = group
-            .iter()
-            .filter(|skill| !crate::pack_layout::is_harness_skill_folder(&skill.folder_path))
-            .count();
-        if independents > 1 {
-            collisions.push(identity);
-            continue;
-        }
-        collapsed.push(
-            choose_copy(
-                &group,
-                |skill| &skill.folder_path,
-                CopyRequest::default(),
-                &[],
-            )
-            .expect("identity group is non-empty")
-            .clone(),
-        );
-    }
-    if !collisions.is_empty() {
-        collisions.sort();
-        return Err(format!(
-            "duplicate Skill identities: {}",
-            collisions.join(", ")
-        ));
-    }
-    collapsed.sort_by(|left, right| left.folder_path.cmp(&right.folder_path));
-    Ok(collapsed)
-}
-
-/// One skill per identity, chosen by the default column of
-/// `pack_layout::choose_copy`. Identities keep first-seen order.
+/// One skill per identity, first-seen in priority order (vercel parity).
+///
+/// Rank = (priority-container index, folder depth, path): `skills/foo`
+/// shadows `.claude/skills/foo`; inside one container the shallower folder
+/// wins; ties break lexicographically for determinism.
 pub fn dedupe_discovered_skills(
     skills: Vec<DiscoveredSkill>,
-    manifest_dirs: &[String],
+    _manifest_dirs: &[String],
 ) -> Vec<DiscoveredSkill> {
     let mut order: Vec<String> = Vec::new();
-    let mut groups: HashMap<String, Vec<DiscoveredSkill>> = HashMap::new();
+    let mut groups: HashMap<String, DiscoveredSkill> = HashMap::new();
     for skill in skills {
         let key = skill.id.to_lowercase();
-        if !groups.contains_key(&key) {
-            order.push(key.clone());
+        match groups.get_mut(&key) {
+            None => {
+                order.push(key.clone());
+                groups.insert(key, skill);
+            }
+            Some(current) => {
+                if priority_rank(&skill.folder_path) < priority_rank(&current.folder_path) {
+                    *current = skill;
+                }
+            }
         }
-        groups.entry(key).or_default().push(skill);
     }
     order
         .into_iter()
-        .filter_map(|key| {
-            let group = groups.remove(&key)?;
-            choose_copy(
-                &group,
-                |skill| &skill.folder_path,
-                CopyRequest::default(),
-                manifest_dirs,
-            )
-            .cloned()
-        })
+        .filter_map(|key| groups.remove(&key))
         .collect()
+}
+
+/// Sort key implementing "first seen in priority order wins".
+fn priority_rank(folder_path: &str) -> (usize, usize, String) {
+    let container = PRIORITY_SKILL_DIRS
+        .iter()
+        .position(|dir| {
+            *dir == "."
+                || folder_path == dir.trim_end_matches('/')
+                || folder_path
+                    .strip_prefix(&format!("{dir}/"))
+                    .is_some_and(|rest| !rest.is_empty())
+        })
+        .unwrap_or(PRIORITY_SKILL_DIRS.len());
+    let depth = folder_path.split('/').filter(|s| !s.is_empty()).count();
+    (container, depth, folder_path.to_string())
 }
 
 fn normalize_folder_path(relative_dir: &Path) -> String {
@@ -646,7 +474,7 @@ fn default_root_skill_name(repo_dir: &Path) -> String {
 
 /// Find all SKILL.md files using a full recursive scan.
 ///
-/// An ignored directory (`pack_layout::IGNORED_DIR_NAMES`) may itself be a
+/// An ignored directory ([`IGNORED_DIR_NAMES`]) may itself be a
 /// Skill (`skills/test`), but nothing below it is scanned.
 pub fn find_all_skill_md_files(dir: &Path) -> Vec<PathBuf> {
     let mut results = Vec::new();
@@ -667,7 +495,7 @@ pub fn find_all_skill_md_files(dir: &Path) -> Vec<PathBuf> {
             };
 
             if file_type.is_dir() {
-                if !crate::pack_layout::IGNORED_DIR_NAMES.contains(&&*name_str) {
+                if !IGNORED_DIR_NAMES.contains(&&*name_str) {
                     stack.push(path);
                 } else if is_safe_skill_manifest(&path.join("SKILL.md")) {
                     results.push(path.join("SKILL.md"));

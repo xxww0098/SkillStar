@@ -104,18 +104,6 @@ pub(crate) fn find_internet_password(
     Ok(Some(InternetPassword { account, password }))
 }
 
-pub(crate) fn add_internet_password(
-    server: &str,
-    account: &str,
-    password: &str,
-) -> UsageResult<()> {
-    ensure_keychain_allowed()?;
-    let _ = (server, account, password);
-    Err(UsageError::Other(
-        "已禁用向 macOS Keychain 写入凭据，所有密钥纯本地加密存储".into(),
-    ))
-}
-
 pub(crate) fn delete_internet_password(server: &str) -> UsageResult<()> {
     ensure_keychain_allowed()?;
     let _ = server;
@@ -224,7 +212,6 @@ mod tests {
         for error in [
             find_internet_password_account("https://zed.dev").expect_err("account"),
             find_internet_password("https://zed.dev", "user-1").expect_err("find"),
-            add_internet_password("https://zed.dev", "user-1", "secret").expect_err("add"),
             delete_internet_password("https://zed.dev").expect_err("delete"),
         ] {
             assert_eq!(error.to_string(), SANDBOX_ERROR);

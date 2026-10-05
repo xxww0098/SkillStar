@@ -1,7 +1,6 @@
 //! Pure data types for patrol configuration, status, and events.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 // ── Persistent Configuration ────────────────────────────────────────────
 
@@ -47,11 +46,4 @@ pub struct PatrolCheckEvent {
     pub upstream_change: Option<skillstar_core::types::UpstreamChange>,
     pub skills_checked: u64,
     pub updates_found: u64,
-}
-
-/// Lightweight hub skill entry used by `collect_hub_skills` in the Tauri crate.
-#[derive(Debug, Clone)]
-pub struct HubSkillEntry {
-    pub name: String,
-    pub path: PathBuf,
 }

@@ -122,10 +122,12 @@ fn install_blocking(
         "{}#{}",
         request.repository.clone_url, request.manifest.commit_sha
     );
-    let (_repo_url, _short, repo_dir, discovered) = git
-        .fetch_repo_scanned_detailed(&source, true)
+    let fetched = git
+        .fetch_repo_scanned(&source, true)
         .map_err(|error| git_read_error(error, "Unable to read the selected channel release"))?;
-    let discovered = discovered
+    let repo_dir = fetched.dir.clone();
+    let discovered = fetched
+        .skills
         .into_iter()
         .map(|skill| (skill.id.to_ascii_lowercase(), skill))
         .collect::<BTreeMap<_, _>>();
@@ -141,13 +143,7 @@ fn install_blocking(
         })
         .map(|skill| (skill.id.to_ascii_lowercase(), skill))
         .collect::<BTreeMap<_, _>>();
-    let existing_lock =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-            .map_err(|error| {
-                install_error(format!(
-                    "Unable to read installed Skill provenance: {error}"
-                ))
-            })?;
+    let existing_lock = skillstar_skills::skill_lock::load();
     let hub_skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let mut targets = Vec::new();
 
@@ -276,12 +272,7 @@ fn installed_receipt(
     request: &ChannelInstallRequest,
     newly_installed_skill_ids: &[String],
 ) -> Result<ChannelInstallReceipt, SharedChannelError> {
-    let lock_path = skillstar_skills::lockfile::lockfile_path();
-    let lockfile = skillstar_skills::lockfile::Lockfile::load(&lock_path).map_err(|error| {
-        install_error(format!(
-            "Unable to read installed Skill provenance: {error}"
-        ))
-    })?;
+    let lockfile = skillstar_skills::skill_lock::load();
     let released = request
         .manifest
         .skills
@@ -306,13 +297,7 @@ fn installed_receipt(
 }
 
 fn verify_install_receipt(receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError> {
-    let lockfile =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-            .map_err(|error| {
-                install_error(format!(
-                    "Unable to verify installed Skill provenance: {error}"
-                ))
-            })?;
+    let lockfile = skillstar_skills::skill_lock::load();
     for skill in &receipt.skills {
         verify_installed_skill(skill, &lockfile)?;
     }
@@ -321,29 +306,22 @@ fn verify_install_receipt(receipt: &ChannelInstallReceipt) -> Result<(), SharedC
 
 fn verify_installed_skill(
     skill: &ChannelSubscribedSkill,
-    lockfile: &skillstar_skills::lockfile::Lockfile,
+    lock: &skillstar_skills::skill_lock::SkillLock,
 ) -> Result<(), SharedChannelError> {
-    let entry = lockfile
+    // D-081: canonical copies carry no checkout; the guarantee is the lock's
+    // provenance plus the canonical content hash equaling the release hash.
+    let entry = lock
         .skills
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(&skill.id))
+        .get(&skill.id)
         .ok_or_else(content_integrity_error)?;
-    let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(&skill.id);
-    let checkout =
-        skillstar_skills::repo_link::repo_root_of(&hub_path).ok_or_else(content_integrity_error)?;
-    let head = skillstar_skills::git::ops::rev_parse(&checkout, "HEAD")
-        .map_err(|_| content_integrity_error())?;
     let current =
         skillstar_skills::content::snapshot(&skill.id).map_err(|_| content_integrity_error())?;
     if current.content_hash != skill.release_content_hash
         || skill.baseline_hash != skill.release_content_hash
-        || !head.eq_ignore_ascii_case(&skill.provenance.git_ref)
-        || entry.content_hash.as_deref() != Some(skill.release_content_hash.as_str())
-        || entry.content_hash_version != Some(skill.release_content_hash_version)
         || entry.git_ref.as_deref() != Some(skill.provenance.git_ref.as_str())
-        || entry.source_folder.as_deref().unwrap_or_default() != skill.provenance.source_folder
+        || entry.skill_path.as_deref().unwrap_or_default() != skill.provenance.source_folder
         || !skillstar_skills::source_resolver::same_remote_url(
-            &entry.git_url,
+            &entry.source_url,
             &skill.provenance.repository_url,
         )
     {
@@ -355,13 +333,7 @@ fn verify_installed_skill(
 fn rollback_install_receipt_preserving_changes(
     receipt: &ChannelInstallReceipt,
 ) -> Result<(), SharedChannelError> {
-    let lockfile =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-            .map_err(|error| {
-                install_error(format!(
-                    "Unable to inspect staged install rollback: {error}"
-                ))
-            })?;
+    let lockfile = skillstar_skills::skill_lock::load();
     let mut failures = Vec::new();
     for name in receipt.newly_installed_skill_ids.iter().rev() {
         let Some(skill) = receipt
@@ -407,34 +379,28 @@ fn with_install_rollback(
 fn subscribed_skill_from_lock(
     request: &ChannelInstallRequest,
     release: &super::ChannelReleaseSkill,
-    lockfile: &skillstar_skills::lockfile::Lockfile,
+    lock: &skillstar_skills::skill_lock::SkillLock,
 ) -> Result<ChannelSubscribedSkill, SharedChannelError> {
-    let entry = lockfile
+    let entry = lock
         .skills
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(&release.id))
+        .get(&release.id)
         .ok_or_else(content_integrity_error)?;
     if !skillstar_skills::source_resolver::same_remote_url(
-        &entry.git_url,
+        &entry.source_url,
         &request.repository.clone_url,
     ) || entry.git_ref.as_deref() != Some(request.manifest.commit_sha.as_str())
-        || entry.source_folder.as_deref().unwrap_or_default() != release.content_root
+        || entry.skill_path.as_deref().unwrap_or_default() != release.content_root
     {
         return Err(selection_conflict(&release.id));
     }
-    let baseline_hash = entry
-        .content_hash
-        .clone()
-        .ok_or_else(content_integrity_error)?;
-    let baseline_hash_version = entry
-        .content_hash_version
-        .ok_or_else(content_integrity_error)?;
-    let current_baseline = skillstar_skills::content::snapshot(&entry.name)
+    // D-081: the install lock carries no content baseline; the channel's own
+    // baseline is the canonical content snapshot, which must still equal the
+    // reviewed release hash.
+    let baseline_hash = skillstar_skills::content::snapshot(&release.id)
         .map_err(|_| content_integrity_error())?
         .content_hash;
-    if baseline_hash_version != CHANNEL_CONTENT_HASH_VERSION
+    if release.content_hash_version != CHANNEL_CONTENT_HASH_VERSION
         || baseline_hash != release.content_hash
-        || current_baseline != release.content_hash
     {
         return Err(SharedChannelError::new(
             SharedChannelErrorCode::SubscriptionSelectionInvalid,
@@ -450,10 +416,10 @@ fn subscribed_skill_from_lock(
         release_content_hash: release.content_hash.clone(),
         release_content_hash_version: release.content_hash_version,
         baseline_hash,
-        baseline_hash_version,
+        baseline_hash_version: release.content_hash_version,
         provenance: ChannelSkillProvenance {
             repository_id: request.repository.id,
-            repository_url: entry.git_url.clone(),
+            repository_url: entry.source_url.clone(),
             git_ref: request.manifest.commit_sha.clone(),
             source_folder: release.content_root.clone(),
         },
@@ -570,14 +536,6 @@ mod tests {
                 &repository.join("skills/writer"),
             )?
             .content_hash;
-            let cache = skillstar_core::infra::paths::repos_cache_dir().join(format!(
-                "{}--ref--{}",
-                skillstar_skills::source_resolver::cache_dir_name("acme/channel"),
-                skillstar_skills::source_resolver::cache_dir_name(&commit)
-            ));
-            fs::create_dir_all(cache.parent().unwrap())?;
-            git_clone(&repository, &cache)?;
-
             assert!(skillstar_skills::agents::toggle_profile("codex")?);
             let agent_copy = home.join(".codex/skills/writer");
             fs::create_dir_all(&agent_copy)?;
@@ -613,7 +571,12 @@ mod tests {
                     name: "channel".into(),
                     default_branch: "main".into(),
                     html_url: "https://github.com/acme/channel".into(),
-                    clone_url: "https://github.com/acme/channel.git".into(),
+                    // D-081 fetches the remote directly (no repo cache), so
+                    // the fixture serves the release over a file:// remote.
+                    clone_url: format!(
+                        "file://{}",
+                        repository.display()
+                    ),
                     private: true,
                     permissions: RepositoryPermissions {
                         admin: false,
@@ -700,21 +663,6 @@ mod tests {
         }
     }
 
-    fn git_clone(source: &std::path::Path, destination: &std::path::Path) -> anyhow::Result<()> {
-        let output = skillstar_core::infra::path_env::command_with_path("git")
-            .args(["clone", "-q"])
-            .arg(source)
-            .arg(destination)
-            .output()?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            anyhow::bail!(
-                "git clone failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-        }
-    }
 
     fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
         unsafe { std::env::set_var(key, value) }

@@ -960,8 +960,12 @@ describe("ModelsHub", () => {
 
     const list = await screen.findByRole("list", { name: "接入端点" });
     expect(within(list).getByText(/127\.0\.0\.1:21847\/v1\/chat\/completions/)).toBeTruthy();
+    expect(within(list).getByText(/127\.0\.0\.1:21847\/v1\/responses/)).toBeTruthy();
+    expect(within(list).getByText(/127\.0\.0\.1:21847\/v1beta\/models\/\{model\}:generateContent/)).toBeTruthy();
     expect(within(list).getByRole("button", { name: "复制 OpenAI 端点" })).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "复制 Responses 端点" })).toBeTruthy();
     expect(within(list).getByRole("button", { name: "复制 Anthropic 端点" })).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "复制 Gemini 端点" })).toBeTruthy();
     const text = document.body.textContent ?? "";
     expect(text).not.toMatch(/https:\/\//);
     expect(text).not.toContain("api.openai.com");

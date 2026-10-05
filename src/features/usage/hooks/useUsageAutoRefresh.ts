@@ -10,8 +10,6 @@ export const USAGE_REFRESH_INTERVALS = [
   { ms: 3_600_000, key: "interval1h" },
 ] as const;
 
-export type UsageRefreshIntervalKey = (typeof USAGE_REFRESH_INTERVALS)[number]["key"];
-
 const DEFAULT_INTERVAL_MS = USAGE_REFRESH_INTERVALS[1].ms;
 
 export interface UsageAutoRefreshSettings {

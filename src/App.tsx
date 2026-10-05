@@ -5,6 +5,7 @@ import { KeepAliveOutlet } from "./components/layout/KeepAliveOutlet";
 import { Sidebar } from "./components/layout/Sidebar";
 import { LoadingLogo } from "./components/ui/LoadingLogo";
 import { Toaster } from "./components/ui/sonner";
+import { UsagePageSkeleton } from "./features/usage/components/UsageSkeleton";
 import { UsageDataProvider } from "./features/usage/context/UsageDataContext";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNavigation } from "./hooks/useNavigation";
@@ -320,7 +321,9 @@ function AppContent() {
               transition={{ duration: prefersReducedMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }}
               className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             >
-              <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
+              <Suspense fallback={nav.appMode === "usage" ? <UsagePageSkeleton /> : <PageFallback />}>
+                {renderPage()}
+              </Suspense>
             </motion.div>
           </div>
         </div>

@@ -29,13 +29,14 @@ pub(super) fn classify(status: u16, body: &str, label: &str) -> UsageResult<Valu
         ))
     })?;
     if let Some(code) = value.get("code").and_then(super::json_i64)
-        && code != 0 {
-            let detail = super::pick_string(&value, &[&["message"], &["msg"], &["error"]])
-                .unwrap_or_else(|| "business error".into());
-            return Err(UsageError::Fetcher(format!(
-                "{label} 业务错误 {code}: {detail}"
-            )));
-        }
+        && code != 0
+    {
+        let detail = super::pick_string(&value, &[&["message"], &["msg"], &["error"]])
+            .unwrap_or_else(|| "business error".into());
+        return Err(UsageError::Fetcher(format!(
+            "{label} 业务错误 {code}: {detail}"
+        )));
+    }
     Ok(value)
 }
 

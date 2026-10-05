@@ -47,15 +47,6 @@ pub const ROLE_VISION: &str = "vision";
 /// Sub-agent fan-out.
 pub const ROLE_SUBAGENT: &str = "subagent";
 
-/// The canonical five, in presentation order.
-pub const CANONICAL_ROLE_IDS: &[&str] = &[
-    ROLE_DEFAULT,
-    ROLE_FAST,
-    ROLE_PLAN,
-    ROLE_VISION,
-    ROLE_SUBAGENT,
-];
-
 /// Whether a role constrains which models may fill it.
 ///
 /// The filter belongs to the *role*, not to the picker: "vision" means "this
@@ -81,7 +72,7 @@ pub enum RoleCapability {
 /// own copy of every agent's role list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RoleDef {
-    /// Canonical role id (one of [`CANONICAL_ROLE_IDS`]) or an agent-private id.
+    /// Canonical role id or an agent-private id.
     pub id: &'static str,
     /// What this agent's config file calls the role.
     ///

@@ -278,7 +278,6 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
         Ok(ChannelSkillUpdateReceipt {
             previous: request.installed,
             installed,
-            previous_checkout: "/fake/checkout".into(),
             previous_lock_entry: lock_entry("previous", "a"),
             previous_update_available: None,
             update_state_revision_after_apply: None,
@@ -1295,17 +1294,16 @@ pub(super) fn target_v2() -> ChannelReleaseTarget {
     }
 }
 
-fn lock_entry(name: &str, commit: &str) -> skillstar_skills::lockfile::LockEntry {
-    skillstar_skills::lockfile::LockEntry {
-        name: name.into(),
-        git_url: "https://github.com/acme/channel.git".into(),
+fn lock_entry(name: &str, commit: &str) -> skillstar_skills::skill_lock::SkillLockEntry {
+    skillstar_skills::skill_lock::SkillLockEntry {
+        source: "acme/channel".into(),
+        source_type: skillstar_skills::skill_lock::SourceType::Github,
+        source_url: "https://github.com/acme/channel.git".into(),
         git_ref: Some(commit.repeat(40)),
-        tree_hash: "tree".into(),
-        content_hash: Some(hash('a')),
-        content_hash_version: Some(CHANNEL_CONTENT_HASH_VERSION),
+        skill_path: Some(format!("skills/{name}")),
+        skill_folder_hash: None,
         installed_at: "2026-08-05T00:00:00Z".into(),
-        source_folder: Some(format!("skills/{name}")),
-        pinned: false,
+        updated_at: "2026-08-05T00:00:00Z".into(),
     }
 }
 

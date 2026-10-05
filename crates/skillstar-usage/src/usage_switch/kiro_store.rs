@@ -3,12 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value};
-use sha1::{Digest, Sha1};
-use skillstar_core::infra::fs_ops::create_rolling_backup;
 use crate::crypto;
 use crate::subscription::Subscription;
 use crate::{UsageError, UsageResult, storage, tool_paths, vscdb};
+use serde_json::{Map, Value};
+use sha1::{Digest, Sha1};
+use skillstar_core::infra::fs_ops::create_rolling_backup;
 
 use super::{AUTH_FILE, BUILDER_ID_START_URL, CATALOG_ID, HASH_LEN, USAGE_DB_KEY};
 

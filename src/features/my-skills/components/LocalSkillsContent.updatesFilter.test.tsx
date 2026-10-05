@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { RepoNewSkill, Skill } from "../../../types";
+import type { Skill } from "../../../types";
 
 /** Regression harness for the "needs attention" redesign: the sidebar badge,
  *  the toolbar chip and the updates filter must all read the same predicate
- *  (content updates + removed / renamed upstreams), so the number the badge
- *  promises is exactly what the filter shows. */
+ *  (content updates + removed upstreams), so the number the badge promises is
+ *  exactly what the filter shows. */
 
 let mockSkills: Skill[] = [];
 
@@ -28,22 +28,14 @@ vi.mock("../hooks/useSkills", () => ({
     reinstallRepoSkills: vi.fn(),
     uninstallSkill: vi.fn(),
     runSkillUpdate: vi.fn(),
-    resolveRemovedSkill: vi.fn(),
-    migrateRenamedSkill: vi.fn(),
-    pendingMigrationNames: new Set<string>(),
     pendingUpdateNames: new Set<string>(),
     toggleSkillForAgent: vi.fn(),
     pendingAgentToggleKeys: new Set<string>(),
     readSkillContent: vi.fn(),
     updateSkillContent: vi.fn(),
     batchRemoveSkillsFromAllAgents: vi.fn(),
-    ghostSkills: [] as RepoNewSkill[],
-    dismissGhostSkill: vi.fn(),
-    dismissGhostRepo: vi.fn(),
-    installGhostSkill: vi.fn(),
   }),
   useSkillBadgeCounts: () => ({
-    ghostSkillCount: 0,
     pendingUpdatesCount: mockSkills.filter(
       (skill) => skill.skill_type !== "local" && (skill.update_available || skill.upstream_change),
     ).length,
@@ -106,26 +98,22 @@ const baseSkill: Skill = {
   topics: [],
 };
 
-/** The exact shape that produced the reported bug: a renamed skill with no
+/** The exact shape that produced the reported bug: a removed skill with no
  *  content update — badge counts it, the old filter did not. */
-const renamedSkill: Skill = {
+const removedSkill: Skill = {
   ...baseSkill,
   name: "renamed",
-  upstream_change: {
-    kind: "removed",
-    suggested_local_name: "renamed.local",
-    successor: { skill_id: "renamed-next", folder_path: "skills/renamed-next", description: "", similarity: 92 },
-  },
+  upstream_change: { kind: "removed", suggested_local_name: "renamed.local", successor: null },
 };
 
 describe("LocalSkillsContent attention filter", () => {
   beforeEach(() => {
-    mockSkills = [baseSkill, renamedSkill];
+    mockSkills = [baseSkill, removedSkill];
     renderedSkills = [];
     renderedEmptyMessage = null;
   });
 
-  it("counts removed/renamed skills on the chip even when nothing is content-updatable", () => {
+  it("counts removed skills on the chip even when nothing is content-updatable", () => {
     render(<LocalSkillsContent scopeSwitch={<span>scope</span>} />);
 
     const chip = screen.getByRole("button", { name: /需处理 \(1\)/i });
@@ -135,12 +123,12 @@ describe("LocalSkillsContent attention filter", () => {
 
     fireEvent.click(chip);
 
-    // The filter delivers exactly what the chip promised: the renamed skill.
+    // The filter delivers exactly what the chip promised: the removed skill.
     expect(renderedSkills.map((skill) => skill.name)).toEqual(["renamed"]);
   });
 
   it("keeps update-only skills inside the attention filter alongside upstream changes", () => {
-    mockSkills = [baseSkill, renamedSkill, { ...baseSkill, name: "stale", update_available: true }];
+    mockSkills = [baseSkill, removedSkill, { ...baseSkill, name: "stale", update_available: true }];
 
     render(<LocalSkillsContent scopeSwitch={<span>scope</span>} />);
     expect(screen.getByRole("button", { name: /需处理 \(2\)/i })).toBeInTheDocument();
@@ -158,7 +146,7 @@ describe("LocalSkillsContent attention filter", () => {
     const search = screen.getByPlaceholderText(/搜索技能/i);
     fireEvent.change(search, { target: { value: "steady" } });
 
-    // Search hid the renamed skill, so the chip must say 0 — not lie about 1.
+    // Search hid the removed skill, so the chip must say 0 — not lie about 1.
     const chip = screen.getByRole("button", { name: /需处理 \(0\)/i });
     fireEvent.click(chip);
 

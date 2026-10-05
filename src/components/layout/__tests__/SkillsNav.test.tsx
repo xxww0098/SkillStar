@@ -18,7 +18,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-const badgeCounts = { ghostSkillCount: 0, pendingUpdatesCount: 0 };
+const badgeCounts = { pendingUpdatesCount: 0 };
 vi.mock("../../../features/my-skills/hooks/useSkills", () => ({
   useSkillBadgeCounts: () => badgeCounts,
 }));
@@ -33,7 +33,6 @@ describe("SkillsNav", () => {
   };
 
   beforeEach(() => {
-    badgeCounts.ghostSkillCount = 0;
     badgeCounts.pendingUpdatesCount = 0;
   });
 
@@ -93,12 +92,10 @@ describe("SkillsNav", () => {
     expect(titledButtons.length).toBeGreaterThanOrEqual(4);
   });
 
-  it("shows pending-update and ghost counts on the skills item", () => {
+  it("shows the pending-update count on the skills item", () => {
     badgeCounts.pendingUpdatesCount = 3;
-    badgeCounts.ghostSkillCount = 2;
     render(<SkillsNav {...defaultProps} />);
 
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("+2")).toBeInTheDocument();
   });
 });

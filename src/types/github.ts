@@ -42,17 +42,6 @@ export interface GitHubAuthError {
   message: string;
 }
 
-export type GitTransportErrorCode =
-  | "not_authenticated"
-  | "token_expired"
-  | "unauthorized"
-  | "app_not_installed"
-  | "network"
-  | "cancelled"
-  | "credential_unavailable"
-  | "unsafe_remote"
-  | "other";
-
 export type GitOperationPhase = "preparing" | "running" | "completed" | "failed" | "cancelled";
 
 /** Where an install pipeline currently is; attached to `running` progress events. */

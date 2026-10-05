@@ -35,18 +35,9 @@ export const SAMPLE_SKILLS: Skill[] = [
     stars: 982,
     installed: true,
     update_available: false,
-    // Upstream moved it into a bucket under a new name: the card offers a
-    // one-step migration and the ghost card points back here.
-    upstream_change: {
-      kind: "removed",
-      suggested_local_name: "xlsx.local",
-      successor: {
-        skill_id: "xlsx-tools",
-        folder_path: "skills/data/xlsx-tools",
-        description: "Create, read and edit Excel spreadsheets, charts, pivots and formulas.",
-        similarity: 88,
-      },
-    },
+    // Upstream removed it: update attempts report it as skipped; reinstall
+    // from the source or uninstall are the remaining exits.
+    upstream_change: { kind: "removed", suggested_local_name: "xlsx.local", successor: null },
     last_updated: iso(6),
     git_url: "https://github.com/anthropics/skills",
     tree_hash: "e5f6a7b8",
@@ -64,7 +55,7 @@ export const SAMPLE_SKILLS: Skill[] = [
     stars: 2150,
     installed: true,
     update_available: false,
-    // Dropped upstream with no successor: keep a local copy or remove.
+    // Dropped upstream: updates skip it; the card shows the removed chip.
     upstream_change: { kind: "removed", suggested_local_name: "deep-research.local", successor: null },
     last_updated: iso(1),
     git_url: "https://github.com/anthropics/skills",

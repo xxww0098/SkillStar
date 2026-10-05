@@ -388,21 +388,6 @@ fn maybe_upgrade_xai_title(subscription: &mut Subscription) {
     super::common::apply_email_title(subscription, email.as_deref(), &["Grok"]);
 }
 
-/// Refresh Grok OAuth material when the account-switch transaction has already
-/// determined that the effective expiry (stored metadata plus JWT `exp`) is
-/// near/unknown. This deliberately does not fetch billing data.
-pub async fn refresh_for_cli_switch(subscription: &mut Subscription) -> UsageResult<()> {
-    if subscription.catalog_id != "xai" {
-        return Err(UsageError::Other(format!(
-            "Grok credential refresh received catalog {}",
-            subscription.catalog_id
-        )));
-    }
-    refresh_xai_tokens(subscription).await?;
-    maybe_upgrade_xai_title(subscription);
-    Ok(())
-}
-
 /// Consume one of the account's available Grok usage-reset credits, then
 /// return the newly-reset billing snapshot.
 ///

@@ -36,25 +36,25 @@ use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 
 mod board;
 mod compat;
+mod diagnostics;
+mod efforts;
 mod groups;
 mod listen;
 mod names;
 mod profiles;
-mod routing;
-mod efforts;
-mod diagnostics;
 mod provider_cmds;
+mod routing;
 mod tools;
 
 pub use board::*;
-pub use efforts::*;
 pub use diagnostics::*;
+pub use efforts::*;
 pub use groups::*;
 pub use listen::*;
 pub use names::*;
 pub use profiles::*;
-pub use routing::*;
 pub use provider_cmds::*;
+pub use routing::*;
 pub use tools::*;
 
 /// Load the v4 store, turning a store error into an `AppError` the renderer

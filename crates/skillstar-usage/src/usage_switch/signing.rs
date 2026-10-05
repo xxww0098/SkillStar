@@ -97,14 +97,10 @@ pub fn signing_material(catalog_id: &str) -> Option<SigningMaterial> {
     };
     let custody = Custody::open(target).ok()?;
     match custody.probe() {
-        Ok(LinkState::LinkedTo(id)) => {
-            live_material(target, custody.live_path(), Some(id))
-                .or_else(|| row_material(catalog_id, Freshness::Row))
-        }
-        Ok(LinkState::Diverged) => {
-            live_material(target, custody.live_path(), None)
-                .or_else(|| row_material(catalog_id, Freshness::Row))
-        }
+        Ok(LinkState::LinkedTo(id)) => live_material(target, custody.live_path(), Some(id))
+            .or_else(|| row_material(catalog_id, Freshness::Row)),
+        Ok(LinkState::Diverged) => live_material(target, custody.live_path(), None)
+            .or_else(|| row_material(catalog_id, Freshness::Row)),
         Ok(LinkState::Missing) => row_material(catalog_id, Freshness::Row),
         Err(error) => {
             tracing::warn!(
@@ -132,7 +128,9 @@ fn live_material(
     live: &Path,
     subscription_id: Option<String>,
 ) -> Option<SigningMaterial> {
-    let root = target.external_root(live).or_else(|| read_live_root(live))?;
+    let root = target
+        .external_root(live)
+        .or_else(|| read_live_root(live))?;
     // The token existed when probe attributed it; the file may have been
     // swapped by the CLI since. Return None so the caller degrades to the
     // stored row instead of signing a token that just vanished.
@@ -168,9 +166,7 @@ fn read_live_root(live: &Path) -> Option<Value> {
 /// carry over).
 fn row_material(catalog_id: &str, freshness: Freshness) -> Option<SigningMaterial> {
     let rows = storage::list_subscriptions().ok()?;
-    let active = storage::get_active_subscription(catalog_id)
-        .ok()
-        .flatten();
+    let active = storage::get_active_subscription(catalog_id).ok().flatten();
     let row = pinned_row(&rows, catalog_id, active.as_deref())?.clone();
     let subscription_id = row.id.clone();
     Some(SigningMaterial {

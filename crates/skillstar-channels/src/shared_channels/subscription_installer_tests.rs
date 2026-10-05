@@ -82,26 +82,30 @@ fn install_fixture() -> (InstallSandbox, ChannelInstallReceipt, PathBuf, PathBuf
     git(&repo, &["commit", "-m", "initial"]);
     let head = git(&repo, &["rev-parse", "HEAD"]);
 
-    let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("writer");
-    std::fs::create_dir_all(hub_skill.parent().unwrap()).unwrap();
-    skillstar_core::infra::fs_ops::create_symlink(&source, &hub_skill).unwrap();
+    // D-081: installed channel skills are real canonical copies recorded in
+    // the vercel lock — no hub symlink into a checkout.
+    let hub_skill = skillstar_core::infra::paths::agents_skill_dir("writer");
+    std::fs::create_dir_all(&hub_skill).unwrap();
+    std::fs::copy(source.join("SKILL.md"), hub_skill.join("SKILL.md")).unwrap();
     let hash = skillstar_skills::content::snapshot("writer")
         .unwrap()
         .content_hash;
-    let mut lockfile = skillstar_skills::lockfile::Lockfile::default();
-    lockfile.upsert(skillstar_skills::lockfile::LockEntry {
-        name: "writer".into(),
-        git_url: "https://github.com/acme/channel.git".into(),
-        git_ref: Some(head.clone()),
-        tree_hash: "tree".into(),
-        content_hash: Some(hash.clone()),
-        content_hash_version: Some(CHANNEL_CONTENT_HASH_VERSION),
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        source_folder: Some("skills/writer".into()),
-        pinned: false,
-    });
-    lockfile
-        .save(&skillstar_skills::lockfile::lockfile_path())
+    let mut lock = skillstar_skills::skill_lock::SkillLock::default();
+    lock.upsert(
+        "writer",
+        skillstar_skills::skill_lock::SkillLockEntry {
+            source: "acme/channel".into(),
+            source_type: skillstar_skills::skill_lock::SourceType::Github,
+            source_url: "https://github.com/acme/channel.git".into(),
+            git_ref: Some(head.clone()),
+            skill_path: Some("skills/writer".into()),
+            skill_folder_hash: None,
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+    lock
+        .save(&skillstar_skills::skill_lock::lock_path())
         .unwrap();
 
     let receipt = ChannelInstallReceipt {
@@ -158,13 +162,7 @@ async fn metadata_failure_preserves_content_edited_during_commit() {
             .unwrap()
             .contains("Locally edited")
     );
-    assert!(
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-            .unwrap()
-            .skills
-            .iter()
-            .any(|entry| entry.name == "writer")
-    );
+    assert!(skillstar_skills::skill_lock::load().skills.contains_key("writer"));
 }
 
 #[tokio::test]
@@ -193,22 +191,20 @@ async fn metadata_failure_rolls_back_unchanged_install_without_relocking() {
 
     assert_eq!(result.code, SharedChannelErrorCode::Storage);
     assert!(!hub_skill.exists());
-    assert!(
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())
-            .unwrap()
-            .skills
-            .iter()
-            .all(|entry| entry.name != "writer")
-    );
+    assert!(!skillstar_skills::skill_lock::load().skills.contains_key("writer"));
 }
 
+/// D-081: there is no shared checkout to move; the equivalent invariant is
+/// that the canonical content changed between install and commit.
 #[tokio::test]
-async fn final_verification_rejects_a_checkout_that_moved_to_another_commit() {
+async fn final_verification_rejects_edited_canonical_content() {
     let _guard = crate::lock_test_env_async().await;
-    let (_sandbox, receipt, repo, hub_skill) = install_fixture();
-    std::fs::write(repo.join("README.md"), "moved without changing writer\n").unwrap();
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-m", "move head"]);
+    let (_sandbox, receipt, _repo, hub_skill) = install_fixture();
+    std::fs::write(
+        hub_skill.join("SKILL.md"),
+        "---\nname: writer\ndescription: Writer\n---\n# Edited before commit\n",
+    )
+    .unwrap();
     let committed = Arc::new(AtomicBool::new(false));
     let commit_called = committed.clone();
     let installer = GitChannelSubscriptionInstaller::new(
@@ -255,29 +251,8 @@ async fn production_installer_verifies_the_exact_release_checkout() {
     let hash = skillstar_skills::content::snapshot_path("writer", &skill_root)
         .unwrap()
         .content_hash;
-    let cache = skillstar_core::infra::paths::repos_cache_dir().join(format!(
-        "{}--ref--{}",
-        skillstar_skills::repo_scanner::cache_dir_name(&format!(
-            "channel-verify-42-{}",
-            skillstar_skills::repo_scanner::cache_dir_name("https://github.com/acme/channel.git")
-        )),
-        skillstar_skills::repo_scanner::cache_dir_name(&commit)
-    ));
-    std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    let clone = skillstar_core::infra::path_env::command_with_path("git")
-        .args([
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.eol=lf",
-            "clone",
-            "-q",
-        ])
-        .arg(&origin)
-        .arg(&cache)
-        .status()
-        .unwrap();
-    assert!(clone.success());
+    // D-081: verification fetches an isolated temp clone; seeding a
+    // persistent cache entry is no longer part of the contract.
 
     let repository = RemoteRepository {
         id: 42,
@@ -287,7 +262,10 @@ async fn production_installer_verifies_the_exact_release_checkout() {
         name: "channel".into(),
         default_branch: "main".into(),
         html_url: "https://github.com/acme/channel".into(),
-        clone_url: "https://github.com/acme/channel.git".into(),
+        clone_url: format!(
+            "file://{}",
+            std::fs::canonicalize(&origin).unwrap().display()
+        ),
         private: true,
         permissions: super::RepositoryPermissions {
             admin: false,

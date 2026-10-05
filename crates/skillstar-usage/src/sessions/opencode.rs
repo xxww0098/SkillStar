@@ -80,8 +80,8 @@ impl SessionParser for OpenCodeParser {
             #[serde(default)]
             calls: Vec<SessionCall>,
         }
-        let stored: Stored = serde_json::from_value(checkpoint.agent_state.clone())
-            .unwrap_or_default();
+        let stored: Stored =
+            serde_json::from_value(checkpoint.agent_state.clone()).unwrap_or_default();
         stored
             .calls
             .into_iter()
@@ -232,9 +232,7 @@ fn db_root_session(conn: &rusqlite::Connection, sid: &str) -> String {
 /// The old tables' messages, sorted by creation time then id (the table
 /// itself has no order; magpie parseOpenCode sorts).
 fn v1_docs(conn: &rusqlite::Connection, sid: &str) -> Vec<OcDoc> {
-    let Ok(mut rows) =
-        conn.prepare("SELECT data FROM message WHERE session_id = ?1")
-    else {
+    let Ok(mut rows) = conn.prepare("SELECT data FROM message WHERE session_id = ?1") else {
         return Vec::new();
     };
     let mut docs: Vec<OcDoc> = rows
@@ -260,7 +258,11 @@ fn v2_docs(conn: &rusqlite::Connection, sid: &str) -> Vec<OcDoc> {
         return Vec::new();
     };
     let listed = rows.query_map([sid], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     });
     let mut out = Vec::new();
     let mut last_model = String::new();
@@ -269,7 +271,11 @@ fn v2_docs(conn: &rusqlite::Connection, sid: &str) -> Vec<OcDoc> {
             let Ok(parsed) = serde_json::from_str::<V2Data>(&data) else {
                 continue;
             };
-            let model = parsed.model.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+            let model = parsed
+                .model
+                .as_ref()
+                .map(|m| m.id.clone())
+                .unwrap_or_default();
             let doc = match kind.as_str() {
                 "user" => OcDoc {
                     id,
@@ -317,7 +323,11 @@ fn v2_docs(conn: &rusqlite::Connection, sid: &str) -> Vec<OcDoc> {
 /// file name is the fallback); messages are read in file-name order.
 fn json_session_calls(session_json: &Path) -> Vec<SessionCall> {
     // <storage>/session/<project>/<id>.json
-    let Some(storage) = session_json.parent().and_then(Path::parent).and_then(Path::parent) else {
+    let Some(storage) = session_json
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+    else {
         return Vec::new();
     };
     let sid = session_id_of_json(session_json).unwrap_or_else(|| {
@@ -350,7 +360,8 @@ fn json_session_calls(session_json: &Path) -> Vec<SessionCall> {
 
 /// The session document's `id` field.
 fn session_id_of_json(session_json: &Path) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(session_json).ok()?).ok()?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(session_json).ok()?).ok()?;
     let id = value.get("id")?.as_str()?;
     (!id.is_empty()).then(|| id.to_string())
 }
@@ -359,7 +370,9 @@ fn session_id_of_json(session_json: &Path) -> Option<String> {
 fn json_root_session(storage: &Path, sid: &str) -> String {
     let mut root = sid.to_string();
     for _ in 0..64 {
-        let Some(parent) = json_parent_of(storage, &root) else { break };
+        let Some(parent) = json_parent_of(storage, &root) else {
+            break;
+        };
         if parent.is_empty() {
             break;
         }
@@ -377,11 +390,15 @@ fn json_parent_of(storage: &Path, sid: &str) -> Option<String> {
         if !candidate.is_file() {
             continue;
         }
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&std::fs::read(&candidate).ok()?)
+        let Ok(value) =
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&candidate).ok()?)
         else {
             continue;
         };
-        return value.get("parentID").and_then(|p| p.as_str()).map(str::to_string);
+        return value
+            .get("parentID")
+            .and_then(|p| p.as_str())
+            .map(str::to_string);
     }
     None
 }
@@ -410,7 +427,11 @@ fn docs_to_calls(root_session: &str, file: &Path, docs: Vec<OcDoc>) -> Vec<Sessi
         if tokens.is_zero() {
             continue;
         }
-        let at = if doc.completed > 0 { doc.completed } else { doc.created };
+        let at = if doc.completed > 0 {
+            doc.completed
+        } else {
+            doc.created
+        };
         let latency_ms =
             (doc.completed > doc.created).then_some((doc.completed - doc.created) as u64);
         out.push(SessionCall {

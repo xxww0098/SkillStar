@@ -2,12 +2,12 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use base64::Engine;
-use rusqlite::Connection;
-use serde_json::Value;
 use crate::subscription::Subscription;
 use crate::tool_store::safe_storage;
 use crate::{crypto, storage};
+use base64::Engine;
+use rusqlite::Connection;
+use serde_json::Value;
 use tempfile::TempDir;
 
 use super::{

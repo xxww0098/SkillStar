@@ -37,6 +37,7 @@ tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "rt-mult
 base64.workspace = true
 skillstar-git = { path = "../skillstar-git" }
 reqwest = { workspace = true, features = ["form"] }
+tempfile.workspace = true
 
 [target."cfg(windows)".dependencies]
 junction = { workspace = true }

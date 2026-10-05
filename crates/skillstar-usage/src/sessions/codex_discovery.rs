@@ -63,12 +63,10 @@ fn is_date_time(bytes: &[u8]) -> bool {
     if bytes.len() != 19 {
         return false;
     }
-    bytes.iter().enumerate().all(|(index, &byte)| {
-        match index {
-            4 | 7 | 13 | 16 => byte == b'-',
-            10 => byte == b'T',
-            _ => byte.is_ascii_digit(),
-        }
+    bytes.iter().enumerate().all(|(index, &byte)| match index {
+        4 | 7 | 13 | 16 => byte == b'-',
+        10 => byte == b'T',
+        _ => byte.is_ascii_digit(),
     })
 }
 
@@ -94,10 +92,12 @@ pub(super) fn codex_files(agent: &'static str, home: &Path) -> Vec<SessionFile> 
         .map(|f| f.path.clone())
         .filter(|path| !path.ends_with(ZST_SUFFIX))
         .collect();
-    files.retain(|f| match f.path.to_str().and_then(|p| p.strip_suffix(ZST_SUFFIX)) {
-        Some(trimmed) => !plain.contains(Path::new(trimmed)),
-        None => true,
-    });
+    files.retain(
+        |f| match f.path.to_str().and_then(|p| p.strip_suffix(ZST_SUFFIX)) {
+            Some(trimmed) => !plain.contains(Path::new(trimmed)),
+            None => true,
+        },
+    );
     files
 }
 
@@ -114,7 +114,9 @@ fn walk_rollouts(agent: &'static str, dir: &Path, out: &mut Vec<SessionFile>) {
             walk_rollouts(agent, &path, out);
             continue;
         }
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else { continue };
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
         if rollout_thread_id(&name).is_some()
             && let Ok(meta) = entry.metadata()
             && meta.is_file()

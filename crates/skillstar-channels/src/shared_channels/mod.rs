@@ -127,70 +127,23 @@ pub(crate) fn ensure_generic_repository_mutation_allowed(
     Ok(())
 }
 
-fn generic_checkout_is_mutable(skill_path: &std::path::Path) -> anyhow::Result<bool> {
-    let Some(requested_root) = skillstar_skills::repo_link::repo_root_of(skill_path) else {
-        return Ok(true);
-    };
-    let hub = skillstar_core::infra::paths::hub_skills_dir();
-    let entries = match std::fs::read_dir(&hub) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-        Err(error) => return Err(error.into()),
-    };
-    for entry in entries {
-        let entry = entry?;
-        let sibling_path = entry.path();
-        if skillstar_skills::repo_link::repo_root_of(&sibling_path).as_ref()
-            != Some(&requested_root)
-        {
-            continue;
-        }
-        let sibling = entry.file_name().to_string_lossy().into_owned();
-        if managed_repository_for_skill(&sibling)?.is_some() {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 pub(crate) fn generic_installed_skill_is_mutable(
     skill_id: &str,
-    skill_path: &std::path::Path,
+    _skill_path: &std::path::Path,
 ) -> anyhow::Result<bool> {
     if managed_repository_for_skill(skill_id)?.is_some() {
         return Ok(false);
     }
-    let lockfile =
-        skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())?;
-    let entry = lockfile
-        .skills
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(skill_id));
-    let is_repo_backed = skillstar_skills::repo_link::repo_root_of(skill_path).is_some()
-        || skillstar_skills::git::ops::find_repo_root(skill_path).is_some();
-    if is_repo_backed {
-        let Some(entry) = entry else {
-            return Ok(false);
-        };
-        let Some(baseline) = entry.content_hash.as_deref() else {
-            return Ok(false);
-        };
-        if entry.content_hash_version != Some(skillstar_skills::content::SNAPSHOT_HASH_VERSION) {
-            return Ok(false);
-        }
-        let Ok(current) = skillstar_skills::content::snapshot(skill_id) else {
-            return Ok(false);
-        };
-        if current.content_hash != baseline {
-            return Ok(false);
-        }
-    }
-    if let Some(entry) = entry
-        && managed_repository_for_url(&entry.git_url)?.is_some()
+    // D-081: canonical copies are plain directories owned by whoever holds
+    // provenance; the only remaining gate is channel ownership of the
+    // recorded source URL.
+    let lock = skillstar_skills::skill_lock::load();
+    if let Some(entry) = lock.skills.get(skill_id)
+        && managed_repository_for_url(&entry.source_url)?.is_some()
     {
         return Ok(false);
     }
-    generic_checkout_is_mutable(skill_path)
+    Ok(true)
 }
 
 pub const CHANNEL_DESCRIPTOR_VERSION: u32 = 1;
@@ -443,10 +396,6 @@ where
 
     pub async fn list_organizations(&self) -> Result<Vec<GitHubOrganization>, SharedChannelError> {
         self.gateway.list_organizations().await
-    }
-
-    pub fn list_channels(&self) -> Result<Vec<SharedChannelDescriptor>, SharedChannelError> {
-        self.registry.list_read_only()
     }
 
     pub async fn create_channel(
@@ -721,4 +670,41 @@ pub(super) fn validate_remote_repository(
         ));
     }
     Ok(())
+}
+
+/// Collapse catalog + harness copies of one identity into the install unit:
+/// the non-harness (catalog) copy wins; two independent catalog folders with
+/// the same identity are a collision (`Err`).
+pub(super) fn collapse_identity_copies(
+    skills: Vec<skillstar_skills::repo_scanner::DiscoveredSkill>,
+) -> Result<Vec<skillstar_skills::repo_scanner::DiscoveredSkill>, ()> {
+    use std::collections::BTreeMap;
+    let mut groups: BTreeMap<String, Vec<skillstar_skills::repo_scanner::DiscoveredSkill>> =
+        BTreeMap::new();
+    for skill in skills {
+        groups
+            .entry(skill.id.to_ascii_lowercase())
+            .or_default()
+            .push(skill);
+    }
+    let mut collapsed = Vec::new();
+    for (_, group) in groups {
+        let independents = group
+            .iter()
+            .filter(|skill| !is_harness_folder(&skill.folder_path))
+            .count();
+        if independents > 1 {
+            return Err(());
+        }
+        let chosen = group
+            .iter()
+            .find(|skill| !is_harness_folder(&skill.folder_path))
+            .unwrap_or(&group[0]);
+        collapsed.push(chosen.clone());
+    }
+    Ok(collapsed)
+}
+
+fn is_harness_folder(folder_path: &str) -> bool {
+    folder_path.starts_with('.') && folder_path.contains("/skills/")
 }

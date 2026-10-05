@@ -442,9 +442,10 @@ fn open_device_key(map: &Map<String, Value>) -> UsageResult<Option<(String, Stri
     keys.sort();
     for key in keys {
         if let Some(value) = open_storage_value(&map[key])?
-            && let Some(pair) = key_from_value(Some(&value)) {
-                return Ok(Some(pair));
-            }
+            && let Some(pair) = key_from_value(Some(&value))
+        {
+            return Ok(Some(pair));
+        }
     }
     Ok(None)
 }

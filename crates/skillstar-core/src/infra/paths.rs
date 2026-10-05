@@ -25,8 +25,8 @@
 //!
 //! | Variable | Default | Description |
 //! |---|---|---|
-//! | `SKILLSTAR_DATA_DIR` | `~/.skillstar` | App config & metadata root |
-//! | `SKILLSTAR_HUB_DIR` | `~/.skillstar/hub` | Skill hub, repo cache, lockfile |
+//! | `SKILLSTAR_DATA_DIR` | `~/.skillstar` | App config & metadata root; also re-roots [`agents_skills_root`] and [`skill_lock_path`] |
+//! | `SKILLSTAR_HUB_DIR` | `~/.skillstar/hub` | Local-skill authoring root (legacy install hub, removed by D-081 cleanup) |
 //! | `SKILLSTAR_TOOL_SYNC_HOME` | *(real home)* | Sandbox root for external tool-config paths |
 //!
 //! Setting these variables during development keeps dev data completely
@@ -61,6 +61,61 @@ pub fn hub_root() -> PathBuf {
     }
     data_root().join("hub")
 }
+
+/// Canonical installed-skills root, vercel-labs/skills compatible: `~/.agents/skills`.
+///
+/// Skill folders live here as real directory copies (D-081); agent skill dirs
+/// hold relative symlinks into it. Environment overrides, in order: an explicit
+/// `SKILLSTAR_HUB_DIR` (test sandboxes keep working), then `SKILLSTAR_DATA_DIR`
+/// (`<data_root>/agents/skills` dev/test isolation). Production uses the real
+/// `~/.agents/skills` so SkillStar and `npx skills` interoperate.
+pub fn agents_skills_root() -> PathBuf {
+    if let Ok(dir) = std::env::var("SKILLSTAR_HUB_DIR")
+        && !dir.trim().is_empty()
+    {
+        let expanded = shellexpand_home(&dir);
+        return PathBuf::from(expanded).join("skills");
+    }
+    if std::env::var("SKILLSTAR_DATA_DIR")
+        .map(|dir| !dir.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return data_root().join("agents").join("skills");
+    }
+    home_dir().join(".agents").join("skills")
+}
+
+/// One canonical skill folder: `<agents_skills_root>/<name>`.
+pub fn agents_skill_dir(name: &str) -> PathBuf {
+    agents_skills_root().join(name)
+}
+
+/// vercel-format install lock (`.skill-lock.json`).
+///
+/// `$XDG_STATE_HOME/skills/.skill-lock.json` wins, then `~/.agents/.skill-lock.json`
+/// — matching vercel-labs/skills. The same env-override order as
+/// [`agents_skills_root`] re-roots it for dev/test isolation.
+pub fn skill_lock_path() -> PathBuf {
+    if let Ok(dir) = std::env::var("SKILLSTAR_HUB_DIR")
+        && !dir.trim().is_empty()
+    {
+        let expanded = shellexpand_home(&dir);
+        return PathBuf::from(expanded).join(".skill-lock.json");
+    }
+    if std::env::var("SKILLSTAR_DATA_DIR")
+        .map(|dir| !dir.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return data_root().join("agents").join(".skill-lock.json");
+    }
+    if let Ok(xdg) = std::env::var("XDG_STATE_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return PathBuf::from(xdg).join("skills").join(".skill-lock.json");
+    }
+    home_dir().join(".agents").join(".skill-lock.json")
+}
+
 
 /// User home directory (used for agent profile dirs like `~/.claude/skills`).
 ///
@@ -256,9 +311,25 @@ pub fn repo_history_path() -> PathBuf {
     state_dir().join("repo_history.json")
 }
 
-/// `hub/skills/` — the central skill hub (symlinks).
+/// The canonical installed-skills root.
+///
+/// D-081: this IS [`agents_skills_root`] (`~/.agents/skills` in production);
+/// the name survives because deployment and local-authoring code predates the
+/// rename. The pre-D-081 physical directory lives under `legacy_hub_root`.
 pub fn hub_skills_dir() -> PathBuf {
-    hub_root().join("skills")
+    agents_skills_root()
+}
+
+/// The pre-D-081 physical hub root (`~/.skillstar/hub`), used only by the
+/// one-time legacy cleanup. Honors the same env overrides as [`hub_root`].
+pub fn legacy_hub_root() -> PathBuf {
+    if let Ok(dir) = std::env::var("SKILLSTAR_HUB_DIR")
+        && !dir.trim().is_empty()
+    {
+        let expanded = shellexpand_home(&dir);
+        return PathBuf::from(expanded);
+    }
+    data_root().join("hub")
 }
 
 /// `hub/repos/` — cached cloned repositories.

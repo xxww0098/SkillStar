@@ -47,11 +47,6 @@ pub fn which_in_enriched(binary: &str) -> Option<PathBuf> {
     which::which_in(binary, Some(path_str.as_str()), &cwd).ok()
 }
 
-/// Whether a CLI binary is reachable on the enriched PATH.
-pub fn binary_on_enriched_path(binary: &str) -> bool {
-    which_in_enriched(binary).is_some()
-}
-
 #[cfg(unix)]
 fn enriched_path_unix() -> String {
     let current = std::env::var("PATH").unwrap_or_default();

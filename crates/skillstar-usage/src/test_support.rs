@@ -19,9 +19,7 @@ pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Acquire the crate-wide env lock without changing any variables — for
 /// tests that only need serialization against env-mutating tests.
 pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
+    ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner())
 }
 
 pub(crate) struct EnvGuard {

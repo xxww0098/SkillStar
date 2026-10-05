@@ -300,7 +300,7 @@ fn snapshot_published_tree(
         return Err(scanner_error(session));
     }
 
-    let discovered = skillstar_skills::discovery::collapse_pack_identity_copies(
+    let discovered = super::collapse_identity_copies(
         skillstar_skills::discovery::discover_skills_without_dedup(
             &extraction,
             true,

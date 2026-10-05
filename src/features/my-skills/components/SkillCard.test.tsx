@@ -172,42 +172,8 @@ describe("SkillCard", () => {
     fireEvent.click(localBtn);
   });
 
-  it("offers a one-step migration when upstream renamed the skill", () => {
-    const onMigrate = vi.fn();
+  it("marks an upstream-removed skill with a passive chip instead of an action", () => {
     const onUpdate = vi.fn();
-    render(
-      <SkillCard
-        skill={{
-          ...MOCK_SKILL,
-          update_available: true,
-          upstream_change: {
-            kind: "removed",
-            suggested_local_name: "test-skill.local",
-            successor: {
-              skill_id: "test-skill-spec",
-              folder_path: "skills/engineering/test-skill-spec",
-              description: "Renamed",
-              similarity: 91,
-            },
-          },
-        }}
-        onClick={vi.fn()}
-        onUpdate={onUpdate}
-        onMigrate={onMigrate}
-        selectable
-        profiles={[LIBRARY_PROFILE]}
-        onToggleAgent={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByText("迁移到 test-skill-spec"));
-    expect(onMigrate).toHaveBeenCalledWith("test-skill");
-    // A renamed skill cannot be "updated" in place — the rename wins the slot.
-    expect(screen.queryByText("更新")).not.toBeInTheDocument();
-    expect(onUpdate).not.toHaveBeenCalled();
-  });
-
-  it("offers the removal exits when upstream dropped the skill outright", () => {
-    const onResolveRemoved = vi.fn();
     render(
       <SkillCard
         skill={{
@@ -215,14 +181,16 @@ describe("SkillCard", () => {
           upstream_change: { kind: "removed", suggested_local_name: "test-skill.local", successor: null },
         }}
         onClick={vi.fn()}
-        onResolveRemoved={onResolveRemoved}
+        onUpdate={onUpdate}
         selectable
         profiles={[LIBRARY_PROFILE]}
         onToggleAgent={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText("上游已移除"));
-    expect(onResolveRemoved).toHaveBeenCalledWith("test-skill");
+    expect(screen.getByText("上游已移除")).toBeInTheDocument();
+    // No button: updates skip a removed Skill, so the card must not offer one.
+    expect(screen.queryByRole("button", { name: /更新/i })).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 
   it("keeps local skills free of upstream chips", () => {

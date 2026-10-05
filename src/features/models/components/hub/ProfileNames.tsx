@@ -6,9 +6,9 @@ import { modelsKeys } from "../../api/keys";
 import { useProfileNames } from "../../api/profiles";
 
 /**
- * Saved profile names. Applying one calls the existing writer. The name list
- * is the only thing in the labeled list; the save form and the skip line sit
- * outside it.
+ * Saved profile names. Applying one calls the existing writer. The name
+ * list is the only thing in the labeled list; the save form and the skip
+ * line sit outside it.
  */
 export function ProfileNames() {
   const { t } = useTranslation();
@@ -27,11 +27,16 @@ export function ProfileNames() {
   }
 
   return (
-    <div className="space-y-2">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {t("models.gateway.profilesTitle")}
+    <div className="space-y-2.5">
+      <div className="flex items-baseline gap-2">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          {t("models.gateway.profilesTitle")}
+        </div>
+        {names.length > 0 ? (
+          <span className="text-[11px] tabular-nums text-muted-foreground/80">{names.length}</span>
+        ) : null}
       </div>
-      <ul aria-label="profiles" className="space-y-0.5">
+      <ul aria-label="profiles" className="-mx-1.5 space-y-0.5">
         {names.map((item) => {
           const shown = plainText(item);
           if (!shown) return null;
@@ -39,6 +44,8 @@ export function ProfileNames() {
             <li key={item}>
               <button
                 type="button"
+                aria-label={shown}
+                title={t("models.gateway.applyProfileHint")}
                 onClick={() => {
                   void tauriInvoke("apply_profile", { name: item })
                     .then(async (result) => {
@@ -50,9 +57,12 @@ export function ProfileNames() {
                       setError(caught instanceof Error ? caught.message : "");
                     });
                 }}
-                className="w-full truncate rounded-lg px-2.5 py-1.5 text-left text-xs text-foreground transition hover:bg-muted/40"
+                className="group flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-muted/50"
               >
-                {shown}
+                <span className="min-w-0 flex-1 truncate">{shown}</span>
+                <span className="shrink-0 text-[11px] text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                  {t("models.gateway.applyProfile")}
+                </span>
               </button>
             </li>
           );
@@ -63,7 +73,7 @@ export function ProfileNames() {
       ) : null}
       <form
         aria-label="save profile"
-        className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 p-2.5"
+        className="space-y-1.5 rounded-xl bg-muted/30 p-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           void tauriInvoke("save_profile", {
@@ -87,28 +97,28 @@ export function ProfileNames() {
           placeholder={t("models.gateway.profileNamePlaceholder")}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          className="w-full rounded-lg border border-border/60 bg-background px-2 py-1 text-xs"
+          className="w-full rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-xs transition-colors focus-visible:border-primary/50 focus-visible:outline-none"
         />
         <div className="flex gap-1.5">
           <input
             aria-label="profile agent"
-            placeholder="agent id"
+            placeholder={t("models.gateway.agentIdPlaceholder")}
             value={agentId}
             onChange={(event) => setAgentId(event.target.value)}
-            className="min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-2 py-1 font-mono text-xs"
+            className="min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-2 py-1.5 font-mono text-xs transition-colors focus-visible:border-primary/50 focus-visible:outline-none"
           />
           <input
             aria-label="profile model"
-            placeholder="provider/model"
+            placeholder={t("models.gateway.modelRefPlaceholder")}
             value={modelRef}
             onChange={(event) => setModelRef(event.target.value)}
-            className="min-w-0 flex-[1.4] rounded-lg border border-border/60 bg-background px-2 py-1 font-mono text-xs"
+            className="min-w-0 flex-[1.4] rounded-lg border border-border/60 bg-background px-2 py-1.5 font-mono text-xs transition-colors focus-visible:border-primary/50 focus-visible:outline-none"
           />
           <button
             type="submit"
-            className="shrink-0 rounded-lg border border-border/60 bg-background px-2.5 py-1 text-xs text-foreground transition hover:bg-muted/50"
+            className="shrink-0 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
           >
-            Save profile
+            {t("models.gateway.saveProfile")}
           </button>
         </div>
         {error ? (

@@ -14,9 +14,6 @@ type LocalDetailProps = {
   uninstalling?: boolean;
   onReinstall?: (url: string, name: string) => void;
   reinstalling?: boolean;
-  onResolveRemoved?: (name: string) => void;
-  onMigrate?: (name: string) => void;
-  migrating?: boolean;
   onReadContent?: (name: string) => Promise<SkillContent>;
   onSaveContent?: (name: string, content: string) => Promise<void>;
   onPublish?: (name: string) => void;
@@ -65,9 +62,6 @@ export function ScopeDetailDrawer(props: ScopeDetailProps) {
       uninstalling={props.uninstalling}
       onReinstall={props.onReinstall}
       reinstalling={props.reinstalling}
-      onResolveRemoved={props.onResolveRemoved}
-      onMigrate={props.onMigrate}
-      migrating={props.migrating}
       onReadContent={props.onReadContent}
       onSaveContent={props.onSaveContent}
       onPublish={props.onPublish}

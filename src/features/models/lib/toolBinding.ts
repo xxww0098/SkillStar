@@ -7,7 +7,7 @@
  * clamp/active/upsert logic so components never index `entries[active_index]`
  * raw (a stale pointer would panic-by-undefined).
  */
-import type { OmpRoleTarget, ToolActivation, ToolBinding } from "../../../types";
+import type { ToolActivation, ToolBinding } from "../../../types";
 import { agentSupportsMultipleProviders } from "./agentRegistry";
 
 export const EMPTY_BINDING: ToolBinding = { entries: [], active_index: 0 };
@@ -63,11 +63,6 @@ export function removeBindingEntry(prev: ToolBinding | null | undefined, provide
   if (active_index >= pos && active_index > 0) active_index -= 1;
   if (active_index >= entries.length) active_index = Math.max(0, entries.length - 1);
   return { ...base, entries, active_index, settings: pruneRolesForProvider(base.settings, providerId) };
-}
-
-/** The OMP role → provider+model map on a binding (empty when unset). */
-export function bindingRoles(binding: ToolBinding | null | undefined): Record<string, OmpRoleTarget> {
-  return binding?.settings?.roles ?? {};
 }
 
 /** Drop every role assignment pointing at `providerId`. */

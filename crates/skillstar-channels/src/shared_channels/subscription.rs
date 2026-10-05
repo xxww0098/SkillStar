@@ -862,115 +862,80 @@ where
                 )
             })?;
 
-        let lock_path = self.subscriptions.repository_route_lockfile();
-        let _lock_guard = skillstar_skills::lockfile::get_mutex()
+        // The install lock always has a path in this build; the Option kept
+        // the pre-D-081 seam open.
+        let lock_path = self
+            .subscriptions
+            .repository_route_lockfile()
+            .unwrap_or_else(skillstar_skills::skill_lock::lock_path);
+        let _ = &repository;
+        let _lock_guard = skillstar_skills::skill_lock::get_mutex()
             .lock()
             .map_err(|_| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::Storage,
-                    "Lockfile mutex poisoned during repository route migration",
+                    "Install lock poisoned during repository route migration",
                 )
             })?;
-        let mut lockfile = match lock_path.as_deref() {
-            Some(lock_path) => {
-                skillstar_skills::lockfile::Lockfile::load(lock_path).map_err(|error| {
-                    SharedChannelError::new(
-                        SharedChannelErrorCode::Storage,
-                        format!(
-                            "Unable to read repository routes from the Skill lockfile: {error}"
-                        ),
-                    )
-                })?
-            }
-            None => skillstar_skills::lockfile::Lockfile::default(),
-        };
-        let previous_lockfile = lockfile.clone();
-        let mut lockfile_changed = false;
-        if lock_path.is_some()
-            && let Some(tracked) = tracked.as_ref()
-        {
+        let mut lock = skillstar_skills::skill_lock::SkillLock::load(&lock_path);
+        let previous_lock = lock.clone();
+        let mut lock_changed = false;
+        if let Some(tracked) = tracked.as_ref() {
             for (skill_id, previous_skill_url) in tracked {
-                let entry = lockfile
-                    .skills
-                    .iter_mut()
-                    .find(|entry| entry.name.eq_ignore_ascii_case(skill_id));
-                let Some(entry) = entry else {
-                    if skillstar_core::infra::paths::hub_skills_dir()
-                        .join(skill_id)
+                let Some(entry) = lock.skills.get_mut(skill_id) else {
+                    if skillstar_core::infra::paths::agents_skill_dir(skill_id)
                         .symlink_metadata()
                         .is_ok()
                     {
                         return Err(SharedChannelError::new(
                             SharedChannelErrorCode::Integrity,
-                            format!("Tracked Skill '{skill_id}' is missing lockfile provenance"),
+                            format!("Tracked Skill '{skill_id}' is missing install provenance"),
                         ));
                     }
                     continue;
                 };
                 if !skillstar_skills::source_resolver::same_remote_url(
-                    &entry.git_url,
+                    &entry.source_url,
                     previous_skill_url,
                 ) && !skillstar_skills::source_resolver::same_remote_url(
-                    &entry.git_url,
+                    &entry.source_url,
                     &repository.clone_url,
                 ) {
                     return Err(SharedChannelError::new(
                         SharedChannelErrorCode::Integrity,
                         format!(
-                            "Tracked Skill '{skill_id}' has a lockfile route that does not match its channel"
+                            "Tracked Skill '{skill_id}' has an install route that does not match its channel"
                         ),
                     ));
                 }
                 if !skillstar_skills::source_resolver::same_remote_url(
-                    &entry.git_url,
+                    &entry.source_url,
                     &repository.clone_url,
                 ) {
-                    entry.git_url = repository.clone_url.clone();
-                    lockfile_changed = true;
+                    entry.source_url = repository.clone_url.clone();
+                    lock_changed = true;
                 }
             }
         }
 
-        if lockfile_changed {
-            lockfile
-                .save(
-                    lock_path
-                        .as_deref()
-                        .expect("changed lockfile has an owned path"),
+        if lock_changed {
+            lock.save(&lock_path).map_err(|error| {
+                SharedChannelError::new(
+                    SharedChannelErrorCode::Storage,
+                    format!("Unable to save migrated Skill repository routes: {error}"),
                 )
-                .map_err(|error| {
-                    SharedChannelError::new(
-                        SharedChannelErrorCode::Storage,
-                        format!("Unable to save migrated Skill repository routes: {error}"),
-                    )
-                })?;
+            })?;
         }
         if let Err(error) = self.subscriptions.save(&subscriptions) {
-            let rollback = lockfile_changed
-                .then(|| {
-                    previous_lockfile
-                        .save(
-                            lock_path
-                                .as_deref()
-                                .expect("changed lockfile has an owned path"),
-                        )
-                        .err()
-                })
+            let rollback = lock_changed
+                .then(|| previous_lock.save(&lock_path).err())
                 .flatten();
             return Err(route_migration_error(error, rollback));
         }
         if let Err(error) = self.channels.save(&store) {
             let subscription_rollback = self.subscriptions.save(&previous_subscriptions).err();
-            let lock_rollback = lockfile_changed
-                .then(|| {
-                    previous_lockfile
-                        .save(
-                            lock_path
-                                .as_deref()
-                                .expect("changed lockfile has an owned path"),
-                        )
-                        .err()
-                })
+            let lock_rollback = lock_changed
+                .then(|| previous_lock.save(&lock_path).err())
                 .flatten();
             let channel_rollback = self.channels.save(&previous_store).err();
             let rollback = [

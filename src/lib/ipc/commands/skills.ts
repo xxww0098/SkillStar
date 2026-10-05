@@ -1,21 +1,17 @@
 import type {
   ImportBundleResult,
   ImportMultiBundleResult,
-  LocalDivergenceResolution,
-  RepoNewSkill,
   ShareCodeInstallSummary,
   ShareCodeSkillInput,
   Skill,
   SkillCardDeck,
   SkillContent,
-  SkillMigrationReport,
   SkillUpdateReport,
   SkillUpdateState,
-  ResolveSkillUpdateResult,
   UpdateResult,
 } from "../../../types";
 
-/** Installed-skill lifecycle, ghost (unseen repo) skills, and deck group ops. */
+/** Installed-skill lifecycle and deck group ops. */
 export interface SkillCommands {
   // Installed skill lifecycle
   list_skills: { args: Record<string, never>; result: Skill[] };
@@ -27,11 +23,6 @@ export interface SkillCommands {
   uninstall_skill: { args: { name: string }; result: void };
   update_skill: { args: { name: string }; result: UpdateResult };
   update_skills: { args: { names: string[] }; result: SkillUpdateReport };
-  resolve_skill_update: {
-    args: { name: string; resolution: LocalDivergenceResolution };
-    result: ResolveSkillUpdateResult;
-  };
-  migrate_renamed_skill: { args: { name: string }; result: SkillMigrationReport };
   open_skill_folder: { args: { name: string }; result: void };
 
   // Skill content (editor)
@@ -57,12 +48,6 @@ export interface SkillCommands {
   export_multi_skill_bundle: { args: { names: string[]; outputPath: string }; result: string };
   preview_multi_skill_bundle: { args: { filePath: string }; result: import("../../../types").MultiManifest };
   import_multi_skill_bundle: { args: { filePath: string; force: boolean }; result: ImportMultiBundleResult };
-
-  // Ghost (new repo skills) queue
-  check_new_repo_skills: { args: Record<string, never>; result: RepoNewSkill[] };
-  get_dismissed_new_skills: { args: Record<string, never>; result: string[] };
-  dismiss_new_skill: { args: { key: string }; result: void };
-  dismiss_new_skills_batch: { args: { keys: string[] }; result: void };
 
   // Local folder adoption
   adopt_local_folder: { args: { folderPath: string }; result: { adopted: { name: string }[] } };

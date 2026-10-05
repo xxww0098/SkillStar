@@ -190,7 +190,7 @@ impl ChannelSubscriptionRegistry for DiskChannelSubscriptionRegistry {
     }
 
     fn repository_route_lockfile(&self) -> Option<std::path::PathBuf> {
-        Some(skillstar_skills::lockfile::lockfile_path())
+        Some(skillstar_skills::skill_lock::lock_path())
     }
 }
 

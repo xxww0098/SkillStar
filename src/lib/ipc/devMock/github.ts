@@ -4,7 +4,7 @@
  */
 
 import type { DevMockHandlers } from "./shared";
-import { devAssertRepoSourceClean, devRepoSourceSkills } from "./skillsUpdateStore";
+import { devRepoSourceSkills } from "./skillsUpdateStore";
 
 export const GITHUB_HANDLERS: DevMockHandlers = {
   github_auth_status: () => ({
@@ -60,8 +60,7 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
 
   // Repo rescan + reinstall. Backed by the shared skills store so "reinstall
   // every Skill from this source" behaves like the real thing: the scan lists
-  // what the source already carries, and a checkout with unresolved local
-  // edits fails closed instead of overwriting them.
+  // what the source already carries.
   scan_github_repo: (args) => {
     const url = String((args?.url as string) ?? "");
     const { repoUrl, source, gitRef, subpath } = parseSourceUrl(url);
@@ -84,9 +83,6 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
     };
   },
   install_from_scan: (args) => {
-    const spec = (args?.spec as { source?: string; source_url?: string }) ?? {};
-    const source = String(spec.source ?? sourceOfRepoUrl(String(spec.source_url ?? "")));
-    devAssertRepoSourceClean(source);
     return ((args?.skills as Array<{ id: string }>) ?? []).map((skill) => skill.id);
   },
 };

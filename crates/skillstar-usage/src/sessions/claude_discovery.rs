@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 
 use super::SessionFile;
 
-
 /// Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, default
 /// `<home>/.claude`. The sandbox (`SKILLSTAR_TOOL_SYNC_HOME`) always wins —
 /// isomorphic to tool_paths.rs's `codex_home()`.
@@ -82,10 +81,10 @@ fn windows_claude_dir(local: &Path, name: &str, threep: bool) -> PathBuf {
         .flatten()
         .filter(|entry| {
             let file_name = entry.file_name();
-            let Some(name) = file_name.to_str() else { return false };
-            entry.path().is_dir()
-                && name.starts_with("Claude")
-                && name.contains("-3p") == threep
+            let Some(name) = file_name.to_str() else {
+                return false;
+            };
+            entry.path().is_dir() && name.starts_with("Claude") && name.contains("-3p") == threep
         })
         .map(|entry| entry.path())
         .collect();
@@ -114,7 +113,9 @@ pub(super) fn cowork_claude_homes(dir: &Path) -> Vec<PathBuf> {
             };
             for entry in local.flatten() {
                 let file_name = entry.file_name();
-                let Some(name) = file_name.to_str() else { continue };
+                let Some(name) = file_name.to_str() else {
+                    continue;
+                };
                 if name.starts_with("local_") {
                     out.push(entry.path().join(".claude"));
                 }

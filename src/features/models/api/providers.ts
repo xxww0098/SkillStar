@@ -172,27 +172,3 @@ export function useProviderMutations() {
 
   return { createProvider, updateProvider, deleteProvider, reorderProviders };
 }
-
-/**
- * Shallow meta patch for agent-side writes (claude tier mapping, codex
- * settings). Merges over the cached provider and submits through the same
- * update mutation as the drawer autosave, so concurrent writes serialize via
- * cancelQueries instead of clobbering each other.
- */
-export function useProviderMetaPatch() {
-  const queryClient = useQueryClient();
-  const { updateProvider } = useProviderMutations();
-
-  return useCallback(
-    async (providerId: string, metaPatch: Record<string, unknown>, patch: ProviderPatchFlat = {}) => {
-      const data = queryClient.getQueryData<FlatProvidersResponse>(modelsKeys.providersFlat());
-      const provider = data?.providers.find((p) => p.id === providerId);
-      if (!provider) throw new Error(i18n.t("models.toasts.providerMissing"));
-      return updateProvider(providerId, {
-        ...patch,
-        meta: { ...(provider.meta ?? {}), ...metaPatch },
-      });
-    },
-    [queryClient, updateProvider],
-  );
-}

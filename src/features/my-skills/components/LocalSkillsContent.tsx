@@ -11,11 +11,10 @@ import { selectTargetableAgentProfiles, supportsGlobalDeploy, supportsProjectDep
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { Toolbar } from "../../../components/layout/Toolbar";
-import type { RepoNewSkill, Skill, SkillUpdateRunReport, SortOption } from "../../../types";
+import type { Skill, SkillUpdateReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
 import { hasPendingUpdate, needsAttention } from "../lib/pendingUpdates";
-import { syntheticSkillFromGhost } from "../lib/ghostSkill";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
 import { ExportShareCodeModal } from "./ExportShareCodeModal";
@@ -28,7 +27,7 @@ import { SkillListBanners } from "./SkillListBanners";
 import { SkillSelectionBar } from "./SkillSelectionBar";
 import { UninstallConfirmDialog } from "./UninstallConfirmDialog";
 
-type SkillSelection = { kind: "installed"; name: string } | { kind: "ghost"; ghost: RepoNewSkill };
+type SkillSelection = { kind: "installed"; name: string };
 
 interface LocalSkillsContentProps {
   /** Scope switch element built by the page; rendered inside the toolbar title. */
@@ -65,19 +64,12 @@ export function LocalSkillsContent({
     reinstallRepoSkills,
     uninstallSkill,
     runSkillUpdate,
-    resolveRemovedSkill,
-    migrateRenamedSkill,
-    pendingMigrationNames,
     pendingUpdateNames,
     toggleSkillForAgent,
     pendingAgentToggleKeys,
     readSkillContent,
     updateSkillContent,
     batchRemoveSkillsFromAllAgents,
-    ghostSkills,
-    dismissGhostSkill,
-    dismissGhostRepo,
-    installGhostSkill,
   } = useSkills();
   const { profiles, deploySkillsToProject } = useAgentProfiles();
   const { createGroup, groups } = useSkillCards();
@@ -94,8 +86,6 @@ export function LocalSkillsContent({
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
   const [pendingUninstallNames, setPendingUninstallNames] = useState<string[]>([]);
-  /** When set, a successful uninstall also dismisses ghost skills for this repo source. */
-  const [pendingRemoveSource, setPendingRemoveSource] = useState<string | null>(null);
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallError, setUninstallError] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -115,19 +105,11 @@ export function LocalSkillsContent({
   // The query cache owns Skill data; async completions never restore an old selection.
   const selectedSkill = useMemo(() => {
     if (!selection) return null;
-    if (selection.kind === "installed") return skills.find((skill) => skill.name === selection.name) ?? null;
-    const { ghost } = selection;
-    return (
-      skills.find((skill) => skill.name === ghost.skill_id && skill.source === ghost.repo_source) ??
-      syntheticSkillFromGhost(ghost)
-    );
+    return skills.find((skill) => skill.name === selection.name) ?? null;
   }, [selection, skills]);
 
   const closeSkillIfSelected = useCallback((name: string) => {
-    setSelection((current) => {
-      const selectedName = current?.kind === "installed" ? current.name : current?.ghost.skill_id;
-      return selectedName === name ? null : current;
-    });
+    setSelection((current) => (current?.kind === "installed" && current.name === name ? null : current));
   }, []);
 
   const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
@@ -140,17 +122,6 @@ export function LocalSkillsContent({
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [skills]);
-
-  const handleGhostClick = useCallback((ghost: RepoNewSkill) => {
-    setSelection((current) =>
-      current?.kind === "ghost" &&
-      current.ghost.repo_source === ghost.repo_source &&
-      current.ghost.skill_id === ghost.skill_id &&
-      current.ghost.folder_path === ghost.folder_path
-        ? null
-        : { kind: "ghost", ghost },
-    );
-  }, []);
 
   // Fetch broken skill count after skills load (lightweight, one extra field from StorageOverview)
   useEffect(() => {
@@ -223,11 +194,11 @@ export function LocalSkillsContent({
   }, [skills, searchQuery, agentFilter, profiles, sourceFilter, repoFilter]);
 
   /** The attention filter covers everything the sidebar badge counts — content
-   *  updates plus removed / renamed upstreams — so the chip can never show 0
-   *  while the badge promises attention. Removed and renamed skills carry
-   *  their own migrate / resolve actions on the card. The "update all" CTA
-   *  stays deliberately content-only and filter-independent (see
-   *  docs/features/skills/README.md), so it reads the unfiltered list. */
+   *  updates plus removed upstreams — so the chip can never show 0 while the
+   *  badge promises attention. Removed skills explain themselves with the
+   *  card's removed chip. The "update all" CTA stays deliberately
+   *  content-only and filter-independent (see docs/features/skills/README.md),
+   *  so it reads the unfiltered list. */
   const attentionSkills = useMemo(() => scopedSkills.filter(needsAttention), [scopedSkills]);
   const allAttentionSkills = useMemo(() => skills.filter(needsAttention), [skills]);
   const allPendingUpdates = useMemo(() => skills.filter(hasPendingUpdate), [skills]);
@@ -276,111 +247,23 @@ export function LocalSkillsContent({
     [installSkill, t],
   );
 
-  const handleInstallGhost = useCallback(
-    async (ghost: RepoNewSkill) => {
-      try {
-        await installGhostSkill(ghost);
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("[LocalSkills] installGhostSkill failed:", e);
-        toast.error(String(e) ? `${t("mySkills.installFailed")}: ${String(e)}` : t("mySkills.installFailed"));
-        throw e;
-      }
-    },
-    [installGhostSkill, t],
-  );
-
   const handleUpdate = useCallback(
     async (name: string) => {
       try {
         const report = await runSkillUpdate([name]);
-        const failure = report.failed.find((entry) => entry.name === name) ?? report.failed[0];
-        if (failure) {
-          toast.error(failure.error ? `${t("mySkills.updateFailed")}: ${failure.error}` : t("mySkills.updateFailed"));
-          return;
-        }
-        // Declined by design rather than failed. Without this the button would
+        // Failures and upstream-removed skips are toasted by runSkillUpdate.
+        // Declined by design rather than failed: without this the button would
         // simply do nothing, which reads as a bug.
         if (report.channel_managed.some((entry) => entry.name === name)) {
           toast.info(t("mySkills.updateChannelManaged", { name }));
-          return;
-        }
-        if (report.uninstalled.includes(name)) {
-          toast.success(t("mySkills.droppedSkillRemoved", { name }));
-          closeSkillIfSelected(name);
-          return;
         }
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
         toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
       }
     },
-    [runSkillUpdate, closeSkillIfSelected, t],
+    [runSkillUpdate, t],
   );
-
-  /** Upstream dropped the Skill: same dialog and exits as a blocked update. */
-  const handleResolveRemoved = useCallback(
-    async (name: string) => {
-      const outcome = await resolveRemovedSkill(name);
-      if (!outcome) return;
-      if (outcome.uninstalled.includes(name)) {
-        toast.success(t("mySkills.droppedSkillRemoved", { name }));
-        closeSkillIfSelected(name);
-      }
-      for (const copy of outcome.localCopies) {
-        toast.success(t("mySkills.keptAsLocalCopy", { from: name, to: copy.name }));
-        closeSkillIfSelected(name);
-      }
-      const failure = outcome.failed[0];
-      if (failure) {
-        toast.error(failure.error ? `${t("mySkills.updateFailed")}: ${failure.error}` : t("mySkills.updateFailed"));
-      }
-    },
-    [resolveRemovedSkill, closeSkillIfSelected, t],
-  );
-
-  /** Upstream renamed the Skill: one step installs the successor, keeps the
-   *  deployments and removes the old entry. Partial outcomes are spelled out. */
-  const handleMigrate = useCallback(
-    async (name: string) => {
-      if (pendingMigrationNames.has(name)) return;
-      try {
-        const report = await migrateRenamedSkill(name);
-        const details = [
-          ...report.agent_failures,
-          ...report.project_failures,
-          ...(report.removal_failure ? [report.removal_failure] : []),
-        ];
-        if (details.length > 0) {
-          toast.warning(t("mySkills.migratePartial", { to: report.installed, details: details.join("; ") }));
-        } else {
-          toast.success(t("mySkills.migrateSuccess", { from: name, to: report.installed }));
-        }
-        closeSkillIfSelected(name);
-      } catch (e) {
-        const reason = e instanceof Error ? e.message : String(e);
-        toast.error(
-          reason ? `${t("mySkills.migrateFailed", { name })}: ${reason}` : t("mySkills.migrateFailed", { name }),
-        );
-      }
-    },
-    [migrateRenamedSkill, pendingMigrationNames, closeSkillIfSelected, t],
-  );
-
-  const handleMigrateGhost = useCallback(
-    (ghost: RepoNewSkill) => {
-      if (ghost.renamed_from) return handleMigrate(ghost.renamed_from);
-    },
-    [handleMigrate],
-  );
-
-  const drawerMigrationName = selectedSkill?.installed
-    ? selectedSkill.name
-    : selection?.kind === "ghost"
-      ? selection.ghost.renamed_from
-      : null;
-  const handleDrawerMigrate = useCallback(() => {
-    if (drawerMigrationName) void handleMigrate(drawerMigrationName);
-  }, [drawerMigrationName, handleMigrate]);
 
   const handleSkillClick = useCallback((skill: Skill) => {
     setSelection((current) =>
@@ -420,11 +303,10 @@ export function LocalSkillsContent({
     [closeSkillIfSelected],
   );
 
-  const openUninstallDialog = useCallback((names: Iterable<string>, removeSource: string | null = null) => {
+  const openUninstallDialog = useCallback((names: Iterable<string>) => {
     const nextNames = Array.from(new Set(names));
     if (nextNames.length === 0) return;
     setPendingUninstallNames(nextNames);
-    setPendingRemoveSource(removeSource);
     setUninstallError(null);
     setUninstallDialogOpen(true);
   }, []);
@@ -432,7 +314,6 @@ export function LocalSkillsContent({
   const closeUninstallDialog = useCallback(() => {
     if (uninstalling) return;
     setPendingUninstallNames([]);
-    setPendingRemoveSource(null);
     setUninstallError(null);
     setUninstallDialogOpen(false);
   }, [uninstalling]);
@@ -454,7 +335,7 @@ export function LocalSkillsContent({
       const names = skills.filter((skill) => skill.source === source).map((skill) => skill.name);
       if (names.length === 0) return;
       if (repoFilter === source) setRepoFilter(null);
-      openUninstallDialog(names, source);
+      openUninstallDialog(names);
     },
     [openUninstallDialog, repoFilter, skills],
   );
@@ -495,8 +376,6 @@ export function LocalSkillsContent({
         const installed = await reinstallRepoSkills(repoUrl);
         toast.success(t("mySkills.reinstallRepoSuccess", { count: installed.length }));
       } catch (e) {
-        // A repository with unresolved local edits fails closed on purpose.
-        // Point at the update flow, which is where that choice is offered.
         const reason = e instanceof Error ? e.message : String(e);
         const headline = t("mySkills.reinstallRepoFailed", { source });
         toast.error(reason ? `${headline}\n${reason}` : headline);
@@ -512,13 +391,12 @@ export function LocalSkillsContent({
 
     setUninstalling(true);
     const failedNames: string[] = [];
-    const sourceToClean = pendingRemoveSource;
 
     for (const name of pendingUninstallNames) {
       try {
         await uninstallSkill(name);
         removeSkillFromUi(name);
-      } catch (e) {
+      } catch {
         failedNames.push(name);
         toast.error(t("mySkills.batchUninstallFailed", { name, count: 1 }));
       }
@@ -527,13 +405,6 @@ export function LocalSkillsContent({
     setUninstalling(false);
 
     if (failedNames.length === 0) {
-      if (sourceToClean) {
-        try {
-          await dismissGhostRepo(sourceToClean);
-        } catch {
-          // Ghost dismiss is best-effort; installed skills already removed.
-        }
-      }
       closeUninstallDialog();
       return;
     }
@@ -544,48 +415,19 @@ export function LocalSkillsContent({
         ? t("mySkills.batchUninstallFailed", { name: failedNames[0], count: 1 })
         : t("mySkills.batchUninstallFailed", { name: failedNames[0], count: failedNames.length }),
     );
-  }, [
-    closeUninstallDialog,
-    dismissGhostRepo,
-    pendingRemoveSource,
-    pendingUninstallNames,
-    removeSkillFromUi,
-    uninstallSkill,
-    t,
-  ]);
+  }, [closeUninstallDialog, pendingUninstallNames, removeSkillFromUi, uninstallSkill, t]);
 
   /** Summarise a finished batch update — the report is already final, so every
-   *  Skill is counted exactly once. `skipped` counts as updated: the backend
-   *  collapsed those names into a sibling's pull and their content moved too.
-   *  `blocked` here means the user closed the divergence dialog. */
+   *  Skill is counted exactly once. Failures and upstream-removed skips are
+   *  toasted by runSkillUpdate; this covers the aggregate success count. */
   const reportBatchUpdate = useCallback(
-    (report: SkillUpdateRunReport) => {
-      const successCount = report.updated.length + report.skipped.length;
-
-      if (report.uninstalled.length > 0) {
-        toast.success(t("mySkills.droppedSkillsRemoved", { count: report.uninstalled.length }));
-      }
-
-      if (report.failed.length > 0) {
-        const reason = report.failed[0]?.error;
-        if (successCount > 0) {
-          toast.warning(
-            t("mySkills.batchUpdatePartial", {
-              success: successCount,
-              failed: report.failed.length,
-              defaultValue: `${successCount} updated, ${report.failed.length} failed`,
-            }),
-          );
-        } else {
-          toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
-        }
-      }
-
-      if (report.blocked.length > 0) {
+    (report: SkillUpdateReport) => {
+      if (report.failed.length > 0 && report.updated.length > 0) {
         toast.warning(
-          t("mySkills.batchUpdateBlocked", {
-            count: report.blocked.length,
-            defaultValue: `${report.blocked.length} update(s) paused for local changes`,
+          t("mySkills.batchUpdatePartial", {
+            success: report.updated.length,
+            failed: report.failed.length,
+            defaultValue: `${report.updated.length} updated, ${report.failed.length} failed`,
           }),
         );
       }
@@ -594,9 +436,12 @@ export function LocalSkillsContent({
         toast.info(t("mySkills.batchUpdateChannelManaged", { count: report.channel_managed.length }));
       }
 
-      if (successCount > 0 && report.failed.length === 0) {
+      if (report.updated.length > 0 && report.failed.length === 0) {
         toast.success(
-          t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
+          t("mySkills.batchUpdateSuccess", {
+            count: report.updated.length,
+            defaultValue: `${report.updated.length} skill(s) updated`,
+          }),
         );
       }
     },
@@ -623,7 +468,6 @@ export function LocalSkillsContent({
       setBusy(true);
       try {
         const report = await runSkillUpdate(names);
-        for (const name of report.uninstalled) closeSkillIfSelected(name);
         reportBatchUpdate(report);
         return true;
       } catch (error) {
@@ -634,7 +478,7 @@ export function LocalSkillsContent({
         setBusy(false);
       }
     },
-    [reportBatchUpdate, runSkillUpdate, closeSkillIfSelected, t],
+    [reportBatchUpdate, runSkillUpdate, t],
   );
 
   const handleBatchUpdate = useCallback(async () => {
@@ -865,9 +709,6 @@ export function LocalSkillsContent({
               onSkillClick={handleSkillClick}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
-              onResolveRemoved={handleResolveRemoved}
-              onMigrate={handleMigrate}
-              migratingNames={pendingMigrationNames}
               emptyMessage={getEmptyMessage()}
               emptyAction={getEmptyAction()}
               selectable
@@ -877,16 +718,6 @@ export function LocalSkillsContent({
               onToggleAgent={toggleSkillForAgent}
               pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}
-              ghostSkills={
-                !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter && !onlyUpdatesFilter
-                  ? ghostSkills
-                  : undefined
-              }
-              onInstallGhost={handleInstallGhost}
-              onDismissGhost={dismissGhostSkill}
-              onDismissGhostRepo={dismissGhostRepo}
-              onGhostClick={handleGhostClick}
-              onMigrateGhost={handleMigrateGhost}
             />
           )}
         </motion.main>
@@ -902,9 +733,6 @@ export function LocalSkillsContent({
         uninstalling={uninstalling && selectedSkill != null && pendingUninstallNames.includes(selectedSkill.name)}
         onReinstall={handleReinstall}
         reinstalling={selectedSkill != null && reinstallingName === selectedSkill.name}
-        onResolveRemoved={handleResolveRemoved}
-        onMigrate={handleDrawerMigrate}
-        migrating={drawerMigrationName != null && pendingMigrationNames.has(drawerMigrationName)}
         onReadContent={readSkillContent}
         onSaveContent={updateSkillContent}
         onPublish={(name) => setPublishTarget(name)}

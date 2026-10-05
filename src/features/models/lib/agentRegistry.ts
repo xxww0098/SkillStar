@@ -115,16 +115,6 @@ export function agentSupportsMultipleProviders(toolId: string): boolean {
   return getAgent(toolId)?.kind === "multi";
 }
 
-/** Does this provider expose the base URL `agent` requires? */
-export function providerCompatibleWithAgent(
-  agent: Pick<AgentDescriptor, "requiredUrlField">,
-  provider: { base_url_openai?: string; base_url_anthropic?: string },
-): boolean {
-  return agent.requiredUrlField === "anthropic"
-    ? Boolean(provider.base_url_anthropic?.trim())
-    : Boolean(provider.base_url_openai?.trim());
-}
-
 /** Tools listed in the on-disk config file editor. */
 export const CONFIG_FILE_TOOLS: { toolId: AgentToolId; label: string }[] = [
   { toolId: "claude-code", label: "Claude CLI" },

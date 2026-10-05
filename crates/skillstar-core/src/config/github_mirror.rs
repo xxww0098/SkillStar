@@ -161,14 +161,6 @@ pub fn apply_mirror_args_for(cmd: &mut Command, mirror_url: &str) {
     }
 }
 
-/// Apply the preferred mirror's `insteadOf` rewrite to a git command.
-/// Prefer [`apply_mirror_args_for`] when trying candidates in a chain.
-pub fn apply_mirror_args(cmd: &mut Command) {
-    if let Some(mirror) = effective_mirror_url() {
-        apply_mirror_args_for(cmd, &mirror);
-    }
-}
-
 /// True when git stderr suggests the configured GitHub mirror is unreachable.
 pub fn is_mirror_transport_error(stderr: &str) -> bool {
     let s = stderr.to_lowercase();

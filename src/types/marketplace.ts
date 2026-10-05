@@ -20,17 +20,6 @@ export type { SecurityAudit } from "./generated/SecurityAudit";
 export type { SnapshotStatus } from "./generated/SnapshotStatus";
 export type { SyncStateEntry } from "./generated/SyncStateEntry";
 
-export interface RepoNewSkill {
-  repo_source: string;
-  repo_url: string;
-  skill_id: string;
-  folder_path: string;
-  description: string;
-  /** Installed Skill the last update check identified this one as the
-   *  successor of — the source renamed or moved it here. */
-  renamed_from?: string | null;
-}
-
 export interface MarketplaceResult {
   skills: Skill[];
   total_count: number;

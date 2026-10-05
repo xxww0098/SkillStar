@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::Serialize;
 use skillstar_core::infra::error::AppError;
 use skillstar_decision::{
-    DownloadProgress, DecisionEngine, DecisionOutcome, EngineInfo, EngineOptions, ModelPaths,
+    DecisionEngine, DecisionOutcome, DownloadProgress, EngineInfo, EngineOptions, ModelPaths,
     ModelStatus,
 };
 use tauri::{Emitter, State, Window};
@@ -109,7 +109,9 @@ pub async fn decision_cancel_download(state: State<'_, DecisionState>) -> Result
 
 /// What the currently loaded engine runs as, or `null` when nothing is loaded.
 #[tauri::command]
-pub async fn decision_engine_info(state: State<'_, DecisionState>) -> Result<Option<EngineInfo>, AppError> {
+pub async fn decision_engine_info(
+    state: State<'_, DecisionState>,
+) -> Result<Option<EngineInfo>, AppError> {
     let guard = state.engine.lock().await;
     Ok(guard.as_ref().map(|engine| engine.info()))
 }
@@ -148,11 +150,10 @@ async fn load_engine(state: &State<'_, DecisionState>) -> Result<Arc<DecisionEng
         return Ok(engine);
     }
     let paths = ModelPaths::resolve();
-    let loaded = tokio::task::spawn_blocking(move || {
-        DecisionEngine::load(&paths, EngineOptions::default())
-    })
-    .await?
-    .map_err(|error| AppError::Other(error.to_string()))?;
+    let loaded =
+        tokio::task::spawn_blocking(move || DecisionEngine::load(&paths, EngineOptions::default()))
+            .await?
+            .map_err(|error| AppError::Other(error.to_string()))?;
 
     let loaded = Arc::new(loaded);
     let mut guard = state.engine.lock().await;

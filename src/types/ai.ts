@@ -12,11 +12,6 @@ export interface AiKeywordSearchResult {
   keyword_skill_map: Record<string, string[]>;
 }
 
-export interface AiConfigStatus {
-  enabled: boolean;
-  api_key: string;
-}
-
 export interface AiStreamPayload {
   requestId: string;
   event: AiStreamEvent;

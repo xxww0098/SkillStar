@@ -63,9 +63,9 @@ const fn unsupported() -> GlobalDirDef {
 
 // The three legacy SkillStar ids (`claude`, `kiro`, `hermes`) retain
 // their persisted identity. CLI/API normalization accepts the corresponding
-// upstream ids. Every other row uses the upstream id verbatim. `grok`,
-// `omp`, `gemini-cli`, `deepseek` and `workbuddy` are SkillStar extensions
-// kept after the synchronized upstream block.
+// upstream ids. Every other row uses the upstream id verbatim. `omp`,
+// `deepseek` and `workbuddy` are SkillStar extensions kept after the
+// synchronized upstream block.
 const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "aider-desk",
@@ -201,8 +201,12 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "droid",
         "Droid",
+        // Droid reads `.agents/skills` and `~/.agents/skills` as
+        // compatibility locations; the global dir stays on
+        // `~/.factory/skills` so removal still cleans up skills placed there
+        // by earlier versions.
         home(&[".factory", "skills"]),
-        ".factory/skills",
+        ".agents/skills",
     ),
     ("eve", "Eve", unsupported(), "agent/skills"),
     (
@@ -217,6 +221,17 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".forge", "skills"]),
         ".forge/skills",
     ),
+    ("fx", "fx", home(&[".fx", "skills"]), ".fx/skills"),
+    // Google's Gemini CLI — `~/.gemini`. Deliberately *not* the `antigravity`
+    // row above: that one is Google Antigravity, a different product that
+    // merely shares the `~/.gemini` prefix, so it cannot stand in for this
+    // profile.
+    (
+        "gemini-cli",
+        "Gemini CLI",
+        home(&[".gemini", "skills"]),
+        ".agents/skills",
+    ),
     (
         "github-copilot",
         "GitHub Copilot",
@@ -228,6 +243,12 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         "Goose",
         config(&["goose", "skills"]),
         ".goose/skills",
+    ),
+    (
+        "grok",
+        "Grok Build",
+        env_or_home("GROK_HOME", &[".grok"], &["skills"]),
+        ".grok/skills",
     ),
     (
         "hermes",
@@ -254,11 +275,21 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".iflow", "skills"]),
         ".iflow/skills",
     ),
+    // Upstream keeps `~/.kilocode` as the legacy config dir for installed
+    // detection only; skills live in `~/.kilo/skills` and the shared
+    // `.agents/skills` project path.
     (
         "kilo",
         "Kilo Code",
-        home(&[".kilocode", "skills"]),
-        ".kilocode/skills",
+        home(&[".kilo", "skills"]),
+        ".agents/skills",
+    ),
+    // Upstream pins this under a literal `~/.config` prefix, not XDG.
+    (
+        "kimchi",
+        "Kimchi",
+        home(&[".config", "kimchi", "harness", "skills"]),
+        ".kimchi/skills",
     ),
     (
         "kimi-code-cli",
@@ -266,7 +297,7 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".agents", "skills"]),
         ".agents/skills",
     ),
-    ("kiro", "Kiro", home(&[".kiro", "skills"]), ".kiro/skills"),
+    ("kiro", "Kiro CLI", home(&[".kiro", "skills"]), ".kiro/skills"),
     ("kode", "Kode", home(&[".kode", "skills"]), ".kode/skills"),
     (
         "lingma",
@@ -285,6 +316,12 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         "MCPJam",
         home(&[".mcpjam", "skills"]),
         ".mcpjam/skills",
+    ),
+    (
+        "minimax-code",
+        "MiniMax Code",
+        home(&[".minimax", "skills"]),
+        ".minimax/skills",
     ),
     (
         "mistral-vibe",
@@ -318,7 +355,15 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         ".openhands/skills",
     ),
     ("ona", "Ona", home(&[".ona", "skills"]), ".ona/skills"),
-    ("pi", "Pi", home(&[".pi", "agent", "skills"]), ".pi/skills"),
+    // Pi natively reads the open-skills locations, so both of its rows are
+    // the shared `~/.agents/skills` and `.agents/skills` paths.
+    ("pi", "Pi", home(&[".agents", "skills"]), ".agents/skills"),
+    (
+        "posit-assistant",
+        "Posit Assistant",
+        home(&[".posit", "assistant", "skills"]),
+        ".posit/assistant/skills",
+    ),
     (
         "qoder",
         "Qoder",
@@ -350,6 +395,12 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         ".reasonix/skills",
     ),
     ("roo", "Roo Code", home(&[".roo", "skills"]), ".roo/skills"),
+    (
+        "sarvam-code",
+        "Sarvam Code",
+        home(&[".agents", "skills"]),
+        ".agents/skills",
+    ),
     (
         "rovodev",
         "Rovo Dev",
@@ -431,22 +482,11 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         config(&["agents", "skills"]),
         ".agents/skills",
     ),
-    ("grok", "Grok", home(&[".grok", "skills"]), ".grok/skills"),
     (
         "omp",
         "Oh My Pi",
         home(&[".omp", "agent", "skills"]),
         ".omp/skills",
-    ),
-    // Google's Gemini CLI — `~/.gemini`. Deliberately *not* the `antigravity`
-    // row above: that one is Google Antigravity, a different product that
-    // merely shares the `~/.gemini` prefix, so it cannot stand in for this
-    // profile.
-    (
-        "gemini-cli",
-        "Gemini CLI",
-        home(&[".gemini", "skills"]),
-        ".gemini/skills",
     ),
     // DeepSeek Harness (DSH) — the dsh CLI reads user skills from
     // ~/.dsh/skills (or $DSH_HOME/skills) and project skills from
@@ -633,20 +673,25 @@ mod tests {
         "eve",
         "firebender",
         "forgecode",
+        "fx",
+        "gemini-cli",
         "github-copilot",
         "goose",
+        "grok",
         "hermes-agent",
         "inference-sh",
         "jazz",
         "junie",
         "iflow-cli",
         "kilo",
+        "kimchi",
         "kimi-code-cli",
         "kiro-cli",
         "kode",
         "lingma",
         "loaf",
         "mcpjam",
+        "minimax-code",
         "mistral-vibe",
         "moxby",
         "mux",
@@ -655,6 +700,7 @@ mod tests {
         "openhands",
         "ona",
         "pi",
+        "posit-assistant",
         "qoder",
         "qoder-cn",
         "qwen-code",
@@ -662,6 +708,7 @@ mod tests {
         "reasonix",
         "roo",
         "rovodev",
+        "sarvam-code",
         "tabnine-cli",
         "terramind",
         "tinycloud",

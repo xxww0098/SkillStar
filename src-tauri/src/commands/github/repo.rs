@@ -3,11 +3,11 @@
 //! and `skillstar_skills::repo_scanner`.
 
 use skillstar_core::infra::error::AppError;
-use skillstar_git::{dismissed_skills, repo_history};
+use skillstar_git::repo_history;
 use skillstar_skills::deployment;
 use skillstar_skills::git::gh_manager;
 use skillstar_skills::local_skill;
-use skillstar_skills::lockfile;
+use skillstar_skills::skill_lock;
 use skillstar_skills::repo_scanner;
 use skillstar_skills::source_resolver;
 use tauri::{AppHandle, Manager, State};
@@ -49,7 +49,7 @@ pub async fn publish_skill_to_github(
     let skill_name_clone = skill_name.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        let lock_path = lockfile::lockfile_path();
+        let lock_path = skill_lock::lock_path();
         let lockfile_mode = if was_local {
             gh_manager::PublishLockfileMode::ValidateOnly(&lock_path)
         } else {
@@ -180,78 +180,4 @@ pub async fn install_from_scan(
 #[tauri::command]
 pub async fn list_repo_history() -> Result<Vec<repo_history::RepoHistoryEntry>, AppError> {
     Ok(repo_history::list_entries())
-}
-
-#[tauri::command]
-pub async fn get_repo_cache_info() -> Result<repo_scanner::RepoCacheInfo, AppError> {
-    Ok(tokio::task::spawn_blocking(repo_scanner::get_cache_info).await?)
-}
-
-#[tauri::command]
-pub async fn clean_repo_cache() -> Result<usize, AppError> {
-    tokio::task::spawn_blocking(repo_scanner::clean_unused_cache)
-        .await?
-        .map_err(AppError::Anyhow)
-}
-
-// ── New-skill detection commands ────────────────────────────────────
-
-/// Manually check all cached repos for new uninstalled skills.
-/// Returns the list after filtering out dismissed entries.
-#[tauri::command]
-pub async fn check_new_repo_skills(
-    app: AppHandle,
-    auth_state: State<'_, GitHubAuthState>,
-) -> Result<Vec<repo_scanner::RepoNewSkill>, AppError> {
-    // Reading an upstream SKILL.md out of a partial clone can lazy-fetch the
-    // blob, so it runs under the same Git session policy as an update check.
-    let facade = auth_state
-        .begin_git_operation(app, None)
-        .map_err(|error| AppError::Git(error.to_string()))?;
-    let session_id = facade.session().id().to_string();
-    let session = facade.session().clone();
-    let new_skills = tokio::task::spawn_blocking(move || {
-        repo_scanner::detect_new_skills_in_cached_repos(&session)
-    })
-    .await;
-    auth_state.finish_git_operation(&session_id);
-    let new_skills = new_skills?;
-
-    let dismissed = dismissed_skills::load_dismissed();
-    let dismissed_set: std::collections::HashSet<&str> =
-        dismissed.iter().map(|s| s.as_str()).collect();
-
-    let filtered: Vec<repo_scanner::RepoNewSkill> = new_skills
-        .into_iter()
-        .filter(|s| {
-            let key = format!("{}/{}", s.repo_source, s.skill_id);
-            !dismissed_set.contains(key.as_str())
-        })
-        .collect();
-
-    Ok(filtered)
-}
-
-/// Dismiss a new-skill notification so it won't appear again.
-/// Key format: "repo_source/skill_id"
-#[tauri::command]
-pub async fn dismiss_new_skill(key: String) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || dismissed_skills::dismiss(&key))
-        .await?
-        .map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Load all dismissed new-skill keys.
-#[tauri::command]
-pub async fn get_dismissed_new_skills() -> Result<Vec<String>, AppError> {
-    Ok(dismissed_skills::load_dismissed())
-}
-
-/// Batch dismiss multiple new-skill notifications.
-/// Used for repo-level "dismiss all" in the ghost card group header.
-#[tauri::command]
-pub async fn dismiss_new_skills_batch(keys: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || dismissed_skills::dismiss_batch(&keys))
-        .await?
-        .map_err(|e| AppError::Other(e.to_string()))
 }

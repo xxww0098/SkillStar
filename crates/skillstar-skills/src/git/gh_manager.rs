@@ -384,10 +384,6 @@ impl PublishLockfileMode<'_> {
             Self::Commit(path) | Self::ValidateOnly(path) => path,
         }
     }
-
-    fn should_commit(&self) -> bool {
-        matches!(self, Self::Commit(_))
-    }
 }
 
 /// Whether publishing this Skill produces an independent copy rather than
@@ -435,17 +431,13 @@ pub fn publish_skill(
     if let Some(repository_url) = existing_repo_url {
         crate::skill_mutation::policy().ensure_repository_mutation_allowed(repository_url)?;
     }
-    // Validate persisted state before any remote commit/push. Reload again for
-    // the final write so a concurrent install is not overwritten.
+    // D-081: publishing never writes the shared skill lock. Only prove the
+    // lock location is writable so a read-only setup is still caught before
+    // the push.
+    if !lockfile_mode.path().exists()
+        && std::fs::write(lockfile_mode.path(), "{\"version\":3,\"skills\":{}}\n").is_err()
     {
-        let _lock = crate::lockfile::get_mutex()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-        let lockfile = crate::lockfile::Lockfile::load(lockfile_mode.path())
-            .context("Failed to validate Skill lockfile before publishing")?;
-        lockfile
-            .save(lockfile_mode.path())
-            .context("Skill lockfile is not writable; publish was not started")?;
+        anyhow::bail!("Skill lockfile is not writable; publish was not started");
     }
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let skill_source = hub_dir.join(skill_name);
@@ -595,36 +587,10 @@ pub fn publish_skill(
         format!("{}.git", clean_url)
     };
 
-    // A local Skill is not Git-managed until its staged graduation succeeds.
-    // GUI callers therefore defer this write and let the installer commit the
-    // new provenance atomically with the checkout replacement.
-    //
-    // Publishing an *installed* Skill is a copy, not a move: the local one keeps
-    // following the source it was installed from. Rewriting its provenance here
-    // would silently repoint it at the publisher's repository, so a Skill the
-    // user only meant to share with a teammate would stop receiving upstream
-    // updates — with nothing in the UI saying so.
-    if lockfile_mode.should_commit() && !publishes_a_copy {
-        use crate::lockfile::{LockEntry, Lockfile};
-        let tree_hash =
-            skillstar_git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
-        let _lock = crate::lockfile::get_mutex()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-        let mut lf = Lockfile::load(lockfile_mode.path())?;
-        lf.upsert(LockEntry {
-            name: skill_name.to_string(),
-            git_url: git_url.clone(),
-            git_ref: None,
-            tree_hash,
-            content_hash: Some(content_hash),
-            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
-            installed_at: chrono::Utc::now().to_rfc3339(),
-            source_folder: Some(repo_rel_path.clone()),
-            pinned: false,
-        });
-        lf.save(lockfile_mode.path())?;
-    }
+    // D-081: publishing never re-points Skill provenance. Where the Skill
+    // was installed from is recorded by the installer; graduation re-points it
+    // through the installer, not here.
+    let _ = (lockfile_mode, publishes_a_copy, content_hash);
 
     Ok(PublishResult {
         url: clean_url,

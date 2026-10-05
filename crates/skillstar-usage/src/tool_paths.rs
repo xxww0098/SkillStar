@@ -128,33 +128,6 @@ pub fn antigravity_user_data_dir() -> Option<PathBuf> {
     None
 }
 
-/// Return the credential-store mode advertised by the installed Antigravity
-/// desktop version when it can be determined without touching credentials.
-/// Version 2.0 and newer use the official system credential store; older
-/// desktop builds use the legacy `state.vscdb` row.
-pub fn antigravity_prefers_system_credentials() -> Option<bool> {
-    #[cfg(target_os = "macos")]
-    {
-        if is_tool_sync_sandboxed() {
-            return None;
-        }
-        let plist =
-            std::fs::read_to_string("/Applications/Antigravity.app/Contents/Info.plist").ok()?;
-        let version = plist
-            .split_once("<key>CFBundleShortVersionString</key>")?
-            .1
-            .split_once("<string>")?
-            .1
-            .split_once("</string>")?
-            .0
-            .trim();
-        let major = version.split('.').next()?.parse::<u64>().ok()?;
-        return Some(major >= 2);
-    }
-    #[allow(unreachable_code)]
-    None
-}
-
 pub fn cursor_user_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {

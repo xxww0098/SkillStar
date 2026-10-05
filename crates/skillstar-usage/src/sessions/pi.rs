@@ -59,6 +59,10 @@ impl SessionParser for PiParser {
         pi_parse(Self::AGENT, Self::PARSER_VERSION, file, prior)
     }
 
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool {
+        checkpoint::is_unchanged(prior, file, Self::PARSER_VERSION)
+    }
+
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)> {
         pi_replay(checkpoint)
     }
@@ -209,7 +213,10 @@ pub(super) fn family_session_of_path(path: &Path) -> (String, bool) {
         }
         dir = current.parent();
     }
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
     match stem.split_once('_') {
         Some((_, id)) if !id.is_empty() => (id.to_string(), true),
         _ => (String::new(), true),
@@ -351,8 +358,8 @@ impl PiState {
             #[serde(default)]
             calls: Vec<SessionCall>,
         }
-        let stored: Stored = serde_json::from_value(checkpoint.agent_state.clone())
-            .unwrap_or_default();
+        let stored: Stored =
+            serde_json::from_value(checkpoint.agent_state.clone()).unwrap_or_default();
         Self {
             session: stored.session,
             header_seen: stored.header_seen,
@@ -436,7 +443,9 @@ pub(super) fn pi_parse(
         let mut buffer = Vec::new();
         loop {
             buffer.clear();
-            let Ok(n) = reader.read_until(b'\n', &mut buffer) else { break };
+            let Ok(n) = reader.read_until(b'\n', &mut buffer) else {
+                break;
+            };
             if n == 0 {
                 break;
             }
@@ -448,7 +457,9 @@ pub(super) fn pi_parse(
                 Some(b'\r') | Some(b'\n') => &buffer[..buffer.len() - 1],
                 _ => &buffer[..],
             };
-            pi_line(agent, &mut state, is_main, &mut delta, trimmed, &file.path, line_end);
+            pi_line(
+                agent, &mut state, is_main, &mut delta, trimmed, &file.path, line_end,
+            );
             offset = line_end;
         }
     }
@@ -477,7 +488,9 @@ fn pi_line(
     file: &Path,
     line_end: u64,
 ) {
-    let Some(text) = std::str::from_utf8(line).ok() else { return };
+    let Some(text) = std::str::from_utf8(line).ok() else {
+        return;
+    };
     let at = entry_timestamp(text);
     let copied = state.since_ms > 0 && at > 0 && at < state.since_ms;
 
@@ -515,7 +528,16 @@ fn pi_line(
         _ if copied => return,
         "usage" | "model_usage" => {
             let usage = parsed.usage.unwrap_or_default();
-            pi_emit(agent, state, delta, at, parsed.model.as_str(), usage, file, line_end);
+            pi_emit(
+                agent,
+                state,
+                delta,
+                at,
+                parsed.model.as_str(),
+                usage,
+                file,
+                line_end,
+            );
         }
         "compaction" | "branch_summary" => {
             let usage = parsed.usage.unwrap_or_default();
@@ -579,8 +601,9 @@ fn pi_emit(
     }
     // Measured from the previous entry (the prompt that asked, the tool
     // result that came back); the line's own time is noted afterwards.
-    let latency_ms = (state.last_ms > 0 && at > state.last_ms && at - state.last_ms < super::MAX_LATENCY_MS)
-        .then_some((at - state.last_ms) as u64);
+    let latency_ms =
+        (state.last_ms > 0 && at > state.last_ms && at - state.last_ms < super::MAX_LATENCY_MS)
+            .then_some((at - state.last_ms) as u64);
     let call = SessionCall {
         at,
         agent: agent.to_string(),
@@ -606,7 +629,9 @@ fn pi_emit(
 /// as no timestamp).
 fn entry_timestamp(line: &str) -> i64 {
     const MARK: &str = r#""timestamp":""#;
-    let Some(start) = line.find(MARK) else { return 0 };
+    let Some(start) = line.find(MARK) else {
+        return 0;
+    };
     let rest = &line[start + MARK.len()..];
     let end = rest.find('"').unwrap_or(0);
     if end == 0 || end > 40 {

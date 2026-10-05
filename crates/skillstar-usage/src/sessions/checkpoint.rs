@@ -84,6 +84,10 @@ impl CheckpointStore {
         self.files.get(path)
     }
 
+    pub(super) fn paths(&self) -> impl Iterator<Item = &Path> {
+        self.files.keys().map(PathBuf::as_path)
+    }
+
     pub(super) fn upsert(&mut self, path: PathBuf, checkpoint: FileCheckpoint) {
         self.files.insert(path, checkpoint);
     }
@@ -99,8 +103,9 @@ impl CheckpointStore {
             version: STORE_VERSION,
             files: self.files.clone(),
         };
-        let bytes = serde_json::to_vec(&store)
-            .map_err(|error| std::io::Error::other(format!("failed to serialize sessions index: {error}")))?;
+        let bytes = serde_json::to_vec(&store).map_err(|error| {
+            std::io::Error::other(format!("failed to serialize sessions index: {error}"))
+        })?;
         atomic_write(&index_path(), &bytes)
     }
 }
@@ -132,6 +137,19 @@ pub(super) fn hex(bytes: &[u8]) -> String {
         out.push(DIGITS[(byte & 0xf) as usize] as char);
     }
     out
+}
+
+/// The parsers' shared "file did not grow and the head still matches" check.
+/// Packed or rewritten-in-place formats must not use this: they have no
+/// resume and always reread.
+pub(super) fn is_unchanged(
+    prior: &FileCheckpoint,
+    file: &super::SessionFile,
+    version: u32,
+) -> bool {
+    prior.version == version
+        && prior.size == file.size
+        && head_matches(&read_head(&file.path), &prior.head_hash)
 }
 
 /// Whether the current file head matches the head fingerprint recorded in a

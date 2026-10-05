@@ -64,20 +64,22 @@ fn write_installed_skill(root: &Path) -> String {
     let hash = skillstar_skills::content::snapshot_path("writer", root)
         .unwrap()
         .content_hash;
-    let mut lockfile = skillstar_skills::lockfile::Lockfile::default();
-    lockfile.upsert(skillstar_skills::lockfile::LockEntry {
-        name: "writer".into(),
-        git_url: "https://github.com/acme/channel.git".into(),
-        git_ref: Some("a".repeat(40)),
-        tree_hash: "tree".into(),
-        content_hash: Some(hash.clone()),
-        content_hash_version: Some(skillstar_skills::content::SNAPSHOT_HASH_VERSION),
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        source_folder: Some("skills/writer".into()),
-        pinned: false,
-    });
-    lockfile
-        .save(&skillstar_skills::lockfile::lockfile_path())
+    let mut lock = skillstar_skills::skill_lock::SkillLock::default();
+    lock.upsert(
+        "writer",
+        skillstar_skills::skill_lock::SkillLockEntry {
+            source: "acme/channel".into(),
+            source_type: skillstar_skills::skill_lock::SourceType::Github,
+            source_url: "https://github.com/acme/channel.git".into(),
+            git_ref: Some("a".repeat(40)),
+            skill_path: Some("skills/writer".into()),
+            skill_folder_hash: None,
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+    lock
+        .save(&skillstar_skills::skill_lock::lock_path())
         .unwrap();
     hash
 }

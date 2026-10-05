@@ -4,18 +4,10 @@
  * in ./skillsData.ts; AGENTS comes from the app-shell fragment.
  */
 
-import type { LocalDivergenceResolution } from "../../../types";
 import { AGENTS } from "./appShell";
 import { type DevMockHandlers, iso } from "./shared";
 import { DECKS, PROJECTS } from "./skillsData";
-import {
-  devGhostSkills,
-  devListSkills,
-  devMigrateRenamedSkill,
-  devResolveSkillUpdate,
-  devSkillUpdateStates,
-  devUpdateSkills,
-} from "./skillsUpdateStore";
+import { devListSkills, devSkillUpdateStates, devUpdateSkills } from "./skillsUpdateStore";
 
 const DEMO_MANAGED_SKILL_NAMES = ["pdf-tools", "xlsx"];
 const suspendedManagedSkillsByAgent = new Map<string, string[]>();
@@ -31,13 +23,8 @@ function managedSkillsState(agentId: string) {
 export const SKILLS_HANDLERS: DevMockHandlers = {
   list_skills: () => devListSkills(),
   update_skills: (args) => devUpdateSkills((args?.names as string[]) ?? []),
-  resolve_skill_update: (args) =>
-    devResolveSkillUpdate(String(args?.name ?? ""), args?.resolution as LocalDivergenceResolution),
   refresh_skill_updates: () => devSkillUpdateStates(),
-  migrate_renamed_skill: (args) => devMigrateRenamedSkill(String(args?.name ?? "")),
   open_skill_folder: () => undefined,
-  check_new_repo_skills: () => devGhostSkills(),
-  get_dismissed_new_skills: () => [],
   read_skill_content: (args) => ({
     name: String((args?.name as string) ?? "pdf-tools"),
     description: "Read, merge, split, and OCR PDF files with a single command.",

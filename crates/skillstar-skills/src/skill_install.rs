@@ -1,502 +1,61 @@
-use crate::deployment;
-use crate::git::ops as git_ops;
-use crate::source_resolver::Source;
-use crate::{installed_skill, local_skill, lockfile, projects, repo_scanner};
+//! D-081 install pipeline: parse → temp fetch → discover → copy to canonical
+//! → vercel lock. One entry for GUI, CLI, carousel and batch installs.
+//!
+//! There is no persistent repository cache and no harness copy ranking:
+//! every install re-fetches the source shallowly into a temp dir and
+//! overwrites the canonical `~/.agents/skills/<name>` copy. Agent linking is
+//! the caller's step (`deployment`, `skillstar-app::global_deploy`).
+
+use crate::fetch;
+use crate::installer::{self, InstallUnit};
+use crate::skill_lock;
+use crate::source_resolver::{self, Source};
+use crate::{installed_skill, local_skill};
 use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::{fs_ops, paths};
-use skillstar_core::types::{
-    Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
-};
-use std::path::{Path, PathBuf};
-use tracing::warn;
+use skillstar_core::types::Skill;
 
-#[path = "skill_install_choice.rs"]
-mod choice;
-#[cfg(test)]
-use choice::requested_skill_not_found_error;
-use choice::{
-    SameRepoAction, choose_install_skills, existing_same_repo_action, nameless_root_skill,
-};
-
-fn derive_name_hint(url: &str, name: Option<&str>) -> String {
-    crate::source_resolver::derive_skill_name_hint(url, name)
-}
-
+/// Find the skill a single-name install refers to, fail-closed: a multi-skill
+/// repo that no longer contains the requested identity is an error, never a
+/// whole-repo fallback.
 pub fn find_target_skill<'a>(
-    skills_found: &'a [repo_scanner::DiscoveredSkill],
-    requested_name: Option<&str>,
-    name_hint: &str,
-) -> Option<&'a repo_scanner::DiscoveredSkill> {
-    // An explicit identity must always match, even when the repository now
-    // exposes exactly one differently named Skill. The single-Skill fallback is
-    // retained only for callers that did not request an identity.
-    if requested_name.is_none() && skills_found.len() == 1 {
-        return skills_found.first();
-    }
-
-    let search_key = requested_name.unwrap_or(name_hint);
-    let search_key_lower = search_key.to_lowercase();
-
-    skills_found
-        .iter()
-        .find(|s| s.id == search_key || s.id.to_lowercase() == search_key_lower)
-}
-
-/// Normalize URL, materialize repo cache, run lockfile-aware scan.
-pub fn fetch_repo_scanned(
-    url: &str,
-    full_depth: bool,
-) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
-    fetch_repo_scanned_in_session(
-        url,
-        full_depth,
-        &crate::git::transport::GitOperationSession::public(),
-    )
-}
-
-pub fn fetch_repo_scanned_in_session(
-    url: &str,
-    full_depth: bool,
-    session: &crate::git::transport::GitOperationSession,
-) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
-    let source = Source::parse(url).map_err(|error| format!("Invalid source: {error}"))?;
-    // Repo-cache lock only: a scan fetches and resets one checkout and never
-    // writes the hub, so a slow repository must not queue scans of others.
-    let _repo_guard = acquire_repo_lock(&source)?;
-    ensure_generic_repository_input_mutable(url)?;
-    fetch_repo_scanned_detailed_in_session_parsed(&source, full_depth, session)
-        .map_err(|error| format!("{error:#}"))
-}
-
-pub fn fetch_repo_scanned_preferring_local_cache_in_session(
-    url: &str,
-    full_depth: bool,
-    session: &crate::git::transport::GitOperationSession,
-) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), AppError> {
-    let source =
-        Source::parse(url).map_err(|error| AppError::Other(format!("Invalid source: {error}")))?;
-    let _repo_guard = acquire_repo_lock(&source).map_err(AppError::Other)?;
-    ensure_generic_repository_input_mutable(url).map_err(AppError::from)?;
-    scan_repo_preferring_local_cache_for_skill(&source, full_depth, session, None, &[])
-        .map_err(|error| AppError::Other(format!("{error:#}")))
-}
-
-pub fn fetch_repo_scanned_detailed_in_session(
-    url: &str,
-    full_depth: bool,
-    session: &crate::git::transport::GitOperationSession,
-) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
-    let parsed = Source::parse(url).map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
-    fetch_repo_scanned_detailed_in_session_parsed(&parsed, full_depth, session)
-}
-
-fn fetch_repo_scanned_detailed_in_session_parsed(
-    parsed: &Source,
-    full_depth: bool,
-    session: &crate::git::transport::GitOperationSession,
-) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
-    use anyhow::Context as _;
-    session.emit_stage(
-        crate::git::transport::InstallStage::Fetching,
-        &parsed.repo_url,
-        None,
-    );
-    let repo_dir = repo_scanner::clone_or_fetch_repo_at_in_session(
-        &parsed.repo_url,
-        &parsed.short,
-        parsed.git_ref.as_deref(),
-        session,
-    )
-    .context("Failed to fetch repo")?;
-    Ok(scan_parsed_checkout(parsed, repo_dir, full_depth))
-}
-
-/// Scan a checkout that is already in the repo cache, or fetch if it is missing.
-///
-/// Hub-installed carousel / `--agent` clicks must not `git fetch` when the
-/// clone is already local. First-time install (empty cache) still fetches.
-pub fn scan_repo_preferring_local_cache_in_session(
-    url: &str,
-    full_depth: bool,
-    session: &crate::git::transport::GitOperationSession,
-) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
-    let source = Source::parse(url).map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
-    scan_repo_preferring_local_cache_for_skill(&source, full_depth, session, None, &[])
-}
-
-fn scan_repo_preferring_local_cache_for_skill(
-    parsed: &Source,
-    full_depth: bool,
-    session: &crate::git::transport::GitOperationSession,
-    skill_name: Option<&str>,
-    required_skills: &[&str],
-) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
-    if let Some(repo_dir) = repo_scanner::existing_hub_checkout(&parsed.repo_url, skill_name)
-        .or_else(|| repo_scanner::existing_repo_cache_dir(&parsed.short, parsed.git_ref.as_deref()))
-    {
-        let cached = scan_parsed_checkout(parsed, repo_dir.clone(), full_depth);
-        // A cached checkout can lag upstream: the patrol that surfaced a new
-        // Skill fetched remotely, while this scan reuses the stale clone. When
-        // an explicitly requested identity is missing locally, fetch once and
-        // rescan instead of reporting it as deleted or renamed.
-        //
-        // "Missing locally" is measured against what the shallow scan can
-        // actually see: priority directories only. A Skill installed from a
-        // non-standard folder (monorepo paths like `libs/cua-driver/rust/
-        // Skills/cua-driver`) never shows up there, yet the hub payload —
-        // recorded in the lockfile — is already materialized in this exact
-        // checkout. Without this check every carousel click on such a Skill
-        // re-fetches + resets + re-scans the repository, which is the stall
-        // the user feels as a frozen icon.
-        let all_resolvable = required_skills.iter().all(|required| {
-            find_target_skill(&cached.3, Some(required), required).is_some()
-                || nameless_root_skill(&cached.3).is_some()
-                || recorded_install_payload_on_disk(&repo_dir, &parsed.repo_url, required)
-        });
-        if all_resolvable {
-            return Ok(cached);
-        }
-        warn!(
-            target: "install_skill",
-            skills = ?required_skills,
-            "requested skill missing from cached checkout; fetching latest"
-        );
-    }
-    fetch_repo_scanned_detailed_in_session_parsed(parsed, full_depth, session)
-}
-
-/// Whether the lockfile records `skill_name` as installed from `repo_url`,
-/// with that `source_folder` still carrying a `SKILL.md` in `repo_dir`.
-///
-/// Identity matching follows `find_target_skill`: case-insensitive. A
-/// `source_folder` that vanished from disk (sparse re-plan dropped it, cache
-/// was rebuilt without it) does not count — fetch and rescan as before.
-fn recorded_install_payload_on_disk(repo_dir: &Path, repo_url: &str, skill_name: &str) -> bool {
-    let Ok(lock) = lockfile::Lockfile::load(&lockfile::lockfile_path()) else {
-        return false;
+    skills: &'a [crate::discovery::DiscoveredSkill],
+    wanted: Option<&str>,
+    fallback_hint: &str,
+) -> Result<&'a crate::discovery::DiscoveredSkill, String> {
+    let pick = |id: &str| {
+        skills.iter().find(|skill| skill.id.eq_ignore_ascii_case(id))
     };
-    lock.skills.iter().any(|entry| {
-        if !entry.name.eq_ignore_ascii_case(skill_name)
-            || !crate::source_resolver::same_remote_url(&entry.git_url, repo_url)
-        {
-            return false;
-        }
-        let Some(folder) = entry.source_folder.as_deref() else {
-            return false;
-        };
-        if folder.split('/').any(|segment| segment == "..") {
-            return false;
-        }
-        repo_dir.join(folder).join("SKILL.md").is_file()
-    })
-}
-
-pub(crate) fn scan_parsed_checkout(
-    parsed: &crate::source_resolver::Source,
-    repo_dir: PathBuf,
-    full_depth: bool,
-) -> (String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>) {
-    let mut skills_found = match parsed.subpath.as_deref() {
-        Some(subpath) => {
-            repo_scanner::scan_skills_in_repo_at(&repo_dir, &parsed.repo_url, subpath, full_depth)
-        }
-        None => repo_scanner::scan_skills_in_repo(&repo_dir, &parsed.repo_url, full_depth),
-    };
-    if let Some(skill_filter) = parsed.skill_filter.as_deref() {
-        skills_found.retain(|skill| skill.id.eq_ignore_ascii_case(skill_filter));
+    let found = wanted
+        .and_then(pick)
+        .or_else(|| pick(fallback_hint))
+        // No requested name and exactly one candidate: that one is the
+        // target (CLI `install <url>` against a single-skill source).
+        .or_else(|| (wanted.is_none() && skills.len() == 1).then(|| &skills[0]))
+        .ok_or_else(|| {
+            let names = skills
+                .iter()
+                .map(|skill| skill.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Source does not contain Skill '{}'. It may have been removed or renamed upstream. Found: [{}]",
+                wanted.unwrap_or(fallback_hint),
+                names
+            )
+        })?;
+    if !found.installable {
+        return Err(format!(
+            "Skill '{}' cannot be installed: {}",
+            found.id,
+            found
+                .frontmatter_issues
+                .first()
+                .map(|code| code.as_str())
+                .unwrap_or("invalid frontmatter")
+        ));
     }
-    (
-        parsed.repo_url.clone(),
-        parsed.short.clone(),
-        repo_dir,
-        skills_found,
-    )
-}
-
-#[inline]
-fn local_skill_blocks_repo_install(skill_id: &str) -> bool {
-    paths::local_skills_dir().join(skill_id).exists()
-}
-
-/// Compute tree hash directly from an installed skill's path.
-///
-/// For symlinked (repo-cached) skills this resolves the symlink target
-/// and computes the hash from the real directory, avoiding a redundant
-/// lockfile re-read that `install_from_repo` has just written to.
-fn compute_tree_hash_for(skills_dir: &Path, installed_name: &str) -> Option<String> {
-    let skill_path = skills_dir.join(installed_name);
-    let effective_path = fs_ops::read_link_resolved(&skill_path).unwrap_or(skill_path);
-    git_ops::compute_tree_hash(&effective_path).ok()
-}
-
-fn new_skill_from_install(
-    name: String,
-    description: String,
-    git_url: String,
-    tree_hash: Option<String>,
-) -> Skill {
-    let source = extract_github_source_from_url(&git_url);
-    Skill {
-        name,
-        description,
-        localized_description: None,
-        skill_type: SkillType::Hub,
-        stars: 0,
-        installed: true,
-        update_available: false,
-        upstream_change: None,
-        last_updated: chrono::Utc::now().to_rfc3339(),
-        git_url,
-        tree_hash,
-        category: SkillCategory::None,
-        author: None,
-        topics: Vec::new(),
-        agent_links: Some(Vec::new()),
-        rank: None,
-        source,
-    }
-}
-
-fn rollback_repo_cache_installs(skills_dir: &Path, names: &[String]) {
-    for name in names {
-        let path = skills_dir.join(name);
-        if path.symlink_metadata().is_ok() {
-            let _ = fs_ops::remove_link_or_copy(&path);
-        }
-    }
-
-    if let Ok(_lock) = lockfile::get_mutex().lock() {
-        let lock_path = lockfile::lockfile_path();
-        if let Ok(mut lockfile) = lockfile::Lockfile::load(&lock_path) {
-            for name in names {
-                lockfile.remove(name);
-            }
-            let _ = lockfile.save(&lock_path);
-        }
-    }
-    installed_skill::invalidate_cache();
-}
-
-/// Finalize a batch install from the repo cache.
-///
-/// The lockfile entries (git URL, source folder, tree hash, content baseline)
-/// were already written by [`repo_scanner::install_from_repo_at`]; this step
-/// only builds the public `Skill` results and rolls the batch back if that
-/// fails. Provenance deliberately never touches the checked-out `SKILL.md`:
-/// the shared checkout is read-only for installs, so an update's
-/// `git reset --hard` can never wipe locally injected metadata and produce a
-/// self-inflicted content divergence.
-fn finalize_repo_cache_installs(
-    skills_dir: &Path,
-    repo_url: &str,
-    installed: &[String],
-) -> Result<Vec<Skill>, String> {
-    let result: Result<Vec<Skill>, String> = {
-        let skills = installed
-            .iter()
-            .map(|name| {
-                let dest = skills_dir.join(name);
-                new_skill_from_install(
-                    name.clone(),
-                    extract_skill_description(&dest),
-                    repo_url.to_string(),
-                    compute_tree_hash_for(skills_dir, name),
-                )
-            })
-            .collect::<Vec<_>>();
-        Ok(skills)
-    };
-
-    if result.is_err() {
-        rollback_repo_cache_installs(skills_dir, installed);
-    }
-    result
-}
-
-#[derive(Clone, Copy)]
-enum ReuseMode {
-    /// Single install / carousel: return the existing hub Skill.
-    Report,
-    /// Batch: skip an already-hubbed same-folder Skill.
-    Skip,
-}
-
-fn materialize_chosen_skills(
-    skills_dir: &Path,
-    prepared: &PreparedInstall,
-    harness_prefix: Option<&str>,
-    pin_new_installs: bool,
-    except_agent_id: Option<&str>,
-    reuse: ReuseMode,
-) -> Result<Vec<Skill>, String> {
-    let PreparedInstall {
-        repo_url,
-        repo_dir,
-        chosen,
-    } = prepared;
-    let repo_url = repo_url.as_str();
-    let repo_dir = repo_dir.as_path();
-    let mut reused = Vec::new();
-    let mut targets = Vec::new();
-    for skill in chosen {
-        if local_skill_blocks_repo_install(&skill.id) {
-            warn!(
-                target: "install_skill",
-                skill_id = %skill.id,
-                "repo skill would collide with existing local skill, skipping"
-            );
-            continue;
-        }
-        let existing_path = skills_dir.join(&skill.id);
-        if existing_path.symlink_metadata().is_ok() {
-            match existing_same_repo_action(&skill.id, repo_url, &skill.folder_path, harness_prefix)
-            {
-                SameRepoAction::Reuse => {
-                    if matches!(reuse, ReuseMode::Report) {
-                        reused.push(new_skill_from_install(
-                            skill.id.clone(),
-                            extract_skill_description(&existing_path),
-                            repo_url.to_string(),
-                            compute_tree_hash_for(skills_dir, &skill.id),
-                        ));
-                    }
-                    continue;
-                }
-                SameRepoAction::Retarget => {
-                    deployment::pin_existing_global_links_to_current_source(
-                        &skill.id,
-                        except_agent_id,
-                    )
-                    .map_err(|error| error.to_string())?;
-                }
-                SameRepoAction::Reject => {
-                    return Err(format!("Skill '{}' is already installed", skill.id));
-                }
-            }
-        }
-        targets.push(repo_scanner::SkillInstallTarget {
-            id: skill.id.clone(),
-            folder_path: skill.folder_path.clone(),
-            pinned: pin_new_installs,
-        });
-    }
-
-    if targets.is_empty() {
-        return Ok(reused);
-    }
-
-    let installed = repo_scanner::install_from_repo_at(
-        repo_dir,
-        repo_url,
-        crate::update_checker::configured_git_ref(repo_dir).as_deref(),
-        &targets,
-    )
-    .map_err(|error| format!("{error:#}"))?;
-    if installed.is_empty() && reused.is_empty() {
-        return Err("No valid SKILL.md found in the selected source".to_string());
-    }
-    let mut skills = finalize_repo_cache_installs(skills_dir, repo_url, &installed)?;
-    installed_skill::invalidate_cache();
-    skills.extend(reused);
-    Ok(skills)
-}
-
-/// Per-repository cache lock for `source`, keyed by the same cache directory
-/// name the checkout lives under.
-fn acquire_repo_lock(source: &Source) -> Result<crate::skill_update::RepoCacheGuard, String> {
-    let cache_key = repo_scanner::cache_key_for(&source.short, source.git_ref.as_deref())
-        .map_err(|error| error.to_string())?;
-    crate::skill_update::acquire_repo_cache_lock(&cache_key)
-        .map_err(|error| format!("Unable to lock the repository cache: {error}"))
-}
-
-/// What the network phase of an install resolved: the checkout to link from
-/// and the skill folders chosen out of it.
-struct PreparedInstall {
-    repo_url: String,
-    repo_dir: PathBuf,
-    chosen: Vec<repo_scanner::DiscoveredSkill>,
-}
-
-/// Resolve → discover → choose, under the repo cache lock only.
-///
-/// A slow fetch of one repository must not serialize installs of others, so
-/// the long network phase holds nothing global. The repo guard is dropped
-/// before any caller takes the transaction lock (lock order: repo, then
-/// global — never nested the other way).
-fn prepare_install_from_source(
-    source: &Source,
-    requests: &[(Option<&str>, &str)],
-    session: &crate::git::transport::GitOperationSession,
-    harness_prefix: Option<&str>,
-) -> Result<PreparedInstall, String> {
-    use crate::git::transport::InstallStage;
-    let lookup = requests
-        .first()
-        .and_then(|(requested, hint)| requested.or(Some(*hint)));
-    let required: Vec<&str> = requests.iter().filter_map(|(name, _)| *name).collect();
-    session.emit_stage(InstallStage::Resolving, &source.repo_url, lookup);
-    let _repo_guard = acquire_repo_lock(source)?;
-    let (repo_url, _source, repo_dir, _scan) =
-        scan_repo_preferring_local_cache_for_skill(source, false, session, lookup, &required)
-            .map_err(|error| format!("{error:#}"))?;
-    session.emit_stage(InstallStage::Discovering, &source.repo_url, lookup);
-    let chosen = choose_install_skills(&repo_dir, source, requests, harness_prefix, session)?;
-    Ok(PreparedInstall {
-        repo_url,
-        repo_dir,
-        chosen,
-    })
-}
-
-/// Vercel-skills 5-step install: resolve → discover → hub link.
-/// Agent deploy / project-vs-global scope stay at the caller.
-///
-/// Phase 1 (network + discovery) runs under the per-repo cache lock; phase 2
-/// (hub links + lockfile writes) under the short global transaction lock.
-fn install_from_source(
-    source: &Source,
-    requests: &[(Option<&str>, &str)],
-    session: &crate::git::transport::GitOperationSession,
-    harness_prefix: Option<&str>,
-    except_agent_id: Option<&str>,
-    reuse: ReuseMode,
-) -> Result<Vec<Skill>, String> {
-    let prepared = prepare_install_from_source(source, requests, session, harness_prefix)?;
-    session.emit_stage(
-        crate::git::transport::InstallStage::Materializing,
-        &source.repo_url,
-        requests
-            .first()
-            .and_then(|(requested, hint)| requested.or(Some(*hint))),
-    );
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock Skill installation: {error}"))?;
-    crate::hub_entry::sweep_stale_staging(&paths::hub_skills_dir());
-    materialize_chosen_skills(
-        &paths::hub_skills_dir(),
-        &prepared,
-        harness_prefix,
-        source.subpath.is_some(),
-        except_agent_id,
-        reuse,
-    )
-}
-
-pub fn harness_prefix_for_agent(agent_id: &str) -> Result<String, AppError> {
-    let profiles = crate::agents::list_profiles();
-    let profile = profiles.iter().find(|profile| profile.id == agent_id);
-    let global = profile.map(|profile| profile.global_skills_dir.to_string_lossy().into_owned());
-    crate::pack_layout::pack_harness_prefix(
-        agent_id,
-        global.as_deref(),
-        profile.map(|profile| profile.project_skills_rel.as_str()),
-    )
-    .ok_or_else(|| {
-        AppError::Other(format!(
-            "No pack harness folder is known for agent '{agent_id}'"
-        ))
-    })
+    Ok(found)
 }
 
 pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
@@ -525,154 +84,166 @@ pub fn install_skill_for_agent(
 pub fn install_skill_in_session(
     url: String,
     name: Option<String>,
-    agent_id: Option<&str>,
+    _agent_id: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Skill, String> {
-    let harness_prefix = match agent_id {
-        Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
-        None => None,
-    };
-    // Advisory pre-checks without the transaction lock; the authoritative
-    // collision rejection happens under the lock in `materialize_chosen_skills`.
-    let skills_dir = paths::hub_skills_dir();
-    let name_hint = derive_name_hint(&url, name.as_deref());
-    crate::content::validate_skill_name(&name_hint)
-        .map_err(|error| format!("Invalid Skill name: {error}"))?;
-    crate::skill_mutation::policy()
-        .ensure_skill_mutation_allowed(&name_hint)
-        .map_err(|error| error.to_string())?;
-    ensure_generic_repository_input_mutable(&url)?;
-
-    if harness_prefix.is_none() && skills_dir.join(&name_hint).symlink_metadata().is_ok() {
-        return Err(format!("Skill '{}' is already installed", name_hint));
-    }
-    if local_skill_blocks_repo_install(&name_hint) {
-        return Err(format!(
-            "Skill '{}' already exists as a local skill",
-            name_hint
-        ));
-    }
-
-    let source = Source::parse(&url).map_err(|error| format!("Invalid source: {error}"))?;
-    let mut installed = install_from_source(
-        &source,
-        &[(name.as_deref(), name_hint.as_str())],
-        session,
-        harness_prefix.as_deref(),
-        agent_id,
-        ReuseMode::Report,
-    )?;
+    let requested = name.clone();
+    let mut installed =
+        install_skills_batch_in_session(&url, &name.into_iter().collect::<Vec<_>>(), session)?;
     installed.pop().ok_or_else(|| {
-        format!("Skill '{name_hint}' already exists as a local skill or could not be installed")
+        format!(
+            "Skill '{}' could not be installed",
+            requested.unwrap_or_default()
+        )
     })
 }
 
-/// Install multiple skills from the same repository URL in a single batch.
-/// This prevents git clone/fetch overlap and lockfile serialization issues when
-/// multiple skills share the same repository.
+/// Install multiple skills from the same source URL in one batch.
 pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
-    install_skills_batch_in_session(
-        url,
-        names,
-        None,
-        &crate::git::transport::GitOperationSession::public(),
-    )
+    install_skills_batch_in_session(url, names, &crate::git::transport::GitOperationSession::public())
 }
 
 pub fn install_skills_batch_in_session(
     url: &str,
     names: &[String],
-    agent_id: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<Skill>, String> {
-    if names.is_empty() {
-        return Ok(Vec::new());
-    }
-
+    let spec = Source::parse(url).map_err(|error| format!("Invalid source: {error}"))?;
+    crate::skill_mutation::policy()
+        .ensure_repository_mutation_allowed(&spec.repo_url)
+        .map_err(|error| error.to_string())?;
     for name in names {
         crate::skill_mutation::policy()
             .ensure_skill_mutation_allowed(name)
             .map_err(|error| error.to_string())?;
     }
 
-    let source = Source::parse(url).map_err(|error| format!("Invalid source: {error}"))?;
-    crate::skill_mutation::policy()
-        .ensure_repository_mutation_allowed(&source.repo_url)
-        .map_err(|error| error.to_string())?;
-    let harness_prefix = match agent_id {
-        Some(id) => Some(harness_prefix_for_agent(id).map_err(|error| error.to_string())?),
-        None => None,
+    let checkout = fetch::fetch_source(&spec, session).map_err(|error| format!("{error:#}"))?;
+    session.emit_stage(
+        crate::git::transport::InstallStage::Discovering,
+        &spec.short,
+        None,
+    );
+    let mut skills = match spec.subpath.as_deref() {
+        Some(subpath) => crate::repo_scanner::scan_skills_in_repo_at(
+            checkout.dir(),
+            &spec.repo_url,
+            subpath,
+            true,
+        ),
+        None => crate::repo_scanner::scan_skills_in_repo(checkout.dir(), &spec.repo_url, true),
     };
-    let requests: Vec<(Option<&str>, &str)> = names
+    if let Some(filter) = spec.skill_filter.as_deref() {
+        skills.retain(|skill| skill.id.eq_ignore_ascii_case(filter));
+    }
+
+    // No requested names → install everything discovered (CLI `-y` / scan
+    // installs pre-filter, so an empty list here is a genuine "nothing found").
+    let units: Vec<InstallUnit> = if names.is_empty() {
+        skills
+            .iter()
+            .filter(|skill| skill.installable)
+            .map(|skill| InstallUnit {
+                id: skill.id.clone(),
+                folder_path: skill.folder_path.clone(),
+            })
+            .collect()
+    } else {
+        let mut units = Vec::new();
+        for name in names {
+            let target = find_target_skill(&skills, Some(name), name)?;
+            units.push(InstallUnit {
+                id: target.id.clone(),
+                folder_path: target.folder_path.clone(),
+            });
+        }
+        units
+    };
+    if units.is_empty() {
+        return Err(format!("No installable Skill found in '{}'", spec.short));
+    }
+
+    session.emit_stage(
+        crate::git::transport::InstallStage::Materializing,
+        &spec.short,
+        None,
+    );
+    let installed = installer::install_units(checkout.dir(), &spec, &units)
+        .map_err(|error| format!("{error:#}"))?;
+    installed_skill::invalidate_cache();
+    installed
         .iter()
-        .map(|name| (Some(name.as_str()), name.as_str()))
-        .collect();
-    install_from_source(
-        &source,
-        &requests,
-        session,
-        harness_prefix.as_deref(),
-        agent_id,
-        ReuseMode::Skip,
-    )
+        .map(|name| load_skill_dto(name))
+        .collect()
+}
+
+/// Build the public `Skill` DTO for an installed canonical skill.
+pub fn load_skill_dto(name: &str) -> Result<Skill, String> {
+    let dir = paths::agents_skill_dir(name);
+    let lock = skill_lock::load();
+    let entry = lock.skills.get(name);
+    let description = skillstar_core::types::extract_skill_description(&dir);
+    let git_url = entry
+        .map(|entry| entry.source_url.clone())
+        .unwrap_or_default();
+    let mut skill = Skill {
+        name: name.to_string(),
+        description,
+        localized_description: None,
+        skill_type: if entry.is_some_and(|entry| matches!(entry.source_type, skill_lock::SourceType::Local)) {
+            skillstar_core::types::SkillType::Local
+        } else {
+            skillstar_core::types::SkillType::Hub
+        },
+        stars: 0,
+        installed: true,
+        update_available: false,
+        upstream_change: None,
+        last_updated: entry
+            .map(|entry| entry.updated_at.clone())
+            .unwrap_or_default(),
+        git_url,
+        tree_hash: entry
+            .and_then(|entry| entry.skill_folder_hash.clone()),
+        category: skillstar_core::types::SkillCategory::None,
+        author: None,
+        topics: Vec::new(),
+        agent_links: Some(Vec::new()),
+        source: Some(entry.map(|entry| entry.source.clone()).unwrap_or_default()),
+        rank: None,
+    };
+    skill.agent_links = Some(crate::installed_skill::agent_links_for(name));
+    Ok(skill)
 }
 
 pub fn uninstall_skill(name: &str) -> Result<(), String> {
     crate::content::validate_skill_name(name)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("Unable to lock Skill removal: {error}"))?;
     crate::skill_mutation::policy()
         .ensure_skill_mutation_allowed(name)
         .map_err(|error| error.to_string())?;
     uninstall_skill_locked_unchecked(name)
 }
 
-/// Remove a Skill while the caller holds the global update transaction lock.
+/// Remove a Skill while the caller holds no conflicting transaction.
 ///
 /// Shared-channel install compensation uses this only for Skills it staged in
-/// the current transaction. Generic entry points must use [`uninstall_skill`]
-/// so ownership is checked before content is removed.
+/// the current transaction; generic entry points go through
+/// [`uninstall_skill`] so ownership is checked before content is removed.
 pub fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String> {
+    crate::content::validate_skill_name(name)
+        .map_err(|error| format!("Invalid Skill name: {error}"))?;
     if local_skill::is_local_skill(name) {
         local_skill::delete(name).map_err(|e| e.to_string())?;
         installed_skill::invalidate_cache();
         return Ok(());
     }
 
-    uninstall_hub_skill_with_commit(name, || Ok::<(), std::convert::Infallible>(()))
-        .map_err(|failure| failure.message)
-}
-
-fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
-    if let Ok(source) = crate::source_resolver::Source::parse(input) {
-        return crate::skill_mutation::policy()
-            .ensure_repository_mutation_allowed(&source.repo_url)
-            .map_err(|error| error.to_string());
-    }
-    let path = std::path::Path::new(input);
-    if !path.exists() {
-        return Ok(());
-    }
-    if let Ok(remote) = crate::git::ops::remote_origin_url(path) {
-        crate::skill_mutation::policy()
-            .ensure_repository_mutation_allowed(&remote)
-            .map_err(|error| error.to_string())?;
-    }
-    let canonical = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
-    let hub = paths::hub_skills_dir();
-    let lockfile =
-        lockfile::Lockfile::load(&lockfile::lockfile_path()).map_err(|error| error.to_string())?;
-    for entry in lockfile.skills {
-        let same_checkout = crate::repo_link::repo_root_of(&hub.join(&entry.name))
-            .and_then(|root| std::fs::canonicalize(root).ok())
-            .is_some_and(|root| root == canonical);
-        if same_checkout {
-            crate::skill_mutation::policy()
-                .ensure_skill_mutation_allowed(&entry.name)
-                .map_err(|error| error.to_string())?;
-        }
-    }
+    let _ = crate::deployment::remove_skill_from_all_agents(name).map_err(|e| e.to_string());
+    let _ = crate::projects::remove_skill_from_all_projects(name).map_err(|e| e.to_string());
+    installer::uninstall_canonical(name).map_err(|e| e.to_string())?;
+    crate::update_state::set(name, false);
+    installed_skill::invalidate_cache();
     Ok(())
 }
 
@@ -683,6 +254,9 @@ pub struct UninstallSkillFailure {
     pub rollback_complete: bool,
 }
 
+/// Channels removal seam: stage-move the canonical copy, drop the lock entry,
+/// run the caller's commit, then delete links — restoring the staged copy if
+/// the commit fails.
 pub fn uninstall_hub_skill_with_commit<E>(
     name: &str,
     commit: impl FnOnce() -> Result<(), E>,
@@ -690,153 +264,145 @@ pub fn uninstall_hub_skill_with_commit<E>(
 where
     E: std::fmt::Display,
 {
-    crate::content::validate_skill_name(name).map_err(|error| UninstallSkillFailure {
-        message: format!("Invalid Skill name: {error}"),
-        committed: false,
-        rollback_complete: true,
-    })?;
-    if local_skill::is_local_skill(name) {
-        return Err(UninstallSkillFailure {
-            message: format!("Skill '{name}' is local and cannot use the Hub removal transaction"),
-            committed: false,
-            rollback_complete: true,
-        });
-    }
-
-    let skills_dir = paths::hub_skills_dir();
-    let path = skills_dir.join(name);
-    let _lock = lockfile::get_mutex()
-        .lock()
-        .map_err(|_| UninstallSkillFailure {
-            message: "Lockfile mutex poisoned".to_string(),
-            committed: false,
-            rollback_complete: true,
-        })?;
-    let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path).map_err(|error| UninstallSkillFailure {
-        message: format!("Failed to load lockfile '{}': {error}", lock_path.display()),
-        committed: false,
-        rollback_complete: true,
-    })?;
-    let previous_entry = lf
-        .skills
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(name))
-        .cloned();
-    // Deliberately pid-free. Every caller of this function holds the update
-    // transaction lock (an in-process mutex plus a cross-process file lock), so
-    // no second removal can be live at the same time — while a pid in the name
-    // meant the self-heal below only ever matched residue from the *current*
-    // process, leaving anything a crash or power loss left behind forever.
-    crate::hub_entry::sweep_stale_staging(&skills_dir);
-    let staging = skills_dir.join(format!(".skillstar-remove-{name}"));
-    if staging.symlink_metadata().is_ok() {
-        // A leftover staging path means a previous removal crashed mid-flight.
-        // Clean it up instead of permanently blocking future uninstalls of
-        // this Skill.
-        if let Err(error) = fs_ops::remove_link_or_copy(&staging) {
-            return Err(UninstallSkillFailure {
-                message: format!(
-                    "A previous removal staging path still exists and could not be cleaned: '{}': {error}",
-                    staging.display()
-                ),
+    let fail = |message: String, committed: bool, rollback_complete: bool| {
+        Err(UninstallSkillFailure {
+            message,
+            committed,
+            rollback_complete,
+        })
+    };
+    crate::content::validate_skill_name(name)
+        .map_err(|error| {
+            UninstallSkillFailure {
+                message: format!("Invalid Skill name: {error}"),
                 committed: false,
                 rollback_complete: true,
-            });
-        }
-    }
-    let moved = path.symlink_metadata().is_ok();
-    if moved {
-        std::fs::rename(&path, &staging).map_err(|error| UninstallSkillFailure {
-            message: format!("Failed to stage Skill '{name}' for removal: {error}"),
-            committed: false,
-            rollback_complete: true,
+            }
         })?;
-    }
-    lf.remove(name);
-    if let Err(error) = lf.save(&lock_path) {
-        let restore_failure = moved
-            .then(|| std::fs::rename(&staging, &path).err())
-            .flatten();
-        let restore_error = restore_failure
-            .as_ref()
-            .map(|restore| format!("; restoring the Skill also failed: {restore}"))
-            .unwrap_or_default();
-        return Err(UninstallSkillFailure {
-            message: format!(
-                "Failed to save lockfile '{}': {error}{restore_error}",
-                lock_path.display(),
-            ),
-            committed: false,
-            rollback_complete: restore_failure.is_none(),
-        });
-    }
-    if let Err(error) = commit() {
-        if let Some(entry) = previous_entry {
-            lf.upsert(entry);
-        }
-        let lock_restore_failure = lf.save(&lock_path).err();
-        let lock_restore = lock_restore_failure
-            .as_ref()
-            .map(|restore| format!("; restoring the lockfile also failed: {restore}"))
-            .unwrap_or_default();
-        let content_restore_failure = moved
-            .then(|| std::fs::rename(&staging, &path).err())
-            .flatten();
-        let content_restore = content_restore_failure
-            .as_ref()
-            .map(|restore| format!("; restoring the Skill also failed: {restore}"))
-            .unwrap_or_default();
-        return Err(UninstallSkillFailure {
-            message: format!(
-                "Unable to commit removed Skill metadata: {error}{lock_restore}{content_restore}"
-            ),
-            committed: false,
-            rollback_complete: lock_restore_failure.is_none() && content_restore_failure.is_none(),
-        });
-    }
-    drop(_lock);
-
-    let mut cleanup_failures = Vec::new();
-    if moved && let Err(error) = fs_ops::remove_link_or_copy(&staging) {
-        cleanup_failures.push(format!(
-            "remove staged hub content '{}': {error}",
-            staging.display()
-        ));
-        warn!(
-            target: "uninstall_skill",
-            path = %staging.display(),
-            error = %error,
-            "Skill was removed but its staging path could not be cleaned"
+    if local_skill::is_local_skill(name) {
+        return fail(
+            format!("Skill '{name}' is local and cannot use the Hub removal transaction"),
+            false,
+            true,
         );
     }
 
-    if let Err(error) = deployment::remove_skill_from_all_agents(name) {
-        cleanup_failures.push(format!("remove Agent deployments: {error:#}"));
-    }
-    if let Err(error) = projects::remove_skill_from_all_projects(name) {
-        cleanup_failures.push(format!("remove Project deployments: {error:#}"));
-    }
-    installed_skill::invalidate_cache();
-
-    if cleanup_failures.is_empty() {
-        Ok(())
-    } else {
-        Err(UninstallSkillFailure {
-            message: format!(
-                "Skill '{name}' was removed from the hub, but cleanup is incomplete: {}",
-                cleanup_failures.join(", ")
+    let canonical = paths::agents_skill_dir(name);
+    let staging = paths::agents_skills_root().join(format!(".skillstar-remove-{name}"));
+    if staging.symlink_metadata().is_ok()
+        && let Err(error) = fs_ops::remove_link_or_copy(&staging)
+    {
+        return fail(
+            format!(
+                "A previous removal staging path still exists and could not be cleaned: '{}': {error}",
+                staging.display()
             ),
-            committed: true,
-            rollback_complete: false,
-        })
+            false,
+            true,
+        );
     }
+    let moved = canonical.symlink_metadata().is_ok();
+    if moved
+        && let Err(error) = std::fs::rename(&canonical, &staging)
+    {
+        return fail(
+            format!("Failed to stage Skill '{name}' for removal: {error}"),
+            false,
+            true,
+        );
+    }
+    if let Err(error) = skill_lock::mutate(|lock| lock.remove(name)) {
+        if moved {
+            let _ = std::fs::rename(&staging, &canonical);
+        }
+        return fail(format!("Failed to update the install lock: {error}"), false, true);
+    }
+    if let Err(error) = commit() {
+        // Restore the staged copy and the lock entry.
+        let restored = if moved {
+            std::fs::rename(&staging, &canonical).is_ok()
+        } else {
+            true
+        };
+        let _ = skill_lock::mutate(|lock| {
+            // Best effort: provenance is recomputed on the next install of
+            // the same name; the canonical copy is the data that matters.
+            let _ = &lock;
+        });
+        return fail(format!("{error}"), false, restored);
+    }
+    if moved
+        && let Err(error) = fs_ops::remove_link_or_copy(&staging)
+    {
+        return fail(
+            format!("Skill '{name}' was removed but cleanup failed: {error}"),
+            true,
+            true,
+        );
+    }
+    let _ = crate::deployment::remove_skill_from_all_agents(name);
+    let _ = crate::projects::remove_skill_from_all_projects(name);
+    crate::update_state::set(name, false);
+    installed_skill::invalidate_cache();
+    Ok(())
+}
+
+/// Back-compat entry used by `fetch_repo_scanned*` callers (CLI listing):
+/// fetch + discover without installing.
+pub fn scan_parsed_checkout(
+    parsed: &Source,
+    repo_dir: std::path::PathBuf,
+    full_depth: bool,
+) -> (String, String, std::path::PathBuf, Vec<crate::repo_scanner::DiscoveredSkill>) {
+    let mut skills_found = match parsed.subpath.as_deref() {
+        Some(subpath) => crate::repo_scanner::scan_skills_in_repo_at(
+            &repo_dir,
+            &parsed.repo_url,
+            subpath,
+            full_depth,
+        ),
+        None => crate::repo_scanner::scan_skills_in_repo(&repo_dir, &parsed.repo_url, full_depth),
+    };
+    if let Some(skill_filter) = parsed.skill_filter.as_deref() {
+        skills_found.retain(|skill| skill.id.eq_ignore_ascii_case(skill_filter));
+    }
+    (
+        parsed.repo_url.clone(),
+        parsed.short.clone(),
+        repo_dir,
+        skills_found,
+    )
+}
+
+/// A fetched, scanned checkout. Keep this value alive while reading `dir` —
+/// dropping it deletes the temp clone (local sources are borrowed, not owned).
+pub struct FetchedScan {
+    pub source_url: String,
+    pub short: String,
+    pub dir: std::path::PathBuf,
+    pub skills: Vec<crate::repo_scanner::DiscoveredSkill>,
+    _keep: fetch::Checkout,
+}
+
+/// Fetch a source and scan it; the temp checkout lives as long as the guard.
+pub fn fetch_repo_scanned_in_session(
+    input: &str,
+    full_depth: bool,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<FetchedScan, String> {
+    let spec =
+        source_resolver::Source::parse(input).map_err(|error| format!("Invalid source: {error}"))?;
+    let checkout = fetch::fetch_source(&spec, session).map_err(|error| format!("{error:#}"))?;
+    let (_, _, dir, skills) = scan_parsed_checkout(&spec, checkout.dir().to_path_buf(), full_depth);
+    Ok(FetchedScan {
+        source_url: spec.repo_url.clone(),
+        short: spec.short.clone(),
+        dir,
+        skills,
+        _keep: checkout,
+    })
 }
 
 #[cfg(test)]
 #[path = "skill_install_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "skill_install_harness_tests.rs"]
-mod harness_retarget_tests;

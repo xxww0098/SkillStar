@@ -13,8 +13,6 @@ export interface AgentFilterState {
   status: AgentStatusFilter;
 }
 
-export const EMPTY_AGENT_FILTER: AgentFilterState = { query: "", status: "all" };
-
 /** Counts per status for the segmented control, computed after text search. */
 export type AgentStatusCounts = Record<AgentStatusFilter, number>;
 

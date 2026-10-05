@@ -14,6 +14,7 @@ import { UsageActionBar } from "./UsageActionBar";
 import { UsageAlertBanner } from "./UsageAlertBanner";
 import { UsageGrid } from "./UsageGrid";
 import { UsageRefreshControl } from "./UsageRefreshControl";
+import { UsageGridSkeleton } from "./UsageSkeleton";
 
 interface UsagePanelProps {
   filter: CatalogFilter;
@@ -123,9 +124,7 @@ export function UsagePanel({
       ) : null}
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {data.loading ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            {t("usage.loading")}
-          </div>
+          <UsageGridSkeleton />
         ) : data.error ? (
           <div className="flex flex-1 items-center justify-center text-sm text-red-400">
             {t("usage.loadError", { error: data.error })}

@@ -1,4 +1,9 @@
-import type { LocalDivergenceResolution } from "./skill";
+/** How a shared-channel subscriber answers an update that touches locally
+ *  edited content — the channel flow's own divergence resolution. */
+export type LocalDivergenceResolution =
+  | { kind: "preserve"; local_name: string }
+  | { kind: "discard" }
+  | { kind: "uninstall" };
 
 export type SharedChannelRole = "owner" | "publisher" | "subscriber";
 export type SharedChannelStatus = "awaiting_app_installation" | "awaiting_invitation_acceptance" | "active";

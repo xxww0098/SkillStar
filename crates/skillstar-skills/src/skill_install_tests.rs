@@ -1,4 +1,4 @@
-use super::{derive_name_hint, find_target_skill, requested_skill_not_found_error};
+use super::find_target_skill;
 use crate::repo_scanner::DiscoveredSkill;
 
 fn discovered(id: &str) -> DiscoveredSkill {
@@ -13,46 +13,39 @@ fn discovered(id: &str) -> DiscoveredSkill {
 }
 
 #[test]
-fn derive_name_hint_prefers_explicit_name() {
-    let hint = derive_name_hint(
-        "https://github.com/example/skills.git",
-        Some("explicit-name"),
-    );
-    assert_eq!(hint, "explicit-name");
-}
-
-#[test]
-fn derive_name_hint_falls_back_to_repo_tail() {
-    let hint = derive_name_hint("https://github.com/example/awesome-skill.git", None);
-    assert_eq!(hint, "awesome-skill");
-}
-
-#[test]
 fn find_target_skill_prefers_requested_name_case_insensitive() {
     let skills = vec![discovered("frontend-ui"), discovered("security-review")];
     let target = find_target_skill(&skills, Some("FRONTEND-UI"), "unused-name-hint");
-    assert_eq!(target.map(|skill| skill.id.as_str()), Some("frontend-ui"));
+    assert_eq!(target.map(|skill| skill.id.as_str()), Ok("frontend-ui"));
 }
 
 #[test]
 fn find_target_skill_uses_single_skill_fallback() {
     let skills = vec![discovered("only-one")];
     let target = find_target_skill(&skills, None, "no-match-hint");
-    assert_eq!(target.map(|skill| skill.id.as_str()), Some("only-one"));
+    assert_eq!(target.map(|skill| skill.id.as_str()), Ok("only-one"));
 }
 
 #[test]
 fn find_target_skill_rejects_different_single_skill_when_name_is_explicit() {
     let skills = vec![discovered("renamed-skill")];
     let target = find_target_skill(&skills, Some("removed-skill"), "removed-skill");
-    assert!(target.is_none());
+    assert!(target.is_err());
+    let reason = target.unwrap_err();
+    assert!(reason.contains("removed-skill"), "{reason}");
+    assert!(reason.contains("renamed-skill"), "{reason}");
 }
 
 #[test]
-fn requested_skill_not_found_error_names_missing_identity_and_possible_cause() {
-    let error = requested_skill_not_found_error(&["removed-skill".to_string()]);
-    assert!(error.contains("removed-skill"));
-    assert!(error.contains("deleted or renamed"));
+fn find_target_skill_rejects_uninstallable_skill_with_reason() {
+    let mut blocked = discovered("blocked-skill");
+    blocked.installable = false;
+    blocked.frontmatter_issues = vec!["missing_description".to_string()];
+    let skills = vec![blocked];
+    let target = find_target_skill(&skills, Some("blocked-skill"), "blocked-skill");
+    let reason = target.unwrap_err();
+    assert!(reason.contains("cannot be installed"), "{reason}");
+    assert!(reason.contains("missing_description"), "{reason}");
 }
 
 #[cfg(test)]
@@ -107,92 +100,43 @@ mod pipeline_local_source_tests {
         }
     }
 
-    fn init_repo() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        for args in [
-            vec!["init", "--initial-branch=main"],
-            vec!["config", "user.email", "test@example.com"],
-            vec!["config", "user.name", "SkillStar Tests"],
-        ] {
-            let status = skillstar_core::infra::path_env::command_with_path("git")
-                .current_dir(dir.path())
-                .args(&args)
-                .status()
-                .unwrap();
-            assert!(status.success());
-        }
-        dir
+    fn canonical(name: &str) -> std::path::PathBuf {
+        skillstar_core::infra::paths::agents_skill_dir(name)
     }
 
-    fn git_commit_all(repo: &std::path::Path, message: &str) {
-        for args in [vec!["add", "."], vec!["commit", "-m", message]] {
-            let status = skillstar_core::infra::path_env::command_with_path("git")
-                .current_dir(repo)
-                .args(&args)
-                .status()
-                .unwrap();
-            assert!(status.success());
-        }
-    }
-
-    /// Local path is step 1 of the same pipeline. An invalid root SKILL.md
-    /// is still rejected and must not leave a hub entry.
+    /// Local path is step 1 of the same pipeline (borrowed in place, D-081).
+    /// An invalid root SKILL.md is still rejected and must leave nothing behind.
     #[test]
     fn pipeline_rejects_invalid_root_skill_from_a_local_path() {
         let _sandbox = Sandbox::new();
-        let repo = init_repo();
+        let repo = tempfile::tempdir().unwrap();
         std::fs::write(repo.path().join("SKILL.md"), "# No frontmatter\n").unwrap();
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .current_dir(repo.path())
-            .args(["add", "."])
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .current_dir(repo.path())
-            .args(["commit", "-m", "init"])
-            .status()
-            .unwrap();
-        assert!(status.success());
 
+        // The invalid root SKILL.md never surfaces as an installable skill,
+        // so the requested identity fails closed ("not found") and nothing
+        // lands in canonical. The frontmatter gate itself is pinned by the
+        // installer tests.
         let error = install_skill(
             repo.path().to_string_lossy().to_string(),
             Some("demo".into()),
         )
         .unwrap_err();
+        assert!(error.contains("demo"), "{error}");
         assert!(
-            error.contains("invalid") || error.contains("not installable"),
-            "{error}"
-        );
-        assert!(error.contains("description"), "{error}");
-        let hub = skillstar_core::infra::paths::hub_skills_dir();
-        assert!(
-            !hub.join("demo").symlink_metadata().is_ok(),
-            "rejected clone must be cleaned up"
+            !canonical("demo").symlink_metadata().is_ok(),
+            "rejected install must leave nothing behind"
         );
     }
 
     #[test]
     fn pipeline_installs_a_valid_root_skill_from_a_local_path() {
         let _sandbox = Sandbox::new();
-        let repo = init_repo();
+        let repo = tempfile::tempdir().unwrap();
         std::fs::write(
             repo.path().join("SKILL.md"),
             "---\nname: demo\ndescription: A valid root skill\n---\n\n# Demo\n",
         )
         .unwrap();
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .current_dir(repo.path())
-            .args(["add", "."])
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .current_dir(repo.path())
-            .args(["commit", "-m", "init"])
-            .status()
-            .unwrap();
-        assert!(status.success());
 
         let skill = install_skill(
             repo.path().to_string_lossy().to_string(),
@@ -200,17 +144,25 @@ mod pipeline_local_source_tests {
         )
         .expect("valid root skill installs through the same pipeline");
         assert_eq!(skill.name, "demo");
-        let hub = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        assert!(hub.join("SKILL.md").is_file());
+        assert!(canonical("demo").join("SKILL.md").is_file());
+
+        let lock = crate::skill_lock::load();
+        assert_eq!(lock.skills["demo"].skill_path, None, "root skill");
+        assert_eq!(
+            lock.skills["demo"].source_type,
+            crate::skill_lock::SourceType::Local
+        );
     }
 
+    /// vercel parity: the repo-root SKILL.md IS the install unit in
+    /// root-first mode; harness copies no longer win (D-075 table removed).
     #[test]
-    fn pipeline_installs_a_harness_folder_from_a_local_pack_not_the_repo_root() {
+    fn pipeline_installs_the_root_skill_of_a_local_pack() {
         let _sandbox = Sandbox::new();
-        let repo = init_repo();
+        let repo = tempfile::tempdir().unwrap();
         std::fs::write(
             repo.path().join("SKILL.md"),
-            "---\nname: rust\ndescription: shim at pack root\n---\n\n# rust\n",
+            "---\nname: rust\ndescription: pack root\n---\n\n# rust\n",
         )
         .unwrap();
         let cursor = repo.path().join(".cursor/skills/rust");
@@ -220,76 +172,19 @@ mod pipeline_local_source_tests {
             "---\nname: rust\ndescription: cursor copy\n---\n\n# rust\n",
         )
         .unwrap();
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .current_dir(repo.path())
-            .args(["add", "."])
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .current_dir(repo.path())
-            .args(["commit", "-m", "init"])
-            .status()
-            .unwrap();
-        assert!(status.success());
 
         let skill = install_skill(
             repo.path().to_string_lossy().to_string(),
             Some("rust".into()),
         )
-        .expect("a harness pack must install through the same pipeline");
+        .expect("a pack installs through the same pipeline");
         assert_eq!(skill.name, "rust");
-        let lock = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).unwrap();
-        let entry = lock
-            .skills
-            .iter()
-            .find(|entry| entry.name == "rust")
-            .expect("lock entry");
+        let lock = crate::skill_lock::load();
         assert_eq!(
-            entry.source_folder.as_deref(),
-            Some(".cursor/skills/rust"),
-            "must hub-link the harness folder, not the repo root"
+            lock.skills["rust"].skill_path, None,
+            "root-first: the repo root is the install unit"
         );
-        let hub = skillstar_core::infra::paths::hub_skills_dir().join("rust");
-        assert!(hub.join("SKILL.md").is_file());
-        assert!(!hub.join(".cursor").exists());
-    }
-
-    /// Regression: the repo cache can lag upstream. A Skill added after the
-    /// first install must still install — the scan must fetch instead of
-    /// reporting the requested identity as deleted or renamed.
-    #[test]
-    fn pipeline_fetches_stale_cache_when_requested_skill_is_missing() {
-        let _sandbox = Sandbox::new();
-        let repo = init_repo();
-        let alpha = repo.path().join("skills/alpha");
-        std::fs::create_dir_all(&alpha).unwrap();
-        std::fs::write(
-            alpha.join("SKILL.md"),
-            "---\nname: alpha\ndescription: first skill\n---\n\n# alpha\n",
-        )
-        .unwrap();
-        git_commit_all(repo.path(), "alpha");
-
-        install_skill(
-            repo.path().to_string_lossy().to_string(),
-            Some("alpha".into()),
-        )
-        .expect("first install populates the repo cache");
-
-        let pr = repo.path().join("skills/in-progress/pr");
-        std::fs::create_dir_all(&pr).unwrap();
-        std::fs::write(
-            pr.join("SKILL.md"),
-            "---\nname: pr\ndescription: write a PR body\n---\n\n# pr\n",
-        )
-        .unwrap();
-        git_commit_all(repo.path(), "add pr");
-
-        let skill = install_skill(repo.path().to_string_lossy().to_string(), Some("pr".into()))
-            .expect("a skill added upstream after the cached clone must still install");
-        assert_eq!(skill.name, "pr");
-        let hub = skillstar_core::infra::paths::hub_skills_dir().join("pr");
-        assert!(hub.join("SKILL.md").is_file());
+        let content = std::fs::read_to_string(canonical("rust").join("SKILL.md")).unwrap();
+        assert!(content.contains("pack root"), "{content}");
     }
 }

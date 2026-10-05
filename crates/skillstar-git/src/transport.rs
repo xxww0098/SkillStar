@@ -326,6 +326,9 @@ pub fn configure_remote_command(
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_ASKPASS_REQUIRE", "force")
+        // Skill trees are text; LFS blobs stay as pointer files (vercel-skills
+        // parity — clones must not fail without git-lfs installed).
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
         .env("LC_ALL", "C")
         .env("LANG", "C")
         // An empty operation-local helper prevents a global helper from opening

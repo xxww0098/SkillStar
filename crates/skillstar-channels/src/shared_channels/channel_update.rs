@@ -542,7 +542,7 @@ where
                 Ok(inspection) => inspection,
                 Err(error) => ChannelUpdateInspection::Divergent {
                     reason: LocalDivergenceReason::SnapshotFailed,
-                    suggested_local_name: skillstar_skills::skill_update::suggested_local_name(
+                    suggested_local_name: skillstar_skills::skill_update::divergence::suggested_local_name(
                         &installed.id,
                     ),
                     error: Some(error.message),
@@ -624,7 +624,7 @@ fn removed_item(installed: &ChannelSubscribedSkill) -> ChannelUpdateItem {
         from_content_hash: Some(installed.release_content_hash.clone()),
         to_content_hash: None,
         block_reason: Some(ChannelUpdateBlockReason::RemovedUpstream),
-        suggested_local_name: Some(skillstar_skills::skill_update::suggested_local_name(
+        suggested_local_name: Some(skillstar_skills::skill_update::divergence::suggested_local_name(
             &installed.id,
         )),
         error: None,
@@ -733,12 +733,13 @@ fn map_divergence_reason(reason: LocalDivergenceReason) -> ChannelUpdateBlockRea
     match reason {
         LocalDivergenceReason::ContentChanged => ChannelUpdateBlockReason::LocalContentChanged,
         LocalDivergenceReason::BaselineMissing => ChannelUpdateBlockReason::BaselineMissing,
-        LocalDivergenceReason::SnapshotFailed => ChannelUpdateBlockReason::SnapshotFailed,
+        LocalDivergenceReason::ContentReadFailed
+        | LocalDivergenceReason::SnapshotFailed => ChannelUpdateBlockReason::SnapshotFailed,
         // A channel Skill whose content vanished is reported through the
         // channel's own removed-upstream flow, not the generic updater's.
-        LocalDivergenceReason::SourceRemoved | LocalDivergenceReason::SourceMissing => {
-            ChannelUpdateBlockReason::RemovedUpstream
-        }
+        LocalDivergenceReason::SourceRemoved
+        | LocalDivergenceReason::SourceMissing
+        | LocalDivergenceReason::SourceRemovedContentLost => ChannelUpdateBlockReason::RemovedUpstream,
     }
 }
 

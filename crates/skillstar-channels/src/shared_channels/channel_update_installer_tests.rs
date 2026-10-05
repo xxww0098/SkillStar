@@ -9,6 +9,7 @@ use skillstar_skills::git::transport::{
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::path::Path;
 
 #[test]
 fn structured_git_transport_errors_survive_context_mapping() {
@@ -91,42 +92,48 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         let hash_two =
             skillstar_skills::content::snapshot_path("writer", &skill_root)?.content_hash;
 
-        let cache_one = exact_cache(&commit_one);
-        let cache_two = exact_cache(&commit_two);
-        fs::create_dir_all(cache_one.parent().unwrap())?;
-        git_clone(&repository, &cache_one)?;
-        git(&cache_one, &["checkout", "-q", &commit_one])?;
-        git_clone(&repository, &cache_two)?;
-        git(&cache_two, &["checkout", "-q", &commit_two])?;
-
-        let repository_url = "https://github.com/acme/channel.git";
-        skillstar_skills::repo_scanner::install_from_repo_at(
-            &cache_one,
-            repository_url,
-            Some(&commit_one),
-            &[skillstar_skills::repo_scanner::SkillInstallTarget {
-                id: "writer".into(),
-                folder_path: "skills/writer".into(),
-                pinned: false,
-            }],
-        )?;
-        let previous_lock_entry = lock_entry("writer")?;
+        // D-081: fetch goes straight to the remote (file:// fixture) at the
+        // pinned commit; the previous release is installed through the same
+        // pipeline the subscription installer uses.
+        // Canonicalize: macOS tempdirs live behind a /var -> /private/var symlink,
+        // and the source parser canonicalizes local paths.
+        let repository_url = format!(
+            "file://{}",
+            std::fs::canonicalize(&repository)?.display()
+        );
+        let spec_one = skillstar_skills::source_resolver::Source::parse(&format!(
+            "{repository_url}#{commit_one}"
+        ))?;
+        {
+            let session = GitOperationSession::public();
+            let checkout =
+                skillstar_skills::fetch::fetch_source(&spec_one, &session)?;
+            skillstar_skills::installer::install_units(
+                checkout.dir(),
+                &spec_one,
+                &[skillstar_skills::installer::InstallUnit {
+                    id: "writer".into(),
+                    folder_path: "skills/writer".into(),
+                }],
+            )?;
+        }
+        let _previous_lock_entry = lock_entry("writer")?;
         let previous = ChannelSubscribedSkill {
             id: "writer".into(),
             content_root: "skills/writer".into(),
             release_content_hash: hash_one.clone(),
             release_content_hash_version: CHANNEL_CONTENT_HASH_VERSION,
-            baseline_hash: previous_lock_entry.content_hash.clone().unwrap(),
-            baseline_hash_version: previous_lock_entry.content_hash_version.unwrap(),
+            baseline_hash: hash_one.clone(),
+            baseline_hash_version: CHANNEL_CONTENT_HASH_VERSION,
             provenance: ChannelSkillProvenance {
                 repository_id: 42,
-                repository_url: repository_url.into(),
+                repository_url: repository_url.clone(),
                 git_ref: commit_one.clone(),
                 source_folder: "skills/writer".into(),
             },
         };
         fs::write(
-            skillstar_core::infra::paths::hub_skills_dir().join("writer/SKILL.md"),
+            skillstar_core::infra::paths::agents_skill_dir("writer").join("SKILL.md"),
             "---\nname: writer\ndescription: Local writer notes\n---\n# local edits\n",
         )?;
 
@@ -157,8 +164,10 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         fs::write(project_copy.join("SKILL.md"), "# stale project copy\n")?;
 
         skillstar_skills::update_state::set("writer", true);
+        let mut update_repository = remote_repository();
+        update_repository.clone_url = repository_url.clone();
         let request = ChannelSkillUpdateRequest {
-            repository: remote_repository(),
+            repository: update_repository,
             manifest: manifest(&commit_two, &hash_two),
             released: released_skill(&hash_two),
             installed: previous.clone(),
@@ -177,18 +186,18 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         assert_content(&agent_copy, "# version two")?;
         assert_content(&project_copy, "# version two")?;
         assert_content(
-            &skillstar_core::infra::paths::hub_skills_dir().join("writer"),
+            &skillstar_core::infra::paths::agents_skill_dir("writer"),
             "# version two",
         )?;
         assert_content(
-            &skillstar_core::infra::paths::hub_skills_dir().join("writer.local"),
+            &skillstar_core::infra::paths::agents_skill_dir("writer.local"),
             "# local edits",
         )?;
         let updated_lock = lock_entry("writer")?;
         assert_eq!(updated_lock.git_ref.as_deref(), Some(commit_two.as_str()));
         assert_eq!(
-            updated_lock.content_hash.as_deref(),
-            Some(hash_two.as_str())
+            skillstar_skills::content::snapshot("writer")?.content_hash,
+            hash_two
         );
         assert_eq!(persisted_update_state("writer")?, Some(false));
 
@@ -196,11 +205,11 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         assert_content(&agent_copy, "# version one")?;
         assert_content(&project_copy, "# version one")?;
         assert_content(
-            &skillstar_core::infra::paths::hub_skills_dir().join("writer"),
+            &skillstar_core::infra::paths::agents_skill_dir("writer"),
             "# version one",
         )?;
         assert_content(
-            &skillstar_core::infra::paths::hub_skills_dir().join("writer.local"),
+            &skillstar_core::infra::paths::agents_skill_dir("writer.local"),
             "# local edits",
         )?;
         let rolled_back_lock = lock_entry("writer")?;
@@ -209,18 +218,15 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
             Some(commit_one.as_str())
         );
         assert_eq!(
-            rolled_back_lock.content_hash.as_deref(),
-            Some(hash_one.as_str())
+            skillstar_skills::content::snapshot("writer")?.content_hash,
+            hash_one
         );
         assert_eq!(persisted_update_state("writer")?, Some(true));
 
-        let renamed_cache = exact_cache_for("acme/renamed-channel", &commit_two);
-        git_clone(&repository, &renamed_cache)?;
-        git(&renamed_cache, &["checkout", "-q", &commit_two])?;
         let mut renamed_repository = remote_repository();
         renamed_repository.name = "renamed-channel".into();
         renamed_repository.html_url = "https://github.com/acme/renamed-channel".into();
-        renamed_repository.clone_url = "https://github.com/acme/renamed-channel.git".into();
+        renamed_repository.clone_url = repository_url.clone();
         let renamed_receipt = apply_blocking(
             &git_facade,
             ChannelSkillUpdateRequest {
@@ -239,28 +245,20 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
             renamed_receipt.installed.provenance.repository_url,
             renamed_repository.clone_url
         );
-        assert_eq!(
-            lock_entry("writer")?.git_url,
-            "https://github.com/acme/renamed-channel.git"
-        );
+        assert_eq!(lock_entry("writer")?.source_url, repository_url);
         rollback_exact(&renamed_receipt)?;
-        assert_eq!(lock_entry("writer")?.git_url, repository_url);
+        assert_eq!(lock_entry("writer")?.source_url, repository_url);
 
-        let lock_path = skillstar_skills::lockfile::lockfile_path();
-        let mut missing_baseline = skillstar_skills::lockfile::Lockfile::load(&lock_path)?;
-        let entry = missing_baseline
-            .skills
-            .iter_mut()
-            .find(|entry| entry.name == "writer")
-            .unwrap();
-        entry.content_hash = None;
-        entry.content_hash_version = None;
-        missing_baseline.save(&lock_path)?;
+        // A manifest hash that does not match the fetched release content is
+        // an integrity failure; the installed content and provenance stay on
+        // the previous release.
         let invalid_hash = format!("sha256:{}", "0".repeat(64));
+        let mut invalid_repository = remote_repository();
+        invalid_repository.clone_url = repository_url.clone();
         let error = apply_blocking(
             &git_facade,
             ChannelSkillUpdateRequest {
-                repository: remote_repository(),
+                repository: invalid_repository,
                 manifest: manifest(&commit_two, &invalid_hash),
                 released: released_skill(&invalid_hash),
                 installed: previous,
@@ -271,17 +269,10 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         )
         .unwrap_err();
         assert_eq!(error.code, SharedChannelErrorCode::Integrity);
-        let repaired_lock = lock_entry("writer")?;
-        assert_eq!(
-            repaired_lock.content_hash.as_deref(),
-            Some(hash_one.as_str())
-        );
-        assert_eq!(
-            repaired_lock.content_hash_version,
-            Some(CHANNEL_CONTENT_HASH_VERSION)
-        );
+        let intact_lock = lock_entry("writer")?;
+        assert_eq!(intact_lock.git_ref.as_deref(), Some(commit_one.as_str()));
         assert_content(
-            &skillstar_core::infra::paths::hub_skills_dir().join("writer"),
+            &skillstar_core::infra::paths::agents_skill_dir("writer"),
             "# version one",
         )?;
         Ok::<(), anyhow::Error>(())
@@ -294,18 +285,6 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
     skillstar_skills::deployment::invalidate_profile_cache();
     skillstar_skills::update_state::reset_for_test();
     result.unwrap();
-}
-
-fn exact_cache(commit: &str) -> std::path::PathBuf {
-    exact_cache_for("acme/channel", commit)
-}
-
-fn exact_cache_for(source: &str, commit: &str) -> std::path::PathBuf {
-    skillstar_core::infra::paths::repos_cache_dir().join(format!(
-        "{}--ref--{}",
-        skillstar_skills::source_resolver::cache_dir_name(source),
-        skillstar_skills::source_resolver::cache_dir_name(commit)
-    ))
 }
 
 fn remote_repository() -> RemoteRepository {
@@ -357,11 +336,11 @@ fn manifest(commit: &str, content_hash: &str) -> ChannelReleaseManifest {
     }
 }
 
-fn lock_entry(name: &str) -> anyhow::Result<skillstar_skills::lockfile::LockEntry> {
-    skillstar_skills::lockfile::Lockfile::load(&skillstar_skills::lockfile::lockfile_path())?
+fn lock_entry(name: &str) -> anyhow::Result<skillstar_skills::skill_lock::SkillLockEntry> {
+    skillstar_skills::skill_lock::load()
         .skills
-        .into_iter()
-        .find(|entry| entry.name == name)
+        .get(name)
+        .cloned()
         .ok_or_else(|| anyhow::anyhow!("missing lock entry for {name}"))
 }
 
@@ -409,19 +388,6 @@ fn git_output(repository: &Path, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
-fn git_clone(source: &Path, destination: &Path) -> anyhow::Result<()> {
-    let output = skillstar_core::infra::path_env::command_with_path("git")
-        .args(["clone", "-q"])
-        .arg(source)
-        .arg(destination)
-        .output()?;
-    anyhow::ensure!(
-        output.status.success(),
-        "git clone failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(())
-}
 
 fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
     unsafe { std::env::set_var(key, value) }

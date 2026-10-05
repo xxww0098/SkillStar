@@ -4,13 +4,12 @@
 //! This module only owns State, tokio spawn, cancellation, and event emit.
 
 use anyhow::Result;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::watch;
-use tracing::{error, warn};
+use tracing::warn;
 
-use skillstar_channels::patrol::{self, load_config, save_config};
+use skillstar_channels::patrol::{load_config, save_config};
 use skillstar_git::transport::GitOperationSession;
 use skillstar_skills::update_state;
 
@@ -149,31 +148,6 @@ async fn patrol_loop(
     let interval = std::time::Duration::from_secs(interval_secs);
 
     loop {
-        let skills = match tokio::task::spawn_blocking(patrol::collect_hub_skills).await {
-            Ok(Ok(entries)) => entries,
-            Ok(Err(e)) => {
-                error!(target: "patrol", error = %e, "failed to list skills");
-                tokio::select! {
-                    _ = tokio::time::sleep(interval) => continue,
-                    _ = cancel_rx.changed() => break,
-                }
-            }
-            Err(e) => {
-                error!(target: "patrol", error = %e, "failed to list skills (join)");
-                tokio::select! {
-                    _ = tokio::time::sleep(interval) => continue,
-                    _ = cancel_rx.changed() => break,
-                }
-            }
-        };
-
-        if skills.is_empty() {
-            tokio::select! {
-                _ = tokio::time::sleep(interval) => continue,
-                _ = cancel_rx.changed() => break,
-            }
-        }
-
         let auth_state = app.state::<GitHubAuthState>();
         let (git_facade, registered_session_id) = match auth_state
             .begin_git_operation(app.clone(), None)
@@ -210,34 +184,6 @@ async fn patrol_loop(
             break;
         }
 
-        let skill_paths: Vec<PathBuf> = skills.iter().map(|entry| entry.path.clone()).collect();
-        let prefetch_session = git_session.clone();
-        let failed_fetch_roots: Arc<std::collections::HashSet<PathBuf>> =
-            match tokio::task::spawn_blocking(move || {
-                patrol::prefetch_failed_repos_in_session(&skill_paths, &prefetch_session)
-            })
-            .await
-            {
-                Ok(failed) => Arc::new(failed),
-                // An empty set would mean "every repo fetched cleanly", so the
-                // check step below would compare against stale refs and persist
-                // `update_available = false` over real badges. A failed prefetch
-                // is "unknown": abandon the cycle (releasing the git session the
-                // same way every other mid-loop exit does) and retry next tick.
-                Err(err) => {
-                    warn!(target: "patrol", error = %err, "failed to prefetch repos");
-                    git_session.cancel();
-                    if let Some(session_id) = registered_session_id.as_deref() {
-                        auth_state.finish_git_operation(session_id);
-                    }
-                    clear_git_session(&state, git_session.id());
-                    tokio::select! {
-                        _ = tokio::time::sleep(interval) => continue,
-                        _ = cancel_rx.changed() => break,
-                    }
-                }
-            };
-
         if *cancel_rx.borrow() {
             git_session.cancel();
             if let Some(session_id) = registered_session_id.as_deref() {
@@ -248,16 +194,8 @@ async fn patrol_loop(
         }
 
         let owns_generation = {
-            let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
-            if inner.generation == generation {
-                inner.current_skill = skills
-                    .first()
-                    .map(|entry| entry.name.clone())
-                    .unwrap_or_default();
-                true
-            } else {
-                false
-            }
+            let inner = state.lock().unwrap_or_else(|p| p.into_inner());
+            inner.generation == generation
         };
         if !owns_generation {
             git_session.cancel();
@@ -268,44 +206,22 @@ async fn patrol_loop(
             break;
         }
 
-        let checked_from = update_state::stamp();
-        let skills_for_check = skills;
-        let failed_roots = Arc::clone(&failed_fetch_roots);
-        let check_session = git_session.clone();
-        let results = match tokio::task::spawn_blocking(move || {
-            patrol::check_hub_skills_local_in_session(
-                &skills_for_check,
-                &failed_roots,
-                &check_session,
+        // D-081: generic patrol is the same lock-hash compare the refresh
+        // command runs (GitHub Trees API first, temp clone fallback); it
+        // writes update_state itself.
+        let refresh_session = git_session.clone();
+        let committed: Vec<update_state::SkillUpdateState> =
+            match skillstar_skills::installed_skill::refresh_skill_updates_in_session(
+                &refresh_session,
             )
-        })
-        .await
-        {
-            Ok(results) => results,
-            Err(err) => {
-                warn!(
-                    target: "patrol",
-                    error = %err,
-                    "update check batch failed"
-                );
-                Vec::new()
-            }
-        };
-
-        if *cancel_rx.borrow() {
-            git_session.cancel();
-            if let Some(session_id) = registered_session_id.as_deref() {
-                auth_state.finish_git_operation(session_id);
-            }
-            clear_git_session(&state, git_session.id());
-            break;
-        }
-
-        let known: Vec<update_state::SkillUpdateState> = results
-            .into_iter()
-            .filter_map(|(name, status)| Some(status?.into_state(name)))
-            .collect();
-        let committed = update_state::commit_scan(checked_from, &known);
+            .await
+            {
+                Ok(states) => states,
+                Err(err) => {
+                    warn!(target: "patrol", error = %err, "update check batch failed");
+                    Vec::new()
+                }
+            };
 
         for state_item in committed {
             let event = {
@@ -346,18 +262,6 @@ async fn patrol_loop(
             }
             clear_git_session(&state, git_session.id());
             break;
-        }
-
-        let detect_session = git_session.clone();
-        let new_skills_result = tokio::task::spawn_blocking(move || {
-            skillstar_skills::repo_scanner::detect_new_skills_in_cached_repos(&detect_session)
-        })
-        .await;
-
-        if let Ok(new_skills) = new_skills_result
-            && !new_skills.is_empty()
-        {
-            let _ = app.emit("patrol://new-skills-detected", &new_skills);
         }
 
         if let Some(session_id) = registered_session_id.as_deref() {

@@ -416,9 +416,11 @@ fn install_or_reuse_skill(
     }
 
     let git = git_skill_facade()?;
-    let (_, _, repo_dir, skills_found) = git
-        .fetch_repo_scanned_preferring_local_cache(url, false)
+    let fetched = git
+        .fetch_repo_scanned(url, false)
         .map_err(|error| error.to_string())?;
+    let repo_dir = fetched.dir.clone();
+    let skills_found = fetched.skills.clone();
     print_plugin_hint(&repo_dir);
     if skills_found.is_empty() {
         return Err("No valid SKILL.md found in the selected source".to_string());
@@ -549,8 +551,14 @@ fn prompt_for_skill_selection(
 /// `skillstar install --list` — scan the source without mutating anything.
 fn list_skills_in_source(url: &str) {
     println!("Scanning {}...\n", url);
-    match git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false)) {
-        Ok((repo_url, source, repo_dir, skills_found)) => {
+    match git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false).map_err(|e| e.to_string())) {
+        Ok(fetched) => {
+            let (repo_url, source, repo_dir, skills_found) = (
+                fetched.source_url.clone(),
+                fetched.short.clone(),
+                fetched.dir.clone(),
+                fetched.skills.clone(),
+            );
             print_plugin_hint(&repo_dir);
             if skills_found.is_empty() {
                 println!(
@@ -621,13 +629,13 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
     if all {
         println!("  Mode: install every skill (--all)");
         println!("  URL: {}\n", url);
-        let Ok((_repo_url, _source, _, skills_found)) =
-            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false))
+        let Ok(fetched) =
+            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false).map_err(|e| e.to_string()))
         else {
             eprintln!("✗ Failed to scan repository: check URL or network access");
             std::process::exit(1);
         };
-        for skill in &skills_found {
+        for skill in &fetched.skills {
             let status = if skills_dir.join(&skill.id).exists() {
                 "would be reused"
             } else {
@@ -643,8 +651,8 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
         println!("  URL: {}", url);
         println!("  Skill filter: {}\n", skill_filter.join(", "));
 
-        let Ok((_repo_url, _source, _, skills_found)) =
-            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false))
+        let Ok(fetched) =
+            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false).map_err(|e| e.to_string()))
         else {
             eprintln!("✗ Failed to scan repository: check URL or network access");
             std::process::exit(1);
@@ -652,16 +660,13 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
 
         for name in skill_filter {
             let target =
-                skillstar_skills::skill_install::find_target_skill(&skills_found, Some(name), name);
-            let already_installed = target
-                .map(|s| skills_dir.join(&s.id).exists())
-                .unwrap_or(false);
-            if already_installed {
-                println!("  • {} (already installed in hub — would be skipped)", name);
-            } else if target.is_some() {
-                println!("  • {} (would be installed to hub)", name);
-            } else {
-                println!("  • {} (NOT FOUND in repository)", name);
+                skillstar_skills::skill_install::find_target_skill(&fetched.skills, Some(name), name);
+            match &target {
+                Ok(skill) if skills_dir.join(&skill.id).exists() => {
+                    println!("  • {} (already installed — would be skipped)", name);
+                }
+                Ok(_) => println!("  • {} (would be installed)", name),
+                Err(reason) => println!("  • {reason}"),
             }
         }
         return;
@@ -683,25 +688,21 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
     if existing_in_hub || existing_in_lockfile {
         println!("  • {} (already installed — would be reused)", name_hint);
     } else {
-        let Ok((_, _, _, skills_found)) =
-            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false))
+        let Ok(fetched) =
+            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false).map_err(|e| e.to_string()))
         else {
-            println!("  • {} (would be cloned and installed to hub)", name_hint);
+            println!("  • {} (would be cloned and installed)", name_hint);
             return;
         };
 
         let target = skillstar_skills::skill_install::find_target_skill(
-            &skills_found,
+            &fetched.skills,
             explicit_name,
             &name_hint,
         );
-        if let Some(skill) = target {
-            println!("  • {} (skill found in repo, would be installed)", skill.id);
-        } else {
-            println!(
-                "  • {} (no matching skill in repo — would attempt full clone)",
-                name_hint
-            );
+        match target {
+            Ok(skill) => println!("  • {} (skill found in repo, would be installed)", skill.id),
+            Err(reason) => println!("  • {reason}"),
         }
     }
 }

@@ -123,8 +123,7 @@ pub struct ChannelSkillUpdateRequest {
 pub struct ChannelSkillUpdateReceipt {
     pub previous: ChannelSubscribedSkill,
     pub installed: ChannelSubscribedSkill,
-    pub previous_checkout: String,
-    pub previous_lock_entry: skillstar_skills::lockfile::LockEntry,
+    pub previous_lock_entry: skillstar_skills::skill_lock::SkillLockEntry,
     pub previous_update_available: Option<bool>,
     pub update_state_revision_after_apply: Option<u64>,
 }

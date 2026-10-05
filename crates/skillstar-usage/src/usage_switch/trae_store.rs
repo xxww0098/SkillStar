@@ -5,14 +5,14 @@
 
 use std::path::Path;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
-use serde_json::{Map, Value};
 use crate::crypto;
 use crate::subscription::Subscription;
 use crate::tool_store::byte_crypto;
 use crate::trae_platform::TraePlatformKind;
 use crate::{UsageError, UsageResult, storage};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use serde_json::{Map, Value};
 
 pub(super) fn user_auth_key(root: &Map<String, Value>) -> String {
     if root.contains_key(super::DEFAULT_AUTH_KEY) {

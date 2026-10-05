@@ -5,8 +5,7 @@ use skillstar_core::infra::{fs_ops, paths};
 use skillstar_git::repo_history;
 use skillstar_skills::agents as agent_profile;
 use skillstar_skills::deployment;
-use skillstar_skills::lockfile;
-use skillstar_skills::repo_scanner;
+use skillstar_skills::skill_lock;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -98,8 +97,6 @@ pub async fn get_storage_overview() -> Result<StorageOverview, AppError> {
         let local_bytes = dir_size_recursive(&local_dir);
         let local_count = count_directories(&local_dir);
 
-        let cache_info = repo_scanner::get_cache_info();
-
         let history_count = repo_history::entry_count();
 
         StorageOverview {
@@ -115,11 +112,13 @@ pub async fn get_storage_overview() -> Result<StorageOverview, AppError> {
             local_count,
             local_bytes,
             local_path: local_dir.to_string_lossy().to_string(),
-            cache_bytes: cache_info.total_bytes,
-            cache_path: paths::repos_cache_dir().to_string_lossy().to_string(),
-            cache_count: cache_info.repo_count,
-            cache_unused_count: cache_info.unused_count,
-            cache_unused_bytes: cache_info.unused_bytes,
+            // D-081: the persistent repo cache is gone; only the legacy
+            // directory may still exist on disk until the one-time cleanup.
+            cache_bytes: dir_size_recursive(&paths::legacy_hub_root().join("repos")),
+            cache_path: paths::legacy_hub_root().join("repos").to_string_lossy().to_string(),
+            cache_count: 0,
+            cache_unused_count: 0,
+            cache_unused_bytes: 0,
             history_count,
         }
     })
@@ -137,7 +136,16 @@ pub struct CacheCleanResult {
 
 pub async fn clear_all_caches() -> Result<CacheCleanResult, AppError> {
     Ok(tokio::task::spawn_blocking(|| {
-        let repos_removed = repo_scanner::clean_unused_cache().unwrap_or(0);
+        // D-081: nothing is cached anymore; sweep the legacy repo cache if
+        // the one-time cleanup has not taken it yet.
+        let legacy_repos = paths::legacy_hub_root().join("repos");
+        let repos_removed = if legacy_repos.exists() {
+            let removed = count_directories(&legacy_repos);
+            let _ = fs_ops::remove_dir_all_retry(&legacy_repos);
+            removed
+        } else {
+            0
+        };
         let history_cleared = repo_history::clear_history().unwrap_or(0);
 
         // Clean up legacy "agenthub" data directory (old app name before rename to "skillstar")
@@ -161,7 +169,7 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, AppError> {
 /// Returns the number of skill entries removed.
 pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
-        let _transaction_guard = skillstar_skills::skill_update::acquire_skill_mutation_lease()?;
+        let _transaction_guard = skillstar_skills::skill_update::acquire_update_transaction_lock()?;
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let removed_count = count_children(&hub_dir);
 
@@ -182,14 +190,14 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
         }
         std::fs::create_dir_all(&hub_dir)?;
 
-        // Clear lockfile entries so UI state and filesystem stay aligned.
-        let _lock = lockfile::get_mutex()
+        // Clear install-lock entries so UI state and filesystem stay aligned.
+        let _lock = skill_lock::get_mutex()
             .lock()
-            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
-        let lock_path = lockfile::lockfile_path();
-        let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-        lf.skills.clear();
-        let _ = lf.save(&lock_path);
+            .map_err(|_| AppError::Lockfile("Install lock poisoned".to_string()))?;
+        let lock_path = skill_lock::lock_path();
+        let mut lock = skill_lock::SkillLock::load(&lock_path);
+        lock.skills.clear();
+        let _ = lock.save(&lock_path);
         skillstar_skills::installed_skill::invalidate_cache();
         Ok(removed_count)
     })
@@ -201,7 +209,7 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
 /// Returns the number of cached repositories removed.
 pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
-        let _transaction_guard = skillstar_skills::skill_update::acquire_skill_mutation_lease()?;
+        let _transaction_guard = skillstar_skills::skill_update::acquire_update_transaction_lock()?;
         let cache_dir = repos_cache_dir();
         let repos_removed = count_directories(&cache_dir);
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
@@ -240,14 +248,14 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
 
         // Prune lockfile entries for removed cache-backed skills.
         if !removed_skill_names.is_empty() {
-            let _lock = lockfile::get_mutex()
+            let _lock = skill_lock::get_mutex()
                 .lock()
-                .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
-            let lock_path = lockfile::lockfile_path();
-            let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-            lf.skills
-                .retain(|entry| !removed_skill_names.contains(&entry.name));
-            let _ = lf.save(&lock_path);
+                .map_err(|_| AppError::Lockfile("Install lock poisoned".to_string()))?;
+            let lock_path = skill_lock::lock_path();
+            let mut lock = skill_lock::SkillLock::load(&lock_path);
+            lock.skills
+                .retain(|name, _| !removed_skill_names.contains(name));
+            let _ = lock.save(&lock_path);
             skillstar_skills::installed_skill::invalidate_cache();
         }
 
@@ -325,7 +333,7 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
 /// Returns the number of issues fixed.
 pub async fn clean_broken_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
-        let _transaction_guard = skillstar_skills::skill_update::acquire_skill_mutation_lease()?;
+        let _transaction_guard = skillstar_skills::skill_update::acquire_update_transaction_lock()?;
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let mut fixed: usize = 0;
         let mut removed_names: HashSet<String> = HashSet::new();
@@ -358,25 +366,25 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
             let _ = deployment::remove_skill_from_all_agents(name);
         }
 
-        // Phase 3: Prune orphaned lockfile entries
-        let _lock = lockfile::get_mutex()
+        // Phase 3: Prune orphaned install-lock entries
+        let _lock = skill_lock::get_mutex()
             .lock()
-            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
-        let lock_path = lockfile::lockfile_path();
-        let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-        let before = lf.skills.len();
-        lf.skills.retain(|entry| {
-            let skill_path = hub_dir.join(&entry.name);
+            .map_err(|_| AppError::Lockfile("Install lock poisoned".to_string()))?;
+        let lock_path = skill_lock::lock_path();
+        let mut lock = skill_lock::SkillLock::load(&lock_path);
+        let before = lock.skills.len();
+        lock.skills.retain(|name, _| {
+            let skill_path = hub_dir.join(name);
             // Keep entries that have a valid directory or valid symlink, plus
             // every channel-owned entry: its subscription still tracks it, so
             // dropping the lock entry here would orphan that record.
             (skill_path.symlink_metadata().is_ok()
                 && (!fs_ops::is_link(&skill_path) || skill_path.exists()))
-                || is_channel_managed(&entry.name)
+                || is_channel_managed(name)
         });
-        let orphans_removed = before - lf.skills.len();
+        let orphans_removed = before - lock.skills.len();
         if orphans_removed > 0 {
-            let _ = lf.save(&lock_path);
+            let _ = lock.save(&lock_path);
             skillstar_skills::installed_skill::invalidate_cache();
             fixed += orphans_removed;
         }
@@ -464,15 +472,12 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
         }
     }
 
-    // Also count orphaned lockfile entries (in lockfile but not on disk)
-    let lock_path = lockfile::lockfile_path();
-    if let Ok(lf) = lockfile::Lockfile::load(&lock_path) {
-        for entry in &lf.skills {
-            let skill_path = hub_dir.join(&entry.name);
-            // Entry exists in lockfile but has no directory/symlink at all
-            if skill_path.symlink_metadata().is_err() {
-                broken += 1;
-            }
+    // Also count orphaned install-lock entries (in the lock but not on disk)
+    let lock = skill_lock::load();
+    for name in lock.skills.keys() {
+        let skill_path = hub_dir.join(name);
+        if skill_path.symlink_metadata().is_err() {
+            broken += 1;
         }
     }
 

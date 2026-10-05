@@ -20,13 +20,6 @@ export const CODEX_WIRE_API_META_KEY = "codex_wire_api" as const;
 export const CODEX_AUTH_MODE_META_KEY = "codex_auth_mode" as const;
 export const MODEL_CATALOG_META_KEY = "model_catalog" as const;
 
-export const LATEST_CLAUDE_MODELS = {
-  main: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5-20251001",
-  sonnet: "claude-sonnet-4-6",
-  opus: "claude-opus-4-7",
-} as const;
-
 export function getMetaString(meta: Record<string, unknown> | undefined, key: string): string {
   const value = meta?.[key];
   return typeof value === "string" ? value : "";
@@ -140,30 +133,6 @@ export function recommendedCodexDefaults(baseUrlOpenai: string): { wireApi: Code
     return { wireApi: "responses", authMode: "api_key" };
   }
   return { wireApi: "chat", authMode: "third_party" };
-}
-
-/**
- * Derive the env var name Codex reads a third-party API key from. Mirrors the
- * backend `codex_env_key_for` rule: `SKILLSTAR_<UPPER_PREFIX>_KEY` where the
- * prefix is the first 8 chars of the provider id (non-alphanumeric → `_`).
- * Two providers never share a var, and the name is shell-safe.
- */
-export function codexEnvKeyName(provider: ProviderEntryFlat): string {
-  const rawPrefix = provider.id.slice(0, 8);
-  let safe = "";
-  for (const ch of rawPrefix) {
-    safe += /[A-Za-z0-9]/.test(ch) ? ch.toUpperCase() : "_";
-  }
-  if (!safe) safe = "PROVIDER";
-  return `SKILLSTAR_${safe}_KEY`;
-}
-
-/** Mask a key for display (e.g. `sk-abc…wxyz`). Returns "" if the key is empty. */
-export function maskApiKey(key: string): string {
-  const trimmed = key.trim();
-  if (!trimmed) return "";
-  if (trimmed.length <= 8) return `${trimmed.slice(0, 2)}…`;
-  return `${trimmed.slice(0, 6)}…${trimmed.slice(-4)}`;
 }
 
 /** Initial form values mirroring the persisted provider. */

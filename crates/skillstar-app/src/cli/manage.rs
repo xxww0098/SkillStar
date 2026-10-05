@@ -5,10 +5,10 @@ use super::RemoveOpts;
 use skillstar_skills::git::gh_manager;
 use skillstar_skills::git_skill::GitSkillFacade;
 use skillstar_skills::local_skill;
-use skillstar_skills::lockfile;
+use std::collections::BTreeSet;
+use skillstar_skills::skill_lock;
 use skillstar_skills::skill_install;
 use skillstar_skills::skill_update;
-use std::collections::{BTreeSet, VecDeque};
 use std::io::{self, IsTerminal, Write};
 
 fn is_user_hub_entry(name: &str) -> bool {
@@ -16,20 +16,13 @@ fn is_user_hub_entry(name: &str) -> bool {
 }
 
 pub fn cmd_update(name: Option<&str>) {
-    let lock_path = lockfile::lockfile_path();
-    let lockfile = match lockfile::Lockfile::load(&lock_path) {
-        Ok(lf) => lf,
-        Err(e) => {
-            eprintln!("✗ Error reading lockfile: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let lock = skill_lock::load();
 
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let names: Vec<String> = match name {
         Some(name)
             if is_user_hub_entry(name)
-                && (lockfile.skills.iter().any(|entry| entry.name == name)
+                && (lock.skills.contains_key(name)
                     || (hub_dir.join(name).symlink_metadata().is_ok()
                         && !local_skill::is_local_skill(name))) =>
         {
@@ -37,11 +30,8 @@ pub fn cmd_update(name: Option<&str>) {
         }
         Some(_) => Vec::new(),
         None => {
-            let mut names: BTreeSet<String> = lockfile
-                .skills
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect();
+            let mut names: BTreeSet<String> =
+                lock.skills.keys().cloned().collect();
             if let Ok(entries) = std::fs::read_dir(&hub_dir) {
                 for entry in entries.flatten() {
                     let Some(name) = entry.file_name().to_str().map(str::to_string) else {
@@ -63,16 +53,20 @@ pub fn cmd_update(name: Option<&str>) {
 
     let git = GitSkillFacade::from_file_store();
 
-    // Goes through the same batch transaction and divergence contract as the
-    // GUI. A terminal can resolve blocked Skills interactively; redirected
-    // automation remains fail-closed and never guesses whether to discard.
+    // D-081: overwrite-style update. There are no local-divergence stops and
+    // no rename migration; upstream removals are reported for manual action.
     let report = git.update_skills(&names);
-    let mut had_failure = !report.failed.is_empty();
     for result in &report.updated {
         print_update_result(result);
     }
     for failure in &report.failed {
         eprintln!("✗ Failed to update '{}': {}", failure.name, failure.error);
+    }
+    for name in &report.skipped {
+        println!(
+            "- '{}' is no longer available upstream; remove it or convert it to a local copy.",
+            name
+        );
     }
     // Declined by design, so it goes to stdout and never affects the exit code:
     // `skillstar update` with no name sweeps every hub entry, which includes
@@ -83,78 +77,7 @@ pub fn cmd_update(name: Option<&str>) {
             managed.name, managed.repository_id
         );
     }
-
-    if report.blocked.is_empty() {
-        if had_failure {
-            std::process::exit(1);
-        }
-        return;
-    }
-    if !io::stdin().is_terminal() {
-        for blocked in &report.blocked {
-            eprintln!(
-                "✗ '{}' has local changes; rerun in an interactive terminal to preserve them as '{}' or explicitly discard them.",
-                blocked.name, blocked.suggested_local_name
-            );
-            if let Some(error) = &blocked.error {
-                eprintln!("  Cause: {error}");
-            }
-        }
-        std::process::exit(1);
-    }
-
-    let mut pending: VecDeque<_> = report.blocked.into();
-    let mut moved = BTreeSet::new();
-    while let Some(original) = pending.pop_front() {
-        if moved.contains(&original.name) {
-            continue;
-        }
-
-        let current = git.update_skills(std::slice::from_ref(&original.name));
-        if let Some(result) = current.updated.first() {
-            record_update_result(result, &mut moved);
-            continue;
-        }
-        if let Some(failure) = current.failed.first() {
-            had_failure = true;
-            eprintln!("✗ Failed to update '{}': {}", failure.name, failure.error);
-            continue;
-        }
-        let Some(blocked) = current.blocked.first().cloned() else {
-            continue;
-        };
-        let Some(resolution) = prompt_divergence_resolution(&blocked) else {
-            println!("Cancelled update for '{}'.", blocked.name);
-            had_failure = true;
-            moved.extend(current.blocked.iter().map(|item| item.name.clone()));
-            continue;
-        };
-
-        match git.resolve_skill_update(&blocked.name, resolution) {
-            Ok(result) => {
-                if let Some(local_copy) = result.local_copy {
-                    println!("✓ Preserved local copy as '{}'", local_copy.name);
-                }
-                for removed in &result.uninstalled {
-                    println!("✓ Removed '{removed}' — its source no longer ships it");
-                }
-                if let Some(update) = result.update {
-                    record_update_result(&update, &mut moved);
-                } else {
-                    for remaining in result.remaining_blocked {
-                        if !pending.iter().any(|item| item.name == remaining.name) {
-                            pending.push_front(remaining);
-                        }
-                    }
-                }
-            }
-            Err(error) => {
-                had_failure = true;
-                eprintln!("✗ Failed to resolve '{}': {error:#}", blocked.name);
-            }
-        }
-    }
-    if had_failure {
+    if !report.failed.is_empty() {
         std::process::exit(1);
     }
 }
@@ -169,120 +92,11 @@ fn print_update_result(result: &skill_update::UpdateResult) {
     }
 }
 
-fn record_update_result(result: &skill_update::UpdateResult, moved: &mut BTreeSet<String>) {
-    print_update_result(result);
-    moved.insert(result.skill.name.clone());
-    moved.extend(result.siblings_cleared.iter().cloned());
-}
-
-fn prompt_divergence_resolution(
-    blocked: &skill_update::SkillUpdateBlocked,
-) -> Option<skill_update::LocalDivergenceResolution> {
-    if blocked.reason.is_source_gone() {
-        return prompt_removed_source_resolution(blocked);
-    }
-    println!("'{}' has local changes; update is paused.", blocked.name);
-    if let Some(error) = &blocked.error {
-        println!("Cause: {error}");
-    }
-    loop {
-        print!("Preserve as local copy, discard changes, or cancel? [p/d/c] ");
-        let _ = io::stdout().flush();
-        let mut choice = String::new();
-        if io::stdin().read_line(&mut choice).ok()? == 0 {
-            return None;
-        }
-        match choice.trim().to_ascii_lowercase().as_str() {
-            "p" | "preserve" => {
-                print!("Local copy name [{}]: ", blocked.suggested_local_name);
-                let _ = io::stdout().flush();
-                let mut name = String::new();
-                io::stdin().read_line(&mut name).ok()?;
-                let name = name.trim();
-                return Some(skill_update::LocalDivergenceResolution::Preserve {
-                    local_name: if name.is_empty() {
-                        blocked.suggested_local_name.clone()
-                    } else {
-                        name.to_string()
-                    },
-                });
-            }
-            "d" | "discard" => {
-                return Some(skill_update::LocalDivergenceResolution::Discard);
-            }
-            "c" | "cancel" => return None,
-            _ => println!("Enter p, d, or c."),
-        }
-    }
-}
-
-/// A Skill its source dropped has no clean upstream state to go back to, so
-/// "discard" is not on offer here — only keeping a copy of what is left, or
-/// removing it.
-fn prompt_removed_source_resolution(
-    blocked: &skill_update::SkillUpdateBlocked,
-) -> Option<skill_update::LocalDivergenceResolution> {
-    let content_gone = blocked.reason == skill_update::LocalDivergenceReason::SourceMissing;
-    println!(
-        "'{}' is no longer shipped by its source; update is paused.",
-        blocked.name
-    );
-    if content_gone {
-        println!("Its content is already gone, so it can only be removed.");
-    }
-    if let Some(error) = &blocked.error {
-        println!("Cause: {error}");
-    }
-    loop {
-        if content_gone {
-            print!("Remove it, or cancel? [r/c] ");
-        } else {
-            print!("Keep as local copy, remove it, or cancel? [k/r/c] ");
-        }
-        let _ = io::stdout().flush();
-        let mut choice = String::new();
-        if io::stdin().read_line(&mut choice).ok()? == 0 {
-            return None;
-        }
-        match choice.trim().to_ascii_lowercase().as_str() {
-            "k" | "keep" if !content_gone => {
-                print!("Local copy name [{}]: ", blocked.suggested_local_name);
-                let _ = io::stdout().flush();
-                let mut name = String::new();
-                io::stdin().read_line(&mut name).ok()?;
-                let name = name.trim();
-                return Some(skill_update::LocalDivergenceResolution::Preserve {
-                    local_name: if name.is_empty() {
-                        blocked.suggested_local_name.clone()
-                    } else {
-                        name.to_string()
-                    },
-                });
-            }
-            "r" | "remove" => return Some(skill_update::LocalDivergenceResolution::Uninstall),
-            "c" | "cancel" => return None,
-            _ if content_gone => println!("Enter r or c."),
-            _ => println!("Enter k, r, or c."),
-        }
-    }
-}
-
 pub fn cmd_remove(opts: RemoveOpts<'_>) {
     let targets: Vec<String> = if opts.all {
-        let lock_path = lockfile::lockfile_path();
-        let lockfile = match lockfile::Lockfile::load(&lock_path) {
-            Ok(lockfile) => lockfile,
-            Err(error) => {
-                eprintln!("✗ Error reading lockfile: {error}");
-                std::process::exit(1);
-            }
-        };
+        let lock = skill_lock::load();
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
-        let mut names: BTreeSet<String> = lockfile
-            .skills
-            .into_iter()
-            .map(|entry| entry.name)
-            .collect();
+        let mut names: BTreeSet<String> = lock.skills.keys().cloned().collect();
         if let Ok(dir_entries) = std::fs::read_dir(&hub_dir) {
             for entry in dir_entries.flatten() {
                 if let Some(name) = entry.file_name().to_str()
@@ -335,9 +149,7 @@ pub fn cmd_remove(opts: RemoveOpts<'_>) {
         // stale names surface as feedback instead of a misleading "Removed".
         let exists = local_skill::is_local_skill(name)
             || hub_dir.join(name).exists()
-            || lockfile::Lockfile::load(&lockfile::lockfile_path())
-                .map(|lf| lf.skills.iter().any(|s| s.name == *name))
-                .unwrap_or(false);
+            || skill_lock::load().skills.contains_key(name);
         if !exists {
             not_found.push(name.clone());
             continue;
@@ -392,7 +204,6 @@ pub fn cmd_publish() {
 
     println!("Publishing '{}' to GitHub...", name);
 
-    let lock_path = lockfile::lockfile_path();
     match gh_manager::publish_skill(
         &name,
         "my-skills",
@@ -400,7 +211,7 @@ pub fn cmd_publish() {
         true,
         None,
         &name,
-        gh_manager::PublishLockfileMode::Commit(&lock_path),
+        gh_manager::PublishLockfileMode::ValidateOnly(&skillstar_skills::skill_lock::lock_path()),
     ) {
         Ok(result) => println!("✓ Published to: {}", result.url),
         Err(e) => {

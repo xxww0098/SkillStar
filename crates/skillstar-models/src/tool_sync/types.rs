@@ -3,7 +3,7 @@
 use crate::providers::ModelRef;
 use serde::{Deserialize, Serialize};
 
-use crate::providers::{DroppedRole, Provider, Reasoning, RequiredWire};
+use crate::providers::{DroppedRole, Reasoning};
 
 // ---------------------------------------------------------------------------
 // Per-tool typed settings helpers
@@ -58,15 +58,6 @@ impl CodexSettings {
     /// Parse from a generic `Value`, filling in defaults for missing fields.
     pub fn from_value(value: &serde_json::Value) -> Self {
         serde_json::from_value(value.clone()).unwrap_or_default()
-    }
-
-    /// True when this activation should keep a ChatGPT OAuth token intact in
-    /// `auth.json` (i.e. neither mode writes `OPENAI_API_KEY`).
-    pub fn preserves_oauth_token(&self) -> bool {
-        matches!(
-            self.auth_mode.as_str(),
-            CODEX_AUTH_MODE_OAUTH | CODEX_AUTH_MODE_THIRD_PARTY
-        )
     }
 
     /// Whether the Codex provider table should carry `requires_openai_auth`.
@@ -221,77 +212,6 @@ pub fn is_valid_omp_role_name(role: &str) -> bool {
 // ---------------------------------------------------------------------------
 // Typed Codex `[model_providers.*]` table
 // ---------------------------------------------------------------------------
-
-/// The typed shape of a Codex `[model_providers.<id>]` table, replacing the
-/// previous hand-built `toml::Table::insert` sequence. Serializing this through
-/// `to_toml_table()` is the single source of truth for what gets written to
-/// `~/.codex/config.toml`.
-///
-/// `env_key` is only populated in `third_party` auth mode; it is omitted from
-/// the serialized table otherwise (Codex treats a missing `env_key` as
-/// "use the official auth path").
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CodexModelProvider {
-    pub name: String,
-    pub base_url: String,
-    /// Always [`CODEX_WIRE_API`]. Kept as a field because it is a field in
-    /// Codex's own schema, not because there is a choice to make.
-    pub wire_api: String,
-    /// Mirrors Codex's `requires_openai_auth` flag.
-    pub requires_openai_auth: bool,
-    /// Environment variable name Codex reads the API key from. Only set for
-    /// `third_party` mode.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub env_key: Option<String>,
-}
-
-impl CodexModelProvider {
-    /// Build the provider table from a bound provider + resolved settings.
-    ///
-    /// `base_url` is the **Responses** endpoint, not the chat one. Codex only
-    /// calls `/v1/responses`, so pointing it at a chat base URL produces a
-    /// table that parses and then fails every request.
-    pub fn from_binding(provider: &Provider, settings: &CodexSettings) -> Self {
-        let env_key = if settings.auth_mode == CODEX_AUTH_MODE_THIRD_PARTY {
-            Some(codex_env_key_for(&provider.id))
-        } else {
-            None
-        };
-        Self {
-            name: "SkillStar".to_string(),
-            base_url: provider
-                .endpoint_for(RequiredWire::OpenaiResponses)
-                .unwrap_or_default()
-                .to_string(),
-            wire_api: CODEX_WIRE_API.to_string(),
-            requires_openai_auth: settings.requires_openai_auth(),
-            env_key,
-        }
-    }
-
-    /// Serialize into the `toml::Table` shape written under
-    /// `[model_providers.<managed_key>]`.
-    pub fn to_toml_table(&self) -> toml::Table {
-        let mut table = toml::Table::new();
-        table.insert("name".to_string(), toml::Value::String(self.name.clone()));
-        table.insert(
-            "base_url".to_string(),
-            toml::Value::String(self.base_url.clone()),
-        );
-        table.insert(
-            "wire_api".to_string(),
-            toml::Value::String(self.wire_api.clone()),
-        );
-        table.insert(
-            "requires_openai_auth".to_string(),
-            toml::Value::Boolean(self.requires_openai_auth),
-        );
-        if let Some(env_key) = &self.env_key {
-            table.insert("env_key".to_string(), toml::Value::String(env_key.clone()));
-        }
-        table
-    }
-}
 
 /// Derive a stable, collision-resistant env var name for a provider's API key.
 ///

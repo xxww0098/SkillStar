@@ -11,9 +11,9 @@
 
 use std::path::PathBuf;
 
-use serde_json::{Map, Value};
 use crate::crypto;
 use crate::subscription::Subscription;
+use serde_json::{Map, Value};
 
 use super::super::error::{CustodyResult, MaterializeError};
 use super::{AccountIdentity, CliCredentialTarget, secret};

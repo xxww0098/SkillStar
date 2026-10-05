@@ -43,20 +43,6 @@ pub fn list_tree_entries_with_trees(repo_path: &Path, revision: &str) -> Result<
     list_tree_entries_with_args(repo_path, revision, &["-r", "-t"], &[])
 }
 
-/// Recursive blob entries restricted to `paths` — a pathspec-scoped listing
-/// instead of the whole tree, cheap enough to run before materializing just
-/// those directories (see `ops::add_sparse_checkout_dirs_in_session`).
-pub fn list_tree_entries_under(
-    repo_path: &Path,
-    revision: &str,
-    paths: &[&str],
-) -> Result<Vec<GitTreeEntry>> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    list_tree_entries_with_args(repo_path, revision, &["-r"], paths)
-}
-
 fn list_tree_entries_with_args(
     repo_path: &Path,
     revision: &str,

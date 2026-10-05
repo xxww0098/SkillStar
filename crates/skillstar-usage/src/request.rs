@@ -187,9 +187,6 @@ impl Resp {
         self.status == 429 || (500..600).contains(&self.status)
     }
 
-    pub fn parsed_json<T: DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        serde_json::from_str(&self.body)
-    }
 }
 
 /// Errors from [`Req::send`] and [`Req::send_json`].

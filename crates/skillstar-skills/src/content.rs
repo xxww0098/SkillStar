@@ -10,8 +10,7 @@ use sha2::{Digest, Sha256};
 use skillstar_core::infra::error::AppError;
 use skillstar_core::types::{SkillContent, parse_skill_content};
 
-use crate::git::ops as git_ops;
-use crate::{installed_skill, local_skill, lockfile};
+use crate::{installed_skill, local_skill, skill_lock};
 
 const SNAPSHOT_HASH_DOMAIN: &[u8] = b"skillstar.skill-snapshot.v2\0";
 pub const SNAPSHOT_HASH_VERSION: u32 = 2;
@@ -90,52 +89,6 @@ pub struct SkillSnapshot {
 }
 
 impl SkillSnapshot {
-    /// Materialize this captured snapshot into a new directory for read-only analysis.
-    ///
-    /// Internal symlinks are deliberately represented as small sentinel files instead
-    /// of being recreated. This preserves their target as evidence without allowing a
-    /// staged ACP workspace to escape through a link.
-    pub fn materialize_to(&self, destination: &Path) -> Result<(), AppError> {
-        if destination.symlink_metadata().is_ok() {
-            return Err(AppError::Other(format!(
-                "Snapshot destination already exists: {}",
-                destination.display()
-            )));
-        }
-
-        std::fs::create_dir_all(destination)?;
-        let result = (|| -> Result<(), AppError> {
-            for file in &self.files {
-                let relative = normalized_relative_path(&file.relative_path)?;
-                let output_path = destination.join(relative);
-                if let Some(parent) = output_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
-                match file.kind {
-                    SnapshotFileKind::Regular => std::fs::write(output_path, &file.content)?,
-                    SnapshotFileKind::Symlink => {
-                        let target = file.symlink_target().ok_or_else(|| {
-                            AppError::Other(format!(
-                                "Snapshot symlink target is not UTF-8: {}",
-                                file.relative_path
-                            ))
-                        })?;
-                        std::fs::write(
-                            output_path,
-                            format!("SkillStar snapshot symlink (not followed): {target}\n"),
-                        )?;
-                    }
-                }
-            }
-            Ok(())
-        })();
-
-        if result.is_err() {
-            let _ = std::fs::remove_dir_all(destination);
-        }
-        result
-    }
 }
 
 /// Capture the complete, bounded on-disk contents of one installed Skill.
@@ -146,31 +99,6 @@ impl SkillSnapshot {
 /// and version matching without a hash/read time-of-check gap.
 pub fn snapshot(name: &str) -> Result<SkillSnapshot, AppError> {
     snapshot_with_limits(name, SnapshotLimits::default())
-}
-
-/// Snapshot for an explicit read/generation action that may materialize a
-/// legacy lazy Git worktree. Divergence detection must keep using [`snapshot`].
-pub fn snapshot_materialized(name: &str) -> Result<SkillSnapshot, AppError> {
-    validate_skill_name(name)?;
-    let skill_entry = skillstar_core::infra::paths::hub_skills_dir().join(name);
-    materialize_managed_worktree(&skill_entry)?;
-    snapshot(name)
-}
-
-fn materialize_managed_worktree(skill_entry: &Path) -> Result<(), AppError> {
-    // Repo-cache Skills are often links to a nested directory. In a historical
-    // lazy checkout that target does not exist yet, so looking for `.git` at
-    // the link target itself is insufficient; walk to the physical repo root
-    // first and materialize the checkout there.
-    let repo_root = if skillstar_core::infra::fs_ops::is_link(skill_entry) {
-        crate::repo_link::repo_root_of(skill_entry)
-    } else {
-        git_ops::find_repo_root(skill_entry)
-    };
-    if let Some(repo_root) = repo_root {
-        git_ops::ensure_worktree_checked_out(&repo_root).map_err(AppError::Anyhow)?;
-    }
-    Ok(())
 }
 
 pub fn snapshot_with_limits(name: &str, limits: SnapshotLimits) -> Result<SkillSnapshot, AppError> {
@@ -215,9 +143,6 @@ fn snapshot_resolved_root(
         files,
         total_bytes,
     };
-    // Fingerprint the trusted snapshot so the pre-fetch cleanliness proof can
-    // later answer with `stat` calls instead of re-reading every byte.
-    crate::content_stats::record(name, &snapshot);
     Ok(snapshot)
 }
 
@@ -258,19 +183,30 @@ fn resolve_snapshot_root(name: &str) -> Result<PathBuf, AppError> {
         return Err(not_found(name));
     }
 
-    let canonical_hub = std::fs::canonicalize(&hub_root).map_err(|error| {
-        AppError::Other(format!(
-            "Failed to resolve SkillStar hub root {}: {error}",
-            hub_root.display()
-        ))
-    })?;
     let canonical_entry = std::fs::canonicalize(&skill_entry).map_err(|error| {
         AppError::Other(format!(
             "Failed to resolve skill root {}: {error}",
             skill_entry.display()
         ))
     })?;
-    ensure_within(&canonical_entry, &canonical_hub, "skill root")?;
+    // D-081: canonical copies live in ~/.agents/skills; local-authoring
+    // entries resolve into <hub>/local. Either root is a legal home, and a
+    // skill must sit inside one of them.
+    let allowed_roots = [
+        skillstar_core::infra::paths::agents_skills_root(),
+        skillstar_core::infra::paths::local_skills_dir(),
+        hub_root.clone(),
+    ];
+    let inside_any_root = allowed_roots.iter().any(|root| {
+        std::fs::canonicalize(root)
+            .is_ok_and(|canonical_root| ensure_within(&canonical_entry, &canonical_root, "").is_ok())
+    });
+    if !inside_any_root {
+        return Err(AppError::Other(format!(
+            "Skill root escaped its allowed roots: {}",
+            canonical_entry.display()
+        )));
+    }
     if !canonical_entry.is_dir() {
         return Err(AppError::Other(format!(
             "Skill root is not a directory: {}",
@@ -304,7 +240,9 @@ fn resolve_snapshot_root(name: &str) -> Result<PathBuf, AppError> {
         &canonical_entry,
         "effective skill root",
     )?;
-    ensure_within(&canonical_candidate, &canonical_hub, "effective skill root")?;
+    // The effective root only needs to sit inside the (already vetted) entry;
+    // the allowed-roots check above covers the outer boundary.
+    let _ = &hub_root;
     if !is_skill_content_root(&canonical_candidate) {
         return Err(not_found(name));
     }
@@ -644,7 +582,6 @@ pub fn read(name: &str) -> Result<SkillContent, AppError> {
         return Err(not_found(name));
     }
 
-    materialize_managed_worktree(&skill_dir)?;
     let effective_dir = resolve_content_dir(name).ok_or_else(|| not_found(name))?;
     let skill_path = effective_dir.join("SKILL.md");
     if !skill_path.exists() {
@@ -729,9 +666,17 @@ pub fn resolve_skill_folder(name: &str) -> Option<PathBuf> {
 /// arbitrary link must never turn the native file-manager command into an
 /// escape hatch to an unrelated directory.
 fn canonical_managed_path(path: &Path) -> Option<PathBuf> {
-    let hub_root = std::fs::canonicalize(skillstar_core::infra::paths::hub_root()).ok()?;
+    // D-081: managed content lives in the canonical skills root; local
+    // authoring and transitional entries still resolve under the hub root.
+    let allowed = [
+        skillstar_core::infra::paths::agents_skills_root(),
+        skillstar_core::infra::paths::hub_root(),
+    ];
     let target = std::fs::canonicalize(path).ok()?;
-    target.starts_with(hub_root).then_some(target)
+    allowed.iter().any(|root| {
+        std::fs::canonicalize(root).is_ok_and(|root| target.starts_with(root))
+    })
+    .then_some(target)
 }
 
 /// Open or reveal the resolved skill directory in the native file manager.
@@ -751,13 +696,10 @@ fn resolve_skill_dir(skill_dir: &Path) -> PathBuf {
 }
 
 fn lockfile_source_folder(skill_name: &str) -> Option<String> {
-    let lock_path = lockfile::lockfile_path();
-    let lockfile = lockfile::Lockfile::load(&lock_path).ok()?;
-    lockfile
+    skill_lock::load()
         .skills
-        .into_iter()
-        .find(|entry| entry.name == skill_name)
-        .and_then(|entry| entry.source_folder)
+        .get(skill_name)
+        .and_then(|entry| entry.skill_path.clone())
 }
 
 fn find_nested_skill_dir_by_name(root: &Path, skill_name: &str) -> Option<PathBuf> {

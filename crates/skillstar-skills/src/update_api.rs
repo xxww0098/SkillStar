@@ -18,26 +18,13 @@
 //! never degrades update correctness — only speed.
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use reqwest::header::HeaderMap;
 
 /// Per-call HTTP timeout.
 pub const API_TIMEOUT: Duration = Duration::from_secs(10);
-/// Unauthenticated GitHub API budget is 60 requests/hour per IP. Cap the
-/// per-cycle API usage below that so a single patrol never burns the budget
-/// (repos beyond the cap fall back to the git fetch path).
-pub const MAX_API_REPOS_PER_CYCLE: usize = 40;
-/// Concurrency for the API pre-pass.
-pub const API_CONCURRENCY: usize = 8;
-
-/// Unix timestamp until which the fast path should not be attempted, because
-/// the last Trees call exhausted the GitHub rate limit. `0` means "not
-/// blocked". Concurrent 403s keep the furthest reset via `fetch_max`.
-static RATE_LIMIT_RESET_UNIX: AtomicU64 = AtomicU64::new(0);
 
 /// Remote subtree hashes for one repository, obtained from the Trees API.
 ///
@@ -148,22 +135,6 @@ impl std::fmt::Display for FastPathFailure {
 
 impl std::error::Error for FastPathFailure {}
 
-/// `true` while GitHub has told us the current token/IP is out of quota.
-pub fn api_fast_path_blocked() -> bool {
-    RATE_LIMIT_RESET_UNIX.load(Ordering::Relaxed) > now_unix()
-}
-
-fn note_rate_limited_until(reset_unix: u64) {
-    RATE_LIMIT_RESET_UNIX.fetch_max(reset_unix, Ordering::Relaxed);
-}
-
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
-}
-
 /// Load the SkillStar GitHub App access token when a non-expired session
 /// already exists. Missing, unreadable, or expired credentials yield `None`
 /// and the caller stays anonymous — this path never starts a login.
@@ -215,31 +186,6 @@ pub fn owner_repo_from_git_url(url: &str) -> Option<(String, String)> {
         return None;
     }
     Some((owner, repo))
-}
-
-/// Resolve the remote ref to ask the API about: the pinned ref when the
-/// checkout is pinned, otherwise the default branch from the local
-/// `origin/HEAD` symbolic ref. `None` means the ref cannot be determined
-/// locally — the caller falls back to the git fetch path.
-pub fn remote_ref_for(repo_root: &Path, pinned_ref: Option<&str>) -> Option<String> {
-    if let Some(pinned) = pinned_ref
-        && !pinned.is_empty()
-    {
-        return Some(pinned.to_string());
-    }
-    let output = skillstar_core::infra::path_env::command_with_path("git")
-        .current_dir(repo_root)
-        .args(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let resolved = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    resolved
-        .strip_prefix("refs/remotes/origin/")
-        .map(str::to_string)
-        .filter(|branch| !branch.is_empty())
 }
 
 /// Parse the recursive Trees API response body into subtree hashes.
@@ -342,11 +288,11 @@ pub async fn fetch_remote_subtree_hashes(
             owner,
             repo,
             git_ref,
-            now_unix(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
         );
-        if let FastPathFailureKind::RateLimited { reset_unix } = failure.kind {
-            note_rate_limited_until(reset_unix);
-        }
         return Err(failure);
     }
     let body = response.text().await.map_err(|error| {

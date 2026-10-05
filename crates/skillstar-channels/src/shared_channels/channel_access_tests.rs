@@ -218,7 +218,7 @@ fn channel_owned_skills_are_refused_by_the_generic_skills_write_paths() {
         // checked "it failed" would keep passing after the gate was unwired.
         let refused_by_gate = |message: String| {
             assert!(
-                message.contains("managed by shared channel repository"),
+                message.contains("managed by shared channel"),
                 "expected the shared-channel gate to refuse this, got: {message}"
             );
         };
@@ -237,7 +237,8 @@ fn channel_owned_skills_are_refused_by_the_generic_skills_write_paths() {
                 .to_string(),
         );
 
-        let update = skillstar_skills::skill_update::update_skill("writer");
+        let update = skillstar_skills::git_skill::GitSkillFacade::from_file_store()
+            .update_skill("writer");
         refused_by_gate(
             update
                 .expect_err("update_skill must refuse a channel-owned Skill")

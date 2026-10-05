@@ -6,7 +6,7 @@
 //! This mirrors the `.repos/` pattern used for repo-cached skills.
 
 use crate::deployment;
-use crate::{lockfile, projects};
+use crate::projects;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use skillstar_core::types::{Skill, SkillCategory, extract_skill_description};
@@ -527,14 +527,12 @@ pub fn migrate_existing() -> Result<u32> {
     // Ensure local skills directory exists
     std::fs::create_dir_all(&local_dir).context("Failed to create skills-local directory")?;
 
-    // Load lockfile to check for git URLs
-    let lock_path = lockfile::lockfile_path();
-    let lockfile = lockfile::Lockfile::load(&lock_path)
-        .context("Failed to verify Skill ownership before local migration")?;
-    let lock_map: std::collections::HashMap<String, &crate::lockfile::LockEntry> = lockfile
+    // Load the install lock to check provenance URLs.
+    let lock = crate::skill_lock::load();
+    let lock_map: std::collections::HashMap<String, &crate::skill_lock::SkillLockEntry> = lock
         .skills
         .iter()
-        .map(|e| (e.name.clone(), e))
+        .map(|(name, entry)| (name.clone(), entry))
         .collect();
 
     let entries = match std::fs::read_dir(&hub_dir) {
@@ -579,7 +577,7 @@ pub fn migrate_existing() -> Result<u32> {
 
         // Skip if lockfile has a non-empty git_url for this skill
         if let Some(lock_entry) = lock_map.get(&name)
-            && !lock_entry.git_url.is_empty()
+            && !lock_entry.source_url.is_empty()
         {
             continue;
         }

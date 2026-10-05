@@ -1,7 +1,7 @@
 //! Thin adapters for desktop-app multi-instance (create / start / stop / list).
 
-use skillstar_usage::instances::{self, AppInstanceDto, DesktopAppDto};
 use skillstar_core::infra::error::AppError;
+use skillstar_usage::instances::{self, AppInstanceDto, DesktopAppDto};
 
 #[tauri::command]
 pub fn list_desktop_apps() -> Vec<DesktopAppDto> {

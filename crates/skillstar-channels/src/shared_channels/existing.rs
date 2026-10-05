@@ -98,9 +98,9 @@ impl ExistingRepositoryScanner for GitExistingRepositoryScanner {
                     "Unable to lock the repository cache for channel registration",
                 )
             })?;
-        let (_, _, repository_dir, _) = self
+        let fetched = self
             .facade
-            .fetch_repo_scanned_detailed(&repository.clone_url, true)
+            .fetch_repo_scanned(&repository.clone_url, true)
             .map_err(|_| {
                 if session.is_cancelled() {
                     cancelled_error()
@@ -111,6 +111,7 @@ impl ExistingRepositoryScanner for GitExistingRepositoryScanner {
                     )
                 }
             })?;
+        let repository_dir = fetched.dir.clone();
         session.emit(GitOperationPhase::Running, &repository.clone_url);
         let files = match collect_repository_files(&repository_dir, session) {
             Ok(files) => files,

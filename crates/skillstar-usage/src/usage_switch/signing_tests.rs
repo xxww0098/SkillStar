@@ -159,7 +159,10 @@ async fn diverged_signs_but_cannot_be_attributed() {
 
     let material = signing_material("codex").expect("orphan material");
     assert_eq!(material.freshness, Freshness::Diverged);
-    assert_eq!(material.access_token.as_deref(), Some("unknown-terminal-login"));
+    assert_eq!(
+        material.access_token.as_deref(),
+        Some("unknown-terminal-login")
+    );
     assert_eq!(
         material.subscription_id, None,
         "an orphan has no ledger attribution, but the token still signs"
@@ -212,7 +215,10 @@ fn debug_output_carries_no_plaintext_secrets() {
     assert!(!text.contains("sk-access-secret"), "{text}");
     assert!(!text.contains("sk-api-secret"), "{text}");
     assert!(text.contains("<redacted>"), "{text}");
-    assert!(text.contains("acct-1"), "non-secret fields stay readable: {text}");
+    assert!(
+        text.contains("acct-1"),
+        "non-secret fields stay readable: {text}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

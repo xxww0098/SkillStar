@@ -223,45 +223,6 @@ fn skill_folder_rejects_a_link_outside_the_managed_hub() {
 
 #[cfg(unix)]
 #[test]
-fn materialized_snapshot_checks_out_a_nested_repo_cache_skill() {
-    use std::os::unix::fs::symlink;
-
-    let _guard = crate::lock_test_env();
-    let hub = TestHub::new();
-    let repo = hub.temp.path().join("repos/demo-repo");
-    std::fs::create_dir_all(repo.join("skills/demo")).unwrap();
-    std::fs::write(repo.join("skills/demo/SKILL.md"), "# Demo\n").unwrap();
-
-    let git = |args: &[&str]| {
-        let status = skillstar_core::infra::path_env::command_with_path("git")
-            .args(args)
-            .current_dir(&repo)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
-    };
-    git(&["init", "--quiet"]);
-    git(&["config", "user.email", "tests@skillstar.local"]);
-    git(&["config", "user.name", "SkillStar Tests"]);
-    git(&["add", "."]);
-    git(&["commit", "--quiet", "-m", "fixture"]);
-
-    std::fs::remove_dir_all(repo.join("skills")).unwrap();
-    std::fs::create_dir_all(hub.temp.path().join("skills")).unwrap();
-    let canonical_repo = std::fs::canonicalize(&repo).unwrap();
-    symlink(canonical_repo.join("skills/demo"), hub.skill_dir("demo")).unwrap();
-
-    assert!(snapshot("demo").is_err());
-    assert!(!repo.join("skills").exists());
-
-    let captured = snapshot_materialized("demo").unwrap();
-    assert!(repo.join("skills/demo/SKILL.md").exists());
-    assert_eq!(captured.name, "demo");
-    assert_eq!(captured.files[0].relative_path, "SKILL.md");
-}
-
-#[cfg(unix)]
-#[test]
 fn snapshot_rejects_a_hub_entry_that_resolves_outside_the_hub() {
     use std::os::unix::fs::symlink;
 

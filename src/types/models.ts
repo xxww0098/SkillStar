@@ -2,7 +2,6 @@
 //! navigability; all re-exported by `index.ts`.
 
 import type { Reasoning } from "./generated/Reasoning";
-import type { NavPage } from "./marketplace";
 
 export type AppMode = "skills" | "usage" | "models";
 /**
@@ -12,8 +11,6 @@ export type AppMode = "skills" | "usage" | "models";
  */
 
 export type ModelsNavPage = "hub";
-
-export type AllNavPage = NavPage | ModelsNavPage;
 
 export type AppId = "claude" | "codex";
 
@@ -193,8 +190,6 @@ export interface AgentRoleSettings {
 }
 
 /** Historical name for {@link AgentRoleSettings}. */
-export type OmpSettings = AgentRoleSettings;
-
 /** Binding-level settings bag. */
 export type ToolBindingSettings = AgentRoleSettings;
 
@@ -285,13 +280,6 @@ export interface WriteToolConfigFileResult {
   success: boolean;
   backup_path?: string | null;
   error?: string | null;
-}
-
-export interface BalanceInfo {
-  available: number;
-  total?: number;
-  currency: string;
-  updated_at: number;
 }
 
 export interface ConnectionTestResult {

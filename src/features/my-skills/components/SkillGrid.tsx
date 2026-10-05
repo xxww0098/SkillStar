@@ -1,12 +1,10 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { X } from "lucide-react";
 import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MOTION_DURATION, MOTION_TRANSITION } from "../../../comm/motion";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { cn } from "../../../lib/utils";
-import type { AgentProfile, RepoNewSkill, Skill, ViewMode } from "../../../types";
-import { GhostSkillCard } from "./GhostSkillCard";
+import type { AgentProfile, Skill, ViewMode } from "../../../types";
 import { SkillCard, type SkillCardRemoteContext } from "./SkillCard";
 
 /**
@@ -56,9 +54,6 @@ interface SkillGridProps {
   onInstall?: (url: string, name: string, agentId?: string) => void;
   /** Optional: omitted in read-only scopes (e.g. remote) where SkillCard suppresses update. */
   onUpdate?: (name: string) => void;
-  onResolveRemoved?: (name: string) => void;
-  onMigrate?: (name: string) => void;
-  migratingNames?: Set<string>;
   onVisibleCountChange?: (visible: number, total: number) => void;
   scrollParentRef?: RefObject<HTMLElement | null>;
   emptyMessage?: string;
@@ -71,13 +66,6 @@ interface SkillGridProps {
   installingNames?: Set<string>;
   pendingUpdateNames?: Set<string>;
   pendingAgentToggleKeys?: Set<string>;
-  ghostSkills?: RepoNewSkill[];
-  onInstallGhost?: (skill: RepoNewSkill) => void;
-  onDismissGhost?: (repoSource: string, skillId: string) => void;
-  onDismissGhostRepo?: (repoSource: string) => void;
-  onGhostClick?: (skill: RepoNewSkill) => void;
-  /** A ghost an installed Skill was renamed into: migrate instead of installing afresh. */
-  onMigrateGhost?: (skill: RepoNewSkill) => void;
   getRemoteCardProps?: (skill: Skill) => SkillCardRemoteContext | undefined;
 }
 
@@ -156,9 +144,6 @@ export function SkillGrid({
   onSkillClick,
   onInstall,
   onUpdate,
-  onResolveRemoved,
-  onMigrate,
-  migratingNames,
   onVisibleCountChange,
   scrollParentRef,
   emptyMessage,
@@ -171,12 +156,6 @@ export function SkillGrid({
   installingNames,
   pendingUpdateNames,
   pendingAgentToggleKeys,
-  ghostSkills,
-  onInstallGhost,
-  onDismissGhost,
-  onDismissGhostRepo,
-  onGhostClick,
-  onMigrateGhost,
   getRemoteCardProps,
 }: SkillGridProps) {
   const { t } = useTranslation();
@@ -241,17 +220,6 @@ export function SkillGrid({
     element.style.setProperty("--ss-card-h", `${Math.round(first.getBoundingClientRect().height)}px`);
   }, [viewMode, containerWidth, skills.length]);
 
-  const ghostGroups = useMemo(() => {
-    if (!ghostSkills || ghostSkills.length === 0) return [];
-    const groups: Map<string, RepoNewSkill[]> = new Map();
-    for (const s of ghostSkills) {
-      const list = groups.get(s.repo_source) ?? [];
-      list.push(s);
-      groups.set(s.repo_source, list);
-    }
-    return Array.from(groups.entries());
-  }, [ghostSkills]);
-
   // ── Virtualization ──
   const rowCount = useMemo(() => Math.ceil(skills.length / gridColumnCount), [skills.length, gridColumnCount]);
   const cardHeight = viewMode === "grid" ? CARD_ROW_HEIGHT_GRID : CARD_ROW_HEIGHT_LIST;
@@ -265,7 +233,7 @@ export function SkillGrid({
     needsVirtualize,
   );
 
-  if (skills.length === 0 && ghostGroups.length === 0) {
+  if (skills.length === 0) {
     return <EmptyState title={emptyMessage ?? t("skillGrid.noSkills")} action={emptyAction} size="lg" />;
   }
 
@@ -280,9 +248,6 @@ export function SkillGrid({
       onClick={onSkillClick}
       onInstall={onInstall}
       onUpdate={onUpdate}
-      onResolveRemoved={onResolveRemoved}
-      onMigrate={onMigrate}
-      migrating={migratingNames?.has(skill.name)}
       compact={viewMode === "list"}
       selectable={selectable}
       selected={selectedSkills?.has(skill.name)}
@@ -296,55 +261,6 @@ export function SkillGrid({
       remoteContext={getRemoteCardProps?.(skill)}
     />
   );
-
-  const ghostSection =
-    ghostGroups.length > 0 && onInstallGhost && onDismissGhost ? (
-      <div className="mb-4">
-        <AnimatePresence>
-          {ghostGroups.map(([repoSource, groupSkills]) => (
-            <motion.div
-              key={repoSource}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.25 }}
-              className="mb-3"
-            >
-              <div className="flex items-center gap-2 px-1 mb-2">
-                <div className="h-px flex-1 bg-primary/15" />
-                <span className="text-[11px] font-medium text-primary/60 whitespace-nowrap">
-                  {repoSource} {t("ghostCard.foundCount", { count: groupSkills.length })}
-                </span>
-                {onDismissGhostRepo && (
-                  <button
-                    onClick={() => onDismissGhostRepo(repoSource)}
-                    className="p-0.5 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted/60 transition-all duration-150 cursor-pointer"
-                    title={t("ghostCard.dismissAll")}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <div className="h-px flex-1 bg-primary/15" />
-              </div>
-              <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
-                <AnimatePresence>
-                  {groupSkills.map((gs) => (
-                    <GhostSkillCard
-                      key={`${gs.repo_source}/${gs.skill_id}`}
-                      skill={gs}
-                      onInstall={onInstallGhost}
-                      onDismiss={onDismissGhost}
-                      onClick={onGhostClick}
-                      onMigrate={onMigrateGhost}
-                    />
-                  ))}
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    ) : null;
 
   // ── Virtualized: only render visible rows ──
   if (needsVirtualize) {
@@ -380,7 +296,6 @@ export function SkillGrid({
 
     return (
       <div ref={containerRef}>
-        {ghostSection}
         <div style={{ position: "relative", height: totalHeight, width: "100%" }}>{visibleRows}</div>
       </div>
     );
@@ -390,7 +305,6 @@ export function SkillGrid({
   if (!useLayoutAnimations) {
     return (
       <div ref={containerRef}>
-        {ghostSection}
         <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
           {skills.map((skill) => (
             <div key={skill.name + skill.git_url} className="h-full">
@@ -405,7 +319,6 @@ export function SkillGrid({
   // ── Small dataset: full framer-motion layout animations ──
   return (
     <div ref={containerRef}>
-      {ghostSection}
       <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
         <AnimatePresence mode="popLayout">
           {skills.map((skill) => (

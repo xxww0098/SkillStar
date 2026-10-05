@@ -19,7 +19,7 @@ type NavItemNode =
 export function SkillsNav({ activePage, onNavigate, onPrefetch, collapsed }: SkillsNavProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
-  const { ghostSkillCount, pendingUpdatesCount } = useSkillBadgeCounts();
+  const { pendingUpdatesCount } = useSkillBadgeCounts();
 
   const navItems: NavItemNode[] = [
     { id: "my-skills", label: t("sidebar.skills"), icon: Package },
@@ -80,30 +80,16 @@ export function SkillsNav({ activePage, onNavigate, onPrefetch, collapsed }: Ski
               />
             </div>
             {!collapsed && <span className="relative z-10">{item.label}</span>}
-            {item.id === "my-skills" && !collapsed && (!!ghostSkillCount || !!pendingUpdatesCount) && (
+            {item.id === "my-skills" && !collapsed && !!pendingUpdatesCount && pendingUpdatesCount > 0 && (
               <div className="relative z-10 ml-auto flex items-center gap-1">
-                {!!pendingUpdatesCount && pendingUpdatesCount > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-amber-950 text-[9px] font-bold tabular-nums shadow-xs">
-                    {pendingUpdatesCount}
-                  </span>
-                )}
-                {!!ghostSkillCount && ghostSkillCount > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-bold tabular-nums shadow-xs">
-                    +{ghostSkillCount}
-                  </span>
-                )}
+                <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-amber-950 text-[9px] font-bold tabular-nums shadow-xs">
+                  {pendingUpdatesCount}
+                </span>
               </div>
             )}
-            {item.id === "my-skills" && collapsed && !!ghostSkillCount && ghostSkillCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary border border-card shadow-xs" />
+            {item.id === "my-skills" && collapsed && !!pendingUpdatesCount && pendingUpdatesCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 border border-card shadow-xs" />
             )}
-            {item.id === "my-skills" &&
-              collapsed &&
-              (!ghostSkillCount || ghostSkillCount === 0) &&
-              !!pendingUpdatesCount &&
-              pendingUpdatesCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 border border-card shadow-xs" />
-              )}
           </button>
         );
       })}

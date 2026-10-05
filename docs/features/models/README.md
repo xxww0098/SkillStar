@@ -100,11 +100,11 @@ Codex 与 OpenCode 上游各自有一个角色概念（`default_subagent_model`�
 
 ## Models 工作台
 
-Models 页左侧是 Agents 和 Providers 两张列表卡，右侧是一块 Gateway 面板；面板内配置列（监听方式 → 配置档 → 路由与亲和 → 候选路由 → 分组成员）与最近调用表并排，窄屏时配置列收为单栏。从 Usage 页跳来的焦点（某个 Agent，或某个账号）会把候选路由区切到对应形态。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
+Models 页左侧是 Agents 和 Providers 两张列表卡；右侧工作区上下叠两张卡：上面是 Gateway 配置卡（头部放监听方式，下方依次是接入端点、路由与亲和、配置档、分组成员，宽屏下后两段分双栏），下面是占满剩余宽度的最近调用表卡，窄屏时全部收为单列纵向滚动。从 Usage 页跳来的焦点（某个 Agent，或某个账号）会把候选路由区切到对应形态。这一屏不决定行密度。某一栏的读取成功而且是空的时候，句子分别是「还没有探测到可配置的 Agent」「还没有密钥」「还没有调用」。读取失败时不显示这些句子。句子不提示厂商 URL，也不给出示例密钥。这一栏有了自己的一行之后，它的句子就不再出现。
 
 `get_models_board` 返回每一行的 id、name 和 `model_label`。`model_label` 是从该 Agent 配置文件读回的当前模型（gateway 的 `written_model_ref`，含 board 拼法到 writer 拼法的归一，如 `claude-code` 行读的是 `claude` 的 `settings.json`），读不到就是空串，页面显示「未选择模型」。Providers 行另外带掩码摘要。Agents 来自注册表，Providers 来自 `load_store()` 的名字。看板里的 gateway 列表保持为空。Gateway 栏读最近一页调用：持久用量账本是真相（含时间、Agent、模型、状态、补全/输入 token、会话与延迟），进程内的环只为账本缺的行补位（环容量与页大小以代码常量为准：`crates/skillstar-gateway/src/trace.rs` 的 `TRACE_KEEP` 与 app 侧的 `PAGE_KEEP`）。没有用量时 token 为空。这一栏不显示上游 URL。账号册那边的配额数字不进这张表；要对照配额与实测，看下面的候选路由。这个读取不走 `get_providers_flat`，不读 `compat.rs`，也不读网关监听地址。缺失的 store 是空列表，不写 Agent 文件。
 
-Gateway 面板的配置列顶部是「接入端点」：OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两行，各带复制按钮，来源是 `get_loopback_origin` 命令。展示时去掉 `http://` 前缀，复制的是完整地址。读取失败时这一区不渲染。
+Gateway 面板的配置列顶部是「接入端点」：网关服务的四种 API 方言各占一行——OpenAI（`/v1/chat/completions`）、Responses（`/v1/responses`）、Anthropic（`/v1/messages`）和 Gemini（`/v1beta/models/{model}:generateContent`），各带复制按钮，来源是 `get_loopback_origin` 命令。展示时去掉 `http://` 前缀，复制的是完整地址；Gemini 行保留 `{model}` 占位，由调用方替换成要请求的模型。读取失败时这一区不渲染。
 
 点 Agents 栏的一行打开选择器：搜索框输入即过滤，ArrowUp/Down 移动高亮，Enter 保存，Esc 关闭；底部有「保存显示名」表单。列表是 models.dev 缓存和已保存分组的投影，每一项的 id 是 `provider/model` 或 `group/<id>`，当前项带勾选标记。保存走该 Agent 已经落地的 writer，成功后刷新看板并提示；失败时弹层保留。Codex 的保存走网关的字段级接管（`apply_agent_with_model`），写 `config.toml` 的 `model` 键，不整文件替换；空 ref 等于解除接管。不在这套写入里的 id，包括 Goose、Cursor CLI、Copilot CLI 和 Devin，返回 `agent_not_managed`，不写文件，也不为它们新造 URL 字段。弹出层不显示密钥，也不显示厂商 URL。
 

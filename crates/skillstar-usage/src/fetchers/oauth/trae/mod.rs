@@ -149,9 +149,9 @@ pub(super) async fn fetch_with(
                 .as_deref()
                 .map(str::trim)
                 .is_none_or(str::is_empty)
-            {
-                subscription.oauth_account_id = Some(user_id);
-            }
+        {
+            subscription.oauth_account_id = Some(user_id);
+        }
         if let Some(region) = issued
             .login_region
             .as_deref()
@@ -184,9 +184,9 @@ fn usage_from_snapshot(
             .as_deref()
             .map(str::trim)
             .is_none_or(str::is_empty)
-        {
-            subscription.oauth_account_id = Some(user_id);
-        }
+    {
+        subscription.oauth_account_id = Some(user_id);
+    }
     if let Some(region) = snapshot.login_region.clone() {
         subscription.oauth_region = Some(region);
     }

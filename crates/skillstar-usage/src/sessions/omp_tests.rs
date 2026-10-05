@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::omp::OmpParser;
-use super::{SessionCall, SessionParser, SessionFile, SessionTokens};
+use super::{SessionCall, SessionFile, SessionParser, SessionTokens};
 use crate::test_support::EnvGuard;
 
 const MAIN: &str = include_str!("fixtures/omp_session.jsonl");
@@ -27,7 +27,11 @@ fn sandbox() -> (tempfile::TempDir, tempfile::TempDir, EnvGuard) {
 
 /// The sandbox's omp project folder: `<home>/.omp/agent/sessions/--work-omp--`.
 fn omp_project(home: &Path) -> PathBuf {
-    let dir = home.join(".omp").join("agent").join("sessions").join("--work-omp--");
+    let dir = home
+        .join(".omp")
+        .join("agent")
+        .join("sessions")
+        .join("--work-omp--");
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -72,9 +76,33 @@ fn title_lines_and_model_usage_entries() {
     assert_eq!(
         tokens_of(&delta),
         vec![
-            ("claude-opus-5-5".to_string(), SessionTokens { input: 100, output: 50, cache_read: 1000, cache_write: 200 }),
-            ("claude-haiku-5".to_string(), SessionTokens { input: 20, output: 5, cache_read: 0, cache_write: 0 }),
-            ("claude-opus-5-5".to_string(), SessionTokens { input: 10, output: 5, cache_read: 500, cache_write: 0 }),
+            (
+                "claude-opus-5-5".to_string(),
+                SessionTokens {
+                    input: 100,
+                    output: 50,
+                    cache_read: 1000,
+                    cache_write: 200
+                }
+            ),
+            (
+                "claude-haiku-5".to_string(),
+                SessionTokens {
+                    input: 20,
+                    output: 5,
+                    cache_read: 0,
+                    cache_write: 0
+                }
+            ),
+            (
+                "claude-opus-5-5".to_string(),
+                SessionTokens {
+                    input: 10,
+                    output: 5,
+                    cache_read: 500,
+                    cache_write: 0
+                }
+            ),
         ]
     );
     assert!(delta.iter().all(|c| c.agent == "omp"));
@@ -98,11 +126,19 @@ fn artifacts_sub_sessions_count_in_their_parent() {
     std::fs::write(artifacts.join("0-Explore.jsonl"), SUB_EXPLORE).unwrap();
     std::fs::write(explore_dir.join("0-Find.jsonl"), SUB_FIND).unwrap();
     std::fs::write(artifacts.join("__advisor.jsonl"), SUB_ADVISOR).unwrap();
-    std::fs::write(artifacts.join("btw-history").join("1790582450000.json"), b"{}").unwrap();
+    std::fs::write(
+        artifacts.join("btw-history").join("1790582450000.json"),
+        b"{}",
+    )
+    .unwrap();
     std::fs::write(artifacts.join("notes.txt"), b"not a session").unwrap();
 
     let files = OmpParser.discover(home.path());
-    assert_eq!(files.len(), 4, "the main file and its three artifact sessions, nothing else");
+    assert_eq!(
+        files.len(),
+        4,
+        "the main file and its three artifact sessions, nothing else"
+    );
     assert!(files.iter().all(|f| f.agent == "omp"));
 
     // Every artifact call is attributed to the session they ran in — also
@@ -110,7 +146,10 @@ fn artifacts_sub_sessions_count_in_their_parent() {
     let mut all: Vec<(String, SessionTokens)> = Vec::new();
     for file in &files {
         let (delta, _) = OmpParser.parse(file, None);
-        assert!(delta.iter().all(|c| c.session == MAIN_ID), "artifact calls carry the parent session id");
+        assert!(
+            delta.iter().all(|c| c.session == MAIN_ID),
+            "artifact calls carry the parent session id"
+        );
         all.extend(tokens_of(&delta));
     }
     // Main 3 calls + sonnet {300,30,100,0} + sonnet {40,4,0,0} + gpt-6-astra
@@ -121,7 +160,14 @@ fn artifacts_sub_sessions_count_in_their_parent() {
     assert_eq!(sonnet.len(), 2);
     assert_eq!(sonnet[0].1.input + sonnet[1].1.input, 340);
     assert_eq!(sonnet[0].1.output + sonnet[1].1.output, 34);
-    assert!(all.iter().any(|(m, t)| m == "gpt-6-astra" && *t == SessionTokens { input: 50, output: 10, cache_read: 0, cache_write: 0 }));
+    assert!(all.iter().any(|(m, t)| m == "gpt-6-astra"
+        && *t
+            == SessionTokens {
+                input: 50,
+                output: 10,
+                cache_read: 0,
+                cache_write: 0
+            }));
 }
 
 #[test]
@@ -129,7 +175,11 @@ fn profiles_and_xdg_roots() {
     let xdg = tempfile::tempdir().unwrap();
     let xdg_project = xdg.path().join("omp").join("sessions").join("--x--");
     std::fs::create_dir_all(&xdg_project).unwrap();
-    std::fs::write(xdg_project.join("2026-09-29T11-00-00-000Z_xdg-0001.jsonl"), MAIN).unwrap();
+    std::fs::write(
+        xdg_project.join("2026-09-29T11-00-00-000Z_xdg-0001.jsonl"),
+        MAIN,
+    )
+    .unwrap();
 
     // A profile's sessions folder is a root of its own; the sandbox pins
     // every root under home and ignores $XDG_DATA_HOME.
@@ -144,14 +194,24 @@ fn profiles_and_xdg_roots() {
             .join("sessions")
             .join("--p--");
         std::fs::create_dir_all(&profile_project).unwrap();
-        std::fs::write(profile_project.join("2026-09-29T10-00-00-000Z_prof-0001.jsonl"), MAIN).unwrap();
+        std::fs::write(
+            profile_project.join("2026-09-29T10-00-00-000Z_prof-0001.jsonl"),
+            MAIN,
+        )
+        .unwrap();
         main_session(home.path());
 
         let files = OmpParser.discover(home.path());
         assert_eq!(files.len(), 2, "the agent folder's and the profile's");
-        assert!(files.iter().any(|f| f.path.ends_with("2026-09-29T10-00-00-000Z_prof-0001.jsonl")));
         assert!(
-            !files.iter().any(|f| f.path.to_str().is_some_and(|p| p.contains("xdg-0001"))),
+            files
+                .iter()
+                .any(|f| f.path.ends_with("2026-09-29T10-00-00-000Z_prof-0001.jsonl"))
+        );
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.path.to_str().is_some_and(|p| p.contains("xdg-0001"))),
             "the sandbox ignores $XDG_DATA_HOME"
         );
     }
@@ -162,6 +222,10 @@ fn profiles_and_xdg_roots() {
         let _guard = EnvGuard::set(&[("XDG_DATA_HOME", xdg.path())]);
         let files = OmpParser.discover(plain_home.path());
         assert_eq!(files.len(), 1);
-        assert!(files[0].path.ends_with("2026-09-29T11-00-00-000Z_xdg-0001.jsonl"));
+        assert!(
+            files[0]
+                .path
+                .ends_with("2026-09-29T11-00-00-000Z_xdg-0001.jsonl")
+        );
     }
 }

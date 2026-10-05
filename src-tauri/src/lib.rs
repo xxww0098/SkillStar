@@ -151,6 +151,9 @@ pub fn run() {
             // Channel-aware mutation gate must be active before any skill mutation path runs
             skillstar_channels::policy::install_global_policy();
 
+            // D-081: remove the pre-vercel hub/cache model once, idempotently.
+            skillstar_skills::legacy_cleanup::run_once();
+
             // Migrate v1 flat layout → v2 categorised layout (idempotent)
             skillstar_core::infra::migration::migrate_legacy_paths();
 
@@ -233,8 +236,6 @@ pub fn run() {
             commands::toggle_skill_for_agent,
             commands::update_skill,
             commands::update_skills,
-            commands::resolve_skill_update,
-            commands::migrate_renamed_skill,
             commands::open_skill_folder,
             commands::marketplace::resolve_skill_sources,
             commands::marketplace::ai_extract_search_keywords,
@@ -366,18 +367,12 @@ pub fn run() {
             commands::github::scan_github_repo,
             commands::github::install_from_scan,
             commands::github::list_repo_history,
-            commands::github::get_repo_cache_info,
-            commands::github::clean_repo_cache,
             commands::github::get_storage_overview,
             commands::github::clear_all_caches,
             commands::github::force_delete_installed_skills,
             commands::github::force_delete_repo_caches,
             commands::github::force_delete_app_config,
             commands::github::clean_broken_skills,
-            commands::github::check_new_repo_skills,
-            commands::github::dismiss_new_skill,
-            commands::github::get_dismissed_new_skills,
-            commands::github::dismiss_new_skills_batch,
             commands::export_skill_bundle,
             commands::preview_skill_bundle,
             commands::import_skill_bundle,

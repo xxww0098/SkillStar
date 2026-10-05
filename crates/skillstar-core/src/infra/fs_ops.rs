@@ -345,16 +345,6 @@ pub fn remove_dir_all_retry(path: &Path) -> std::io::Result<()> {
     retry_io(|| std::fs::remove_dir_all(path))
 }
 
-/// Remove one regular file with the same Windows transient-lock retry policy.
-pub fn remove_file_retry(path: &Path) -> std::io::Result<()> {
-    retry_io(|| std::fs::remove_file(path))
-}
-
-/// Remove one empty directory with the same Windows transient-lock retry policy.
-pub fn remove_dir_retry(path: &Path) -> std::io::Result<()> {
-    retry_io(|| std::fs::remove_dir(path))
-}
-
 fn retry_io<F>(op: F) -> std::io::Result<()>
 where
     F: Fn() -> std::io::Result<()>,

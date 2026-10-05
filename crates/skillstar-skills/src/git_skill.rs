@@ -9,13 +9,12 @@ use crate::github_auth::{
     FileCredentialStore, GitHubAuthFacade, ProductionGitHubGateway, SystemClock,
 };
 use crate::installed_skill::{self, SkillUpdateState};
-use crate::repo_scanner::{self, ScanResult, SkillInstallTarget};
-use crate::skill_update::{
-    LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
-};
-use crate::{Skill, local_skill, skill_install, skill_update};
+use crate::repo_scanner::{ScanResult, SkillInstallTarget};
+use crate::skill_update::{SkillUpdateChannelManaged, SkillUpdateFailure, SkillUpdateReport, UpdateResult};
+use crate::{Skill, local_skill, skill_install};
 use skillstar_core::infra::error::AppError;
-use std::path::{Path, PathBuf};
+use anyhow::Context as _;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -52,37 +51,37 @@ impl GitSkillFacade {
     }
 
     pub fn scan_repo(&self, input: &str, full_depth: bool) -> anyhow::Result<ScanResult> {
-        let _guard = crate::skill_update::acquire_update_transaction_lock()?;
         ensure_generic_input_repository_mutable(input)?;
-        repo_scanner::scan_repo_with_mode_in_session(input, full_depth, &self.session)
+        let parsed =
+            crate::source_resolver::Source::parse(input).context("Invalid repository URL")?;
+        self.session.emit_stage(
+            crate::git::transport::InstallStage::Fetching,
+            &parsed.short,
+            None,
+        );
+        let checkout = crate::fetch::fetch_source(&parsed, &self.session)?;
+        self.session.emit_stage(
+            crate::git::transport::InstallStage::Discovering,
+            &parsed.short,
+            None,
+        );
+        let (_, _, repo_dir, skills) =
+            crate::skill_install::scan_parsed_checkout(&parsed, checkout.dir().to_path_buf(), full_depth);
+        let plugin = crate::plugin_manifest::plugin_hint_for_repo(&repo_dir);
+        Ok(ScanResult {
+            spec: parsed,
+            skills,
+            plugin,
+        })
     }
 
     pub fn fetch_repo_scanned(
         &self,
         input: &str,
         full_depth: bool,
-    ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
+    ) -> anyhow::Result<skill_install::FetchedScan> {
         skill_install::fetch_repo_scanned_in_session(input, full_depth, &self.session)
-    }
-
-    pub fn fetch_repo_scanned_preferring_local_cache(
-        &self,
-        input: &str,
-        full_depth: bool,
-    ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), AppError> {
-        skill_install::fetch_repo_scanned_preferring_local_cache_in_session(
-            input,
-            full_depth,
-            &self.session,
-        )
-    }
-
-    pub fn fetch_repo_scanned_detailed(
-        &self,
-        input: &str,
-        full_depth: bool,
-    ) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
-        skill_install::fetch_repo_scanned_detailed_in_session(input, full_depth, &self.session)
+            .map_err(anyhow::Error::msg)
     }
 
     pub fn install_from_scan(
@@ -90,8 +89,27 @@ impl GitSkillFacade {
         spec: &crate::source_resolver::Source,
         targets: &[SkillInstallTarget],
     ) -> anyhow::Result<Vec<String>> {
-        let _guard = crate::skill_update::acquire_update_transaction_lock()?;
-        repo_scanner::install_from_repo_in_session(spec, targets, &self.session)
+        self.session.emit_stage(
+            crate::git::transport::InstallStage::Fetching,
+            &spec.short,
+            None,
+        );
+        let checkout = crate::fetch::fetch_source(spec, &self.session)?;
+        self.session.emit_stage(
+            crate::git::transport::InstallStage::Materializing,
+            &spec.short,
+            None,
+        );
+        let units: Vec<crate::installer::InstallUnit> = targets
+            .iter()
+            .map(|target| crate::installer::InstallUnit {
+                id: target.id.clone(),
+                folder_path: target.folder_path.clone(),
+            })
+            .collect();
+        let installed = crate::installer::install_units(checkout.dir(), spec, &units)?;
+        installed_skill::invalidate_cache();
+        Ok(installed)
     }
 
     /// Replace a published local Skill with its Git-backed installation while
@@ -106,13 +124,18 @@ impl GitSkillFacade {
         crate::skill_mutation::policy().ensure_skill_mutation_allowed(skill_name)?;
         crate::skill_mutation::policy().ensure_repository_mutation_allowed(&spec.repo_url)?;
         let snapshot = crate::content::snapshot(skill_name)?;
-        let previous_lock_entry = load_skill_lock_entry(skill_name)?;
         local_skill::graduate(skill_name)?;
-        let install = repo_scanner::install_from_repo_in_session(
-            spec,
-            std::slice::from_ref(target),
-            &self.session,
-        )
+        let install = (|| -> anyhow::Result<Vec<String>> {
+            let checkout = crate::fetch::fetch_source(spec, &self.session)?;
+            crate::installer::install_units(
+                checkout.dir(),
+                spec,
+                std::slice::from_ref(&crate::installer::InstallUnit {
+                    id: target.id.clone(),
+                    folder_path: target.folder_path.clone(),
+                }),
+            )
+        })()
         .and_then(|installed| {
             installed
                 .iter()
@@ -127,18 +150,11 @@ impl GitSkillFacade {
         });
         if let Err(error) = install {
             let content_rollback = local_skill::create_from_snapshot(skill_name, &snapshot).err();
-            let lock_rollback = restore_skill_lock_entry(skill_name, previous_lock_entry).err();
             installed_skill::invalidate_cache();
-            return Err(match (content_rollback, lock_rollback) {
-                (None, None) => error,
-                (Some(content), None) => anyhow::anyhow!(
+            return Err(match content_rollback {
+                None => error,
+                Some(content) => anyhow::anyhow!(
                     "Git-backed installation failed ({error:#}); local Skill restore also failed: {content:#}"
-                ),
-                (None, Some(lock)) => anyhow::anyhow!(
-                    "Git-backed installation failed ({error:#}); lockfile restore also failed: {lock:#}"
-                ),
-                (Some(content), Some(lock)) => anyhow::anyhow!(
-                    "Git-backed installation failed ({error:#}); local Skill restore failed: {content:#}; lockfile restore failed: {lock:#}"
                 ),
             });
         }
@@ -162,13 +178,7 @@ impl GitSkillFacade {
                 "repository checkout is at {before}, expected immutable commit {expected_commit}"
             );
         }
-        let installed = repo_scanner::scan_install::install_from_repo_at_with_source_migrations(
-            repo_dir,
-            repo_url,
-            Some(expected_commit),
-            targets,
-            &[],
-        )?;
+        let installed = install_targets_at(repo_dir, repo_url, Some(expected_commit), targets)?;
         let after = crate::git::ops::rev_parse(repo_dir, "HEAD")?;
         if !after.eq_ignore_ascii_case(expected_commit) {
             anyhow::bail!(
@@ -193,17 +203,8 @@ impl GitSkillFacade {
                 "repository checkout is at {before}, expected immutable commit {expected_commit}"
             );
         }
-        let authorized = targets
-            .iter()
-            .map(|target| (target.id.clone(), previous_repo_url.to_string()))
-            .collect::<Vec<_>>();
-        let installed = repo_scanner::scan_install::install_from_repo_at_with_source_migrations(
-            repo_dir,
-            repo_url,
-            Some(expected_commit),
-            targets,
-            &authorized,
-        )?;
+        let _ = previous_repo_url;
+        let installed = install_targets_at(repo_dir, repo_url, Some(expected_commit), targets)?;
         let after = crate::git::ops::rev_parse(repo_dir, "HEAD")?;
         if !after.eq_ignore_ascii_case(expected_commit) {
             anyhow::bail!(
@@ -229,33 +230,80 @@ impl GitSkillFacade {
     }
 
     pub fn install_skills_batch(&self, url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
-        skill_install::install_skills_batch_in_session(url, names, None, &self.session)
+        skill_install::install_skills_batch_in_session(url, names, &self.session)
     }
 
     pub fn install_skills_batch_for_agent(
         &self,
         url: &str,
         names: &[String],
-        agent_id: &str,
+        _agent_id: &str,
     ) -> Result<Vec<Skill>, AppError> {
-        skill_install::install_skills_batch_in_session(url, names, Some(agent_id), &self.session)
+        skill_install::install_skills_batch_in_session(url, names, &self.session)
             .map_err(AppError::from)
     }
 
+    /// D-081 overwrite-update: refetch the locked source and reinstall.
     pub fn update_skill(&self, name: &str) -> anyhow::Result<UpdateResult> {
-        skill_update::update_skill_in_session(name, &self.session)
+        let report = self.update_skills(std::slice::from_ref(&name.to_string()));
+        if let Some(managed) = report.channel_managed.first() {
+            return Err(anyhow::anyhow!(
+                "'{}' is managed by shared channel {}; update it from the shared-channel view",
+                managed.name, managed.repository_id
+            ));
+        }
+        if report.updated.is_empty() {
+            return Err(anyhow::anyhow!("{}", first_failure_text(&report)));
+        }
+        Ok(report.updated.into_iter().next().expect("checked non-empty"))
     }
 
     pub fn update_skills(&self, names: &[String]) -> SkillUpdateReport {
-        skill_update::update_skills_in_session(names, &self.session)
-    }
-
-    pub fn resolve_skill_update(
-        &self,
-        name: &str,
-        resolution: LocalDivergenceResolution,
-    ) -> anyhow::Result<ResolveSkillUpdateResult> {
-        skill_update::resolve_skill_update_in_session(name, resolution, &self.session)
+        let policy = crate::skill_mutation::policy();
+        let mut report = SkillUpdateReport::default();
+        let mut generic: Vec<String> = Vec::new();
+        for name in names {
+            match policy.managed_repository_for_skill(name) {
+                Ok(Some(repository_id)) => {
+                    report.channel_managed.push(SkillUpdateChannelManaged {
+                        name: name.clone(),
+                        repository_id,
+                    });
+                }
+                Ok(None) => generic.push(name.clone()),
+                Err(error) => report.failed.push(SkillUpdateFailure {
+                    name: name.clone(),
+                    error: format!("{error:#}"),
+                }),
+            }
+        }
+        for applied in crate::update::apply_updates(&generic, &self.session) {
+            match applied.result {
+                crate::update::UpdateResult::Updated { .. } => {
+                    // Refresh every existing link/copy onto the new content.
+                    let _ = crate::deployment::resync_existing_links(&applied.name);
+                    crate::update_state::set(&applied.name, false);
+                    match crate::skill_install::load_skill_dto(&applied.name) {
+                        Ok(skill) => report.updated.push(UpdateResult {
+                            skill,
+                            siblings_cleared: Vec::new(),
+                            agent_link_failures: Vec::new(),
+                        }),
+                        Err(error) => report.failed.push(SkillUpdateFailure {
+                            name: applied.name.clone(),
+                            error,
+                        }),
+                    }
+                }
+                crate::update::UpdateResult::Removed => report.skipped.push(applied.name.clone()),
+                crate::update::UpdateResult::Failed(error) => report.failed.push(SkillUpdateFailure {
+                    name: applied.name.clone(),
+                    error,
+                }),
+            }
+        }
+        installed_skill::invalidate_cache();
+        report
     }
 
     pub async fn refresh_skill_updates(&self) -> anyhow::Result<Vec<SkillUpdateState>> {
@@ -263,39 +311,42 @@ impl GitSkillFacade {
     }
 }
 
-fn load_skill_lock_entry(skill_name: &str) -> anyhow::Result<Option<crate::lockfile::LockEntry>> {
-    let _lock = crate::lockfile::get_mutex()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-    let lockfile = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())?;
-    Ok(lockfile
-        .skills
-        .into_iter()
-        .find(|entry| skill_lock_names_equal(&entry.name, skill_name)))
+/// Install `targets` out of an already-verified checkout dir (channels seam).
+fn install_targets_at(
+    repo_dir: &Path,
+    repo_url: &str,
+    git_ref: Option<&str>,
+    targets: &[SkillInstallTarget],
+) -> anyhow::Result<Vec<String>> {
+    let spec = crate::source_resolver::Source {
+        repo_url: repo_url.to_string(),
+        short: crate::source_resolver::cache_dir_name(repo_url),
+        git_ref: git_ref.map(str::to_string),
+        subpath: None,
+        skill_filter: None,
+    };
+    let units: Vec<crate::installer::InstallUnit> = targets
+        .iter()
+        .map(|target| crate::installer::InstallUnit {
+            id: target.id.clone(),
+            folder_path: target.folder_path.clone(),
+        })
+        .collect();
+    crate::installer::install_units(repo_dir, &spec, &units)
 }
 
-fn restore_skill_lock_entry(
-    skill_name: &str,
-    previous: Option<crate::lockfile::LockEntry>,
-) -> anyhow::Result<()> {
-    let _lock = crate::lockfile::get_mutex()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-    let path = crate::lockfile::lockfile_path();
-    let mut lockfile = crate::lockfile::Lockfile::load(&path)?;
-    lockfile.remove(skill_name);
-    if let Some(entry) = previous {
-        lockfile.upsert(entry);
-    }
-    lockfile.save(&path)
-}
-
-fn skill_lock_names_equal(left: &str, right: &str) -> bool {
-    if cfg!(windows) {
-        left.eq_ignore_ascii_case(right)
-    } else {
-        left == right
-    }
+fn first_failure_text(report: &SkillUpdateReport) -> String {
+    report
+        .failed
+        .first()
+        .map(|failure| format!("{}: {}", failure.name, failure.error))
+        .or_else(|| {
+            report
+                .skipped
+                .first()
+                .map(|name| format!("'{name}' is no longer available upstream"))
+        })
+        .unwrap_or_else(|| "update produced no result".to_string())
 }
 
 fn ensure_generic_input_repository_mutable(input: &str) -> anyhow::Result<()> {
@@ -306,103 +357,6 @@ fn ensure_generic_input_repository_mutable(input: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::transport::{GitAuthMaterial, NoopGitProgressSink};
-
-    #[test]
-    fn failed_local_graduation_restores_content_and_previous_lock_entry() {
-        let _guard = crate::lock_test_env();
-        let temp = tempfile::tempdir().unwrap();
-        let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
-        let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
-        unsafe {
-            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path().join("data"));
-            std::env::set_var("SKILLSTAR_HUB_DIR", temp.path().join("hub"));
-        }
-
-        let result = (|| -> anyhow::Result<()> {
-            local_skill::create("writer", Some("# Writer\n"))?;
-            let old_entry = crate::lockfile::LockEntry {
-                name: "writer".into(),
-                git_url: "legacy-local".into(),
-                git_ref: None,
-                tree_hash: "legacy-tree".into(),
-                content_hash: None,
-                content_hash_version: None,
-                installed_at: "2026-08-05T00:00:00Z".into(),
-                source_folder: None,
-                pinned: false,
-            };
-            let lock_path = crate::lockfile::lockfile_path();
-            let mut lockfile = crate::lockfile::Lockfile::default();
-            lockfile.upsert(old_entry);
-            lockfile.save(&lock_path)?;
-
-            let source = "missing-graduation-cache";
-            let repo = skillstar_core::infra::paths::repos_cache_dir()
-                .join(crate::repo_scanner::cache_dir_name(source));
-            std::fs::create_dir_all(&repo)?;
-            let status = skillstar_core::infra::path_env::command_with_path("git")
-                .args(["init", "-q"])
-                .current_dir(&repo)
-                .status()?;
-            assert!(status.success());
-            let facade = GitSkillFacade::new(GitOperationSession::new(
-                "failed-graduation",
-                GitAuthMaterial::missing(),
-                Arc::new(NoopGitProgressSink),
-            ));
-
-            let spec = crate::source_resolver::Source {
-                repo_url: "https://github.com/acme/channel.git".to_string(),
-                short: source.to_string(),
-                git_ref: None,
-                subpath: None,
-                skill_filter: None,
-            };
-            let error = facade
-                .graduate_local_skill_from_scan(
-                    "writer",
-                    &spec,
-                    &SkillInstallTarget {
-                        id: "writer".into(),
-                        folder_path: "skills/writer".into(),
-                        pinned: false,
-                    },
-                )
-                .expect_err("the cache has no remote and graduation must fail");
-
-            assert!(error.to_string().contains("fetch"));
-            assert!(local_skill::is_local_skill("writer"));
-            assert_eq!(
-                std::fs::read_to_string(
-                    skillstar_core::infra::paths::hub_skills_dir().join("writer/SKILL.md")
-                )?,
-                "# Writer\n"
-            );
-            let restored = crate::lockfile::Lockfile::load(&lock_path)?;
-            let restored = restored
-                .skills
-                .iter()
-                .find(|entry| entry.name == "writer")
-                .expect("the previous lock entry must be restored");
-            assert_eq!(restored.git_url, "legacy-local");
-            assert_eq!(restored.tree_hash, "legacy-tree");
-            assert!(restored.source_folder.is_none());
-            Ok(())
-        })();
-
-        unsafe {
-            match previous_data {
-                Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
-                None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
-            }
-            match previous_hub {
-                Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
-                None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
-            }
-        }
-        result.unwrap();
-    }
 
     /// The GUI scan preview (`scan_github_repo` → `GitSkillFacade::scan_repo`)
     /// must resolve a tree URL's ref and honor its subpath the same way the

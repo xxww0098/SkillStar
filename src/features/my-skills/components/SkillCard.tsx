@@ -1,14 +1,4 @@
-import {
-  AlertTriangle,
-  ArrowRightLeft,
-  ArrowUpCircle,
-  Check,
-  Download,
-  GitBranch,
-  HardDrive,
-  Loader2,
-  Star,
-} from "lucide-react";
+import { AlertTriangle, ArrowUpCircle, Check, Download, GitBranch, HardDrive, Loader2, Star } from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
@@ -36,11 +26,6 @@ export interface SkillCardProps {
   /** Optional: remote cards never call these. */
   onInstall?: (url: string, name: string, agentId?: string) => void;
   onUpdate?: (name: string) => void;
-  /** Upstream dropped the Skill with no successor: keep a local copy or remove. */
-  onResolveRemoved?: (name: string) => void;
-  /** Upstream renamed the Skill: install the successor, carry deployments over, remove this one. */
-  onMigrate?: (name: string) => void;
-  migrating?: boolean;
   compact?: boolean;
   selectable?: boolean;
   selected?: boolean;
@@ -61,9 +46,6 @@ function SkillCardInner({
   onClick,
   onInstall,
   onUpdate,
-  onResolveRemoved,
-  onMigrate,
-  migrating,
   compact,
   selectable,
   selected,
@@ -92,62 +74,21 @@ function SkillCardInner({
   const upstreamChange = !isRemoteCard && !isLocalSkill ? (skill.upstream_change ?? null) : null;
 
   let statusAction: React.ReactNode = null;
-  if (upstreamChange?.kind === "removed" && upstreamChange.successor) {
-    const successor = upstreamChange.successor;
+  if (upstreamChange?.kind === "removed") {
+    // Informational only: the source no longer ships this Skill, so updates
+    // skip it. Reinstalling or uninstalling remain the exits, on the card's
+    // other surfaces.
     statusAction = (
-      <Button
-        size="xs"
-        variant="ghost"
+      <span
         className={cn(
-          "group/migrate relative h-6 max-w-[11rem] px-2.5 rounded-full text-xs font-semibold tracking-tight transition-all duration-200 cursor-pointer shadow-2xs select-none",
-          "bg-violet-500/15 text-violet-300 border border-violet-500/35",
-          "paper:bg-violet-500/10 paper:text-violet-800 paper:border-violet-500/30",
-          "hover:bg-violet-500/25 hover:text-violet-100 hover:border-violet-500/60 hover:-translate-y-0.5",
-          "paper:hover:bg-violet-500/20 paper:hover:text-violet-950 paper:hover:border-violet-500/50",
-          "active:translate-y-0 active:scale-95 focus-visible:ring-2 focus-visible:ring-violet-500/40",
-          migrating && "opacity-75 cursor-not-allowed pointer-events-none",
-        )}
-        disabled={migrating}
-        title={t("skillCard.upstreamRenamed", { name: successor.skill_id })}
-        onClick={(e) => {
-          stopCard(e);
-          onMigrate?.(skill.name);
-        }}
-        onMouseDown={stopCard}
-      >
-        {migrating ? (
-          <Loader2 className="w-3 h-3 mr-1 animate-spin shrink-0" />
-        ) : (
-          <ArrowRightLeft className="w-3 h-3 mr-1 shrink-0 transition-transform duration-200 group-hover/migrate:translate-x-0.5" />
-        )}
-        <span className="truncate">
-          {migrating ? t("skillCard.migrating") : t("skillCard.migrate", { name: successor.skill_id })}
-        </span>
-      </Button>
-    );
-  } else if (upstreamChange?.kind === "removed") {
-    statusAction = (
-      <Button
-        size="xs"
-        variant="ghost"
-        className={cn(
-          "relative h-6 px-2.5 rounded-full text-xs font-semibold tracking-tight transition-all duration-200 cursor-pointer shadow-2xs select-none",
-          "bg-rose-500/15 text-rose-300 border border-rose-500/35",
+          "inline-flex h-6 items-center gap-1 rounded-full border border-rose-500/35 bg-rose-500/15 px-2.5 text-xs font-semibold tracking-tight text-rose-300 shadow-2xs select-none",
           "paper:bg-rose-500/10 paper:text-rose-800 paper:border-rose-500/30",
-          "hover:bg-rose-500/25 hover:text-rose-100 hover:border-rose-500/60 hover:-translate-y-0.5",
-          "paper:hover:bg-rose-500/20 paper:hover:text-rose-950 paper:hover:border-rose-500/50",
-          "active:translate-y-0 active:scale-95 focus-visible:ring-2 focus-visible:ring-rose-500/40",
         )}
-        title={t("skillCard.resolveRemoved")}
-        onClick={(e) => {
-          stopCard(e);
-          onResolveRemoved?.(skill.name);
-        }}
-        onMouseDown={stopCard}
+        title={t("skillCard.upstreamRemovedHint")}
       >
-        <AlertTriangle className="w-3 h-3 mr-1 shrink-0" />
-        <span>{t("skillCard.upstreamRemoved")}</span>
-      </Button>
+        <AlertTriangle className="h-3 w-3 shrink-0" />
+        <span className="truncate">{t("skillCard.upstreamRemoved")}</span>
+      </span>
     );
   } else if (!isRemoteCard && skill.update_available && !isLocalSkill) {
     statusAction = (

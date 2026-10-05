@@ -51,6 +51,10 @@ impl SessionParser for OmpParser {
         pi_parse(Self::AGENT, Self::PARSER_VERSION, file, prior)
     }
 
+    fn unchanged(&self, file: &SessionFile, prior: &super::FileCheckpoint) -> bool {
+        super::checkpoint::is_unchanged(prior, file, Self::PARSER_VERSION)
+    }
+
     fn replay(&self, checkpoint: &super::FileCheckpoint) -> Vec<(String, SessionCall)> {
         pi_replay(checkpoint)
     }
@@ -126,7 +130,9 @@ fn collect_artifacts(agent: &'static str, dir: PathBuf, out: &mut Vec<SessionFil
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         if file_type.is_dir() {
             if entry.file_name() == "btw-history" {
                 continue;

@@ -25,8 +25,3 @@ export const MOTION_TRANSITION = {
   progress: { duration: MOTION_DURATION.progress, ease: "easeOut" as const },
   ring: { duration: MOTION_DURATION.ring, ease: MOTION_EASE_STANDARD },
 } as const;
-
-export const motionDelay = (index: number, step = 0.03, max = 0.3) => Math.min(index * step, max);
-
-export const motionDuration = (prefersReducedMotion: boolean | null | undefined, duration: number) =>
-  prefersReducedMotion ? MOTION_DURATION.instant : duration;

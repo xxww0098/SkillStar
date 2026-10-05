@@ -26,6 +26,7 @@ export { default as ClaudeCodeColor } from "@lobehub/icons/es/ClaudeCode/compone
 export { default as ClineMono } from "@lobehub/icons/es/Cline/components/Mono";
 export { default as CodeBuddyColor } from "@lobehub/icons/es/CodeBuddy/components/Color";
 export { default as CodexColor } from "@lobehub/icons/es/Codex/components/Color";
+export { default as CommandCodeColor } from "@lobehub/icons/es/CommandCode/components/Color";
 export { default as CursorMono } from "@lobehub/icons/es/Cursor/components/Mono";
 export { default as DeepSeekColor } from "@lobehub/icons/es/DeepSeek/components/Color";
 export { default as DevinColor } from "@lobehub/icons/es/Devin/components/Color";
@@ -40,6 +41,7 @@ export { default as JunieColor } from "@lobehub/icons/es/Junie/components/Color"
 export { default as KiloCodeMono } from "@lobehub/icons/es/KiloCode/components/Mono";
 export { default as KimiMono } from "@lobehub/icons/es/Kimi/components/Mono";
 export { default as KiroColor } from "@lobehub/icons/es/Kiro/components/Color";
+export { default as LangChainColor } from "@lobehub/icons/es/LangChain/components/Color";
 export { default as LobeHubMono } from "@lobehub/icons/es/LobeHub/components/Mono";
 export { default as LongCatColor } from "@lobehub/icons/es/LongCat/components/Color";
 export { default as MinimaxColor } from "@lobehub/icons/es/Minimax/components/Color";

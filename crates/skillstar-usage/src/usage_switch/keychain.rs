@@ -26,7 +26,6 @@ use std::process::Command;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::error::ExternalStoreError;
 
 /// Keychain service name used by the real Codex CLI.
 const SERVICE: &str = "Codex Auth";
@@ -76,9 +75,6 @@ pub(super) fn read(codex_home: &Path) -> Option<Value> {
 /// Disabled: SkillStar strictly stores all credentials in local encrypted JSON,
 /// never writing secrets to the macOS Keychain.
 #[allow(dead_code)]
-pub(super) fn write_merged(_codex_home: &Path, _root: &Value) -> Result<bool, ExternalStoreError> {
-    Ok(false)
-}
 
 #[cfg(test)]
 mod tests {

@@ -1,16 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { tauriInvoke } from "@/lib/ipc";
-import { cn } from "@/lib/utils";
 import { modelsKeys } from "../../api/keys";
+import { SegmentedControl } from "./SegmentedControl";
 
 const ROUTING = ["smart", "order", "rotate", "usage"] as const;
 const AFFINITY = ["auto", "session", "turn", "off"] as const;
 
 /**
- * Segmented routing and affinity inside one labelled card. The buttons send
- * those eight words and nothing else. A caption that looks like a URL or a
- * key is left blank.
+ * One owner's routing and affinity as a flat row: the name on the left,
+ * two labelled segmented groups on the right. The buttons send those eight
+ * words and nothing else. A caption that looks like a URL or a key is left
+ * blank.
  */
 export function RoutingControl({
   owner,
@@ -49,50 +50,30 @@ export function RoutingControl({
     <div
       role="group"
       aria-label={`routing ${owner} ${label}`.trim()}
-      className="space-y-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5"
+      className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg px-2 py-2 transition-colors hover:bg-muted/30"
     >
-      {heading ? <div className="truncate text-xs font-medium text-foreground">{heading}</div> : null}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="w-10 shrink-0 text-[11px] text-muted-foreground">{t("models.gateway.routingLabel")}</span>
-        <div role="group" aria-label="Routing" className="flex flex-wrap rounded-lg bg-muted/60 p-0.5">
-          {ROUTING.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={routing === mode}
-              onClick={() => save(mode, affinity)}
-              className={cn(
-                "rounded-md px-2 py-0.5 font-mono text-[11px] transition",
-                routing === mode
-                  ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/60"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
+      {heading ? (
+        <div className="min-w-24 flex-1 basis-28 truncate text-xs font-medium text-foreground">{heading}</div>
+      ) : null}
+      <div className="flex items-center gap-2">
+        <span className="w-8 shrink-0 text-[11px] text-muted-foreground">{t("models.gateway.routingLabel")}</span>
+        <SegmentedControl
+          ariaLabel="Routing"
+          mono
+          options={ROUTING.map((mode) => ({ id: mode, label: mode }))}
+          value={routing as (typeof ROUTING)[number]}
+          onSelect={(mode) => save(mode, affinity)}
+        />
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="w-10 shrink-0 text-[11px] text-muted-foreground">{t("models.gateway.affinityLabel")}</span>
-        <div role="group" aria-label="Affinity" className="flex flex-wrap rounded-lg bg-muted/60 p-0.5">
-          {AFFINITY.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={affinity === mode}
-              onClick={() => save(routing, mode)}
-              className={cn(
-                "rounded-md px-2 py-0.5 font-mono text-[11px] transition",
-                affinity === mode
-                  ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/60"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
+      <div className="flex items-center gap-2">
+        <span className="w-8 shrink-0 text-[11px] text-muted-foreground">{t("models.gateway.affinityLabel")}</span>
+        <SegmentedControl
+          ariaLabel="Affinity"
+          mono
+          options={AFFINITY.map((mode) => ({ id: mode, label: mode }))}
+          value={affinity as (typeof AFFINITY)[number]}
+          onSelect={(mode) => save(routing, mode)}
+        />
       </div>
     </div>
   );

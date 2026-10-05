@@ -32,7 +32,6 @@ sha2.workspace = true
 dirs = { workspace = true }
 russh = { version = "0.61", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "2.3"
-ssh-key = { version = "=0.7.0-rc.10", features = ["alloc"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

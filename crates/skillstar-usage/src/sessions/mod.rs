@@ -57,7 +57,11 @@ use omp::OmpParser;
 use opencode::OpenCodeParser;
 use pi::PiParser;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -182,13 +186,27 @@ pub trait SessionParser: Send + Sync {
     /// file is reread from zero. When the file has not grown (`file.size ==
     /// prior.size`), return an empty delta and hand the checkpoint back
     /// unchanged.
-    fn parse(&self, file: &SessionFile, prior: Option<FileCheckpoint>)
-    -> (Vec<SessionCall>, FileCheckpoint);
+    fn parse(
+        &self,
+        file: &SessionFile,
+        prior: Option<FileCheckpoint>,
+    ) -> (Vec<SessionCall>, FileCheckpoint);
 
     /// Rebuild this file's full call view from the checkpoint's private
     /// state. Returns `(message id, call)` pairs; an empty message id means
     /// the call does not participate in cross-file dedup.
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)>;
+
+    /// `true` when `prior` already describes `file` exactly, so [`read_calls`]
+    /// can replay it without cloning the checkpoint or opening the body.
+    ///
+    /// Default is `false` (always reparse). Append-only families share
+    /// [`checkpoint::is_unchanged`]; formats that rewrite in place or are
+    /// packed whole must keep the default.
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool {
+        let _ = (file, prior);
+        false
+    }
 }
 
 /// Object-safe view of a parser's method face (`SessionParser` has
@@ -204,6 +222,7 @@ trait SessionParserMethods: Send + Sync {
         prior: Option<FileCheckpoint>,
     ) -> (Vec<SessionCall>, FileCheckpoint);
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)>;
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool;
 }
 
 impl<P: SessionParser + 'static> SessionParserMethods for P {
@@ -225,6 +244,10 @@ impl<P: SessionParser + 'static> SessionParserMethods for P {
 
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)> {
         SessionParser::replay(self, checkpoint)
+    }
+
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool {
+        SessionParser::unchanged(self, file, prior)
     }
 }
 
@@ -252,9 +275,16 @@ fn parsers() -> &'static [Box<dyn SessionParserMethods>] {
 /// Flow (magpie callsFor precedent): incremental parse per file in ascending
 /// file mtime order (earliest file first) → `replay` to the full view →
 /// cross-file message-id dedup → since filter → reverse chronological order.
-/// The checkpoint index is written back to `data_root()/sessions/index.json`;
-/// a write failure only degrades to a `tracing::warn` (the next run rereads
-/// in full) and never fails — this path does not write agent directories.
+/// The checkpoint index at `data_root()/sessions/index.json` is rewritten
+/// only when a file changed or disappeared. A no-op save used to serialize
+/// the whole index (tens of MB once a machine has a long Codex history) on
+/// every Usage-tab open, on the UI thread, twice. A write failure only
+/// degrades to a `tracing::warn` (the next run rereads in full) and never
+/// fails — this path does not write agent directories.
+///
+/// Repeated reads of an unchanged tree share one in-process result. The
+/// Usage page asks for the same window twice in parallel; without the
+/// singleflight both would replay every checkpointed call.
 pub fn read_calls(home: &Path, since: Option<i64>) -> Vec<SessionCall> {
     let mut files = Vec::new();
     for parser in parsers() {
@@ -264,36 +294,168 @@ pub fn read_calls(home: &Path, since: Option<i64>) -> Vec<SessionCall> {
     // old file claims the message ids first.
     files.sort_by(|a, b| (a.modified_ms, &a.path).cmp(&(b.modified_ms, &b.path)));
 
+    let key = calls_cache_key(home, since, &files);
+    if let Some(hit) = cached_calls(&key) {
+        return hit;
+    }
+    // One in-flight compute. The Usage page fires two consumers at once;
+    // the second waits and takes the cached view instead of replaying.
+    let _gate = calls_gate()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let key = calls_cache_key(home, since, &files);
+    if let Some(hit) = cached_calls(&key) {
+        return hit;
+    }
+    let calls = read_calls_uncached(&files, since);
+    // Stamp the key again: a dirty compute rewrites the index, and the
+    // next read must look up that new stamp rather than the pre-save one.
+    let key = calls_cache_key(home, since, &files);
+    store_cached_calls(key, calls.clone());
+    calls
+}
+
+fn read_calls_uncached(files: &[SessionFile], since: Option<i64>) -> Vec<SessionCall> {
     let store = CheckpointStore::load();
-    // The new index keeps only files that still exist (checkpoints of
-    // vanished files are pruned).
+    // Built only when something actually changed. The common Usage-tab
+    // open replays checkpoints that are already current and must not clone
+    // them into a second index just to write the same bytes back.
     let mut next = CheckpointStore::empty();
+    let mut dirty = false;
     let mut seen_msgs: HashSet<String> = HashSet::new();
+    let mut seen_paths: HashSet<PathBuf> = HashSet::with_capacity(files.len());
     let mut out = Vec::new();
-    for file in &files {
+    for file in files {
+        seen_paths.insert(file.path.clone());
         let Some(parser) = parsers().iter().find(|p| p.agent() == file.agent) else {
             continue;
         };
+        if let Some(prior) = store.get(&file.path)
+            && parser.unchanged(file, prior)
+        {
+            push_replay(parser.as_ref(), prior, since, &mut seen_msgs, &mut out);
+            continue;
+        }
+        dirty = true;
         let prior = store.get(&file.path).cloned();
         let (_delta, checkpoint) = parser.parse(file, prior);
         next.upsert(file.path.clone(), checkpoint.clone());
-        for (msg, call) in parser.replay(&checkpoint) {
-            if !msg.is_empty()
-                && !seen_msgs.insert(msg.clone())
-            {
+        push_replay(
+            parser.as_ref(),
+            &checkpoint,
+            since,
+            &mut seen_msgs,
+            &mut out,
+        );
+    }
+    // A file that vanished has to leave the index, even when every file
+    // that remains was unchanged.
+    if store.paths().any(|path| !seen_paths.contains(path)) {
+        dirty = true;
+    }
+    if dirty {
+        for file in files {
+            if next.get(&file.path).is_some() {
                 continue;
             }
-            if since.is_none_or(|floor| call.at >= floor) {
-                out.push(call);
+            if let Some(prior) = store.get(&file.path) {
+                next.upsert(file.path.clone(), prior.clone());
             }
         }
-    }
-    if let Err(error) = next.save() {
-        tracing::warn!(%error, index = ?next.path(), "Failed to save sessions checkpoint; next run will reread in full");
+        if let Err(error) = next.save() {
+            tracing::warn!(%error, index = ?next.path(), "Failed to save sessions checkpoint; next run will reread in full");
+        }
     }
     // Reverse chronological order; ties broken by file path and interval
     // end, descending (magpie callsFor ordering), so later calls within the
     // same file come first and the output is stable.
     out.sort_by(|a, b| (b.at, &b.file, b.to).cmp(&(a.at, &a.file, a.to)));
     out
+}
+
+fn push_replay(
+    parser: &dyn SessionParserMethods,
+    checkpoint: &FileCheckpoint,
+    since: Option<i64>,
+    seen_msgs: &mut HashSet<String>,
+    out: &mut Vec<SessionCall>,
+) {
+    for (msg, call) in parser.replay(checkpoint) {
+        if !msg.is_empty() && !seen_msgs.insert(msg) {
+            continue;
+        }
+        if since.is_none_or(|floor| call.at >= floor) {
+            out.push(call);
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct CallsCacheKey {
+    home: PathBuf,
+    index: PathBuf,
+    since: Option<i64>,
+    files: u64,
+    /// `None` when the index is missing. Included so deleting the index
+    /// (the tests' full-reread path, and a corrupt index replaced on disk)
+    /// does not keep serving the previous view.
+    stamp: Option<(SystemTime, u64)>,
+}
+
+struct CallsCache {
+    key: CallsCacheKey,
+    calls: Vec<SessionCall>,
+}
+
+fn calls_gate() -> &'static Mutex<()> {
+    static GATE: Mutex<()> = Mutex::new(());
+    &GATE
+}
+
+fn calls_cache() -> &'static Mutex<Option<CallsCache>> {
+    static CACHE: Mutex<Option<CallsCache>> = Mutex::new(None);
+    &CACHE
+}
+
+fn calls_cache_key(home: &Path, since: Option<i64>, files: &[SessionFile]) -> CallsCacheKey {
+    let index = checkpoint::index_path();
+    let stamp = std::fs::metadata(&index)
+        .ok()
+        .and_then(|meta| Some((meta.modified().ok()?, meta.len())));
+    CallsCacheKey {
+        home: home.to_path_buf(),
+        index,
+        since,
+        files: files_fingerprint(files),
+        stamp,
+    }
+}
+
+fn files_fingerprint(files: &[SessionFile]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    files.len().hash(&mut hasher);
+    for file in files {
+        file.agent.hash(&mut hasher);
+        file.path.hash(&mut hasher);
+        file.size.hash(&mut hasher);
+        file.modified_ms.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn cached_calls(key: &CallsCacheKey) -> Option<Vec<SessionCall>> {
+    let guard = calls_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .as_ref()
+        .filter(|cached| &cached.key == key)
+        .map(|cached| cached.calls.clone())
+}
+
+fn store_cached_calls(key: CallsCacheKey, calls: Vec<SessionCall>) {
+    let mut guard = calls_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(CallsCache { key, calls });
 }

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use super::opencode::OpenCodeParser;
-use super::{SessionCall, SessionParser, SessionFile, SessionTokens};
+use super::{SessionCall, SessionFile, SessionParser, SessionTokens};
 use crate::test_support::EnvGuard;
 
 const MAIN: &str = "ses_1a2b3c4d5e6fAAAAAAAAAAAAAA";
@@ -94,7 +94,15 @@ fn insert_v2_session(conn: &Connection, id: &str, parent: Option<&str>) {
     .unwrap();
 }
 
-fn insert_v2_message(conn: &Connection, id: &str, sid: &str, kind: &str, seq: i64, created: u64, data: &str) {
+fn insert_v2_message(
+    conn: &Connection,
+    id: &str,
+    sid: &str,
+    kind: &str,
+    seq: i64,
+    created: u64,
+    data: &str,
+) {
     conn.execute(
         "INSERT INTO session_message VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
         rusqlite::params![id, sid, kind, seq, created as i64, data],
@@ -127,21 +135,46 @@ fn v1_database_sessions() {
     insert_v1_session(&conn, MAIN, None, "/work/oc");
     insert_v1_session(&conn, CHILD, Some(MAIN), "/work/oc");
     insert_v1_session(&conn, IDLE, None, "/work/oc");
-    insert_v1_message(&conn, "msg_0", MAIN, MAIN_USER, r#"{"id":"msg_0","role":"user","time":{"created":1790416805000}}"#);
+    insert_v1_message(
+        &conn,
+        "msg_0",
+        MAIN,
+        MAIN_USER,
+        r#"{"id":"msg_0","role":"user","time":{"created":1790416805000}}"#,
+    );
     // modelId spelled in either case (real files spell it both ways).
-    insert_v1_message(&conn, "msg_1", MAIN, MAIN_CREATED_1,
-        r#"{"id":"msg_1","role":"assistant","modelId":"gpt-6-astra","tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#);
-    insert_v1_message(&conn, "msg_2", MAIN, MAIN_CREATED_2,
-        r#"{"id":"msg_2","role":"assistant","modelID":"codex/gpt-6-luna","tokens":{"input":300,"output":50,"reasoning":10,"cache":{"read":2000,"write":0}},"time":{"created":1790416890000,"completed":1790416980000}}"#);
-    insert_v1_message(&conn, "msg_3", CHILD, 1790416860000,
-        r#"{"id":"msg_3","role":"assistant","modelID":"claude-opus-5-5","tokens":{"input":40,"output":60,"reasoning":0,"cache":{"read":700,"write":300}},"time":{"created":1790416860000,"completed":1790416890000}}"#);
+    insert_v1_message(
+        &conn,
+        "msg_1",
+        MAIN,
+        MAIN_CREATED_1,
+        r#"{"id":"msg_1","role":"assistant","modelId":"gpt-6-astra","tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#,
+    );
+    insert_v1_message(
+        &conn,
+        "msg_2",
+        MAIN,
+        MAIN_CREATED_2,
+        r#"{"id":"msg_2","role":"assistant","modelID":"codex/gpt-6-luna","tokens":{"input":300,"output":50,"reasoning":10,"cache":{"read":2000,"write":0}},"time":{"created":1790416890000,"completed":1790416980000}}"#,
+    );
+    insert_v1_message(
+        &conn,
+        "msg_3",
+        CHILD,
+        1790416860000,
+        r#"{"id":"msg_3","role":"assistant","modelID":"claude-opus-5-5","tokens":{"input":40,"output":60,"reasoning":0,"cache":{"read":700,"write":300}},"time":{"created":1790416860000,"completed":1790416890000}}"#,
+    );
     drop(conn);
 
     let files = OpenCodeParser.discover(home.path());
     assert_eq!(files.len(), 3, "main, child and the idle session alike");
     let main_path = files
         .iter()
-        .find(|f| f.path.to_str().is_some_and(|p| p.ends_with(&format!("#{MAIN}"))))
+        .find(|f| {
+            f.path
+                .to_str()
+                .is_some_and(|p| p.ends_with(&format!("#{MAIN}")))
+        })
         .unwrap()
         .path
         .clone();
@@ -156,13 +189,26 @@ fn v1_database_sessions() {
         vec![
             // opencode input already excludes the cache; reasoning rides
             // inside output (the codex.rs matrix).
-            SessionTokens { input: 1000, output: 120, cache_read: 5000, cache_write: 0 },
-            SessionTokens { input: 300, output: 60, cache_read: 2000, cache_write: 0 },
+            SessionTokens {
+                input: 1000,
+                output: 120,
+                cache_read: 5000,
+                cache_write: 0
+            },
+            SessionTokens {
+                input: 300,
+                output: 60,
+                cache_read: 2000,
+                cache_write: 0
+            },
         ]
     );
     assert_eq!(delta[0].model_answered, "gpt-6-astra");
     assert_eq!(delta[0].session, MAIN);
-    assert_eq!(delta[0].at as u64, MAIN_COMPLETED_1, "the completed time names the call");
+    assert_eq!(
+        delta[0].at as u64, MAIN_COMPLETED_1,
+        "the completed time names the call"
+    );
     assert_eq!(delta[0].latency_ms, Some(24000));
     assert_eq!(checkpoint.calls_seen, 2);
     // The view is fully rebuilt every run (rows are rewritten in place).
@@ -178,7 +224,10 @@ fn v1_database_sessions() {
     let child = session_file(&files, &child_path);
     let (child_delta, _) = OpenCodeParser.parse(&child, None);
     assert_eq!(child_delta.len(), 1);
-    assert_eq!(child_delta[0].session, MAIN, "a subagent's work counts in the session it ran in");
+    assert_eq!(
+        child_delta[0].session, MAIN,
+        "a subagent's work counts in the session it ran in"
+    );
     assert_eq!(child_delta[0].tokens.input, 40);
 }
 
@@ -195,36 +244,91 @@ fn v2_database_after_completed_migration() {
     // An old session OpenCode 2 deleted after copying it over: the kv row
     // says the migration completed, so the old tables are not read.
     insert_v1_session(&conn, "ses_gone", None, "/work/gone");
-    insert_v1_message(&conn, "msg_gone", "ses_gone", 1790416800000,
-        r#"{"id":"msg_gone","role":"assistant","modelID":"claude-opus-5-5","tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790416800000,"completed":1790416810000}}"#);
+    insert_v1_message(
+        &conn,
+        "msg_gone",
+        "ses_gone",
+        1790416800000,
+        r#"{"id":"msg_gone","role":"assistant","modelID":"claude-opus-5-5","tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790416800000,"completed":1790416810000}}"#,
+    );
     v2_tables(&conn, "completed");
     insert_v2_session(&conn, MAIN, None);
     insert_v2_session(&conn, CHILD, Some(MAIN));
-    insert_v2_message(&conn, "msg_0001", MAIN, "user", 0, MAIN_USER,
-        r#"{"text":"Why does the login test flake?","time":{"created":1790416805000}}"#);
-    insert_v2_message(&conn, "msg_0002", MAIN, "assistant", 1, MAIN_CREATED_1,
-        r#"{"model":{"id":"gpt-6-astra","providerID":"openai"},"content":[{"type":"text","text":"Let me look."}],"cost":0.01,"tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#);
-    insert_v2_message(&conn, "msg_0003", MAIN, "assistant", 2, MAIN_CREATED_2,
-        r#"{"model":{"id":"codex/gpt-6-luna","providerID":"magpie"},"content":[],"tokens":{"input":300,"output":50,"reasoning":10,"cache":{"read":2000,"write":0}},"time":{"created":1790416890000,"completed":1790416980000}}"#);
+    insert_v2_message(
+        &conn,
+        "msg_0001",
+        MAIN,
+        "user",
+        0,
+        MAIN_USER,
+        r#"{"text":"Why does the login test flake?","time":{"created":1790416805000}}"#,
+    );
+    insert_v2_message(
+        &conn,
+        "msg_0002",
+        MAIN,
+        "assistant",
+        1,
+        MAIN_CREATED_1,
+        r#"{"model":{"id":"gpt-6-astra","providerID":"openai"},"content":[{"type":"text","text":"Let me look."}],"cost":0.01,"tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#,
+    );
+    insert_v2_message(
+        &conn,
+        "msg_0003",
+        MAIN,
+        "assistant",
+        2,
+        MAIN_CREATED_2,
+        r#"{"model":{"id":"codex/gpt-6-luna","providerID":"magpie"},"content":[],"tokens":{"input":300,"output":50,"reasoning":10,"cache":{"read":2000,"write":0}},"time":{"created":1790416890000,"completed":1790416980000}}"#,
+    );
     // A compaction names no model: it counts on the one last replied with.
-    insert_v2_message(&conn, "msg_0004", MAIN, "compaction", 3, 1790417000000,
-        r#"{"status":"failed","reason":"auto","tokens":{"input":5,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790417000000}}"#);
-    insert_v2_message(&conn, "msg_0005", CHILD, "assistant", 0, 1790416860000,
-        r#"{"model":{"id":"claude-opus-5-5","providerID":"anthropic"},"tokens":{"input":40,"output":60,"reasoning":0,"cache":{"read":700,"write":300}},"time":{"created":1790416860000,"completed":1790416890000}}"#);
+    insert_v2_message(
+        &conn,
+        "msg_0004",
+        MAIN,
+        "compaction",
+        3,
+        1790417000000,
+        r#"{"status":"failed","reason":"auto","tokens":{"input":5,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790417000000}}"#,
+    );
+    insert_v2_message(
+        &conn,
+        "msg_0005",
+        CHILD,
+        "assistant",
+        0,
+        1790416860000,
+        r#"{"model":{"id":"claude-opus-5-5","providerID":"anthropic"},"tokens":{"input":40,"output":60,"reasoning":0,"cache":{"read":700,"write":300}},"time":{"created":1790416860000,"completed":1790416890000}}"#,
+    );
     drop(conn);
 
     let files = OpenCodeParser.discover(home.path());
-    assert_eq!(files.len(), 2, "the v2 sessions; the old 'gone' row is not read once the migration completed");
+    assert_eq!(
+        files.len(),
+        2,
+        "the v2 sessions; the old 'gone' row is not read once the migration completed"
+    );
 
     let main_path = files
         .iter()
-        .find(|f| f.path.to_str().is_some_and(|p| p.ends_with(&format!("#{MAIN}"))))
+        .find(|f| {
+            f.path
+                .to_str()
+                .is_some_and(|p| p.ends_with(&format!("#{MAIN}")))
+        })
         .unwrap()
         .path
         .clone();
     let (delta, checkpoint) = OpenCodeParser.parse(&session_file(&files, &main_path), None);
-    assert_eq!(delta.len(), 3, "two replies and the compaction; the user row is no call");
-    assert_eq!(delta[2].model_answered, "codex/gpt-6-luna", "the compaction takes the model last replied with");
+    assert_eq!(
+        delta.len(),
+        3,
+        "two replies and the compaction; the user row is no call"
+    );
+    assert_eq!(
+        delta[2].model_answered, "codex/gpt-6-luna",
+        "the compaction takes the model last replied with"
+    );
     assert_eq!(delta[2].tokens.input, 5);
     assert_eq!(checkpoint.calls_seen, 3);
 
@@ -246,20 +350,44 @@ fn migration_under_way_reads_uncopied_sessions_from_the_old_tables() {
     let conn = v1_db(&db);
     // Not yet copied over: read from the old tables.
     insert_v1_session(&conn, "ses_pending", None, "/work/pending");
-    insert_v1_message(&conn, "msg_p1", "ses_pending", 1790416800000,
-        r#"{"id":"msg_p1","role":"assistant","modelID":"claude-opus-5-5","tokens":{"input":8,"output":4,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790416800000,"completed":1790416809000}}"#);
+    insert_v1_message(
+        &conn,
+        "msg_p1",
+        "ses_pending",
+        1790416800000,
+        r#"{"id":"msg_p1","role":"assistant","modelID":"claude-opus-5-5","tokens":{"input":8,"output":4,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790416800000,"completed":1790416809000}}"#,
+    );
     v2_tables(&conn, "sessions"); // the phase is not "completed" yet
     // Already copied: its rows exist only in the v2 tables.
     insert_v2_session(&conn, MAIN, None);
-    insert_v2_message(&conn, "msg_v2a", MAIN, "assistant", 0, MAIN_CREATED_1,
-        r#"{"model":{"id":"gpt-6-astra"},"tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#);
+    insert_v2_message(
+        &conn,
+        "msg_v2a",
+        MAIN,
+        "assistant",
+        0,
+        MAIN_CREATED_1,
+        r#"{"model":{"id":"gpt-6-astra"},"tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#,
+    );
     drop(conn);
 
     let files = OpenCodeParser.discover(home.path());
-    assert_eq!(files.len(), 2, "one session from each store, the copied one not double-listed");
+    assert_eq!(
+        files.len(),
+        2,
+        "one session from each store, the copied one not double-listed"
+    );
     let paths: Vec<String> = files
         .iter()
-        .map(|f| f.path.to_str().unwrap().rsplit('#').next().unwrap().to_string())
+        .map(|f| {
+            f.path
+                .to_str()
+                .unwrap()
+                .rsplit('#')
+                .next()
+                .unwrap()
+                .to_string()
+        })
         .collect();
     assert!(paths.contains(&"ses_pending".to_string()));
     assert!(paths.contains(&MAIN.to_string()));
@@ -296,7 +424,11 @@ fn json_storage_fallback_when_no_database() {
     .unwrap();
     let main_messages = storage.join("message").join(MAIN);
     std::fs::create_dir_all(&main_messages).unwrap();
-    std::fs::write(main_messages.join("msg_0001.json"), r#"{"id":"msg_0001","role":"user","time":{"created":1790416805000}}"#).unwrap();
+    std::fs::write(
+        main_messages.join("msg_0001.json"),
+        r#"{"id":"msg_0001","role":"user","time":{"created":1790416805000}}"#,
+    )
+    .unwrap();
     std::fs::write(main_messages.join("msg_0002.json"),
         r#"{"id":"msg_0002","role":"assistant","modelId":"gpt-6-astra","tokens":{"input":1000,"output":100,"reasoning":20,"cache":{"read":5000,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#).unwrap();
     let child_messages = storage.join("message").join(CHILD);
@@ -309,7 +441,11 @@ fn json_storage_fallback_when_no_database() {
 
     let main = files
         .iter()
-        .find(|f| f.path.file_name().is_some_and(|n| n == format!("{MAIN}.json").as_str()))
+        .find(|f| {
+            f.path
+                .file_name()
+                .is_some_and(|n| n == format!("{MAIN}.json").as_str())
+        })
         .unwrap();
     let (delta, _) = OpenCodeParser.parse(main, None);
     assert_eq!(delta.len(), 1);
@@ -318,11 +454,18 @@ fn json_storage_fallback_when_no_database() {
 
     let child = files
         .iter()
-        .find(|f| f.path.file_name().is_some_and(|n| n == format!("{CHILD}.json").as_str()))
+        .find(|f| {
+            f.path
+                .file_name()
+                .is_some_and(|n| n == format!("{CHILD}.json").as_str())
+        })
         .unwrap();
     let (child_delta, _) = OpenCodeParser.parse(child, None);
     assert_eq!(child_delta.len(), 1);
-    assert_eq!(child_delta[0].session, MAIN, "parentID links attribute to the root session");
+    assert_eq!(
+        child_delta[0].session, MAIN,
+        "parentID links attribute to the root session"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -358,8 +501,13 @@ fn opencode_db_env_named_and_sandbox_wins() {
     std::fs::create_dir_all(&oc).unwrap();
     let conn = v1_db(&oc.join("other.db"));
     insert_v1_session(&conn, MAIN, None, "/work/oc");
-    insert_v1_message(&conn, "msg_1", MAIN, MAIN_CREATED_1,
-        r#"{"id":"msg_1","role":"assistant","modelID":"gpt-6-astra","tokens":{"input":10,"output":2,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#);
+    insert_v1_message(
+        &conn,
+        "msg_1",
+        MAIN,
+        MAIN_CREATED_1,
+        r#"{"id":"msg_1","role":"assistant","modelID":"gpt-6-astra","tokens":{"input":10,"output":2,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790416806000,"completed":1790416830000}}"#,
+    );
     drop(conn);
 
     let home = tempfile::tempdir().unwrap();
@@ -374,7 +522,12 @@ fn opencode_db_env_named_and_sandbox_wins() {
         OpenCodeParser.discover(home.path())
     };
     assert_eq!(files.len(), 1);
-    assert!(files[0].path.to_str().is_some_and(|p| p.ends_with(&format!("other.db#{MAIN}"))));
+    assert!(
+        files[0]
+            .path
+            .to_str()
+            .is_some_and(|p| p.ends_with(&format!("other.db#{MAIN}")))
+    );
 
     // The sandbox wins over both XDG_DATA_HOME and OPENCODE_DB.
     let sandbox_home = tempfile::tempdir().unwrap();

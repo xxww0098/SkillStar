@@ -11,8 +11,19 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 分发注册表以 `vercel-labs/skills/src/agents.ts` 为兼容基线；同步上游时必须同时核对
 Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以作为扩展保留，
 但不能改变同名上游 Agent 的目录语义。
-**Gemini 的三轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已重新接入
-轴①（`BUILTIN_AGENT_DEFS` 的 extension 区，全局目录 `~/.gemini/skills`）；轴②Models 工具同步**仍未接入**。
+
+2026-10 上游对齐要点：`grok` 与 `gemini-cli` 已被上游正式收录，从 extension 区
+归位同步区（`grok` 增加 `$GROK_HOME` 支持；`gemini-cli` 项目路径改共享
+`.agents/skills`）；`pi` 与 `kilo` 改为 open-skills 语义（Pi 原生读共享路径；
+Kilo 全局目录为 `~/.kilo/skills`，`~/.kilocode` 仅上游用于安装检测）；`droid`
+项目路径改共享 `.agents/skills`，全局目录留在 `~/.factory/skills` 供旧安装清理。
+旧目录中已部署的链接不做迁移，用户重新部署即更新。`discovery` 的
+`PRIORITY_SKILL_DIRS` 与上游 `AGENT_PROJECT_SKILL_DIRS` 保持超集关系，缺的容器
+目录（`.grok`、`.kilo`、`.kimchi`、`.minimax`、`.posit/assistant`、`.zcode`）
+随同步补齐。
+
+**Gemini 的三轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已随上游
+进入同步区（全局目录 `~/.gemini/skills`，项目级共享 `.agents/skills`）；轴②Models 工具同步**仍未接入**。
 Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 Gemini CLI 是不同
 产品，两个 profile 互不顶替。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
 **一个** Agent profile，部署时再扇出到三份 `builtin/skills`，见下面的[镜像目录](#镜像目录一个-profile多份技能目录)。Usage/Cloud Code 中的 Gemini **模型名**
@@ -153,7 +164,7 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
 命令 `pi`）是同源但独立的产品：配置根互不读取（`~/.omp` vs `~/.pi/agent`），OMP 自带
 `~/.omp/agent/config.yml`（modelRoles）、自有 models.db 目录、会话与认证状态，本机可并存。
 
-- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区（与 `grok` 并列，不在
+- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区（与 `deepseek`、`workbuddy` 并列，不在
   vercel-labs 上游 id 内）：全局技能目录 `~/.omp/agent/skills`，项目级 `.omp/skills`；
   `skillstar-skills::discovery` 的优先级目录包含 `.omp/skills`。
 - `~/.omp/agent/managed-skills` 是 OMP Auto-Learn 的自动生成目录（`manage_skill`

@@ -2,10 +2,10 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value, json};
 use crate::subscription::Subscription;
 use crate::trae_platform::TraePlatformKind;
 use crate::{crypto, storage, tool_paths};
+use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
 use super::READBACK_FAIL_ENV;

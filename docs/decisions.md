@@ -220,7 +220,7 @@
 ## D-024：共享 skills 目录塌缩为部署目标，归属改由链接指向 hub 推导
 
 - 日期：2026-08-12
-- 状态：accepted（决策已定，落地未开始；本条只记录选择与约束）
+- 状态：superseded（全局侧由 [D-081](#d-081技能安装锁与更新整体同步-vercel-labsskills删除自研管线) 消解：canonical 即 `~/.agents/skills`；项目侧缺口仍由本条约束）
 - 背景：`BUILTIN_AGENT_DEFS` 的 74 个内置 Agent 中，多组解析到**同一个物理目录**：Global 侧 `~/.agents/skills`（cline/dexto/kimi-code-cli/loaf/warp/zed）、`<config>/agents/skills`（amp/replit/universal）、`~/.zencoder/skills`（zencoder/zenflow）；Project 侧 `.agents/skills` 被 18 个 Agent 共用，另有 `.qoder/skills`、`.trae/skills`、`.zencoder/skills` 各 2 个。D-007 已为 Project 侧选择"manifest 单一 owner + 按路径去重"，但只读取证证明该模型两侧都未兑现，且失败形状同源：**磁盘上不存在"这条 entry 是谁装的"这一信息，代码在需要它时一律退化为"看起来像技能就删"**。Global 侧更彻底——`deployment/` 下没有任何归属记录，`unlink_skill_from_agent`(`deployment/mod.rs:305-336`) 直接删共享目录里的条目，其余 5 个仍启用的 Agent 静默失去该技能；Project 侧 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 与 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 会删掉从未登记进 `skills-list.json` 的目录，与 `sync.rs:103-106` 自己的注释直接矛盾。根本困难在于 per-agent 归属是产品虚构：`~/.agents/skills` 是生态共享约定，zed 事实上就能加载 cline 部署的技能，任何试图记录归属的方案在存量磁盘上都没有正确的起手（已有部署无归属记录，记为无主/归给全部/归给第一个三种起手都错）。
 - 决策：① **目录即部署单元**：把 canonical 目录键提升为一等"部署目标"，N 个解析到同一目录的 Agent 在部署模型与 UI 上塌缩为 1 项并列出成员 Agent；不记录 per-agent 归属，因为它在物理上不存在。Agent 的**启用开关仍是 per-agent 的**（D-009 不变），只塌缩部署目标，不塌缩激活状态。② **归属零状态推导**：一条 entry 属于 SkillStar，当且仅当其链接目标落在 `hub_skills_dir()` 之下——已验证 5 个全局写入点（`deployment/mod.rs:165/406/532/536/631`）的 src 全是 hub 绝对路径，且 `read_link_resolved`(`fs_ops.rs:174-184`) 确定只解一跳，hub→repo cache 的两跳链返回中间的 hub 路径。③ **容器判定复用 `repo_link::is_inside`**(`repo_link.rs:65-77` 及其 `normalize`:79-93) 的形态（双侧 canonicalize with fallback + 分隔符归一 + Windows 小写折叠），提升为可复用实现，并把 `local_skill.rs:174`、`git/gh_manager.rs:432`、`storage_maintenance.rs:183` 三处裸 `starts_with` 一并收敛；`repo_link.rs:4-9` 已记录过"两份实现分叉导致 Windows junction 误判"的同类事故，不制造第四份。④ **目录身份键**用 `fs_ops::canonicalize_existing_prefix`（`skillstar-core`；`skill_update` 仍保留同名包装）处理"目录尚不存在"，与 ③ 的容器判定是两个不同问题，不合并。键只在每次 `list_profiles()` 快照内重算，**不持久化**——openclaw(`builtin.rs:487-494`) 与 5 个 env 驱动 Agent(`builtin.rs:102/115/152/237/294`)、`XDG_CONFIG_HOME`(`builtin.rs:473-478`) 的目录会随环境与磁盘状态漂移。⑤ **copy 形态用 sibling marker**（无链接可读），判定顺序是先试 link 谓词、`is_link` 为假才查 marker。⑥ **拒绝 project root 等于或包含任一 agent global 目录**：`ensure_project_root_exists`(`projects/types.rs:74-85`) 与 `cli/install.rs:132` 今天只检查 `is_dir()`，HOME 可被注册成 project 从而让 project 部署写进 global 共享目录，此时两个 surface 的 src 同为 hub、谓词无法区分。⑦ 归属判定**不复用** `acquire_skill_mutation_lease`：它是不可重入的进程级 `Mutex`(`skill_update/transaction.rs:4-7`)，三个 resync 入口已在其内，deployment 层再 acquire 会自死锁；改为按目录键的独立同步，并覆盖今天完全无锁的 5 个 Tauri 命令（`commands/skills.rs:91`、`commands/agents.rs:28/44/64/76`）。
 - 后果：获得——存量**零迁移**（磁盘即真相，不需要任何归属回填或"收养"决策）；崩溃后重扫即一致（不引入第二份可与磁盘分叉的状态）；4 处计数串台（`installed_skill.rs:532-548`、`registry.rs:131-153`、`deployment/mod.rs:280-302`、`global_deploy.rs:23-38`）结构性消失而非逐个打补丁；CLI 已有的 `seen_dirs` 去重(`deployment/mod.rs:476,491`)从特例**泛化**为全局不变量。承担——Settings 里共享目录的多行塌缩为一行是**可见的 UX 退让**，需文案说明"这是这些 Agent 自己的生态约定，非 SkillStar 决定"；`AgentProfile` 是冻结的 8 字段 IPC（`registry.rs:16-18`、本文件 D-008），塞不进第 9 个字段，必须新开 `list_deploy_targets` IPC 而非扩展它；unlink 语义从"从某个 Agent 移除"变为"从某个目录移除（影响其全部成员 Agent）"，这是**如实陈述**而非降级——旧语义在磁盘上从未成立。本条扩展 D-007：D-007 的"按路径去重"方向正确但只在 `build_path_plans`(`projects/sync.rs:57-98`) 与 `add_skills_to_project_with_mode`(`sync.rs:419-465`) 两处兑现，scan/rebuild/cleanup 三处未兑现，本条把该不变量的适用范围扩展到 Global 侧并要求两侧同源实现。落地必须先于模型改动修掉三条既有 bug：`swap_in_fresh_deploy` 与 unlink 之间的 lost update（`mod.rs:635-640` + `mod.rs:102`，用户看到"已取消部署"但 rename 把技能复活）、`toggle_skill_for_agent` enable 分支先删后建不回滚（`mod.rs:154-173`，应复用 `mod.rs:619-654` 的先建后换）、以及 ⑦ 的无锁命令同步。
@@ -418,7 +418,7 @@
 ## D-046：已安装轮播从 repo-cache 部署且缺 harness 时回退
 
 - 日期：2026-08-31
-- 状态：accepted
+- 状态：superseded（D-081）
 - 背景：D-045 让未链接轮播图标走完整 `install_skill`。`clone_or_fetch` 在 cache 已有 `.git` 时仍 `git fetch --depth 1` + reset，已装 rust-skills / impeccable 点第二个图标像重装。同时 D-045 对缺 `.<harness>/` fail-closed，impeccable 没有 `.dsh` 时点 DeepSeek 报错，用户无法把技能落到 `~/.dsh/skills/<id>`。
 - 决策：hub 已装且 repo-cache 已有 clone 时，轮播 / 显式单个 `--agent` 只扫描现有 checkout（`cached_repo_dir_if_present`），不 clone、不 fetch；`source_folder` 没变就不改 lock。cache 缺失才 fetch。请求的 harness 文件夹不存在时按顺序回退：规范 `skills/<name>/` 或 `source/skills/` → 已装则用现有 hub `source_folder` → 同 identity 的另一份嵌套 harness 副本。把该 payload 部署到被点 Agent。禁止 `source_folder: None` 整仓，禁止静默 no-op。只有完全没有嵌套 `SKILL.md` 才失败。
 - 后果：已装卡的常见轮播点击是 cache-local 部署/改指向。Impeccable 点 DeepSeek 会把已有 skill 文件夹链到 `~/.dsh/skills/impeccable`，不再报「没有 `.dsh`」。首次安装和 cache 被删后的重装仍走网络。
@@ -427,7 +427,7 @@
 ## D-047：技能安装是 vercel-skills 五步管线，harness 文件夹是 identity 别名
 
 - 日期：2026-08-31
-- 状态：accepted
+- 状态：superseded（D-081）
 - 背景：CLI、Tauri、轮播、batch 和整仓 clone 回退各自选文件夹，shim / catalog / harness 扫描器重复。用户要的是 `npx skills add` 那条管线，不是第六条路径。
 - 决策：所有 git/local 安装走同一入口 `skill_install::install_from_source`：1. `Source::parse` 解析 `owner/repo`、URL、tree URL、本地路径；2. 发现含 `SKILL.md` 的目录；3. Hub 只链所选文件夹；4. Agent 目录 symlink（Windows 必要时 copy）；5. 调用方决定 project vs global。`.<harness>/skills/<name>` 与 `skills/<name>/` 是同一 identity：`--agent X` 优先该 harness，否则 catalog，否则现有 hub，否则另一份 harness 副本。没有 `SKILL.md` 才失败。禁止整仓 clone 回退。
 - 后果：本地路径和 Git URL 产物一致。rust-skills / impeccable / ui-ux-pro-max-skill 都装得上。已删除 git ref 与 prefetch 失败仍按 D-046 / errors.md 处理。share-code 的 embedded 分支不是第六条 git 安装。
@@ -571,7 +571,7 @@
 ## D-063：代表副本唯一物化与永不整仓下载
 
 - 日期：2026-09-21
-- 状态：accepted（代表副本的排名与「内容不同的副本一律物化」被 [D-075](#d-075异形分发仓库只有一张选副本表) 取代）
+- 状态：superseded（D-081）（代表副本的排名与「内容不同的副本一律物化」被 [D-075](#d-075异形分发仓库只有一张选副本表) 取代）
 - 背景：分发型仓库（如 `pbakaus/impeccable`）把同一技能镜像进十几个 harness 目录，还携带 Rust/Node 工程等重型非技能内容。旧管线把**每个**含 `SKILL.md` 的目录都加入稀疏检出，逐副本懒取 blob；blob 物化一旦在镜像上失败（HTTP/2 framing 等），回退是**删掉部分克隆、整仓浅克隆**——等于把整个 monorepo 全量下载。加上全局事务锁串行一切安装、marketplace 安装无进度反馈，用户感知就是"卡死"。
 - 决策：四条。**tree-SHA inventory**——treeless partial clone 的 `git ls-tree -t` 免费携带每目录 tree SHA，相同 SHA 即逐字节相同副本；每个 identity 只物化一个代表目录（manifest 声明 > `skills/<name>` > `.agents/skills/<name>` > 已安装 source_folder > 字典序），相同 SHA 的重复副本记入 `.git/skillstar-inventory.json` deferred 集合按需增量物化，**内容不同的副本一律物化**（frontmatter 可能是另一个 identity）。**永不整仓下载**——checkout blob 硬失败先去 mirror 直连重试一次，克隆整体失败改走 codeload `tar.gz` 单次 HTTPS（匿名 mirror 链）选择性解压 + 本地合成 commit 构建 cache（`skillstar.transport=tarball` 标记），完整浅克隆仅作最后手段。**锁粒度**——网络/发现阶段只持每仓库 cache 锁（`state/repo-locks/`），hub 提交才持全局短锁，锁序恒为 repo → global；baseline 刷新用 `state/lockfile.lock` 跨进程互斥。**基线 stat 短路**——fetch 前的 cleanliness 证明用上次可信快照的 mtime/size 指纹（`state/snapshot-stats/`）代替全字节重读，指纹失配即回退全量快照，fail-closed 语义不变。
 - 后果：获得——impeccable 形态的安装从"物化 15+ 副本、失败即全量下载 monorepo"变为"物化 1 份代表副本、镜像协议坏了走单次 HTTPS"；不同仓库安装互不排队；安装阶段可见。承担——相同 SHA 副本的 harness 切换多一次增量物化；tarball cache 无真实 git 历史，更新走重下归档；mtime/size 指纹理论上可被刻意保时间的编辑绕过（与 make/git 同级信任，且有全量快照兜底）。
@@ -688,7 +688,7 @@
 ## D-075：异形分发仓库只有一张选副本表
 
 - 日期：2026-09-29
-- 状态：accepted（按 [specs/irregular-skill-packs](../specs/irregular-skill-packs/README.md) 逐档补全）
+- 状态：superseded（D-081）（按 [specs/irregular-skill-packs](../specs/irregular-skill-packs/README.md) 逐档补全）
 - 背景：`pbakaus/impeccable` 这类仓库把一个技能改写成二十份 harness 专用副本：`name` 相同，字节不同，正文里写死各自路径。另外还有插件包装副本和 `tests/` 夹具。SkillStar 原来有三套互不一致的排名：inventory 优先 manifest，discovery 的 root(4)/catalog(3)/`.agent`·`.agents`(2)/其他(1)，harness 回退链自成一套。平局时取 `read_dir` 顺序。`plugin.json` 里字符串形式的 `skills`（容器路径）被当成单个技能路径取了父目录。全递归扫描还会把测试夹具当技能列出来。
 - 决策：
   - **选副本只有一张表**：`pack_layout::choose_copy`。inventory 代表副本、发现去重、完整性收拢、harness 回退全部调用它，平局一律按路径字典序。
@@ -744,6 +744,15 @@
 - 决策：持久账本（数据根 ledger JSONL，逐行带 agent/session/模型/token/状态/延迟/catalog/account 归因，无密钥无上游 URL）是网关度量面的唯一真相；进程内 60 条环只为账本缺的行补位（append 失败的那几笔），读取面合并两边（`load_ledger_page`）。上层视图全是账本与会话文件的**派生投影**：`consumption_view` 以两阶段配对（request id 主键，回退 会话+token+时间±2s+成败一致、双侧唯一）吞掉账本已代表的文件行；`summarize`/`crossview` 在其上做汇总与会话 chip；`get_route_comparison` 以账本归因为口径聚合各候选的实测（calls/错误率/p50/p95/token/成本），余量与 rest 状态作为进程事实随行标注、绝不与实测混算。账本只存 token：价格在读时查当前价格表（`effective_price`），价格变更重述历史，UI 恒标「估算」；查不到的调用计入 `unpriced`（未知，不是免费）。芯片、chip、对照卡不新增任何真相字段。
 - 后果：获得——「配额（厂商口径）× 实测消耗（网关+会话口径）× 成本」三角的全部数字可从两个源文件复算，对账有落点（docs/features/usage 的口径矩阵）；重启、多开、环丢失都不改变度量面。承担——成本永远是与「当时的」价格表相关的估算而非账单；rest 状态进程内即忘（重启后对照卡的休息标记消失，属诚实降级）；配对窗口 ±2s 与零 token 成功调用不配对是继承 magpie 的取舍，极高频同会话并发可能留下双记行（可见、可对账，优于静默吞行）。
 - 证据：`crates/skillstar-gateway/src/ledger/`（append/load/query）、`crates/skillstar-app/src/usage/consumption/`（mod/summarize/crossview 与配对测试）、`crates/skillstar-app/src/usage/service/summary.rs`、`crates/skillstar-app/src/models/gateway/ledger.rs`，参照 magpie `internal/usage`（`gatewayMatches`/`bareModel`）。
+
+## D-081：技能安装、锁与更新整体同步 vercel-labs/skills，删除自研管线
+
+- 日期：2026-10-04
+- 状态：accepted
+- 背景：D-047 之后的自研层（持久仓库缓存 + 稀疏 inventory、tarball 回退链、lock.json v5 内容基线、update 事务/分歧分类/重命名迁移、ghost 检测、pack_layout 选副本表）累计约一万八千行，语义与 `npx skills` 持续漂移（同名跨源静默跳过、baseline fail-closed 等行为用户不可预期）。用户决策：不再做多余兼容，安装逻辑与 vercel-labs/skills 完全一致。
+- 决策：全局安装采用 vercel 布局与语义——canonical 副本是 `~/.agents/skills/<name>` 的真实目录（`SKILLSTAR_DATA_DIR` 设置时落到数据根下以保持开发/测试隔离），各 Agent 目录以**相对**符号链接指向它（Windows junction，失败回退 copy，全局安装对以 `~/.agents/skills` 为自身全局目录的 Agent 不建链）；锁是 vercel 格式 `~/.agents/.skill-lock.json` v3（`$XDG_STATE_HOME` 优先），每技能记 `source/sourceType/sourceUrl/ref/skillPath/skillFolderHash(git tree SHA)/installedAt/updatedAt`，版本不符静默重置；获取是 `git clone --depth 1 [--branch ref]` 到 OS 临时目录、用完即删（SHA-pin 走 init+fetch，LFS 禁用，非交互，认证失败升级 `gh repo clone`→SSH）；发现去重为「优先目录顺序、先见者胜」；frontmatter 门禁对齐 vercel（`name` 与 `description` 必须是字符串，缺失即不可安装）；更新按 source+ref 分组对比上游 tree SHA（GitHub API 优先，克隆回退），变化即覆盖式重装，不检测本地修改。首次启动自动清理旧 `~/.skillstar/hub/{skills,repos}`、`lock.json` 与指向旧 hub 的 Agent 链接（幂等标记）。删除：repo cache/inventory/tarball/pack_layout/lockfile v5/skill_update 事务/update_checker/ghost 检测/仓库缓存管理。取代 D-046、D-047、D-063、D-075；D-024 的全局侧因 canonical 即 `~/.agents/skills` 而消解（项目侧不变）。共享频道保留自身 store 与发布验证，安装/更新写路径改走新核心。
+- 后果：获得——与 `npx skills` 目录与锁互通、约一万行自研复杂度删除、跨源同名冲突语义变成 vercel 的「覆盖安装」、更新行为可预期。承担——本地修改会被更新覆盖（与 npx skills 一致）；无持久缓存后每次安装/更新都要网络获取；旧安装需要用户重装一次；ghost 提醒与「上游已移除/更名」迁移流程移除。
+- 证据：`crates/skillstar-skills/src/{skill_lock,fetch,installer,update}.rs`、`docs/features/skills/README.md`。
 
 ## 新增记录格式
 

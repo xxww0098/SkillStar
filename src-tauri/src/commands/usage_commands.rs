@@ -8,8 +8,8 @@ use tauri::AppHandle;
 
 pub use skillstar_app::usage::{
     CatalogEntryDto, CliAccountStateDto, ConsumptionPeriodDto, ConsumptionSummaryDto,
-    CreateSubscriptionInput, OAuthStartDto, SubscriptionAlertDto, SubscriptionDto, SwitchOutcomeDto,
-    TodayConsumptionDto, UpdateSubscriptionInput, UsageSummary,
+    CreateSubscriptionInput, OAuthStartDto, SubscriptionAlertDto, SubscriptionDto,
+    SwitchOutcomeDto, TodayConsumptionDto, UpdateSubscriptionInput, UsageSummary,
 };
 
 #[tauri::command]
@@ -109,17 +109,26 @@ pub fn get_usage_summary() -> Result<UsageSummary, AppError> {
 /// Read-time-priced consumption summary over the merged view (gateway
 /// ledger + session files). `window` picks the period; its day boundary is
 /// UTC, and costs are estimates under the price table as it reads *now*.
+///
+/// Async on a blocking worker: the session index replays every checkpointed
+/// call, and a synchronous command runs that on the webview thread. Opening
+/// Usage was freezing the window for seconds.
 #[tauri::command]
-pub fn get_consumption_summary(window: ConsumptionPeriodDto) -> ConsumptionSummaryDto {
-    usage::get_consumption_summary(window)
+pub async fn get_consumption_summary(window: ConsumptionPeriodDto) -> ConsumptionSummaryDto {
+    tokio::task::spawn_blocking(move || usage::get_consumption_summary(window))
+        .await
+        .expect("consumption summary worker")
 }
 
 /// Today's consumption with one chip per session (slice 13): the Usage
 /// page's session-dimension entry into the agent that ran it. Same sources
 /// and UTC day boundary as `get_consumption_summary`; all derived views.
+/// Off the webview thread for the same reason as [`get_consumption_summary`].
 #[tauri::command]
-pub fn get_today_consumption() -> TodayConsumptionDto {
-    usage::get_today_consumption()
+pub async fn get_today_consumption() -> TodayConsumptionDto {
+    tokio::task::spawn_blocking(usage::get_today_consumption)
+        .await
+        .expect("today consumption worker")
 }
 
 #[tauri::command]

@@ -17,7 +17,6 @@ export type {
   ModelsCommands,
   PatrolStatus,
   ProjectCommands,
-  RepoCacheInfo,
   SkillCommands,
   SharedChannelCommands,
   StorageCommands,

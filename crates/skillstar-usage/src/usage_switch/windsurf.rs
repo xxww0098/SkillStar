@@ -9,8 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value};
-use skillstar_core::infra::fs_ops::create_rolling_backup;
 use crate::crypto;
 use crate::fetchers::oauth::windsurf::{
     API_SERVER_SECRET_KEY, AUTH_STATUS_KEY, SESSIONS_SECRET_KEY,
@@ -18,6 +16,8 @@ use crate::fetchers::oauth::windsurf::{
 use crate::subscription::Subscription;
 use crate::tool_store::safe_storage::{self, KeyMaterial};
 use crate::{UsageError, UsageResult, storage, tool_paths, vscdb};
+use serde_json::{Map, Value};
+use skillstar_core::infra::fs_ops::create_rolling_backup;
 
 use super::ide::IdeCredentialAdapter;
 use super::{CliAccountState, SwitchOutcome};

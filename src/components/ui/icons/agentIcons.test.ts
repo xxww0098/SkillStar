@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_ICON_BY_ID, getAgentIcon } from "./agentIcons";
-import { DevinColor, KiroColor, LobeHubMono, PiMono, ZAIMono } from "./lobe";
+import {
+  CommandCodeColor,
+  DevinColor,
+  KiroColor,
+  LangChainColor,
+  LobeHubMono,
+  MinimaxColor,
+  PiMono,
+  ZAIMono,
+} from "./lobe";
 
 const BUILTIN_AGENT_IDS = [
   "aider-desk",
@@ -31,6 +40,7 @@ const BUILTIN_AGENT_IDS = [
   "eve",
   "firebender",
   "forgecode",
+  "fx",
   "gemini-cli",
   "github-copilot",
   "goose",
@@ -40,12 +50,14 @@ const BUILTIN_AGENT_IDS = [
   "junie",
   "iflow-cli",
   "kilo",
+  "kimchi",
   "kimi-code-cli",
   "kiro",
   "kode",
   "lingma",
   "loaf",
   "mcpjam",
+  "minimax-code",
   "mistral-vibe",
   "moxby",
   "mux",
@@ -55,6 +67,7 @@ const BUILTIN_AGENT_IDS = [
   "openhands",
   "ona",
   "pi",
+  "posit-assistant",
   "qoder",
   "qoder-cn",
   "qwen-code",
@@ -62,6 +75,7 @@ const BUILTIN_AGENT_IDS = [
   "reasonix",
   "roo",
   "rovodev",
+  "sarvam-code",
   "tabnine-cli",
   "terramind",
   "tinycloud",
@@ -100,6 +114,9 @@ describe("Agent icon registry", () => {
     expect(getAgentIcon("devin")).toBe(DevinColor);
     expect(getAgentIcon("pi")).toBe(PiMono);
     expect(getAgentIcon("zcode")).toBe(ZAIMono);
+    expect(getAgentIcon("command-code")).toBe(CommandCodeColor);
+    expect(getAgentIcon("deepagents")).toBe(LangChainColor);
+    expect(getAgentIcon("minimax-code")).toBe(MinimaxColor);
     expect(getAgentIcon("pi")).not.toBe(LobeHubMono);
     expect(getAgentIcon("zcode")).not.toBe(LobeHubMono);
   });

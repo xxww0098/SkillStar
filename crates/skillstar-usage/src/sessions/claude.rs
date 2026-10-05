@@ -86,6 +86,10 @@ impl SessionParser for ClaudeCodeParser {
         claude_parse(Self::AGENT, Self::PARSER_VERSION, file, prior)
     }
 
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool {
+        checkpoint::is_unchanged(prior, file, Self::PARSER_VERSION)
+    }
+
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)> {
         claude_replay(checkpoint)
     }
@@ -123,6 +127,10 @@ impl SessionParser for ClaudeDesktopParser {
         prior: Option<FileCheckpoint>,
     ) -> (Vec<SessionCall>, FileCheckpoint) {
         claude_parse(Self::AGENT, Self::PARSER_VERSION, file, prior)
+    }
+
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool {
+        checkpoint::is_unchanged(prior, file, Self::PARSER_VERSION)
     }
 
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)> {
@@ -322,13 +330,21 @@ impl ClaudeState {
             call: SessionCall,
             asked_ms: i64,
         }
-        let stored: Stored = serde_json::from_value(checkpoint.agent_state.clone())
-            .unwrap_or_default();
+        let stored: Stored =
+            serde_json::from_value(checkpoint.agent_state.clone()).unwrap_or_default();
         Self {
             msgs: stored
                 .msgs
                 .into_iter()
-                .map(|(id, m)| (id, MsgEntry { call: m.call, asked_ms: m.asked_ms }))
+                .map(|(id, m)| {
+                    (
+                        id,
+                        MsgEntry {
+                            call: m.call,
+                            asked_ms: m.asked_ms,
+                        },
+                    )
+                })
                 .collect(),
             last_user_ms: stored.last_user_ms,
             last_asst_ms: stored.last_asst_ms,
@@ -350,8 +366,11 @@ impl ClaudeState {
             .map(|(id, entry)| {
                 (
                     id.clone(),
-                    serde_json::to_value(StoredMsg { call: &entry.call, asked_ms: entry.asked_ms })
-                        .unwrap_or(serde_json::Value::Null),
+                    serde_json::to_value(StoredMsg {
+                        call: &entry.call,
+                        asked_ms: entry.asked_ms,
+                    })
+                    .unwrap_or(serde_json::Value::Null),
                 )
             })
             .collect();
@@ -420,7 +439,9 @@ fn claude_parse(
     }) {
         loop {
             let mut line = Vec::new();
-            let Ok(n) = reader.read_until(b'\n', &mut line) else { break };
+            let Ok(n) = reader.read_until(b'\n', &mut line) else {
+                break;
+            };
             if n == 0 {
                 break; // EOF
             }
@@ -602,7 +623,10 @@ fn claude_line(
     } else {
         state.msgs.insert(
             id.to_string(),
-            MsgEntry { call: call.clone(), asked_ms },
+            MsgEntry {
+                call: call.clone(),
+                asked_ms,
+            },
         );
     }
     delta.push((id.to_string(), call));

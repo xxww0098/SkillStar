@@ -7,9 +7,8 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
+use skillstar_core::infra::paths::hub_skills_dir;
 use skillstar_skills::agents::list_profiles;
-use skillstar_skills::lockfile::Lockfile;
 use skillstar_skills::source_resolver::same_remote_url;
 
 // ── Name resolution helpers ─────────────────────────────────────────────
@@ -27,13 +26,11 @@ pub fn resolve_installed_name(
     name_hint: &str,
 ) -> Result<Option<String>, String> {
     let skills_dir = hub_skills_dir();
-    let lock_path = lockfile_path();
-    let lockfile = Lockfile::load(&lock_path).unwrap_or_default();
+    let lock = skillstar_skills::skill_lock::load();
     let has_matching_lock = |name: &str| {
-        lockfile
-            .skills
-            .iter()
-            .any(|entry| entry.name == name && same_remote_url(&entry.git_url, url))
+        lock.skills
+            .get(name)
+            .is_some_and(|entry| same_remote_url(&entry.source_url, url))
     };
 
     if let Some(name) = explicit_name {
@@ -50,13 +47,11 @@ pub fn resolve_installed_name(
         return Ok(Some(name_hint.to_string()));
     }
 
-    let mut matches: Vec<String> = lockfile
+    let mut matches: Vec<String> = lock
         .skills
         .iter()
-        .filter(|entry| {
-            same_remote_url(&entry.git_url, url) && skills_dir.join(&entry.name).exists()
-        })
-        .map(|entry| entry.name.clone())
+        .filter(|(name, entry)| same_remote_url(&entry.source_url, url) && skills_dir.join(name).exists())
+        .map(|(name, _)| name.clone())
         .collect();
     matches.sort();
     matches.dedup();

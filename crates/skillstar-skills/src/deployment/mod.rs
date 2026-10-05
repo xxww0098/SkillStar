@@ -86,53 +86,6 @@ fn require_enabled_global_profile<'a>(
     Ok(profile)
 }
 
-/// Pin already-deployed Agent links to the hub's current payload.
-///
-/// A later harness retarget rewrites the single hub symlink + lock
-/// `source_folder`. Agent links that still pointed at the hub would then
-/// silently receive the other copy. Resolve those links onto the current
-/// folder first so carousel / `--agent` clicks stay independent.
-///
-/// `except_agent_id` is the Agent being retargeted: leave its deploy alone
-/// so a later deploy can point it at the new harness instead of pinning it
-/// to the old one.
-pub fn pin_existing_global_links_to_current_source(
-    skill_name: &str,
-    except_agent_id: Option<&str>,
-) -> Result<()> {
-    let hub = skillstar_core::infra::paths::hub_skills_dir().join(skill_name);
-    if !skillstar_core::infra::fs_ops::is_link(&hub) {
-        return Ok(());
-    }
-    let hub_payload = skillstar_core::infra::fs_ops::read_link_resolved(&hub)?;
-    let hub_canon = std::fs::canonicalize(&hub).unwrap_or_else(|_| hub.clone());
-    let payload_canon = std::fs::canonicalize(&hub_payload).unwrap_or(hub_payload);
-
-    invalidate_profile_cache();
-    for profile in cached_profiles() {
-        if !profile.has_global_skills() {
-            continue;
-        }
-        if except_agent_id.is_some_and(|id| id == profile.id) {
-            continue;
-        }
-        let target = profile.global_skills_dir.join(skill_name);
-        if !skillstar_core::infra::fs_ops::is_link(&target) {
-            continue;
-        }
-        let resolved = match skillstar_core::infra::fs_ops::read_link_resolved(&target) {
-            Ok(path) => std::fs::canonicalize(&path).unwrap_or(path),
-            Err(_) => continue,
-        };
-        if resolved != hub_canon && resolved != payload_canon {
-            continue;
-        }
-        skillstar_core::infra::fs_ops::remove_symlink(&target)?;
-        skillstar_core::infra::fs_ops::create_symlink(&payload_canon, &target)?;
-    }
-    Ok(())
-}
-
 fn canonical_path(path: &Path) -> std::path::PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }

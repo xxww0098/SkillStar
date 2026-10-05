@@ -1,6 +1,4 @@
 use crate::discovery as skill_discover;
-use crate::lockfile;
-use crate::source_resolver;
 use skillstar_core::infra::paths;
 use std::path::Path;
 
@@ -35,46 +33,17 @@ pub fn scan_skills_in_repo_at(
 pub(super) fn annotate_discovered_skills(
     mut discovered: Vec<DiscoveredSkill>,
     repo_dir: &Path,
-    repo_url: &str,
+    _repo_url: &str,
 ) -> Vec<DiscoveredSkill> {
-    let hub_skills_dir = paths::hub_skills_dir();
-    let lock_entries = lockfile::Lockfile::load(&paths::lockfile_path())
-        .map(|lf| lf.skills)
-        .unwrap_or_default();
-
+    // D-081: provenance lives in the vercel lock; a discovered skill is
+    // installed when the canonical dir for its identity exists.
+    let canonical = paths::agents_skills_root();
     for skill in &mut discovered {
-        let source_folder = if skill.folder_path.is_empty() {
-            None
-        } else {
-            Some(skill.folder_path.as_str())
-        };
-
-        let legacy_name = lock_entries.iter().find_map(|entry| {
-            if source_resolver::same_remote_url(&entry.git_url, repo_url)
-                && option_str_eq(entry.source_folder.as_deref(), source_folder)
-            {
-                Some(entry.name.clone())
-            } else {
-                None
-            }
-        });
-
-        if let Some(name) = legacy_name {
-            skill.id = name;
-            // A lockfile entry for this exact source exists — that is what
-            // produced `legacy_name` — so the skill is installed by definition.
-            skill.already_installed = true;
-        } else {
-            skill.already_installed = hub_skills_dir.join(&skill.id).exists();
-        }
+        skill.already_installed = canonical.join(&skill.id).symlink_metadata().is_ok();
     }
 
     skill_discover::dedupe_discovered_skills(
         discovered,
         &crate::plugin_manifest::declared_skill_dir_names(repo_dir),
     )
-}
-
-fn option_str_eq(left: Option<&str>, right: Option<&str>) -> bool {
-    left == right
 }

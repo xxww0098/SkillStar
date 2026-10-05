@@ -31,7 +31,6 @@ sha2.workspace = true
 skillstar-core = { version = "0.0.0", path = "../skillstar-core" }
 thiserror.workspace = true
 tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
-tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 ts-rs = { workspace = true, features = ["serde-compat"] }
 

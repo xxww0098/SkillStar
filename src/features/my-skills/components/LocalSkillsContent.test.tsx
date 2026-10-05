@@ -1,9 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentProfile, RepoNewSkill, Skill } from "../../../types";
+import type { AgentProfile, Skill } from "../../../types";
 
 const installSkill = vi.fn();
-const installGhostSkill = vi.fn();
 const toggleSkillForAgent = vi.fn();
 
 vi.mock("../../../lib/toast", () => ({
@@ -14,14 +13,6 @@ vi.mock("../../../lib/toast", () => ({
     warning: vi.fn(),
   },
 }));
-
-const GHOST: RepoNewSkill = {
-  repo_source: "acme/ghost-skills",
-  repo_url: "https://github.com/acme/ghost-skills",
-  skill_id: "ghost-skill",
-  folder_path: "skills/ghost-skill",
-  description: "A ghost skill",
-};
 
 const RUST: Skill = {
   name: "rust",
@@ -70,19 +61,12 @@ vi.mock("../hooks/useSkills", () => ({
     reinstallRepoSkills: vi.fn(),
     uninstallSkill: vi.fn(),
     runSkillUpdate: vi.fn(),
-    resolveRemovedSkill: vi.fn(),
-    migrateRenamedSkill: vi.fn(),
-    pendingMigrationNames: new Set(),
     pendingUpdateNames: new Set(),
     toggleSkillForAgent,
     pendingAgentToggleKeys: new Set(),
     readSkillContent: vi.fn(),
     updateSkillContent: vi.fn(),
     batchRemoveSkillsFromAllAgents: vi.fn(),
-    ghostSkills: [GHOST],
-    dismissGhostSkill: vi.fn(),
-    dismissGhostRepo: vi.fn(),
-    installGhostSkill,
   }),
 }));
 
@@ -110,22 +94,13 @@ vi.mock("../../../lib/ipc", () => ({
 }));
 
 vi.mock("./SkillGrid", () => ({
-  SkillGrid: ({
-    onInstall,
-    onInstallGhost,
-  }: {
-    onInstall: (url: string, name: string, agentId?: string) => void;
-    onInstallGhost?: (skill: RepoNewSkill) => Promise<unknown>;
-  }) => (
+  SkillGrid: ({ onInstall }: { onInstall: (url: string, name: string, agentId?: string) => void }) => (
     <div>
       <button type="button" onClick={() => onInstall(RUST.git_url, RUST.name, "deepseek")}>
         carousel-deepseek
       </button>
       <button type="button" onClick={() => onInstall(RUST.git_url, RUST.name, "cursor")}>
         carousel-cursor
-      </button>
-      <button type="button" onClick={() => void onInstallGhost?.(GHOST).catch(() => {})}>
-        ghost-install
       </button>
     </div>
   ),
@@ -136,7 +111,6 @@ import { LocalSkillsContent } from "./LocalSkillsContent";
 describe("LocalSkillsContent install forwarding", () => {
   beforeEach(() => {
     installSkill.mockReset();
-    installGhostSkill.mockReset();
     toggleSkillForAgent.mockReset();
     installSkill.mockResolvedValue(RUST);
   });
@@ -151,16 +125,5 @@ describe("LocalSkillsContent install forwarding", () => {
     fireEvent.click(screen.getByText("carousel-cursor"));
     expect(installSkill).toHaveBeenCalledWith(RUST.git_url, "rust", "cursor");
     expect(installSkill).toHaveBeenCalledTimes(2);
-  });
-
-  it("shows an error toast when a ghost skill install fails", async () => {
-    installGhostSkill.mockRejectedValue(new Error("network down"));
-    const { toast } = await import("../../../lib/toast");
-    render(<LocalSkillsContent scopeSwitch={<span>scope</span>} />);
-
-    fireEvent.click(screen.getByText("ghost-install"));
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Error: network down"));
   });
 });

@@ -68,9 +68,9 @@ mod zed;
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
 use crate::subscription::Subscription;
 use crate::{UsageError, UsageResult, storage};
+use serde::{Deserialize, Serialize};
 
 use custody::{Activated, Custody, CustodyLease, LinkState};
 use target::CliCredentialTarget;

@@ -267,10 +267,12 @@ pub struct RemoveOpts<'a> {
 
 /// Dispatch the CLI. `migrate_and_run` is the only caller-specific seam: the
 /// Tauri package prefers its own marketplace snapshot init, everyone else
-/// passes [`default_migrate_and_run`].
 pub fn run(args: Vec<String>, migrate_and_run: fn()) {
     // Channel-aware mutation gate must be active before any skill mutation path runs
     skillstar_channels::policy::install_global_policy();
+
+    // D-081: remove the pre-vercel hub/cache model once, idempotently.
+    skillstar_skills::legacy_cleanup::run_once();
 
     // Migration (only runs once at startup)
     migrate_and_run();
@@ -470,25 +472,6 @@ fn is_bundle_file(path: &std::path::Path) -> bool {
         path.extension().and_then(|ext| ext.to_str()),
         Some("ags") | Some("agd")
     )
-}
-
-/// Migration + snapshot init that runs entirely in skillstar-app (no Tauri).
-pub fn default_migrate_and_run() {
-    skillstar_core::infra::migration::migrate_legacy_paths();
-    // Configure marketplace snapshot paths so `find` hits the real DB.
-    skillstar_marketplace::snapshot::configure_runtime(
-        skillstar_marketplace::snapshot::SnapshotRuntimeConfig::new(
-            skillstar_core::infra::paths::marketplace_db_path(),
-            skillstar_core::infra::paths::data_root(),
-            skillstar_skills::installed_skill::installed_snapshot_markers,
-            || -> skillstar_marketplace::snapshot::InstalledSkillsFuture {
-                Box::pin(skillstar_skills::installed_skill::list_installed_skills())
-            },
-        ),
-    );
-    if let Err(err) = skillstar_marketplace::snapshot::initialize() {
-        eprintln!("⚠ Marketplace snapshot init failed: {err}");
-    }
 }
 
 #[cfg(test)]

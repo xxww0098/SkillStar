@@ -144,13 +144,21 @@ mod tests {
     #[test]
     fn universal_agents_share_the_open_skills_project_dir() {
         let data = builtin_agent_data();
-        let ag = data.iter().find(|d| d.id == "antigravity").unwrap();
-        let codex = data.iter().find(|d| d.id == "codex").unwrap();
-        let cursor = data.iter().find(|d| d.id == "cursor").unwrap();
-        for agent in [ag, codex, cursor] {
+        let ids = [
+            "antigravity",
+            "codex",
+            "cursor",
+            "droid",
+            "gemini-cli",
+            "kilo",
+            "pi",
+        ];
+        for id in ids {
+            let agent = data.iter().find(|d| d.id == id).unwrap();
             assert_eq!(
                 BuiltinSpec(agent).project_skills_rel(),
-                Some(".agents/skills")
+                Some(".agents/skills"),
+                "{id} must keep the open-skills project path"
             );
         }
     }

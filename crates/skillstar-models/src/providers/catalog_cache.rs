@@ -116,15 +116,6 @@ fn sanitize_id(provider_id: &str) -> String {
     }
 }
 
-/// Read one provider's cached catalog, or an empty list.
-///
-/// Never an error: see the module note on why a degraded write beats a refused
-/// one. A parse failure is logged so a corrupt cache file is diagnosable
-/// instead of merely quiet.
-pub fn read_catalog(provider_id: &str) -> Vec<ModelCatalogEntry> {
-    read_catalog_at(&catalog_cache_path(provider_id))
-}
-
 /// Same, against an explicit path (what the tests and the writers use).
 pub fn read_catalog_at(path: &Path) -> Vec<ModelCatalogEntry> {
     if !path.exists() {

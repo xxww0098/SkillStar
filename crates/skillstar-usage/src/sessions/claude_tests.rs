@@ -13,9 +13,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::claude::{ClaudeCodeParser, ClaudeDesktopParser};
-use super::{SessionCall, SessionParser, SessionFile, read_calls};
-use sha2::Digest;
+use super::{SessionCall, SessionFile, SessionParser, read_calls};
 use crate::test_support::EnvGuard;
+use sha2::Digest;
 
 const NORMAL: &str = include_str!("fixtures/normal.jsonl");
 const SUBAGENT: &str = include_str!("fixtures/subagent.jsonl");
@@ -104,9 +104,16 @@ fn normal_session_counts_calls_with_multi_block_override() {
     let (delta, checkpoint) = ClaudeCodeParser.parse(&session_file(&session), None);
     // msg_1 (two blocks merged into one), msg_2, msg_err, msg_3 = 4 calls;
     // the count after msg id dedup.
-    assert_eq!(delta.len(), 4, "permission/ai-title/file-history/identity/user lines produce no call");
+    assert_eq!(
+        delta.len(),
+        4,
+        "permission/ai-title/file-history/identity/user lines produce no call"
+    );
     assert_eq!(checkpoint.calls_seen, 4);
-    assert_eq!(checkpoint.offset, std::fs::metadata(&session).unwrap().len());
+    assert_eq!(
+        checkpoint.offset,
+        std::fs::metadata(&session).unwrap().len()
+    );
 
     // Same message id, multiple blocks: later block usage overrides the
     // earlier one (110/60/5500/1100); From takes the first block's line
@@ -255,7 +262,11 @@ fn append_produces_only_delta_and_calls_seen_converges() {
         ClaudeCodeParser.parse(&session_file(&session), Some(first.clone()));
     assert_eq!(second_delta.len(), 1, "append produces only delta calls");
     assert_eq!(second_delta[0].request_id.as_deref(), Some("req_4"));
-    assert_eq!(second_delta[0].latency_ms, Some(5000), "incremental parsing also gets latency (the user line is inside the append)");
+    assert_eq!(
+        second_delta[0].latency_ms,
+        Some(5000),
+        "incremental parsing also gets latency (the user line is inside the append)"
+    );
     assert_eq!(second.calls_seen, 5);
     assert_eq!(second.offset, std::fs::metadata(&session).unwrap().len());
 
@@ -264,7 +275,8 @@ fn append_produces_only_delta_and_calls_seen_converges() {
     assert_eq!(full_reread.calls_seen, second.calls_seen);
     assert_eq!(full_reread_delta.len(), 5);
     // Parsing again when unchanged: handed back as-is, zero delta.
-    let (noop, returned) = ClaudeCodeParser.parse(&session_file(&session), Some(full_reread.clone()));
+    let (noop, returned) =
+        ClaudeCodeParser.parse(&session_file(&session), Some(full_reread.clone()));
     assert!(noop.is_empty());
     assert_eq!(returned, full_reread);
 }
@@ -292,9 +304,19 @@ fn later_block_after_checkpoint_overrides_and_keeps_first_from() {
         .unwrap();
 
     let (delta, second) = ClaudeCodeParser.parse(&session_file(&session), Some(first));
-    assert_eq!(delta.len(), 1, "the overriding block yields the message's final version");
-    assert_eq!(delta[0].tokens.input, 20, "later block usage overrides the earlier one");
-    assert_eq!(delta[0].from, 0, "From keeps the first block's position (no assistant line before it, i.e. file start)");
+    assert_eq!(
+        delta.len(),
+        1,
+        "the overriding block yields the message's final version"
+    );
+    assert_eq!(
+        delta[0].tokens.input, 20,
+        "later block usage overrides the earlier one"
+    );
+    assert_eq!(
+        delta[0].from, 0,
+        "From keeps the first block's position (no assistant line before it, i.e. file start)"
+    );
     assert_eq!(
         delta[0].to,
         std::fs::metadata(&session).unwrap().len(),
@@ -318,7 +340,11 @@ fn truncated_file_rereads_from_zero() {
     std::fs::write(&session, &cut).unwrap();
 
     let (delta, after) = ClaudeCodeParser.parse(&session_file(&session), Some(prior));
-    assert_eq!(delta.len(), 1, "after truncation only msg_1 (first block) remains");
+    assert_eq!(
+        delta.len(),
+        1,
+        "after truncation only msg_1 (first block) remains"
+    );
     assert_eq!(after.calls_seen, 1);
     assert_eq!(after.offset, cut.len() as u64);
 }
@@ -368,9 +394,19 @@ fn discovery_defaults_to_sandboxed_claude_projects() {
     std::fs::write(subagents.join("agent-a1.jsonl"), SUBAGENT).unwrap();
 
     let files = ClaudeCodeParser.discover(home.path());
-    assert_eq!(files.len(), 2, "main session + subagents discovered together");
+    assert_eq!(
+        files.len(),
+        2,
+        "main session + subagents discovered together"
+    );
     let paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
-    assert!(paths.contains(&projects.join("11111111-2222-3333-4444-555555555555.jsonl").as_path()));
+    assert!(
+        paths.contains(
+            &projects
+                .join("11111111-2222-3333-4444-555555555555.jsonl")
+                .as_path()
+        )
+    );
     assert!(paths.contains(&subagents.join("agent-a1.jsonl").as_path()));
 
     // A subagent file's session id is the parent directory name
@@ -411,7 +447,11 @@ fn sandbox_wins_over_claude_config_dir() {
     std::fs::write(env_projects.join("sess-env.jsonl"), NORMAL).unwrap();
 
     let sandbox_home = tempfile::tempdir().unwrap();
-    let other_projects = sandbox_home.path().join(".claude").join("projects").join("-p");
+    let other_projects = sandbox_home
+        .path()
+        .join(".claude")
+        .join("projects")
+        .join("-p");
     std::fs::create_dir_all(&other_projects).unwrap();
     std::fs::write(other_projects.join("sess-sandbox.jsonl"), NORMAL).unwrap();
 
@@ -506,7 +546,10 @@ fn read_calls_persists_and_reuses_checkpoints() {
 
     let first = read_calls(home.path(), None);
     let index = data.path().join("sessions").join("index.json");
-    assert!(index.exists(), "the checkpoint index lands in the data root, not the agent directory");
+    assert!(
+        index.exists(),
+        "the checkpoint index lands in the data root, not the agent directory"
+    );
 
     // Second call (file unchanged): same result, checkpoint reused as-is.
     let second = read_calls(home.path(), None);
@@ -525,8 +568,7 @@ fn read_calls_persists_and_reuses_checkpoints() {
     // After the file vanishes: the index prunes the entry.
     std::fs::remove_file(&session).unwrap();
     read_calls(home.path(), None);
-    let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&index).unwrap()).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&index).unwrap()).unwrap();
     assert_eq!(value["files"].as_object().unwrap().len(), 0);
 }
 
@@ -540,7 +582,10 @@ fn read_calls_never_writes_agent_directory() {
     let calls = read_calls(home.path(), None);
     assert!(!calls.is_empty());
     let after = snapshot_tree(home.path());
-    assert_eq!(before, after, "read-only red line: no byte or mtime of the agent directory may change");
+    assert_eq!(
+        before, after,
+        "read-only red line: no byte or mtime of the agent directory may change"
+    );
 }
 
 #[test]
@@ -569,7 +614,10 @@ fn read_calls_incremental_matches_full_reread() {
     // Clear the index → full reread.
     std::fs::remove_file(super::checkpoint::index_path()).ok();
     let full = read_calls(home.path(), None);
-    assert_eq!(incremental, full, "the incremental view matches the full reread");
+    assert_eq!(
+        incremental, full,
+        "the incremental view matches the full reread"
+    );
 }
 
 // ---------------------------------------------------------------------------

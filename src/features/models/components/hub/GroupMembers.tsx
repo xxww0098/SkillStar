@@ -6,9 +6,10 @@ import type { SavedGroup } from "@/lib/ipc/commands/models";
 import { modelsKeys } from "../../api/keys";
 import { useSavedGroups } from "../../api/groups";
 
-const FIELD = "rounded-lg border border-border/60 bg-background px-2 py-1 font-mono text-xs";
+const FIELD =
+  "rounded-lg border border-border/60 bg-background px-2 py-1.5 font-mono text-xs transition-colors focus-visible:border-primary/50 focus-visible:outline-none";
 const ACTION =
-  "shrink-0 rounded-lg border border-border/60 bg-background px-2.5 py-1 text-xs text-foreground transition hover:bg-muted/50";
+  "shrink-0 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20";
 
 /**
  * Saved-group members. Add and remove send the whole list to the gateway
@@ -39,9 +40,14 @@ export function GroupMembers() {
   }
 
   return (
-    <div className="space-y-2">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {t("models.gateway.groupsTitle")}
+    <div className="space-y-2.5">
+      <div className="flex items-baseline gap-2">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          {t("models.gateway.groupsTitle")}
+        </div>
+        {groups.length > 0 ? (
+          <span className="text-[11px] tabular-nums text-muted-foreground/80">{groups.length}</span>
+        ) : null}
       </div>
       {groups.map((group) => (
         <GroupRow
@@ -73,7 +79,7 @@ export function GroupMembers() {
       ))}
       <form
         aria-label="new group"
-        className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 p-2.5"
+        className="space-y-1.5 rounded-xl bg-muted/30 p-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           const id = newId.trim();
@@ -97,13 +103,13 @@ export function GroupMembers() {
           />
           <input
             aria-label="new group member"
-            placeholder="provider/model"
+            placeholder={t("models.gateway.modelRefPlaceholder")}
             value={newMember}
             onChange={(event) => setNewMember(event.target.value)}
             className={`min-w-0 flex-[1.4] ${FIELD}`}
           />
           <button type="submit" className={ACTION}>
-            Save group
+            {t("models.gateway.saveGroup")}
           </button>
         </div>
         {errors[newId.trim()] ? (
@@ -133,12 +139,13 @@ function GroupRow({
   onRemove: (member: string) => void;
   onFix: (member: string, next: string) => void;
 }) {
+  const { t } = useTranslation();
   const label = plainText(group.id);
   return (
     <div
       role="group"
       aria-label={`group members ${label}`.trim()}
-      className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5"
+      className="space-y-1.5 rounded-xl bg-muted/30 px-3 py-2.5"
     >
       {label ? (
         <div className="flex items-baseline justify-between gap-2">
@@ -171,7 +178,7 @@ function GroupRow({
           className={`min-w-0 flex-1 ${FIELD}`}
         />
         <button type="submit" className={ACTION}>
-          Add
+          {t("models.gateway.addMember")}
         </button>
       </form>
       {error ? (
@@ -192,6 +199,7 @@ function MemberLine({
   onRemove: () => void;
   onFix: (next: string) => void;
 }) {
+  const { t } = useTranslation();
   const { data } = useQuery({
     queryKey: modelsKeys.modelEfforts(member),
     queryFn: () => tauriInvoke("model_efforts", { id: member }),
@@ -230,11 +238,11 @@ function MemberLine({
       ) : null}
       <button
         type="button"
-        aria-label={shown ? `Remove ${shown}` : "Remove"}
+        aria-label={shown ? t("models.gateway.removeMember", { name: shown }) : t("models.gateway.remove")}
         onClick={onRemove}
         className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
       >
-        Remove
+        {t("models.gateway.remove")}
       </button>
     </li>
   );

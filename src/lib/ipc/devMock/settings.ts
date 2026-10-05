@@ -113,10 +113,4 @@ export const SETTINGS_HANDLERS: DevMockHandlers = {
     recommendations: [],
   }),
   get_storage_overview: () => STORAGE_OVERVIEW,
-  get_repo_cache_info: () => ({
-    total_bytes: 64_200_000,
-    repo_count: 8,
-    unused_count: 2,
-    unused_bytes: 9_800_000,
-  }),
 };

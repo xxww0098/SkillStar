@@ -1,15 +1,11 @@
 use anyhow::{Context, Result, anyhow};
-use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
 
 use skillstar_core::config::{github_health, github_mirror};
 use skillstar_core::infra::path_env::command_with_path;
 use tracing::{debug, warn};
 
 use crate::transport::{self, GitOperationSession};
-pub use crate::blobs::{prefetch_blobs_in_session, read_local_blob};
 pub use crate::tree::{
     GitTreeEntry, list_tree_entries_at, list_tree_entries_with_trees, list_tree_paths,
     list_tree_paths_at, revision_contains_path,
@@ -32,21 +28,10 @@ pub fn local_file_url(path: &Path) -> String {
     format!("file://{normalized}")
 }
 
-/// Maximum number of retries for shallow fetch operations that hit the
-/// `shallow file has changed since we read it` race condition.
-const SHALLOW_FETCH_MAX_RETRIES: u32 = 3;
-/// Backoff delays (ms) between retries.
-const SHALLOW_FETCH_BACKOFF_MS: [u64; 3] = [200, 500, 1000];
-/// Per-repository shallow-fetch mutexes to avoid concurrent `.git/shallow` races.
-static SHALLOW_FETCH_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
 /// Compute the tree-hash of a local Git repository.
 ///
 /// Tries the in-process `gix` library first (fastest, no process spawn).
 /// Falls back to `git rev-parse HEAD^{tree}` via CLI when `gix` fails —
-/// this is needed on Windows where `gix` can choke on shallow clones
-/// due to NTFS file-locking or path-normalization quirks.
 pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
     match compute_tree_hash_gix(repo_path) {
         Ok(hash) => Ok(hash),
@@ -136,35 +121,71 @@ pub fn rev_parse(repo_path: &Path, rev: &str) -> Result<String> {
     run_git(repo_path, &["rev-parse", rev])
 }
 
-/// Git tree hash of a single folder inside a repo (`HEAD:<folder>`).
-///
-/// Used to tell apart skills that share a repo: each one hashes only its own
-/// `source_folder`, so an unrelated commit elsewhere in the repo does not mark
-/// every sibling as updated.
-pub fn compute_subtree_hash(repo_path: &Path, folder_path: &str) -> Result<String> {
-    rev_parse(repo_path, &format!("HEAD:{folder_path}"))
-        .with_context(|| format!("Failed to read subtree hash for '{folder_path}'"))
-}
-
-/// Clone a repository from a URL to a destination path.
-///
-/// Always uses `--depth 1 --single-branch` to minimise network transfer
-/// and disk usage. Skills only need the latest snapshot, not full history.
-pub fn clone_repo_in_session(url: &str, dest: &Path, session: &GitOperationSession) -> Result<()> {
-    run_git_clone(url, dest, true, session)
-}
-
-/// Shallow-clone a repository (depth=1) for fast scanning.
-///
-/// Only fetches the latest commit – ideal for repo scanning where full
-/// history is unnecessary.  Unlike `clone_repo_in_session`, does *not* pass
-/// `--single-branch` so remote tracking refs are created for update checks.
 pub fn clone_repo_shallow_in_session(
     url: &str,
     dest: &Path,
     session: &GitOperationSession,
 ) -> Result<()> {
     run_git_clone(url, dest, false, session)
+}
+
+pub fn clone_repo_shallow_at_ref_in_session(
+    url: &str,
+    dest: &Path,
+    git_ref: &str,
+    session: &GitOperationSession,
+) -> Result<()> {
+    let looks_like_sha =
+        git_ref.len() == 40 && git_ref.chars().all(|ch| ch.is_ascii_hexdigit());
+    if !looks_like_sha {
+        let args = ["clone", "--depth", "1", "--branch", git_ref];
+        return run_git_clone_attempt(url, dest, &args, session)
+            .with_context(|| format!("Failed to clone '{url}' at ref '{git_ref}'"));
+    }
+
+    let mkdir = || std::fs::create_dir_all(dest);
+    mkdir().with_context(|| format!("Failed to create clone dir '{}'", dest.display()))?;
+    run_local_git(dest, &["init", "--quiet"], session)?;
+    transport::execute_remote_git(
+        Some(dest),
+        &["remote", "add", "origin", url],
+        url,
+        session,
+        false,
+    )
+    .map_err(anyhow::Error::from)?;
+    transport::execute_remote_git(
+        Some(dest),
+        &["fetch", "--depth", "1", "--quiet", "origin", git_ref],
+        url,
+        session,
+        true,
+    )
+    .map_err(anyhow::Error::from)?;
+    run_local_git(dest, &["checkout", "--quiet", "FETCH_HEAD"], session)?;
+    Ok(())
+}
+
+/// A repo-local command that never touches the network (no origin needed):
+/// `init` and FETCH_HEAD checkouts in a fresh SHA-pin clone.
+fn run_local_git(dir: &Path, args: &[&str], session: &GitOperationSession) -> Result<()> {
+    let mut command = command_with_path("git");
+    let output = transport::execute_remote_command(
+        &mut command,
+        Some(dir),
+        args,
+        "local-sha-pin",
+        session,
+    )?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed in '{}': {}",
+            args.join(" "),
+            dir.display(),
+            output.stderr.clone()
+        );
+    }
+    Ok(())
 }
 
 fn run_git_clone(
@@ -198,32 +219,9 @@ fn run_git_clone_attempt(
         .map_err(anyhow::Error::from)
 }
 
-/// Sparse treeless clone: only downloads tree objects, no file blobs.
-///
-/// Uses `--filter=blob:none --depth 1 --no-checkout --sparse` so the initial
-/// clone is extremely small (typically <500KB even for large repos). Callers
-/// must follow up with `git sparse-checkout set <dirs>` + `git checkout` to
-/// materialize only the directories they need.
-pub fn clone_repo_sparse_in_session(
-    url: &str,
-    dest: &Path,
-    session: &GitOperationSession,
-) -> Result<()> {
-    let args = [
-        "clone",
-        "--filter=blob:none",
-        "--depth",
-        "1",
-        "--no-checkout",
-        "--sparse",
-    ];
-    // Mirror candidate chain handled inside `execute_remote_git`.
-    run_git_clone_attempt(url, dest, &args, session)
-}
-
 /// Configure sparse-checkout for a repo and materialize the given directories.
 ///
-/// Expects the repo to have been cloned with `clone_repo_sparse_in_session`.
+/// Expects a sparse promisor clone with partial blob filters.
 /// Sets cone-mode sparse-checkout to the given directory patterns then runs
 /// `git checkout`.
 pub fn apply_sparse_checkout_in_session(
@@ -294,153 +292,6 @@ pub fn apply_sparse_checkout_in_session(
     Ok(())
 }
 
-/// Materialize additional directories in an existing cone-mode sparse checkout.
-///
-/// Reads the current sparse paths, unions them with `dirs`, and re-applies
-/// the set — the portable equivalent of `git sparse-checkout add` built from
-/// primitives every supported git already has. `dirs`' blobs are batch-
-/// prefetched first (one fetch), so the trailing checkout reads them
-/// locally instead of git's default one-round-trip-per-blob lazy fetch —
-/// this is the pack-layout (e.g. `pbakaus/impeccable`) harness-toggle path,
-/// where a directory can hold several blobs.
-pub fn add_sparse_checkout_dirs_in_session(
-    repo_path: &Path,
-    dirs: &[String],
-    session: &GitOperationSession,
-) -> Result<()> {
-    if dirs.is_empty() {
-        return Ok(());
-    }
-    prefetch_dir_blobs(repo_path, dirs, session);
-    let mut merged = sparse_checkout_paths(repo_path).unwrap_or_default();
-    for dir in dirs {
-        if !merged.contains(dir) {
-            merged.push(dir.clone());
-        }
-    }
-    let refs: Vec<&str> = merged.iter().map(String::as_str).collect();
-    apply_sparse_checkout_in_session(repo_path, &refs, session)
-}
-
-/// One batched fetch for every blob under `dirs`, instead of letting the
-/// following `git checkout` lazily fetch each blob in its own smart-protocol
-/// round-trip (measured 39s vs 1.8s for 22 blobs — see `blobs.rs`). Best
-/// effort: a failed listing or prefetch just leaves the checkout to fetch
-/// lazily, as it did before this existed.
-fn prefetch_dir_blobs(repo_path: &Path, dirs: &[String], session: &GitOperationSession) {
-    let paths: Vec<&str> = dirs.iter().map(String::as_str).collect();
-    let Ok(entries) = crate::tree::list_tree_entries_under(repo_path, "HEAD", &paths) else {
-        return;
-    };
-    let oids: Vec<String> = entries
-        .into_iter()
-        .filter(|entry| entry.kind == "blob")
-        .map(|entry| entry.sha)
-        .collect();
-    let _ = prefetch_blobs_in_session(repo_path, &oids, session);
-}
-
-/// Ensure repository worktree files are present.
-///
-/// Some historical installs were fetched without checkout and ended up with only `.git`.
-/// This function detects that state and materializes files via `git checkout -f HEAD`.
-pub fn ensure_worktree_checked_out(repo_path: &Path) -> Result<bool> {
-    ensure_worktree_checked_out_in_session(repo_path, &GitOperationSession::public())
-}
-
-pub fn ensure_worktree_checked_out_in_session(
-    repo_path: &Path,
-    session: &GitOperationSession,
-) -> Result<bool> {
-    if !repo_path.exists() || !repo_path.is_dir() {
-        return Ok(false);
-    }
-
-    if !repo_path.join(".git").exists() {
-        return Ok(false);
-    }
-
-    let mut has_non_git_entries = false;
-    for entry in fs::read_dir(repo_path).context("Failed to inspect repo directory")? {
-        let entry = entry?;
-        if entry.file_name() != ".git" {
-            has_non_git_entries = true;
-            break;
-        }
-    }
-
-    if has_non_git_entries {
-        return Ok(false);
-    }
-
-    if remote_origin_url(repo_path).is_ok() {
-        checkout_in_session(repo_path, &["checkout", "-f", "HEAD"], session)?;
-    } else {
-        // Historical/local test repositories can have no remote at all; such a
-        // checkout cannot lazily fetch and remains a purely local operation.
-        run_git(repo_path, &["checkout", "-f", "HEAD"])?;
-    }
-    Ok(true)
-}
-
-/// Fetch latest changes and check if update is available.
-///
-/// Uses `--depth 1` to keep network transfer minimal — we only need the
-/// tip commit hash, not additional history.
-pub fn check_update(repo_path: &Path) -> Result<bool> {
-    check_update_in_session(repo_path, &GitOperationSession::public())
-}
-
-pub fn check_update_in_session(repo_path: &Path, session: &GitOperationSession) -> Result<bool> {
-    // Every git call below only sets the working directory, so without a `.git`
-    // here git discovery walks *up* and operates on an ancestor repository —
-    // shallow-fetching a user repo SkillStar was never pointed at. Fail closed;
-    // callers map `Err` to "unknown" and keep the last successful badge.
-    if !repo_path.join(".git").exists() {
-        return Err(anyhow!("{} is not a git repository", repo_path.display()));
-    }
-
-    // Depth-1 fetch: updates remote refs without downloading extra history.
-    // Retry on shallow-file race condition.
-    run_git_shallow_fetch_in_session(repo_path, &["fetch", "--depth", "1", "--quiet"], session)?;
-
-    // For shallow repos, rev-list --left-right can be unreliable.
-    // Compare HEAD vs FETCH_HEAD / @{upstream} via rev-parse instead.
-    let local_head = run_git(repo_path, &["rev-parse", "HEAD"])?;
-    let remote_head = run_git(repo_path, &["rev-parse", "@{upstream}"])
-        .or_else(|_| run_git(repo_path, &["rev-parse", "FETCH_HEAD"]))?;
-
-    Ok(local_head != remote_head)
-}
-
-/// Pull a repository to the latest remote HEAD.
-///
-/// Uses `fetch --depth 1` + `reset --hard` instead of `git pull` so that:
-/// - Shallow clones stay shallow (git pull can re-deepen).
-/// - The result is always exactly at origin HEAD (no merge conflicts).
-/// - Network transfer is bounded to a single commit.
-pub fn pull_repo_in_session(repo_path: &Path, session: &GitOperationSession) -> Result<()> {
-    run_git_shallow_fetch_in_session(repo_path, &["fetch", "--depth", "1", "--quiet"], session)?;
-
-    // The fetch is a network operation lasting up to seconds; a user edit
-    // landing in that window must not be destroyed by the reset below.
-    // Fail closed instead — the error propagates and the caller preserves
-    // the worktree (see WorktreeDirty handling).
-    if !worktree_is_clean(repo_path)? {
-        return Err(WorktreeDirty.into());
-    }
-
-    // Determine the correct reset target.
-    // Try origin/HEAD first, then the tracking upstream, then FETCH_HEAD.
-    let target = run_git(repo_path, &["rev-parse", "origin/HEAD"])
-        .or_else(|_| run_git(repo_path, &["rev-parse", "@{upstream}"]))
-        .or_else(|_| run_git(repo_path, &["rev-parse", "FETCH_HEAD"]))
-        .unwrap_or_else(|_| "FETCH_HEAD".to_string());
-
-    checkout_in_session(repo_path, &["reset", "--hard", &target], session)?;
-    Ok(())
-}
-
 /// Return the exact commit currently checked out by a managed repository.
 pub fn head_revision(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["rev-parse", "HEAD"])
@@ -465,26 +316,6 @@ impl std::fmt::Display for WorktreeDirty {
 
 impl std::error::Error for WorktreeDirty {}
 
-/// Whether the repository worktree has uncommitted *modifications*.
-///
-/// Only modified/added/renamed/copied/staged/unmerged tracked entries count
-/// as dirty.
-/// Untracked files survive `git reset --hard` untouched, and deleted files
-/// are restored from the index — neither loses user data — while a modified
-/// tracked file would be overwritten. This also keeps sparse checkouts whose
-/// directories were never materialized (reported as deleted) from false
-/// positives.
-pub fn worktree_is_clean(repo_path: &Path) -> Result<bool> {
-    let output = run_git(repo_path, &["status", "--porcelain"])?;
-    Ok(output.lines().all(|line| {
-        let mut codes = line.chars();
-        let index_code = codes.next().unwrap_or(' ');
-        let worktree_code = codes.next().unwrap_or(' ');
-        !matches!(index_code, 'M' | 'T' | 'A' | 'U' | 'R' | 'C')
-            && !matches!(worktree_code, 'M' | 'T' | 'U')
-    }))
-}
-
 /// Read the configured origin URL without mutating the repository.
 pub fn remote_origin_url(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["remote", "get-url", "origin"])
@@ -498,213 +329,6 @@ pub fn checkout_in_session(
 ) -> Result<String> {
     let remote = remote_origin_url(repo_path)?;
     run_remote_git(repo_path, args, &remote, session)
-}
-
-/// Read the blob at `<revision>:<path>` through the operation session.
-///
-/// In a partial (`blob:none`) clone an object that was never checked out is
-/// fetched lazily, so this is a remote operation: it must honor the session's
-/// proxy, mirror, and credential policy exactly like a checkout. Blobs larger
-/// than `max_bytes` are refused before being loaded into memory.
-pub fn read_blob_in_session(
-    repo_path: &Path,
-    revision: &str,
-    path: &str,
-    max_bytes: u64,
-    session: &GitOperationSession,
-) -> Result<String> {
-    let spec = format!("{revision}:{path}");
-    let remote = remote_origin_url(repo_path)?;
-    let size: u64 = run_remote_git(repo_path, &["cat-file", "-s", &spec], &remote, session)?
-        .trim()
-        .parse()
-        .with_context(|| format!("git cat-file -s returned no size for '{spec}'"))?;
-    if size > max_bytes {
-        return Err(anyhow!(
-            "'{spec}' is {size} bytes, above the {max_bytes}-byte limit"
-        ));
-    }
-    run_remote_git(repo_path, &["cat-file", "blob", &spec], &remote, session)
-}
-
-/// One `R` record of `git diff -M --name-status` between two revisions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenamedPath {
-    pub from: String,
-    pub to: String,
-    /// Similarity percentage git assigned (100 = identical content).
-    pub similarity: u8,
-}
-
-/// Renames git detects between `from` and `to`, limited to `pathspecs`.
-///
-/// Similarity needs both blobs, so in a partial clone this may lazy-fetch the
-/// `to` side — hence the session. Keep `pathspecs` tight (the folder that
-/// disappeared plus the folders that appeared) so only those blobs are pulled.
-pub fn diff_renames_in_session(
-    repo_path: &Path,
-    from: &str,
-    to: &str,
-    pathspecs: &[&str],
-    session: &GitOperationSession,
-) -> Result<Vec<RenamedPath>> {
-    let remote = remote_origin_url(repo_path)?;
-    let mut args = vec![
-        "diff",
-        "-M",
-        "--name-status",
-        "--diff-filter=R",
-        "-z",
-        from,
-        to,
-        "--",
-    ];
-    args.extend(pathspecs);
-    let output = transport::execute_remote_git(Some(repo_path), &args, &remote, session, true)
-        .map_err(anyhow::Error::from)?;
-    Ok(parse_rename_records(&output.stdout))
-}
-
-/// `-z` output is `R<score>\0<from>\0<to>\0` per rename; anything else
-/// (`A`, `D`, `M` records) carries one path and is skipped.
-fn parse_rename_records(output: &str) -> Vec<RenamedPath> {
-    let mut fields = output.split('\0');
-    let mut renames = Vec::new();
-    while let Some(status) = fields.next() {
-        if status.is_empty() {
-            continue;
-        }
-        let Some(from) = fields.next() else { break };
-        if let Some(score) = status.strip_prefix('R') {
-            let Some(to) = fields.next() else { break };
-            renames.push(RenamedPath {
-                from: from.to_string(),
-                to: to.to_string(),
-                similarity: score.parse().unwrap_or(0).min(100),
-            });
-        } else if status.starts_with('C') {
-            // Copies also carry two paths; not a rename, just keep in step.
-            let _ = fields.next();
-        }
-    }
-    renames
-}
-
-/// Restore a repository to a previously captured commit after a failed update.
-pub fn reset_to_revision_in_session(
-    repo_path: &Path,
-    revision: &str,
-    session: &GitOperationSession,
-) -> Result<()> {
-    checkout_in_session(repo_path, &["reset", "--hard", revision], session).map(|_| ())
-}
-
-/// Capture cone-mode sparse paths so a failed update can restore its old view.
-pub fn sparse_checkout_paths(repo_path: &Path) -> Option<Vec<String>> {
-    run_git(repo_path, &["sparse-checkout", "list"])
-        .ok()
-        .map(|output| {
-            output
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-}
-
-pub fn restore_sparse_checkout_paths_in_session(
-    repo_path: &Path,
-    paths: &[String],
-    session: &GitOperationSession,
-) -> Result<()> {
-    if paths.is_empty() {
-        checkout_in_session(repo_path, &["sparse-checkout", "disable"], session).map(|_| ())
-    } else {
-        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
-        apply_sparse_checkout_in_session(repo_path, &refs, session)
-    }
-}
-
-/// Discard every local change in one managed Skill subtree without moving HEAD.
-///
-/// A repo-cached Skill supplies its source folder so siblings in the same
-/// checkout remain untouched until the user resolves them too. A standalone
-/// clone supplies `None`, which restores the complete checkout.
-pub fn restore_worktree_to_head_in_session(
-    repo_path: &Path,
-    pathspec: Option<&str>,
-    session: &GitOperationSession,
-) -> Result<()> {
-    let clean_args = |pathspec: Option<&str>| {
-        let mut args: Vec<String> = vec![
-            "clean",
-            "-fdx",
-            "-e",
-            ".skillstar/",
-            "-e",
-            ".DS_Store",
-            "-e",
-            "Thumbs.db",
-            "-e",
-            "desktop.ini",
-            "-e",
-            "._*",
-            "-e",
-            "*~",
-            "-e",
-            "*.swp",
-            "-e",
-            "*.swo",
-            "-e",
-            "*.tmp",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-        if let Some(pathspec) = pathspec {
-            args.extend(["--".to_string(), pathspec.to_string()]);
-        }
-        args
-    };
-    match pathspec.filter(|value| !value.is_empty()) {
-        Some(pathspec) => {
-            validate_relative_pathspec(pathspec)?;
-            let literal_pathspec = format!(":(literal){pathspec}");
-            checkout_in_session(
-                repo_path,
-                &["checkout", "-f", "HEAD", "--", &literal_pathspec],
-                session,
-            )?;
-            let clean_args = clean_args(Some(&literal_pathspec));
-            let clean_refs: Vec<&str> = clean_args.iter().map(String::as_str).collect();
-            run_git(repo_path, &clean_refs)?;
-        }
-        None => {
-            checkout_in_session(repo_path, &["reset", "--hard", "HEAD"], session)?;
-            let clean_args = clean_args(None);
-            let clean_refs: Vec<&str> = clean_args.iter().map(String::as_str).collect();
-            run_git(repo_path, &clean_refs)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_relative_pathspec(pathspec: &str) -> Result<()> {
-    let path = Path::new(pathspec);
-    if path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir
-                    | std::path::Component::RootDir
-                    | std::path::Component::Prefix(_)
-            )
-        })
-    {
-        anyhow::bail!("Unsafe Git pathspec: {pathspec:?}");
-    }
-    Ok(())
 }
 
 /// Git failed because the recorded remote ref no longer exists.
@@ -723,66 +347,6 @@ pub fn is_missing_remote_ref(error: &dyn std::error::Error) -> bool {
         current = err.source();
     }
     false
-}
-
-/// Run a git fetch with retry logic for the shallow-file race condition.
-///
-/// When multiple processes or threads run `git fetch --depth 1` on the same
-/// shallow repo concurrently, Git can fail with:
-///   `fatal: shallow file has changed since we read it`
-/// This is a transient condition — retrying after a short backoff resolves it.
-pub fn run_git_shallow_fetch_in_session(
-    repo_path: &Path,
-    args: &[&str],
-    session: &GitOperationSession,
-) -> Result<String> {
-    let repo_lock = shallow_fetch_lock(repo_path);
-    // Poisoned mutex: another thread panicked while holding the lock (e.g. antivirus
-    // injection). `into_inner()` recovers the guard safely — the HashMap inside holds
-    // only PathBuf keys and has no permanent invariant to corrupt.
-    let _fetch_guard = repo_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-    let mut last_err = None;
-    for attempt in 0..SHALLOW_FETCH_MAX_RETRIES {
-        let remote = remote_origin_url(repo_path)?;
-        match run_remote_git(repo_path, args, &remote, session) {
-            Ok(output) => return Ok(output),
-            Err(e) => {
-                let err_msg = e.to_string();
-                if err_msg.contains("shallow file has changed") {
-                    let delay = SHALLOW_FETCH_BACKOFF_MS
-                        .get(attempt as usize)
-                        .copied()
-                        .unwrap_or(1000);
-                    warn!(
-                        target: "git_ops",
-                        path = %repo_path.display(),
-                        attempt = attempt + 1,
-                        max = SHALLOW_FETCH_MAX_RETRIES,
-                        delay_ms = delay,
-                        "shallow file race detected, retrying after backoff"
-                    );
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
-                    last_err = Some(e);
-                } else {
-                    return Err(e);
-                }
-            }
-        }
-    }
-    Err(last_err.unwrap_or_else(|| anyhow!("shallow fetch failed after retries")))
-}
-
-fn shallow_fetch_lock(repo_path: &Path) -> Arc<Mutex<()>> {
-    let mut locks = SHALLOW_FETCH_LOCKS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    locks
-        .entry(repo_path.to_path_buf())
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone()
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {

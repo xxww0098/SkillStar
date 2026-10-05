@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::pi::PiParser;
-use super::{SessionCall, SessionParser, SessionFile, SessionTokens, read_calls};
+use super::{SessionCall, SessionFile, SessionParser, SessionTokens, read_calls};
 use crate::test_support::EnvGuard;
 
 const SESSION: &str = include_str!("fixtures/pi_session.jsonl");
@@ -27,7 +27,11 @@ fn sandbox() -> (tempfile::TempDir, tempfile::TempDir, EnvGuard) {
 
 /// A pi session file under `<home>/.pi/agent/sessions/<folder>/`.
 fn pi_session(home: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-    let dir = home.join(".pi").join("agent").join("sessions").join("--work-pi--");
+    let dir = home
+        .join(".pi")
+        .join("agent")
+        .join("sessions")
+        .join("--work-pi--");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     std::fs::write(&path, bytes).unwrap();
@@ -57,7 +61,11 @@ fn at(value: &str) -> i64 {
 #[test]
 fn usage_entries_model_work_and_compaction_count() {
     let (home, _data, _guard) = sandbox();
-    let path = pi_session(home.path(), &format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"), SESSION.as_bytes());
+    let path = pi_session(
+        home.path(),
+        &format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"),
+        SESSION.as_bytes(),
+    );
 
     let (delta, checkpoint) = PiParser.parse(&session_file(&path), None);
     // e0000005 (assistant), e0000006 (toolResult on the model in use),
@@ -72,7 +80,15 @@ fn usage_entries_model_work_and_compaction_count() {
     assert_eq!(first.agent, "pi");
     // pi's input already excludes the cache read (the codex.rs matrix):
     // mapped as they stand, never stripped.
-    assert_eq!(first.tokens, SessionTokens { input: 100, output: 50, cache_read: 1000, cache_write: 200 });
+    assert_eq!(
+        first.tokens,
+        SessionTokens {
+            input: 100,
+            output: 50,
+            cache_read: 1000,
+            cache_write: 200
+        }
+    );
     // The ask was the user entry at 08:00:01.
     assert_eq!(first.latency_ms, Some(4000));
 
@@ -84,7 +100,15 @@ fn usage_entries_model_work_and_compaction_count() {
     assert_eq!(delta[2].model_answered, "claude/claude-opus-5-5");
 
     // A usage entry with only cache_read is still a call.
-    assert_eq!(delta[3].tokens, SessionTokens { input: 0, output: 0, cache_read: 300, cache_write: 0 });
+    assert_eq!(
+        delta[3].tokens,
+        SessionTokens {
+            input: 0,
+            output: 0,
+            cache_read: 300,
+            cache_write: 0
+        }
+    );
 
     // The compaction counts on the model last replied with.
     assert_eq!(delta[4].model_answered, "claude/claude-opus-5-5");
@@ -94,12 +118,24 @@ fn usage_entries_model_work_and_compaction_count() {
 #[test]
 fn fork_copy_is_skipped_by_time() {
     let (home, _data, _guard) = sandbox();
-    let source = pi_session(home.path(), &format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"), SESSION.as_bytes());
+    let source = pi_session(
+        home.path(),
+        &format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"),
+        SESSION.as_bytes(),
+    );
     // Forked an hour later: its file copies the source's entries (times and
     // all) then goes on. Set the copy's mtime later so the source file is
     // read first.
-    let fork = pi_session(home.path(), &format!("2026-09-25T09-00-00-000Z_{FORK_ID}.jsonl"), FORK.as_bytes());
-    let later = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3600;
+    let fork = pi_session(
+        home.path(),
+        &format!("2026-09-25T09-00-00-000Z_{FORK_ID}.jsonl"),
+        FORK.as_bytes(),
+    );
+    let later = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
     let older = later - 7200;
     set_mtime(&fork, later);
     set_mtime(&source, older);
@@ -108,8 +144,16 @@ fn fork_copy_is_skipped_by_time() {
     let pi: Vec<&SessionCall> = calls.iter().filter(|c| c.agent == "pi").collect();
     // The source's 5 calls plus the fork's own single reply (f0000002);
     // the fork's copied entries counted where they were first written.
-    assert_eq!(pi.len(), 6, "the fork's copy of the source's entries is skipped");
-    let fork_calls: Vec<&SessionCall> = pi.iter().filter(|c| c.session == FORK_ID).copied().collect();
+    assert_eq!(
+        pi.len(),
+        6,
+        "the fork's copy of the source's entries is skipped"
+    );
+    let fork_calls: Vec<&SessionCall> = pi
+        .iter()
+        .filter(|c| c.session == FORK_ID)
+        .copied()
+        .collect();
     assert_eq!(fork_calls.len(), 1);
     assert_eq!(fork_calls[0].tokens.input, 7);
     let source_calls: Vec<&SessionCall> = pi.iter().filter(|c| c.session == ID).copied().collect();
@@ -119,7 +163,8 @@ fn fork_copy_is_skipped_by_time() {
 fn set_mtime(path: &Path, secs: u64) {
     let time = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
     let f = std::fs::File::options().append(true).open(path).unwrap();
-    f.set_times(std::fs::FileTimes::new().set_modified(time)).unwrap();
+    f.set_times(std::fs::FileTimes::new().set_modified(time))
+        .unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -136,12 +181,23 @@ fn jsonc_comments_and_trailing_commas_are_tolerated() {
 {"type":"message","id":"e3","timestamp":"2026-09-24T08:00:05.000Z","message":{"role":"assistant","model":"claude-opus-5-5","usage":{"input":9,"output":3,"cacheRead":10,"cacheWrite":0,"totalTokens":22,},},}
 {"not json at all"
 "#;
-    let path = pi_session(home.path(), "2026-09-24T08-00-00-000Z_sess-jsonc.jsonl", lines.as_bytes());
+    let path = pi_session(
+        home.path(),
+        "2026-09-24T08-00-00-000Z_sess-jsonc.jsonl",
+        lines.as_bytes(),
+    );
 
     let (delta, checkpoint) = PiParser.parse(&session_file(&path), None);
-    assert_eq!(delta.len(), 1, "comments, trailing commas and junk lines tolerated");
+    assert_eq!(
+        delta.len(),
+        1,
+        "comments, trailing commas and junk lines tolerated"
+    );
     assert_eq!(delta[0].session, "sess-jsonc");
-    assert_eq!(delta[0].model_answered, "claude-opus-5-5", "model_change's provider/model takes the id half");
+    assert_eq!(
+        delta[0].model_answered, "claude-opus-5-5",
+        "model_change's provider/model takes the id half"
+    );
     assert_eq!(delta[0].tokens.input, 9);
     assert_eq!(checkpoint.calls_seen, 1);
 }
@@ -154,7 +210,11 @@ fn model_change_without_model_id_does_not_clear_the_model() {
 {"type":"model_change","id":"e2","timestamp":"2026-09-24T08:00:00.200Z","model":"bare-without-slash"}
 {"type":"compaction","id":"e3","timestamp":"2026-09-24T08:03:00.000Z","usage":{"input":5,"output":1,"cacheRead":0,"cacheWrite":0}}
 "#;
-    let path = pi_session(home.path(), "2026-09-24T08-00-00-000Z_sess-mc.jsonl", lines.as_bytes());
+    let path = pi_session(
+        home.path(),
+        "2026-09-24T08-00-00-000Z_sess-mc.jsonl",
+        lines.as_bytes(),
+    );
     let (delta, _) = PiParser.parse(&session_file(&path), None);
     // A bare model without '/' does not override; the compaction counts on
     // the model in force.
@@ -169,7 +229,11 @@ fn model_change_without_model_id_does_not_clear_the_model() {
 #[test]
 fn append_produces_only_delta_and_calls_seen_converges() {
     let (home, _data, _guard) = sandbox();
-    let path = pi_session(home.path(), &format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"), SESSION.as_bytes());
+    let path = pi_session(
+        home.path(),
+        &format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"),
+        SESSION.as_bytes(),
+    );
     let (first_delta, first) = PiParser.parse(&session_file(&path), None);
     assert_eq!(first_delta.len(), 5);
 
@@ -208,18 +272,28 @@ fn discovery_reads_session_dir_setting_and_env() {
     let (home, _data, _guard) = sandbox();
     let flat = home.path().join("flat");
     std::fs::create_dir_all(&flat).unwrap();
-    std::fs::write(flat.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")), SESSION).unwrap();
+    std::fs::write(
+        flat.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")),
+        SESSION,
+    )
+    .unwrap();
     let agent = home.path().join(".pi").join("agent");
     std::fs::create_dir_all(&agent).unwrap();
     std::fs::write(
         agent.join("settings.json"),
-        format!("{{\n  // where the sessions go\n  \"sessionDir\": {},\n}}", json_string(&flat)),
+        format!(
+            "{{\n  // where the sessions go\n  \"sessionDir\": {},\n}}",
+            json_string(&flat)
+        ),
     )
     .unwrap();
 
     let files = PiParser.discover(home.path());
     assert_eq!(files.len(), 1, "the flat folder named by the setting");
-    assert_eq!(files[0].path, flat.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")));
+    assert_eq!(
+        files[0].path,
+        flat.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl"))
+    );
 }
 
 fn json_string(path: &Path) -> String {
@@ -231,34 +305,59 @@ fn agent_dir_env_and_session_dir_env_honored_when_not_sandboxed() {
     let agent = tempfile::tempdir().unwrap();
     let dir = agent.path().join("sessions").join("--proj--");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")), SESSION).unwrap();
+    std::fs::write(
+        dir.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")),
+        SESSION,
+    )
+    .unwrap();
 
     let home = tempfile::tempdir().unwrap();
     let files = {
         let _guard = EnvGuard::set(&[("PI_CODING_AGENT_DIR", agent.path())]);
         PiParser.discover(home.path())
     };
-    assert_eq!(files.len(), 1, "$PI_CODING_AGENT_DIR names the agent folder");
+    assert_eq!(
+        files.len(),
+        1,
+        "$PI_CODING_AGENT_DIR names the agent folder"
+    );
 
     // $PI_CODING_AGENT_SESSION_DIR names a flat folder outright.
     let flat = tempfile::tempdir().unwrap();
-    std::fs::write(flat.path().join("2026-09-24T08-00-00-000Z_flat-id.jsonl"), SESSION).unwrap();
+    std::fs::write(
+        flat.path().join("2026-09-24T08-00-00-000Z_flat-id.jsonl"),
+        SESSION,
+    )
+    .unwrap();
     let files = {
         let _guard = EnvGuard::set(&[("PI_CODING_AGENT_SESSION_DIR", flat.path())]);
         PiParser.discover(home.path())
     };
     assert_eq!(files.len(), 1);
-    assert!(files[0].path.ends_with("2026-09-24T08-00-00-000Z_flat-id.jsonl"));
+    assert!(
+        files[0]
+            .path
+            .ends_with("2026-09-24T08-00-00-000Z_flat-id.jsonl")
+    );
 }
 
 #[test]
 fn non_session_names_are_skipped() {
     let (home, _data, _guard) = sandbox();
-    let dir = home.path().join(".pi").join("agent").join("sessions").join("--work-pi--");
+    let dir = home
+        .path()
+        .join(".pi")
+        .join("agent")
+        .join("sessions")
+        .join("--work-pi--");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("no-underscore.jsonl"), SESSION).unwrap();
     std::fs::write(dir.join("trailing_.jsonl"), SESSION).unwrap();
-    std::fs::write(dir.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")), SESSION).unwrap();
+    std::fs::write(
+        dir.join(format!("2026-09-24T08-00-00-000Z_{ID}.jsonl")),
+        SESSION,
+    )
+    .unwrap();
 
     let files = PiParser.discover(home.path());
     assert_eq!(files.len(), 1, "only <time>_<id>.jsonl names are sessions");

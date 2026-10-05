@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::codex::CodexParser;
-use super::{SessionCall, SessionParser, SessionFile, SessionTokens};
+use super::{SessionCall, SessionFile, SessionParser, SessionTokens};
 use crate::test_support::EnvGuard;
 
 const ROLLOUT: &str = include_str!("fixtures/codex_rollout.jsonl");
@@ -30,7 +30,12 @@ fn sandbox() -> (tempfile::TempDir, tempfile::TempDir, EnvGuard) {
 
 /// Write a rollout under the sandbox's sessions tree, returning its path.
 fn rollout(home: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-    let dir = home.join(".codex").join("sessions").join("2026").join("09").join("20");
+    let dir = home
+        .join(".codex")
+        .join("sessions")
+        .join("2026")
+        .join("09")
+        .join("20");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     std::fs::write(&path, bytes).unwrap();
@@ -90,7 +95,12 @@ fn token_count_deltas_and_cache_semantics() {
     assert_eq!(first.effort.as_deref(), Some("low"));
     assert_eq!(
         first.tokens,
-        SessionTokens { input: 6000, output: 300, cache_read: 4000, cache_write: 0 }
+        SessionTokens {
+            input: 6000,
+            output: 300,
+            cache_read: 4000,
+            cache_write: 0
+        }
     );
     // Latency measured from the user_message line (15:48:29.2 → 15:48:36).
     assert_eq!(first.latency_ms, Some(6800));
@@ -108,7 +118,12 @@ fn token_count_deltas_and_cache_semantics() {
     assert_eq!(second.effort, None);
     assert_eq!(
         second.tokens,
-        SessionTokens { input: 2000, output: 200, cache_read: 10000, cache_write: 0 }
+        SessionTokens {
+            input: 2000,
+            output: 200,
+            cache_read: 10000,
+            cache_write: 0
+        }
     );
 
     // A total that started over (input fell below the previous one): the
@@ -117,7 +132,12 @@ fn token_count_deltas_and_cache_semantics() {
     assert_eq!(third.at, at("2026-09-20T15:51:00.000Z"));
     assert_eq!(
         third.tokens,
-        SessionTokens { input: 400, output: 50, cache_read: 100, cache_write: 0 }
+        SessionTokens {
+            input: 400,
+            output: 50,
+            cache_read: 100,
+            cache_write: 0
+        }
     );
 }
 
@@ -128,11 +148,18 @@ fn session_id_prefers_meta_session_id_over_thread_id() {
 {"timestamp":"2026-09-20T15:48:30.000Z","type":"turn_context","payload":{"model":"gpt-6-astra"}}
 {"timestamp":"2026-09-20T15:48:31.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"cache_write_input_tokens":0},"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"cache_write_input_tokens":0}}}}
 "#;
-    let path = rollout(home.path(), &format!("rollout-2026-09-20T15-48-28-{THREAD}.jsonl"), lines.as_bytes());
+    let path = rollout(
+        home.path(),
+        &format!("rollout-2026-09-20T15-48-28-{THREAD}.jsonl"),
+        lines.as_bytes(),
+    );
 
     let (delta, _) = CodexParser.parse(&session_file(&path), None);
     assert_eq!(delta.len(), 1);
-    assert_eq!(delta[0].session, "sess-cx-1", "session_id wins over payload id");
+    assert_eq!(
+        delta[0].session, "sess-cx-1",
+        "session_id wins over payload id"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -161,14 +188,24 @@ fn packed_rollout_reads_the_same_calls() {
     let strip = |calls: &[SessionCall]| {
         calls
             .iter()
-            .map(|c| (c.at, c.session.clone(), c.model_answered.clone(), c.tokens, c.effort.clone(), c.latency_ms))
+            .map(|c| {
+                (
+                    c.at,
+                    c.session.clone(),
+                    c.model_answered.clone(),
+                    c.tokens,
+                    c.effort.clone(),
+                    c.latency_ms,
+                )
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(strip(&packed_delta), strip(&plain_delta));
     assert_eq!(packed_checkpoint.calls_seen, plain_checkpoint.calls_seen);
     // A packed rollout is read whole every run: even an unchanged file
     // reparses (no resume), still yielding the same full view.
-    let (again_delta, again) = CodexParser.parse(&session_file(&zst_path), Some(packed_checkpoint.clone()));
+    let (again_delta, again) =
+        CodexParser.parse(&session_file(&zst_path), Some(packed_checkpoint.clone()));
     assert_eq!(again_delta.len(), 3);
     assert_eq!(again.calls_seen, 3);
 }
@@ -192,7 +229,11 @@ fn both_forms_side_by_side_count_once() {
 #[test]
 fn corrupt_packed_rollout_degrades_to_empty() {
     let (home, _data, _guard) = sandbox();
-    let path = rollout(home.path(), "rollout-2026-09-20T15-48-28-deadbeef.jsonl.zst", b"not a zstd frame");
+    let path = rollout(
+        home.path(),
+        "rollout-2026-09-20T15-48-28-deadbeef.jsonl.zst",
+        b"not a zstd frame",
+    );
     let (delta, checkpoint) = CodexParser.parse(&session_file(&path), None);
     assert!(delta.is_empty());
     assert_eq!(checkpoint.calls_seen, 0);
@@ -225,7 +266,12 @@ fn append_produces_only_delta_and_calls_seen_converges() {
     // input 100, cached 0, output 10.
     assert_eq!(
         second_delta[0].tokens,
-        SessionTokens { input: 100, output: 10, cache_read: 0, cache_write: 0 }
+        SessionTokens {
+            input: 100,
+            output: 10,
+            cache_read: 0,
+            cache_write: 0
+        }
     );
     assert_eq!(second.calls_seen, 4);
     assert_eq!(second.offset, std::fs::metadata(&path).unwrap().len());
@@ -260,12 +306,19 @@ fn partial_trailing_line_is_left_for_next_read() {
     // Everything but the last 12 bytes: line 13 is half written, lines 1-12
     // (two calls: the third count lives in line 13) are consumed.
     let (whole, _tail) = ROLLOUT.split_at(ROLLOUT.len() - 12);
-    let path = rollout(home.path(), &format!("rollout-2026-09-20T15-48-28-{THREAD}.jsonl"), whole.as_bytes());
+    let path = rollout(
+        home.path(),
+        &format!("rollout-2026-09-20T15-48-28-{THREAD}.jsonl"),
+        whole.as_bytes(),
+    );
     let (delta, checkpoint) = CodexParser.parse(&session_file(&path), None);
     assert_eq!(delta.len(), 2);
     assert_eq!(checkpoint.calls_seen, 2);
     let twelve_lines: u64 = ROLLOUT.lines().take(12).map(|l| l.len() as u64 + 1).sum();
-    assert_eq!(checkpoint.offset, twelve_lines, "the half-written line is left for the next read");
+    assert_eq!(
+        checkpoint.offset, twelve_lines,
+        "the half-written line is left for the next read"
+    );
 
     // Completing the line yields the third call on the next read.
     std::fs::write(&path, ROLLOUT).unwrap();
@@ -290,7 +343,11 @@ fn discovery_walks_and_filters_rollout_names() {
     // Not rollouts: wrong prefix, no thread id, a second underscore.
     rollout(home.path(), "other.jsonl", ROLLOUT.as_bytes());
     rollout(home.path(), "rollout-x.jsonl", ROLLOUT.as_bytes());
-    rollout(home.path(), "rollout-2026-09-20T15-48-28-a_b_c.jsonl", ROLLOUT.as_bytes());
+    rollout(
+        home.path(),
+        "rollout-2026-09-20T15-48-28-a_b_c.jsonl",
+        ROLLOUT.as_bytes(),
+    );
 
     let files = CodexParser.discover(home.path());
     assert_eq!(files.len(), 2, "both segments of the thread, nothing else");
@@ -304,7 +361,11 @@ fn sandbox_wins_over_codex_home() {
     let outside = tempfile::tempdir().unwrap();
     let outside_sessions = outside.path().join(".codex").join("sessions");
     std::fs::create_dir_all(&outside_sessions).unwrap();
-    std::fs::write(outside_sessions.join("rollout-2026-09-20T15-48-28-outside.jsonl"), ROLLOUT).unwrap();
+    std::fs::write(
+        outside_sessions.join("rollout-2026-09-20T15-48-28-outside.jsonl"),
+        ROLLOUT,
+    )
+    .unwrap();
     plain_rollout(home.path());
 
     let _guard = EnvGuard::set(&[
@@ -313,8 +374,16 @@ fn sandbox_wins_over_codex_home() {
         ("CODEX_HOME", outside.path()),
     ]);
     let files = CodexParser.discover(home.path());
-    assert_eq!(files.len(), 1, "SKILLSTAR_TOOL_SYNC_HOME wins over $CODEX_HOME");
-    assert!(files[0].path.ends_with(format!("rollout-2026-09-20T15-48-28-{THREAD}.jsonl")));
+    assert_eq!(
+        files.len(),
+        1,
+        "SKILLSTAR_TOOL_SYNC_HOME wins over $CODEX_HOME"
+    );
+    assert!(
+        files[0]
+            .path
+            .ends_with(format!("rollout-2026-09-20T15-48-28-{THREAD}.jsonl"))
+    );
 }
 
 #[test]
@@ -322,11 +391,18 @@ fn codex_home_honored_when_not_sandboxed() {
     let codex = tempfile::tempdir().unwrap();
     let sessions = codex.path().join("sessions").join("2026").join("09");
     std::fs::create_dir_all(&sessions).unwrap();
-    std::fs::write(sessions.join("rollout-2026-09-20T15-48-28-env.jsonl"), ROLLOUT).unwrap();
+    std::fs::write(
+        sessions.join("rollout-2026-09-20T15-48-28-env.jsonl"),
+        ROLLOUT,
+    )
+    .unwrap();
 
     let home = tempfile::tempdir().unwrap();
     let _guard = EnvGuard::set(&[("CODEX_HOME", codex.path())]);
     let files = CodexParser.discover(home.path());
     assert_eq!(files.len(), 1);
-    assert_eq!(files[0].path, sessions.join("rollout-2026-09-20T15-48-28-env.jsonl"));
+    assert_eq!(
+        files[0].path,
+        sessions.join("rollout-2026-09-20T15-48-28-env.jsonl")
+    );
 }

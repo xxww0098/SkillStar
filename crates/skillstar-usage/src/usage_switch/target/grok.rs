@@ -5,11 +5,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
-use serde_json::{Map, Value};
 use crate::crypto;
 use crate::oauth::token_refresh;
 use crate::subscription::Subscription;
+use chrono::{DateTime, Utc};
+use serde_json::{Map, Value};
 
 use super::super::error::{CustodyResult, MaterializeError};
 use super::{
@@ -203,9 +203,9 @@ fn fill_schema(entry: &mut Map<String, Value>, access_token: &str, sub: &Subscri
     entry
         .entry("oidc_issuer")
         .or_insert_with(|| Value::String("https://auth.x.ai".into()));
-    entry.entry("oidc_client_id").or_insert_with(|| {
-        Value::String(crate::fetchers::oauth::xai::client_id().into())
-    });
+    entry
+        .entry("oidc_client_id")
+        .or_insert_with(|| Value::String(crate::fetchers::oauth::xai::client_id().into()));
 
     if let Some(claims) = token_refresh::decode_jwt_payload(access_token) {
         for field in MIRRORED_CLAIMS {

@@ -71,7 +71,11 @@ impl SessionParser for CodexParser {
         file: &SessionFile,
         prior: Option<FileCheckpoint>,
     ) -> (Vec<SessionCall>, FileCheckpoint) {
-        let packed = file.path.as_os_str().to_str().is_some_and(|p| p.ends_with(ZST_SUFFIX));
+        let packed = file
+            .path
+            .as_os_str()
+            .to_str()
+            .is_some_and(|p| p.ends_with(ZST_SUFFIX));
         let head = checkpoint::read_head(&file.path);
         // Packed rollouts are written whole, so they are read whole: no fast
         // path and no resume, whatever the checkpoint says.
@@ -102,8 +106,11 @@ impl SessionParser for CodexParser {
             }
         };
         if state.session.is_empty()
-            && let Some(thread) =
-                file.path.file_name().and_then(|n| n.to_str()).and_then(rollout_thread_id)
+            && let Some(thread) = file
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(rollout_thread_id)
         {
             // The thread id from the file name until session_meta names it.
             state.session = thread;
@@ -115,7 +122,9 @@ impl SessionParser for CodexParser {
             // warn and an empty view (the next run retries).
             match decode_zst(&file.path) {
                 Ok(bytes) => scan_lines(&bytes, 0, Self::AGENT, &mut state, &mut delta, &file.path),
-                Err(error) => tracing::warn!(%error, path = ?file.path, "Failed to decode packed rollout; skipping this run"),
+                Err(error) => {
+                    tracing::warn!(%error, path = ?file.path, "Failed to decode packed rollout; skipping this run")
+                }
             }
         } else if let Ok(reader) = std::fs::File::open(&file.path).map(|f| {
             let mut f = f;
@@ -138,7 +147,14 @@ impl SessionParser for CodexParser {
                             Some(b'\r') | Some(b'\n') => &buffer[..buffer.len() - 1],
                             _ => &buffer[..],
                         };
-                        codex_line(Self::AGENT, &mut state, &mut delta, trimmed, &file.path, line_end);
+                        codex_line(
+                            Self::AGENT,
+                            &mut state,
+                            &mut delta,
+                            trimmed,
+                            &file.path,
+                            line_end,
+                        );
                         offset = line_end;
                     }
                 }
@@ -158,6 +174,20 @@ impl SessionParser for CodexParser {
             calls_seen: state.calls.len() as u64,
         };
         (delta, checkpoint)
+    }
+
+    fn unchanged(&self, file: &SessionFile, prior: &FileCheckpoint) -> bool {
+        // Packed rollouts are rewritten whole; the plain fast path would
+        // skip the decode and keep a stale view.
+        if file
+            .path
+            .as_os_str()
+            .to_str()
+            .is_some_and(|path| path.ends_with(ZST_SUFFIX))
+        {
+            return false;
+        }
+        checkpoint::is_unchanged(prior, file, Self::PARSER_VERSION)
     }
 
     fn replay(&self, checkpoint: &FileCheckpoint) -> Vec<(String, SessionCall)> {
@@ -391,8 +421,8 @@ impl CodexState {
             #[serde(default)]
             calls: Vec<SessionCall>,
         }
-        let stored: Stored = serde_json::from_value(checkpoint.agent_state.clone())
-            .unwrap_or_default();
+        let stored: Stored =
+            serde_json::from_value(checkpoint.agent_state.clone()).unwrap_or_default();
         Self {
             meta: stored.meta,
             session: stored.session,
@@ -503,7 +533,9 @@ fn codex_line(
             if tokens.is_zero() {
                 return; // The same total told again adds nothing
             }
-            let Some(at) = line_timestamp(line) else { return };
+            let Some(at) = line_timestamp(line) else {
+                return;
+            };
             // It took from what asked for it, or the call before it.
             let asked = state.last_in_ms.max(state.last_call_ms);
             let latency_ms = (asked > 0 && at > asked && at - asked < super::MAX_LATENCY_MS)

@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use crate::core::github_auth::GitHubAuthState;
 
 pub use skillstar_skills::skill_update::{
-    LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
+    SkillUpdateReport, UpdateResult,
 };
 
 #[tauri::command]
@@ -51,9 +51,11 @@ pub async fn install_skill(
             None => facade.install_skill(url, name)?,
         };
         if let Some(id) = agent_id.as_deref() {
-            facade
-                .session()
-                .emit_stage(skillstar_skills::git::transport::InstallStage::Deploying, &skill.git_url, Some(&skill.name));
+            facade.session().emit_stage(
+                skillstar_skills::git::transport::InstallStage::Deploying,
+                &skill.git_url,
+                Some(&skill.name),
+            );
             let ids = vec![id.to_string()];
             let deploy = skillstar_app::global_deploy::deploy_to_selected_global_agents(
                 std::slice::from_ref(&skill.name),
@@ -166,51 +168,10 @@ pub async fn update_skills(
 }
 
 #[tauri::command]
-pub async fn resolve_skill_update(
-    name: String,
-    resolution: LocalDivergenceResolution,
-    app: AppHandle,
-    auth_state: State<'_, GitHubAuthState>,
-) -> Result<ResolveSkillUpdateResult, AppError> {
-    let facade = auth_state
-        .begin_git_operation(app, None)
-        .map_err(|error| AppError::Git(error.to_string()))?;
-    let session_id = facade.session().id().to_string();
-    let result =
-        tokio::task::spawn_blocking(move || facade.resolve_skill_update(&name, resolution)).await;
-    auth_state.finish_git_operation(&session_id);
-    result
-        .map_err(|e| AppError::Other(format!("update resolution task panicked: {e}")))?
-        .map_err(AppError::Anyhow)
-}
-
-#[tauri::command]
 pub async fn open_skill_folder(name: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         skillstar_skills::content::open_skill_folder(&name).map_err(AppError::Anyhow)
     })
     .await
     .map_err(|e| AppError::Other(format!("open_skill_folder task panicked: {e}")))?
-}
-
-/// Install the successor an update check recorded for `name`, carry its
-/// Agent/Project deployments over, and remove `name`.
-#[tauri::command]
-pub async fn migrate_renamed_skill(
-    name: String,
-    app: AppHandle,
-    auth_state: State<'_, GitHubAuthState>,
-) -> Result<skillstar_app::skill_migration::SkillMigrationReport, AppError> {
-    let facade = auth_state
-        .begin_git_operation(app, None)
-        .map_err(|error| AppError::Git(error.to_string()))?;
-    let session_id = facade.session().id().to_string();
-    let result = tokio::task::spawn_blocking(move || {
-        skillstar_app::skill_migration::migrate_renamed_skill(&name, &facade)
-    })
-    .await;
-    auth_state.finish_git_operation(&session_id);
-    result
-        .map_err(|e| AppError::Other(format!("skill migration task panicked: {e}")))?
-        .map_err(AppError::Anyhow)
 }

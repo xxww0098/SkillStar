@@ -1,17 +1,12 @@
-//! Patrol: config, types, and pure check/batch logic.
+//! Patrol: config and event DTOs.
 //!
-//! Domain ownership:
-//! - [`check`] — collect hub skills, prefetch, per-skill update detection
-//! - [`config`] / [`types`] — persisted config and event DTOs
-//!
-//! Tauri owns only State, tokio spawn, and Emitter adapters (`src-tauri/src/core/patrol.rs`).
+//! D-081 removed the generic per-skill patrol checker — the loop in
+//! `src-tauri/src/core/patrol.rs` runs the same lock-hash refresh the UI's
+//! refresh button uses. This module owns only the persisted config and the
+//! event/status DTOs.
 
-pub mod check;
 pub mod config;
 pub mod types;
 
-pub use check::{
-    check_hub_skills_local_in_session, collect_hub_skills, prefetch_failed_repos_in_session,
-};
 pub use config::{load_config, save_config};
-pub use types::{HubSkillEntry, PatrolCheckEvent, PatrolConfig, PatrolStatus};
+pub use types::{PatrolCheckEvent, PatrolConfig, PatrolStatus};

@@ -487,7 +487,7 @@ fn agent_ids_are_spelled_out_only_in_the_registry_and_the_writers() {
             include_str!("../migrate_configs.rs"),
             6,
         ),
-        ("paths_files.rs", include_str!("../paths_files.rs"), 2),
+        ("paths_files.rs", include_str!("../paths_files.rs"), 1),
         ("backup_merge.rs", include_str!("../backup_merge.rs"), 0),
         ("mod.rs", include_str!("../mod.rs"), 0),
     ];

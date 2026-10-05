@@ -48,7 +48,6 @@ export type {
 };
 export type { PatrolStatus, UpdateCheckResult } from "./system";
 export type { AgentDeployStatus, DeployKind } from "./agents";
-export type { RepoCacheInfo } from "./storage";
 export type { ConfigConflict, ToolInstallStatus } from "./models";
 export type {
   AuthMethod,

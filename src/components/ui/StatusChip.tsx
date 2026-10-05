@@ -32,8 +32,6 @@ const statusChipVariants = cva(
   },
 );
 
-export type StatusChipTone = NonNullable<VariantProps<typeof statusChipVariants>["tone"]>;
-
 export function StatusChip({
   className,
   tone,

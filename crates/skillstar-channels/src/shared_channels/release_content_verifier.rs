@@ -3,6 +3,7 @@ use super::{
     CHANNEL_CONTENT_HASH_VERSION, ChannelReleaseManifest, ChannelSkillReleaseStatus,
     RemoteRepository, SharedChannelError, SharedChannelErrorCode,
 };
+use anyhow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -18,22 +19,17 @@ pub(super) fn verify_release_content_blocking(
                 format!("Unable to lock channel verification: {error}"),
             )
         })?;
-    // Verification must never reuse the installed ref cache: Hub Skills may
-    // point into that checkout, and fetching it would reset user edits before
-    // divergence handling can offer preserve/discard choices.
+    // D-081: verification fetches an isolated temp clone at the pinned commit
+    // — installed content is never touched, so there is nothing to reset.
     let verification_source = format!(
-        "channel-verify-{}-{}",
-        repository.id,
-        skillstar_skills::repo_scanner::cache_dir_name(&repository.clone_url)
+        "{}#{}",
+        repository.clone_url, manifest.commit_sha
     );
-    let repo_dir = skillstar_skills::repo_scanner::clone_or_fetch_repo_at_in_session(
-        &repository.clone_url,
-        &verification_source,
-        Some(&manifest.commit_sha),
-        git.session(),
-    )
-    .map_err(release_content_git_error)?;
-    verify_release_checkout(&repo_dir, &repository.name, manifest)
+    let spec = skillstar_skills::source_resolver::Source::parse(&verification_source)
+        .map_err(release_content_git_error)?;
+    let checkout = skillstar_skills::fetch::fetch_source(&spec, git.session())
+        .map_err(|error| release_content_git_error(anyhow::anyhow!("{error:#}")))?;
+    verify_release_checkout(checkout.dir(), &repository.name, manifest)
 }
 
 fn verify_release_checkout(
@@ -44,13 +40,11 @@ fn verify_release_checkout(
     verify_checkout_head(repo_dir, &manifest.commit_sha)?;
 
     let default_skill_id = root_skill_default_id(repository_name, &manifest.skills);
-    let discovered = skillstar_skills::discovery::collapse_pack_identity_copies(
-        skillstar_skills::discovery::discover_skills_without_dedup(
-            repo_dir,
-            true,
-            Some(default_skill_id),
-        ),
-    )
+    let discovered = super::collapse_identity_copies(skillstar_skills::discovery::discover_skills_without_dedup(
+        repo_dir,
+        true,
+        Some(default_skill_id),
+    ))
     .map_err(|_| content_integrity_error())?
     .into_iter()
     .map(|skill| (skill.id.to_ascii_lowercase(), skill))

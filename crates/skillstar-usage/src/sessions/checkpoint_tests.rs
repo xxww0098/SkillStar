@@ -5,10 +5,10 @@
 
 use std::path::PathBuf;
 
+use super::FileCheckpoint;
 use super::checkpoint::{
     CheckpointStore, can_resume, head_hash, head_matches, index_path, prefix_hash,
 };
-use super::FileCheckpoint;
 use crate::test_support::EnvGuard;
 
 fn sandbox() -> (tempfile::TempDir, EnvGuard) {
@@ -45,7 +45,10 @@ fn store_save_load_roundtrip_is_equal() {
     store.save().unwrap();
 
     let loaded = CheckpointStore::load();
-    assert_eq!(loaded.get(&PathBuf::from("/tmp/session.jsonl")), Some(&sample_checkpoint()));
+    assert_eq!(
+        loaded.get(&PathBuf::from("/tmp/session.jsonl")),
+        Some(&sample_checkpoint())
+    );
     assert!(loaded.get(&PathBuf::from("/tmp/other.jsonl")).is_some());
 }
 
@@ -74,7 +77,11 @@ fn store_version_mismatch_drops_everything() {
     value["version"] = serde_json::json!(9999);
     std::fs::write(index_path(), serde_json::to_vec(&value).unwrap()).unwrap();
 
-    assert!(CheckpointStore::load().get(&PathBuf::from("/tmp/a.jsonl")).is_none());
+    assert!(
+        CheckpointStore::load()
+            .get(&PathBuf::from("/tmp/a.jsonl"))
+            .is_none()
+    );
 }
 
 #[test]

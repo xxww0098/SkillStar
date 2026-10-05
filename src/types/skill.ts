@@ -53,22 +53,6 @@ export interface SkillUpdateState {
   upstream_change?: UpstreamChange | null;
 }
 
-/** Return type of `migrate_renamed_skill`: the successor was installed and
- *  the old entry removed; anything that did not carry over is listed. */
-export interface SkillMigrationReport {
-  installed: string;
-  removed: string;
-  agents_relinked: string[];
-  agent_failures: string[];
-  projects_relinked: string[];
-  project_failures: string[];
-  /** The old entry is still installed; the next check reports it as removed. */
-  removal_failure: string | null;
-}
-
-/** Return type of the `update_skill` command. When a repo-cached skill is
- *  updated the entire repo is pulled, which implicitly updates all siblings. */
-
 export interface UpdateResult {
   skill: Skill;
   /** Names of sibling skills from the same repo whose update_available was
@@ -84,42 +68,6 @@ export interface SkillUpdateFailure {
   error: string;
 }
 
-/** Why an update stopped. `source_removed` and `source_missing` mean the Skill
- *  is no longer shipped by its source, so there is no upstream state to go back
- *  to — only `source_removed` still has content left to keep. */
-export type LocalDivergenceReason =
-  | "content_changed"
-  | "baseline_missing"
-  | "snapshot_failed"
-  | "source_removed"
-  | "source_missing";
-
-export interface SkillUpdateBlocked {
-  name: string;
-  reason: LocalDivergenceReason;
-  suggested_local_name: string;
-  error: string | null;
-}
-
-export type LocalDivergenceResolution =
-  | { kind: "preserve"; local_name: string }
-  | { kind: "discard" }
-  | { kind: "uninstall" };
-
-export interface ResolveSkillUpdateResult {
-  update: UpdateResult | null;
-  local_copy: Skill | null;
-  /** Skills removed because their source dropped them — they are not coming back. */
-  uninstalled: string[];
-  remaining_blocked: SkillUpdateBlocked[];
-}
-
-/** A stop whose Skill no longer exists at its source: it can be kept as a local
- *  copy (content permitting) or removed, but never discarded back to upstream. */
-export function isSourceGone(reason: LocalDivergenceReason): boolean {
-  return reason === "source_removed" || reason === "source_missing";
-}
-
 /** A Skill a shared channel owns, which the generic update path declines by
  *  design rather than fails on. */
 export interface SkillUpdateChannelManaged {
@@ -128,26 +76,16 @@ export interface SkillUpdateChannelManaged {
 }
 
 /** Return type of the `update_skills` batch command. `skipped` names were not
- *  pulled because a skill sharing their repository was — their content moved
- *  anyway. A failed update reports every name it would have covered, so
- *  nothing is quietly counted as done. `channel_managed` is declined-by-design,
- *  not a failure: those Skills update through the shared channel flow. */
+ *  pulled because their upstream no longer ships them. A failed update reports
+ *  every name it would have covered, so nothing is quietly counted as done.
+ *  `channel_managed` is declined-by-design, not a failure: those Skills update
+ *  through the shared channel flow. */
 export interface SkillUpdateReport {
   updated: UpdateResult[];
-  blocked: SkillUpdateBlocked[];
   failed: SkillUpdateFailure[];
   skipped: string[];
   channel_managed: SkillUpdateChannelManaged[];
 }
-
-/** A complete update run, including whatever the blocked-update dialog resolved
- *  along the way. `uninstalled` Skills were removed because their source no
- *  longer ships them — they are gone from the library, not merely unchanged. */
-export interface SkillUpdateRunReport extends SkillUpdateReport {
-  uninstalled: string[];
-}
-
-/** A new skill found in a cached repo that the user hasn't installed yet. */
 
 export interface SkillCardDeck {
   id: string;

@@ -47,16 +47,15 @@ flowchart LR
 | --- | --- | --- |
 | 全局配置、日志和状态 | `~/.skillstar/{config,logs,state}/` | `skillstar-core` + 对应域 |
 | SQLite 数据库 | `~/.skillstar/db/` | marketplace 等具体模块 |
-| 已安装、创作和仓库技能 | `~/.skillstar/hub/{skills,local,repos,content}/` | `skillstar-skills` |
-| 本地 Skill 长期身份 sidecar | `~/.skillstar/hub/local/<name>/.skillstar/identity.json` | `skillstar-skills::local_identity`；`.skillstar` 被 v2 snapshot 排除，不进入内容 hash |
-| Skill 安装来源、Git tree 与完整内容 baseline | `~/.skillstar/hub/lock.json` | `skillstar-skills::lockfile` 持久化；`skillstar-skills::skill_update` 独占更新事务 |
-| 仓库缓存的稀疏物化计划 | `~/.skillstar/hub/repos/<cache_key>/.git/skillstar-inventory.json` | `skillstar-skills::repo_scanner::inventory`；代表目录 + deferred 副本集合，按 HEAD revision 失效重算，`.git` 内不污染工作区（[D-063](./decisions.md#d-063代表副本唯一物化与永不整仓下载)） |
-| 每仓库安装/扫描锁 | `~/.skillstar/state/repo-locks/<cache_key>.lock` | `skillstar-skills::skill_update::transaction`；网络与发现阶段持有，hub 提交另持全局短锁 |
-| 内容基线 stat 指纹 | `~/.skillstar/state/snapshot-stats/<name>.json` | `skillstar-skills::content_stats`；fetch 前 cleanliness 证明的 mtime/size 快路径，失配回退全量快照 |
+| 已安装技能 canonical 副本 | `~/.agents/skills/<name>`（真实目录；`SKILLSTAR_DATA_DIR` 设置时为 `data_root()/agents/skills/` 以隔离开发与测试） | `skillstar-skills::installer`；与 `npx skills` 互通（[D-081](./decisions.md#d-081技能安装锁与更新整体同步-vercel-labsskills删除自研管线)） |
+| Skill 安装锁（vercel `.skill-lock.json` v3） | `~/.agents/.skill-lock.json`（`$XDG_STATE_HOME/skills/.skill-lock.json` 优先；数据根隔离规则同上） | `skillstar-skills::skill_lock`；每技能 `source/sourceType/sourceUrl/ref/skillPath/skillFolderHash(git tree SHA)/installedAt/updatedAt`，版本不符静默重置 |
+| 本地创作 Skill | `~/.skillstar/hub/local/<name>`，经 `~/.agents/skills/<name>` 链接暴露 | `skillstar-skills::local_skill` |
+| 本地 Skill 长期身份 sidecar | `~/.skillstar/hub/local/<name>/.skillstar/identity.json` | `skillstar-skills::local_identity`；`.skillstar` 不进入内容 hash |
+| 旧安装模型残留清理标记 | `~/.skillstar/state/agents-migration-done` | `skillstar-skills::legacy_cleanup`；首次启动幂等清理 `~/.skillstar/hub/{skills,repos}`、旧 `lock.json` 与指向旧 hub 的 Agent 链接 |
 | Project 技能 manifest | `~/.skillstar/state/projects/` | `skillstar-skills`；共享项目路径只记录一个 Agent owner |
-| 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；批量 refresh、patrol 和 update 完成都写穿它，UI 与事件只是投影 |
+| 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；只保存每技能 `update_available/checked_at` 投影，刷新与更新完成都写穿它，UI 与事件只是投影 |
 | 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `skillstar-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
-| Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；`skillstar-skills` 从 hub 物化并读取当前链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
+| Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；部署以 `~/.agents/skills` 为 canonical source 创建相对链接；`skillstar-app::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
 | Models provider 与工具同步状态 | `~/.skillstar/config/model_providers.json`（v4：`providers` + `bindings`）及 Agent 配置文件 | `skillstar-models` |
 | 本机模型网关的路由与监听配置 | `~/.skillstar/config/model_gateway.json` | `skillstar-gateway` 经 `config_dir()` 解析，跟 `SKILLSTAR_DATA_DIR` 走；crate 内读写归 `store/`，models.dev 目录缓存在 `catalog/`。缺文件、空的 `routing`，以及读不出来的文件，都是 smart。启动不创建、不改写这个文件 |
 | 网关持久用量账本 | `~/.skillstar/gateway/usage.jsonl`，满 5 MB 轮转为 `usage.<n>.jsonl` 归档 | `skillstar-gateway::ledger`（append/load/query；轮转阈值是 `ledger/append.rs` 的 `ROTATE_AT_BYTES`）；度量面唯一真相（[D-080](./decisions.md#d-080持久用量账本是网关度量面的唯一真相环只补缺价格只在读时)），逐行只存 token 与归因，无密钥、无上游 URL |
@@ -84,17 +83,14 @@ flowchart LR
 
 ### 文件和部署
 
-- 技能向 Agent/项目部署优先 symlink；平台不允许时回退 junction/copy。
-- SkillStar hub 是安装后的 canonical source；兼容 Agent 的项目级 universal surface 是 `.agents/skills`。多个 Agent 指向同一物理路径时，manifest 只保留一个 owner，部署、清理与 reconciliation 必须按路径去重。
+- 技能向 Agent/项目部署优先 symlink；平台不允许时回退 junction/copy。全局安装的 canonical source 是 `~/.agents/skills/<name>` 真实目录副本，Agent 目录链接必须使用相对路径（Windows junction 用绝对目标）；全局目录本身就是 `~/.agents/skills` 的 Agent 不建链。
 - 内置 Agent 注册表区分 Home、XDG config、环境变量覆盖、动态 OpenClaw 根和不支持全局目录；空全局路径只能表示项目级 Agent，任何全局部署入口都必须先做能力检查。
 - 本机 Agent 不做 PATH、桌面应用或目录存在性探测；profile 默认关闭，Settings 持久化开关是进入所有本机 Agent 投影的唯一激活来源。冻结 IPC 字段 `installed` 仅镜像 `enabled`，不得恢复为探测状态。
 - reconciliation 同时处理新增和删除；失败的 staged swap 不得先破坏可用部署。
-- 判断一个 hub 条目是否为 repo cache 链接只有一个实现；symlink 与 Windows junction 必须由同一入口解析，否则 update 检测与 update 应用会对同一技能得出不同结论。
+- 除技能 canonical 副本（vercel 语义为直接覆盖重建）外，配置与状态等覆盖写入仍使用临时文件/目录和原子替换。
 - 扫描、检测等只读动作不得创建用户目录。
-- 所有覆盖写入使用临时文件/目录和原子替换，尽量保留已有可用状态。
-- Git-backed Skill 更新前必须用 `lock.json` v5 的带算法版本完整内容 baseline 做 fail-closed 检查。共享同一物理 checkout 的 Skill 作为一个保护单元：任一分歧未显式保留或丢弃前不得 fetch/reset；pull 后的内容快照或 lockfile 提交失败时，checkout 回滚到旧 revision、旧 sparse 配置和更新前受管内容。
-- Skill 更新/分歧解决使用进程内互斥与数据目录中的跨进程文件锁串行化；等待锁后必须重新检查完整内容 baseline，不能复用锁外的“未修改”判断。
-- `resolve_skill_update` 是 GUI 的分歧解决 IPC facade；command 只适配 DTO/异步调度，保留副本、子树清理、整组复检和继续更新都由 `skillstar-skills::skill_update` 完成。前端 IPC 声明、dev mock 与全局选择对话框必须同步该契约。
+- Git 来源安装 = 临时目录浅克隆（用完即删）→ 复制到 canonical → 写锁 → Agent 链接；更新 = 上游 tree SHA 与锁不符时**覆盖式重装**（同 `npx skills update`），不检测、不保留本地修改；锁写读都经 `skill_lock` 单一模块，安装来源 provenance 只存在锁里。
+- 判断一个条目是否指向 canonical 副本只有一个实现；symlink 与 Windows junction 必须由同一入口解析。
 
 ### 网络
 

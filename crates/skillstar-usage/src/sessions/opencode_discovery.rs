@@ -199,7 +199,9 @@ fn json_files(agent: &'static str, storage: &Path) -> Vec<SessionFile> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_none_or(|ext| ext != "json") || !entry.metadata().is_ok_and(|m| m.is_file()) {
+            if path.extension().is_none_or(|ext| ext != "json")
+                || !entry.metadata().is_ok_and(|m| m.is_file())
+            {
                 continue;
             }
             if let Some(file) = json_session_file(agent, &path) {

@@ -25,8 +25,7 @@ pub struct AiProviderRef {
     /// An id from the agent registry (`claude-code`, `codex`, …).
     ///
     /// `alias` accepts the v3 spelling so an `ai.json` written by an older
-    /// build still parses; [`AiProviderRef::normalized_agent_id`] maps its
-    /// values forward. Migrating a one-field pointer through serde is cheaper
+        /// values forward. Migrating a one-field pointer through serde is cheaper
     /// and less breakable than a file-format migration for it.
     #[serde(default, alias = "app_id")]
     pub agent_id: String,
@@ -35,10 +34,6 @@ pub struct AiProviderRef {
 }
 
 impl AiProviderRef {
-    /// The agent id, with v3's two legacy spellings mapped forward.
-    pub fn normalized_agent_id(&self) -> &str {
-        normalize_agent_id(&self.agent_id)
-    }
 }
 
 /// Map a v3 `app_id` onto the agent registry's id space.

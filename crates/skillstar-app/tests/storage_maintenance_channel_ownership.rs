@@ -13,7 +13,7 @@ use skillstar_channels::shared_channels::{
     ChannelSubscriptionStore, DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry,
 };
 use skillstar_core::infra::paths;
-use skillstar_skills::lockfile;
+use skillstar_skills::skill_lock;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -131,33 +131,27 @@ fn save_subscription(channel_skill_ids: &[&str]) {
 }
 
 fn save_lock_entries(entries: &[(&str, &str)]) {
-    let lock = lockfile::Lockfile {
-        skills: entries
-            .iter()
-            .map(|(name, git_url)| lockfile::LockEntry {
-                name: (*name).to_string(),
-                git_url: (*git_url).to_string(),
+    let mut lock = skill_lock::SkillLock::default();
+    for (name, git_url) in entries {
+        lock.upsert(
+            name,
+            skill_lock::SkillLockEntry {
+                source: name.to_string(),
+                source_type: skill_lock::SourceType::Github,
+                source_url: (*git_url).to_string(),
                 git_ref: Some("a".repeat(40)),
-                tree_hash: "0".repeat(40),
-                content_hash: None,
-                content_hash_version: None,
+                skill_path: None,
+                skill_folder_hash: None,
                 installed_at: "2026-08-05T00:00:00Z".into(),
-                source_folder: None,
-                pinned: false,
-            })
-            .collect(),
-        ..Default::default()
-    };
-    lock.save(&lockfile::lockfile_path()).unwrap();
+                updated_at: "2026-08-05T00:00:00Z".into(),
+            },
+        );
+    }
+    lock.save(&skill_lock::lock_path()).unwrap();
 }
 
 fn lock_entry_names() -> Vec<String> {
-    lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .unwrap()
-        .skills
-        .into_iter()
-        .map(|entry| entry.name)
-        .collect()
+    skill_lock::load().skills.keys().cloned().collect()
 }
 
 fn tracked_skill_ids() -> Vec<String> {

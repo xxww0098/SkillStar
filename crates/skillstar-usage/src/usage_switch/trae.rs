@@ -17,11 +17,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde_json::{Map, Value};
-use skillstar_core::infra::fs_ops::create_rolling_backup;
 use crate::subscription::Subscription;
 use crate::trae_platform::TraePlatformKind;
 use crate::{UsageError, UsageResult, storage, tool_paths};
+use serde_json::{Map, Value};
+use skillstar_core::infra::fs_ops::create_rolling_backup;
 
 use super::ide::IdeCredentialAdapter;
 use super::{CliAccountState, SwitchOutcome};

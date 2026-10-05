@@ -2,7 +2,6 @@ import { tauriInvoke } from "../../lib/ipc";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   AlertTriangle,
-  ArrowRightLeft,
   BookOpen,
   Calendar,
   Download,
@@ -41,11 +40,6 @@ interface DetailPanelProps {
   onUpdate: (name: string) => void;
   onUninstall: (name: string) => void;
   uninstalling?: boolean;
-  /** Upstream dropped the Skill with no successor: keep a local copy or remove. */
-  onResolveRemoved?: (name: string) => void;
-  /** Upstream renamed the Skill: install the successor, carry deployments over, remove this one. */
-  onMigrate?: (name: string) => void;
-  migrating?: boolean;
   onReinstall?: (url: string, name: string) => void;
   reinstalling?: boolean;
   onReadContent?: (name: string) => Promise<SkillContent>;
@@ -60,9 +54,6 @@ export function DetailPanel({
   onUpdate,
   onUninstall,
   uninstalling,
-  onResolveRemoved,
-  onMigrate,
-  migrating,
   onReinstall,
   reinstalling,
   onReadContent,
@@ -71,7 +62,6 @@ export function DetailPanel({
 }: DetailPanelProps) {
   const { t } = useTranslation();
   const upstreamChange = skill?.installed && skill.skill_type !== "local" ? (skill.upstream_change ?? null) : null;
-  const upstreamSuccessor = upstreamChange?.kind === "removed" ? upstreamChange.successor : null;
   const prefersReducedMotion = useReducedMotion();
   const [editing, setEditing] = useState(false);
   const [reading, setReading] = useState(false);
@@ -570,65 +560,19 @@ export function DetailPanel({
             {skill.installed ? (
               <>
                 {upstreamChange?.kind === "removed" && (
-                  <div
-                    className={
-                      upstreamSuccessor
-                        ? "rounded-xl border border-violet-500/30 bg-violet-500/[0.06] px-3 py-2.5 space-y-2"
-                        : "rounded-xl border border-rose-500/30 bg-rose-500/[0.06] px-3 py-2.5 space-y-2"
-                    }
-                  >
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/[0.06] px-3 py-2.5">
                     <div className="flex items-start gap-2">
-                      {upstreamSuccessor ? (
-                        <ArrowRightLeft className="w-4 h-4 mt-0.5 shrink-0 text-violet-500 dark:text-violet-300" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500 dark:text-rose-300" />
-                      )}
+                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500 dark:text-rose-300" />
                       <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-semibold text-foreground">
-                          {t(
-                            upstreamSuccessor ? "detailPanel.upstreamRenamedTitle" : "detailPanel.upstreamRemovedTitle",
-                          )}
+                        <p className="text-sm font-semibold text-foreground">{t("detailPanel.upstreamRemovedTitle")}</p>
+                        <p className="text-xs text-muted-foreground leading-5 break-words">
+                          {t("detailPanel.upstreamRemovedDesc", {
+                            source: skill.source ?? skill.git_url,
+                            folder: skill.name,
+                          })}
                         </p>
-                        {upstreamSuccessor ? (
-                          <p className="text-xs text-muted-foreground leading-5 break-words">
-                            {t("detailPanel.upstreamRenamedDesc", {
-                              name: upstreamSuccessor.skill_id,
-                              folder: upstreamSuccessor.folder_path,
-                            })}{" "}
-                            {upstreamSuccessor.similarity === null
-                              ? t("detailPanel.upstreamSameName")
-                              : t("detailPanel.upstreamSimilarity", { similarity: upstreamSuccessor.similarity })}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-muted-foreground leading-5 break-words">
-                            {t("detailPanel.upstreamRemovedDesc", {
-                              source: skill.source ?? skill.git_url,
-                              folder: skill.name,
-                            })}
-                          </p>
-                        )}
                       </div>
                     </div>
-                    {upstreamSuccessor && onMigrate ? (
-                      <>
-                        <Button className="w-full" disabled={migrating} onClick={() => onMigrate(skill.name)}>
-                          <ArrowRightLeft className="w-4 h-4 mr-2" />
-                          {migrating
-                            ? t("skillCard.migrating")
-                            : t("detailPanel.migrateToSuccessor", { name: upstreamSuccessor.skill_id })}
-                        </Button>
-                        <p className="text-[11px] leading-4 text-muted-foreground">{t("detailPanel.migrateHint")}</p>
-                      </>
-                    ) : null}
-                    {onResolveRemoved && (
-                      <Button
-                        variant={upstreamSuccessor ? "outline" : "default"}
-                        className="w-full"
-                        onClick={() => onResolveRemoved(skill.name)}
-                      >
-                        {t("detailPanel.resolveRemoved")}
-                      </Button>
-                    )}
                   </div>
                 )}
 
@@ -640,7 +584,7 @@ export function DetailPanel({
                 )}
 
                 <div className="flex gap-2">
-                  {onReinstall && skill.skill_type !== "local" && !upstreamChange && (
+                  {onReinstall && skill.skill_type !== "local" && (
                     <Button
                       variant="outline"
                       className="flex-1"
@@ -662,17 +606,6 @@ export function DetailPanel({
                   </Button>
                 </div>
               </>
-            ) : skill.upstream_change?.successor && onMigrate ? (
-              // Ghost card for an upstream-renamed skill: migrate (carries
-              // deployments over) instead of a bare install.
-              <Button className="w-full" disabled={migrating} onClick={() => onMigrate(skill.name)}>
-                <ArrowRightLeft className="w-4 h-4 mr-2" />
-                {migrating
-                  ? t("skillCard.migrating")
-                  : t("detailPanel.migrateToSuccessor", {
-                      name: skill.upstream_change?.successor?.skill_id,
-                    })}
-              </Button>
             ) : (
               <Button className="w-full" onClick={() => onInstall(skill.git_url, skill.name)}>
                 <Download className="w-4 h-4" />

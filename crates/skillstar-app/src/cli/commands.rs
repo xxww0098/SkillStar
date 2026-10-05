@@ -1,6 +1,6 @@
-use skillstar_core::infra::paths::{hub_skills_dir, local_skills_dir, lockfile_path};
+use skillstar_core::infra::paths::{hub_skills_dir, local_skills_dir};
 use skillstar_marketplace::snapshot;
-use skillstar_skills::lockfile::Lockfile;
+
 
 /// List scope filter for `skillstar list`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,8 +93,7 @@ fn title_case(slug: &str) -> String {
 
 /// Rich `list` that covers hub, local authored, and lockfile-only entries.
 pub fn cmd_list(filter: ListFilter) {
-    let lock_path = lockfile_path();
-    let lockfile = Lockfile::load(&lock_path).unwrap_or_default();
+    let lock = skillstar_skills::skill_lock::load();
     let hub_dir = hub_skills_dir();
     let local_dir = local_skills_dir();
 
@@ -119,12 +118,12 @@ pub fn cmd_list(filter: ListFilter) {
                     continue;
                 }
                 seen.insert(name.clone());
-                let entry_row = lockfile.skills.iter().find(|s| s.name == name);
+                let entry_row = lock.skills.get(&name);
                 rows.push(ListRow {
                     name,
                     kind: RowKind::Hub,
-                    git_url: entry_row.map(|e| e.git_url.clone()).unwrap_or_default(),
-                    tree_hash: entry_row.map(|e| e.tree_hash.clone()).unwrap_or_default(),
+                    git_url: entry_row.map(|e| e.source_url.clone()).unwrap_or_default(),
+                    tree_hash: entry_row.and_then(|e| e.skill_folder_hash.clone()).unwrap_or_default(),
                     deploy: if broken {
                         DeployKind::Broken
                     } else if is_symlink {
@@ -136,16 +135,16 @@ pub fn cmd_list(filter: ListFilter) {
             }
         }
         // Orphan lockfile entries — installed in lockfile but missing on disk
-        for entry in &lockfile.skills {
-            if seen.contains(&entry.name) {
+        for (name, entry) in &lock.skills {
+            if seen.contains(name) {
                 continue;
             }
-            seen.insert(entry.name.clone());
+            seen.insert(name.clone());
             rows.push(ListRow {
-                name: entry.name.clone(),
+                name: name.clone(),
                 kind: RowKind::Hub,
-                git_url: entry.git_url.clone(),
-                tree_hash: entry.tree_hash.clone(),
+                git_url: entry.source_url.clone(),
+                tree_hash: entry.skill_folder_hash.clone().unwrap_or_default(),
                 deploy: DeployKind::Missing,
             });
         }

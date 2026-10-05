@@ -10,9 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
 use crate::subscription::Subscription;
 use crate::{UsageError, UsageResult, storage, tool_paths, vscdb};
+use serde_json::Value;
 
 use super::ide::IdeCredentialAdapter;
 use super::{CliAccountState, SwitchOutcome};
