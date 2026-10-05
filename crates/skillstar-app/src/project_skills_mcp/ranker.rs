@@ -14,7 +14,7 @@ pub trait SkillReranker {
         "passthrough"
     }
 
-    /// Name recorded on a plan for this task. Load failures stay `passthrough`.
+    /// Name recorded on a plan for this task.
     fn name_for(&self, _task: &str) -> &'static str {
         self.name()
     }
@@ -22,7 +22,7 @@ pub trait SkillReranker {
     fn rerank(&self, task: &str, candidates: Vec<RankedCandidate>) -> Vec<RankedCandidate>;
 }
 
-/// Permanent fallback. Later rankers that cannot load behave like this.
+/// Keeps BM25 order. The app does not load a local decision model.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PassthroughReranker;
 

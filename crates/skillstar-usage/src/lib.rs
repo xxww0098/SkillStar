@@ -8,6 +8,7 @@
 //! - [`subscription`] — Domain types (Subscription, SubscriptionUsage, UsageWindow, ...)
 //! - [`storage`]      — JSON persistence at `~/.skillstar/config/usage/`
 //! - [`catalog`]      — Fixed catalog of supported providers
+//! - [`claude_credentials`] — Claude Code credential-store addressing (keychain + file)
 //! - [`crypto`]       — AES-256-GCM helpers for API keys / OAuth tokens
 //! - [`alerts`]       — Threshold-based alert computation
 //! - [`oauth`]        — PKCE / local-server / poll-flow / device-flow primitives
@@ -17,6 +18,7 @@
 pub mod alerts;
 pub mod antigravity_oauth_config;
 pub mod catalog;
+pub(crate) mod claude_credentials;
 pub mod cloud_code;
 pub mod cookie_jar;
 pub mod crypto;

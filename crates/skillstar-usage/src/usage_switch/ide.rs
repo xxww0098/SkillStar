@@ -3,9 +3,12 @@
 //! Antigravity, Cursor, Windsurf, Kiro, Qoder, CodeBuddy, Trae, Zed, and ZCode
 //! do not fit the CLI symlink model. Each adapter writes its own live store,
 //! reads it back, then pins. The registry is the only switch path that knows
-//! those catalogs. Zed's store is the macOS keychain and is unavailable off
-//! macOS or while tool-sync is sandboxed. ZCode's store is `credentials.json`
-//! / `config.json` and stays available in that sandbox.
+//! those catalogs. Claude (`anthropic`) joins the registry too: on macOS its
+//! store is the `Claude Code-credentials` keychain item — the one write
+//! D-083 exempts from D-072 — and off macOS the credentials file. The macOS
+//! keychain stores (Zed, Claude) are unavailable while tool-sync is sandboxed.
+//! ZCode's store is `credentials.json` / `config.json` and stays available in
+//! that sandbox.
 
 use crate::UsageResult;
 use crate::subscription::Subscription;

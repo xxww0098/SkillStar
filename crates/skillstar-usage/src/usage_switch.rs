@@ -22,7 +22,7 @@
 //!
 //! | catalog_id | CLI       | live path                                  |
 //! |------------|-----------|--------------------------------------------|
-//! | `anthropic` | Claude Code | `$CLAUDE_CONFIG_DIR/.credentials.json`（非 macOS；macOS 钥匙串受 D-072 约束不写） |
+//! | `anthropic` | Claude Code | macOS 钥匙串 `Claude Code-credentials`（D-083 定点豁免）；其它平台 `$CLAUDE_CONFIG_DIR/.credentials.json` |
 //! | `codex`    | Codex CLI | `$CODEX_HOME/auth.json` + macOS keychain    |
 //! | `xai`      | Grok CLI  | `$GROK_HOME/auth.json`                      |
 //! | `opencode` | OpenCode  | `$XDG_DATA_HOME/opencode/auth.json`         |
@@ -628,8 +628,9 @@ mod tests {
             assert_eq!(adapter.catalog_id(), catalog);
             assert!(adapter.available(), "{catalog}");
         }
-        // Claude's adapter is availability-gated like Zed's (macOS: D-072),
-        // so it is not in the always-true loop above either.
+        // Claude's adapter is availability-gated on macOS (sandboxed runs
+        // must not touch the keychain), so it is not in the always-true loop
+        // above either.
         assert!(supports_switch("anthropic"));
         assert!(target_for("anthropic").is_none());
         assert_eq!(ide::ide_adapter_for("anthropic").unwrap().catalog_id(), "anthropic");
@@ -689,9 +690,8 @@ mod tests {
         }
 
         // Other IDEs keep their credentials outside an implemented adapter.
-        // `anthropic` switches via the credentials file off macOS; on macOS
-        // its adapter exists but reports unavailable (D-072: the keychain is
-        // Claude Code's store there and must not be written).
+        // `anthropic` switches via the macOS keychain item there (the D-083
+        // exception to D-072) and via the credentials file elsewhere.
         for catalog in ["deepseek", "glm", "stepfun"] {
             assert!(!supports_switch(catalog), "{catalog}");
             assert!(!supports_cli_switch(catalog), "{catalog}");

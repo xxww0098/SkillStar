@@ -598,7 +598,7 @@
 ## D-066：Laya 重排只在本机 CPU 上跑，失败则回到 BM25
 
 - 日期：2026-09-22
-- 状态：accepted
+- 状态：superseded（被 [D-084](#d-084移除本地决策模型laya) 取代）
 - 背景：项目技能推荐需要可选的本地优选。Laya 的发布形态是 ONNX。Windows、macOS、Linux 没有同一个 GPU Execution Provider。官方 `laya_config.json` 不写语种，而中文任务不能拿英文权重来打分。
 - 决策：`skillstar-app` 用 `ort` 的 CPU Execution Provider 和 `tokenizers` 加载 Laya。默认目录是 `data_root()/models/laya`（`~/.skillstar/models/laya/`），`SKILLSTAR_LAYA_ONNX` 整目录覆盖。每个候选是一次 noul，输入布局跟 receptron/laya 的 `build_sequence`。至多 12 个，不增删候选，分数不进 `plan_hash`。含汉字的任务只接受 multilingual 导出。没有 `language` 字段时，用 tokenizer 特殊符号区分英文 ModernBERT 和 mmBERT；对不上就不加载。加载失败保持 BM25。应用不下载权重，PyTorch 不进依赖。
 - 后果：获得——英文 `receptron/laya-onnx` 可以在 CPU 上改变候选顺序。承担——这份英文包遇到中文任务仍是 BM25；中文优选要用户自行导出 multilingual，放到 `models/laya`，或用 `SKILLSTAR_LAYA_ONNX` 指过去。
@@ -652,7 +652,7 @@
 ## D-072：密钥纯本地加密 JSON 存储，彻底禁用系统 Keychain 写入
 
 - 日期：2026-09-22
-- 状态：accepted
+- 状态：accepted（定点修订：Claude Code 自己的钥匙串项豁免，见 D-083）
 - 背景：原系统中 SSH 密码与部分 IDE/CLI（如 Zed 的 internet-password、Antigravity 与 Codex 的 generic-password）会向系统 Keychain / Keyring 写入凭据。用户明确要求所有凭据必须完全保存在本地加密 JSON 中，严禁写入 macOS Keychain 或系统钥匙串。
 - 决策：① 移除根依赖 `keyring`。② SSH 凭据由 `EncryptedJsonSecretStore`（落盘在 `state/ssh_credentials.json`，权限 0600，AES-256-GCM sealed，派生自 machine-id）完全接管，保留 `KeyringSecretStore` 作为向后兼容单元结构体但仅转发到本地加密存储。③ 彻底移除所有向 macOS Keychain 的写操作：Antigravity 切号仅写入本地 SQLite `state.vscdb`；Codex `publish_external` / `write_merged` 静默忽略不写钥匙串；Zed 禁用钥匙串写回（切号适配器标记为不可用），`keychain_cli` 的 `add_internet_password` 与 `delete_internet_password` 明确拒绝写入。
 - 后果：获得——所有敏感密钥与凭据纯净保留在用户应用本地加密文件内，无系统钥匙串提权弹窗、无外溢、可审计、与平台钥匙串彻底解耦。承担——Zed 无法通过写钥匙串实现外部 IDE 自动切号（Zed 保持仅本地导入与用量监控）。
@@ -762,6 +762,15 @@
 - 决策：整体删除 `skillstar-models`、`skillstar-gateway`、`skillstar-decision` 三个 crate 及其命令组（`models_commands`、`ai`、`decision`）、`skillstar gateway` / `skillstar decide` CLI、`claude-mcp-helper` 入口、桌面启动时的网关监听、消费汇总的网关账本合并与 401 自愈、路由对比与应用内 AI（skill 摘要、marketplace AI 关键词搜索、MCP 神经重排器）。计价下沉为 `skillstar-usage::pricing`（只读 `model_gateway.json` 的 `prices` 覆盖与 models.dev 缓存，按模型 id 反查），消费汇总改为会话文件单源；`skillstar-core::providers`（identity/balance）与 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱保留。磁盘上的模型域用户数据不主动清理。
 - 后果：获得——代码面收敛约五万行，产品语义单一，账号切换成为一等能力。承担——经网关流量的归因/计价维度消失（账本数据留存磁盘但不再展示）；会话行只能按模型 id 估值（无法区分中转）；价格表冻结在最后一次 models.dev 同步，不再刷新；应用内 AI 摘要与 AI 搜索不再提供；决策模型推荐退化为透传排序。
 - 证据：`crates/skillstar-usage/src/pricing.rs`、`crates/skillstar-app/src/usage/consumption/`、`docs/boundaries.md`、`docs/architecture.md`。
+
+## D-083：定点豁免 D-072——允许写 Claude Code 自己的那条钥匙串项
+
+- 日期：2026-10-05
+- 状态：accepted
+- 背景：D-072 禁止一切系统钥匙串写入，导致 Claude 账号切换在 macOS 不可用——Claude Code 在 macOS 的权威凭证存储就是 generic-password 钥匙串项（service `Claude Code-credentials`），只写 `.credentials.json` 不会被 CLI 读取，假装切换成功是谎言。用户明确授权：允许写 Claude Code 自己的那条钥匙串项。
+- 决策：豁免范围仅此一项。`skillstar-usage::claude_credentials` 拥有唯一寻址实现：账号 = `$USER` / `$LOGNAME` 回退 `claude-code-user`；`CLAUDE_CONFIG_DIR` 非空时 service 追加该目录 SHA-256 前 8 位 hex 后缀（同 Claude Code 自身派生）。登录采用（`fetchers::oauth::anthropic`）保持只读；唯一写入方是切换适配器 `usage_switch::claude`：读现有 blob → 只替换 `claudeAiOauth` 键（`mcpOAuth` 等兄弟键原样保留，item 缺失时从明文文件迁移兄弟键）→ `security add-generic-password -U -X <hex>` 写回 → 回读一致才移动 pin → 删除过期的明文镜像文件（同 CLI 自身迁移行为）。钥匙串 IO 一律 shell out `/usr/bin/security`（不链 `security-framework`，ACL 授权绑定调用方签名），`SKILLSTAR_TOOL_SYNC_HOME` 沙箱内一律拒绝。D-072 对其余钥匙串项（Zed internet-password、Antigravity / Codex generic-password 等）的禁写不变。
+- 后果：获得——macOS 上 Claude 多账号切换可用，且与 CLI 自身存储语义一致（同一 service 派生、同一 blob 合并规则）。承担——首次写入可能触发钥匙串确认弹窗；切换写整 blob，兄弟键靠合并保留、回读校验兜底；其余钥匙串禁写约束无变化。
+- 证据：`crates/skillstar-usage/src/claude_credentials.rs`、`crates/skillstar-usage/src/usage_switch/claude.rs`、`crates/skillstar-usage/src/fetchers/oauth/anthropic.rs`、`docs/features/usage/README.md`。
 
 ## 新增记录格式
 

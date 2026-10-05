@@ -1,36 +1,36 @@
-//! Claude Code account switching through the credentials **file**.
+//! Claude Code account switching through its own credential store.
 //!
-//! Claude Code's authoritative store is the macOS keychain on macOS and
+//! The authoritative store is the macOS keychain item on macOS (see
+//! `claude_credentials` for the addressing rules) and
 //! `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR/.credentials.json`)
-//! everywhere else. [D-072](docs/decisions.md) forbids SkillStar from writing
-//! the system keychain, so on macOS this adapter is **unavailable**: switching
-//! there would mean rewriting `Claude Code-credentials`, and writing the file
-//! nobody reads would be a lie the UI shows as a successful switch. The
-//! macOS path stays read-only adoption (see `fetchers::oauth::anthropic`).
+//! everywhere else. [D-083](docs/decisions.md) grants exactly one keychain
+//! write — Claude Code's own item — as a scoped exception to D-072; no other
+//! keychain item is ever read or written.
 //!
-//! Where the file *is* the store, switching is a read-modify-write that
-//! replaces only the `claudeAiOauth` key and preserves every other key in
-//! the JSON (the same blob carries `mcpOAuth` and account-scoped entries),
-//! followed by a read-back. The pin moves only after the read-back matches.
+//! Switching is a read-modify-write that replaces only the `claudeAiOauth`
+//! key and preserves every other key in the blob (the same JSON carries
+//! `mcpOAuth` and account-scoped entries), followed by a read-back. The pin
+//! moves only after the read-back matches, and a verified macOS switch also
+//! deletes the stale plaintext mirror, exactly like the CLI's own migration.
 //!
-//! Anthropic's refresh token is single-use, and on this platform Claude Code
-//! itself is the one spending it: the live file is fresher than any snapshot,
-//! so `adopt_before_refresh` absorbs the live generation into the row before
-//! a refresh, and reconcile repairs the pin from the file — never the other
+//! Anthropic's refresh token is single-use, and Claude Code itself is the one
+//! spending it: the live store is fresher than any snapshot, so
+//! `adopt_before_refresh` absorbs the live generation into the row before a
+//! refresh, and reconcile repairs the pin from the store — never the other
 //! way round.
-
-use std::path::PathBuf;
 
 use crate::crypto;
 use crate::subscription::Subscription;
-use crate::{UsageError, UsageResult, storage};
+use crate::{UsageError, UsageResult, storage, tool_paths};
 
 use super::ide::IdeCredentialAdapter;
 use super::{CliAccountState, SwitchOutcome};
+use crate::claude_credentials::{self, SecurityRunner};
 
 pub(super) const CATALOG_ID: &str = "anthropic";
 
-const MACOS_UNAVAILABLE: &str = "macOS 上 Claude Code 的凭证存于系统钥匙串；受 D-072（禁止写入系统钥匙串）约束，本平台不提供 Claude 账号切换，可继续使用只读绑定";
+const SANDBOX_UNAVAILABLE: &str =
+    "SKILLSTAR_TOOL_SYNC_HOME 已设置，拒绝访问 macOS 钥匙串；沙箱内不提供 Claude 账号切换";
 
 pub(super) struct Adapter;
 
@@ -39,60 +39,73 @@ impl IdeCredentialAdapter for Adapter {
         CATALOG_ID
     }
 
-    /// The file store is addressable off macOS. `SKILLSTAR_TOOL_SYNC_HOME`
-    /// redirects the home the file resolves under, so the sandbox is safe and
-    /// stays available (unlike a global store such as the keychain).
+    /// The live store is addressable. On macOS that is the login keychain —
+    /// a global store, so it stays off inside the `SKILLSTAR_TOOL_SYNC_HOME`
+    /// sandbox (and every real keychain IO re-checks). Off macOS the file
+    /// store resolves under `CLAUDE_CONFIG_DIR` / the redirected home, so it
+    /// stays available in that sandbox.
     fn available(&self) -> bool {
-        !cfg!(target_os = "macos")
+        if cfg!(target_os = "macos") {
+            !tool_paths::is_tool_sync_sandboxed()
+        } else {
+            true
+        }
     }
 
     fn activate(&self, sub_id: &str) -> UsageResult<(Subscription, SwitchOutcome)> {
-        let subscription = storage::get_subscription(sub_id)?;
         if !self.available() {
-            return Ok((subscription, failed(MACOS_UNAVAILABLE)));
+            let subscription = storage::get_subscription(sub_id)?;
+            return Ok((subscription, failed(keychain_display(), SANDBOX_UNAVAILABLE)));
         }
-        match write_verified(&subscription) {
-            Ok(()) => {
-                storage::set_active_subscription(&subscription.catalog_id, &subscription.id)?;
-                Ok((subscription, succeeded()))
-            }
-            Err(error) => Ok((subscription, failed(error.to_string()))),
+        if cfg!(target_os = "macos") {
+            activate_keychain(sub_id, &claude_credentials::RealSecurity)
+        } else {
+            activate_file(sub_id)
         }
     }
 
     fn sync(&self, sub: &Subscription) -> UsageResult<SwitchOutcome> {
         if !self.available() {
-            return Ok(failed(MACOS_UNAVAILABLE));
+            return Ok(failed(keychain_display(), SANDBOX_UNAVAILABLE));
         }
-        write_verified(sub).map(|()| succeeded()).or_else(|error| Ok(failed(error.to_string())))
+        let display = if cfg!(target_os = "macos") {
+            keychain_display()
+        } else {
+            file_display()
+        };
+        let written = if cfg!(target_os = "macos") {
+            write_verified_keychain(sub, &claude_credentials::RealSecurity).map(|()| true)
+        } else {
+            write_verified_file(sub).map(|()| false)
+        };
+        match written {
+            Ok(keychain_updated) => Ok(succeeded(display, keychain_updated)),
+            Err(error) => Ok(failed(display, error.to_string())),
+        }
     }
 
     fn reconcile(&self) -> UsageResult<Option<CliAccountState>> {
         if !self.available() {
             return Ok(None);
         }
-        reconcile_file().map(Some)
+        let live = if cfg!(target_os = "macos") {
+            read_live_oauth_keychain(&claude_credentials::RealSecurity)
+        } else {
+            read_live_oauth_file()
+        };
+        reconcile_with(live).map(Some)
     }
 
     fn adopt_before_refresh(&self, sub: &mut Subscription) -> UsageResult<()> {
         if !self.available() || sub.catalog_id != CATALOG_ID {
             return Ok(());
         }
-        // Live-first: whatever Claude Code rotated into the file wins over the
-        // row's copy, exactly like `fetch_inner` already does on every read.
-        if let Some(live) = read_live_oauth()
-            && token_of(sub).as_deref() != live.access_token.as_deref()
-        {
-            {
-                let mut updated = sub.clone();
-                updated.access_token_encrypted = live.access_token.map(|t| crypto::encrypt(&t));
-                if let Some(expires_s) = live.expires_at_seconds {
-                    updated.access_token_expires_at = Some(expires_s);
-                }
-                *sub = storage::patch_oauth_credentials(&updated)?;
-            }
-        }
-        Ok(())
+        let live = if cfg!(target_os = "macos") {
+            read_live_oauth_keychain(&claude_credentials::RealSecurity)
+        } else {
+            read_live_oauth_file()
+        };
+        absorb_live(sub, live)
     }
 
     fn forget(&self, _sub_id: &str) -> UsageResult<()> {
@@ -102,9 +115,9 @@ impl IdeCredentialAdapter for Adapter {
     }
 }
 
-// ── file store ───────────────────────────────────────────────────────────
+// ── shared blob model ────────────────────────────────────────────────────
 
-/// The `claudeAiOauth` slice SkillStar writes; every other key in the file is
+/// The `claudeAiOauth` slice SkillStar writes; every other key in the blob is
 /// preserved verbatim.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 struct ClaudeOAuthFile {
@@ -130,38 +143,13 @@ struct LiveOAuth {
     expires_at_seconds: Option<i64>,
 }
 
-fn credentials_path() -> PathBuf {
-    if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
-        let dir = dir.trim();
-        if !dir.is_empty() {
-            return PathBuf::from(dir).join(".credentials.json");
-        }
-    }
-    skillstar_core::infra::paths::home_dir()
-        .join(".claude")
-        .join(".credentials.json")
-}
-
-fn read_file_json() -> UsageResult<Option<serde_json::Value>> {
-    match std::fs::read_to_string(credentials_path()) {
-        Ok(text) if text.trim().is_empty() => Ok(Some(serde_json::Value::Object(Default::default()))),
-        Ok(text) => serde_json::from_str(&text)
-            .map(Some)
-            .map_err(|error| UsageError::Other(format!("解析 Claude 凭证文件失败：{error}"))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(UsageError::Other(format!("读取 Claude 凭证文件失败：{error}"))),
-    }
-}
-
-fn read_live_oauth() -> Option<LiveOAuth> {
-    let value = read_file_json().ok()??;
-    let oauth = value.get("claudeAiOauth")?.clone();
-    let parsed: ClaudeOAuthFile = serde_json::from_value(oauth).ok()?;
+fn live_oauth_from_blob(blob: &serde_json::Value) -> Option<LiveOAuth> {
+    let parsed: ClaudeOAuthFile = serde_json::from_value(blob.get("claudeAiOauth")?.clone()).ok()?;
     let access_token = parsed
         .access_token
         .as_deref()
         .map(str::trim)
-        .filter(|t| !t.is_empty())
+        .filter(|token| !token.is_empty())
         .map(str::to_string);
     Some(LiveOAuth {
         access_token,
@@ -169,10 +157,32 @@ fn read_live_oauth() -> Option<LiveOAuth> {
     })
 }
 
+// ── file store (authoritative off macOS) ─────────────────────────────────
+
+fn activate_file(subscription_id: &str) -> UsageResult<(Subscription, SwitchOutcome)> {
+    let subscription = storage::get_subscription(subscription_id)?;
+    match write_verified_file(&subscription) {
+        Ok(()) => {
+            storage::set_active_subscription(&subscription.catalog_id, &subscription.id)?;
+            Ok((subscription, succeeded(file_display(), false)))
+        }
+        Err(error) => Ok((subscription, failed(file_display(), error.to_string()))),
+    }
+}
+
+fn read_live_oauth_file() -> Option<LiveOAuth> {
+    claude_credentials::read_file_blob()
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(live_oauth_from_blob)
+}
+
 /// Replace only the `claudeAiOauth` key, keeping every other key (notably
 /// `mcpOAuth`) exactly as stored.
-fn write_oauth(oauth: &ClaudeOAuthFile) -> UsageResult<()> {
-    let mut root = read_file_json()?.unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+fn write_oauth_file(oauth: &ClaudeOAuthFile) -> UsageResult<()> {
+    let mut root = claude_credentials::read_file_blob()?
+        .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
     if !root.is_object() {
         return Err(UsageError::Other(
             "Claude 凭证文件顶层不是 JSON 对象，拒绝改写".into(),
@@ -186,7 +196,7 @@ fn write_oauth(oauth: &ClaudeOAuthFile) -> UsageResult<()> {
         );
     let text = serde_json::to_string_pretty(&root)
         .map_err(|error| UsageError::Other(error.to_string()))?;
-    let path = credentials_path();
+    let path = claude_credentials::credentials_file_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| UsageError::Other(format!("创建 Claude 配置目录失败：{error}")))?;
@@ -194,6 +204,95 @@ fn write_oauth(oauth: &ClaudeOAuthFile) -> UsageResult<()> {
     std::fs::write(&path, format!("{text}\n"))
         .map_err(|error| UsageError::Other(format!("写入 Claude 凭证文件失败：{error}")))
 }
+
+fn write_verified_file(subscription: &Subscription) -> UsageResult<()> {
+    let oauth = oauth_of(subscription)?;
+    write_oauth_file(&oauth)?;
+    // Read back: the switch is real only if the file now serves this row.
+    let live = read_live_oauth_file()
+        .ok_or_else(|| UsageError::Other("Claude 凭证文件回读失败，切换未生效".into()))?;
+    if live.access_token.as_deref() != oauth.access_token.as_deref() {
+        return Err(UsageError::Other(
+            "Claude 凭证文件回读与写入不一致，切换未生效".into(),
+        ));
+    }
+    Ok(())
+}
+
+// ── keychain store (authoritative on macOS, D-083 exception) ─────────────
+
+fn activate_keychain(
+    subscription_id: &str,
+    runner: &dyn SecurityRunner,
+) -> UsageResult<(Subscription, SwitchOutcome)> {
+    let subscription = storage::get_subscription(subscription_id)?;
+    match write_verified_keychain(&subscription, runner) {
+        Ok(()) => {
+            storage::set_active_subscription(&subscription.catalog_id, &subscription.id)?;
+            Ok((subscription, succeeded(keychain_display(), true)))
+        }
+        Err(error) => Ok((subscription, failed(keychain_display(), error.to_string()))),
+    }
+}
+
+/// Keychain-first live read — the same order login adoption reads with — so
+/// reconcile and adopt see exactly what the CLI sees.
+fn read_live_oauth_keychain(runner: &dyn SecurityRunner) -> Option<LiveOAuth> {
+    if let Ok(Some(blob)) = claude_credentials::read_keychain_blob(runner)
+        && let Some(live) = live_oauth_from_blob(&blob)
+    {
+        return Some(live);
+    }
+    read_live_oauth_file()
+}
+
+fn write_verified_keychain(
+    subscription: &Subscription,
+    runner: &dyn SecurityRunner,
+) -> UsageResult<()> {
+    if subscription.catalog_id != CATALOG_ID {
+        return Err(UsageError::Other(
+            "Claude 切换收到了其它 catalog 的订阅".into(),
+        ));
+    }
+    let oauth = oauth_of(subscription)?;
+    // Merge base: the keychain item first; when it is absent, the plaintext
+    // file (the pre-migration store), so its `mcpOAuth` siblings survive the
+    // migration into the item instead of being dropped.
+    let mut root = match claude_credentials::read_keychain_blob(runner)? {
+        Some(blob) => blob,
+        None => claude_credentials::read_file_blob()?
+            .unwrap_or_else(|| serde_json::Value::Object(Default::default())),
+    };
+    if !root.is_object() {
+        return Err(UsageError::Other(
+            "Claude 钥匙串凭证顶层不是 JSON 对象，拒绝改写".into(),
+        ));
+    }
+    root.as_object_mut()
+        .expect("checked above")
+        .insert(
+            "claudeAiOauth".to_string(),
+            serde_json::to_value(&oauth).map_err(|error| UsageError::Other(error.to_string()))?,
+        );
+    claude_credentials::write_keychain_blob(runner, &root)?;
+    // Read back: the switch is real only if the item now serves this row.
+    let live = claude_credentials::read_keychain_blob(runner)?
+        .as_ref()
+        .and_then(live_oauth_from_blob)
+        .ok_or_else(|| UsageError::Other("Claude 钥匙串回读失败，切换未生效".into()))?;
+    if live.access_token.as_deref() != oauth.access_token.as_deref() {
+        return Err(UsageError::Other(
+            "Claude 钥匙串回读与写入不一致，切换未生效".into(),
+        ));
+    }
+    // The plaintext file is a stale mirror once the item holds the login;
+    // Claude Code deletes it after migrating, and so does a verified switch.
+    let _ = std::fs::remove_file(claude_credentials::credentials_file_path());
+    Ok(())
+}
+
+// ── row ↔ blob mapping and shared verdicts ───────────────────────────────
 
 fn token_of(subscription: &Subscription) -> Option<String> {
     subscription
@@ -220,31 +319,12 @@ fn oauth_of(subscription: &Subscription) -> UsageResult<ClaudeOAuthFile> {
     Ok(ClaudeOAuthFile {
         access_token: Some(access_token),
         refresh_token: refresh_of(subscription),
-        expires_at_ms: subscription.access_token_expires_at.map(|s| s * 1000),
+        expires_at_ms: subscription.access_token_expires_at.map(|s| s * 1_000),
         subscription_type: subscription
             .plan_tier
             .clone()
             .map(|tier| tier.to_ascii_lowercase()),
     })
-}
-
-fn write_verified(subscription: &Subscription) -> UsageResult<()> {
-    if subscription.catalog_id != CATALOG_ID {
-        return Err(UsageError::Other(
-            "Claude 切换收到了其它 catalog 的订阅".into(),
-        ));
-    }
-    let oauth = oauth_of(subscription)?;
-    write_oauth(&oauth)?;
-    // Read back: the switch is real only if the file now serves this row.
-    let live = read_live_oauth()
-        .ok_or_else(|| UsageError::Other("Claude 凭证文件回读失败，切换未生效".into()))?;
-    if live.access_token.as_deref() != oauth.access_token.as_deref() {
-        return Err(UsageError::Other(
-            "Claude 凭证文件回读与写入不一致，切换未生效".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn pinned_row() -> UsageResult<Option<Subscription>> {
@@ -258,11 +338,8 @@ fn pinned_row() -> UsageResult<Option<Subscription>> {
     }
 }
 
-fn reconcile_file() -> UsageResult<CliAccountState> {
-    let Some(live) = read_live_oauth() else {
-        return Ok(CliAccountState::Missing);
-    };
-    let Some(live_token) = live.access_token else {
+fn reconcile_with(live: Option<LiveOAuth>) -> UsageResult<CliAccountState> {
+    let Some(live_token) = live.and_then(|live| live.access_token) else {
         return Ok(CliAccountState::Missing);
     };
     let Some(subscription) = pinned_row()? else {
@@ -277,14 +354,34 @@ fn reconcile_file() -> UsageResult<CliAccountState> {
     }
 }
 
-fn config_path_display() -> String {
-    credentials_path().to_string_lossy().to_string()
+/// Live-first: whatever Claude Code rotated into the store wins over the
+/// row's copy, exactly like `fetch_inner` already does on every read.
+fn absorb_live(subscription: &mut Subscription, live: Option<LiveOAuth>) -> UsageResult<()> {
+    if let Some(live) = live
+        && token_of(subscription).as_deref() != live.access_token.as_deref()
+    {
+        let mut updated = subscription.clone();
+        updated.access_token_encrypted = live.access_token.map(|token| crypto::encrypt(&token));
+        if let Some(expires_s) = live.expires_at_seconds {
+            updated.access_token_expires_at = Some(expires_s);
+        }
+        *subscription = storage::patch_oauth_credentials(&updated)?;
+    }
+    Ok(())
 }
 
-fn failed(reason: impl Into<String>) -> SwitchOutcome {
+fn file_display() -> String {
+    claude_credentials::credentials_file_path().to_string_lossy().to_string()
+}
+
+fn keychain_display() -> String {
+    format!("keychain:{}", claude_credentials::keychain_service())
+}
+
+fn failed(display: String, reason: impl Into<String>) -> SwitchOutcome {
     SwitchOutcome {
         tool_id: CATALOG_ID.to_string(),
-        config_path: config_path_display(),
+        config_path: display,
         backup_path: None,
         keychain_updated: false,
         link_mode: None,
@@ -293,12 +390,12 @@ fn failed(reason: impl Into<String>) -> SwitchOutcome {
     }
 }
 
-fn succeeded() -> SwitchOutcome {
+fn succeeded(display: String, keychain_updated: bool) -> SwitchOutcome {
     SwitchOutcome {
         tool_id: CATALOG_ID.to_string(),
-        config_path: config_path_display(),
+        config_path: display,
         backup_path: None,
-        keychain_updated: false,
+        keychain_updated,
         link_mode: None,
         success: true,
         error: None,

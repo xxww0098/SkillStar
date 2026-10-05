@@ -33,17 +33,6 @@ fn credential_blob_without_a_usable_token_is_rejected() {
     assert_eq!(parse_credentials(r#"{"mcpOAuth":{"srv":{"a":1}}}"#), None);
 }
 
-#[test]
-fn keychain_account_falls_back_to_the_cli_literal() {
-    // Whatever the runner's environment is, the label is never blank —
-    // Claude Code itself falls back to this exact string.
-    let account = keychain_account();
-    assert!(!account.trim().is_empty());
-    if std::env::var("USER").is_err() && std::env::var("LOGNAME").is_err() {
-        assert_eq!(account, KEYCHAIN_ACCOUNT_FALLBACK);
-    }
-}
-
 // ── usage payload: schema compatibility ────────────────────────────
 
 #[test]

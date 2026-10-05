@@ -38,9 +38,7 @@ Projects 页在选中项目且存在未过期计划时，在列表上方展示�
 
 ## 重排
 
-推荐的默认顺序是已安装技能的 BM25。Laya 导出默认放在 `~/.skillstar/models/laya/`（随 `SKILLSTAR_DATA_DIR` 移动）。`SKILLSTAR_LAYA_ONNX` 可以改指向别的目录。目录里有 `laya.onnx`、`laya.onnx.data`、`laya_config.json` 和 `tokenizer/` 时，第一次推荐在 CPU 上加载 Laya。每个候选单独问一次该技能是否适用于这次任务，只用名称和 frontmatter 描述，不送 `SKILL.md` 正文。至多打分 12 个，按 true 的概率从高到低排；平分保持 BM25 原序，低分也不删候选。
-
-含汉字的任务只有 multilingual 导出才打分。Hugging Face `receptron/laya-onnx` 是英文包。`laya_config.json` 可以用 `language` 写成 `en` 或 `multilingual`；没有这个字段时，用 tokenizer 的特殊符号区分。看不出语种、文件缺失或 Session 失败都保持 BM25，推荐仍然成功。分数不进入 `plan_hash`。模型不进仓库和安装包，应用也不下载。PyTorch 只用于另行导出，不进应用依赖。`ort` 只注册 CPU Execution Provider。
+推荐顺序就是已安装技能的 BM25 原序。生产实现是 `PassthroughReranker`：不增删候选，不读 `SKILL.md` 正文，分数不进入 `plan_hash`。应用不加载本地决策模型，也不读取 `SKILLSTAR_LAYA_ONNX`。磁盘上残留的 `~/.skillstar/models/` 不主动删除。见 [D-084](../../decisions.md#d-084移除本地决策模型laya)。
 
 ## 应用
 

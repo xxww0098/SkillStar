@@ -29,15 +29,14 @@
 - Antigravity 额度先调用 `loadCodeAssist` 获取 plan、credits 和 `cloudaicompanionProject`，再把项目 ID 传给 Cloud Code。项目字段同时兼容字符串和 `{ "id": ... }` 对象。Cloud Code 请求按 daily → daily sandbox → production 回退；优先使用 `retrieveUserQuotaSummary` 返回的用户可见 5h/weekly buckets，只有摘要接口没有可用窗口时才回退到 `fetchAvailableModels` 的模型 quota。汇总卡按最紧张（消耗百分比最高）的窗口计算，`UsageWindow.used` 与 `percent` 始终表示已消耗比例，不能把剩余比例写入 `used`。
 - Antigravity 模型列表不是固定枚举：已知模型按产品分组，新增的 Gemini/Claude/GPT/Image 模型只要带 `quotaInfo.remainingFraction` 也必须显示；无法抓取模型额度时保留 plan/credits，同时在 `usage.error` 显示原因，401 仍按认证失效处理。配额刷新优先调用 `retrieveUserQuotaSummary`；只有该 endpoint 明确返回 404/405 时才回退 `fetchAvailableModels`，有效但为空的 summary 不再额外发起模型目录请求。卡片在窄宽度下把已知的 Gemini、Claude/GPT 周额度与 5 小时额度压缩为可扫描的短标签，并保留完整原始标签作为悬浮说明；重置倒计时与进度条同行，避免四个窗口把卡片纵向拉长。
 
-### Anthropic Claude 特例：只读采纳（登录）；切换仅限凭证文件平台
+### Anthropic Claude 特例：只读采纳（登录）；切换写 Claude Code 自己的凭证存储
 
-- 凭证来源是 Claude Code 自己的登录态：macOS 读钥匙串 `Claude Code-credentials`（account = `$USER` / `$LOGNAME`，取不到时回退字面量 `claude-code-user`），其它平台读 `~/.claude/.credentials.json`。取 JSON 的 `claudeAiOauth.accessToken`。
+- 凭证来源是 Claude Code 自己的登录态：macOS 读钥匙串 `Claude Code-credentials`（account = `$USER` / `$LOGNAME`，取不到时回退字面量 `claude-code-user`；`CLAUDE_CONFIG_DIR` 非空时 service 追加该目录 SHA-256 前 8 位 hex 后缀，同 Claude Code 自身派生），其它平台读 `~/.claude/.credentials.json`（`CLAUDE_CONFIG_DIR` 非空时为 `$CLAUDE_CONFIG_DIR/.credentials.json`）。取 JSON 的 `claudeAiOauth.accessToken`。寻址规则唯一实现在 `claude_credentials`，登录与切换共用。
 - **`claudeAiOauth.expiresAt` 是 epoch 毫秒**，与本 crate 其它所有 provider 的秒不同；统一经 `expires_at_seconds()` 归一，禁止直接使用该字段。
-- SkillStar **不刷新、不写回**这份凭证。Anthropic 的 refresh token 一次性，谁先刷谁让对方失效；自己去刷会把用户的 Claude Code 登出。每次 refresh 重读本地存储、采纳更新的那一份，本地存储不可用时才回落到绑定时捕获的 token。
-- 因为不写回，也就不存在钥匙串 read-modify-write：同一条目里的 `mcpOAuth` 不会被覆盖，用户不会被登出所有 MCP server。
-- 钥匙串读取 shell out 到 `/usr/bin/security` 而不是链 `security-framework`：钥匙串 ACL 授权绑定调用方二进制签名，重新编译后授权会失效。
+- 登录（fetcher）**不刷新、不写回**这份凭证。Anthropic 的 refresh token 一次性，谁先刷谁让对方失效；自己去刷会把用户的 Claude Code 登出。每次 refresh 重读本地存储、采纳更新的那一份，本地存储不可用时才回落到绑定时捕获的 token。登录路径因此不存在 read-modify-write，同一条目里的 `mcpOAuth` 不会被登录覆盖。
+- 钥匙串 IO shell out 到 `/usr/bin/security` 而不是链 `security-framework`：钥匙串 ACL 授权绑定调用方二进制签名，重新编译后授权会失效。`SKILLSTAR_TOOL_SYNC_HOME` 沙箱内一律拒绝钥匙串访问。
 - 没有浏览器腿。`start_login("anthropic")` 就地采纳本地凭证并立即兑现 pending-login 通道；没有本地登录态时在 `start_login` 当场失败，用户看到“先跑一次 `claude`”而不是卡住的等待面板。
-- 多账号切换（Accounts 工作台）在**非 macOS** 平台可用：`usage_switch::claude` 适配器对 `$CLAUDE_CONFIG_DIR/.credentials.json` 做 read-modify-write——只替换 `claudeAiOauth` 键、保留 `mcpOAuth` 等其它键、回读一致才移动 pin；刷新前 `adopt_before_refresh` 先吸收 CLI 轮转出的新 token。**macOS 受 D-072（禁止写系统钥匙串）约束不提供切换**：Claude Code 在 macOS 的权威存储是钥匙串，SkillStar 不写它，也不写一个没人读的文件假装切换成功。
+- 多账号切换（Accounts 工作台）：`usage_switch::claude` 适配器对权威存储做 read-modify-write——只替换 `claudeAiOauth` 键、保留 `mcpOAuth` 等其它键（macOS 上钥匙串项缺失时先从明文文件迁移兄弟键）、回读一致才移动 pin；刷新前 `adopt_before_refresh` 先吸收 CLI 轮转出的新 token。macOS 写钥匙串项是 [D-083](../../decisions.md) 对 D-072 的定点豁免（唯一允许的钥匙串写入），验证成功后同时删除过期的明文镜像 `.credentials.json`（同 CLI 自身迁移行为）；其它平台写 `$CLAUDE_CONFIG_DIR/.credentials.json`。
 - 额度端点 `GET https://api.anthropic.com/api/oauth/usage`，头 `Authorization: Bearer <access_token>` + `anthropic-beta: oauth-2025-04-20`。非公开文档端点，schema 会漂：`limits[]`（`kind` 为 `session` / `weekly_all` / `weekly_scoped`）是权威来源，顶层 `five_hour` / `seven_day` 是逐窗口回落，两者都读。
 - **解析失败的粒度是「这条窗口缺失」，不是「这个账号失败」**：未知 `kind`、读不出的百分比、形状不定的 `used_dollars` / `limit_dollars`、无法解析的 `resets_at`，都只让对应的那一条额度条消失。
 - 同 host 相邻请求间隔 ≥5s，由 fetcher 内的进程级 gate 串行化（这层在 `refresh_guard` 的 per-catalog 间隔之上）。

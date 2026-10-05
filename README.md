@@ -156,7 +156,7 @@ skillstar team used pr-review
 
 ### 项目技能 MCP
 
-`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。候选排序为 BM25 透传（本地神经重排器已随 D-082 移除）。
+`serve` 给本机 Agent 提供 stdio JSON-RPC。`approve` 在终端展示计划差异，读到 `approve <plan_hash>` 后写入 SkillStar 批准，不部署链接。候选顺序保持 BM25，不加载本地决策模型。
 
 ```bash
 skillstar mcp serve --stdio

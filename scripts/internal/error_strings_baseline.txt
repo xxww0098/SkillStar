@@ -1,40 +1,5 @@
-# Ratchet baseline for check_error_strings.sh: max allowed count of
-# `Result<_, String>` signatures across src-tauri/src + crates/ (excluding
-# test code). The guard FAILS if the live count exceeds this number. Lower it
-# whenever a stringly-typed error gets migrated to a real error enum
-# (thiserror) — never raise it except for a deliberate, reviewed exception.
-#
-# 2026-07-03: normalized all src-tauri/src command-layer signatures to
-# AppError (models_commands/*.rs, mcp_commands.rs, ai/*.rs, updater.rs,
-# core/app_shell.rs, lib.rs, commands/patrol.rs) — dropped 80 -> 22.
-# Remaining 22 hits are: (a) 4 nested-generic false positives from the
-# script's regex matching `HashMap<String, String>` inside `Result<...>`
-# (marketplace.rs, marketplace_snapshot/mod.rs, commands/marketplace.rs,
-# usage_commands.rs — all already AppError/anyhow in reality); (b) 5 private
-# helper fns whose owning #[tauri::command] is already AppError-typed
-# (core/skills/mod.rs's SkillManager trait, commands/share_install.rs's
-# decode_embedded) sitting in front of crates/skillstar-skills's own
-# Result<_, String> API; (c) 13 signatures inside crates/ (skillstar-skills,
-# skillstar-marketplace, skillstar-models, skillstar-app, skillstar-ai,
-# skillstar-usage), intentionally out of scope for this command-layer pass.
-#
-# 2026-07-26: raised 22 -> 34 to register debt carried in by the pre-release
-# WIP snapshot (2ed84a5): 12 new hits, dominated by
-# crates/skillstar-app/src/usage_switch/grok/io.rs (Grok account switching
-# I/O helpers). These predate the v0.0.4 release work; migrate them to a
-# real error enum and lower this number in a dedicated pass.
-#
-# 2026-08-14: that dedicated pass, done against the symlink-custody rewrite
-# that replaced grok/io.rs. `usage_switch` now has its own layered error enums
-# in crates/skillstar-usage/src/usage_switch/error.rs (CustodyError /
-# MaterializeError / ExternalStoreError, plus the ActivationError + Stage pair
-# that carries the before/after-replace rollback contract), so all 31
-# stringly-typed signatures in custody.rs, target*.rs and keychain.rs are
-# gone — 58 -> 27. The remaining 27 are unrelated debt (skillstar-skills,
-# skillstar-marketplace, skillstar-models, cli/install.rs, four command-layer
-# files) plus the 3 surviving `HashMap<String, String>` nested-generic false
-# positives (usage_commands.rs, usage/service.rs, skillstar-usage/storage.rs).
-#
 # 2026-09-22: 27 -> 28 on merging project_skills_mcp (ort_cpu try_load_bundle).
 # 2026-09-29: 28 -> 25 on deleting MCP management (mcp_snapshot, mcp/probe).
-25
+# 2026-10-05: 25 -> 22 on removing the model domain (D-082): models_commands,
+# ai/*, decide.rs, and skillstar-models/gateway signatures left with it.
+22

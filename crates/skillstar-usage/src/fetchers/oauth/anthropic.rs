@@ -9,8 +9,14 @@
 //!   revokes the other. Minting our own pair would log the user's CLI out.
 //!   We therefore only ever *read* that store and adopt whatever pair it holds
 //!   — the "adopt the fresher pair" rule, never "win the rotation race".
-//! - Nothing is ever written back: no keychain read-modify-write, so the
-//!   `mcpOAuth` block sharing that keychain item cannot be clobbered.
+//! - This fetcher never writes the store, so login adoption can never
+//!   clobber the `mcpOAuth` block sharing it. The one permitted write is the
+//!   switch adapter's, scoped to Claude Code's own keychain item by
+//!   [D-083](../../decisions.md) (see `usage_switch::claude`).
+//!
+//! Store addressing (keychain service/account, config-dir scoping, file
+//! location) lives in `crate::claude_credentials` so login and switching can
+//! never disagree about which store is authoritative.
 //!
 //! `start_login` consequently completes synchronously: it adopts the local
 //! credential and resolves the pending-login channel immediately, so the
@@ -29,6 +35,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use super::common::SubscriptionBuilder;
+use crate::claude_credentials;
 use crate::oauth::pending_state;
 use crate::request::{Req, RequestError};
 use crate::storage;
@@ -48,11 +55,6 @@ const ANTHROPIC_TITLE_PLACEHOLDERS: &[&str] = &["Claude", "Anthropic"];
 /// queue on the same gate, so a five-account refresh paces itself instead of
 /// bursting.
 const HOST_MIN_GAP: Duration = Duration::from_secs(5);
-
-/// macOS keychain item Claude Code stores its credential blob under.
-const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
-/// Account label Claude Code falls back to when it cannot read the OS login name.
-const KEYCHAIN_ACCOUNT_FALLBACK: &str = "claude-code-user";
 
 // ── credential store ────────────────────────────────────────────────────
 
@@ -104,63 +106,27 @@ impl ClaudeOAuth {
     }
 }
 
+/// String entry used by the credential-blob tests. Production reads a parsed
+/// [`Value`] through [`parse_credentials_blob`].
+#[cfg(test)]
 fn parse_credentials(blob: &str) -> Option<ClaudeOAuth> {
-    serde_json::from_str::<ClaudeCredentials>(blob)
+    parse_credentials_blob(&serde_json::from_str(blob).ok()?)
+}
+
+fn parse_credentials_blob(blob: &Value) -> Option<ClaudeOAuth> {
+    serde_json::from_value::<ClaudeCredentials>(blob.clone())
         .ok()?
         .claude_ai_oauth
         .filter(|oauth| oauth.access_token().is_some())
 }
 
-/// OS login name Claude Code keys its keychain item by.
-fn keychain_account() -> String {
-    for var in ["USER", "LOGNAME"] {
-        if let Ok(value) = std::env::var(var) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
-    }
-    KEYCHAIN_ACCOUNT_FALLBACK.to_string()
-}
-
-fn credentials_file_path() -> std::path::PathBuf {
-    skillstar_core::infra::paths::home_dir()
-        .join(".claude")
-        .join(".credentials.json")
-}
-
-/// Read Claude Code's credential blob: keychain first on macOS (where the file
-/// is only a stale mirror the CLI deletes after migrating), file everywhere else.
+/// Read Claude Code's credential blob through the shared store addressing:
+/// keychain first on macOS (where the file is only a stale mirror the CLI
+/// deletes after migrating), file everywhere else.
 fn read_local_credentials() -> Option<ClaudeOAuth> {
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(oauth) = read_keychain_credentials() {
-            return Some(oauth);
-        }
-    }
-    let blob = std::fs::read_to_string(credentials_file_path()).ok()?;
-    parse_credentials(&blob)
-}
-
-/// Shell out to `/usr/bin/security` rather than linking `security-framework`:
-/// keychain ACL grants are bound to the *calling binary's* signature, and a
-/// rebuilt `skillstar` would silently lose an entitlement granted to the old one.
-#[cfg(target_os = "macos")]
-fn read_keychain_credentials() -> Option<ClaudeOAuth> {
-    let output = std::process::Command::new("/usr/bin/security")
-        .arg("find-generic-password")
-        .arg("-s")
-        .arg(KEYCHAIN_SERVICE)
-        .arg("-a")
-        .arg(keychain_account())
-        .arg("-w")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_credentials(String::from_utf8_lossy(&output.stdout).trim())
+    claude_credentials::read_live_blob()
+        .as_ref()
+        .and_then(parse_credentials_blob)
 }
 
 // ── login (local adoption) ──────────────────────────────────────────────

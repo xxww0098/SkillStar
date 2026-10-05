@@ -17,8 +17,8 @@ Accounts 是顶层「账号」工作台：按平台管理多个登录账号、�
 
 ## Claude Code
 
-- 绑定：只读采用 Claude Code 自己的登录（macOS 钥匙串 / 其它平台 `~/.claude/.credentials.json`），不写回。
-- 切换：非 macOS 平台通过凭证文件切换（只合并 `claudeAiOauth` 键、保留 `mcpOAuth` 等、回读校验后移动 pin；`adopt_before_refresh` 先吸收 CLI 轮转出的新 token）。macOS 受 [D-072](../../decisions.md)（禁止写系统钥匙串）约束不提供切换——Claude Code 在 macOS 的权威存储就是钥匙串，写文件不会生效。
+- 绑定：只读采用 Claude Code 自己的登录（macOS 钥匙串 / 其它平台凭证文件），登录路径不写回。
+- 切换：对权威存储做 read-modify-write——只替换 `claudeAiOauth` 键、保留 `mcpOAuth` 等（macOS 钥匙串项缺失时先从明文文件迁移兄弟键）、回读校验通过才移动 pin；`adopt_before_refresh` 先吸收 CLI 轮转出的新 token。macOS 写钥匙串项 `Claude Code-credentials` 是 [D-083](../../decisions.md) 对 D-072 的定点豁免（唯一允许的钥匙串写入），验证成功后删除过期的明文镜像文件；其它平台写 `$CLAUDE_CONFIG_DIR/.credentials.json`。
 
 ## 边界
 
