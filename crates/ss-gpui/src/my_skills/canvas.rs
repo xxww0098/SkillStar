@@ -294,7 +294,7 @@ mod tests {
     fn replayed_grid_fills_the_page(cx: &mut gpui_kit::TestAppContext) {
         use ss_core::types::skill::{Skill, SkillType};
 
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(MySkillsPage::new);
         cx.update(|cx| {
             page.update(cx, |page, cx| {
@@ -346,7 +346,7 @@ mod tests {
     /// `ensure_canvas` runs inside the page render, which already holds the lease.
     #[gpui_kit::test]
     fn canvas_can_be_created_while_the_page_is_updating(cx: &mut gpui_kit::TestAppContext) {
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(|cx| MySkillsPage::new(cx));
         cx.update(|cx| {
             page.update(cx, |page, cx| {
@@ -362,7 +362,7 @@ mod tests {
         use gpui_kit::point;
         use ss_core::types::skill::{Skill, SkillType};
 
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(|cx| MySkillsPage::new(cx));
         cx.update(|cx| {
             page.update(cx, |page, cx| {
@@ -435,7 +435,7 @@ mod tests {
 
         use super::super::skill_card::{reset_skill_card_hover, skill_card_is_hovered};
 
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(|cx| MySkillsPage::new(cx));
         cx.update(|cx| {
             page.update(cx, |page, cx| {

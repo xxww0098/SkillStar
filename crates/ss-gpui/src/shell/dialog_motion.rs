@@ -57,10 +57,8 @@ impl Render for Surface {
 
 #[gpui_kit::test]
 fn dialog_entrance_does_not_rebuild_the_page(cx: &mut gpui_kit::TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        cx.set_reduce_motion(false);
-    });
+    crate::init_test(cx);
+    cx.update(|cx| cx.set_reduce_motion(false));
 
     let hits = Rc::new(Cell::new(0));
     let host_hits = Rc::new(Cell::new(0));
@@ -155,10 +153,8 @@ impl Render for SpinFrame {
 
 #[gpui_kit::test]
 fn spin_does_not_rebuild_the_replayed_body(cx: &mut gpui_kit::TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        cx.set_reduce_motion(false);
-    });
+    crate::init_test(cx);
+    cx.update(|cx| cx.set_reduce_motion(false));
 
     let hits = Rc::new(Cell::new(0));
     let hits_for_body = hits.clone();

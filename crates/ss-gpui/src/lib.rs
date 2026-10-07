@@ -132,6 +132,18 @@ fn install_dock_icon() {
 /// each view.
 static TOKIO: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
 
+/// Test-context bootstrap shared by every `#[gpui_kit::test]`. The gpui
+/// test scheduler treats any foreign-thread wakeup as nondeterminism,
+/// but page constructors kick off real tokio work through
+/// [`spawn_domain`] on the `skillstar-domain` runtime. `allow_parking`
+/// switches that scheduler to real-time waiting instead of aborting when
+/// those threads poke it mid-run.
+#[cfg(test)]
+pub(crate) fn init_test(cx: &mut gpui_kit::TestAppContext) {
+    cx.executor().allow_parking();
+    cx.update(|cx| gpui_kit::init(cx));
+}
+
 fn tokio() -> &'static tokio::runtime::Runtime {
     TOKIO.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()

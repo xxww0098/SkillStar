@@ -301,7 +301,7 @@ mod card_motion {
     /// ellipsis; that is the only animation on the card's update pill.
     #[gpui_kit::test]
     fn batch_update_mounts_the_card_update_animation(cx: &mut gpui_kit::TestAppContext) {
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(|cx| MySkillsPage::new(cx));
         cx.update(|cx| {
             page.update(cx, |page, _| {

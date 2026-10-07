@@ -166,7 +166,7 @@ mod tests {
     /// drops the hover so the next button does not open already eased in.
     #[gpui_kit::test]
     fn hover_does_not_revise_the_grid(cx: &mut gpui_kit::TestAppContext) {
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(|cx| super::MySkillsPage::new(cx));
         cx.update(|cx| {
             page.update(cx, |page, cx| {

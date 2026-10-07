@@ -188,7 +188,7 @@ mod tests {
     /// `ensure_board` runs inside the page render, which already holds the lease.
     #[gpui_kit::test]
     fn board_can_be_created_while_the_page_is_updating(cx: &mut gpui_kit::TestAppContext) {
-        cx.update(|cx| gpui_kit::init(cx));
+        crate::init_test(cx);
         let page = cx.new(|_cx| PublisherDetailPage::new());
         cx.update(|cx| {
             page.update(cx, |page, cx| {

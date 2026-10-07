@@ -29,8 +29,10 @@ name: CI
 #    tests point it at a fixture file and never mutate HOME/USERPROFILE.
 #
 # 3. `cargo test --workspace` compiles the GPUI shell, so Linux needs
-#    pkg-config, libxkbcommon-dev, libwayland-dev, and libvulkan-dev. Do not
-#    put webkit2gtk or GTK back; that linker set belonged to Tauri.
+#    pkg-config, libxkbcommon-dev, libwayland-dev, libvulkan-dev, and the
+#    font stack (libfontconfig1-dev, libfreetype6-dev) for
+#    yeslogic-fontconfig-sys. Do not put webkit2gtk or GTK back; that linker
+#    set belonged to Tauri.
 #
 # 4. Ratchet gates + clippy + cargo-deny run only on Linux (see test-macos
 #    note). Duplicating clippy on macOS roughly doubles wall-clock time for
@@ -107,7 +109,9 @@ jobs:
             libssl-dev \
             libxkbcommon-dev \
             libwayland-dev \
-            libvulkan-dev
+            libvulkan-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev
 
       # Rust version + component list have exactly one home: rust-toolchain.toml
       # (see failure lesson #7). Read it here and hand it to the action, so no
