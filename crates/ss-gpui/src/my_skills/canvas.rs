@@ -285,12 +285,40 @@ mod tests {
 
     /// The replayed grid has to keep the pane's height. A flex root with no
     /// definite height collapses, and the scroller clips every card.
+    ///
+    /// The page is built on the app context before the window opens, like the
+    /// sibling tests: constructing it inside `add_window_view` binds the
+    /// construction-time domain refresh to the window executor, and its real
+    /// tokio wakeup then trips the test scheduler's determinism guard on CI.
     #[gpui_kit::test]
     fn replayed_grid_fills_the_page(cx: &mut gpui_kit::TestAppContext) {
+        use ss_core::types::skill::{Skill, SkillType};
+
         cx.update(|cx| gpui_kit::init(cx));
-        let (_root, cx) = cx.add_window_view(|window, cx| {
-            let page = cx.new(|cx| MySkillsPage::new(cx));
-            let frame = cx.new(|_| Frame { page });
+        let page = cx.new(MySkillsPage::new);
+        cx.update(|cx| {
+            page.update(cx, |page, cx| {
+                page.loading = false;
+                page.error = None;
+                page.skills = (0..3)
+                    .map(|index| {
+                        let mut skill = Skill::from_skills_sh(
+                            format!("skill-{index}"),
+                            String::new(),
+                            0,
+                            "local".into(),
+                            String::new(),
+                        );
+                        skill.skill_type = SkillType::Local;
+                        skill
+                    })
+                    .collect();
+                page.revise(cx);
+            });
+        });
+        let shown = page.clone();
+        let (_root, cx) = cx.add_window_view(move |window, cx| {
+            let frame = cx.new(|_| Frame { page: shown });
             Root::new(frame, window, cx)
         });
         cx.simulate_resize(size(px(1400.), px(800.)));

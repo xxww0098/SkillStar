@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use ss_core::infra::paths::TOOL_SYNC_HOME_ENV;
 use ss_core::infra::paths::{home_dir, tool_sync_home_override};
 
 pub fn is_tool_sync_sandboxed() -> bool {
