@@ -23,4 +23,8 @@
 # 41 redundant `#[must_use]`, 6 redundant closures, 2 serde attribute parse
 # failures, and 7 one-off warnings (including cargo's future-incompat note
 # for the `block` crate). Raised here as the toolchain-bump exception.
-56
+# 2026-10-07: 56 -> 153 on the ss-* consolidation and the GPUI dialog work:
+# 42 redundant `#[must_use]`, 27 unit-value let bindings, 21 redundant
+# closures, 18 collapsible ifs, and one-offs. Debt: burn back down with
+# `cargo clippy --fix` once the vendored gpui-component patch (D-084) lands.
+153
