@@ -1,2 +1,0 @@
-# Production command files that still own direct filesystem/path work.
-# Format: path maximum_matching_lines. Counts can only decrease.

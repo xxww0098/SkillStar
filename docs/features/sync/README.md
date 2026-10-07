@@ -4,18 +4,18 @@
 
 本文件维护 SSH 远端技能传输、凭证边界、进度事件和恢复语义。技能本地安装/部署规则见 [../skills/README.md](../skills/README.md)。
 
-> S3 云同步已移除（2025）：跨设备/组织协作统一走 GitHub 共享频道（`skillstar-channels`），SSH 保留为个人服务器部署路径。决策记录见 [../../decisions.md](../../decisions.md)。
+> S3 云同步已移除（2025）：跨设备/组织协作统一走 GitHub 共享频道（`ss-skills::channels`），SSH 保留为个人服务器部署路径。决策记录见 [../../decisions.md](../../decisions.md)。
 
 ## 所有权
 
-- `skillstar-sync::ssh` 拥有 SSH dial/auth/TOFU、SFTP、远端 discovery、hub 操作和 host store。
-- `src-tauri/src/commands/ssh_hosts/` 只注入事件 sink、State 和 DTO。
-- Sync 可以消费 `skillstar-skills` 的公开安装/skill contract，不反向拥有本地技能规则。
+- `ss-sync::ssh` 拥有 SSH dial/auth/TOFU、SFTP、远端 discovery、hub 操作和 host store。
+- SSH 主机和传输留在 `ss-sync`。当前 GPUI 没有远端界面。
+- Sync 可以消费 `ss-skills` 的公开安装/skill contract，不反向拥有本地技能规则。
 
 ## SSH 凭证与 Host Key
 
 - 非敏感 host metadata 写 `~/.skillstar/config/ssh_hosts.toml`。
-- 密码和 passphrase 采用本地 AES-256-GCM 加密 JSON 存储（落盘在 `~/.skillstar/state/ssh_credentials.json`，权限 0600，密钥派生自 machine-id），不写入系统 Keychain / Keyring。
+- 密码和 passphrase 采用本地 AES-256-GCM 加密 JSON 存储（落盘在 `~/.skillstar/secrets/ssh/credentials.json`，权限 0600，密钥派生自 machine-id），不写入系统 Keychain / Keyring。
 - 连接分为 dial/handshake → host-key gate → authenticate。未信任或 mismatch 主机（包括连接测试流程）不得收到认证材料；测试流程在密钥接受前只返回指纹与延迟，接受密钥后重试才发送密码/私钥。
 - 已接受 fingerprint 存 `ssh_known_hosts.json`；mismatch fail closed。
 - 系统 `~/.ssh/config` host 只读发现，导入后才写 SkillStar store。
@@ -42,11 +42,10 @@
 - 每次命令有唯一 `session_id`，事件 phase/status 由 `SshProgressEvent` 定义。
 - console 显示 dial、handshake、host_key、auth、sftp、scan、done/error；host-key pending 在 console 内暂停并提供 trust action。
 - My Skills remote scope 复用 `SkillGrid`/`SkillCard` 展示，但 host/console/push/migrate/delete 状态归 remote content 自己所有。
-- `src/features/ssh/` 拥有 host CRUD、连接事件 hook 与远程 mutation/query 公共接口；`src/features/my-skills/remote/` 拥有 remote content、Skill 投影、详情抽屉和迁移/删除交互。依赖方向固定为 `my-skills → ssh`，禁止 SSH UI 回读 My Skills 私有组件。
+- 远端界面没有移植到 GPUI。主机和传输规则仍以 `ss-sync` 为准，不要为了补界面恢复 `src/features/ssh/`。
 
 ## 验证
 
 ```bash
-cargo test -p skillstar-sync
-bun run test -- src/features/ssh
+cargo test -p ss-sync
 ```

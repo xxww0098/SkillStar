@@ -1,12 +1,12 @@
 # 项目技能 MCP
 
-状态：18 已落地。最后更新：2026-09-22。
+状态：01–16 已落地。最后更新：2026-10-05。
 
 ## Next Agent Prompt
 
 你正在收尾 SkillStar 的项目技能 MCP。不要从聊天记录恢复上下文，以本目录为准。
 
-01–18 已落地。Laya 在第一次推荐时用 CPU 对至多 12 个候选做 noul 重排；未设置 `SKILLSTAR_LAYA_ONNX`、语种不符或加载失败时仍是 BM25。中文任务只接受 multilingual 导出，英文 `receptron/laya-onnx` 不能冒充。下一步是整份规格收尾：按最终代码重写 `choices.md`，再归档。不要 push。
+01–16 已落地。推荐保持 BM25 原序，生产重排器只有 `PassthroughReranker`。下一步是整份规格收尾：按最终代码重写 `choices.md`，再归档。不要 push。
 
 项目技能 MCP 只接受 `2026-07-28`。`initialize` 返回不支持的协议版本。Windows release 管道探针还没跑。分支 `feat/project-skills-mcp`。
 
@@ -32,8 +32,6 @@
 - [x] 14 elicitation — [slices/14-elicitation.md](slices/14-elicitation.md)
 - [x] 15 CLI 批准 — [slices/15-cli-approve.md](slices/15-cli-approve.md)
 - [x] 16 桌面批准 — [slices/16-gui-approve.md](slices/16-gui-approve.md)
-- [x] 17 ort CPU — [slices/17-ort-cpu.md](slices/17-ort-cpu.md)
-- [x] 18 Laya 图 — [slices/18-laya-graph.md](slices/18-laya-graph.md)
 
 ## 目标
 
@@ -46,7 +44,7 @@
 
 推荐、安装、项目启用、当前会话已加载是四件事。本方案做推荐、确认、启用和部署复核。安装留在现有 CLI。当前会话是否已加载技能，结果里固定为未验证。
 
-可选的 Laya 重排只改变候选顺序。推理引擎是 `ort` 的 CPU Execution Provider，Windows、macOS、Linux 共用同一份 ONNX 和同一条 `Session` 构建路径。模型文件不在时，推荐仍按 BM25 返回。
+推荐保持 BM25 原序。
 
 ## 人可以怎么看
 
@@ -63,7 +61,6 @@
 05 + 06 ─► 07 计划 ──► 12 应用 ──► 13
 08 批准 ──► 12
 08 + 07 ─► 15 CLI 批准 ──► 16 桌面批准
-10 的重排接口 ──► 17 ort CPU ──► 18 Laya 图
 ```
 
 01、02、03、04、06、08 没有相互依赖，仍按编号做，避免两档同时改公共入口。
@@ -74,7 +71,7 @@
 
 | 概念 | 所有者 |
 | --- | --- |
-| stdio 进程规则（不进 GUI、stdout 只有协议、跳过 askpass 与 marketplace init） | `src-tauri/src/main.rs` 的 `mcp` 分支 + `skillstar_app::project_skills_mcp::serve` |
+| stdio 进程规则（不进 GUI、stdout 只有协议、跳过 askpass 与 marketplace init） | `crates/skillstar/src/main.rs` 的 `mcp` 分支 + `ss_app::project_skills_mcp::serve` |
 | 项目绑定 | `skillstar_skills::projects::binding` |
 | 项目写锁 | `skillstar_skills::projects::write_lock` |
 | 共享路径 owner | `skillstar_skills::projects::owner` |
@@ -86,11 +83,11 @@
 | 计划、回执 | `skillstar_app::project_skills_mcp::plan` |
 | 批准记录 | `skillstar_app::project_skills_mcp::approval` |
 | 推荐 / 查询 / 应用编排 | 同模块的 `recommend` / `inspect` / `apply` |
-| 重排 | 同模块的 `ranker`。`PassthroughReranker` 是永久回退，不是以后要删的垫片 |
+| 重排 | 同模块的 `ranker`。生产只有 `PassthroughReranker`，保持 BM25 原序 |
 | 协议 DTO | 同模块的 `protocol`。禁止 `From<工具参数> for ApprovalRecord` |
 | 外部 MCP 安装计划 | 保持 `skillstar_app::mcp`。本功能不往那里加类型 |
 
-`rmcp` 与 `ort` 只加入 `skillstar-app`，用 `cargo add`，版本写进根 `Cargo.toml`。不新增 crate。
+`rmcp` 只加入 `skillstar-app`，用 `cargo add`，版本写进根 `Cargo.toml`。不新增 crate。
 
 数据目录一律经 `skillstar_core::infra::paths`，`SKILLSTAR_DATA_DIR` 继续生效：
 
@@ -107,9 +104,9 @@
 
 ### 进程
 
-`skillstar mcp serve --stdio` 必须被 `is_cli_subcommand` 认成 CLI。漏掉时 `src-tauri/src/main.rs` 会打开桌面窗口。
+`skillstar mcp serve --stdio` 在 `crates/skillstar/src/main.rs` 里于 askpass 之前返回。漏掉时会打开桌面窗口。
 
-`argv[1] == "mcp"` 时，在 `handle_internal_askpass` 之前进入 serve。该函数在 `SKILLSTAR_GIT_ASKPASS_MODE=1` 时会 `println!` 并吞掉进程（`crates/skillstar-git/src/transport.rs`）。serve 自己调用 `install_global_policy` 和 `migrate_legacy_paths`。不调用 marketplace snapshot `initialize`。tracing 只写 stderr。stdout 只有换行分隔的 JSON-RPC。
+`argv[1] == "mcp"` 时，在 `handle_internal_askpass` 之前进入 serve。该函数在 `SKILLSTAR_GIT_ASKPASS_MODE=1` 时会 `println!` 并吞掉进程（`crates/ss-git/src/transport.rs`）。serve 自己迁移旧路径，不调用 `ss_app::bootstrap::prepare_process`，因此不初始化 marketplace snapshot。tracing 只写 stderr。stdout 只有换行分隔的 JSON-RPC。
 
 Release Windows 使用 `windows_subsystem = "windows"`。不要改子系统，不要 `AllocConsole`。父进程接上的管道就是传输。
 
@@ -163,9 +160,7 @@ TTL 15 分钟。测试注入时钟。
 
 ### 重排
 
-`SkillReranker` 只重排已有候选的顺序，不增删 id，不产生 selection，不写计划或批准。默认实现是 `PassthroughReranker`。
-
-`ort` 关闭 default features，只保留编出 CPU Execution Provider 的最小 feature。不要同时启用 `cuda`、`coreml`、`directml`。PyTorch 不进 workspace。权重不进 git，不进安装包，运行时不下载。
+`SkillReranker` 只重排已有候选的顺序，不增删 id，不产生 selection，不写计划或批准。生产实现是 `PassthroughReranker`，顺序等于 BM25。
 
 ## 被否决的做法
 
@@ -182,8 +177,6 @@ TTL 15 分钟。测试注入时钟。
 | 一份计划里自动勾选高分技能 | 分数不是授权 |
 | apply 里从市场补装、执行技能脚本、安装技能建议的 MCP | 那些是另一份批准 |
 | 为每次推荐建 SkillGroup，或走 `save_and_sync` | 卡组是用户以后主动保存的；`save_and_sync` 会清空再重建 |
-| GPU Execution Provider、应用内 PyTorch | 三平台没有同一个 GPU 后端；CPU 足够做可选重排 |
-| 把 1.7GB 的英文 Laya 权重复制进仓库 | CI 不下载。中文 multilingual ONNX 目前没有现成文件 |
 
 ## 防火墙
 
@@ -191,19 +184,15 @@ TTL 15 分钟。测试注入时钟。
 - 不把工具写进 `docs/features/mcp/README.md` 的类型说明。新行为写 `docs/features/project-skills-mcp/README.md`，并在 `Agents.md` 功能入口加一行链接。`docs/boundaries.md`、`docs/architecture.md`、`docs/decisions.md` 只加本功能的所有权、stdio 与锁。`README.md` 只加这两条 CLI。
 - 测试把 `SKILLSTAR_DATA_DIR`、`HOME`，Windows 再加 `USERPROFILE`，指到临时目录。不写真实家目录。
 - 无协议兼容垫片，无 `projects.json` 迁移，无第二套工具名。
-- 01 到 17 在当前操作系统上可以继续。Windows release 管道探针没跑过之前，不要把传输标成三平台已验证。该探针失败时停在 01，改规格，不要改子系统。
+- 01 到 16 在当前操作系统上可以继续。Windows release 管道探针没跑过之前，不要把传输标成三平台已验证。该探针失败时停在 01，改规格，不要改子系统。
 
 ## 已知未知
 
 - rmcp 3.4 里读取 form elicitation 能力的具体方法名，以该版本文档为准。策略不能改：能力来自 `initialize`，不来自工具参数。
-- `ort` 关闭 default features 之后，CPU 包对应的 feature 名以引入时的 ort 文档为准。禁止为了编过而打开硬件 EP。
 - Windows release 的继承管道要在真机 release 二进制上看一次。macOS 上的 debug 探针不能代替它。
-- Laya 英文图的打包格式以 [receptron/laya](https://github.com/receptron/laya) 的导出和加载代码为准。数值对照是 18，不是 17 的门。
 
 ## 来源
 
 - MCP Rust SDK：<https://github.com/modelcontextprotocol/rust-sdk>（`rmcp` 3.4.0，规范 2026-07-28）
 - stdio：<https://modelcontextprotocol.io/specification/2026-07-28/basic/transports>
 - elicitation：<https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation>
-- ort features：<https://ort.pyke.io/setup/cargo-features>
-- 英文 ONNX：<https://huggingface.co/receptron/laya-onnx>

@@ -1,0 +1,237 @@
+//! Interface language for the GPUI shell.
+//!
+//! Copy lives in `src/i18n/locales/{en,zh-CN}.json` — the same catalogs the
+//! React shell uses. [`set_language`] updates a process-wide code and a GPUI
+//! global; `Shell` observes that global, re-renders the pages, and they pick
+//! up [`t`] on the next frame.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
+
+use gpui_kit::component::input::InputState;
+use gpui_kit::*;
+
+static CURRENT: RwLock<String> = RwLock::new(String::new());
+
+// Tests on one worker must not flip the language other workers are rendering.
+thread_local! {
+    static OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+struct Catalogs {
+    en: HashMap<String, String>,
+    zh: HashMap<String, String>,
+}
+
+static CATALOGS: OnceLock<Catalogs> = OnceLock::new();
+
+/// Observed by `Shell`. Mutating it (via [`set_language`]) makes the shell
+/// re-render its pages, which then read fresh copy from [`t`].
+pub struct UiLang {
+    code: String,
+}
+
+impl Global for UiLang {}
+
+/// Load `gui_prefs.json` and publish the language before the first frame.
+pub fn install(cx: &mut App) {
+    let code = normalize(&crate::prefs::load().language);
+    set_current(&code);
+    cx.set_global(UiLang { code });
+}
+
+/// Persist happens in the caller. This applies `code` immediately.
+pub fn set_language(cx: &mut App, code: &str) {
+    let code = normalize(code);
+    set_current(&code);
+    cx.global_mut::<UiLang>().code = code;
+}
+
+/// Dotted key, e.g. `sidebar.skills`. Missing keys fall back to the other
+/// catalog, then to the key itself.
+pub fn t(key: &str) -> SharedString {
+    lookup(&current_code(), key).into()
+}
+
+/// `{{name}}` placeholders, same shape as the React catalogs.
+pub fn tf(key: &str, vars: &[(&str, &str)]) -> SharedString {
+    let mut text = lookup(&current_code(), key);
+    for (name, value) in vars {
+        let token = format!("{{{{{name}}}}}");
+        text = text.replace(&token, value);
+    }
+    text.into()
+}
+
+/// `"en"` or `"zh-CN"`. Empty until [`install`] or [`set_language`].
+pub fn language() -> String {
+    current_code()
+}
+
+/// Tests only. Overrides this thread until the guard drops, so parallel
+/// tests keep the process language.
+#[cfg(test)]
+pub(crate) fn set_language_for_test(code: &str) -> LanguageGuard {
+    LanguageGuard::apply(code);
+    LanguageGuard
+}
+
+#[cfg(test)]
+pub(crate) struct LanguageGuard;
+
+#[cfg(test)]
+impl LanguageGuard {
+    pub(crate) fn set(&self, code: &str) {
+        Self::apply(code);
+    }
+
+    fn apply(code: &str) {
+        let code = normalize(code);
+        OVERRIDE.with(|slot| *slot.borrow_mut() = Some(code));
+    }
+}
+
+#[cfg(test)]
+impl Drop for LanguageGuard {
+    fn drop(&mut self) {
+        OVERRIDE.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+/// `"en"` or `"zh-CN"`. Anything else follows the React fallback, `zh-CN`.
+pub fn normalize(code: &str) -> String {
+    let code = code.trim();
+    if code.eq_ignore_ascii_case("en") || code.to_ascii_lowercase().starts_with("en-") {
+        "en".into()
+    } else {
+        "zh-CN".into()
+    }
+}
+
+pub fn sync_placeholder(
+    input: &Entity<InputState>,
+    text: SharedString,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if input.read(cx).presentation().placeholder() == &text {
+        return;
+    }
+    let _ = input.update(cx, |state, cx| state.set_placeholder(text, window, cx));
+}
+
+fn set_current(code: &str) {
+    if let Ok(mut guard) = CURRENT.write() {
+        *guard = code.to_string();
+    }
+}
+
+fn current_code() -> String {
+    if let Some(code) = OVERRIDE.with(|slot| slot.borrow().clone()) {
+        return code;
+    }
+    CURRENT
+        .read()
+        .ok()
+        .filter(|code| !code.is_empty())
+        .map(|code| code.clone())
+        .unwrap_or_else(|| "zh-CN".into())
+}
+
+fn catalogs() -> &'static Catalogs {
+    CATALOGS.get_or_init(|| Catalogs {
+        en: flatten(include_str!("../assets/locales/en.json")),
+        zh: flatten(include_str!("../assets/locales/zh-CN.json")),
+    })
+}
+
+fn flatten(raw: &str) -> HashMap<String, String> {
+    let value: serde_json::Value = serde_json::from_str(raw).expect("locale json");
+    let mut out = HashMap::new();
+    walk(&value, "", &mut out);
+    out
+}
+
+fn walk(value: &serde_json::Value, prefix: &str, out: &mut HashMap<String, String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                let next = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                walk(child, &next, out);
+            }
+        }
+        serde_json::Value::String(text) => {
+            out.insert(prefix.to_string(), text.clone());
+        }
+        _ => {}
+    }
+}
+
+fn lookup(lang: &str, key: &str) -> String {
+    let cats = catalogs();
+    let (primary, fallback) = if lang == "en" {
+        (&cats.en, &cats.zh)
+    } else {
+        (&cats.zh, &cats.en)
+    };
+    primary
+        .get(key)
+        .or_else(|| fallback.get(key))
+        .cloned()
+        .unwrap_or_else(|| key.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize, set_language_for_test, t, tf};
+
+    #[test]
+    fn normalize_matches_react_codes() {
+        assert_eq!(normalize("en"), "en");
+        assert_eq!(normalize("en-US"), "en");
+        assert_eq!(normalize("zh-CN"), "zh-CN");
+        assert_eq!(normalize("zh"), "zh-CN");
+        assert_eq!(normalize(""), "zh-CN");
+    }
+
+    #[test]
+    fn catalogs_translate_sidebar_and_interpolate() {
+        let lang = set_language_for_test("zh-CN");
+        assert_eq!(t("sidebar.skills").as_ref(), "技能");
+        assert_eq!(
+            tf("settings.storageHubCount", &[("count", "3")]).as_ref(),
+            "3 个技能"
+        );
+        lang.set("en");
+        assert_eq!(t("sidebar.skills").as_ref(), "Cards");
+        assert_eq!(
+            tf("settings.activeCount", &[("enabled", "1"), ("total", "4")]).as_ref(),
+            "1 / 4 active"
+        );
+        assert_eq!(t("missing.key").as_ref(), "missing.key");
+    }
+
+    #[test]
+    fn usage_card_copy_switches() {
+        let lang = set_language_for_test("zh-CN");
+        assert_eq!(t("usage.meterResetSoon").as_ref(), "即将重置");
+        assert_eq!(t("usage.resetCards").as_ref(), "重置卡");
+        assert_eq!(
+            tf("usage.remainingPercent", &[("percent", "86")]).as_ref(),
+            "剩余 86%"
+        );
+        lang.set("en");
+        assert_eq!(t("usage.meterResetSoon").as_ref(), "Resetting soon");
+        assert_eq!(t("usage.resetCards").as_ref(), "Reset cards");
+        assert_eq!(
+            tf("usage.remainingPercent", &[("percent", "86")]).as_ref(),
+            "86% left"
+        );
+        assert_eq!(tf("usage.meterDays", &[("n", "6")]).as_ref(), "6d");
+    }
+}

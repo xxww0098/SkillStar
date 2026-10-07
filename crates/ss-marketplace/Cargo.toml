@@ -1,0 +1,36 @@
+[package]
+name = "ss-marketplace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Internal path dep, never goes to crates.io.
+publish = false
+
+[lib]
+# No doc tests in this workspace; the crates are internal path deps, not a
+# published API whose examples need to keep compiling.
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+htmd = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+ss-core = { path = "../ss-core" }
+ts-rs = { workspace = true, features = ["serde-compat"] }
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -95,7 +95,7 @@ while IFS= read -r -d '' file; do
   fi
 done < <(
   for ext in "${EXTS[@]}"; do
-    find src src-tauri/src crates -name "*.${ext}" -type f -print0 2>/dev/null
+    find crates -name "*.${ext}" -type f -print0 2>/dev/null
   done
 )
 

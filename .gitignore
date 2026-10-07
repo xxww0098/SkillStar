@@ -78,4 +78,7 @@ test_parse
 .serena/
 .workbuddy/
 .zcode/
+.posit/
+.tabnine/
+.codegraph/
 .ignore

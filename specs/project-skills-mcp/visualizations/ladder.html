@@ -15,7 +15,7 @@
 </head>
 <body>
   <h1>项目技能 MCP</h1>
-  <p>推荐、批准、启用、会话加载分开。推理只用 ort 的 CPU。模型不在时，17 以前的推荐已经可用。</p>
+  <p>推荐、批准、启用、会话加载分开。推荐保持 BM25 原序。</p>
   <ol>
     <li><span class="id">01</span> stdio 进程。探针：把 initialize 送进 <code>skillstar mcp serve --stdio</code>。</li>
     <li><span class="id">02</span> 项目绑定。规范路径，推荐不注册。</li>
@@ -33,8 +33,6 @@
     <li><span class="id">14</span> 有 elicitation 才在写入前向人确认。</li>
     <li><span class="id">15</span> 终端批准。不部署。</li>
     <li><span class="id">16</span> Projects 页批准。不部署。</li>
-    <li><span class="id">17</span> ort CPU。小图进仓库，Laya 权重不进。</li>
-    <li><span class="id">18</span> Laya 图。CPU 上按 noul 重排，失败则回到 BM25。</li>
   </ol>
 </body>
 </html>

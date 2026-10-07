@@ -1,0 +1,55 @@
+[package]
+name = "ss-skills"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Internal path dep, never goes to crates.io.
+publish = false
+
+[lib]
+# No doc tests in this workspace; the crates are internal path deps, not a
+# published API whose examples need to keep compiling.
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+ss-core = { path = "../ss-core" }
+dirs = { workspace = true }
+flate2 = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+aes-gcm = { workspace = true }
+machine-uid = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "rt-multi-thread"] }
+base64.workspace = true
+ss-git = { path = "../ss-git" }
+reqwest = { workspace = true, features = ["form"] }
+tempfile.workspace = true
+url.workspace = true
+serde_yaml.workspace = true
+
+[target."cfg(windows)".dependencies]
+junction = { workspace = true }
+
+# Every `tempfile` use in this crate sits behind `#[cfg(test)]` — the sibling
+# `*_tests.rs` files are mounted from `#[cfg(test)] mod` declarations — so it is
+# a test-only dependency. `[dev-dependencies]` are visible to the lib target
+# under `cfg(test)`, which is what those tests compile as.
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[[bench]]
+name = "discovery"
+harness = false

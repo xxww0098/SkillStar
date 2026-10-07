@@ -1,0 +1,24 @@
+[package]
+name = "skillstar"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SkillStar desktop shell and CLI"
+publish = false
+
+# Product version lives on this package, not the workspace placeholder.
+# skillstar --version still comes from the Clap derive in ss-app, which
+# shares the same 0.0.1 until a release bumps both on purpose.
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "skillstar"
+path = "src/main.rs"
+
+[dependencies]
+ss-app = { path = "../ss-app" }
+ss-git = { path = "../ss-git" }
+ss-gpui = { path = "../ss-gpui" }

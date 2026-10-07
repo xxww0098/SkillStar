@@ -2,7 +2,7 @@
 # Structural-governance guard: count `Result<..., String>` signatures across
 # the Rust backend. Stringly-typed errors erase structure (no matching on
 # variants, no source chains) — new code should return a proper error enum
-# (thiserror) instead. Scans src-tauri/src and crates/, skipping test code
+# (thiserror) instead. Scans crates/, skipping test code
 # (paths containing /tests/, and files named *_tests.rs or tests.rs).
 #
 # Ratchet model (same as check_file_size.sh, but a single number instead of
@@ -45,7 +45,7 @@ while IFS= read -r -d '' file; do
   total=$((total + count))
   declare_hits="$declare_hits$(printf '%4s  %s\n' "$count" "$file")"$'\n'
 done < <(
-  for dir in src-tauri/src crates; do
+  for dir in crates; do
     [ -d "$dir" ] || continue
     find "$dir" -name "*.rs" -type f -print0 2>/dev/null
   done

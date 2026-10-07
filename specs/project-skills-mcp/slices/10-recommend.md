@@ -22,7 +22,7 @@
 
 返回四个独立字段：`candidates`、`plan`、`approval: absent`、`runtime_visibility` 不出现在推荐里。分数不进入计划。
 
-trait 放在 `ranker.rs`。17 档增加 `OrtCpuReranker`，不改这个函数的返回形状。
+trait 放在 `ranker.rs`。生产实现是 `PassthroughReranker`，不改这个函数的返回形状。
 
 ## 人可以运行
 

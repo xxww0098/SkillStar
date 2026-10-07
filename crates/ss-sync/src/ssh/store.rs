@@ -1,0 +1,585 @@
+//! Persistence for SSH hosts and their credentials.
+//!
+//! Two storage tiers mirror the existing config patterns:
+//!
+//! - **Host metadata** (`~/.skillstar/config/ssh_hosts.toml`) — a `Vec<SshHostDef>`
+//!   containing only non-sensitive fields (display name, host, port, username,
+//!   auth method, key *path*). Safe to back up.
+//! - **Credentials** — passphrases and passwords go through the system keyring
+//!   via the [`SecretStore`] trait. The production impl uses `keyring` v4;
+//!   tests use [`MemSecretStore`].
+//! - **Accepted host keys** (`~/.skillstar/config/ssh_known_hosts.json`) — the
+//!   TOFU store written when the user confirms a server fingerprint.
+//!
+//! This mirrors `ss_skills::agents::profile_storage`
+//! (`TomlPrefsStore` + in-memory test double).
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::ssh::types::{KnownHost, SshHostDef};
+
+// ── Host metadata persistence ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct HostsFile {
+    #[serde(default)]
+    hosts: Vec<SshHostDef>,
+}
+
+fn hosts_config_path() -> PathBuf {
+    ss_core::infra::paths::ssh_hosts_config_path()
+}
+
+/// Load all SSH host definitions from disk. Missing/corrupt file → empty list.
+pub fn load_hosts() -> Vec<SshHostDef> {
+    let path = hosts_config_path();
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let file: HostsFile = toml::from_str(&content).unwrap_or_default();
+    file.hosts
+}
+
+/// Persist the full host list to disk (atomic write via tmp + rename).
+pub fn save_hosts(hosts: &[SshHostDef]) -> Result<()> {
+    let path = hosts_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create ssh_hosts config dir")?;
+    }
+    let file = HostsFile {
+        hosts: hosts.to_vec(),
+    };
+    let content = toml::to_string_pretty(&file).context("serialize ssh_hosts.toml")?;
+
+    ss_core::infra::fs_ops::atomic_write(&path, content.as_bytes())
+        .context("persist ssh_hosts.toml")?;
+    Ok(())
+}
+
+// ── Credential storage (encrypted local JSON) ────────────────────────
+
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+
+const KEY_NAMESPACE: &[u8] = b"skillstar-ssh-credentials";
+const CREDENTIAL_SCHEMA_VERSION: u32 = 1;
+
+fn encryption_key() -> [u8; 32] {
+    let uid = machine_uid::get().unwrap_or_else(|_| "skillstar-fallback-id-123".into());
+    let mut hash = Sha256::new();
+    hash.update(KEY_NAMESPACE);
+    hash.update(uid.as_bytes());
+    hash.finalize().into()
+}
+
+fn seal(plaintext: &str) -> Result<String> {
+    if plaintext.is_empty() {
+        return Ok(String::new());
+    }
+    let key = encryption_key();
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| anyhow::anyhow!("cipher init: {e}"))?;
+    let mut nonce_bytes = [0u8; 12];
+    for byte in &mut nonce_bytes {
+        *byte = rand::random::<u8>();
+    }
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext.as_bytes())
+        .map_err(|e| anyhow::anyhow!("encrypt: {e}"))?;
+    let mut combined = nonce_bytes.to_vec();
+    combined.extend_from_slice(&ciphertext);
+    Ok(BASE64.encode(combined))
+}
+
+fn open(encoded: &str) -> Result<String> {
+    if encoded.is_empty() {
+        return Ok(String::new());
+    }
+    let combined = BASE64
+        .decode(encoded)
+        .map_err(|e| anyhow::anyhow!("base64 decode: {e}"))?;
+    if combined.len() < 28 {
+        return Err(anyhow::anyhow!("ciphertext too short"));
+    }
+    let key = encryption_key();
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| anyhow::anyhow!("cipher init: {e}"))?;
+    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("decrypt: {e}"))?;
+    String::from_utf8(plaintext).map_err(|e| anyhow::anyhow!("utf8: {e}"))
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct SshCredentialsBlob {
+    schema_version: u32,
+    secrets: HashMap<String, String>,
+}
+
+/// Abstraction over secret storage so logic can be unit-tested without a
+/// real on-disk store. Mirrors the `PrefsStore` pattern in `profile_storage.rs`.
+pub trait SecretStore {
+    fn get_secret(&self, host_id: &str) -> Result<Option<String>>;
+    fn set_secret(&self, host_id: &str, value: &str) -> Result<()>;
+    fn delete_secret(&self, host_id: &str) -> Result<()>;
+}
+
+/// Production secret store backed by local AES-256-GCM sealed JSON on disk (mode 0600).
+/// Never enters the OS keychain.
+#[derive(Clone)]
+pub struct EncryptedJsonSecretStore {
+    path: PathBuf,
+}
+
+impl Default for EncryptedJsonSecretStore {
+    fn default() -> Self {
+        Self {
+            path: ss_core::infra::paths::ssh_credentials_path(),
+        }
+    }
+}
+
+impl EncryptedJsonSecretStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[cfg(test)]
+    pub fn at(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn read_blob(&self) -> Result<SshCredentialsBlob> {
+        if !self.path.exists() {
+            return Ok(SshCredentialsBlob {
+                schema_version: CREDENTIAL_SCHEMA_VERSION,
+                secrets: HashMap::new(),
+            });
+        }
+        let bytes = std::fs::read(&self.path).context("read ssh_credentials.json")?;
+        if bytes.is_empty() {
+            return Ok(SshCredentialsBlob {
+                schema_version: CREDENTIAL_SCHEMA_VERSION,
+                secrets: HashMap::new(),
+            });
+        }
+        serde_json::from_slice(&bytes).context("parse ssh_credentials.json")
+    }
+
+    fn write_blob(&self, blob: &SshCredentialsBlob) -> Result<()> {
+        let content = serde_json::to_vec_pretty(blob).context("serialize ssh_credentials.json")?;
+        ss_core::infra::fs_ops::atomic_write(&self.path, &content)
+            .context("persist ssh_credentials.json")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
+    }
+}
+
+impl SecretStore for EncryptedJsonSecretStore {
+    fn get_secret(&self, host_id: &str) -> Result<Option<String>> {
+        let blob = self.read_blob()?;
+        match blob.secrets.get(host_id) {
+            Some(encrypted) => Ok(Some(open(encrypted)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_secret(&self, host_id: &str, value: &str) -> Result<()> {
+        let mut blob = self.read_blob()?;
+        let sealed = seal(value)?;
+        blob.secrets.insert(host_id.to_string(), sealed);
+        self.write_blob(&blob)
+    }
+
+    fn delete_secret(&self, host_id: &str) -> Result<()> {
+        let mut blob = self.read_blob()?;
+        if blob.secrets.remove(host_id).is_some() {
+            self.write_blob(&blob)?;
+        }
+        Ok(())
+    }
+}
+
+/// Backwards compatibility unit struct for callers that expect KeyringSecretStore as a value or type.
+/// Completely delegates to EncryptedJsonSecretStore — never touches OS keyring.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KeyringSecretStore;
+
+impl SecretStore for KeyringSecretStore {
+    fn get_secret(&self, host_id: &str) -> Result<Option<String>> {
+        EncryptedJsonSecretStore::default().get_secret(host_id)
+    }
+
+    fn set_secret(&self, host_id: &str, value: &str) -> Result<()> {
+        EncryptedJsonSecretStore::default().set_secret(host_id, value)
+    }
+
+    fn delete_secret(&self, host_id: &str) -> Result<()> {
+        EncryptedJsonSecretStore::default().delete_secret(host_id)
+    }
+}
+
+/// In-memory secret store for tests.
+#[cfg(test)]
+#[derive(Default)]
+pub struct MemSecretStore {
+    map: std::cell::RefCell<std::collections::HashMap<String, String>>,
+}
+
+#[cfg(test)]
+impl MemSecretStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[cfg(test)]
+impl SecretStore for MemSecretStore {
+    fn get_secret(&self, host_id: &str) -> Result<Option<String>> {
+        Ok(self.map.borrow().get(host_id).cloned())
+    }
+    fn set_secret(&self, host_id: &str, value: &str) -> Result<()> {
+        self.map
+            .borrow_mut()
+            .insert(host_id.to_string(), value.into());
+        Ok(())
+    }
+    fn delete_secret(&self, host_id: &str) -> Result<()> {
+        self.map.borrow_mut().remove(host_id);
+        Ok(())
+    }
+}
+
+// ── High-level host CRUD ────────────────────────────────────────────
+
+/// Convenience façade combining host metadata + credential storage.
+///
+/// `HostsStore` is constructed with a [`SecretStore`] impl; production code
+/// uses [`KeyringSecretStore`], tests pass a [`MemSecretStore`].
+pub struct HostsStore<S: SecretStore> {
+    secrets: S,
+}
+
+impl<S: SecretStore> HostsStore<S> {
+    pub fn new(secrets: S) -> Self {
+        Self { secrets }
+    }
+
+    /// Generate a host id unique against the current on-disk list.
+    pub fn fresh_id() -> String {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        format!("ssh_{now_ms}")
+    }
+
+    /// Insert a new host. If `def.id` is empty it is auto-generated and the
+    /// populated def is returned. `credential` (passphrase or password) is
+    /// written to the secret store when non-empty.
+    pub fn add(&self, mut def: SshHostDef, credential: Option<&str>) -> Result<SshHostDef> {
+        if def.id.trim().is_empty() {
+            def.id = Self::fresh_id();
+        }
+        if let Some(pw) = credential.filter(|s| !s.is_empty()) {
+            self.secrets.set_secret(&def.id, pw)?;
+        }
+        let mut hosts = load_hosts();
+        if hosts.iter().any(|h| h.id == def.id) {
+            anyhow::bail!("SSH host id '{}' already exists", def.id);
+        }
+        hosts.push(def.clone());
+        save_hosts(&hosts)?;
+        Ok(def)
+    }
+
+    /// Replace a host by id. If `credential` is `Some`, the stored secret is
+    /// updated (empty string clears it); `None` leaves the existing secret.
+    pub fn update(&self, id: &str, def: SshHostDef, credential: Option<&str>) -> Result<()> {
+        let mut hosts = load_hosts();
+        let target = hosts
+            .iter_mut()
+            .find(|h| h.id == id)
+            .ok_or_else(|| anyhow::anyhow!("SSH host '{}' not found", id))?;
+        // If the id changed, move the secret so credentials follow the host.
+        if def.id != *id
+            && let Some(pw) = self.secrets.get_secret(id)?
+        {
+            self.secrets.set_secret(&def.id, &pw)?;
+            self.secrets.delete_secret(id)?;
+        }
+        if let Some(pw) = credential {
+            if pw.is_empty() {
+                self.secrets.delete_secret(&def.id)?;
+            } else {
+                self.secrets.set_secret(&def.id, pw)?;
+            }
+        }
+        *target = def;
+        save_hosts(&hosts)
+    }
+
+    /// Remove a host by id and delete its secret.
+    pub fn remove(&self, id: &str) -> Result<()> {
+        let mut hosts = load_hosts();
+        let before = hosts.len();
+        hosts.retain(|h| h.id != id);
+        if hosts.len() == before {
+            anyhow::bail!("SSH host '{}' not found", id);
+        }
+        save_hosts(&hosts)?;
+        // Best-effort secret cleanup — never fail the delete because the
+        // keyring is unavailable.
+        let _ = self.secrets.delete_secret(id);
+        Ok(())
+    }
+
+    /// Read the stored credential for a host (passphrase or password).
+    pub fn credential(&self, id: &str) -> Result<Option<String>> {
+        self.secrets.get_secret(id)
+    }
+}
+
+// ── Known hosts (TOFU) ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct KnownHostsFile {
+    #[serde(default)]
+    hosts: Vec<KnownHost>,
+}
+
+fn known_hosts_path() -> PathBuf {
+    ss_core::infra::paths::ssh_known_hosts_path()
+}
+
+/// Read the TOFU store, failing closed on damage.
+///
+/// A missing or empty file is the legitimate "no host accepted yet" state and
+/// yields an empty list. Content that is present but unparseable is an error,
+/// so a rewrite can never silently reset every accepted fingerprint.
+fn read_known_hosts() -> Result<Vec<KnownHost>> {
+    let path = known_hosts_path();
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Ok(Vec::new());
+    };
+    if content.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let file: KnownHostsFile =
+        serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
+    Ok(file.hosts)
+}
+
+/// Load all accepted host-key fingerprints. Missing/corrupt file → empty list.
+pub fn load_known_hosts() -> Vec<KnownHost> {
+    read_known_hosts().unwrap_or_default()
+}
+
+/// Record an accepted fingerprint for `host_id`. Replaces any prior entry for
+/// the same host id.
+pub fn accept_host_key(host_id: &str, host: &str, fingerprint: &str) -> Result<()> {
+    let path = known_hosts_path();
+    // Fail closed: never rewrite a store we could not read, or the surviving
+    // entries would be dropped along with the damage.
+    let mut entries = read_known_hosts()?;
+    entries.retain(|e| e.host_id != host_id);
+    entries.push(KnownHost {
+        host_id: host_id.to_string(),
+        host: host.to_string(),
+        fingerprint: fingerprint.to_string(),
+    });
+    let content = serde_json::to_string_pretty(&KnownHostsFile { hosts: entries })
+        .context("serialize known_hosts")?;
+    ss_core::infra::fs_ops::atomic_write(&path, content.as_bytes())
+        .context("persist known_hosts")?;
+    Ok(())
+}
+
+/// Look up the accepted fingerprint for a host id, if any.
+pub fn known_fingerprint(host_id: &str) -> Option<String> {
+    load_known_hosts()
+        .into_iter()
+        .find(|e| e.host_id == host_id)
+        .map(|e| e.fingerprint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ssh::types::AuthMethod;
+    use tempfile::TempDir;
+
+    /// RAII guard that points `SKILLSTAR_DATA_DIR` at a temp dir for one test
+    /// AND holds the crate-wide env lock, so parallel tests that touch this
+    /// env var never interleave (mirrors `ss_core::config::test_env_lock`).
+    struct DataDirGuard {
+        _temp: TempDir,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl DataDirGuard {
+        fn new() -> Self {
+            // Hold the lock for the whole test body — released on Drop.
+            let _lock = crate::test_support::env_lock().lock().unwrap();
+            let temp = TempDir::new().unwrap();
+            // SAFETY: the env lock above serialises all DataDirGuard users,
+            // so there is no concurrent mutation of this env var.
+            unsafe {
+                std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+            }
+            Self { _temp: temp, _lock }
+        }
+    }
+
+    impl Drop for DataDirGuard {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("SKILLSTAR_DATA_DIR");
+            }
+        }
+    }
+
+    fn sample_host(id: &str) -> SshHostDef {
+        SshHostDef {
+            id: id.into(),
+            display_name: "Prod".into(),
+            host: "10.0.0.1".into(),
+            port: 22,
+            username: "root".into(),
+            auth_method: AuthMethod::Password,
+            default_remote_dir: "~/.claude/skills".into(),
+        }
+    }
+
+    #[test]
+    fn load_hosts_empty_when_missing() {
+        let _g = DataDirGuard::new();
+        assert!(load_hosts().is_empty());
+    }
+
+    #[test]
+    fn save_and_load_hosts_roundtrip() {
+        let _g = DataDirGuard::new();
+        let hosts = vec![sample_host("ssh_1"), sample_host("ssh_2")];
+        save_hosts(&hosts).unwrap();
+        let loaded = load_hosts();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "ssh_1");
+    }
+
+    #[test]
+    fn hosts_store_add_assigns_id_and_secret() {
+        let _g = DataDirGuard::new();
+        let store = HostsStore::new(MemSecretStore::new());
+        let mut def = sample_host("");
+        def.id.clear();
+        let created = store.add(def, Some("hunter2")).unwrap();
+        assert!(created.id.starts_with("ssh_"));
+        assert_eq!(
+            store.secrets.get_secret(&created.id).unwrap(),
+            Some("hunter2".to_string())
+        );
+        assert_eq!(load_hosts().len(), 1);
+    }
+
+    #[test]
+    fn hosts_store_remove_clears_secret() {
+        let _g = DataDirGuard::new();
+        let store = HostsStore::new(MemSecretStore::new());
+        let created = store.add(sample_host("ssh_1"), Some("pw")).unwrap();
+        store.remove(&created.id).unwrap();
+        assert!(load_hosts().is_empty());
+        assert_eq!(store.secrets.get_secret(&created.id).unwrap(), None);
+    }
+
+    #[test]
+    fn hosts_store_update_moves_secret_on_id_change() {
+        let _g = DataDirGuard::new();
+        let store = HostsStore::new(MemSecretStore::new());
+        store.add(sample_host("old"), Some("secret")).unwrap();
+        let mut new_def = sample_host("new");
+        new_def.display_name = "Renamed".into();
+        store.update("old", new_def, None).unwrap();
+        assert_eq!(
+            store.secrets.get_secret("new").unwrap(),
+            Some("secret".into())
+        );
+        assert_eq!(store.secrets.get_secret("old").unwrap(), None);
+    }
+
+    #[test]
+    fn accept_host_key_replaces_prior_entry() {
+        let _g = DataDirGuard::new();
+        accept_host_key("ssh_1", "host:22", "SHA256:aaa").unwrap();
+        accept_host_key("ssh_1", "host:22", "SHA256:bbb").unwrap();
+        assert_eq!(known_fingerprint("ssh_1"), Some("SHA256:bbb".into()));
+        assert_eq!(load_known_hosts().len(), 1);
+    }
+
+    #[test]
+    fn corrupt_known_hosts_is_not_silently_reset() {
+        let _g = DataDirGuard::new();
+        accept_host_key("ssh_1", "host:22", "SHA256:aaa").unwrap();
+        let path = known_hosts_path();
+        let good = std::fs::read_to_string(&path).unwrap();
+
+        // Simulate a torn write: JSON truncated mid-object (ASCII, so slicing
+        // at a byte index is safe here).
+        let torn = good[..good.len() / 2].to_string();
+        std::fs::write(&path, &torn).unwrap();
+        assert!(
+            accept_host_key("ssh_2", "h2:22", "SHA256:bbb").is_err(),
+            "a rewrite over unparseable content must fail closed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            torn,
+            "the damaged store must not be replaced by a fresh single-entry file"
+        );
+
+        // An empty or missing file is still the legitimate "nothing accepted
+        // yet" state, not corruption.
+        std::fs::write(&path, "").unwrap();
+        assert!(load_known_hosts().is_empty());
+        accept_host_key("ssh_2", "h2:22", "SHA256:bbb").unwrap();
+        assert_eq!(known_fingerprint("ssh_2"), Some("SHA256:bbb".into()));
+    }
+
+    #[test]
+    fn encrypted_json_secret_store_roundtrip() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ssh_credentials.json");
+        let store = EncryptedJsonSecretStore::at(path.clone());
+
+        assert_eq!(store.get_secret("host_1").unwrap(), None);
+        store.set_secret("host_1", "super_secret_pw").unwrap();
+        assert_eq!(
+            store.get_secret("host_1").unwrap(),
+            Some("super_secret_pw".into())
+        );
+
+        // Verify the raw file does not contain the plaintext password
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("super_secret_pw"));
+        assert!(raw.contains("schema_version"));
+
+        // Delete secret
+        store.delete_secret("host_1").unwrap();
+        assert_eq!(store.get_secret("host_1").unwrap(), None);
+    }
+}

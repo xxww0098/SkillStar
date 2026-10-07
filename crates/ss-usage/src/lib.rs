@@ -1,0 +1,132 @@
+//! `ss-usage` — Subscription / usage / renewal tracking for AI coding plans.
+//!
+//! Provides a unified data model and storage for tracking subscriptions across
+//! the account families registered in [`catalog`].
+//!
+//! The crate is organized into:
+//! - [`subscription`] — Domain types (Subscription, SubscriptionUsage, UsageWindow, ...)
+//! - [`storage`]      — JSON persistence at `~/.skillstar/secrets/accounts/usage/`
+//! - [`catalog`]      — Fixed catalog of supported providers
+//! - [`crypto`]       — AES-256-GCM helpers for API keys / OAuth tokens
+//! - [`alerts`]       — Threshold-based alert computation
+//! - [`oauth`]        — PKCE / local-server / poll-flow / device-flow primitives
+//! - [`fetchers`]     — Per-provider quota fetchers (API key + OAuth)
+//! - [`pricing`]      — Read-only model price table (overrides + models.dev cache)
+
+pub mod accounts;
+pub mod alerts;
+pub mod antigravity_oauth_config;
+pub mod catalog;
+pub mod cloud_code;
+pub mod cookie_jar;
+pub mod crypto;
+pub mod dock_usage;
+pub mod fetchers;
+pub mod http_client;
+pub mod instances;
+pub mod local_import;
+pub mod oauth;
+pub mod oauth_clients;
+pub mod pricing;
+pub mod protobuf_oauth;
+mod providers;
+pub mod refresh_guard;
+pub mod request;
+pub mod sessions;
+pub mod storage;
+pub mod subscription;
+pub mod token_import;
+pub mod tool_paths;
+pub mod tool_store;
+pub mod urlencode;
+pub mod usage_switch;
+pub mod vscdb;
+
+pub use catalog::{AuthMode, CatalogEntry, catalog};
+pub use subscription::{
+    BillingCycle, ManualQuota, MonetaryBalance, Subscription, SubscriptionAlert, SubscriptionUsage,
+    UsageUnit, UsageWindow,
+};
+
+#[cfg(test)]
+pub(crate) mod test_support;
+
+/// Serializes tests that mutate process-wide environment variables
+/// (`SKILLSTAR_DATA_DIR`, `SKILLSTAR_TOOL_SYNC_HOME`, …). Mirrors
+/// `ss_skills::test_env_lock` and is backed by the same
+/// [`test_support::ENV_LOCK`] the switch-engine tests hold, so no two
+/// env-mutating tests in this crate can interleave.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
+    &test_support::ENV_LOCK
+}
+
+/// Crate-level error type (wraps anyhow under the hood for IO/serialization).
+#[derive(Debug, thiserror::Error)]
+pub enum UsageError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("serde error: {0}")]
+    Serde(#[from] serde_json::Error),
+
+    #[error("subscription not found: {0}")]
+    NotFound(String),
+
+    #[error("unknown catalog id: {0}")]
+    UnknownCatalogId(String),
+
+    #[error("fetcher error: {0}")]
+    Fetcher(String),
+
+    /// The provider is momentarily unavailable (429 / 5xx / transport
+    /// failure). Distinct from [`UsageError::Fetcher`] because retrying later
+    /// is plausible: callers must not latch `requires_reauth` and must not
+    /// discard the last good quota snapshot over one of these.
+    #[error("provider temporarily unavailable: {0}")]
+    Transient(String),
+
+    #[error("auth required (token expired or revoked)")]
+    AuthRequired,
+
+    #[error("{0}")]
+    Other(String),
+}
+
+impl UsageError {
+    /// Classify an upstream non-2xx response.
+    ///
+    /// 429 and 5xx are the provider's problem, not the credential's, so they
+    /// become [`UsageError::Transient`]. Everything else stays a plain
+    /// [`UsageError::Fetcher`]. Deciding *auth* is deliberately not this
+    /// function's job — only `oauth::token_endpoint` (token grants) and the
+    /// explicit 401 checks in the quota fetchers may return
+    /// [`UsageError::AuthRequired`].
+    pub fn http_status(label: &str, status: u16, body: &str) -> Self {
+        let summary = format!("{label} 状态码 {status}: {}", truncate_body(body));
+        if status == 429 || (500..600).contains(&status) {
+            Self::Transient(summary)
+        } else {
+            Self::Fetcher(summary)
+        }
+    }
+
+    /// A network/TLS/DNS/timeout failure reaching `label`'s endpoint.
+    pub fn transport(label: &str, error: impl std::fmt::Display) -> Self {
+        Self::Transient(format!("{label} 请求失败: {error}"))
+    }
+
+    /// True when the failure is expected to clear on its own. Callers use this
+    /// to keep the previously fetched quota snapshot instead of replacing it
+    /// with a bare error card.
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Transient(_) | Self::Io(_))
+    }
+}
+
+/// Trim a provider body down to something safe to show in an error message.
+pub(crate) fn truncate_body(body: &str) -> String {
+    body.chars().take(200).collect()
+}
+
+pub type UsageResult<T> = std::result::Result<T, UsageError>;

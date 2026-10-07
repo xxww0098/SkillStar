@@ -1,3 +1,0 @@
-# Grandfathered cross-feature deep imports, one `file:line` per import line.
-# The 2026-07-14 ownership migration eliminated the current debt. Keep this
-# empty file so future temporary baselines remain explicit and shrink-only.

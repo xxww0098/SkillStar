@@ -6,8 +6,8 @@
 
 ## 缝
 
-- `src-tauri/src/main.rs`：`argv[1] == "mcp"` 时，在 `handle_internal_askpass` 之前调用 `skillstar_app::project_skills_mcp::serve`。
-- `serve` 调用 `install_global_policy` 与 `migrate_legacy_paths`。不调用 marketplace snapshot `initialize`。不走 `src-tauri/src/cli/mod.rs` 的 `migrate_and_run`。
+- `crates/skillstar/src/main.rs`：`argv[1] == "mcp"` 时，在 `handle_internal_askpass` 之前调用 `ss_app::project_skills_mcp::serve`。
+- `serve` 迁移旧路径。不调用 `ss_app::bootstrap::prepare_process`，因此不初始化 marketplace snapshot。
 - tracing subscriber 的 writer 固定 stderr。CLI 路径今天不初始化 tracing；GUI 的 subscriber 没有 `with_writer`，serve 不能复用它。
 - `is_cli_subcommand` 与 `known_cli_subcommands_are_detected` 同时加上 `"mcp"`。没有 `--stdio` 时向 stderr 报错，退出码非 0，stdout 为空。
 - 本档的 handler 只回答 `initialize` 和空的 `tools/list`。13 档换成真正的工具 handler，不改本档的进程规则。

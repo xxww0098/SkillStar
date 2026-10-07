@@ -6,26 +6,26 @@ Accounts 是顶层「账号」工作台：按平台管理多个登录账号、�
 
 ## 布局
 
-- 侧栏 `AccountsNav`：平台目录 + 每平台账号计数 + 快速「添加账号」（带当前筛选进入新建对话框）。
-- 页面 `AccountsPanel`：管理头（额度刷新、账号隐私开关）→ 花费/排序条 → 告警条 → 账号卡片网格 → 新建/编辑对话框。
-- 账号卡片 = Usage 域的 `SubscriptionCard`：当前账号徽标（以 CLI custody reconcile 的磁盘真相为准，不是 active pin）、切换、重新同步到 CLI、编辑、删除、刷新。
-- 「当前」徽标三态：`LinkedTo`（CLI 正在服务这个账号）/ `Diverged`（CLI 在服务一个不认识的登录）/ `Missing`。pin 只是缓存，reconcile 会修复。
+GPUI 壳（`crates/ss-gpui`）在账号模式下把供应商放进应用左侧菜单：全部，加上目录里的每个平台（品牌标、名称、账号数）。菜单收起时只留图标。ChatGPT 用 Lobe Icons 的 OpenAI 白底黑标，不复用 Codex 彩色标。当前供应商整行铺强调色，名称和账号数用强调色上的前景并加粗；其余行没有底色，悬停只加一层浅底，和选中分开。收起时强调色留在图标后面。纸面主题下单色品牌标跟随浅色前景，彩色标保持原色（根因与缓存约束见 [errors.md](../../errors.md#2026-10-06---纸面主题下单色供应商图标发白)）。主面板按供应商分组，组与组上下排列。窗口、技能卡和额度卡的宽度都在 `crates/ss-gpui/src/layout.rs`：两张额度卡加一档间距，与三张技能卡加两档间距，是同一行宽。默认窗口按展开侧栏、账号页边距和这一行来定。同一供应商的账号卡用 `QUOTA_CARD_W`，列间距 `CARD_GAP`。详情区放得下两张就并排，第三张换行；窗口变宽时卡片不拉伸。不同供应商不会出现在同一行。账号格和添加格都是 [`accounts/frame.rs`](../../../crates/ss-gpui/src/accounts/frame.rs) 的图例面，坐在 [`skill_card/grid.rs`](../../../crates/ss-gpui/src/skill_card/grid.rs) 的轨道上（`tracks`，宽度 `QUOTA_CARD_W`）。每个账号是一格，添加永远是下一格。轨道不按供应商或账号数量分叉。卡片标题压在上边框上；卡内是身份、套餐，当前账号在名字后用勾选图标，右侧是切换、刷新、退出三个图标按钮。额度条只表示剩余（绿到红）。文案随界面语言走 `assets/locales/`：中文 `剩余 n%`，英文 `n% left`。固定窗口名同样本地化：`Weekly credits` 为「每周额度」，`Monthly credits` 为「每月额度」，`Weekly Limit` 为「周额度」，`Five Hour Limit` 为「5 小时额度」，`模型额度` 英文为 `Model quota`。GLM 的第三条是 `ZCode MCP`，中英文都用这个名字。模型组名和其它窗口名保持抓取原文。计数窗口只显示剩余百分比，不并列已用 / 总量。OpenCode Go 控制台额度在剩余百分比前写出美元已用和上限，例如 `$3.00 / $12.00 · 剩余 75%`。Cursor 包含额度同样按美分显示美元（`Included`，旧标签 `Total` 仍显示「包含额度」），例如 `$11.73 / $20.00 · 剩余 41%`；已用和上限都在时，剩余百分比按这笔金额计算。补全 & Composer（`Auto + Composer`）和 API 调用（`API`）只有百分比，只显示剩余。Grok 每月额度同样按美分显示美元，这一行不画进度条。重置倒计时用紧凑单位，中文省略空格和「后重置」（`6天22时31分`、`22时31分`、`31分`），英文在单位之间留空格（`6d 22h 31m`）。到期中文是「即将重置」，英文是 `Resetting soon`。添加和重置仍是文字按钮，随语言切换，中文是「添加 / 重置」。切换、刷新和退出只显示图标，悬停提示中文是「切换」「刷新」和「退出」。额度条、余额/积分行和重置卡叠跟随卡片内容宽度。Codex 额度点数来自 wham/usage 的 `credits.balance`：落盘保留上游原文，卡片最多两位小数并去掉尾随 0；`unlimited` 为「无限」。没有点数且非无限时不显示这一行。Codex、Grok 与 ZCode（GLM）账号在额度下面显示重置卡：Codex / Grok 为每周窗口，GLM 按 5 小时、每周分两行，中间用虚线分隔。浅色账号区使用参考图的白底、近黑卡面和中性灰边线（独立 `os_*` token）；深色仍随主题切换。卡叠用实心卡面显示张数，两张及以上时后卡向右上角露出一截，最多叠出三层；同行显示窗口和最早过期时间。空卡为虚线轮廓且重置按钮禁用，未取到卡库时显示未知并禁用。消耗前勾选确认，操作绑定具体账号和窗口；请求中禁止重复操作，卡堆以 GPUI 弹簧轻抬；失败后复位，服务端确认成功后单张卡向上淡出，随后移除动画层。动画遵循 GPUI 减少动态效果设置，不提前扣减显示数量。几何沿用 dsh-plugin 的 40×44 卡面、14px 行间列距和带图例的虚线框（截图为 2× 像素）。没有账号时卡片只留虚线「添加」。添加、登录和退出确认都是居中对话框。悬停卡叠时，过期时间列表画在前置层，浮在同行文字、重置按钮、下一行和图例之上。
+
+当前账号的勾选标记真相是 CLI 对账，不是 pin：`LinkedTo` / `Diverged` / `Missing`。悬停提示说明 CLI 正在使用这个账号。pin 只是缓存，reconcile 会修复。卡片用已落地的缓存上屏，刷新结果原位更新；冷启动首次读取未落地时才显示等待态。
 
 ## 添加账号
 
-对话框按平台 auth mode 提供 OAuth 登录（浏览器回调 / 粘贴码 / 设备流，按平台而异）、API Key、Cookie、Token 导入、从本机导入。同一平台重复「添加」= 新账号行；对已有卡片重新授权 = 原位更新，不产生重复行。
+对话框按平台 auth mode 提供 OAuth 登录（浏览器回调 / 粘贴码 / 设备流，按平台而异）、API Key、Cookie、Token 导入、从本机导入。登录界面按 `OAuthFlow` 分支：`RemotePoll` 只显示设备码；`LocalCallback` 和 `SchemePaste` 在等待时可以粘贴回调链接或授权 code。GLM 在点登录前选择 Z.ai 或智谱，默认 Z.ai。每种方式一行：主操作是实心通栏按钮，其余是描边行，旁边有一句说明。上面已经有登录时，粘贴保存改成描边通栏，并用「或粘贴」分隔线隔开。粘贴密钥或凭证时，输入框上方有可见标签；空内容提示贴在输入框下面，不写成失败条。同一平台重复「添加」= 新账号行；对已有卡片重新授权 = 原位更新，不产生重复行。
 
-## Claude Code
+「导入本机会话」先把本机凭证复制成账号行，再向服务商核对一次额度，对话框等到这一步结束才关闭。读凭证本身很快；这几秒到十几秒是额度请求在返回。核对只用复制来的访问令牌，不兑换刷新令牌，也不改本机登录文件。点击后该按钮立刻改为「正在核对额度」，右侧箭头换成旋转指示。同一对话框里的登录和保存按钮在各自请求进行时也显示旋转等待。额度核对失败仍保存凭据行，见 [Usage](../usage/README.md)。
 
-- 绑定：只读采用 Claude Code 自己的登录（macOS 钥匙串 / 其它平台凭证文件），登录路径不写回。
-- 切换：对权威存储做 read-modify-write——只替换 `claudeAiOauth` 键、保留 `mcpOAuth` 等（macOS 钥匙串项缺失时先从明文文件迁移兄弟键）、回读校验通过才移动 pin；`adopt_before_refresh` 先吸收 CLI 轮转出的新 token。macOS 写钥匙串项 `Claude Code-credentials` 是 [D-083](../../decisions.md) 对 D-072 的定点豁免（唯一允许的钥匙串写入），验证成功后删除过期的明文镜像文件；其它平台写 `$CLAUDE_CONFIG_DIR/.credentials.json`。
+## 家族范围
+
+Accounts 的家族范围与 dsh-plugin-oauth-subs 的 `src/oauth/families.ts` 及 `src/apikey/opencode-go` 一致；本仓库唯一清单与一致性测试在 [`catalog.rs`](../../../../crates/ss-usage/src/catalog.rs)。既有账号使用的内部 ID 保持兼容，显示名称按家族命名。删除目录外家族的额度、导入与凭证切换实现；旧账号记录保留在磁盘，不自动销毁凭证，但不再出现在 Accounts 或参加后台刷新。Skills Agent、会话解析各自独立，不随账号目录删减。桌面多开只保留目录内有独立 IDE 的家族，能力门槛见 [Usage](../usage/README.md#桌面应用多开)。
 
 ## 边界
 
-- 数据层零新增：全部走既有 IPC（订阅 CRUD、`set_active_subscription`、`switch_active_subscription_to_cli`、`reconcile_cli_accounts`、导入命令），命令面归 `usage_commands`。
-- 跨 feature 依赖只经过 `src/features/usage/index.ts` 公开出口（`check_feature_imports.sh` 守卫）。
-- Usage 工作台是只读消费视图；一切账号增删改切在 Accounts 完成。
+- 启动整理存储目录不得让 CLI 丢失当前凭据。已有 custody catalog 原位保留，新 catalog 使用 secrets 默认路径；迁移约束见 [存储布局](../../storage-layout.md#未实施阶段)。
+- 数据层零新增：GUI 直接调 `ss-usage` facade（订阅 CRUD、切换、对账、导入）。不要恢复 IPC 或 TypeScript feature 目录。
+- Accounts 是 Skills 之外的唯一顶层模式（[D-085](../../decisions.md)）；Usage 顶层模式已移除，账号增删改切与消费展示都在 Accounts 完成。
 
 ## 验证
 
-`src/features/accounts/`（面板/侧栏组件与测试）、`crates/skillstar-usage/src/usage_switch.rs`（切换引擎与平台注册表）。账号切换的事务契约（失败保留旧账号、pin 只在读回成功后移动）见 [usage README](../usage/README.md)。
+`crates/ss-gpui/src/accounts/`（额度页）、`crates/ss-usage/src/usage_switch.rs`（切换引擎与平台注册表）。账号切换的事务契约（失败保留旧账号、pin 只在读回成功后移动）见 [usage README](../usage/README.md)。

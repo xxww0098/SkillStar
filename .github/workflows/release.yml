@@ -1,19 +1,15 @@
 name: Release
 
-# Build and publish desktop bundles for macOS, Linux, and Windows whenever a
-# version tag (v*) is pushed. Drafts a GitHub Release and uploads the installers.
+# Build the skillstar binary for macOS, Linux, and Windows whenever a
+# version tag (v*) is pushed. Drafts a GitHub Release and uploads that binary.
+# Signed installers and the Tauri updater were retired with D-091. Do not
+# put tauri-action back.
 #
 # ## Failure lessons (from Actions history — do not re-learn the hard way)
 #
-# 1. Tag only after CI is green AND a local production frontend build passes.
-#    `tauri-action` runs `beforeBuildCommand` (`bun run build` / tsc+vite).
-#    v0.0.3 failed on ALL four matrix legs with the same 4 TypeScript errors
-#    (unused import, incomplete test fixtures vs generated types, dead type
-#    comparison in useUpdater). Those never hit main CI while Linux/macOS CI
-#    only ran `bun run lint` + `bun run test` and skipped the production
-#    build. Pre-tag checklist:
-#      bun run build          # must pass (tsc is strict in production)
-#      bun run test && cargo test --workspace --locked
+# 1. Tag only after CI is green. The old failure was a TypeScript build that
+#    only tauri-action ran. That stack is gone. Pre-tag checklist:
+#      cargo test --workspace --locked
 #      # wait for CI + Windows CI green on the commit you will tag
 #    The last line is no longer a request — the require-green-ci job below
 #    enforces it (lesson #6).
@@ -27,12 +23,9 @@ name: Release
 #    Fixed later by "declare junction as Windows-only dependency"; the
 #    successful v0.0.1 / v0.0.2 releases only landed after that.
 #
-# 3. Updater signing secrets (required — createUpdaterArtifacts is true).
-#    Repo secrets must include:
-#      TAURI_SIGNING_PRIVATE_KEY          # contents of ~/.tauri/skillstar.key
-#      TAURI_SIGNING_PRIVATE_KEY_PASSWORD # passphrase used when generating the key
-#    Without them every matrix leg fails at the signing step. Do not push a
-#    tag to "see what happens" — a partial matrix burn costs ~20–35 min × N.
+# 3. There is no updater signing step. TAURI_SIGNING_PRIVATE_KEY is unused.
+#    Do not add a fake latest.json. A partial matrix still costs real compile
+#    time, so do not push a tag to see what happens.
 #
 # 4. Matrix is `fail-fast: false` on purpose so one platform's failure still
 #    surfaces the others (v0.0.1 junction was Windows-only; without fail-fast
@@ -192,20 +185,22 @@ jobs:
 
   release:
     needs: require-green-ci
-    env:
-      SKILLSTAR_GITHUB_APP_CLIENT_ID: ${{ vars.SKILLSTAR_GITHUB_APP_CLIENT_ID }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
+            target: aarch64-apple-darwin
+            asset: skillstar-aarch64-apple-darwin
           - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+            target: x86_64-apple-darwin
+            asset: skillstar-x86_64-apple-darwin
           - platform: ubuntu-22.04
-            args: ""
+            target: x86_64-unknown-linux-gnu
+            asset: skillstar-x86_64-unknown-linux-gnu
           - platform: windows-latest
-            args: ""
+            target: x86_64-pc-windows-msvc
+            asset: skillstar-x86_64-pc-windows-msvc.exe
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -216,23 +211,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
+            pkg-config \
             build-essential \
             libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev
+            libxkbcommon-dev \
+            libwayland-dev \
+            libvulkan-dev
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      # Reads the pin out of rust-toolchain.toml instead of hard-coding it —
-      # identical to ci.yml's steps, where the long rationale lives (ci.yml
-      # failure lesson #7). `shell: bash` matters: one matrix leg is
-      # windows-latest, which defaults to pwsh.
       - name: Resolve pinned Rust toolchain
         id: rust
         shell: bash
@@ -248,42 +233,48 @@ jobs:
           esac
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "components=$components" >> "$GITHUB_OUTPUT"
-          echo "pinned toolchain: $channel (components: $components)"
 
       - name: Set up Rust ${{ steps.rust.outputs.channel }}
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
           components: ${{ steps.rust.outputs.components }}
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Verify GitHub App client ID
-        run: bun -e 'if (!process.env.SKILLSTAR_GITHUB_APP_CLIENT_ID?.trim()) throw new Error("Missing repository variable SKILLSTAR_GITHUB_APP_CLIENT_ID")'
+        shell: bash
+        env:
+          SKILLSTAR_GITHUB_APP_CLIENT_ID: ${{ vars.SKILLSTAR_GITHUB_APP_CLIENT_ID }}
+        run: |
+          if [ -z "${SKILLSTAR_GITHUB_APP_CLIENT_ID:-}" ]; then
+            echo "::error::Missing repository variable SKILLSTAR_GITHUB_APP_CLIENT_ID"
+            exit 1
+          fi
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "src-tauri -> target"
 
-      - name: Install JS dependencies
-        run: bun install --frozen-lockfile
-
-      # Cheap gate before the long Tauri compile: catch TS/vite errors that
-      # historically only failed at release time (see failure lesson #1).
-      - name: Frontend production build (pre-flight)
-        run: bun run build
-
-      - name: Build and release Tauri app
-        uses: tauri-apps/tauri-action@v0
+      - name: Build skillstar
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "SkillStar ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
-          # Default true: merge multi-platform platforms into latest.json on the release.
-          uploadUpdaterJson: true
-          args: ${{ matrix.args }}
+          SKILLSTAR_GITHUB_APP_CLIENT_ID: ${{ vars.SKILLSTAR_GITHUB_APP_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p skillstar --target "${{ matrix.target }}"
+          bin="target/${{ matrix.target }}/release/skillstar"
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            bin="${bin}.exe"
+          fi
+          mkdir -p dist
+          cp "$bin" "dist/${{ matrix.asset }}"
+
+      - name: Upload release binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          notes="GPUI desktop shell and CLI. This release uploads the skillstar binary only. Signed installers, disk images, and the in-app updater were retired with Tauri and are not replaced yet."
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --title "SkillStar $tag" --notes "$notes"
+          gh release upload "$tag" "dist/${{ matrix.asset }}" --clobber

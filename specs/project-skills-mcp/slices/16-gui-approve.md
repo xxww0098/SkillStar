@@ -6,21 +6,19 @@ Projects 页对一份待批准计划展示与 CLI 相同的差异。用户点击
 
 ## 缝
 
-新 Tauri command 放在 `src-tauri/src/commands/project_host.rs`。不要放进 `mcp_commands.rs`。函数体只调 `record_from_skillstar` 和计划读取。command 不直接读写项目技能目录，不发 HTTP。
+批准调用放在 GPUI 的 Projects 页，直接调 `record_from_skillstar` 和计划读取。不读写项目技能目录，不发 HTTP。不要恢复 Tauri command 或 `src/types/generated/`。
 
-若 DTO 跨过 IPC，用 ts-rs，然后 `bun run types:gen`。不手改 `src/types/generated/`。协议工具的参数类型不进生成目录。
-
-页面落在现有 Projects 页，展示规范路径、注册与否、owner、受影响 Agent、每项操作。没有计划时不显示这块区域。
+页面展示规范路径、注册与否、owner、受影响 Agent、每项操作。没有计划时不显示这块区域。
 
 ## 人可以运行
 
-`bun run tauri dev`，打开有待批准计划的项目。点击批准前后，项目技能目录不变，批准文件出现。再到无 elicitation 的 MCP apply，部署才发生。
+`cargo run -p skillstar -- gui`，打开有待批准计划的项目。点击批准前后，项目技能目录不变，批准文件出现。再到无 elicitation 的 MCP apply，部署才发生。
 
 ## 验证
 
 - `skillstar_approve_command_rejects_a_plan_already_approved_by_elicitation`
 - `skillstar_approve_command_does_not_deploy`
-- 前端测试覆盖空状态和有计划时的差异字段
+- GPUI 测试覆盖空状态和有计划时的差异字段
 
 视觉收尾：对批准区域截图，用 screenshot-critique 做一次不带实现者结论的复查，通过后再接受本档。没有旧界面可对照，不做 compare-screenshots。
 
@@ -34,11 +32,11 @@ Projects 页对一份待批准计划展示与 CLI 相同的差异。用户点击
 
 ## 不可改
 
-不在前端自己写批准 JSON。不调用 `save_and_sync`。
+不在界面自己写批准 JSON。不调用 `save_and_sync`。
 
 ## 必须保持绿
 
-`bun run lint`、`bash scripts/internal/check_feature_imports.sh`、`check_command_boundaries.sh`。改了 Rust 导出则生成文件与源一起提交。
+`cargo test -p ss-app --lib project_skills_mcp::host`。不要跑已删除的前端门禁，也不要提交生成的 TypeScript。
 
 ## 会改这一档的反馈
 

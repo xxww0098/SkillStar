@@ -1,0 +1,454 @@
+//! Well-known on-disk paths for IDE / CLI credential stores (default install only).
+
+use std::path::{Path, PathBuf};
+
+use ss_core::infra::paths::{home_dir, tool_sync_home_override};
+
+pub fn is_tool_sync_sandboxed() -> bool {
+    tool_sync_home_override().is_some()
+}
+
+fn tool_config_home() -> PathBuf {
+    tool_sync_home_override().unwrap_or_else(home_dir)
+}
+
+pub fn codex_auth_path() -> PathBuf {
+    home_dir().join(".codex").join("auth.json")
+}
+
+// ---------------------------------------------------------------------------
+// Switch-engine credential stores (sandbox-aware)
+// ---------------------------------------------------------------------------
+// The account switcher *writes* credential files, so unlike the read-side
+// helpers above it must honour `SKILLSTAR_TOOL_SYNC_HOME` (tests never touch
+// a real `$HOME`) and each CLI's own home override (writing credentials to a
+// file the CLI never reads would silently break login). Semantics mirror
+// `skillstar_models::tool_sync` (D-077); the read-side default-install
+// helpers stay as they are.
+
+/// Read an upstream CLI's own home override (`CODEX_HOME`, `GROK_HOME`, …).
+fn upstream_home_override(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Codex's home, honouring the upstream `CODEX_HOME` override. The sandbox
+/// always wins: tests must never escape into a developer's real `~/.codex`
+/// even when `CODEX_HOME` is exported.
+fn codex_home() -> PathBuf {
+    if let Some(home) = tool_sync_home_override() {
+        return home.join(".codex");
+    }
+    if let Some(dir) = upstream_home_override("CODEX_HOME") {
+        return dir;
+    }
+    home_dir().join(".codex")
+}
+
+/// `~/.codex/auth.json` — Codex CLI's OAuth credential store, switch-aware.
+///
+/// Distinct from [`codex_auth_path`]: that one is the default-install path
+/// the OAuth fetcher reads during import; this one is where the switch
+/// engine writes and reconciles the live symlink target.
+pub fn switch_codex_auth_path() -> PathBuf {
+    codex_home().join("auth.json")
+}
+
+/// `~/.grok/auth.json` — the xAI Grok Build CLI's OAuth credential store
+/// (switch-aware: honours `GROK_HOME`, sandbox wins).
+pub fn switch_grok_auth_path() -> PathBuf {
+    if let Some(home) = tool_sync_home_override() {
+        return home.join(".grok").join("auth.json");
+    }
+    if let Some(dir) = upstream_home_override("GROK_HOME") {
+        return dir.join("auth.json");
+    }
+    home_dir().join(".grok").join("auth.json")
+}
+
+pub fn antigravity_user_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if is_tool_sync_sandboxed() {
+            return Some(
+                tool_config_home()
+                    .join("AppData")
+                    .join("Roaming")
+                    .join("Antigravity IDE"),
+            );
+        }
+        let appdata = std::env::var("APPDATA").ok()?;
+        return Some(PathBuf::from(appdata).join("Antigravity IDE"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Some(
+            tool_config_home()
+                .join("Library")
+                .join("Application Support")
+                .join("Antigravity IDE"),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if is_tool_sync_sandboxed() {
+            return Some(tool_config_home().join(".config").join("Antigravity IDE"));
+        }
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            let trimmed = xdg.trim();
+            if !trimmed.is_empty() {
+                return Some(PathBuf::from(trimmed).join("Antigravity IDE"));
+            }
+        }
+        return Some(home_dir().join(".config").join("Antigravity IDE"));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+pub fn cursor_user_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if std::env::var_os(TOOL_SYNC_HOME_ENV).is_some() {
+            return Some(
+                tool_config_home()
+                    .join("AppData")
+                    .join("Roaming")
+                    .join("Cursor"),
+            );
+        }
+        let appdata = std::env::var("APPDATA").ok()?;
+        return Some(PathBuf::from(appdata).join("Cursor"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Some(
+            tool_config_home()
+                .join("Library")
+                .join("Application Support")
+                .join("Cursor"),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os(TOOL_SYNC_HOME_ENV).is_none()
+            && let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+            && !xdg.trim().is_empty()
+        {
+            return Some(PathBuf::from(xdg).join("Cursor"));
+        }
+        return Some(tool_config_home().join(".config").join("Cursor"));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+pub fn cursor_state_db_path() -> Option<PathBuf> {
+    cursor_user_data_dir().map(|root| root.join("User").join("globalStorage").join("state.vscdb"))
+}
+
+pub fn antigravity_state_db_path() -> Option<PathBuf> {
+    antigravity_user_data_dir()
+        .map(|root| root.join("User").join("globalStorage").join("state.vscdb"))
+}
+
+/// Host OS for IDE config roots. The path table test constructs every variant;
+/// production only constructs the cfg-selected host.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DesktopOs {
+    Macos,
+    Windows,
+    Linux,
+}
+
+fn current_desktop_os() -> Option<DesktopOs> {
+    #[cfg(target_os = "macos")]
+    {
+        return Some(DesktopOs::Macos);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return Some(DesktopOs::Windows);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return Some(DesktopOs::Linux);
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+/// IDE user-data root. Sandbox (`SKILLSTAR_TOOL_SYNC_HOME`) wins over
+/// `APPDATA` / `XDG_CONFIG_HOME` / the real home, same as Antigravity.
+fn ide_user_data_dir(os: DesktopOs, app_dir: &str) -> Option<PathBuf> {
+    match os {
+        DesktopOs::Macos => Some(
+            tool_config_home()
+                .join("Library")
+                .join("Application Support")
+                .join(app_dir),
+        ),
+        DesktopOs::Windows => {
+            if is_tool_sync_sandboxed() {
+                return Some(
+                    tool_config_home()
+                        .join("AppData")
+                        .join("Roaming")
+                        .join(app_dir),
+                );
+            }
+            let appdata = std::env::var("APPDATA").ok()?;
+            let trimmed = appdata.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(PathBuf::from(trimmed).join(app_dir))
+        }
+        DesktopOs::Linux => {
+            if !is_tool_sync_sandboxed()
+                && let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+            {
+                let trimmed = xdg.trim();
+                if !trimmed.is_empty() {
+                    return Some(PathBuf::from(trimmed).join(app_dir));
+                }
+            }
+            Some(tool_config_home().join(".config").join(app_dir))
+        }
+    }
+}
+
+fn global_state_db(os: DesktopOs, app_dir: &str) -> Option<PathBuf> {
+    ide_user_data_dir(os, app_dir)
+        .map(|root| root.join("User").join("globalStorage").join("state.vscdb"))
+}
+
+/// Windsurf 编辑器 2026-06 OTA 改名 Devin Desktop 后，Electron user-data
+/// 目录从 `Windsurf` 变成 `Devin`；`~/.codeium/windsurf` 配置目录不受影响。
+/// 先取新目录，未升级的安装回退旧目录，都不存在时以新目录为准。
+pub fn windsurf_state_db_path() -> Option<PathBuf> {
+    let os = current_desktop_os()?;
+    let devin = global_state_db(os, "Devin");
+    let legacy = global_state_db(os, "Windsurf");
+    devin
+        .clone()
+        .filter(|path| path.exists())
+        .or(legacy.filter(|path| path.exists()))
+        .or(devin)
+}
+
+/// Kiro's Electron user-data directory (`…/Kiro`), not the AWS cache.
+pub fn kiro_data_dir() -> Option<PathBuf> {
+    ide_user_data_dir(current_desktop_os()?, "Kiro")
+}
+
+/// `~/.aws/sso/cache` on every OS. Cockpit reads `kiro-auth-token.json` here,
+/// not under the Kiro user-data directory.
+pub fn aws_sso_cache_dir() -> PathBuf {
+    tool_config_home().join(".aws").join("sso").join("cache")
+}
+
+/// ZCode data root. Default is `~/.zcode`.
+///
+/// Cockpit reads `dataBaseDir` from `~/.zcode/v2/setting.json` (no trailing
+/// "s") and treats that value as a replacement home: the root becomes
+/// `{dataBaseDir}/.zcode`.
+pub fn zcode_home() -> PathBuf {
+    let default_root = tool_config_home().join(".zcode");
+    overridden_zcode_root(&default_root.join("v2").join(ZCODE_SETTINGS_FILE))
+        .unwrap_or(default_root)
+}
+
+const ZCODE_SETTINGS_FILE: &str = "setting.json";
+
+fn overridden_zcode_root(settings: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(settings).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let base = value.get("dataBaseDir")?.as_str()?.trim();
+    if base.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(base).join(".zcode"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STATE_DB: &[&str] = &["User", "globalStorage", "state.vscdb"];
+    const OSES: [DesktopOs; 3] = [DesktopOs::Macos, DesktopOs::Windows, DesktopOs::Linux];
+
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        tool_sync: Option<std::ffi::OsString>,
+        appdata: Option<std::ffi::OsString>,
+        xdg: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn sandbox(path: &Path) -> Self {
+            let lock = crate::test_env_lock()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let tool_sync = std::env::var_os("SKILLSTAR_TOOL_SYNC_HOME");
+            let appdata = std::env::var_os("APPDATA");
+            let xdg = std::env::var_os("XDG_CONFIG_HOME");
+            // SAFETY: serialized by the crate-wide test_env_lock.
+            unsafe {
+                std::env::set_var("SKILLSTAR_TOOL_SYNC_HOME", path);
+                std::env::set_var("APPDATA", path.join("poison-appdata"));
+                std::env::set_var("XDG_CONFIG_HOME", path.join("poison-xdg"));
+            }
+            Self {
+                _lock: lock,
+                tool_sync,
+                appdata,
+                xdg,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            restore("SKILLSTAR_TOOL_SYNC_HOME", self.tool_sync.as_deref());
+            restore("APPDATA", self.appdata.as_deref());
+            restore("XDG_CONFIG_HOME", self.xdg.as_deref());
+        }
+    }
+
+    fn restore(key: &str, prev: Option<&std::ffi::OsStr>) {
+        // SAFETY: caller holds the crate-wide test_env_lock.
+        unsafe {
+            match prev {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    fn expect(root: &Path, os: DesktopOs, app_dir: &str, tail: &[&str]) -> PathBuf {
+        let base = match os {
+            DesktopOs::Macos => root
+                .join("Library")
+                .join("Application Support")
+                .join(app_dir),
+            DesktopOs::Windows => root.join("AppData").join("Roaming").join(app_dir),
+            DesktopOs::Linux => root.join(".config").join(app_dir),
+        };
+        tail.iter().fold(base, |path, part| path.join(part))
+    }
+
+    fn resolved(os: DesktopOs, app_dir: &str, tail: &[&str]) -> PathBuf {
+        let mut path = ide_user_data_dir(os, app_dir).expect("ide dir");
+        for part in tail {
+            path.push(part);
+        }
+        path
+    }
+
+    #[test]
+    fn sandboxed_path_table_covers_every_app_on_every_os() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sandbox = dir.path();
+        let _guard = EnvGuard::sandbox(sandbox);
+        let real_home = home_dir();
+        assert_ne!(sandbox, real_home.as_path());
+
+        let ide_rows: &[(&str, &str, &[&str])] = &[
+            ("windsurf", "Devin", STATE_DB),
+            ("windsurf-legacy", "Windsurf", STATE_DB),
+            ("kiro", "Kiro", &[]),
+        ];
+
+        for os in OSES {
+            for (_name, app_dir, tail) in ide_rows {
+                let path = resolved(os, app_dir, tail);
+                let expected = expect(sandbox, os, app_dir, tail);
+                assert_eq!(path, expected, "{app_dir} on {os:?}");
+                assert!(path.starts_with(sandbox), "{path:?}");
+                assert_ne!(path, expect(&real_home, os, app_dir, tail));
+                assert!(!path.starts_with(sandbox.join("poison-appdata")));
+                assert!(!path.starts_with(sandbox.join("poison-xdg")));
+            }
+            let cache = aws_sso_cache_dir();
+            assert_eq!(cache, sandbox.join(".aws").join("sso").join("cache"));
+            assert_ne!(
+                cache,
+                real_home.join(".aws").join("sso").join("cache"),
+                "aws cache on {os:?}"
+            );
+            assert_eq!(zcode_home(), sandbox.join(".zcode"));
+            assert_ne!(zcode_home(), real_home.join(".zcode"));
+        }
+
+        let host = current_desktop_os().expect("desktop os");
+        assert_eq!(
+            windsurf_state_db_path(),
+            Some(expect(sandbox, host, "Devin", STATE_DB)),
+            "falls back to the Devin dir when neither exists"
+        );
+        let devin_dir = expect(sandbox, host, "Devin", STATE_DB);
+        let legacy_dir = expect(sandbox, host, "Windsurf", STATE_DB);
+        std::fs::create_dir_all(legacy_dir.parent().expect("parent")).expect("legacy dir");
+        std::fs::write(&legacy_dir, b"").expect("legacy db");
+        std::fs::create_dir_all(devin_dir.parent().expect("parent")).expect("devin dir");
+        std::fs::write(&devin_dir, b"").expect("devin db");
+        assert_eq!(
+            windsurf_state_db_path(),
+            Some(devin_dir.clone()),
+            "prefers the Devin dir when both exist"
+        );
+        std::fs::remove_file(&devin_dir).expect("remove devin db");
+        assert_eq!(
+            windsurf_state_db_path(),
+            Some(legacy_dir.clone()),
+            "falls back to the legacy Windsurf dir"
+        );
+        std::fs::remove_file(&legacy_dir).expect("remove legacy db");
+        assert_eq!(kiro_data_dir(), Some(expect(sandbox, host, "Kiro", &[])));
+    }
+
+    #[test]
+    fn zcode_home_prefers_setting_json_database_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sandbox = dir.path();
+        let _guard = EnvGuard::sandbox(sandbox);
+        assert_eq!(zcode_home(), sandbox.join(".zcode"));
+
+        let v2 = sandbox.join(".zcode").join("v2");
+        std::fs::create_dir_all(&v2).expect("mkdir");
+        let override_root = sandbox.join("override");
+        std::fs::write(
+            v2.join("settings.json"),
+            serde_json::to_string(&serde_json::json!({
+                "dataBaseDir": override_root.to_string_lossy()
+            }))
+            .expect("json"),
+        )
+        .expect("wrong filename");
+        assert_eq!(
+            zcode_home(),
+            sandbox.join(".zcode"),
+            "settings.json is not cockpit's filename"
+        );
+
+        std::fs::write(v2.join("setting.json"), r#"{"dataBaseDir":"   "}"#).expect("blank");
+        assert_eq!(zcode_home(), sandbox.join(".zcode"));
+
+        std::fs::write(v2.join("setting.json"), "{not json").expect("invalid");
+        assert_eq!(zcode_home(), sandbox.join(".zcode"));
+
+        std::fs::write(
+            v2.join("setting.json"),
+            serde_json::to_string(&serde_json::json!({
+                "dataBaseDir": override_root.to_string_lossy()
+            }))
+            .expect("json"),
+        )
+        .expect("override");
+        assert_eq!(zcode_home(), override_root.join(".zcode"));
+        assert_ne!(zcode_home(), home_dir().join(".zcode"));
+    }
+}

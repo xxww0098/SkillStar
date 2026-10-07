@@ -4,7 +4,7 @@
 
 ## 进程
 
-`argv[1] == "mcp"` 时，进程在 Git askpass 和桌面窗口之前进入 `skillstar_app::project_skills_mcp::serve`。`is_cli_subcommand("mcp")` 为真，所以这条参数不会打开 GUI。
+`argv[1] == "mcp"` 时，进程在 Git askpass 和桌面窗口之前进入 `ss_app::project_skills_mcp::serve`。`is_cli_subcommand("mcp")` 为真，所以这条参数不会打开 GUI。
 
 serve 安装全局技能变更策略（`install_global_policy`）并迁移旧数据目录（`migrate_legacy_paths`）。它不初始化 marketplace snapshot，也不走 CLI 的 `migrate_and_run`。
 
@@ -14,7 +14,7 @@ Windows release 仍使用 `windows_subsystem = "windows"`，不分配控制台�
 
 ## 工具
 
-工具参数和结果在 `skillstar_app::project_skills_mcp::protocol`。名字是 `recommend_project_skills`、`get_project_skills`、`apply_project_skills`。参数使用 `deny_unknown_fields`。没有 `user_confirmed`、批准来源或 `plan_hash` 入参。`plan_hash` 只出现在推荐的结构化结果里，不能当作应用的授权。
+工具参数和结果在 `ss_app::project_skills_mcp::protocol`。名字是 `recommend_project_skills`、`get_project_skills`、`apply_project_skills`。参数使用 `deny_unknown_fields`。没有 `user_confirmed`、批准来源或 `plan_hash` 入参。`plan_hash` 只出现在推荐的结构化结果里，不能当作应用的授权。
 
 每次调用同时返回结构化结果和一段短文本。字段以结构化结果为准。结果不包含技能正文，也不包含 Hub 绝对路径。Server capabilities 启用 tools，不启用 roots 或 resources。
 
@@ -38,7 +38,7 @@ Projects 页在选中项目且存在未过期计划时，在列表上方展示�
 
 ## 重排
 
-推荐顺序就是已安装技能的 BM25 原序。生产实现是 `PassthroughReranker`：不增删候选，不读 `SKILL.md` 正文，分数不进入 `plan_hash`。应用不加载本地决策模型，也不读取 `SKILLSTAR_LAYA_ONNX`。磁盘上残留的 `~/.skillstar/models/` 不主动删除。见 [D-084](../../decisions.md#d-084移除本地决策模型laya)。
+推荐顺序就是已安装技能的 BM25 原序。生产实现是 `PassthroughReranker`：不增删候选，不读 `SKILL.md` 正文，分数不进入 `plan_hash`。
 
 ## 应用
 

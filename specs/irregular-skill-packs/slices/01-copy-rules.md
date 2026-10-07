@@ -58,7 +58,7 @@ pub(crate) fn choose_copy<'a, T>(copies: &'a [T], folder: impl Fn(&T) -> &str,
 
 - `deserialize_path_list`（`:73-87`）改成保留原形：`enum PathList { Container(String), Paths(Vec<String>) }`。
   - plugin.json 的 `skills` 是**字符串**时，表示容器路径，把该路径本身推进去，不取父目录。
-  - **数组**里的每一项仍按技能路径处理，取父目录（与 npx skills 的约定一致）。
+  - **数组**里的每一项仍按技能路径处理，取父目录。
   - marketplace 条目的处理不变。
 
 ## 测试

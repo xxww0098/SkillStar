@@ -2,7 +2,271 @@
 
 状态：active
 
+## 2026-10-07 - 光标闪一下又变回箭头
+
+- Symptom: 指针移到技能卡底栏的品牌 SVG、按钮，或点进输入框时，光标变成手型或工字，马上又变回箭头。鼠标停住也不再变。
+- Root cause: macOS 上 GPUI 的内容视图打开了 layer。它只用一整块窗口大小的 cursor rect 表示当前光标，样式变化时 invalidate 这块 rect。AppKit 会先套上新光标，随后丢掉，鼠标还在同一块 rect 里就不再套。GPUI 认为样式已经换成手型或工字，不会再 invalidate。
+- Fix: `GPUIView` 记住 `addCursorRect:cursor:` 传来的 `NSCursor`，当场设上，并在鼠标移动结束、`cursorUpdate:` 和下一轮 run loop 再设一次。另外登记一块带 `NSTrackingCursorUpdate` 的 tracking area，`cursorUpdate:` 才会被调用。
+- Files: `crates/ss-gpui/src/macos_cursor.rs`。光标约定见 [界面](./features/frontend/README.md) 技能卡一节。
+- Self-check: `cargo test -p ss-gpui --lib --locked gpui_view_keeps_a_cursor_override`。指针停在品牌 SVG 上应保持手型，点进搜索框应保持工字。复发时先看是不是又只靠 `resetCursorRects`，事件结束之后没有重新 set。
+
+## 2026-10-07 - Devin 浏览器登录报 auth required
+
+- Symptom: 添加 Devin 账号，浏览器里登录完成后对话框显示 `失败: Usage: auth required (token expired or revoked)`。
+- Root cause: `windsurf.com/editor/auth-success` 已经用 Firebase ID token 调过 `GetOneTimeAuthToken`，loopback 的 `access_token` 是响应里的 `authToken`。登录完成仍把这个值当成 Firebase ID token 交给 `RegisterUser`。`register.windsurf.com` 回 401 `invalid token`，被收成 `UsageError::AuthRequired`。同一句也会出现在旧路径：`RegisterUser` 已经发了 apiKey，随后 `GetOneTimeAuthToken` 的 401 却把整次登录判失败。
+- Fix: `RegisterUser` 认证失败时，把回调 token 当作已签发的会话，并用 `GetCurrentUser` / `GetPlanStatus` 确认。两个都拒绝才仍是 `AuthRequired`。Firebase 路径上，apiKey 已经到手之后，会话和资料请求的 401 不再取消登录。
+- Files: `crates/ss-usage/src/fetchers/oauth/windsurf/login.rs`。行为见 [Usage](./features/usage/README.md)。
+- Self-check: `cargo test -p ss-usage --lib --locked windsurf::login`。再点一次「登录」，浏览器完成后应出现账号，而不是这条失败。复发时先看回调 `access_token` 是不是又被送进 `RegisterUser`。
+
+## 2026-10-07 - 导入框最近仓库滚轮翻不动
+
+- Symptom: 技能导入框「最近的仓库」多于一屏时，鼠标滚轮不能翻列表。
+- Root cause: 列表用 `max_h` 加 `overflow_y_scrollbar`。滚动包装把调用方的高度限制留在内容节点上，内容被截到和视口一样高，滚轮位移夹回 0。看见的裁切来自外层，不是一个有溢出的滚动盒。和 SKILL.md 悬浮窗是同一类。
+- Fix: 超过四条时，外框和滚动盒都写明确高度 144px，不再用 `max_h`。四条及以内高度跟着内容走。
+- Files: `crates/ss-gpui/src/my_skills/import_modal/phases.rs`。行为见 [技能安装](./features/skills/README.md#安装与更新)。
+- Self-check: 历史超过四条时，滚轮应能翻到第五条。四条及以内不应留出空的滚动区。复发时先看滚动盒是不是又只写了 `max_h`。
+
+## 2026-10-07 - Grok 套餐显示成 GROK，月额度为 0 时剩余百分比丢失
+
+- Symptom: 账号邮箱右边的徽章是 `GROK`。每月额度显示 `0 / 0`，没有剩余百分比，每周额度有。刷新报 `Grok billing 请求失败: error sending request for url (https://cli-chat-proxy.grok.com/v1/billing)`。
+- Root cause: `plan_name` 写死成品牌名 `Grok`，没有读 `/v1/settings` 的 `subscription_tier_display`。统一计费账号的 `monthlyLimit` / `used` 是明确的 0，解析时因为上限为 0 不算 `percent`，剩余百分比依赖 `percent`。默认 billing 一次传输失败会直接放弃同一次已经能返回的 credits 视图，卡片停在旧快照上并挂着这条错误。
+- Fix: 套餐优先用 `subscription_tier_display`，否则用 JWT `tier` 映射到同一套显示名（`SuperGrok Heavy`、`X Premium+`）。明确的 0 月额度写入 `percent: 0`，剩余百分比仍显示。账号卡不画每月额度进度条。代理请求带 `x-xai-token-auth: xai-grok-cli`；默认 billing 传输失败但 credits 已给出周窗口时，卡片仍更新。
+- Files: `crates/ss-usage/src/fetchers/oauth/{xai.rs,xai_tests.rs}`，`crates/ss-gpui/src/accounts/meters.rs`，`docs/features/usage/README.md`。
+- Self-check: `cargo test -p ss-usage --lib --locked fetchers::oauth::xai`，`cargo test -p ss-gpui --lib --locked accounts::meters`。刷新后徽章应是上游套餐名。每月额度显示金额和剩余百分比，下面没有进度条。复发时先看 settings 是否又没带回 `subscription_tier_display`，以及月窗口的 `percent` 是不是在上限为 0 时被丢掉（丢掉后剩余百分比也会消失）。
+
+## 2026-10-07 - SKILL.md 悬浮窗滚轮翻不动
+
+- Symptom: 打开 SKILL.md 悬浮窗，鼠标滚轮不能翻正文。英文和译文在卡片右缘、底边被切断。
+- Root cause: 正文用了双向 `overflow_scrollbar()`，内容宽度跟着最长一行涨，不再换行。滚动盒又是 `flex_1`，滚动包装先画 `size_full()`，百分比高度变成整份阅读区，盒子跟着文件变高，自己并不溢出。真正裁切的是对话框的 `max_h`。滚轮打在一个没有溢出的滚动盒上，位移被夹回 0。
+- Fix: 滚动盒只用纵向滚动，高度是落在卡片内部的明确像素，英文按卡片宽度换行。中文界面打开时只显示原文；设置里打开「SKILL.md」，或在悬浮窗点「翻译」之后，才会排队翻译。
+- Files: `crates/ss-gpui/src/my_skills/skill_reader.rs`。行为见 [技能详情](./features/skills/README.md)。
+- Self-check: `cargo test -p ss-gpui --lib --locked skill_reader`。打开一份长的英文 SKILL.md，滚轮应能翻过第一段，卡片底边不应切掉滚动盒。设置里「SKILL.md」关闭、且没有点悬浮窗里的「翻译」时不应出现译文。复发时先看滚动盒是不是又没了明确高度，或又改回双向滚动。
+
+## 2026-10-07 - SKILL.md 悬浮窗打开时动画一顿一顿
+
+- Symptom: 点「查看 SKILL.md…」后，悬浮窗从顶部滑到正中的过程中掉帧。英文段落下方的译文也在这段滑动里挤进来。
+- Root cause: 对话框层每次入场帧都会重建。没缓存的子视图因此每帧 `render` 并重新排版。整份 `SKILL.md` 被拆成许多 `TextView`，而且一打开就排队翻译；译文回来后正文变高，`margin_top` 跟着改，滑动目标中途跳跃。缓存键包含布局边界，卡片在动时重放命中不了，省不掉这次排版。
+- Fix: 入场约 250ms 里只画标题和固定高度的空正文，320ms 后再排版 Markdown。高度在打开时按视口算好，第一帧就用这个值居中。中文界面默认不翻译；设置里打开「SKILL.md」，或在悬浮窗点「翻译」之后，才会排队。点悬浮窗外走对话框遮罩关闭。
+- Files: `crates/ss-gpui/src/my_skills/skill_reader.rs`，`crates/ss-gpui/src/chrome/dialog.rs`，`crates/ss-gpui/src/translation.rs`。行为见 [技能详情](./features/skills/README.md)。
+- Self-check: `cargo test -p ss-gpui --lib --locked skill_reader`。打开一份英文 SKILL.md，卡片应滑到正中且正文在停住后出现；设置里「SKILL.md」关闭、且没有点「翻译」时没有译文；点卡片外应关闭。复发时先看入场期间有没有又把 `TextView` 放进每帧都重建的子树。
+
+## 2026-10-07 - 浮层下的技能卡跟着指针进入悬停
+
+- Symptom: 打开选择条的「链接到智能体」菜单，鼠标在菜单上移动时，被菜单挡住的技能卡边框变成强调色，像被指中。
+- Root cause: GPUI 的普通命中盒不会挡住后面的元素。菜单行自己能点，但卡片的悬停仍算命中。只有 `occlude()`（或 `block_mouse_except_scroll()`）会把后面的悬停停掉。
+- Fix: 链接菜单、账号对话框遮罩、卡组表情面板和重置卡过期列表调用 `occlude()`。选择胶囊和回到顶部贴在可滚动列表上，调用 `block_mouse_except_scroll()`，滚轮仍交给列表。Kit 的 Popover、菜单和对话框本来就会挡住。
+- Self-check: `cargo test -p ss-gpui --lib --locked link_menu_keeps_the_pointer_off_the_card_under_it`。指针在菜单上时，被挡住的卡不应进入悬停；菜单外的卡仍应进入。复发时先看新浮层有没有挡住后面的命中盒。
+
+## 2026-10-07 - 详情列裁掉最右一张技能卡的边框
+
+- Symptom: 技能页（市场榜同样）打开右侧详情列后，靠列的那一列卡右边框和阴影被裁掉几个像素，列看起来压在卡片上。
+- Root cause: 默认窗口把详情列宽定成「两张卡刚好放下」。列数用的面板宽度没减主面板左右各 1px 的边框（边框在 border box 里面）。实际内容区比估算窄 2px，卡片行溢出滚动容器，溢出在横向上被裁掉。卡片之间的间隙还在容器里，所以只有最右一张卡的外边被切。
+- Fix: `pane_width` 减去 `PANEL_BORDER_X`。详情列从 376 收到 370，默认窗口两张卡旁边留 4px 给边框和阴影。技能列和市场列仍同宽。
+- Self-check: `cargo test -p ss-gpui --lib --locked an_open_column_keeps_two_cards_in_the_default_window`。打开一张技能，最右一张卡的右边框应完整，和详情列之间仍是页面内边距。复发时先看详情列宽是不是又把这块余量吃满。
+
+## 2026-10-07 - 技能页滚动卡顿：整份卡片网格都在视图里布局
+
+- Symptom: 技能页卡片一多，滚动就一顿一顿。市场页同一操作是顺的，而且技能页没有市场那个「回到顶部」。
+- Root cause: 已安装技能全部放进一个 `overflow_y_scrollbar`。滚动和悬停都会通知这块重放视图，于是每一帧都把全部卡片交给 Taffy。市场榜已经改成 `uniform_list`，只排视口里的行。
+- Fix: `my_skills/canvas.rs` 按行虚拟化，行高是卡片高加行距。滚动超过约 300px 后，卡片区右下角用 `chrome/scroll_top.rs` 的同一个按钮回到顶部。网格/列表切换会换一把滚动句柄，从新排列的顶部开始。选择条出现时，列表底部多留一截，最后一行不被胶囊盖住。
+- Self-check: `cargo test -p ss-gpui --lib --locked visible_rows_only_and_back_to_top`。复发时先看技能列表是不是又把 `slots` 全铺进一棵元素树。
+
+## 2026-10-07 - 工具栏「更新」点了，卡片更新按钮不动画
+
+- Symptom: 技能页右上角「更新」已在转，待更新卡片右上角仍是静止的「更新」，省略号不走。
+- Root cause: 单卡更新把 `busy` 设成技能名，卡片用这个相等关系挂上省略号。工具栏和选择栏批量更新把 `busy` 设成 `update_all` / `batch_update`，没有一张卡对得上，动画元素根本不会挂上。
+- Fix: `arm_batch_update` 在点击时记下名单。`skill_update_in_flight` 在批次记号下按这份名单判断，选择变化不影响已经开始的卡。详情列的更新按钮用同一判断，进行中不再另起一次更新。
+- Self-check: `cargo test -p ss-gpui --lib --locked batch_update_mounts_the_card_update_animation`。点右上角「更新」后，有更新徽标的卡应切到「更新中」并循环省略号。复发时先看卡片的 `updating` 是不是又写成了 `busy == 技能名`。
+
+## 2026-10-07 - 技能页顶栏以下一片空白
+
+- Symptom: 技能页顶栏正常，计数和更新数都在，下面的卡片区是面板底色，没有骨架也没有卡片。
+- Root cause: 卡片网格被放进重放视图之后，网格根节点只写了 `flex_1`。这个节点是视图的根，上面没有 flex 父级，`flex-basis: 0` 不会被撑开。滚动容器又把溢出裁掉，卡片高度变成 0。顶栏画在页面上，所以只有它还在。
+- Fix: 重放视图的根用 `size_full` 铺满这块视图的边界。市场榜已经是这样。滚动条在这个确定高度里再 `flex_1`。
+- Self-check: `cargo test -p ss-gpui --lib --locked replayed_grid_fills_the_page`。打开技能页，卡片或加载骨架应占满顶栏以下。复发时先看重放视图的根是不是又只剩 `flex_1`。
+
+## 2026-10-07 - 打开技能页时进程 abort：重放视图在页面更新中又读了页面
+
+- Symptom: `./dev.sh` 刚画出窗口就 abort。主线程是 `cannot read ss_gpui::my_skills::MySkillsPage while it is already being updated`，接着 `fatal runtime error: failed to initiate panic`。市场、发布者、账号页是同一条构造路径，切过去也会停在这一句。
+- Root cause: 重放视图在页面自己的 `render` 里用 `cx.new` 创建。这次 `render` 已经把页面从 entity map 租走。构造函数里 `page.read(cx)` 再借一次，走到 `double_lease_panic`。观察回调是效果刷完之后才跑的，那次 `read` 没问题；出事的是构造函数。
+- Fix: 代际从这次 `render` 已经拿到的 `self` 传进构造函数。`SkillsCanvas`、`MarketBoard`、`MarketDetail`、`PublisherBoard`、`PublisherDetailColumn`、`AccountsPane` 都这样。
+- Self-check: `cargo test -p ss-gpui --lib --locked while_the_page_is_updating`。打开技能页，进程应留着。复发时先看 `ensure_canvas` / `ensure_board` / `ensure_pane` / `ensure_detail` 里面还有没有 `page.read`。
+
+## 2026-10-07 - 动画帧把卡片网格一起排版
+
+- Symptom: 刷新图标、对话框入场在 120Hz 屏幕上仍一顿一顿。图标在转，后面的技能网格、市场榜或额度卡也在每帧重排。
+- Root cause: GPUI 没有独立的合成器动画。`with_animation` 每帧 notify 当前视图，并把祖先标脏；缓存只跳过没有被标脏的视图，而且命中后是按原坐标重放场景，不会把位移交给 GPU。旋转若和网格在同一棵子树里，120 帧就被布局吃掉。`with_max_fps` 改走定时器，跟不上显示器，也不能减轻这一帧的布局。
+- Fix: 旋转去掉帧率上限，只变换字形。壳放在 `WindowSurface` 里重放，对话框入场不再排版侧栏。技能网格、市场榜、发布者列表、账号额度区各是一块重放视图，只在数据代际变化时失效；动画帧只 `notify` 页面，不走 `revise`。骨架脉冲和更新省略号仍限频。额度卡高度不固定，单卡刷新和重置卡弹簧仍会重排整个额度区。
+- Files: `crates/ss-gpui/src/chrome/mod.rs`，`shell.rs`，`my_skills/canvas.rs`，`marketplace/board.rs`，`marketplace/publisher/board.rs`，`accounts/pane.rs`。界面约定见 [frontend README](./features/frontend/README.md#壳)。
+- Self-check: `cargo test -p ss-gpui --lib dialog_entrance_does_not_rebuild_the_page spin_does_not_rebuild_the_replayed_body`。技能页点刷新，图标连续转动，卡片网格不跟着重排。复发时先看重内容是否还走 `replay_view`，以及动画途中的 `notify` 有没有改走 `revise`。
+
+## 2026-10-07 - 悬浮窗从顶部滑到正中时整页掉帧
+
+- Symptom: 确认框、导入框和其他对话框打开时，卡片从窗口顶部滑到正中并淡入，整段动画明显掉帧。
+- Root cause: gpui-component 的对话框入场把纵坐标从 0 收到 `margin_top`，同时淡入并补阴影，250ms 内每帧 `request_animation_frame`。这会 notify `WindowState`，并把祖先 `Root` 标脏。壳把当前页当作普通子视图，根视图一脏就把整页（技能网格里的每一张卡）重新布局。居中之后 `margin_top` 大约是半个窗口，掉一帧就会跳一大截。
+- Fix: `WindowSurface` 重放整个壳，`mount_page` 再重放当前页。入场动画仍然滑动，但不再排版侧栏和卡片网格。悬停、滚动、主题切换和页面自己的数据 `revise` 仍会让对应缓存失效。
+- Files: `crates/ss-gpui/src/shell.rs`，`shell/dialog_motion.rs`。界面约定见 [frontend README](./features/frontend/README.md#壳)。
+- Self-check: `cargo test -p ss-gpui --lib dialog_entrance_does_not_rebuild_the_page`。打开技能页再开一个确认框，卡片应滑到正中，侧栏和后面的网格不跟着一顿一顿。复发时先看 `replay_view` 是否还在 `.cached()`。
+
+## 2026-10-07 - 多账号时添加按钮掉出额度卡骨架
+
+- Symptom: 同一供应商有两张及以上额度卡时（例如两张 Grok），「添加」掉到卡片下面，变成一条没有供应商名、没有卡框的虚线按钮。零张或一张账号时，添加仍在卡框里。
+- Root cause: `render_provider_card` 按账号数量分成两条布局。零张或一张把添加放进图例卡；两张及以上只把虚线按钮放进下一格，不再套额度卡骨架。Grok 没有单独的界面，只是先凑满了两张卡。
+- Fix: 图例面在 `accounts/frame.rs` 的 `legend_frame`。轨道在 `skill_card/grid.rs` 的 `tracks`，技能卡和额度卡共用这一条。每个账号一格，添加永远是下一格。
+- Files: `crates/ss-gpui/src/accounts/frame.rs`，`crates/ss-gpui/src/accounts/card.rs`，`crates/ss-gpui/src/skill_card/grid.rs`。布局见 [Accounts](./features/accounts/README.md#布局)。
+- Self-check: `cargo test -p ss-gpui --lib quota_cards_use_the_same_pitch`。两张 Grok 时，添加是下一张带 Grok 图例的卡，宽度与账号卡相同。复发时先看是不是又按供应商或账号数量绕开了 `legend_frame`，或者又手写了一条不走 `tracks` 的行。
+
+## 2026-10-07 - 顶栏空白拖不动窗口：细条盖不住行高和控件间隙
+
+- Symptom: 技能页顶栏在控件上下、以及胶囊和按钮之间的空白按住，窗口不动。搜索、导入、筛选、刷新仍应能点。
+- Root cause: 两件独立的事叠在一起。一是拖拽只挂在几条固定宽度的叶子上。行高 56px、控件高 32px，控件上下各约 12px，以及标题和按钮之间的 `gap`，都属于没有处理器的父级，看着是空白，按下没有命中盒。二是不能把 `window_drag` 挂到包住按钮的容器上来补这块空白。GPUI 命中测试会收录指针下每一个普通命中盒；普通命中盒不挡住更靠后的层。容器上的按下处理器，或者铺在按钮背后的拖拽层，都会和按钮一起触发。`block_mouse_except_scroll` 也不够：它只把背后的层排除出悬停，Windows 的 `WM_NCHITTEST` 仍看完整命中列表，拖拽层还在里面就会返回 `HTCAPTION`，按钮点击变成拖窗口。
+- Fix: `PageBar` 在行背后铺一层绝对定位的 `window_drag`，盖住整行。空白没有更靠前的命中盒，按下就 `start_window_move`。会接收点击的控件，或包住它的分段轨道，调用 `occlude()`（`HitboxBehavior::BlockMouse`）。命中测试在控件处停下，拖拽层进不了命中列表，macOS 的按下和 Windows 的标题栏命中都看不到这次点击。筛选条仍写 `w_auto()`，否则滚动包装根会吃掉中间空白。不要改回只靠细条，也不要给控件的祖先加拖拽处理器。
+- Files: `crates/ss-gpui/src/chrome/toolbar.rs`，`my_skills/toolbar.rs` 的范围开关和更新组，`marketplace/view.rs` 的页签，`marketplace/spotlight.rs`，`marketplace/publisher/mod.rs` 的返回按钮。界面约定见 [frontend README](./features/frontend/README.md#壳)。
+- Self-check: `cargo check -p ss-gpui --locked`。技能页顶栏在标题旁、搜索框上下、筛选胶囊之间和右侧按钮之间的空白按下拖动，窗口跟随。搜索、导入、筛选、刷新仍能点。复发时先看新放进顶栏的控件有没有 `occlude()`；用了 `block_mouse_except_scroll` 的话，Windows 上点按钮仍会拖窗口。
+
+## 2026-10-07 - 顶栏搜索框点外面或按 Escape 不失去焦点
+
+- Symptom: 技能页点进「搜索技能…」之后，点页面空白、点顶栏空白、按 Escape，光标都留在输入框里。项目、卡组和发布者页用的是同一个搜索框。
+- Root cause: GPUI 不会因为点到不可聚焦的区域就 blur。顶栏空白是拖拽条，鼠标按下只开始移动窗口，不移动焦点。输入框的 Escape 在没有菜单、多光标或补全时会向上传递，父节点没有人 blur。
+- Fix: `toolbar_search` 在绘制阶段登记 Capture 的鼠标按下：焦点在这个框里、且点击落在框外时 blur，不拦截事件，拖拽仍然发生。Escape 在输入框自己处理完菜单和补全并向上传递之后，由外层 blur。
+- Files: `crates/ss-gpui/src/chrome/toolbar.rs`。
+- Self-check: 技能页点进搜索框，再点卡片区空白，光标离开；再点进搜索框按 Escape，光标离开。顶栏空白仍能拖动窗口。
+
+## 2026-10-07 - Grok 登录仍走本机回调，CLI 已改设备码
+
+- Symptom: 账号页对 Grok 点「登录」后，浏览器里的授权完不成，或 SkillStar 一直等 `127.0.0.1:56121` 的回调。同机 `grok login`（CLI 1.0.40）会打开 `https://accounts.x.ai/oauth2/device` 并给出配对码。
+- Root cause: CLI 先读远程 login-config，`device_flow=true` 时交互登录改为 `POST https://auth.x.ai/oauth2/device/code`，再轮询 token 端点。SkillStar 仍只打开 `oauth2/authorize` 并监听固定端口回调。
+- Fix: Grok 登录改为设备码，对话框展示配对码并打开完整验证地址。设备端点 404 才回退本机回调。新登录请求补上 CLI 已发放的 `workspaces:read` / `workspaces:write`。
+- Files: `crates/ss-usage/src/fetchers/oauth/{xai.rs,xai_device.rs,xai_tests.rs}`，`crates/ss-gpui/src/accounts/dialog.rs`，`docs/features/usage/README.md`。
+- Self-check: `cargo test -p ss-usage --lib fetchers::oauth::xai`。账号页对 Grok 点「登录」应出现配对码，浏览器打开 `accounts.x.ai/oauth2/device`；确认后账号写入，不必再等 56121 回调。
+
+## 2026-10-07 - 悬停、旋转和骨架动画把整个窗口按刷新率重绘
+
+- Symptom: 鼠标划过按钮或技能卡时界面一顿一顿；刷新图标旋转、加载骨架、重置卡闪烁时整页掉帧。高刷新率屏幕上更明显。
+- Root cause: `with_spring` / `with_animation` 在没停稳前每帧 `request_animation_frame`，这会 notify 当前 view，并把祖先一起标脏，于是整窗重建。交互弹簧（刚度 420、阻尼 38、误差 0.001）要大约 370ms 才停，120Hz 下是四十多帧。划过卡片网格时至少有一条弹簧在跑，重绘就不会停。
+- Fix: 悬停和按下改走 GPUI 的 `.hover()` / `.active()`，只在状态变化时重绘一次；颜色相同的那一层不挂。位移弹簧改成临界阻尼（`INTERACTION_SPRING`）并放宽 epsilon，大约 80ms 内停。旋转跟显示器刷新走，但只变换字形，重内容是重放视图。骨架和重置闪烁仍是 20fps，且骨架共用同一时钟。见 [界面约定](./features/frontend/README.md#壳)。
+- Self-check: `cargo test -p ss-gpui --lib spring_settles_inside_one_tenth_of_a_second`。复发时先看是不是又有控件用 `with_spring` 做悬停色。详情列「卸载」是写明的唯一例外，不要再往技能卡或其它按钮上加。旋转不要再加 `with_max_fps`；要限频的是脉冲和省略号。
+
+## 2026-10-07 - 存储分类迁移破坏外部链接或混入旧 SQLite WAL
+
+- Symptom: 旧 CLI 凭据快照搬走后，CLI 软链接断开；本地 Skill 同名冲突时，Agent 被重指到另一份内容；旧市场 WAL 可能被搬到已存在的新数据库旁。
+- Root cause: 按文件位置迁移忽略了外部引用与文件组一致性；本地 Skill 重连只检查新目标存在，并用链接名字猜目标，不能证明旧内容已搬走。
+- Fix: CLI custody 已有 catalog 原位兼容；市场缓存独立重建，旧主库/WAL/SHM 不动；本地 Skill 仅在旧条目确实不存在时按真实目标的相对路径重连。迁移策略与离线代价见 [存储布局](./storage-layout.md#迁移语义)。
+- Self-check: `cargo test -p ss-core -p ss-skills --locked migration` 与 `cargo test -p ss-core --locked v3_layout_categories_resolve_under_data_root`。覆盖旧 CLI 链接读写、缓存新旧共存、重复执行、Skill 同名冲突与别名/子路径。
+
 > **D-082 注记（2026-10-05）**：模型域（`skillstar-models` / `skillstar-gateway` / `skillstar-decision`）已整体移除。以下条目凡只涉及该域的，其代码已不存在、不可经由原路径复发；根因教训（如 Windows 只读目录、持锁文件、测试并发）仍适用，故保留为历史记录。
+
+## 2026-10-07 - 重置卡过期列表被同行文字和下一行盖住
+
+- Symptom: 账号卡上悬停重置卡叠，过期时间列表被同行的窗口名、重置按钮、下一行虚线和「重置卡」图例挡住。
+- Root cause: 列表是 40×44 卡叠里的绝对定位子节点，宽 180px，从卡面下方伸出。GPUI 按树顺序绘制，后出现的兄弟画在上面；账号区的纵向滚动还会裁切溢出内容。原生 `.tooltip()` 在整棵树和 deferred 之后绘制，这块列表没有走那条路径。
+- Fix: `reset_stack` 把列表放进 `deferred`，优先级 1000，高于弹出层（100）和 kit tooltip 层（200）。位置仍锚在卡叠下方。原生 `.tooltip()` 仍在其后。
+- Self-check: 账号页悬停有过期时间的卡叠，列表应完整盖住同行文字、重置按钮和下一行虚线。新的悬停面板不要再做成普通绝对定位子节点。
+
+## 2026-10-07 - 进入技能页时进程 abort：更新中又读了 MySkillsPage
+
+- Symptom: 技能页打开后不久，或点刷新、卸载、检查更新、重装来源、导入完成、切回该页时，主线程打出 `cannot read ss_gpui::my_skills::MySkillsPage while it is already being updated`，接着 `fatal runtime error: failed to initiate panic`，`./dev.sh` abort。
+- Root cause: `MySkillsPage::refresh` 在页面自己的 `update` 闭包里用 `cx.entity().read(cx)` 再借一次。GPUI 的 `update` 已经把 entity 从 map 租到栈上，第二次 read 走 `double_lease_panic`。工具栏、命令完成、更新检查、来源重装、导入框和 Shell 切页都是这样调用的。后台更新检查在首次列表刷新之后自动跑，所以一进技能页也可能崩。
+- Fix: `refresh(&self, cx)` 使用这次 `update` 已经拿到的 `self.profiles_epoch`。构造函数里 entity 还没插入，仍走 `refresh_from(cx, 0)`，不要在 `new` 里读 handle。
+- Self-check: 打开技能页等到后台更新检查结束，进程应仍在。点工具栏刷新、从其他页切回，也应重新列出技能且不退出。复发时先 grep `cx.entity().read`，`update` 闭包里只能用闭包参数上的页面。
+
+## 2026-10-06 - 安装与复制部署跟随逃出来源的符号链接
+
+- Symptom: 仓库里放一个 `skills/x/leak -> ../../../../.ssh`（或任何指向 checkout 外的相对链接），安装 `x` 后 canonical `~/.agents/skills/x/leak` 里是本机文件的真实副本，随后可能被复制部署、打包或发布出去。断链会让整次复制失败，链接环会无限递归。
+- Root cause: installer、本地采用和 `fs_ops::copy_dir_all` 各自实现复制，都用 `metadata()`/`is_dir()` 跟随链接，没有「链接目标必须仍在来源根内」的边界，也没有环检测。
+- Fix: 复制只走 `materialize::copy_confined`。规则见 [技能生命周期](./features/skills/README.md#生命周期)。不要再手写会跟随链接的递归复制。
+- Self-check: `cargo test -p ss-skills installer::tests materialize::tests`，其中包含相对链接逃逸的回归测试。新增复制入口前先 grep `copy_confined`。
+
+## 2026-10-06 - 本地采用用 frontmatter `name` 拼路径，可写出 local 目录
+
+- Symptom: 采用一个 frontmatter 写着 `name: ../../escape` 的文件夹，SkillStar 在 `skills/local` 之外创建或覆盖目录。
+- Root cause: `adopt_folder` 直接用 `skill.id`（来自 frontmatter）拼 `local_skills_dir().join(id)`，安装管线的名字清洗没有覆盖采用入口；同类问题也存在于「已安装」判定和去重直接用原始名字。
+- Fix: 名字只经 `materialize::canonical_skill_name` 换算一次。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
+- Self-check: `cargo test -p ss-skills local_skill::adopt_folder_tests`。任何把外部名字拼进路径的新代码都要先过 `canonical_skill_name` 或 `validate_skill_name`。
+
+## 2026-10-06 - 规范根和 Agent 全局目录是同一棵树
+
+- Symptom: 对 Pi 或 Cline 取消链接、取消全部链接或批量部署之后，`~/.agents/skills` 里已经安装的技能目录消失，或变成指向自己的链接。
+- Root cause: 这些 Agent 的全局技能目录就是规范根，或落在规范根里面。部署把「这个 Agent 的技能目录」当成待改的链接容器，取消链接删掉的就是规范副本。若只按 Pi、Cline 的 id 特判，以后把自定义 Agent 的全局目录指进规范根会再犯一次。
+- Fix: `deployment::targets_canonical_root` 为真时，链接、取消链接和镜像都跳过。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
+- Self-check: `deployment/production_layout_tests.rs` 的 `agents_on_the_canonical_root_never_unlink_installed_skills`。新的全局部署入口先问这个谓词，不要按 Agent id 写分支。
+
+## 2026-10-06 - 读不懂的安装锁被写成空锁
+
+- Symptom: `~/.agents/.skill-lock.json` 被更新的 `npx skills` 写过，或文件损坏之后，SkillStar 一次安装或卸载把锁变成几乎为空。其他工具写下的条目消失，技能还在磁盘上，但失去来源。
+- Root cause: 写侧把解析失败和版本不符都当成「没有锁」，用默认空对象覆盖。读侧展示成空是安全的；写侧覆盖不是。
+- Fix: 过新或损坏先做滚动备份，再拒绝写入。安装和卸载在改目录之前就失败。旧 schema 仍在写入时备份后从空锁重写，与 vercel 一致。显式恢复才是 `skill_lock::reset_after_backup`。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
+- Self-check: `skill_lock_tests` 里版本过新或损坏的写入必须失败，原文件还在。新的写锁路径走 `mutate` 或 `load_for_write`，不要 `load()` 之后直接 `save`。
+
+## 2026-10-07 - 内容 hash 拼接碰撞把不同目录当成同一份
+
+- Symptom: Agent 目录里一份和规范副本并不相同的技能，被当成旧的复制部署删掉；或者两份不同的树得到同一个 `contentHash`，刷新时互相覆盖。
+- Root cause: 把相对路径和文件字节直接拼进同一个哈希时，路径 `ab` 加内容 `c` 与路径 `a` 加内容 `bc` 会撞在一起。空的 `.git` 目录也不会出现在文件集合里，于是带 Git 元数据、但没有可比文件的工作区会被判成「文件完全相同」。
+- Fix: `dir_content_hash` 对路径和文件长度做前缀，并按块读文件。比较无标记旧副本时，目录里只要出现比较排除名就不是 SkillStar 的。文件集合真的相同、且不含那些名字的手工副本，仍会被当成旧部署删除。这是所有权规则，不是碰撞。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
+- Self-check: `ownership_tests` 的 `content_hash_length_prefixes_stop_boundary_collisions_and_streams` 与 `unmarked_copy_requires_an_equal_file_set_and_rejects_excluded_names`。不要用字符串拼接做内容相等。
+
+## 2026-10-06 - GPUI 确认框没有按钮，对话框贴在窗口上方
+
+- Symptom: 技能页勾选后点卸载，确认框只有标题、说明和右上角关闭，没有「取消」和「卸载」。卡片停在画面偏上，不是正中。来源移除、单卡卸载、卡组删除、注册项目、改路径、分享码导入是同一类。
+- Root cause: gpui-component 0.7.1 的 Dialog::button_props 只保存回调。普通 Dialog 绘制时不读它；只有 AlertDialog 在没有自定义 footer 时才画出默认按钮。垂直位置在 margin_top 缺省时是视口高度的十分之一。AlertDialog 不公开 margin_top，调用方改不了。
+- Fix: chrome/dialog.rs 自己画取消和确认按钮（卸载、删除、移除用 danger，其余提交用 primary），并用下一帧量到的高度设置 margin_top，把卡片放到窗口正中。导入框自己有按钮，只走居中。输入 entity 仍须在 open_dialog 之前创建。
+- Self-check: cargo test -p ss-gpui --locked dialog::tests。打开技能页勾选技能点卸载，确认框应在窗口正中，底部有「取消」和红色「卸载」。复发时先看新的 open_dialog 是否又只设了 button_props。
+
+## 2026-10-06 - 启用 Agent 后技能卡轮播 SVG 不立刻出现
+
+- Symptom: Settings 里打开一个 Agent 后回到技能页，卡片底栏轮播和工具栏筛选没有该 Agent 的品牌 SVG。过一会儿，或做一次会刷新技能列表的操作，图标才出现。关掉 Agent 时旧图标也会多留一阵。
+- Root cause: 技能页、卡组页、项目页是 KeepAlive，只在构造和各自的 refresh 里调用 `list_profiles()`。`toggle_agent_enabled` 只改 Settings 自己的 `profiles` 并 `notify`，没有把启用集变更转给这些页面。轮播按 `enabled` 投影，快照里没有这个 Agent，SVG 根本不会进元素树。
+- Fix: Settings 在开关成功后发出 `AgentsChanged`。Shell 让技能页同步重读 profile，并挡住进行中的 refresh 用旧列表盖回去；卡组页和项目页同样重读。不要等技能列表的异步刷新来带上这枚图标。
+- Self-check: 打开一个此前关闭、且有全局技能目录的 Agent，立刻回到技能页，每张卡的底栏应已有该品牌 SVG，不需要再点刷新。关掉后图标应马上从轮播消失。复发时先看 `toggle_agent_enabled` 成功路径是否还在 `emit(AgentsChanged)`，再看 Shell 是否还把事件接到三个 KeepAlive 页面。
+
+## 2026-10-06 - GPUI 导入一直停在「正在克隆仓库…」
+
+- Symptom: 技能页导入框点「扫描」后，加载页一直显示「正在克隆仓库…」，转圈不换文案，像卡死。等几分钟后技能列表其实会出现。
+- Root cause: 克隆在 spawn_blocking 里正常跑，阶段事件也发了。GPUI 用的是 GitSkillFacade::from_file_store()，里面的 sink 是 NoopGitProgressSink。Tauri 壳靠 skillstar://git-progress 把 preparing/running 换成「正在下载…」，GPUI 进程没有这条总线，文案停在扫描开始时写死的那一句。
+- Fix: from_file_store_with_progress 让导入框自己接 sink。import_modal/progress.rs 把阶段收成文案，扫描和安装期间刷新 progress。不要在 GPUI 里再听 Tauri 事件。
+- Self-check: 扫一个稍慢的公开仓库，加载文案应从「正在准备仓库访问…」变成「正在下载仓库数据…」，克隆结束后变成「正在扫描仓库里的技能…」，然后进入勾选页。一直停在第一句时，先看这次 facade 是不是又用了 NoopGitProgressSink。
+
+## 2026-10-06 - GPUI 对话框输入框打字没有反应
+
+- Symptom: 技能页「导入」对话框里的 GitHub 地址框点进去打不了字，占位符一直在，扫描按钮保持禁用。新建卡组、注册项目、改项目路径、卡组分享码/文件导入的输入框是同一类。
+- Root cause: `gpui-component` 的 `open_dialog` 把 builder 存下来，对话框层每次绘制都再调一次（`root.rs` 的 `dialog_layer`）。builder 里 `cx.new` 出来的 `InputState` / `ImportDialog` 每帧都是新的：上一帧打进去的字随旧 entity 丢掉，光标句柄也每帧换掉。`open_dialog` 还会立刻把焦点给对话框壳；在 `ImportDialog::new` 里抢焦点发生在输入框进入元素树之前，壳的焦点把它盖掉。
+- Fix: 在调用 `open_dialog` 之前创建输入 entity，builder 里只 `clone` 同一份。导入框的光标改到 `ImportDialog` 第一次 `render` 再放进 URL 字段。涉及 `my_skills/toolbar.rs`、`my_skills/import_modal.rs`、`skill_cards/deck_import.rs`、`skill_cards/mod.rs`、`projects/mod.rs`、`projects/detail.rs`。
+- Self-check: `cargo build -p ss-gpui --locked`，打开导入框打几个 ASCII 字符，框里应出现文字且「扫描」不再是半透明。复发时先看新的 `open_dialog` builder 里有没有 `cx.new`。
+
+## 2026-10-06 - GPUI 顶栏空白拖不动窗口：滚动包装根抢走了 filler 的宽度
+
+- Symptom: GPUI 顶栏（`chrome::PageBar`）中间那片空白拖不动窗口；行内边距、各分区之间按下去也没有反应。侧栏顶部拖拽条正常，深色/浅色、各页面一样。
+- Root cause: `gpui-component` 的 `overflow_x_scrollbar()` 把 filters 包进一个 `size_full()` 的根，而 filters 是 `center` 的弹性子项——`flex-basis: auto` 让这个根吃掉 100% 宽度，后面 `flex_1` 的拖拽 filler 被压成 0 宽：看着是空白，其实整块属于 filters 的滚动区。当时以为鼠标按下沿祖先冒泡、所以拖拽只能包叶子；这个模型是错的，见 2026-10-07 的条目。普通命中盒不挡住背后的层，细条又盖不住控件上下和轨道间隙。
+- Fix: `crates/ss-gpui/src/chrome/toolbar.rs` 给 filters 显式 `w_auto()`，把松弛还给中间空白。细条后来盖不住控件上下和轨道内部的空白，见 2026-10-07「顶栏空白拖不动窗口：细条盖不住行高和控件间隙」：改成整行背后的拖拽层，控件用 `occlude()`。不要给控件或它的祖先加拖拽处理器。
+- Self-check: `cargo check -p ss-gpui`。复发时先看有没有新的 `overflow_*_scrollbar()` 包装子项漏了 `w_auto()`。空白拖不动时看拖拽层还在不在，以及新控件有没有 `occlude()`。
+
+## 2026-10-06 - 纸面主题下单色供应商图标发白
+
+- Symptom: 纸面（`background_style = paper`）下，账号侧栏「供应商」、添加账号对话框、技能卡 Agent 轨和设置里的 Agent 连接，有一批品牌标几乎看不见，看起来像白块。深色主题下同一批标是浅色笔画，正常。
+- Root cause: `crates/ss-gpui/assets/agents/` 里的单色标是按深色壳烤的，根节点 `fill="#e8eef8"`。GPUI 用 usvg 渲染，这个填充会继承到没有自己填色的路径上，整枚字形都是近白，铺在浅色侧栏（`#f7f9fc`）上就消失。图像缓存的键是嵌入路径字符串，主题切换后如果路径不变，第一次光栅化的结果会一直留着。
+- Fix: `agent_icons::load_agent_icon_path` 只在请求带 `#paper` 时把 `#e8eef8` 换成浅色前景 `#16213c`（与 `theme::LIGHT.fg` 相同，长度一致）。`agent_icon_path` 在纸面主题下给路径加上这个后缀。彩色填色、Codex 白底、Kiro / Antigravity 里本来的 `#fff` 都不改。没有品牌文件的 id 仍是 LobeHub 灰标。
+- Self-check: `cargo test -p ss-gpui --locked paper_request_recolors_only_the_baked_mono_ink paper_recolor_keeps_explicit_brand_fills`。复发时先看新烤的单色标是不是又写成了别的近白色，而不是 `#e8eef8`；再看 `img` 是否绕过了 `agent_icon_path`。
+
+## 2026-10-06 - GPUI 市场页滚动和悬停卡顿：整份榜单都在视图里布局
+
+- Symptom: GPUI 市场页（All / Trending / Hot）滚动、鼠标划过卡片时明显掉帧。官方发布者页同样会随发布者数量变卡。
+- Root cause: `get_leaderboard_local` 一次交回整份榜单（SSR 约 600 行，再加搜索 API 补充，大约 600–800 张卡片）。GPUI 的滚动和 `.hover()` 都会 `notify` 当前 view，于是每一帧都把全部卡片重建并交给 Taffy。卡片上的 `line_clamp` 还要做文本测量。
+- Fix: `crates/ss-gpui/src/marketplace/card.rs` 用 `uniform_list` 按行虚拟化，只构建视口内的行；行高固定，否则第一行的高度会被套到后面每一行上。这只行高就是三张页面卡共用的外框 `skill_card::{CARD_W, CARD_H}`，技能页、市场瓦片（含发布者）和卡组共用它；卡组多出来的技能和 Agent 在卡片内部滚动，外框不跟着变高。改矮会裁切，改高会让虚拟列表行距和真实卡片错开。搜索输入 200ms 防抖，进行中的更早一次加载用 `load_epoch` 丢弃。列数按 `layout.rs` 的展开侧栏和固定的 `SKILL_CARD_W` 计算。卡片不拉伸，所以收起侧栏后若多出一列，也不会把卡片裁掉或拉宽。不要把轨道改回 `flex_1`。
+- Self-check: `cargo test -p ss-gpui --locked columns_follow_the_card_pitch`。复发时先看市场列表是不是又退回 `card_grid` 把 `self.skills` 全铺进一棵元素树；发布者详情（`marketplace/publisher`）仍是全量网格，仓库技能很多时会以同样的方式卡。
+
+## 2026-10-05 - ZCode 配额 400 code 3001：billing/balance 开始强制 X-Device-Mid
+
+- Symptom: ZCode 订阅刷新报 `fetcher error: ZCode 配额 状态码 400: {"code":3001,"msg":"parameter error","logid":…}`；用户信息两步正常（「ZCode 配额」这个错误标签只有 billing 请求使用）。
+- Root cause: `zcode.z.ai/api/v1/zcode-plan/billing/balance` 开始要求请求带 `X-Device-Mid` 头：官方客户端的 apiClient 每个请求都带它自存的 `deviceMid` UUID，缺失即 400 业务码 3001 "parameter error"（magpie #282 记录了同一故障，并验证服务端只验存在性）。SkillStar 的 `fetch_billing` 只带了 authorization / user-agent / http-referer 和 `app_version` query。
+- Fix: `fetchers/oauth/zcode/device.rs` 提供设备标识——优先只读复用官方客户端 `{zcode_home}/v2/telemetry-state.json` 的 `deviceMid`（不创建不轮换，与 usage_switch 对 telemetry-state 的承诺一致），否则回退 `state/usage/zcode-device-mid`（具名函数 `ss_core::infra::paths::zcode_device_mid_path`）持久化的自有 UUID v4，全无则现场生成并尽力落盘，失败不阻塞刷新；`fetch_billing` 发送 `x-device-mid`。仿客户端版本同时从 3.10.2 提到 3.14.3（与 magpie 一致）。规则与取舍见 [usage README 的 ZCode 特例](./features/usage/README.md#zcode-特例billing-请求必须带设备标识)。
+- Self-check: `cargo test -p ss-usage --locked zcode`——scripted 测试断言 billing 请求带合法 UUID 的 `x-device-mid` 且与落盘文件一致；`device.rs` 单测覆盖官方优先、坏值回退、生成后可复用、不可写路径不炸。同款症状复发时，先怀疑服务端开始校验更多仿客户端字段（版本号、`X-Title`、`X-Platform` 等），对照 cockpit-tools `zcode_source_headers` 与 magpie `zcodeSourceHeaders` 补齐。
+
+## 2026-10-05 - crate 合并后测试根目录覆盖与环境锁契约不能机械照搬
+
+- Symptom: channels 并入 skills 后，精确发布安装测试误报同名 Skill 已由其他来源安装；测试命令统一设置 tool-sync sandbox 后，预期走非 sandbox 路径的只读会话发现与钥匙串 availability 测试失败。
+- Root cause: crate 拆分原本提供了测试进程隔离，合并后必须共用环境锁；外层统一设置的 `SKILLSTAR_HUB_DIR` 优先于夹具的 data root，多个用例会共用安装目录。外层 `SKILLSTAR_TOOL_SYNC_HOME` 也会遮蔽专门验证非 sandbox 环境变量优先级的用例。另一个隐患是 app 的 guard 原本不拿锁，而 usage 的 guard 自行拿锁，照搬外层锁会重复加锁。
+- Fix: 迁入测试复用目标 crate 的唯一环境锁；accounts 使用 usage 自带 guard，不额外加锁；频道安装夹具单独保存/覆盖/恢复 Hub 根。全量测试以临时 HOME 兜底隔离，由各夹具设置/恢复实际需要的根；tool-sync 写入测试仍必须设置自己的临时 sandbox，不能为过测试而访问真实 HOME。
+- Self-check: 在临时 HOME 中以默认并行执行 `cargo test --workspace --locked`；同时检查 `exact_release_install_refreshes_existing_agent_and_project_copies`、accounts facade 和 sessions 环境优先级测试。不要以单线程运行掩盖跨模块锁遗漏。
 
 ## 2026-10-02 - 网关 401 自愈：跨 runtime 桥、降级语义与退避（evolution 切片 11）（historical：代码已随 D-082 移除）
 
@@ -11,7 +275,7 @@
 - Fix: 网关侧 `AccountBook::reauthorize` 默认 `None`（假 book 免改），`forward.rs` 的 turn 状态机持 `TurnAuth { retried }` 栈变量：仅 401、仅一次、仅未 committed 时调钩子，钩子给了新材料就重签重发同一候选恰好一次；仍 401 则透传、账本 `error_kind=auth`、候选进 `AUTH_REST`（30 分钟，与 `VERIFY_REST` 同档）。app 侧 `usage/service/reauth.rs` 完整复用 refresh 锁序模板（`with_catalog_refresh` → `acquire_cli_refresh_lease` → `adopt_active_cli_session_before_refresh` → `fetchers::refresh` → `sync_refreshed_active_subscription`），不新造锁；仅 OAuth/TokenImport 行可自愈，AuthRequired 是唯一「放弃」裁决（照 `refresh_failure` 规则落 latch 与空卡）。
 - 跨 runtime 探针结论: 不需要队列降级。探针（gateway `tests/forward.rs::the_heal_hook_blocks_across_runtimes…` + app `reauth` 测试）证实：常驻 heal 线程持有自己的 current-thread runtime，turn 侧只做 `sync_channel` + `recv_timeout`，从 serve 线程与从 current-thread 测试上下文调用都不嵌套 runtime、不死锁；共享 HTTP client 的连接绑定在与进程同寿的 runtime 上，不会出现悬空 driver。
 - 降级语义: turn 最多等 `HEAL_WAIT`（5 秒）。占用中的 serialization domain、慢 vendor、无可自愈行、死 grant 都让钩子答 `None`——当次 turn 透传 401，并且**同样进 `AUTH_REST` 退避**（这是有意的：不给退避会让死登录被逐 turn 重放）。排队的自愈不会被取消，domain 释放后在 turn 之外完成（latch 落库，下一次调用可见）；heal 线程自身有 `HEAL_HARD_STOP`（30 秒）兜底，楔死的链不会堵住下一个自愈。清退 `AUTH_REST` 的途径：30 分钟自然到期，或网关重启（rest 是进程态）；用户重新登录后如仍被 seat 挡住，重启网关即可。
-- Self-check: `cargo test -p skillstar-gateway --locked -- --skip serve_binds_default_port`（`tests/forward.rs` 的 401→200 自愈、401→401 恰一次重试、403/429 不触发、None 透传退避、跨 runtime 探针）；`cargo test -p skillstar-app --locked usage::service::reauth`（真实链路探针、busy domain 降级与 off-turn 完成、无刷新腿门禁、包装 delegation）。人工灰度：把 codex token 人为置过期，观察一次 adopt+重试成功且 CLI 不被踢下线。
+- Self-check: `cargo test -p skillstar-gateway --locked -- --skip serve_binds_default_port`（`tests/forward.rs` 的 401→200 自愈、401→401 恰一次重试、403/429 不触发、None 透传退避、跨 runtime 探针）；`cargo test -p ss-app --locked usage::service::reauth`（真实链路探针、busy domain 降级与 off-turn 完成、无刷新腿门禁、包装 delegation）。人工灰度：把 codex token 人为置过期，观察一次 adopt+重试成功且 CLI 不被踢下线。
 
 ## 2026-10-02 - 占位 bearer + 0.0.0.0 监听：局域网上网关无鉴权（P0）（historical：代码已随 D-082 移除）
 
@@ -25,111 +289,76 @@
 - Symptom: 已装的 `pbakaus/impeccable` 式复合包（同一技能在仓库里按 harness 各放一份），点轮播上一个还没链过的 Agent 图标（如第一次点 Cursor），要停顿数秒才从灰变亮；单技能仓库不会。D-046 已经把这条路径改成「只扫描现有 checkout，不 clone、不 fetch」，但停顿仍在。
 - Root cause: `Inventory::materialize_for`/`materialize_dirs` 选中新 harness 副本所在目录后，靠 `add_sparse_checkout_dirs_in_session` → `apply_sparse_checkout_in_session` 的尾部 `git checkout` 把它物化到磁盘。该 `checkout` 用的是 partial-clone 默认的逐 blob 懒抓取：目录里每个文件各开一次 smart-protocol 往返。`blobs.rs` 早就测过这个量级（22 个 `SKILL.md` blob 懒抓 39 s、批量一次抓 1.8 s），但那次优化只接进了 `inventory.rs` 里判定 identity 用的 manifest blob 读取，没有接进真正落盘这一步。
 - Fix: `add_sparse_checkout_dirs_in_session` 在跑 sparse-checkout + `git checkout` 之前，先用 `git ls-tree -r HEAD -- <新目录>`（新增 `tree::list_tree_entries_under`，按路径限定，不必列整棵树）列出新目录下的全部 blob，一次 `prefetch_blobs_in_session` 批量抓完，checkout 再执行时这些 blob 已在本地，不再逐个懒抓。列表或抓取失败时静默回退到原来的懒抓路径，不影响正确性。
-- Self-check: `cargo test -p skillstar-git --lib ops::tests::add_sparse_checkout_dirs_batches_new_blobs_into_one_fetch`（一个新目录两个 blob，断言 promisor pack 只多一份，而不是两份）。
+- Self-check: `cargo test -p ss-git --lib ops::tests::add_sparse_checkout_dirs_batches_new_blobs_into_one_fetch`（一个新目录两个 blob，断言 promisor pack 只多一份，而不是两份）。
 
 ## 2026-09-29 - 点一个 harness 图标，cache 里物化出全部同名副本
 
 - Symptom: 装 `pbakaus/impeccable` 这类仓库时，点 Cursor 图标或 `--agent cursor`，cache 里 12 份同名副本全部被检出（离线夹具实测 13 个 `SKILL.md`），延迟物化形同虚设。
 - Root cause: `materialize_deferred_matching` 的过滤条件是 `name_hit || prefix_hit`，而两个调用方总会传入技能名，于是 basename 相同的延迟副本全部命中。只放一份延迟副本的旧测试看不出来。
 - Fix: 改由 `inventory::materialize_for` 实现：对每个请求用 `Inventory::copy_for` 按 `choose_copy` 的 harness 列只选一份，与安装 chooser 走同一张表。不指定 harness 的请求不再物化任何副本。规则见 [D-075](decisions.md#d-075异形分发仓库只有一张选副本表)。
-- Self-check: `cargo test -p skillstar-skills harness_install_materializes_only_the_chosen_copy`（逐个 Agent 断言 cache 里只有代表副本加被选中的那一份）。
+- Self-check: `cargo test -p ss-skills harness_install_materializes_only_the_chosen_copy`（逐个 Agent 断言 cache 里只有代表副本加被选中的那一份）。
 
 ## 2026-09-29 - `plugin.json` 的 `skills` 字符串被当成技能路径，测试碰巧通过
 
 - Symptom: `pbakaus/impeccable` 的 `.claude-plugin/plugin.json` 写 `"skills": "./.claude/skills/"`，manifest 声明的目录却变成了 `.claude`，深度 1 的扫描什么也找不到。
 - Root cause: `deserialize_path_list` 把字符串和数组都压平成一组「技能路径」，一律取父目录；而字符串形式在 Claude 插件规范里是容器。原来的测试用 `"./skills/"`，它刚好靠「总会补上约定的 `skills` 目录」通过，没有测到声明路径本身。
 - Fix: `PathList` 保留原始形状。字符串推入容器本身，数组每项推入父目录。规则见 [D-075](decisions.md#d-075异形分发仓库只有一张选副本表)。
-- Self-check: `cargo test -p skillstar-skills plugin_manifest::`，其中 `plugin_json_string_is_a_container_path` 断言结果包含 `.claude/skills`、不包含 `.claude`。
+- Self-check: `cargo test -p ss-skills plugin_manifest::`，其中 `plugin_json_string_is_a_container_path` 断言结果包含 `.claude/skills`、不包含 `.claude`。
 
 ## 2026-09-22 - 新 IDE 的本地写回还没有被官方应用重启确认
 
 - Symptom: Safe Storage、byte_crypto、RSA 回调和 `enc:v1` 的本地往返测试通过，但 Windsurf、Kiro、Qoder、CodeBuddy、Trae、Zed、ZCode 的官方应用还没有在重启后认过这次写回。
 - Root cause: 实现时没有使用真实账号、真实钥匙串或真实应用数据目录。测试被 `SKILLSTAR_TOOL_SYNC_HOME` 沙箱挡住。
 - Fix: 不把这些应用标成多开 Verified，也不因为缺一次人工记录就降级已测过的本地读写。配额解析缺字段就省略窗口，不补 0。私有接口形状变了必须返回明确错误。
-- Self-check: 各 provider 的 fetcher 测试，以及 `src/features/usage/lib/desktopApps.test.ts` 里「Pending 不进多开入口」。
-
-## 2026-09-09 - 卡片 Agent rail 被 overflow 裁掉，看起来不像 Settings
-
-- Symptom: 卡片底栏的 Agent 图标显示不全；工具栏只露出前几个，和设置里已启用的集合对不上。
-- Root cause: 轮播曾把 Settings 已关掉但仍写入的 target 留在行里占位；底栏左侧状态 `shrink-0`、轨道 `justify-end`，外层卡片又 `overflow-hidden`。横向滚动容器一旦被内容撑开，`scrollWidth === clientWidth`，箭头不出现，多出来的图标被圆角裁掉。工具栏 `AgentFilterPill` 默认最多露出 4 个，同一批目标在筛选条上再被截一层。
-- Fix: `AgentTargetCarousel` 只绘制 `profile.enabled` 的项。底栏把剩余宽度交给轨道并 `overflow-hidden` 强制内层滚动；筛选条的可见个数跟随当前目标集，不再默认 cap 在 4。契约见 [Frontend](features/frontend/README.md#agent-手动激活投影)。
-- Self-check: `bun run test src/components/shared/AgentTargetCarousel.test.tsx`；设置里启用/关掉若干 Agent 后，卡片与工具栏应是同一批图标，窄卡片悬停出现滚动箭头而不是缺图标。
-
-## 2026-09-09 - 保活弹窗不能把 React Activity 交给 Dialog.Portal asChild
-
-- Symptom: 在保活页打开新建弹窗时（最初在已删除的 MCP 页复现），WKWebView 整页落到错误边界：`getComputedStyle` 的参数不是 `Element`；组件栈是 `Activity` → Radix `SlotClone`。
-- Root cause: `Dialog.Portal` 对每个子节点做 Presence + `asChild`，ref 回调里无条件 `getComputedStyle(node)`。React `Activity` 不是宿主节点；保活为了停用隐藏页的焦点锁、又保留表单草稿，曾把它当作 Portal 的唯一子节点。jsdom 的 `getComputedStyle` 不按 WebKit 校验类型，所以单测原先绿着。
-- Fix: Portal 的 asChild 目标必须是宿主 Element；`Activity` 只包在这层节点里面。保活语义不变：页面不活跃时停用模态生命周期、保留子树。契约见 [Frontend](features/frontend/README.md#桌面性能)。
-- Self-check: `bun run test src/components/ui/ModalShell.test.tsx src/components/layout/KeepAliveOutlet.test.tsx`；在任一保活页打开带表单的弹窗，确认表单而不是错误边界；切走再回来草稿还在。
-
-## 2026-09-08 - Provider 的空凭据投影不能作为编辑补丁回传
-
-- Symptom: 只改供应商名称，也可能把环境变量或文件来源的凭据变成空凭据。
-- Root cause: flat IPC 的空 `api_key` 是一种有损投影，不证明后端没有凭据；把完整表单作为 patch 会把未编辑字段当成清空操作。乐观缓存也不能充当成功保存的基线，否则失败重试会丢掉补丁。
-- Fix: 表单以初始状态和已确认保存快照计算最小补丁；未触碰的密钥、端点和元数据不提交，显式清空仍能表达。持久化约束见 [Models 工作台](features/models/README.md#models-工作台)。
-- Self-check: 运行 `src/features/models/hooks/__tests__/useProviderForm.test.tsx` 的重命名、显式清空、失败重试与元数据保留回归；测试仅 mock IPC，不访问真实用户配置。
-
-## 2026-09-08 - 保活页面的弹窗不能只隐藏父页面或卸载表单
-
-- Symptom: 切走页面后旧弹窗仍挡住新页；改为直接返回空节点后，返回页面又丢失弹窗表单未保存的输入。
-- Root cause: body portal 不在保活页的 DOM 隐藏边界内；卸载整个弹窗则会清掉子表单自身的 React 状态。只把草稿放在外层的测试夹具不能覆盖真实消费路径。
-- Fix: 页面活跃上下文跨过 portal 边界；在 portal 内保留表单子树、停用模态交互生命周期。契约与实现选择见 [Frontend](features/frontend/README.md#桌面性能)。
-- Self-check: `bun run test src/components/layout/KeepAliveOutlet.test.tsx src/components/ui/ModalShell.test.tsx`；直接使用真实弹窗表单编辑后切页，核对草稿提交值、焦点锁释放和快捷键恢复。
-
-## 2026-09-08 - 详情面板复用时，旧请求把正文覆盖到新技能
-
-- Symptom: 从技能 A 直接切到 B，B 的标题下却出现 A 的说明；打开阅读器后，B 的名称与 A 的 SKILL.md 正文被组合展示。
-- Root cause: `mountedRef` 只证明组件没有卸载，不证明请求仍属于当前选择。同一个详情面板会被多个技能复用，本地读取、后台同步和再次读取都可能晚于下一次选择。
-- Fix: 详情请求以来源和技能名绑定 effect 生命周期；切换后失效的结果不能写入状态，已结束的后台同步也不能再为旧选择发起读取。当前选择仍保留本地快照与后台刷新能力。交互契约见 [Frontend](features/frontend/README.md#tauri-事件与流式-ux)。
-- Self-check: `bun run test src/components/layout/DetailPanel.test.tsx`；用延迟 IPC 让 A 晚于 B 返回，并覆盖同名不同来源的切换，核对说明、阅读器正文和过期刷新是否停止。
+- Self-check: 各 provider 的 fetcher 测试。
 
 ## 2026-09-02 - 测试继承 hook 的 GIT_DIR，会污染真实仓库
 
 - Symptom: pre-push 里的 `cargo test --workspace --locked` 必然失败；同一命令在普通 shell 里通过。失败集中在 `skillstar-channels` 的 fixture git 测试。更糟的是失败测试会把 `git init` / `config` / `branch` 打到宿主仓库上，写坏 `.git/config`（`core.worktree` 指向已删除临时目录、user.name 被改成 SkillStar Test）并删掉工作树里的跟踪文件。
 - Root cause: git 调用 hook 时导出 `GIT_DIR` / `GIT_WORK_TREE`。测试和产品代码 spawn 的 `git` 继承这两个变量，于是操作到真实仓库而不是夹具。CI 不受影响（没有 hook 环境）。这与 Failure lesson「测试不得依赖 runner 的真实 $HOME / 宿主机状态」同类，换成了 git 环境。
 - Fix: `command_with_path` 统一剥离 `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` / `GIT_COMMON_DIR` / `GIT_OBJECT_DIRECTORY` / `GIT_PREFIX` / `GIT_NAMESPACE`（保留 `GIT_EXEC_PATH`）。夹具测试改为走同一入口，不再裸 `Command::new("git")`。产品路径操作的永远是别人的仓库，同样不该继承宿主 git 环境。
-- Files: `crates/skillstar-core/src/infra/path_env.rs`，以及各 crate 里仍直接 spawn git 的测试辅助函数。
+- Files: `crates/ss-core/src/infra/path_env.rs`，以及各 crate 里仍直接 spawn git 的测试辅助函数。
 - Self-check:
-  - `GIT_DIR=/.git GIT_WORK_TREE=. cargo test -p skillstar-core --lib path_env::tests::command_with_path_strips_host_git_dir`
+  - `GIT_DIR=/.git GIT_WORK_TREE=. cargo test -p ss-core --lib path_env::tests::command_with_path_strips_host_git_dir`
   - `GIT_DIR=/.git GIT_WORK_TREE=. cargo test -p skillstar-channels --lib`
   - `grep -rn 'Command::new("git")' crates/` 除 `github_mirror` 的 args 检视与 `path_env` 对照测试外，不应再有真实 spawn。
 
 ## 2026-09-01 - 跨 host 复用 ETag 造成假 304；SOCKS5 本地 DNS 被污染
 
-- Symptom: 启用 marketplace / GitHub 加速后，商店同步“成功”但内容停在旧版；GitHub clone 卡在 DNS 或连到错误 IP；镜像 Test 显示可达，实际 git/raw 失败。
+- Symptom: 启用 GitHub 加速后，商店同步“成功”但内容停在旧版；GitHub clone 卡在 DNS 或连到错误 IP；镜像 Test 显示可达，实际 git/raw 失败。
 - Root cause: (1) `fetch_with_failover` 把上一 host 的 ETag 带到下一 host，加速源用自己的 validator 答 304。(2) `socks5://` 让 reqwest/git 在本地解析，GFW 污染把 `github.com` 指到黑洞。(3) `test_mirror` HEAD 加速源根，根路径 200 不代表 raw/git 代理可用。(4) `insteadOf` 只改写 `github.com`，raw/codeload/objects 仍直连。
 - Fix: `If-None-Match` 绑定 `source_host`；SOCKS5 出网改 `socks5h`；探测改为 GET 公开 raw README；GitHub 族匿名 URL 经健康加速源包装；连续失败熔断。见 [D-050](decisions.md#d-050对抗审查加固熔断排序socks5hgithub-族匿名改写etag-绑-host)。
-- Self-check: `cargo test -p skillstar-core --locked --lib -- github_health github_rewrite github_mirror proxy http_client github_http network_doctor`；`cargo test -p skillstar-marketplace --locked --lib -- etag_is_only_sent_to_the_host_that_issued_it enabled_github_mirrors_wrap_skills_sh`。
+- Self-check: `cargo test -p ss-core --locked --lib -- github_health github_rewrite github_mirror proxy http_client github_http network_doctor`；`cargo test -p ss-marketplace --locked --lib -- etag_is_only_sent_to_the_host_that_issued_it enabled_github_mirrors_wrap_skills_sh`。
 
 ## 2026-08-31 - 安装必须是一条 vercel-skills 管线，harness 文件夹是 identity 别名
 
 - Symptom: rust-skills / impeccable / ui-ux-pro-max-skill 的轮播和 `--agent` 走 scan 列表、chooser、整仓 clone 三条机器，缺 `.dsh` 或只有 `.claude` 时 fail-closed 或链整仓。
 - Root cause: `install_skill` 与 `install_skills_batch` 各自选文件夹；scan 成功时跳过 `resolve_install_skills`；scan 失败再 `git clone` 到 hub。那是第六条路径。
 - Fix: 只留 `install_from_source`：resolve → discover → 一个 chooser → hub link。Agent deploy / scope 仍在调用方。见 [D-047](decisions.md#d-047技能安装是-vercel-skills-五步管线harness-文件夹是-identity-别名)。
-- Self-check: `cargo test -p skillstar-skills --locked --lib skill_install -- --nocapture`。
+- Self-check: `cargo test -p ss-skills --locked --lib skill_install -- --nocapture`。
 
 ## 2026-08-31 - 已删除的 git ref 把无关技能的安装/轮播部署打成「无法安装该技能」
 
 - Symptom: Library 点 banner-design 的 Antigravity 轮播，toast「无法安装该技能」。日志混入 `update_checker: prefetch git fetch failed — will preserve existing update state`，`fatal: couldn't find remote ref cursor/harness-install-units-dc3e`。该 ref 来自另一条 lock 记录（`rust` 钉在已合并并删除的 PR 分支）；cache 目录仍叫 `--ref--cursor--harness-install-units-dc3e`，工作区 HEAD 已是 `main`。
 - Root cause: lock / `skillstar.ref` 把已删除分支当成硬 fetch 目标。prefetch 虽写明保留徽标，但 (1) cache-local 只按「URL 无 ref」查 `{source}` 目录，找不到 `{source}--ref--{gone}`，已在 hub 的轮播会再 fetch；(2) `fetch_and_reset_ref` / `fetch_tracked_ref` 对 `couldn't find remote ref` fail-closed，错误被映射成通用安装 toast，即使点击的是另一张卡。cache 里已有 `SKILL.md` 时不该 fail-closed。
 - Fix: cache-local 通过 hub symlink 和 `--ref--*` 变体找到现有 checkout，已在 hub 的轮播不再 fetch。fetch 遇到 missing-ref 且 cache 仍有 `SKILL.md` 时使用现有文件，把 lock `git_ref` 和 `skillstar.ref` 改指仓库默认分支（或省略），不得继续钉死分支。无 `SKILL.md`、也无 cache 仍 fail-closed。prefetch 失败不得让另一技能的 install 返回错误。
-- Self-check: `cargo test -p skillstar-skills --locked --lib skill_install::harness_retarget_tests -- --nocapture`；`cargo test -p skillstar-git --locked --lib ops::tests::missing_remote_ref_is_detected_through_anyhow_context -- --exact`。手工：lock 钉已删分支、cache HEAD 在 main，点另一技能的 harness 轮播必须安装成功，且 rust 的 lock `git_ref` 不再是死分支。
+- Self-check: `cargo test -p ss-skills --locked --lib skill_install::harness_retarget_tests -- --nocapture`；`cargo test -p ss-git --locked --lib ops::tests::missing_remote_ref_is_detected_through_anyhow_context -- --exact`。手工：lock 钉已删分支、cache HEAD 在 main，点另一技能的 harness 轮播必须安装成功，且 rust 的 lock `git_ref` 不再是死分支。
 
 ## 2026-08-31 - Windows dangling junction 对不上 cache，SourceMissing 被吃掉
 
 - Symptom: Windows CI 只红 `source_dropped::a_dropped_skill_whose_content_is_already_gone_can_only_be_removed`：`blocked` 是 `[]`，期望 `[("alpha", SourceMissing)]`。Linux/macOS 绿。harness / CRLF / deny 已过。
 - Root cause: 两件叠加，都不是「放宽 SourceMissing」。① `reset --hard origin/HEAD` 在 path-remote 的 Windows clone 上不一定落到 drop commit；junction 指着 `skills/alpha` 时 reset 也可能删不掉该目录，hub 仍是可读副本，`exists()` 为真就不该报 SourceMissing。② 即便链已 dangling，`repo_root_of` / `is_inside` 对缺尾巴的目标 `canonicalize` 失败后拿生路径去比；Windows temp 常是 `RUNNER~1`，cache 目录是 `runneradmin`，alpha 被踢出共享 checkout。
 - Fix: 夹具钉 drop commit oid，断言 cache tree 已无 `skills/alpha`，再把 hub 建成**不可读的 managed link**（先链后删 target）。产品侧 `canonicalize_existing_prefix` 让 dangling 链仍属于同一 checkout。不要改 SourceMissing 语义，也不要在 Windows 上 skip。
-- Files: `crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`、`crates/skillstar-skills/src/repo_link.rs`。
-- Self-check: `cargo test -p skillstar-skills --locked --lib skill_update::tests::source_dropped -- --nocapture`。
+- Files: `crates/ss-skills/src/skill_update/tests/source_dropped.rs`、`crates/ss-core/src/infra/fs_ops.rs`、`crates/ss-skills/src/repo_link.rs`。
+- Self-check: `cargo test -p ss-skills --locked --lib skill_update::tests::source_dropped -- --nocapture`。
 
 ## 2026-08-31 - Windows gitconfig `insteadOf` 吃掉反斜杠；checkout 变成 CRLF
 
-- Symptom: Windows CI 在 store-v4 变绿之后，`skillstar-skills` harness / private-facade 报 `fatal: 'C:UsersRUNNER~1…' does not appear to be a git repository`；部分 update 测试左边是 `echo remote-v2\r\n`。macOS/Linux 绿。此前被 fail-fast 挡住。
+- Symptom: Windows CI 在 store-v4 变绿之后，`ss-skills` harness / private-facade 报 `fatal: 'C:UsersRUNNER~1…' does not appear to be a git repository`；部分 update 测试左边是 `echo remote-v2\r\n`。macOS/Linux 绿。此前被 fail-fast 挡住。
 - Root cause: `[url "file://C:\Users\…"]` 写进 `GIT_CONFIG_GLOBAL` 时，gitconfig 把 `\` 当转义，路径变成 `C:Users…`。Windows runner 默认 `core.autocrlf=true`，测试夹具未钉 LF，checkout 带 CR。`Path::join(".claude/skills/…")` 的 `display()` 仍留着 `/`，产品返回的是 `\`。
-- Fix: `skillstar_git::ops::local_file_url` 统一成 `file:///C:/…`。测试 `git init` 后钉 `core.autocrlf=false` / `core.eol=lf` / `* -text`。路径断言比 `Path::components`。不要为了绿而改产品正文或接受 CRLF digest。
-- Files: `crates/skillstar-git/src/ops.rs`、`skill_install_harness_tests.rs`、`skill_update/tests.rs`、`deployment/tests.rs`、`.github/workflows/windows-ci.yml`。
-- Self-check: `cargo test -p skillstar-git --locked --lib local_file_url`；`cargo test -p skillstar-skills --locked --lib harness_retarget_tests skill_update::tests`。Windows 上 insteadOf 必须 clone 到真实 temp 路径，`scripts/run.sh` 必须仍是 LF。
+- Fix: `ss_git::ops::local_file_url` 统一成 `file:///C:/…`。测试 `git init` 后钉 `core.autocrlf=false` / `core.eol=lf` / `* -text`。路径断言比 `Path::components`。不要为了绿而改产品正文或接受 CRLF digest。
+- Files: `crates/ss-git/src/ops.rs`、`skill_install_harness_tests.rs`、`skill_update/tests.rs`、`deployment/tests.rs`、`.github/workflows/windows-ci.yml`。
+- Self-check: `cargo test -p ss-git --locked --lib local_file_url`；`cargo test -p ss-skills --locked --lib harness_retarget_tests skill_update::tests`。Windows 上 insteadOf 必须 clone 到真实 temp 路径，`scripts/run.sh` 必须仍是 LF。
 
 ## 2026-08-31 - cargo-deny 因 RUSTSEC-2026-0258 拦 h2
 
@@ -137,7 +366,7 @@
 - Root cause: lockfile 钉着 h2 0.4.13。advisory-db 在 2026-08-18 发布补丁线 `>=0.4.16`。deny.toml 要求修依赖，不要把活漏洞写进 ignore。
 - Fix: `cargo update -p h2 --precise 0.4.16`。
 - Files: `Cargo.lock`。
-- Self-check: `cargo deny check advisories --config src-tauri/deny.toml` 必须还是 ok（忽略项不得增加这条）。
+- Self-check: `cargo deny check advisories --config deny.toml` 必须还是 ok（忽略项不得增加这条）。
 
 ## 2026-08-31 - Windows 目录只读挡不住 store-v4 备份，迁移照样写盘（historical：代码已随 D-082 移除）
 
@@ -147,21 +376,21 @@
 - Files: `crates/skillstar-models/src/providers/store_v4.rs`、`crates/skillstar-models/src/providers/tests/store_v4.rs`、`.github/workflows/windows-ci.yml`。
 - Self-check: `cargo test -p skillstar-models --locked --lib providers::tests::store_v4`；Windows CI 这条必须仍是 `BackupFailed`，且 v3 原文完整。
 
-## 2026-08-31 - Linux CI 在 skillstar-git 被 `The operation was canceled` 砍掉
+## 2026-08-31 - Linux CI 在 ss-git 被 `The operation was canceled` 砍掉
 
-- Symptom: `test-linux` 前端 lint/tests 全绿，Rust workspace 跑到 `skillstar-git` 后整步 `cancelled`，annotation 是 `The operation was canceled.` 作业大约 7 分钟。macOS 同 suite 绿。`test-linux` **没有** `timeout-minutes`。main 上已经这样，不是 harness 测试把 cap 撑爆。
+- Symptom: `test-linux` 前端 lint/tests 全绿，Rust workspace 跑到 `ss-git` 后整步 `cancelled`，annotation 是 `The operation was canceled.` 作业大约 7 分钟。macOS 同 suite 绿。`test-linux` **没有** `timeout-minutes`。main 上已经这样，不是 harness 测试把 cap 撑爆。
 - Root cause: `terminate_child_tree` 对 unix 发 `kill -TERM -$pid`（进程组）。取消测试的 fake-git 若没能 `process_group(0)` 隔离，这就是 GitHub Actions step 的进程组；runner 收到 SIGTERM 就记成 operation canceled。看起来像 timeout 或 `cancel-in-progress`。
 - Fix: 仅当 `ps` 确认该 child 是进程组组长（`process_group(0)` 生效）时才 `kill -TERM -- -$pid`；否则只杀该 pid。`child.wait()` 改为 2s 上限再 SIGKILL，避免 kill 失败后挂在 `sleep 30` 上。不要为了这个去加/加大并不存在的 job timeout，也不要删掉取消覆盖。这是 main 上已有的 Linux 红，本 PR 必须让 `cargo test --workspace` 跑完。
-- Files: `crates/skillstar-git/src/transport.rs`、`.github/workflows/ci.yml`。
-- Self-check: `cargo test -p skillstar-git --locked --lib`；Linux CI 必须跑完 workspace Rust tests，不能再停在 skillstar-git 的 cancel annotation。
+- Files: `crates/ss-git/src/transport.rs`、`.github/workflows/ci.yml`。
+- Self-check: `cargo test -p ss-git --locked --lib`；Linux CI 必须跑完 workspace Rust tests，不能再停在 ss-git 的 cancel annotation。
 
 ## 2026-08-31 - Windows `get_envs()` 没有独立的 `http_proxy=None`
 
 - Symptom: Windows CI 在频道 hash 变绿之后，`configured_proxy_is_operation_local_and_its_password_is_redacted` 报 `left: None` / `right: Some(None)`。Linux/macOS 同测试绿。此前被 hash 失败挡住，workspace fail-fast 跑不到。
 - Root cause: Windows 环境变量名大小写不敏感。`env_remove("http_proxy")` 再加上 `HTTP_PROXY=…` 之后，`Command::get_envs()` 不会再列出一条独立的 `http_proxy=None`。Unix 上大小写是不同的键。Runner 上的 `HTTP_PROXY` 会让这个看起来像 flake。
 - Fix: 测试先把进程级 proxy 键换成 `inherited-canary` 并在 Drop 里恢复。Unix 仍断言 Command 覆盖是 `Some(None)`。Windows 复制同一组覆盖到 `cmd /C set`（Unix 用 `env`）证明子进程看不到 canary、只看到 SkillStar proxy。密码 redaction 断言不改。
-- Files: `crates/skillstar-git/src/transport_tests.rs`。
-- Self-check: `cargo test -p skillstar-git --locked --lib configured_proxy_is_operation_local`。
+- Files: `crates/ss-git/src/transport_tests.rs`。
+- Self-check: `cargo test -p ss-git --locked --lib configured_proxy_is_operation_local`。
 
 ## 2026-08-31 - Windows `autocrlf` 把频道 content-hash 改成第二套 digest
 
@@ -176,9 +405,9 @@
 - Symptom: `skillstar install … --agent cursor` 之后再 `install … --agent deepseek` 打印 `Reusing existing hub install(s)`，把 `~/.dsh/skills/rust` 链到 **Cursor** 的 hub 路径；lock `source_folder` 仍是 `.cursor/skills/rust`。clone 里其实有 `.dsh/skills/rust`。卡片轮播点第二个图标同样走这条。Hub 已是 `.agents/skills/impeccable` 时再 `--agent cursor` 也不改指向 `.cursor/skills/impeccable`。对 rust-skills 两份拷贝相同，对 impeccable 式改写过的 `SKILL.md` 会装错 harness。
 - Root cause: 同名一条 lock 把「仓库已在 hub」当成「可以复用」。`install_skills_batch` / `try_install_from_repo_cache` 只比 git URL，不比 `source_folder` 是否已经是本次请求的 `.<harness>/` 文件夹。CLI 的 `install_or_reuse` 因此走 Reuse，随后 `batch_deploy` 把**当前** hub（另一份 harness）链到新 Agent。轮播未链接图标也曾只 `toggle_skill_for_agent`，同样部署当前 hub。
 - Fix: 复用仅当现有 `source_folder` 已是本次解析到的文件夹。否则从同一 clone 改指向（不二次 clone），改之前 `pin_existing_global_links_to_current_source` 把**其他** Agent 钉到当前 payload（跳过正在改指向的 Agent）。`batch_deploy` 对目标 Agent 上指向另一份 harness / 旧 hub 的 symlink 做 link-first 替换，不得把「路径已存在」当成成功。缺少该 harness 时按 D-046 回退，不得 fail-closed。轮播未链接图标走 `install_skill(url, name, agentId)`。
-- Files: `crates/skillstar-skills/src/skill_install.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`src/features/my-skills/components/SkillCard.tsx`、`docs/features/skills/README.md`。
+- Files: `crates/ss-skills/src/skill_install.rs`、`crates/ss-skills/src/deployment/mod.rs`、`docs/features/skills/README.md`。
 - Self-check:
-  - `cargo test -p skillstar-skills --locked stale_dsh_link_is_rewritten_to_requested_harness batch_deploy_rewrites_a_stale_link_and_leaves_other_agents_pinned`
+  - `cargo test -p ss-skills --locked stale_dsh_link_is_rewritten_to_requested_harness batch_deploy_rewrites_a_stale_link_and_leaves_other_agents_pinned`
   - 装完 Cursor 再装 DeepSeek：clone 里有 `.dsh` 时 `~/.dsh/skills/<id>` 必须解析到 `.dsh/skills/<id>`，不能是 `.cursor/skills/<id>`；已链的 Cursor 仍是 Cursor 正文。即使 `~/.dsh/skills/<id>` 事先错误地指向 cursor 文件夹，部署也必须改写，CLI 不得报 `0 new deployment(s)`。
   - Hub 已是 `.agents/skills/<id>` 时 `--agent cursor` 必须把 lock/`source_folder` 改成 `.cursor/skills/<id>`，不得静默 Reuse。
 
@@ -187,26 +416,19 @@
 - Symptom: Library 里 rust-skills / impeccable 已在 hub，点未链接的 DeepSeek 图标要等一整次 Git clone/fetch；impeccable（包内没有 `.dsh`）随后报 `This pack has no '.dsh' skill folder`，`~/.dsh/skills/impeccable` 不会出现。
 - Root cause: `try_install_from_repo_cache` / CLI `fetch_repo_scanned` 一律走 `clone_or_fetch`，cache 有 `.git` 也会 `git fetch --depth 1` + reset。`resolve_install_skills` 在缺请求 harness 时 fail-closed，不回退 catalog / 现有 hub / 另一份副本。
 - Fix: 已有 repo-cache 时只扫描本地 checkout（`cached_repo_dir_if_present`），不 fetch；`source_folder` 没变就不改 lock。缺 harness 时回退 `skills/<name>/` 或 `source/skills/` → 现有 hub `source_folder` → 同 identity 的另一嵌套副本，再部署到被点 Agent。只有没有嵌套 `SKILL.md` 才失败。cache 被删仍 fetch。
-- Files: `crates/skillstar-skills/src/{skill_install.rs,discovery.rs,repo_scanner/cache.rs}`、`crates/skillstar-app/src/cli/install.rs`、`docs/features/skills/README.md`。
+- Files: `crates/ss-skills/src/{skill_install.rs,discovery.rs,repo_scanner/cache.rs}`、`crates/ss-app/src/cli/install.rs`、`docs/features/skills/README.md`。
 - Self-check:
-  - `cargo test -p skillstar-skills --locked installed_rust_skills_deepseek_retargets_from_cache_without_clone installed_impeccable_deepseek_falls_back_to_a_skill_folder missing_git_cache_still_fetches_for_harness_install`
+  - `cargo test -p ss-skills --locked installed_rust_skills_deepseek_retargets_from_cache_without_clone installed_impeccable_deepseek_falls_back_to_a_skill_folder missing_git_cache_still_fetches_for_harness_install`
   - 已装 rust-skills：掐断 remote 后再 `--agent deepseek` 必须成功，dsh 链到 `.dsh/skills/rust`，cursor 不变。
   - 已装 impeccable：`--agent deepseek` 必须成功，`~/.dsh/skills/impeccable` 是含 `SKILL.md` 的技能目录，不是整仓。
   - 删掉 `repos` cache 后再装必须重新 fetch，不能静默 no-op。
-
-## 2026-08-31 - TS 孤儿门禁在 Windows CI 上打印 ✓/✗ 触发 UnicodeEncodeError，报 0 违规却退出 1
-
-- Symptom: Windows CI 只有 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 失败，且断言 `output 包含 "0 new orphan module(s)"` 通过、`status` 却是 1；日志散落 `UnicodeEncodeError: 'charmap' codec can't encode character '\u2713'/'\u2717'`。macOS/Linux 本地与 CI 全绿。
-- Root cause: 门禁的 bash 包装内嵌 `python3` heredoc，收尾 print `✓`/`✗`。GitHub Windows runner 上子进程 stdout 按 ANSI 代码页（cp1252）编码，非 ASCII print 直接抛异常；纯 ASCII 的 summary 行先打印成功，所以「0 个孤儿」的断言过了，Python 却以异常退出码 1 结束。stdout 是管道而非控制台时 Python 不用 UTF-8，这是本地终端永远复现不了的原因。
-- Fix: 五个内嵌 python3 的门禁脚本（check_ts_orphan_modules / check_no_orphan_modules / check_dep_graph_doc / check_workspace_deps / check_command_boundaries）统一在调用行加 `PYTHONIOENCODING=utf-8`，让 Python stdio 与平台代码页解耦。
-- Self-check: `for f in $(grep -l python3 scripts/internal/*.sh); do grep -q PYTHONIOENCODING "$f" || echo "missing: $f"; done` 必须无输出；新增内嵌 python3 的门禁若 print 非 ASCII 字符，调用行必须带 `PYTHONIOENCODING=utf-8`。
 
 ## 2026-08-31 - Windows 的持锁文件不能由第二个句柄读取来验证 holder 内容
 
 - Symptom: Windows CI 的 `usage_switch::custody_tests::grok_shares_the_cli_lock_file_and_writes_its_holder_line` 在 `fs::read_to_string(~/.grok/auth.json.lock)` 报 `Os { code: 33, message: The process cannot access the file because another process has locked a portion of the file }`；macOS/Linux 通过。
 - Root cause: `Custody::lock()` 取得 Grok 官方 lock 后，在返回 `CustodyLease` 前写入并 `sync_data()` PID holder 行。Unix 文件锁通常是 advisory，旧测试可以在 lease 持有时用第二个 handle 读取；Windows 正确执行排他/字节范围锁，第二次打开读取被拒绝。测试误把 Unix 的偶然可读性当成跨平台契约。
 - Fix: 在内层作用域取得并释放 lease，随后读取同一官方 lock 文件的持久内容；仍断言内容以当前 PID 开头且 `auth.json.skillstar.lock` 未出现。不要加 retry、`cfg(windows)` skip 或修改生产锁语义。若要测试锁竞争，另建明确的互斥不变量测试。
-- Self-check: `cargo test -p skillstar-app usage_switch::custody_tests::grok_shares_the_cli_lock_file_and_writes_its_holder_line --locked -- --exact`，并以 Windows CI 验证真实文件锁语义。
+- Self-check: `cargo test -p ss-app usage_switch::custody_tests::grok_shares_the_cli_lock_file_and_writes_its_holder_line --locked -- --exact`，并以 Windows CI 验证真实文件锁语义。
 
 ## 2026-08-31 - Actions runner shutdown 不等于 Rust 测试断言失败
 
@@ -215,53 +437,46 @@
 - Fix: 不要据此修改测试或用无关 retry 掩盖问题；先抓取失败步骤原始日志区分 runner cancel 与断言失败。需要重新取证时，让下一次相关 push 的新 run 自然执行，不要在它运行时重跑旧 run。
 - Self-check: `gh run view <run-id> --job <job-id> --log-failed` 的末尾必须先确认是否存在测试失败标记；只有实际断言/编译错误才进入代码修复。
 
-## 2026-08-31 - process-backed Vitest gate 的过紧 wall-clock timeout 会把满载调度延迟当成失败
-
-- Symptom: pre-push 的完整 `bun run test` 偶发仅在 `checkTsOrphanModules.test.ts > passes on the repository as it stands` 处失败，断言 `run.timedOut` 收到 `true`；同一脚本单独运行约 0.2–0.6 秒且输出 `0 new orphan module(s)`。
-- Root cause: 测试通过 `execFileSync` 执行真实 bash/Python gate，并把 child 的 **wall-clock** timeout 固定为 15 秒。完整 Vitest pool 同时 transform/运行大量文件、或宿主还有编译任务时，OS 可能让这个同步 child 在实际开始前就耗尽 15 秒；它把调度竞争误判为脚本挂死。外层 test 的 20 秒 timeout 不能修复，因为 child 已先被 `execFileSync` 杀掉。
-- Fix: 仍保留有限 hang guard，但将 child 上限设为 60 秒，并给 Vitest 额外 10 秒观察退出与 cleanup。不要因为 gate 独立运行很快就把该上限缩回 15 秒；测试的目标是完整 suite 下的可靠性，不是 microbenchmark。
-- Self-check: `bun run test` 必须通过完整 Vitest suite；单独测量 `/usr/bin/time -p bash scripts/internal/check_ts_orphan_modules.sh >/dev/null` 只用于发现真实算法退化，不能替代全套验证。
-
 ## 2026-08-31 - 取消测试不能用 worker 启动前的固定时间窗判断 child 已就绪
 
 - Symptom: 全 workspace 并发测试时，`transport_tests::fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel` 偶发整整等待 10 秒后报 marker 未出现，但 worker 返回的是 `Cancelled`。单独运行通常全绿，使它看起来像 credential 配置错误。
 - Root cause: 旧测试把 `execute_remote_command` 放到 worker，并由主线程从 spawn worker 的瞬间开始 marker deadline。繁忙时 worker 可能尚未被调度、或尚未走到 `command.spawn()`，主线程就置 cancel；transport 的 preflight 会直接返回 cancelled，或轮询路径会在 shell 写 marker 前杀 child。加长 timeout 只是扩大竞态窗口。
 - Fix: 主测试线程同步执行 transport；watcher 只在 marker（child 确认收到了 operation-scoped credential）出现后取消。测试私有 `AtomicBool` 在 command 返回后通知 watcher 无 marker 地退出失败，避免 pre-spawn cancel，同时仍覆盖 marker 之后 `sleep 30` 子进程的 kill/reap。
-- Self-check: `for n in 1 2 3 4 5; do cargo test -p skillstar-git transport_tests::fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel --locked -- --exact || exit; done` 必须每次运行 1 个测试且全绿。
+- Self-check: `for n in 1 2 3 4 5; do cargo test -p ss-git transport_tests::fake_transport_sees_credential_only_while_running_and_is_killed_on_cancel --locked -- --exact || exit; done` 必须每次运行 1 个测试且全绿。
 
 ## 2026-08-31 - tiny_http responder 的空闲超时不是 mock server 生命周期信号
 
 - Symptom: `cloud_code::tests::supported_quota_summary_does_not_call_model_fallback` 与 `model_fallback_runs_only_for_unsupported_summary` 偶发把对 `127.0.0.1` 的 `retrieveUserQuotaSummary` 请求报为 transient send failure；单独运行时常常消失。
 - Root cause: responder 用 `recv_timeout(250ms)`，并把 `Ok(None)` 当成服务完成而 drop `tiny_http::Server`。Tokio 调度或满载 CI 可以在首次请求（或 404 后的 fallback 请求）前停顿超过 250ms，端口已经被关闭；生产实现正确将这种连接失败映射为 transient，测试却把 fixture 生命周期错误伪装成业务失败。
 - Fix: 主测试持有 `Arc<Server>`，responder 用阻塞 `recv()` 服务请求；先保存 fetch 结果，再调用 `server.unblock()` 唤醒 responder、join，最后再 unwrap/assert。失败路径也会 shutdown/reap，不依赖调度时间窗。
-- Self-check: `for n in 1 2 3 4 5; do cargo test -p skillstar-usage cloud_code::tests:: --locked || exit; done` 必须每次通过全部 cloud_code 测试。
+- Self-check: `for n in 1 2 3 4 5; do cargo test -p ss-usage cloud_code::tests:: --locked || exit; done` 必须每次通过全部 cloud_code 测试。
 
 ## 2026-08-27 - clippy 棘轮在热缓存下读到 0，照它的提示锁定基线会让冷构建 CI 挂掉
 
 - Symptom: 本地刚跑过 `cargo clippy` 后立即执行 `scripts/internal/check_clippy_ratchet.sh`，输出 `summary: 0 clippy diagnostics (baseline: 1)` 并主动提示 `note: count dropped below baseline — lower scripts/internal/clippy_baseline.txt to lock in the improvement`。照做把基线改成 0，CI 冷构建时真实计数仍是 1，`1 > 0` 直接失败。
-- Root cause: 脚本靠 `grep -c '^warning:'` 数 `cargo clippy` 的 stdout，而 cargo 对**未变更且已缓存**的 crate 不会重新发出诊断。热缓存下 `skillstar-usage` 不重编译，那条 `needless_lifetimes`（在冻结的 `fetchers/oauth/cursor.rs`，按项目规则不得修改）就不出现在输出里，计数虚假归零。脚本本身不区分"真的修好了"和"这次没编译它"。
+- Root cause: 脚本靠 `grep -c '^warning:'` 数 `cargo clippy` 的 stdout，而 cargo 对**未变更且已缓存**的 crate 不会重新发出诊断。热缓存下 `ss-usage` 不重编译，那条 `needless_lifetimes`（在冻结的 `fetchers/oauth/cursor.rs`，按项目规则不得修改）就不出现在输出里，计数虚假归零。脚本本身不区分"真的修好了"和"这次没编译它"。
 - Fix: 采信该脚本的计数前，先强制目标 crate 重编译（`touch` 相关源文件，或 `cargo clean -p <crate>`）再跑。基线维持 1；那一条属于冻结文件，不可清零。
-- Self-check: `touch crates/skillstar-usage/src/fetchers/oauth/cursor.rs && bash scripts/internal/check_clippy_ratchet.sh` 必须报 `1 clippy diagnostics`。同一陷阱适用于任何以编译器输出为计数源的门禁。
+- Self-check: `touch crates/ss-usage/src/fetchers/oauth/cursor.rs && bash scripts/internal/check_clippy_ratchet.sh` 必须报 `1 clippy diagnostics`。同一陷阱适用于任何以编译器输出为计数源的门禁。
 
 ## 2026-08-27 - 更新检查在普通目录里让 git 向上逃逸到用户的其他仓库
 
 - Symptom: 无明显症状,这正是危险处。hub 里的普通目录技能(bundle 导入、pack 安装、手工放入)每次巡检都会在自己目录里跑 `git fetch --depth 1`;当任何祖先目录是真仓库(`$HOME` 的 dotfiles 仓库、被版本管理的 `~/.skillstar`),git 解析到的是**那个**仓库,于是 SkillStar 定期对用户无关的仓库做浅取,并拿它的 HEAD 与 FETCH_HEAD 算出技能的更新徽章。
 - Root cause: 所有 git 调用只设 `current_dir`,不设 `-C` / `--git-dir` / `GIT_CEILING_DIRECTORIES`,所以 git 会向上走查找 `.git`。`ensure_worktree_checked_out_in_session` 自带 `if !repo_path.join(".git").exists() { return Ok(false) }` 守卫,但紧挨着它的 `check_update_in_session` 没有 —— 同一对调用里一个 fail-closed 一个不设防。
-- Fix: 守卫放进共享的 `check_update_in_session`(`crates/skillstar-git/src/ops.rs`),不是放进某一个调用方 —— patrol 与前台刷新是两个调用方,只修一个会漏。返回 `Err` 而非 `Ok(false)`:两个调用方都刻意把失败映射为"未知"以免用假的 `false` 覆盖真实徽章。
-- Self-check: `cargo test -p skillstar-git --locked check_update_refuses_a_directory_without_its_own_git`。凡是靠 cwd 定位仓库的 git 包装函数,都要问一句"目标不是仓库时会发生什么"。
+- Fix: 守卫放进共享的 `check_update_in_session`(`crates/ss-git/src/ops.rs`),不是放进某一个调用方 —— patrol 与前台刷新是两个调用方,只修一个会漏。返回 `Err` 而非 `Ok(false)`:两个调用方都刻意把失败映射为"未知"以免用假的 `false` 覆盖真实徽章。
+- Self-check: `cargo test -p ss-git --locked check_update_refuses_a_directory_without_its_own_git`。凡是靠 cwd 定位仓库的 git 包装函数,都要问一句"目标不是仓库时会发生什么"。
 
 ## 2026-08-27 - 删 UI 不删后端,留下一串永远走不到的代码
 
-- Symptom: 一批功能"看起来实现了"但用户永远触发不到:Codex 写 `~/.zshrc` 的 385 行后端 + Tauri 命令 + 前端 IPC 声明齐全,却没有任何按钮;`OAuthStartInfo` 的 `user_code`/`verification_uri` 恒为 `None`,前端却有整块设备码 UI 等着渲染;skill-pack 的 `list`/`remove`/`doctor` CLI 操作一个没有写入方的 store。
-- Root cause: 提交 `8e53552 chore(models): remove dead code and promote prototype to production paths` 只删了前端调用点,后端命令、域实现、IPC 声明、文档承诺原样留下。死代码不会自己报错:内部 workspace crate 里的 `pub` 项不触发 dead_code lint,Tauri 命令注册了就"被使用",`#![allow(dead_code)]` 还会主动压掉信号。文档因此长期描述着不存在的行为。
-- Fix: 按"入口 → 域实现 → 命令 → IPC 声明 → devMock → locale key → 文档"整条链一次性删净,并摘掉掩盖信号的 `#![allow(dead_code)]`。
-- Self-check: 删除任何 UI 调用点后,反向追一遍它独占的后端链路。判断"是废弃还是没接线"用 `git log -S '<命令名>' -- src/`:前端历史上出现过则是被删的功能(继续删干净),从未出现过则是没接线的脚手架(同样删,但要在功能文档里写清缺口)。
+- Symptom: 一批功能"看起来实现了"但用户永远触发不到:后端实现、命令注册、声明齐全,却没有任何入口;某个字段恒为 `None`,却有一整块 UI 等着渲染;CLI 操作一个没有写入方的 store。
+- Root cause: 只删了调用点,后端实现、命令注册、文档承诺原样留下。死代码不会自己报错:内部 workspace crate 里的 `pub` 项不触发 dead_code lint,注册过的命令"被使用",`#![allow(dead_code)]` 还会主动压掉信号。文档因此长期描述着不存在的行为。
+- Fix: 按"入口 → 域实现 → 命令 → 声明 → 文档"整条链一次性删净,并摘掉掩盖信号的 `#![allow(dead_code)]`。
+- Self-check: 删除任何调用点后,反向追一遍它独占的后端链路。判断是废弃还是没接线，查 git 历史。
 
 ## 2026-08-27 - tool-sync 把解析失败的用户配置静默重建成仅含托管块的骨架（historical：代码已随 D-082 移除）
 
 - Symptom: 用户的 `~/.codex/config.toml`（或 OpenCode/Pi/OMP/Claude 的 JSON/YAML 配置）里有一个语法错误后,下一次 provider 同步"成功",但文件里只剩 SkillStar 托管块——用户自己的 MCP servers、profiles、OAuth token 全部消失。滚动备份只保留 5 份,后续自动 resync 会把最后一份好备份也轮换掉。
 - Root cause: 同步写入路径在读现有文件时用 `unwrap_or_default()` / `unwrap_or_else(|_| init_root())` 把解析失败当成"文件不存在",随后整文件重写。这正是 store_v4 模块文档点名要终结的 v3 缺陷,且同文件的 unsync 路径早已 fail-closed(`with_context(...)?`),形成双标。
-- Fix: 所有 sync 写入方统一走 `backup_merge::read_existing_config`:文件缺失或空白 → 从头初始化;存在但解析失败 → 硬错误 `Failed to parse … — fix or remove it before syncing`。同时全部写入点从裸 `fs::write` 换成 `skillstar_core::infra::fs_ops::atomic_write`,崩溃不再截断配置。
+- Fix: 所有 sync 写入方统一走 `backup_merge::read_existing_config`:文件缺失或空白 → 从头初始化;存在但解析失败 → 硬错误 `Failed to parse … — fix or remove it before syncing`。同时全部写入点从裸 `fs::write` 换成 `ss_core::infra::fs_ops::atomic_write`,崩溃不再截断配置。
 - Self-check: 往沙箱 `~/.codex/config.toml` 写一行非法 TOML 后触发同步,必须报错且文件字节不变;`cargo test -p skillstar-models --locked tool_sync`。
 
 ## 2026-08-27 - 非 GitHub 仓库的上游新增技能检测永远静默跳过
@@ -269,21 +484,21 @@
 - Symptom: 从 GitLab/SSH 源安装的技能一切正常,但上游新增技能的 ghost 检测从不出现;无日志、无报错。
 - Root cause: `detect_new_skills_in_cached_repos` 自己用 `strip_prefix("https://github.com/")` 推导 cache 目录 key,而安装路径用 `Source::parse(url).short`。两套推导只在 GitHub https URL 上碰巧一致;GitLab/SSH 源算出的目录名对不上,`.git` 存在性检查失败后 `continue` 静默丢弃。同一份 key 出现两套推导逻辑时,不一致就是这种"只对主流路径生效"的静默缺陷。
 - Fix: detect 侧改用与安装完全相同的 `Source::parse(&git_url).map(|s| s.short)`,失败回退原始 URL。
-- Self-check: `cargo test -p skillstar-skills --locked repo_scanner`;手工:GitLab 源安装后上游加技能,fetch 后 ghost 卡必须出现。
+- Self-check: `cargo test -p ss-skills --locked repo_scanner`;手工:GitLab 源安装后上游加技能,fetch 后 ghost 卡必须出现。
 
 ## 2026-08-21 - 上游新增的 Skill 永远检测不到，刷新按钮也无效
 
 - Symptom: `mattpocock/skills` 新增 `skills/in-progress/implement-spec` 一小时后，My Skills 既没有 ghost 卡也没有推送；点右上角刷新毫无变化。本地 cache 的 `HEAD` 与 `origin/HEAD` 都停在前一天的 commit。
 - Root cause: ghost 检测扫描的是 repo cache 的**工作树**，而工作树只在安装/更新/扫描时 `reset --hard origin/HEAD`。两条更新检查路径都不移动它：UI 的 `refresh_skill_updates` 走 GitHub Trees API（完全不碰 git，连 `origin/HEAD` 都不前进），patrol 只 `git fetch`（动 `origin/main`，不动工作树）。"上游只新增了一个目录"这种变化因此在结构上不可见，直到用户碰巧更新了同仓库的别的 Skill。另外工具栏刷新只重取 `list_skills` 与 `refresh_skill_updates`，从不重取 `check_new_repo_skills`。
-- Fix: 检测改为本地 `HEAD` tree 与 tracked ref tree 的差集，manifest 直接从 Git 对象经 session 读取（见 skills README「Patrol 与页面职责」）；API 快路径只在远端 commit 仍等于本地 tracked ref 时替代 fetch，否则回退 `git fetch` 让 ref 跟上；前端在每次更新检查完成后（按 `dataUpdatedAt`，不按 data 身份）重取 ghost。
-- Self-check: `cargo test -p skillstar-skills --locked upstream_additions_surface_after_a_fetch_without_touching_the_checkout`。手工：上游新增一个 Skill 后点刷新，cache 里 `git rev-parse origin/HEAD` 应前进到上游 tip 而 `HEAD` 不动，ghost 卡出现且带描述。
+- Fix: 检测改为本地 `HEAD` tree 与 tracked ref tree 的差集，manifest 直接从 Git 对象经 session 读取（见 skills README「Patrol 与页面职责」）；API 快路径只在远端 commit 仍等于本地 tracked ref 时替代 fetch，否则回退 `git fetch` 让 ref 跟上；更新检查完成后必须重取 ghost 列表。
+- Self-check: `cargo test -p ss-skills --locked upstream_additions_surface_after_a_fetch_without_touching_the_checkout`。手工：上游新增一个 Skill 后点刷新，cache 里 `git rev-parse origin/HEAD` 应前进到上游 tip 而 `HEAD` 不动，ghost 卡出现且带描述。
 
 ## 2026-08-20 - 仓库根技能更新后徽标立刻回来
 
 - Symptom: 像 `ip-as-logo` 这种 SKILL.md 在仓库根的技能，点「更新」成功后徽标马上又亮；再点一次还是一样，看起来像一直在更新。
 - Root cause: GitHub Trees 快路径把响应顶层 `sha` 当成根目录 tree SHA，再和本地 `HEAD^{tree}` 比较。`GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1` 在用 branch/commit 查询时，GitHub 把 **commit SHA** 放进 `sha`，真正的 tree SHA 在 commit 对象里（例如 `ip-as-logo-skill@main` 的 `sha` 是 `2cb23157…`，tree 是 `819c89fe…`）。根技能的这两个值永远不相等，所以已经在远端 tip 也会被判成有更新。子目录技能不受影响，它们用的是 `tree[]` 里的真实 tree SHA。
 - Fix: 根技能在 API 快路径上同时接受「本地 HEAD == 远程 sha」和「本地 HEAD^{tree} == 远程 sha」；子目录比较不变。
-- Self-check: `cargo test -p skillstar-skills --locked github_trees_api_commit_ish_sha_does_not_badge_an_up_to_date_root_skill`。造一个根技能，把 API `folders[""]` 设成该 checkout 的 commit SHA（刻意不等于 tree SHA）时必须报无更新；换成另一个 SHA 时仍报有更新。
+- Self-check: `cargo test -p ss-skills --locked github_trees_api_commit_ish_sha_does_not_badge_an_up_to_date_root_skill`。造一个根技能，把 API `folders[""]` 设成该 checkout 的 commit SHA（刻意不等于 tree SHA）时必须报无更新；换成另一个 SHA 时仍报有更新。
 
 ## 2026-08-17 - Antigravity 摘要额度被模型目录的全量剩余值遮蔽
 
@@ -297,15 +512,15 @@
 - Symptom: Antigravity 的 plan/credits 能刷新，但模型额度为空、显示不全，或接口失败后卡片像是“成功刷新”却没有任何解释。
 - Root cause: `loadCodeAssist` 的 `cloudaicompanionProject` 可能是 `{ "id": "projects/..." }`，旧解析只接受字符串，后续 `fetchAvailableModels` 因缺少 `project` 得到错误/不完整结果；额度解析还只接受固定模型 ID，且 fetcher 用 `unwrap_or_default()` 吞掉了额度请求错误。
 - Fix: 兼容字符串与对象项目字段；Cloud Code 的 `loadCodeAssist` 按 daily、sandbox、production 回退并发送 Antigravity 完整 metadata；模型额度保留已知分组，同时显示新增的 Gemini/Claude/GPT/Image 模型；模型接口为空时 best-effort 读取 `retrieveUserQuotaSummary`；额度请求失败保留 plan/credits 并写入可见错误，401 仍触发重新授权。
-- Files: `crates/skillstar-usage/src/cloud_code.rs`、`crates/skillstar-usage/src/fetchers/oauth/antigravity.rs`、`docs/features/usage/README.md`。
-- Self-check: `cargo test -p skillstar-usage cloud_code::tests --locked`、`cargo test -p skillstar-usage fetchers::oauth::antigravity::tests --locked`；重点覆盖对象项目 ID、新模型 ID、summary bucket、额度请求错误可见性。
+- Files: `crates/ss-usage/src/cloud_code.rs`、`crates/ss-usage/src/fetchers/oauth/antigravity.rs`、`docs/features/usage/README.md`。
+- Self-check: `cargo test -p ss-usage cloud_code::tests --locked`、`cargo test -p ss-usage fetchers::oauth::antigravity::tests --locked`；重点覆盖对象项目 ID、新模型 ID、summary bucket、额度请求错误可见性。
 
 ## 2026-08-17 - Cursor 切换账号只改 active pin，没有改 IDE 登录态
 
 - Symptom: Usage 页面有多张 Cursor OAuth 卡，点“切为当前账号”后卡片 pin 变化，但 Cursor 仍使用原账号；此前 Cursor 卡甚至没有真实的 IDE 同步适配器。
 - Root cause: `usage_switch` 只把 Cursor 当作无本地凭证的 catalog；Cursor 实际把 OAuth token 分散存于 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken`、`cursorAuth/cachedEmail` 和镜像 key。
 - Fix: 新增 Cursor IDE adapter，在 catalog 锁内事务写入并回读验证真实 state.vscdb，验证成功后才更新 active pin；对账读取 IDE 当前账号，刷新前采纳本地轮换，刷新后投影新 token；本地导入复用同一读取路径。
-- Files: `crates/skillstar-app/src/usage_switch/cursor.rs`、`crates/skillstar-usage/src/{tool_paths.rs,vscdb.rs,local_import.rs}`、`crates/skillstar-app/src/usage_switch/custody_tests.rs`。
+- Files: `crates/ss-app/src/usage_switch/cursor.rs`、`crates/ss-usage/src/{tool_paths.rs,vscdb.rs,local_import.rs}`、`crates/ss-app/src/usage_switch/custody_tests.rs`。
 - Self-check: 两张 Cursor 订阅连续切换后，`cursorAuth/accessToken` / `cursorAuth/refreshToken` 必须分别等于目标卡凭证；删除或损坏 state.vscdb 时不得只更新 active pin；`reconcile_cli_account("cursor")` 必须返回 `LinkedTo`、`Diverged` 或 `Missing` 的真实状态。
 
 ## 2026-08-17 - Antigravity OAuth 因缺少外部 client 配置而无法登录
@@ -313,36 +528,23 @@
 - Symptom: Antigravity 登录直接失败并提示设置 `SKILLSTAR_ANTIGRAVITY_CLIENT_ID` / `SKILLSTAR_ANTIGRAVITY_CLIENT_SECRET` 或 `~/.skillstar/config/antigravity_oauth.json`。
 - Root cause: 本地桌面 OAuth 的公开 client 标识被错误地当成了每台机器都必须自行提供的配置；同时切号只更新 Usage active pin，没有写回 Antigravity IDE 的真实凭证存储。
 - Fix: 使用参考桌面客户端同源的内置 OAuth fallback，保留 env / config file override；切换时写入并回读验证 macOS Keychain 或 legacy `state.vscdb`，验证成功后才更新 active pin。刷新前先采纳 IDE 已轮换的 access/refresh token，刷新后再把新凭证投影回 IDE；切换失败时明确返回“切换未生效”。
-- Files: `crates/skillstar-usage/src/antigravity_oauth_config.rs`、`crates/skillstar-app/src/usage_switch.rs`、`crates/skillstar-app/src/usage_switch/antigravity.rs`、`crates/skillstar-usage/src/{protobuf_oauth.rs,vscdb.rs,tool_paths.rs}`、`docs/features/usage/README.md`。
+- Files: `crates/ss-usage/src/antigravity_oauth_config.rs`、`crates/ss-app/src/usage_switch.rs`、`crates/ss-app/src/usage_switch/antigravity.rs`、`crates/ss-usage/src/{protobuf_oauth.rs,vscdb.rs,tool_paths.rs}`、`docs/features/usage/README.md`。
 - Self-check: Antigravity OAuth 无 env / 配置文件时仍能得到内置 client；切换后 `reconcile_cli_accounts` 必须从 IDE 真实存储读回目标 refresh token，而不是只依据 `active_per_catalog.json`；IDE 自行轮换 token 后，下一次 Usage refresh 必须先更新订阅再刷新。
 
 ## 2026-08-16 - 本地 GitHub 登录报 This build does not include a GitHub App client ID
 
-- Symptom: 从源码跑 `tauri dev`，侧边栏 GitHub 账户点「开始登录」或「重试」后固定英文错误 `This build does not include a GitHub App client ID`。仓库根已有 `.env` 且填了 `SKILLSTAR_GITHUB_APP_CLIENT_ID` 仍然失败。
+- Symptom: 从源码启动桌面壳，侧边栏 GitHub 账户点「开始登录」或「重试」后固定英文错误 `This build does not include a GitHub App client ID`。仓库根已有 `.env` 且填了 `SKILLSTAR_GITHUB_APP_CLIENT_ID` 仍然失败。
 - Root cause: Client ID 只看进程环境变量和编译期 `option_env!`。Vite 会读 `.env`，Rust 后端不会；`ProductionGitHubGateway` 还在进程启动时把缺失结果缓存下来，所以 UI「重试」不会重新解析。官方 Release 靠 CI 仓库变量编进二进制，本地构建两者都空。
 - Fix: 解析顺序改为环境变量 → 编译期嵌入 → 从 cwd / `CARGO_MANIFEST_DIR` 向上查找 `.env`；gateway 改为每次登录动作即时解析，不再缓存 Unavailable。
-- Files: `crates/skillstar-skills/src/github_auth/gateway.rs`、`.env.example`、`docs/features/skills/README.md`。
-- Self-check: 不 `export`、只在仓库根 `.env` 写 Client ID，重启 `tauri dev` 后「开始登录」必须进入设备码界面而不是这条 Unavailable；解析测试覆盖注释行、空值、引号，以及从 `crates/skillstar-skills` 子目录向上找到祖先 `.env`。
-
-## 2026-08-15 - 声明了却没人写：角色面板收下用户输入然后丢掉，UI 与磁盘长期不一致（historical：代码已随 D-082 移除）
-
-- Symptom: 三种表现，同一个根因。① Claude Code 的模型映射面板可以填 Sonnet/Opus/Haiku，保存后 `~/.claude/settings.json` 里没有任何 `ANTHROPIC_DEFAULT_*_MODEL`；重开面板值还在，因为它从来只活在渲染进程。② OMP 角色面板里一个角色显示 `某 provider/某模型`，`~/.omp/agent/config.yml` 的 `modelRoles` 里却没有该条目，且同步结果是绿色成功。③ 面板给每个模型都列出 9 个 thinking 等级，选了对没有推理档的模型无效的等级，也不会有任何提示。
-- Root cause: 「角色」这个概念在 v3 有两处互不相通的实现——Claude 的层级模型在 `provider.meta`、OMP 的角色在 binding 的无 schema settings 袋——因此没有任何一层能回答「这个 Agent 支持哪些角色」。于是三件事各自失配：前端 Claude 面板只有 `useState`（后端契约其实早就就绪，断链在前端）；OMP 写盘函数 `resolve_omp_roles` 对「provider 未绑定 / 无端点 / 无模型」三种情况各有一个裸 `continue`，调用方拿不到任何差异信息；thinking 等级是一个全局 9 元常量，与模型能力无关。共同点是**声明与写盘之间没有约束**：UI 可以提供一个写盘侧根本不会处理的设置，而且没有任何机制会发现。
-- Fix: 角色词表提升为域内类型 `providers::roles`（`RoleDef{id, agent_key, primary, inherits, requires}` + `DroppedRole`/`RoleDropReason`）；`AgentSpec` 增加 `roles` 列，每个 Agent 声明自己能投影的角色及其磁盘键名；`ToolSyncResultFlat` 增加 `dropped_roles`，OMP 与 Claude 写盘时逐条回报跳过原因，前端落到角色行并弹一次警告；`ModelCatalogEntry` 增加 `reasoning`，`omp_thinking_levels_for` 按能力裁剪等级；Claude 面板改为经 `update_agent_settings` 落到 `AgentBinding.roles`。
-- Files: `crates/skillstar-models/src/providers/roles.rs`、`crates/skillstar-models/src/tool_sync/{agents,sync,omp_provider,types}.rs`、`crates/skillstar-app/src/models/agents.rs`、`src/features/models/components/hub/matrix/rich/ClaudeMappingPanel.tsx`、`src/features/models/api/{agents,activations}.ts`。
-- Self-check:
-  - 通用判据：**只要一处「声明能力」和另一处「实现能力」分处两个文件，就必须有测试把两者对上，否则它们迟早不一致**。这里是 `every_declared_role_reaches_disk`：给每个 Agent 的全部声明角色赋值、跑真实 writer、断言每个 `agent_key` 出现在写出的字节里。新增角色但忘了改 writer 会直接红。
-  - 「成功」与「完整」是两个问题。写盘成功不代表用户配的东西都写进去了，差集只有 writer 算得出来，所以它必须是返回值的一部分而不是日志。任何新 writer 若有 `continue`/`skip` 分支，都要顺手回报原因。
-  - 前端不要重算后端的跳过规则。规则复制一份就会在 writer 改动时过期；`useRoleDrops` 只记住后端的裁决。
-  - 存储键与磁盘键不是一回事。v4 迁移把 `smol` 改名为 `fast`，前端若继续按 `smol` 读写，老用户的角色会「消失」同时旁边多出一条重复角色。`registry_agent_keys_match_the_migration_table` 与 `ompRoles.test.ts` 分别钉住两侧。
-  - 「不知道」不能渲染成「不支持」。模型目录没有 reasoning 数据时必须给出完整等级表，只有明确的能力声明才收窄。
+- Files: `crates/ss-skills/src/github_auth/gateway.rs`、`.env.example`、`docs/features/skills/README.md`。
+- Self-check: 不 `export`、只在仓库根 `.env` 写 Client ID，重启 `cargo run -p skillstar` 后「开始登录」必须进入设备码界面而不是这条 Unavailable；解析测试覆盖注释行、空值、引号，以及从 `crates/ss-skills` 子目录向上找到祖先 `.env`。
 
 ## 2026-08-14 - 稀疏 checkout 按 Skill 名去重会把仍存在的已安装来源误报为删除
 
 - Symptom: 更新 `impeccable` 时弹出「来源已不再提供」，选择「彻底移除该 Skill」却收到 `Skill 'impeccable' still comes from its source; keep or discard the local changes instead of removing it`。Git reflog 显示每次更新都先 reset 到远端提交、随即回滚；远端提交仍包含 lockfile 记录的 `.agents/skills/impeccable`。`--list` / `--preview` 稀疏检出后只留下 `.agent/skills/impeccable`（Antigravity），Hub 与 `~/.cursor/skills/impeccable` 变悬空。
 - Root cause: 远端新增了同名的 `.agent/skills/impeccable` provider 副本。`derive_sparse_skill_dirs` 曾为节省物化范围按 Skill 目录名（basename）去重，`.agent/...` 与 `.agents/...` 的 `source_priority` 相同且前者按字典序先出现，于是 sparse set 只保留 `.agent/...`。`git sparse-checkout set` 随即移除已安装链接指向的 `.agents/...` 工作树目录。更新路径还会把根 `SKILL.md` 当成“整仓 checkout”信号，进一步丢掉嵌套 harness 目录。
 - Fix: 稀疏检出保留**全部**含 `SKILL.md` 的嵌套目录（不再按 basename 去重）；根 `SKILL.md` 只在没有嵌套技能时才触发全量 checkout。repo-cache 更新仍合并已安装 `source_folder`。真正被远端删除的路径即使留在 sparse pattern 中也不会被物化。
-- Files: `crates/skillstar-skills/src/repo_scanner/ops.rs`、`crates/skillstar-skills/src/skill_update/tests/source_dropped.rs`。
+- Files: `crates/ss-skills/src/repo_scanner/ops.rs`、`crates/ss-skills/src/skill_update/tests/source_dropped.rs`。
 - Self-check:
   - 通用判据：**发现结果的去重策略不能改写已经安装的 provenance**。同名 provider 路径用于“新安装选哪个”，lockfile 的 `source_folder` 用于“已安装项继续跟哪个”；两者不是同一个问题。
   - 回归 fixture 必须从仅有 `.agents/skills/impeccable` 的 sparse checkout 开始，再让远端同时保留该路径并新增 `.agent/skills/impeccable`；更新应直接成功，不能产生 `SourceRemoved`。
@@ -351,35 +553,25 @@
 ## 2026-08-14 - 跨 provider 的时间戳单位不是常识：Claude Code 的 expiresAt 是毫秒
 
 - Symptom: 尚未发生（新增 `anthropic` fetcher 时提前拦下）。若直接把 `claudeAiOauth.expiresAt` 写进 `Subscription::access_token_expires_at`，过期时刻会落在约五万年后，`token_refresh::needs_refresh` 之类的过期判定对该行**永远返回 false**——不会报错，只会静默地永不失效，等到上游真的 401 才暴露，且届时错误分类正确、症状却是“卡片突然要求重新登录且没有任何前兆”。
-- Root cause: `skillstar-usage` 内所有既有 provider 的 token 过期都是 epoch **秒**（`TokenResponse::expires_at()`、`jwt_exp`、`Subscription::access_token_expires_at` 全是秒），于是“过期字段是秒”变成了一条没有人写下来、也没有类型系统兜底的隐含约定。Claude Code 是 Node 生态出身，`Date.now()` 给的是毫秒。跨生态借用凭证文件时，**字段名相同不代表单位相同**，而 `i64` 对两者一视同仁。
+- Root cause: `ss-usage` 内所有既有 provider 的 token 过期都是 epoch **秒**（`TokenResponse::expires_at()`、`jwt_exp`、`Subscription::access_token_expires_at` 全是秒），于是“过期字段是秒”变成了一条没有人写下来、也没有类型系统兜底的隐含约定。Claude Code 是 Node 生态出身，`Date.now()` 给的是毫秒。跨生态借用凭证文件时，**字段名相同不代表单位相同**，而 `i64` 对两者一视同仁。
 - Fix: 反序列化字段命名为 `expires_at_ms` 并只经 `ClaudeOAuth::expires_at_seconds()` 出口（`/1_000`），doc comment 直接写“禁止直接使用该字段”；配一个断言毫秒→秒换算的单元测试。
-- Files: `crates/skillstar-usage/src/fetchers/oauth/anthropic.rs`、`anthropic_tests.rs`。
+- Files: `crates/ss-usage/src/fetchers/oauth/anthropic.rs`、`anthropic_tests.rs`。
 - Self-check:
   - 通用判据：**从别的工具的凭证文件/配置文件里读时间戳，先确认单位**。判据很便宜：把值当秒解释，看看落在哪一年。落在 2100 年之后就是毫秒。
   - 通用判据：**单位应该编码进字段名而不是注释**（`expires_at_ms` vs `expires_at`），并且只留一个换算出口；靠调用点自觉乘除迟早漏一处。
   - 回归判据：任何新增的、从第三方 CLI 读凭证的 fetcher，必须有一个“过期字段单位”的单元测试，而不是等 401。
-
-## 2026-08-14 - 手抄的 DTO 会把“键缺席”抄成 `null`
-
-- Symptom: 前端类型写 `total: number | null`，运行时拿到的却是 `undefined`；`x === null` 分支永不触发，而 `x ?? fallback` 侥幸把它掩盖成“看起来能跑”。对称的第二种：永远序列化的 bool 被手抄成可选 `?`，于是前端为一个不可能缺席的字段写了永远走不到的兜底分支。`/usage` 一次性暴露了这两类共六处。
-- Root cause: Rust 字段带 `#[serde(default, skip_serializing_if = "Option::is_none")]` 时，`None` 让**整个键从 JSON 里消失**，而不是序列化成 `null`。手抄类型的人凭 `Option<T>` 直觉写成 `| null`，就此漂移；两种写法都能通过 `tsc`，也都能通过 code review，只有运行时行为不同，且不同的那一半是“分支静默失效”而不是报错。
-- Fix: 不要手抄。让 ts-rs 生成——它读 serde 属性，两种都不会错。`src/features/usage/types.ts` 已退化为 re-export barrel，决策见 [decisions.md](./decisions.md) D-034。
-- Files: `crates/skillstar-app/src/usage/dto.rs`、`src/types/generated/`、`src/features/usage/types.ts`。
-- Self-check:
-  - 通用判据：**任何手写的、镜像后端形状的前端类型都是待爆的漂移**，review 抓不住它，因为两侧各自都自洽。判据是“这个形状有没有 Rust 来源”，有就必须生成。
-  - 回归判据：`bash scripts/internal/check_generated_types.sh` 是门禁；新增 DTO 时先确认它进了 `types:gen`，而不是先在前端写一份。
 
 ## 2026-08-12 - 共享 skills 目录：没有归属记录时，清理一律退化成"看起来像技能就删"
 
 - Symptom: 多个 Agent 解析到同一个物理 skills 目录时，一方的移除会静默删掉另一方仍在使用的技能，两侧各有独立表现。Global 侧：cline 与 zed 共用 `~/.agents/skills`，在 SkillCard 或 Settings 里对 cline 取消部署某技能，zed/warp/loaf/dexto/kimi-code-cli 五个仍启用的 Agent 一并失去它（`deployment/mod.rs:305-336`，全程无共享检查，且用的是 `require_global_profile` 而非 enabled 版本，对已禁用 Agent 也照删）。Project 侧：卸载 hub 技能时 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 对**全部** profile（含从未启用的、含 openclaw 的项目根 `skills`）拼路径，只要 `is_link || is_dir` 就删，用户手写的 `.agents/skills/foo` 被静默删除；一次 `full_sync` 的 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 更是按目录清空而非按 manifest 清空，共享目录里所有未登记技能一次 Apply 后消失。UI 侧的伴生症状是计数串台：6 个共用 `~/.agents/skills` 的 Agent 各自显示同一个总数（`registry.rs:131-153`），任一 Agent 装了技能则 6 个图标一起亮（`installed_skill.rs:532-548`）。
 - Root cause: 一个共同的形状——**磁盘上不存在"这条 entry 是谁装的"这一信息，而代码在需要它时退化成了启发式**。Global 侧 `deployment/` 下根本没有任何归属记录（Project 侧至少有 `skills-list.json`），于是删除判据只剩 `fs_ops.rs:265-274` 的"是 link，或者是含 `SKILL.md` 的目录"——这个判据对"是不是一个技能"回答正确，对"该不该由我删"完全失明。Project 侧有 manifest 却在三条路径上不查它（cleanup、clear、rebuild），等价于退回同一个启发式。更深一层：**per-agent 归属在物理世界从未存在过**。`~/.agents/skills` 是 open agent skills 生态的共享约定，zed 进程 `ls` 一下就能加载 cline 部署的技能；系统曾试图用 manifest 维护一个磁盘无法兑现的隔离承诺，于是任何"存量已有部署但无归属记录"的起手都没有正确答案。这类缺陷在**单所有者场景下永远测不出来**——一个目录一个 Agent 时，"看起来像技能就删"和"是我装的才删"给出完全相同的结果。
 - Fix: 决策见 [decisions.md](./decisions.md) D-024（**已定，落地未开始**）：目录塌缩为一等部署单元 + 归属零状态推导（entry 属于 SkillStar ⟺ 其链接目标落在 `hub_skills_dir()` 下，已验证 5 个全局写入点 src 全是 hub 绝对路径且 `read_link_resolved` 只解一跳）。容器判定**必须复用** `repo_link::is_inside`(`repo_link.rs:65-93`)，不要新写 `starts_with`。
-- Files: `crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/{installed_skill,repo_link}.rs`、`crates/skillstar-skills/src/agents/{builtin,registry,custom}.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。
+- Files: `crates/ss-skills/src/deployment/mod.rs`、`crates/ss-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/ss-skills/src/{installed_skill,repo_link}.rs`、`crates/ss-skills/src/agents/{builtin,registry,custom}.rs`、`crates/ss-core/src/infra/fs_ops.rs`。
 - Self-check:
   - 通用判据：**当一个物理资源可被多个逻辑所有者共享时，"删除"必须由归属回答，不能由"这东西长得像不像我管的类型"回答**。后者在单所有者下与前者等价，因此不会被现有测试发现；任何按 `read_dir` 遍历后逐项判断"像不像技能"的清理循环都是这个反模式的实例。
   - 通用判据：**归属信息如果在物理世界不存在，就不要用状态去发明它**。存量数据没有正确的回填起手（记为无主/归给全部/归给第一个都错），且清单与磁盘是两次写、崩溃必然分叉。优先找一个能从磁盘零状态推导的谓词。
   - 通用判据：**同一个容器判定不允许有第二份实现**。`repo_link.rs:4-9` 已记录过 Windows junction 因两份实现分叉而误判的事故；今天 `local_skill.rs:174`、`git/gh_manager.rs:432`、`storage_maintenance.rs:183` 三处裸 `resolved.starts_with(&dir)` 缺 canonicalize 与大小写折叠，是同一事故的复发预备队。
-  - 回归判据：任何新增的"清理/取消部署/清空目录"路径，必须先回答"这个目录还有没有别的已启用 Agent 解析到它"。用 `crates/skillstar-skills/src/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS` 按 `resolve_global_dir` 与 `project_skills_rel` 分组即可枚举出全部共享组；今天共 3 组 global 与 4 组 project 共享目录。
+  - 回归判据：任何新增的"清理/取消部署/清空目录"路径，必须先回答"这个目录还有没有别的已启用 Agent 解析到它"。用 `crates/ss-skills/src/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS` 按 `resolve_global_dir` 与 `project_skills_rel` 分组即可枚举出全部共享组；今天共 3 组 global 与 4 组 project 共享目录。
   - 反例警告：不要把 `deploy_modes` 当遗留字段。`docs/features/skills/README.md` 曾声称它"只为兼容旧 manifest"，实际 `projects/sync.rs:78-84,227,461-463` 正在读写它决定 symlink/copy。
 
 ## 2026-08-12 - tool-sync 单元测试并行必挂：所有测试共用同一个 sandbox HOME（historical：代码已随 D-082 移除）
@@ -396,41 +588,41 @@
 
 ## 2026-08-12 - degraded 收尾：同步状态行自相矛盾、降级判据只问了一个 scope、绕过快照的读路径不报降级
 
-- Symptom: 三个都不会立刻可见，都会让上面几条已经修好的契约在边角上重新破洞。(1) 配了 `config/marketplace_mirror.json` 且镜像与主站内容分叉时，新鲜度会莫名滞后：带着上一份载荷的 ETag 去问新 host，本该 200 的请求被答成 304。(2) 只逛过 hot / trending、从没同步过 all 的用户，搜索会把 hot 的降级兜底行报成 `Fresh`。(3) 本地 SQLite 读失败改走远端直取时，即使远端返回的也是降级载荷，用户只看到「不是来自快照」，看不到「这批数据不完整」。
+- Symptom: 三个都不会立刻可见，都会让上面几条已经修好的契约在边角上重新破洞。(1) 商店经 GitHub 加速源包装 skills.sh，且包装源与主站内容分叉时，新鲜度会莫名滞后：带着上一份载荷的 ETag 去问新 host，本该 200 的请求被答成 304。(2) 只逛过 hot / trending、从没同步过 all 的用户，搜索会把 hot 的降级兜底行报成 `Fresh`。(3) 本地 SQLite 读失败改走远端直取时，即使远端返回的也是降级载荷，用户只看到「不是来自快照」，看不到「这批数据不完整」。
 - Root cause: 一个共同的形状——**降级/一致性信息在某一条路径上被丢掉了，而那条路径恰好没人问过它**。
   1. `mark_scope_success_with_meta_in_tx` 的 `etag = COALESCE(excluded.etag, 旧值)` 是为「同字节 200 轮换 validator」写的，却同时作用在**完整重写**路径上。`source_host` / `payload_sha256` 都有 `CASE WHEN fetched_unchanged` 保护，只有 `etag` 没有，于是一次不带 `ETag` 头的 200 会让同一行里 `etag` 描述上一份载荷、另外两列描述这一份。
   2. `search_local` / `ai_search_local` 只问 `scope_is_degraded(leaderboard_all)`，但 `hot` / `trending` 的兜底行经由同一个 `upsert_skill_in_tx` 写进同一张 `marketplace_skill`。判据的范围比数据的范围窄。
   3. 七处 `ErrorFallback` 分支调用的是 `remote::get_*`（丢掉 `FetchMeta` 的 `.0` 包装），而 `ErrorFallback` 是唯一完全不读 `marketplace_sync_state` 的读路径——远端的 `degraded` 一旦在包装层丢掉，下游再也无从得知。
 - Fix: (1) 拆开两条路径：`etag = CASE WHEN fetched_unchanged THEN COALESCE(新,旧) ELSE excluded.etag END`。完整重写时 etag 跟随本次载荷，没有就置 NULL。不变式写在函数文档里：**同一行的 `etag` / `payload_sha256` / `source_host` 必须描述同一份载荷**；no-change 路径采纳轮换后的 validator 不违反它（字节相同即同一份载荷）。(2) 新增 `shared_skill_table_is_degraded(conn)`，一次 `EXISTS` 查完 all / hot / trending 三个 scope（搜索每次按键都会走，不能做成逐 scope 查询）；scope 列表由 `leaderboard_scope()` 派生，不手抄。(3) 七处 `ErrorFallback` 改走 `remote::*_with_meta(..., None)`，统一经由新的 `error_fallback(data, local_err, meta)` 构造；`meta.degraded` 为真时把原因追加到 `error` 字段（状态枚举与健康路径共用，塞不下第二根轴）。
-- Files: `crates/skillstar-marketplace/src/snapshot/{sync_state.rs,local_first.rs}`、`crates/skillstar-marketplace/src/snapshot/tests/part6.rs`。
+- Files: `crates/ss-marketplace/src/snapshot/{sync_state.rs,local_first.rs}`、`crates/ss-marketplace/src/snapshot/tests/part6.rs`。
 - Self-check:
   - 通用判据：**同一行里描述同一个对象的几列，必须由同一条写路径同时写入**。只要有一列走了 `COALESCE` 而邻居走了 `CASE`，这一行迟早自相矛盾，而且没有任何下游能发现。
   - 通用判据：**判据的范围必须覆盖数据的范围**。多个 scope 往同一张共享表写行时，只问其中一个 scope 的质量标记，等于对其余几个失明。
   - 通用判据：绕过状态存储的旁路（直取远端、缓存穿透、应急通道）也必须携带质量信息，否则「降级数据永不冒充完整数据」只在主路径上成立。
-  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,source_host,substr(payload_sha256,1,8),etag FROM marketplace_sync_state;"` —— 只在配了镜像时有意义：`source_host` 刚变过而 `etag` 没跟着变（也没被清空）即为回归。
-  - `cargo test -p skillstar-marketplace part6`、`cargo test -p skillstar-marketplace degraded`。
+  - `sqlite3 ~/.skillstar/cache/marketplace/marketplace.db "SELECT scope,source_host,substr(payload_sha256,1,8),etag FROM marketplace_sync_state;"` —— 只在配了镜像时有意义：`source_host` 刚变过而 `etag` 没跟着变（也没被清空）即为回归。
+  - `cargo test -p ss-marketplace part6`、`cargo test -p ss-marketplace degraded`。
 
 ## 2026-08-12 - Marketplace 默认 all tab 只看"表里有没有行"，永远报 Fresh
 
 - Symptom: 最常用的 all tab 永远显示"已是最新"：TTL 过期不刷新、降级兜底数据不带任何提示、前端的自动 stale 刷新 / 重试额度 / 重试按钮在这个视图上从不触发。hot / trending 却一切正常。
-- Root cause: `list_skills_local()`（`list_marketplace_skills_local` 命令，`Marketplace.tsx` 默认 tab）只查 `marketplace_skill` 有没有行，非空即 `Fresh`，完全不读 `marketplace_sync_state`。于是一次搜索 seed 留下的一行、或 degraded 兜底写入的 200 行，都会让它报 Fresh；`Stale` 在这条命令上根本不可达，前端所有 stale 自愈逻辑成为死代码。同一文件里 `get_leaderboard_local` / `get_publishers_local` 等读路径都是按 scope 判新鲜度的——只有它例外。
+- Root cause: `list_skills_local()`（市场默认 all tab 的读路径）只查 `marketplace_skill` 有没有行，非空即 `Fresh`，完全不读 `marketplace_sync_state`。于是一次搜索 seed 留下的一行、或 degraded 兜底写入的 200 行，都会让它报 Fresh；`Stale` 在这条命令上根本不可达，所有 stale 自愈逻辑成为死代码。同一文件里 `get_leaderboard_local` / `get_publishers_local` 等读路径都是按 scope 判新鲜度的——只有它例外。
 - Fix: `list_skills_local()` 的数据仍读全表，但新鲜度、seed 状态、`updated_at` 一律来自 `leaderboard_all` scope——正是前端刷新（`sync_marketplace_scope("leaderboard_all")`）和 `schedule_startup_refreshes` 重试的同一个 scope。状态集与 hot/trending 对齐：Fresh / Stale / Miss / Seeding / ErrorFallback / RemoteError。同时本地 SQLite 读失败不再伪装成 `RemoteError`（前端会显示"检查网络或代理"却附一句 `database is locked`），改为与其它读路径一致的"先试远端 → ErrorFallback，双双失败才 RemoteError"。
-- Files: `crates/skillstar-marketplace/src/snapshot/local_first.rs`。
+- Files: `crates/ss-marketplace/src/snapshot/local_first.rs`。
 - Self-check:
   - 通用判据：**读路径的新鲜度判据必须和写路径的 scope 是同一个键**。任何"有行 = 新鲜"的判断都等于把 TTL 和降级标记全部作废。
-  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,last_success_at,next_refresh_at,degraded_reason FROM marketplace_sync_state WHERE scope='leaderboard_all';"` —— `next_refresh_at` 为空或过期时，all tab 必须显示 stale。
-  - `cargo test -p skillstar-marketplace the_all_tab`。
+  - `sqlite3 ~/.skillstar/cache/marketplace/marketplace.db "SELECT scope,last_success_at,next_refresh_at,degraded_reason FROM marketplace_sync_state WHERE scope='leaderboard_all';"` —— `next_refresh_at` 为空或过期时，all tab 必须显示 stale。
+  - `cargo test -p ss-marketplace the_all_tab`。
 
 ## 2026-08-12 - Marketplace degraded 快照自锁：兜底数据写进去就再也刷不出来
 
 - Symptom: 上游榜单 HTML 改版后，用户看到 200 行兜底数据 + 一条永久错误条 + 一个点几次都必然失败的重试按钮。既没有接受降级数据的出口，也没有停止报错的出口。
 - Root cause: 两条守卫互相打架。空库时允许写入 degraded 兜底并把 `next_refresh_at` 清空（立刻 stale）；但另一条守卫只要「本次 degraded 且本地有行」就直接失败返回。第一次兜底 seed 成功之后本地就有行了，于是之后每一次刷新都确定性失败，永远失败。根因是**"本地有没有行"回答不了"本地这批行是好数据还是兜底数据"**——降级状态只有进入语义、没有退出语义，也没有持久化标记。
 - Fix: 给 `marketplace_sync_state` 加 `degraded_reason` 列（schema v12，幂等 ALTER），由 `mark_scope_success_with_meta_in_tx` 在**写数据的同一事务内**维护：degraded 载荷 → 不给 TTL + 写 `degraded_reason`，且 `last_error` 保持 NULL（同步确实成功了，`last_success_at` 与 `last_error` 同时非空会被所有诊断消费方读成失败）；完整载荷 → 清 `degraded_reason` + 恢复 TTL，这是唯一的退出；304 / 同字节 → 行没变，质量也不变，保留原 `degraded_reason`（否则一次 304 就能给兜底数据发一个完整 6 小时 TTL）。判定收敛到纯函数 `plan_refresh(meta, previous_sha256, has_local_rows, stored_is_degraded)`：拒绝用降级数据覆盖**完整**快照，但允许降级数据替换**同样降级**的快照。
-- Files: `crates/skillstar-marketplace/src/snapshot/{sync.rs,sync_state.rs,migrations.rs,mod.rs}`。
+- Files: `crates/ss-marketplace/src/snapshot/{sync.rs,sync_state.rs,migrations.rs,mod.rs}`。
 - Self-check:
   - 通用判据：任何"拒绝写入"的守卫都必须能回答"被保护的到底是什么"。用行数代替质量标记，第一次降级写入就会把守卫变成自锁。凡是可能确定性重复失败的路径，必须明确写出退出条件。
-  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,last_success_at,last_error,next_refresh_at,degraded_reason FROM marketplace_sync_state;"` —— `degraded_reason` 非空时 `next_refresh_at` 必须为空。数据可不可信只看 `degraded_reason`，判据见下一条故障的自检（`last_success_at` 与 `last_error` 同时非空是正常可达状态，不是回归）。
-  - `cargo test -p skillstar-marketplace plan_refresh`、`cargo test -p skillstar-marketplace degraded`。
+  - `sqlite3 ~/.skillstar/cache/marketplace/marketplace.db "SELECT scope,last_success_at,last_error,next_refresh_at,degraded_reason FROM marketplace_sync_state;"` —— `degraded_reason` 非空时 `next_refresh_at` 必须为空。数据可不可信只看 `degraded_reason`，判据见下一条故障的自检（`last_success_at` 与 `last_error` 同时非空是正常可达状态，不是回归）。
+  - `cargo test -p ss-marketplace plan_refresh`、`cargo test -p ss-marketplace degraded`。
 
 ## 2026-08-12 - degraded 机制在它唯一要防的场景里不生效，进去了还出不来
 
@@ -440,13 +632,13 @@
   2. **出口被内容寻址挡住**：`plan_refresh` 的真值表漏了 `(stored_is_degraded=true, meta.degraded=false, payload_unchanged=true)`。degraded 时存下的 `payload_sha256` 是那份**当时解析不了**的载荷的指纹；解析器修好后重新解析同一份字节正是主要恢复路径，却恰好被跳写命中。
   3. **拿不到 body 就无从判断**：`conditional_etag` 只看行数不看质量，degraded scope 照发 `If-None-Match`，上游字节没变就一直 304，永远没有载荷可重新解析。
 - Fix: (1) 降级判定移到合并之前，抽成纯函数 `combine_leaderboard(html_skills, api_skills) -> (skills, degraded)`：`degraded` 由「HTML 有没有解析出榜单」决定；两半都空则返回 Err（没有载荷 ≠ 降级载荷，不允许用空榜单覆盖快照）。(2) `plan_refresh` 增加「stored degraded 且本次完整且**有真实 body**」强制 `Rewrite`（304 无 body，仍走 `SkipRewrite` 以保留标记而不是把 scope 重写成空）。(3) `conditional_etag(previous_etag, has_local_rows, stored_is_degraded)`：degraded 时不发 ETag。(4) `commit_unchanged` 路径改为 `etag = COALESCE(excluded.etag, 旧值)`——同字节响应也可能轮换 validator，留着旧的等于以后再也拿不到 304。
-- Files: `crates/skillstar-marketplace/src/remote/{leaderboard.rs,tests.rs}`、`crates/skillstar-marketplace/src/snapshot/{sync.rs,sync_state.rs,local_first.rs}`、`crates/skillstar-marketplace/src/snapshot/tests/part4.rs`。
+- Files: `crates/ss-marketplace/src/remote/{leaderboard.rs,tests.rs}`、`crates/ss-marketplace/src/snapshot/{sync.rs,sync_state.rs,local_first.rs}`、`crates/ss-marketplace/src/snapshot/tests/part4.rs`。
 - Self-check:
   - 通用判据：**降级/拒绝类判定必须放在「还分得清好数据和兜底数据」的那一刻**。任何在合并、追加、去重之后再问「结果是不是空的」的判定，都会在真实降级场景里恒假。
   - 通用判据：跳写（内容寻址、`If-None-Match`、缓存）与**质量升级**是两条正交的轴。只要「本次载荷和上次一样」能压过「上次那份是坏的」，坏状态就没有出口——凡是有降级态的地方都要显式写出 exit 优先级。
   - 通用判据：`last_success_at` 与 `last_error` 同时非空是**正常可达状态**（任何一次成功之后的刷新失败都会产生），它不表示「没有数据」。数据可不可信只由 `degraded_reason` 回答。
-  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,next_refresh_at,degraded_reason,etag FROM marketplace_sync_state WHERE scope LIKE 'leaderboard%';"` —— 榜单行数骤降到 ~200 而 `degraded_reason` 为 NULL 即为回归。
-  - `cargo test -p skillstar-marketplace degraded`、`cargo test -p skillstar-marketplace leaderboard`。
+  - `sqlite3 ~/.skillstar/cache/marketplace/marketplace.db "SELECT scope,next_refresh_at,degraded_reason,etag FROM marketplace_sync_state WHERE scope LIKE 'leaderboard%';"` —— 榜单行数骤降到 ~200 而 `degraded_reason` 为 NULL 即为回归。
+  - `cargo test -p ss-marketplace degraded`、`cargo test -p ss-marketplace leaderboard`。
 
 ## 2026-08-12 - 测试失明（第二轮）：迁移只测了函数自己，接线和持久化读回零覆盖
 
@@ -455,7 +647,7 @@
   1. `stored_scope_state` 的 `degraded: state.degraded_reason.is_some()` 变异成 `degraded: false`（精确复活自锁）不转红：所有 degraded 测试都直接调 `mark_scope_success_with_meta_in_tx` 然后读列，从不经过「读回持久化状态 → 喂给 `plan_refresh`」这条线；`plan_refresh` 的真值表测试根本不碰 SQLite。
   2. `migrate_schema` 的 `if version < 12` 变异成 `< 11` 不转红：v12 的测试先调 `create_connection()`（整条链已经跑完、列已经在了）再直接调两次 `migrate_v11_to_v12`，测的是函数自身幂等，不是迁移有没有接进版本链。而升级路径是唯一会坏的路径——全新库从 version 0 走基础建表，永远看不到这个缺陷。
 - Fix: (1) 把决定收敛到 `plan_scope_refresh(scope, meta)`——五个 `sync_scope_*` 都经过它，它内部完成「读回状态 → 判定」，测试直接断言它的返回值。(2) 新增手工种 `user_version = 11` 真实老库、走完整 `create_connection()` 的用例，并断言真正的症状（`scope_sync_state` / `get_marketplace_sync_states` 可读），不只断言列存在。(3) `stored_scope_state` / `scope_has_local_rows` 的读失败不再静默——加 warn 日志，因为读失败与上述变异等价。
-- Files: `crates/skillstar-marketplace/src/snapshot/sync.rs`、`crates/skillstar-marketplace/src/snapshot/tests/part4.rs`。
+- Files: `crates/ss-marketplace/src/snapshot/sync.rs`、`crates/ss-marketplace/src/snapshot/tests/part4.rs`。
 - Self-check:
   - 通用判据：**迁移测试必须从「上一版本的真实数据库」开始，走完整启动路径**。从 `create_connection()` 开始的迁移测试只能证明幂等，不能证明接线；这类缺陷对全新安装完全不可见。
   - 通用判据：凡是「持久化状态 → 决策」的链路，测试必须**跨过持久化边界**。分别断言「列写对了」和「纯函数判对了」，中间那一段读回逻辑仍是零覆盖。
@@ -466,19 +658,19 @@
 - Symptom: 上面两条 URL 拼接和跳写校验的修复，各自带着新增测试合并，但把修复代码变异回缺陷版本后 66 个测试**全绿**——测试名承诺的行为其实没有被测试。
 - Root cause: 两种同型错误。(1) `join_url` 两端都做了防御，只喂给它规范化过的 host 就永远拼对，测的是它自己而不是真实请求路径；真实路径 `fetch_with_failover` 的 URL 构造零覆盖。(2) 测试分别断言 `payload_unchanged(...)` 和 `scope_has_local_rows(...)` 两个 helper，从没把它们**组合**起来跑过任何判定，所以删掉五处 `has_local_rows &&` 守卫全绿。
 - Fix: 把两处判定各自抽成可测的纯函数并直接断言判定结果——`failover_targets_for(hosts, path)`（把 host 列表作为参数传入，才能覆盖"host 丢了尾斜杠"这个真正的缺陷形状）和 `plan_refresh(...)`。判定必须只有这一个落点，`sync_scope_*` 只做分派。
-- Files: `crates/skillstar-marketplace/src/remote/{mod.rs,tests.rs}`、`crates/skillstar-marketplace/src/snapshot/sync.rs`、`crates/skillstar-marketplace/src/snapshot/tests/part4.rs`。
+- Files: `crates/ss-marketplace/src/remote/{mod.rs,tests.rs}`、`crates/ss-marketplace/src/snapshot/sync.rs`、`crates/ss-marketplace/src/snapshot/tests/part4.rs`。
 - Self-check:
   - 通用判据：新增测试后，**把修复代码手工变异回缺陷版本，确认测试确实变红**。测不红的测试等于没写。断言中间量（host 列表、单个 helper 的返回值）永远不构成对判定的覆盖。
-  - 隔离副本做法：`rsync -a --exclude target --exclude node_modules --exclude .git ./ /tmp/mut/` 后在副本里改代码跑 `CARGO_TARGET_DIR=/tmp/muttarget cargo test -p skillstar-marketplace --lib`，不要在仓库里做变异。
+  - 隔离副本做法：`rsync -a --exclude target --exclude node_modules --exclude .git ./ /tmp/mut/` 后在副本里改代码跑 `CARGO_TARGET_DIR=/tmp/muttarget cargo test -p ss-marketplace --lib`，不要在仓库里做变异。
 
 ## 2026-08-12 - Marketplace URL 拼接丢斜杠：所有远端请求打到 `https://skills.shhot`
 
 - Symptom: 市场每个 tab 都红字 "Marketplace request failed" + 空列表，只有 Popular/All 榜单有数据；搜索永远失败且不自愈；配了 mirror 的用户完全正常。全套 58 个单测绿。
 - Root cause: 主 host 常量 `https://skills.sh` 没有尾斜杠（mirror host 走 `normalize_host` 有），而 `fetch_with_failover` 用 `format!("{host}{}", path.trim_start_matches('/'))` 又把 path 的前导斜杠删掉 —— 两端都不负责分隔符。于是 `/hot` → `https://skills.shhot`（NXDOMAIN，curl code=000），只有 path 为 `"/"` 的 Popular/All 恰好拼对。测试只断言 host 列表、从不断言最终 URL，还把"主 host 无尾斜杠、mirror 有"这个自相矛盾的状态写成了期望值，所以全绿。
 - Fix: `join_url()` 两端都防御 —— `format!("{}/{}", host.trim_end_matches('/'), path.trim_start_matches('/'))`；`marketplace_hosts()` 的主 host 也过 `normalize_host`。测试改为直接断言最终 URL。
-- Files: `crates/skillstar-marketplace/src/remote/{mod.rs,tests.rs}`。
+- Files: `crates/ss-marketplace/src/remote/{mod.rs,tests.rs}`。
 - Self-check:
-  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,last_success_at,last_error,source_host FROM marketplace_sync_state;"` —— 有 `last_attempt_at` 但 `last_success_at` 恒为 NULL，就是远端从来没通。
+  - `sqlite3 ~/.skillstar/cache/marketplace/marketplace.db "SELECT scope,last_success_at,last_error,source_host FROM marketplace_sync_state;"` —— 有 `last_attempt_at` 但 `last_success_at` 恒为 NULL，就是远端从来没通。
   - 通用判据：只要「host 是否带尾斜杠」和「path 是否带前导斜杠」由两处代码各自决定，就必然有一种组合拼错。断言中间量（host 列表）不算测过，必须断言最终 URL。
 
 ## 2026-08-12 - 首次同步失败把用户永久钉死在空市场，且看起来像"已同步"
@@ -490,11 +682,11 @@
   3. 远端 fetch 失败用 `?` 直接返回，从不调 `mark_scope_error`，而 `mark_scope_attempt_in_tx` 每次尝试开头又把 `last_error` 置 NULL → 库里 `last_error` 恒为 NULL，排查时看起来"没有错误"。
   另有同源的第四段：内容寻址只比对 `payload_sha256`，不看本地行是否还在 —— 本地数据丢失后只要上游字节没变就永远跳过重写，却报告成功 + Fresh。被墙网络恰恰最容易返回字节稳定的挑战页。
 - Fix: `sync_seed_state` 改按 `last_success_at.is_some()` 判定；`is_scope_stale` 对「有行但从未成功」返回 true，让启动刷新重试；五个 `sync_scope_*` 的远端失败显式 `mark_scope_error` 后再返回 Err；跳写前增加本地行数校验，行数为 0 时连 ETag 都不发（否则 304 空 body 无法重建数据）。
-- Files: `crates/skillstar-marketplace/src/snapshot/{sync_state.rs,sync.rs,local_first.rs}`。
+- Files: `crates/ss-marketplace/src/snapshot/{sync_state.rs,sync.rs,local_first.rs}`。
 - Self-check:
   - `SELECT scope, last_success_at, last_error, payload_sha256 FROM marketplace_sync_state;` —— 有行且 `last_success_at IS NULL` 就是本故障；`last_error` 必须能看到真实原因，恒为 NULL 说明失败路径又不写错误了。
   - 有 `last_success_at` + `payload_sha256`，但 `marketplace_listing` 是空的 ⇒ 跳写校验失效。
-  - `cargo test -p skillstar-marketplace part4`。
+  - `cargo test -p ss-marketplace part4`。
   - 通用判据：「尝试过」不等于「成功过」。任何用行存在与否代表成功的状态机，都会被"失败前先插行"的写法反噬。
 
 ## 2026-08-05 - 已有仓库扫描把稀疏工作树误当完整远端树，并跟随 Skill symlink
@@ -502,7 +694,7 @@
 - Symptom: 已有私有仓库的注册预览可能漏掉 Skill 目录外的嵌套文件、漏掉根 Skill 之外的嵌套 Skill，且恶意仓库可用 symlink 让发现器读取 checkout 外的 `SKILL.md`。
 - Root cause: 通用 Skill 安装缓存为了性能使用 shallow sparse checkout；注册预览却遍历物化后的工作树来代表完整远端库存。与此同时，递归发现使用会跟随 symlink 的 `Path::is_dir` / `read_to_string`，没有文件类型和大小边界。
 - Fix: 注册预览以 `git ls-tree` 的 tracked tree 作为文件清单，忽略 cache untracked 文件，再按 tree 中的全部 `SKILL.md` 目录物化并重新发现；发现器只接受不超过 1 MiB 的普通 `SKILL.md` 文件，递归 entry 与优先目录的每一级父路径都用 `symlink_metadata` 拒绝 symlink。
-- Files: `crates/skillstar-skills/src/{shared_channels/existing.rs,discovery.rs}`。
+- Files: `crates/ss-skills/src/{shared_channels/existing.rs,discovery.rs}`。
 - Self-check: sparse fixture 必须同时看见 `.github/workflows/ci.yml`、根 Skill 和嵌套 Skill，且不包含 cache untracked 文件；外部目录 symlink、`SKILL.md` symlink 和超大 manifest 均不得被发现。
 
 ## 2026-07-29 - Skill update 链路上的三处静默分叉
@@ -514,12 +706,12 @@
   3. **`update_available` 有三个所有者。** patrol 只 emit `patrol://skill-checked` 事件、从不落盘，所以它的发现活不过重启，并在重启前与 JSON snapshot 长期不一致。
   4. **CLI 绕过 update 事务。** `cmd_update` 只做 `git_ops::check_update` + `pull_repo`，跳过 lockfile hash 写入、同 repo 兄弟扇出、Agent relink、项目 cascade 和 update state 清除；对 repo-cached 技能还在错误的目录层级 pull。
 - Fix: `repo_link` 独占链接判定并统一走 `read_link_resolved`；subtree hash 合并进 `git_ops::compute_subtree_hash`（内部 `run_git` → `command_with_path`）；`update_state` 独占 update 可用状态，三个写入者全部写穿，陈旧判定按技能名 revision 在该 module 内裁决；CLI 与 GUI 共用 `skill_update` 事务。
-- Files: `crates/skillstar-skills/src/{repo_link.rs,update_state.rs,update_checker.rs,git/ops.rs,installed_skill.rs,skill_update/}`、`crates/skillstar-app/src/cli/manage.rs`、`src-tauri/src/core/patrol.rs`。
+- Files: `crates/ss-skills/src/{repo_link.rs,update_state.rs,update_checker.rs,git/ops.rs,installed_skill.rs,skill_update/}`、`crates/ss-app/src/cli/manage.rs`。
 - Self-check:
   - `grep -rn 'Command::new("git")' crates/` 应只命中测试 fixture；产品代码一律走 `command_with_path`（否则 GUI 从 Finder 启动时静默失效）。
-  - `grep -rn 'repos_cache_dir' crates/skillstar-skills/src/` 中做「是不是 repo cache 链接」判定的只能是 `repo_link`；`repo_scanner::{cache,detect,maintenance}` 命中的是 cache 目录管理，不是该判定。
+  - `grep -rn 'repos_cache_dir' crates/ss-skills/src/` 中做「是不是 repo cache 链接」判定的只能是 `repo_link`；`repo_scanner::{cache,detect,maintenance}` 命中的是 cache 目录管理，不是该判定。
   - `grep -rn 'junction::get_target' crates/` 应只命中 `fs_ops::read_link_resolved`，以及 `content::read_raw_link_target` 这一个有意的例外 —— 内容快照要 hash 链接的字面目标，解析成绝对路径会让 hash 依赖机器。除此之外，手写 `std::fs::read_link` + junction 回退就是在复制 `read_link_resolved`；这类手抄版本次共清理掉四份。
-  - `cargo test -p skillstar-skills repo_link update_state skill_update::plan`。
+  - `cargo test -p ss-skills repo_link update_state skill_update::plan`。
   - 通用判据：一个事实如果存在两个入口、且能给出不同答案，那就是分叉，无论两份代码看起来多像。
 
 ## 2026-07-12 - Grok account switch could overwrite a working CLI session with a billing-only token
@@ -531,41 +723,9 @@
   3. The documented protections (per-account full-entry snapshot, private file mode, write-after-read verification) were not implemented behind a single testable seam, so code and the backend SSOT had drifted independently.
   4. SkillStar could write an entry without Grok's required `create_time`; `~/.grok/logs/unified.jsonl` repeatedly recorded `auth disk state ... Unreadable ... missing field create_time`, after which Grok launched browser login.
   5. Usage refresh could rotate the active xAI refresh-token generation only in the card store while leaving `auth.json` stale, and SkillStar did not cooperate with Grok's official refresh lock/adopt-sibling protocol.
-- Fix: isolate Grok activation in `skillstar_app::usage_switch::grok` behind the `activate_subscription` / `resync_active_subscription` facade; give it a private encrypted, cross-process-locked session store and sole ownership of stable-identity outgoing capture, target restore/merge, schema/scope/effective-expiry validation, atomic `0600` write, post-write verification, and active-pin commit/reconciliation/rollback. Add the missing OAuth scopes; normalize every entry source to Grok's required schema; cooperate with the official `auth.json.lock` across sibling adoption, refresh and active CLI projection; preserve refresh/id tokens only when the same xAI subject is proven; immediately reactivate an active row after OAuth; serialize refresh/edit/delete/switch under one cross-process catalog lock; persist fetch results through narrow field patches; prefer a matching live disk session without downgrading newer cards; distinguish pre/post-replace errors; and reject known narrow-scope or unrestorable tokens before touching the working CLI file. Existing cards created with the old scope set must re-authorize once.
-- Files: `crates/skillstar-usage/src/{fetchers/oauth/{xai.rs,xai_tests.rs},storage.rs,refresh_guard.rs}`, `crates/skillstar-app/src/usage_switch{.rs,/grok.rs,/grok/{io.rs},/grok_tests.rs}`, `src-tauri/src/commands/usage_commands.rs`, `src/features/usage/{hooks/useUsageData.ts,components/{UsagePanel,UsageCardWindow}.tsx}`, i18n, `docs/features/usage/README.md`.
-- Self-check: `cargo test -p skillstar-usage oauth_scopes_include_conversations_for_grok_cli`; `cargo test -p skillstar-app usage_switch` (the Grok-only module was replaced by the shared symlink custody engine — see D-033);  `bunx vitest run src/features/usage/hooks/useUsageData.test.ts`; switch from a running/valid Grok account to an old narrow-scope card and confirm SkillStar reports reauthorization without changing the current `auth.json`, then re-authorize and switch successfully without browser OAuth. The written OIDC entry must contain `create_time`, and a following Usage refresh must leave the card and `auth.json` on the same access/refresh generation.
-
-## 2026-07-12 - GitHub Actions chronic failures (Windows CI / Release / CI)
-
-- Symptom: Actions history was almost all red — Windows CI never green; Release v0.0.3 failed all 4 platforms; CI red on Rust tests / flaky agent detection.
-- Root causes (recurring patterns, not one-off flakes):
-  1. **Dual lockfile drift:** local + Linux/macOS use Bun (`bun.lock`); Windows CI uses `npm ci` (`package-lock.json`). Dep changes updated package.json/bun.lock but left package-lock stale → every Windows run died at install with "Missing: … from lock file".
-  2. **Release-only TypeScript:** main CI ran lint + vitest but not `bun run build` (tsc). Tagging v0.0.3 made tauri-action's beforeBuildCommand fail on unused imports / incomplete fixtures / dead type compares — after the tag existed.
-  3. **Windows-only crate:** v0.0.1 Windows release E0433 `junction` until declared under `cfg(windows)` deps.
-  4. **Tests vs real $HOME:** agent profile detection and `ssh_hosts` "vps-yy" tests assumed developer machine layout / SSH config; clean GitHub runners failed and poisoned shared env mutexes.
-- Fix (process + gates, not all product bugs): delete failed/cancelled runs; document lessons in each `.github/workflows/*.yml` header; regenerate `package-lock.json`; add `bun run build` to CI + release pre-flight. Product fixes for remaining red tests (HOME sandbox / unused TS) are separate follow-ups.
-- Files: `.github/workflows/{ci,windows-ci,release}.yml`, `package-lock.json`, `AGENTS.md` CI section.
-- Self-check: after dep change, `npm ci` succeeds in a clean dir; `bun run build` is green before any `v*` tag; workflow comments list the patterns above.
-
-## 2026-07-12 - Usage card "去续费 / 打开控制台" browser link looked dead
-
-- Symptom: clicking the ExternalLink control on a Usage subscription card (tooltip「去续费 / 打开控制台」) did not open the system browser.
-- Root cause (stack):
-  1. Frontend used a bare `<a>` (`ExternalAnchor`) whose click path called `open_external_url` fire-and-forget with **no error toast**, so IPC/launcher failures looked like a dead button.
-  2. `openExternalUrl` recorded the URL into the 900ms duplicate-suppress cache *before* invoke succeeded — a failed open blocked immediate retries.
-  3. macOS launcher used bare `open` (PATH lookup); Dock/Finder launches with a thin PATH can miss it — use `/usr/bin/open`.
-  4. Framer `Reorder.Item` card wrappers could swallow the anchor click without `stopPropagation`.
-- Fix: Usage footer opens the console URL via `Button` + `openExternalUrl` with `stopPropagation` + failure toast; harden `open_external_url` with absolute launchers; only cache successful opens; ExternalAnchor also handles middle-click (`onAuxClick`) and keeps `target="_blank"` as progressive enhancement.
-- Files: `src/features/usage/components/card/UsageCardFooter.tsx`, `src/lib/externalOpen.ts`, `src/components/ui/ExternalAnchor.tsx`, `src-tauri/src/commands/shell.rs`, i18n `usage.openConsoleFailed`.
-- Self-check: `bunx vitest run src/lib/externalOpen.test.ts`; on a Usage card click「去续费 / 打开控制台」and confirm the default browser opens the catalog `subscription_url`.
-
-## 2026-07-12 - Usage card "在新窗口打开" looked dead on Retina/4K
-
-- Symptom: clicking「在新窗口打开」on a Usage subscription card did nothing visible (no floating card on the main display).
-- Root cause: `open_usage_card_window` fed `monitor.work_area()` **physical** coordinates into `WebviewWindowBuilder::position`, which expects **logical** pixels. On a 4K display with UI scale 2 (logical 1920×1080, physical 3840×2160) the card was placed at x≈3460 — far past the right edge of the screen. Re-clicks only focused the already off-screen window.
-- Fix: convert work-area origin/size by `scale_factor()` before cascade math; recovery path re-clamps existing off-screen card windows when the button is clicked again; surface create/show errors via toast.
-- Files: `src-tauri/src/commands/usage_windows.rs`, `src/features/usage/components/card/UsageCardFooter.tsx`, i18n `usage.openInWindowFailed`.
-- Self-check: `cargo test -p skillstar --lib commands::usage_windows`; on a Retina/4K Mac click「在新窗口打开」and confirm the floating card appears at the top-right of the main display (x ≈ logical_width − 360 − 20).
+- Fix: isolate Grok activation in `ss_app::usage_switch::grok` behind the `activate_subscription` / `resync_active_subscription` facade; give it a private encrypted, cross-process-locked session store and sole ownership of stable-identity outgoing capture, target restore/merge, schema/scope/effective-expiry validation, atomic `0600` write, post-write verification, and active-pin commit/reconciliation/rollback. Add the missing OAuth scopes; normalize every entry source to Grok's required schema; cooperate with the official `auth.json.lock` across sibling adoption, refresh and active CLI projection; preserve refresh/id tokens only when the same xAI subject is proven; immediately reactivate an active row after OAuth; serialize refresh/edit/delete/switch under one cross-process catalog lock; persist fetch results through narrow field patches; prefer a matching live disk session without downgrading newer cards; distinguish pre/post-replace errors; and reject known narrow-scope or unrestorable tokens before touching the working CLI file. Existing cards created with the old scope set must re-authorize once.
+- Files: `crates/ss-usage/src/{fetchers/oauth/{xai.rs,xai_tests.rs},storage.rs,refresh_guard.rs}`, `crates/ss-app/src/usage_switch{.rs,/grok.rs,/grok/{io.rs},/grok_tests.rs}`, `docs/features/usage/README.md`.
+- Self-check: `cargo test -p ss-usage oauth_scopes_include_conversations_for_grok_cli`; `cargo test -p ss-app usage_switch` (the Grok-only module was replaced by the shared symlink custody engine — see D-033);  switch from a running/valid Grok account to an old narrow-scope card and confirm SkillStar reports reauthorization without changing the current `auth.json`, then re-authorize and switch successfully without browser OAuth. The written OIDC entry must contain `create_time`, and a following Usage refresh must leave the card and `auth.json` on the same access/refresh generation.
 
 ## 2026-07-11 - Grok revoked refresh token stayed as a raw error and re-login duplicated the card
 
@@ -574,20 +734,8 @@
   1. xAI returns revoked refresh tokens as HTTP 400 OAuth `invalid_grant`, while the Grok token parser only mapped HTTP 401 to `UsageError::AuthRequired`. The command layer therefore saved a raw fetcher error instead of setting `requires_reauth`.
   2. The frontend correctly passed the edited subscription id, but the OAuth dispatcher/xAI login flow dropped it. Grok finalization always used `SubscriptionBuilder`'s fresh UUID, and storage upsert is intentionally keyed by subscription id rather than email.
 - Fix: classify OAuth `invalid_grant` as `AuthRequired`; carry `target_subscription_id` through the xAI pending login worker; rebuild refreshed credentials onto the target Grok row while preserving user metadata and clearing the stale reauth/error state.
-- Files: `crates/skillstar-usage/src/fetchers/oauth/{mod.rs,xai.rs,xai_tests.rs}`, `docs/features/usage/README.md`.
-- Self-check: `cargo test -p skillstar-usage fetchers::oauth::xai::tests`; edit/re-authorize one existing Grok card and confirm its id/card count stay unchanged while the token and usage snapshot refresh.
-
-## 2026-07-11 - Provider editor drawer could not be closed (X / Esc / left scrim)
-
-- Symptom: Models 侧边供应商编辑抽屉点右上角 X、「完成」、Esc 或左侧空白遮罩后仍不关闭，像被卡住。
-- Root cause:
-  1. `ProviderEditorDrawer.requestClose` 在 `flush()` 返回 `validation` / `error` 时直接 `return`，不调用 `onClose()`。受控 `Dialog` 的 `open` 因此一直为 true，所有 dismiss 路径（X / Esc / overlay）全部失效。
-  2. 遮罩 dismiss 只依赖 Radix outside-detect；未在 Overlay 上显式绑定点击关闭，体验不够稳。
-- Fix:
-  - `requestClose` 改为 best-effort `flush` 后 **始终** `onClose()`（`closingRef` 防重入）；非法 dirty 本就不会落盘，save 已 toast。
-  - `DrawerShell` Overlay 显式 `onPointerDown` / `onClick` → `onOpenChange(false)`，左侧空白可关。
-- Files: `src/features/models/components/provider/ProviderEditorDrawer.tsx`, `src/components/shared/DrawerShell.tsx`.
-- Self-check: 打开供应商编辑抽屉 → 故意填非法 URL 使 dirty+validation 失败 → 点 X / 左侧遮罩 / Esc /「完成」均应能关闭；合法编辑关闭后应已 autosave。
+- Files: `crates/ss-usage/src/fetchers/oauth/{mod.rs,xai.rs,xai_tests.rs}`, `docs/features/usage/README.md`.
+- Self-check: `cargo test -p ss-usage fetchers::oauth::xai::tests`; edit/re-authorize one existing Grok card and confirm its id/card count stay unchanged while the token and usage snapshot refresh.
 
 ## 2026-07-09 - Grok Usage card account switch looked like logout / forced browser re-auth
 
@@ -597,47 +745,17 @@
   2. `set_active_subscription` could write **stored** tokens without refreshing first — near-expired keys made the CLI re-auth the old session.
   3. Grok `auth.json` writer omitted `create_time` / `coding_data_retention_opt_out` and (before JWT fill) `team_id` / `principal_*` that `grok login` stores.
   4. No post-write verification — a live `grok` process can race and rewrite the old account, while SkillStar still reported success.
-  5. Usage floating card window swallowed switch errors (no toast) and only showed「重新同步到 CLI」after an in-memory `switch_result` failure (lost on reload).
-- Fix: request the full Grok CLI scope set in `xai` OAuth; OAuth refresh before CLI write; JWT claim fill + `create_time` / `coding_data_retention_opt_out`; `auth.json` mode `0o600` + re-read verify; card/grid always offer CLI re-sync; surface switch outcome via toast. **Existing Grok subscriptions logged in before the scope fix must re-authorize once** so stored tokens pick up `conversations:*`.
-- Files: `crates/skillstar-usage/src/fetchers/oauth/xai.rs`, `crates/skillstar-app/src/usage_switch.rs`, `src-tauri/src/commands/usage_commands.rs`, `src/features/usage/components/{UsageCardWindow,SubscriptionCard}.tsx`, `docs/features/usage/README.md`.
-- Self-check: `cargo test -p skillstar-app usage_switch` + `cargo test -p skillstar-usage oauth_scopes_include_conversations_for_grok_cli`; decode a stored token's JWT `scope` claim and confirm it includes `conversations:read`; switch two Grok rows and confirm `~/.grok/auth.json` OIDC entry `email`/`user_id`/`key` match the target (close running `grok` sessions if verify fails with "写入被覆盖").
-
-## 2026-06-15 - GUI/Tauri command core logic lacked direct test coverage（historical：代码已随 D-082 移除）
-
-> Historical coverage snapshot. The project-path assertions below were superseded on 2026-07-14 by the shared `.agents/skills` design in D-007: Codex now participates in an ambiguous universal group, and OpenClaw supports its upstream project-level `skills` directory.
-
-- Symptom: the Tauri commands `detect_project_agents`, `get_storage_overview`, and MCP `sync_server_to_tool` delegate to pure functions in workspace crates, but those functions had zero unit tests — only the surrounding Tauri wrappers exercised them at runtime. A regression in agent detection rules, symlink handling, or MCP sync skip-logic could ship unnoticed.
-- Coverage added (13 new tests across 4 modules):
-  - `detect_project_agents` (skillstar-projects/scan.rs, +4): detects codex when `.codex/skills` exists; does NOT detect when only the parent `.codex` exists (AGENTS.md "strictly on the skills dir itself"); detects multiple distinct agents with zero ambiguity; openclaw never appears at project level (global-only, empty `project_skills_rel`).
-  - `dir_size_recursive` + `count_hub_skills` (src-tauri/commands/github.rs, +2): symlink target content contributes 0 bytes (1 MB via symlink excluded, only the real 5-byte file counted); valid dir / valid symlink / broken symlink / stray file all classified correctly.
-  - (Removed with MCP management, D-074) MCP `sync_server_to_tool` / `sync_server_all_tools` (skillstar-models/mcp/tests.rs, +2): unknown tool_id surfaces an error instead of silent success; `sync_server_all_tools` returns exactly `MCP_TOOL_IDS.len()` results, one per known tool.
-  - Usage `local_import` (skillstar-usage/local_import.rs, +4): missing auth.json, empty `{}`, blank access_token, unsupported catalog_id — all return clear user-facing messages (see dedicated entry below).
-- Note: a first draft of the symlink-size test placed the symlink target *inside* the scanned root, which made it count as a normal subdirectory and falsely appeared to reveal a bug in `dir_size_recursive`. The function is correct; the test was restructured to put the target outside the root. Recorded here so the trap isn't re-hit.
+  5. Usage floating card window swallowed switch errors and only showed「重新同步到 CLI」after an in-memory `switch_result` failure (lost on reload).
+- Fix: request the full Grok CLI scope set in `xai` OAuth; OAuth refresh before CLI write; JWT claim fill + `create_time` / `coding_data_retention_opt_out`; `auth.json` mode `0o600` + re-read verify; card/grid always offer CLI re-sync; surface switch outcome to the user. **Existing Grok subscriptions logged in before the scope fix must re-authorize once** so stored tokens pick up `conversations:*`.
+- Files: `crates/ss-usage/src/fetchers/oauth/xai.rs`, `crates/ss-app/src/usage_switch.rs`, `docs/features/usage/README.md`.
+- Self-check: `cargo test -p ss-app usage_switch` + `cargo test -p ss-usage oauth_scopes_include_conversations_for_grok_cli`; decode a stored token's JWT `scope` claim and confirm it includes `conversations:read`; switch two Grok rows and confirm `~/.grok/auth.json` OIDC entry `email`/`user_id`/`key` match the target (close running `grok` sessions if verify fails with "写入被覆盖").
 
 ## 2026-06-15 - Usage local_import had no error-path test coverage
 
 - Symptom: `import_subscription_from_local` (codex/antigravity) is the entry point for one-click local credential import, but `local_import.rs` had zero unit tests — its failure modes (missing file, empty `{}` JSON, blank access_token) were only exercised manually.
 - Risk: a regression that silently creates a subscription from a blank credential, or gives an unhelpful error, could ship unnoticed.
-- Fix: added 4 tokio tests using a `$HOME`-scoped temp dir guard (serialized via a mutex since `home_dir()` reads `$HOME` under `cfg(test)`): missing auth.json, empty `{}` object, blank access_token, and unsupported catalog_id. All error paths now assert the user-facing message mentions the right field. skillstar-usage goes from 47 → 51 tests.
+- Fix: added 4 tokio tests using a `$HOME`-scoped temp dir guard (serialized via a mutex since `home_dir()` reads `$HOME` under `cfg(test)`): missing auth.json, empty `{}` object, blank access_token, and unsupported catalog_id. All error paths now assert the user-facing message mentions the right field. ss-usage goes from 47 → 51 tests.
 - Verified live: `~/.codex/auth.json` on this machine is `{}`, and the new test confirms that correctly yields "auth.json 缺少 tokens" instead of a crash or silent subscription.
-
-## 2026-06-15 - Deep-link event emitted by backend has no frontend listener
-
-- Symptom: SkillStar registers the `skillstar://` URL scheme and the backend (`src-tauri/src/lib.rs:emit_deep_link`) parses incoming `skillstar://...` URLs and emits a `skillstar://deep-link` Tauri event with the parsed payload. But no frontend code subscribes to that event, so opening a `skillstar://` URL does nothing visible.
-- Investigation: `src/hooks/useTauriSetup.ts` listens to `skillstar://window-hidden` and `patrol://enabled-changed`, but a repo-wide search for `deep-link` / `deepLink` / `DEEP_LINK` in `src/` finds no `listen(...)` call for `skillstar://deep-link`. The backend half is wired but the frontend consumer is missing.
-- Status: recorded as an in-progress gap, not fixed here — the current branch (`refactor/models-frontend-ia`) is mid frontend refactor and the deep-link consumer likely belongs to that work. When wiring it up, register a listener in `useTauriSetup.ts` that routes the parsed `{ host, path, query }` payload to navigation (e.g. open a skill detail / models drawer) the way `useNavigation` already models drawer deep-link requests.
-
-## 2026-06-15 - CLI commands find/remove/init hung launching the GUI
-
-- Symptom: `skillstar find`, `search`, `remove`, `init` (and their aliases) appeared to hang for minutes when run from the `skillstar` binary, eventually timing out. Other commands (`list`, `install`, `doctor`) returned instantly.
-- Root cause: `src-tauri/src/main.rs` routes to CLI mode only when `args[1]` is in a hard-coded `cli_commands` allow-list. That list predated several commands and was missing `find`/`search`/`remove`/`rm`/`uninstall`/`init`/`help`. Any missing subcommand fell through to `skillstar_lib::run()` and started the full Tauri GUI, which blocks indefinitely in a terminal/headless context.
-- Fix: the `cli_commands` list now mirrors every variant + alias declared in `skillstar_app::cli::Commands` (including aliases like `search`, `rm`, `add`), with a comment tying the two together so future commands are not silently dropped.
-
-## 2026-06-15 - CLI find used a throwaway empty marketplace DB
-
-- Symptom: even after the routing fix, `skillstar find <q>` was slow and reported `snapshot: Seeding`/`RemoteError` instead of `Fresh`, despite `~/.skillstar/db/marketplace.db` holding 54k+ rows.
-- Root cause: the marketplace snapshot runtime defaults to `std::env::temp_dir().join("skillstar-marketplace")` when nobody calls `configure_runtime`. GUI mode configures it during `setup`, but the CLI entry point's `migrate_and_run` hook only ran legacy path migration. So `find` opened an empty `/tmp` DB, hit the "no skill rows" branch, and triggered a blocking remote seed against skills.sh on every search.
-- Fix: the Tauri CLI's `migrate_and_run` now also calls `core::marketplace::initialize_local_snapshot()` so every CLI command shares the real `~/.skillstar/db/marketplace.db`. `find` now returns `Fresh` in ~2s.
 
 ## 2026-06-15 - CLI failures returned exit code 0
 
@@ -670,19 +788,6 @@
 - Root cause: agent install detection provisioned `global_skills_dir` during read-only profile listing, which made every built-in profile look installed and enabled by default. Batch/project deploy paths also created target directories before confirming a source skill existed.
 - Fix: profile detection is now read-only and treats an existing agent config root as installed without creating `skills/`. Toggle defaults mirror that read-only detection. Global batch link and project incremental deploy now create target directories only after finding a real hub skill to deploy, and prune a newly-created project target if nothing was linked.
 - Superseded: D-009 于 2026-07-14 完全移除了本机 Agent 安装探测与探测默认值；本条保留为历史事故记录，当前实现只读取手动激活偏好。
-
-## 2026-06-07 - Agent tool model metadata was not persisted for OpenCode
-
-- Symptom: pulling models populated model IDs, but OpenCode sync could not reliably write enriched `name`, `limit`, and `cost` fields, and Codex `wire_api` / auth mode changes could be lost after saving.
-- Root cause: the provider form reused `modelCatalog` as a local string-list variable while building the save patch, overwriting `meta.model_catalog` with plain IDs. The flat provider patch also did not apply `codex_wire_api` and `codex_auth_mode` to the provider entry fields.
-- Fix: model IDs and normalized catalog metadata are now stored separately, OpenCode sync reads structured metadata from `provider.meta.model_catalog`, and flat provider updates persist Codex API/auth settings directly.
-
-## 2026-06-07 - SKILL.md translation skipped mixed English/Chinese content and lost reuse after restart
-
-- Symptom: SKILL.md translation could return too quickly with untranslated English when the document already contained enough Chinese text, and repeated translations after restarting the app still had to call the AI provider again.
-- Root cause: the Chinese-target skip heuristic only checked CJK ratio, so mixed documents could be treated as already translated. The translation cache was session-scoped memory only, despite the UI contract expecting backend-owned durable reuse.
-- Fix: translation now only skips content that is clearly already target-language Chinese, keeps mixed English/Chinese segments eligible for translation, and stores both segment-level and whole-document translation results in `~/.skillstar/db/translation_cache.db`.
-- Superseded: 2026-07-14 起 SKILL.md 翻译及其缓存已由 ACP 全目录图文教程替代；本条只保留为历史故障记录。
 
 ## 2026-06-06 - Antigravity Usage credits loaded but model quota stayed empty
 
@@ -719,7 +824,7 @@
 
 - Symptom: Google-family Usage OAuth failed with `Google token：error sending request`, and startup logged `marketplace_snapshot: startup refresh failed scope=leaderboard_all`.
 - Root cause: the local SkillStar proxy config can be disabled while the machine cannot direct-connect to Google/GitHub/skills.sh. Usage already used the proxy-aware client, but marketplace remote fetches used a bare cached `reqwest::Client`, so they ignored later proxy configuration.
-- Fix: marketplace remote HTTP now uses `skillstar_core::infra::http_client::probe_http_client`, sharing the app proxy config and rebuilding when proxy settings change. Usage command errors now append a network/proxy hint for transport failures.
+- Fix: marketplace remote HTTP now uses `ss_core::infra::http_client::probe_http_client`, sharing the app proxy config and rebuilding when proxy settings change. Usage command errors now append a network/proxy hint for transport failures.
 
 ## 2026-05-21 - OpenCode usage API readiness shown as fetcher failure
 
@@ -743,29 +848,12 @@
 ## 2026-06-19 - Skill pack post_install scripts failed on Windows; bundle path guard missed Windows-style entries
 
 - Symptom: a skill pack whose `skillpack.toml` declares a `post_install` script was always marked `PartiallyInstalled` with "post_install script exited with code -1" on Windows, even though every skill in the pack installed correctly. `execute_post_install` unconditionally invoked `sh -c <script>`, and `sh` is absent from PATH on Windows unless Git Bash/WSL is installed — so `Command::output()` returned `Err` and the function returned `-1`. This contradicted the rest of the codebase's "Windows uses PowerShell, not bash" convention (ACP runner, cloud_code probe, Launch Deck all gate scripting by OS).
-- Root cause: `crates/skillstar-skills/src/skill_pack.rs` `execute_post_install` had no `#[cfg(windows)]` branch and no interpreter selection; it hard-coded `command_with_path("sh")`. Separately, the bundle extraction path-traversal guard (`skill_bundle.rs`, two call sites) only rejected `/`-prefixed and `..`-containing entries, so a maliciously crafted archive entry using a Windows drive prefix (`C:\...`) or backslash separators (`..\foo`) could slip past it — defense-in-depth only, since legitimate `.ags`/`.agd` bundles written by this module always use `/`-delimited entries.
+- Root cause: `crates/ss-skills/src/skill_pack.rs` `execute_post_install` had no `#[cfg(windows)]` branch and no interpreter selection; it hard-coded `command_with_path("sh")`. Separately, the bundle extraction path-traversal guard (`skill_bundle.rs`, two call sites) only rejected `/`-prefixed and `..`-containing entries, so a maliciously crafted archive entry using a Windows drive prefix (`C:\...`) or backslash separators (`..\foo`) could slip past it — defense-in-depth only, since legitimate `.ags`/`.agd` bundles written by this module always use `/`-delimited entries.
 - Fix:
   - `execute_post_install` now selects the interpreter by platform + script extension: Unix always uses `sh -c` (backward compatible with existing bash scripts); Windows uses `powershell -NoProfile -ExecutionPolicy Bypass -File` for `.ps1`, `cmd /C` for `.bat`/`.cmd`, and falls back to `sh -c` for `.sh`/extensionless so a Git Bash install still runs bash scripts. The selection logic was extracted into a `post_install_interpreter(ext)` helper (returning a `PostInstallInterpreter` enum) so it has cross-platform unit-test coverage (2 new tests in `skill_pack.rs`).
   - A missing interpreter now logs a readable `tracing::warn!` (with the program name and the underlying io error) before returning the `-1` sentinel, instead of swallowing the error silently.
   - Bundle extraction now uses a shared `is_unsafe_archive_path` predicate that also rejects backslash separators and Windows drive-letter prefixes (`C:`, `c:`). Both extraction sites (single-skill and multi-skill import) route through it. 3 new tests in `skill_bundle.rs` cover safe relative paths, Unix absolute/traversal, and Windows-style paths.
-- Verified: `cargo test -p skillstar-skills` 58 passed (was 53; +5 new), `cargo clippy -p skillstar-skills` introduces no new warnings, `cargo check --workspace` clean. Windows-specific branches are exercised by the interpreter-selection unit tests on every platform.
-
-## 2026-06-25 - Models workbench: Claude Code wrote empty ANTHROPIC_MODEL; ZCode removed as provider tool（historical：代码已随 D-082 移除）
-
-- Symptom: 模型工作台 (Models Hub) 功能异常。用户机器上 `~/.claude/settings.json` 的 `env` 块出现 `"ANTHROPIC_MODEL": ""`（空字符串），导致 Claude Code 模型解析失效。
-- Root cause: `sync_to_claude_code_inner` 无条件把 `model` 参数写进 `ANTHROPIC_MODEL`。当 provider 未设 `default_model` 且激活时未显式指定 model 时，链路（前端 `useAgentActivation.activate` → `activate_tool` 命令 → `crud::activate_tool` 的 model resolution → `sync_to_claude_code`）会让 model 解析成空字符串 `""`，原样写入，产生无效配置。同一次还移除了 ZCode 作为模型工作台 provider tool（`sync_to_zcode`/`unsync_zcode` 及相关分支），但保留 `tool_sync::resolve_zcode_config_path()` —— 它当时被 MCP 子系统（`zcode_v2_opencode_mcp_remove`，已随 D-074 删除）和 Usage 子系统（`switch_zcode`）跨子系统复用，删除会破坏编译。
-- Fix:
-  - `sync_to_claude_code_inner`：`ANTHROPIC_MODEL` 改用新增的 `trim_or_null(model)` helper —— 空/空白 model 返回 `Value::Null`，由 `merge_json_env_write` 当作"移除该键"处理（与 Haiku/Sonnet/Opus 空值语义一致），不再写入无效的 `""`。
-  - 模型工作台范围移除 ZCode：前端 `agentRegistry.ts`（`ProviderToolId` 联合、`PROVIDER_AGENTS`、`CONFIG_FILE_TOOLS`）、`AgentToolIcon.tsx`；后端 `tool_sync` 的 `sync_to_zcode`/`unsync_zcode`、`paths_files.rs` 各 `zcode` 分支、`backup_merge.rs` 的 `resync_active_tools` 分支、`types.rs` 注释；`providers/crud.rs` `activate_tool` 校验分支；Tauri 命令层 `tools.rs`（activate/deactivate/update_tool_settings/push_provider_to_tool_config/resync_tool/detect_tool_installation）。MCP/Usage/Projects/SSH/providers-balance 等子系统的 zcode 引用**全部保留**。
-- Verified: `cargo check -p skillstar-models` 通过；`cargo test -p skillstar-models tool_sync` 51 passed（含新增 `test_sync_to_claude_code_inner_empty_model_skips_key`）；`cargo check --workspace` 通过；改动的两个前端文件 `biome check` 干净。`tool_sync::tests` 里 3 个 zcode 专用测试已删，`test_get_tool_config_targets_returns_both_tools` 的 `targets.len()` 由 5 改为 4。
-
-## 2026-06-25 - 模型工作台所有 agent 卡片显示"未接入"（FlatProvidersResponse camelCase 序列化不匹配）（historical：代码已随 D-082 移除）
-
-- Symptom: 在模型工作台激活 Claude（或任意 agent）后，toast 提示"已同步到配置文件"（后端 sync 确实成功，`~/.claude/settings.json` 写入正确），但卡片状态胶囊始终显示"未接入"（inactive），provider 下拉与模型选择也不出现。后端 store（`~/.skillstar/config/model_providers.json`）的 `tool_activations["claude-code"]` 数据完全正确（含 provider_id 和 model）。
-- Root cause: `FlatProvidersResponse`（`src-tauri/src/commands/models_commands/mod.rs`）标注了 `#[serde(rename_all = "camelCase")]`，导致 `tool_activations` 字段被序列化成 `toolActivations` 返回给前端。而前端类型 `FlatProvidersResponse.tool_activations`（`src/types/models.ts`）及所有消费者（`activations.ts`、`providers.ts`、`useProvidersFlat.ts`、`useAgentActivation.ts`、`ModelsHub.tsx`、`devMockData.ts`）一律读 snake_case 的 `tool_activations`。于是 `data.tool_activations` 永远是 `undefined`，`toolActivations` 退化成 `{}`，`activation = data?.tool_activations?.[toolId]` 恒为 `null` → `computeAgentStatus` 走 `!activation` 分支返回 `inactive`。注意 `ProviderEntryFlat` 和 `ToolActivation` 本身**没有** `rename_all`（字段保持 snake_case），所以 provider 列表能正常工作——只有包了 `rename_all` 的 `FlatProvidersResponse` 这一层把 `tool_activations` 这个多词字段改了名，单个词的 `version`/`providers` 因 camelCase==snake_case 而未暴露问题。
-- Fix: 去掉 `FlatProvidersResponse` 上的 `#[serde(rename_all = "camelCase")]`，让 `tool_activations` 保持 snake_case 与前端类型一致。该结构体只作为 `get_providers_flat` 的返回值（纯序列化输出，从不作为命令入参），去掉属性不影响反序列化入参；`version`/`providers` 是单词不受影响。
-- Verified: `cargo check`（全工作区）通过；前端 `providers.test.tsx` + `activations.test.ts` 共 9 passed。前端 mock（`devMockData.ts`）与测试夹具（`providers.test.tsx`）均已使用 snake_case `tool_activations`，与修复后的后端输出一致。
-- Lesson: 当一个响应结构体包了 `rename_all = "camelCase"` 而其嵌套类型没有时，多词字段会在边界处发生命名风格切换，前端按统一风格读取就会漏掉。新增/修改跨 Tauri 边界的响应结构体时，应确保字段命名风格与前端类型定义一致；若前端用 snake_case，后端响应结构体不应加 `rename_all = "camelCase"`。
+- Verified: `cargo test -p ss-skills` 58 passed (was 53; +5 new), `cargo clippy -p ss-skills` introduces no new warnings, `cargo check --workspace` clean. Windows-specific branches are exercised by the interpreter-selection unit tests on every platform.
 
 ## 2026-07-04 - SSH 远程 hub：单引号包裹的 `~` 从不展开 → 内容落到字面 `$HOME/~/` 目录、agent 符号链接悬空；远端脚本退出码被丢弃 → 静默失败
 
@@ -785,14 +873,6 @@
 - Verified: `cargo test --workspace` 738 passed / 0 failed（skillstar-ssh 60，含新增：绝对布局与旧 `~` 布局的 discovery 分类、脚本构造器"禁止引号包 `~`"断言、git 免交互断言、heal 输出解析）；`cargo clippy -p skillstar-ssh -p skillstar` 无新告警。
 - Lesson: 远端路径有两条独立的展开规则——shell 只展开未加引号的 `~`，SFTP 根本不展开。任何要跨这两个通道的路径都必须显式解析成绝对路径（shell 用 `"$HOME"`，SFTP 用 `canonicalize(".")`），并且"写入方"和"探测方"用同一个错误路径会让 bug 自洽地隐身：验证要以**第三方消费者**（VPS 上的 agent CLI）视角做。远端命令必须检查退出码，echo 标记只能用于分支分类，不能当成功判据。
 
-## 2026-07-13 - Gemini CLI 卸载后仍出现在 Skill Agent SVG 轮播
-
-- Symptom: 本机已找不到 `gemini` CLI，但 Skill 卡片底部仍显示 Gemini SVG，并在已链接的 Skill 上显示“Gemini CLI（移除）”。
-- Root cause: `skillstar-skills` 的 CLI 安装检测把 exact skills 目录存在也视为安装信号；SkillStar 在部署 Skill 时会创建 `~/.gemini/skills`，卸载 CLI 后该目录仍可能保留，因此 `AgentProfile.installed` 错误地保持为 `true`。前端的 `installed && enabled` 过滤本身正确，但消费了错误的后端状态。
-- Fix: CLI 的 skills-dir fallback 改为显式按 Agent 允许，目前仅 Codex 与 ZCode 保留兼容兜底；Gemini 必须检测到 `gemini` binary 或受支持的桌面应用信号。前端继续复用 `selectTargetableAgentProfiles`，不添加 Gemini 特判，避免 Settings、项目部署和 Skill 卡片状态分叉。
-- Self-check: 在 hermetic tempdir 中创建 Gemini skills 目录，但让 binary 不存在，`detect_installed` 必须返回 `false`；同样场景下 Codex/ZCode 的兼容 fallback 必须保持 `true`；前端 `installed=false, enabled=true` 的 profile 不得进入轮播候选。
-- Superseded: D-009 于 2026-07-14 删除了 `detect_installed`，上述 fallback 与 self-check 不再属于当前实现；本条只解释旧版本根因。
-
 ## 2026-07-14 - 共享 Agent skills 目录导致本机 Agent 被误发现和误启用
 
 - Symptom: Skill 和卡组卡片底部的 Agent SVG 列表与 Settings 的实际 Agent 状态不一致；已经卸载的 Agent 仍可能出现在 Skill/卡组里。
@@ -800,32 +880,11 @@
 - Fix: 删除本机 Agent 安装探测、探测元数据和探测驱动的默认值；所有 profile 默认关闭，Settings 开关成为唯一激活来源。Skill、卡组、Project 和 CLI 隐式目标统一按手动 `enabled` 投影。冻结 IPC 字段 `installed` 仅镜像 `enabled`。
 - Self-check: 即使 PATH、应用目录、配置根和共享 skills 目录都存在，空偏好注册表仍必须返回全部关闭；首次手动 toggle 后对应 profile 才进入各 rail；关闭后立即消失。
 
-## 2026-07-10 - Models Agent 设置切换供应商会串写上一家的参数
-
-- Symptom: 在 Agent 设置中修改供应商 A 的 Claude/Codex 参数后，若在自动保存完成前切换到供应商 B，界面可能继续显示 A 的草稿，并把它保存进 B；原始配置文件有未保存内容时，切换、重载、同步或关闭也可能静默覆盖草稿。
-- Root cause: `AgentSettingsDialog` 的参数草稿只有一份 `params`，没有绑定 `provider.id`；供应商切换后 `persisted` 已指向 B，但旧 `params` 仍参与 dirty/save。`AgentConfigFiles` 的文件切换、格式化、重载与同步也没有把 `dirty` 当作覆盖保护条件，弹窗关闭状态更未感知该 dirty。
-- Fix: 参数草稿改为 `{ providerId, values }`，保存与渲染只消费当前供应商的草稿；切换供应商和关闭前先 flush 参数自动保存，失败时留在当前界面。原始配置 dirty 会同步到弹窗保存状态，并阻止关闭、切文件、格式化、重载、同步、重绑与断开，直到用户显式保存。
-- Self-check: 编辑 A 后立即切 B，B 必须显示自身参数且 A 的值不能写入 B；原始配置 textarea 变脏后，所有会替换内容或离开弹窗的入口都必须保持禁用/被拦截，保存成功后才能恢复。
-
-## 2026-07-14 - Agent 已链接技能明细为空但徽标仍显示旧计数
-
-- Symptom: 在 Settings 展开 Agent 后，明细已经显示“暂无已链接的技能”，同一行的徽标仍显示例如“3 已链接”；逐个解绑最后一个技能或在外部手动删除部署后都可能触发。
-- Root cause: Agent 行用 `linkedSkillNames.length || profile.synced_count` 计算徽标。空数组长度 `0` 是已经加载完成的真实结果，却被 JavaScript 的逻辑或当成假值，错误回退到 Settings 首次加载时的 `synced_count` 快照；展开明细则直接读取空数组，于是同一张卡片出现两套真相。
-- Fix: 保留“明细未加载时用 `synced_count` 摘要”的首屏能力，但用 `undefined` 区分未加载、用空数组表达已加载且为零；明细加载后计数与内容统一读取同一数组。展开后的零计数仍显示收起按钮，收起后隐藏零计数徽标。
-- Self-check: 用 `synced_count=3` 渲染未加载行时应显示初始摘要；随后传入该 Agent 的空明细数组时，展开内容应显示“暂无已链接的技能”，徽标必须变成 `0` 而不能继续显示 `3`，并且仍可收起。
-
-## 2026-07-14 - 来源下拉里滚动鼠标滚轮会横向滚动 topbar
-
-- Symptom: 窗口较窄、topbar filters 溢出时，打开“来源”下拉并在选项上滚动鼠标滚轮，topbar 会跟着横向滚动，下拉与其锚点错位。
-- Root cause: `PageToolbar` 的 filters 容器 `<div ref={filtersRef} onWheel={...}>` 用滚轮量驱动横向滚动。来源下拉是 Radix `Popover.Content`，通过 `Popover.Portal` 渲染到 `document.body`，DOM 上不在 filters 内部；但 React synthetic event 沿 **React 组件树** 冒泡，会跨 portal 传播回这个仍是其 React 祖先的 `onWheel` handler。handler 只判断 `scrollWidth > clientWidth`，没有校验事件是否真的源自 filters 的 DOM 子树，于是把下拉里的滚动也当成 filters 滚动执行。
-- Fix: 在 `onWheel` 开头加 `if (!el.contains(e.target as Node)) return;` DOM 归属守卫。portal 出去的下拉内容不是 `el` 的 DOM 后代会被直接跳过；真正的 filter pills 是 `el` 后代，横向滚动照常。用真实 DOM 关系而非 React 树关系判断事件归属。
-- Self-check: 窗口窄到 filters 溢出时，鼠标在真正的 filter pills 上滚动仍应横向滚动 topbar；打开来源（或任何 portal 下拉）后在其内容上滚动，topbar 必须保持不动。任何经 portal 渲染、但 React 树上是 filters 后代的浮层，都不应再触发 topbar 滚动。
-
 ## 2026-08-13 - 装第二个技能会永久锁死整个仓库；崩溃残留的 staging 会伪装成"无 lock entry 的已装技能"
 
 - Symptom: 从同一个仓库安装第二个技能后，该仓库的所有安装、扫描和更新都失败并报 `Skill 'A' has local changes; preserve them as a local copy or explicitly discard them`，而用户从未编辑过 A；`refresh_skill_updates` 同时显示"无更新"，与错误自相矛盾。另一种形态是错误里点名 `.skillstar-remove-writer-1234` 这类用户看不见也无从处理的隐藏路径，同样锁死整个仓库。
 - Root cause: 两个独立缺陷叠加在同一道门禁上。① `repo_scanner::cache` 在任何 scan/install 前无条件 `git fetch` + `reset --hard`，但 `scan_install` 只为本次 target 写 lock entry，同 checkout 的其它已装技能磁盘内容被推进、baseline 却停在旧 commit，于是被算成"本地分歧"。② 每条写入路径都用点开头的 staging 名（`.skillstar-remove-*`、`.skillstar-install-*`、`.importing-*`）做 rename 换入，进程被杀会留下残留；对 repo-cache 技能这个残留就是一个指向该 cache 的符号链接，而 `ensure_installed_checkout_is_clean`、`collect_skill_dirs`、patrol 的 hub 遍历都不过滤点开头条目，于是把它当成已装技能并要求它有 lock entry。卸载 staging 名里还带 `std::process::id()`，使得已有的自愈分支只能匹配当前进程的残留，跨进程崩溃留下的永远清不掉。
-- Fix: `hub_entry::is_managed_hub_entry` 成为所有 hub 遍历共用的唯一判定（`cache.rs`、`installed_skill::collect_skill_dirs`、`patrol::collect_hub_skills`、`divergence`），点开头条目一律不算已装技能；`hub_entry::sweep_stale_staging` 在持有 update transaction lock 的安装与卸载入口清扫残留，且不走 `fs_ops::remove_link_or_copy`（那个函数对没有 SKILL.md 的目录会拒绝删除，而半写状态恰恰没有 SKILL.md）；卸载 staging 名去掉 pid，使自愈跨进程生效——安全前提是它的三个调用方都持有 transaction lock。`skill_update::refresh_baselines_after_checkout_reset` 在两处 reset 成功后为同 checkout 的全部已装技能刷新 baseline，只在门禁已证明 worktree 干净之后调用，因此内容变化必然来自上游而不是用户；内容在 reset 后消失的技能保留旧 baseline，那是更新路径识别"来源已删除"的依据。
+- Fix: `hub_entry::is_managed_hub_entry` 成为所有 hub 遍历共用的唯一判定（`cache.rs`、`installed_skill::collect_skill_dirs`、`patrol::collect_hub_skills`、`divergence`），点开头条目一律不算已装技能；`materialize::sweep_stale_transients`（公开入口 `skill_update::sweep_stale_transients`，持事务锁）清扫 canonical 根和各 Agent 全局目录里、自残留创建时刻起超过 30 分钟的暂存：目标还在的 `.skillstar-stage-*`，以及目标还在且替换已提交的 `-backup-*` / `-retain-*`。目标已缺失的 backup / remove / retain 留给医生还原，不按目录 mtime 删掉，且不走 `fs_ops::remove_link_or_copy`（那个函数对没有 SKILL.md 的目录会拒绝删除，而半写状态恰恰没有 SKILL.md）；事务入口会定期调用它。卸载 staging 名去掉 pid，使自愈跨进程生效——安全前提是调用方持有 transaction lock。`skill_update::refresh_baselines_after_checkout_reset` 在两处 reset 成功后为同 checkout 的全部已装技能刷新 baseline，只在门禁已证明 worktree 干净之后调用，因此内容变化必然来自上游而不是用户；内容在 reset 后消失的技能保留旧 baseline，那是更新路径识别"来源已删除"的依据。
 - Self-check: 造一个含点开头 staging 残留（符号链接、无 SKILL.md 的半写目录、完整目录三种形态）的 hub，清扫后只有 staging 消失、真实技能与无关 dotfile 保留、被指向的 repo cache 内容不受影响；同一仓库连装两个技能后，第一个技能不得出现 local divergence，且该仓库的后续安装/扫描/更新都必须继续可用。
 
 ## 2026-08-13 - 检查失败被当成"没有更新"，一次离线巡检就把真实徽标擦成最新
@@ -835,26 +894,19 @@
 - Fix: 三处统一改成返回 `None`（`.ok()`），交给既有的跳过逻辑。判定语义与 `docs/features/skills/README.md` 已经声明的"失败保留徽标"对齐。
 - Self-check: 让检查返回 `Err`，`update_state` 中该技能的既有 `true` 必须原样保留而不是被写成 `false`；这条同样适用于 patrol 的任务 panic/取消路径。
 
-## 2026-08-20 - 侧边栏收起卡顿：先修错了层，真正的成本在每帧重绘而不是重排
-
-- Symptom: 点击侧边栏收起/展开，200ms 全程掉帧（不是点击那一下顿住，是整个滑动过程不连贯）。直觉指向 `Sidebar`，改侧边栏本身没有效果。
-- Root cause: 第一轮按"动画布局属性 → 每帧重排"定的性，删掉 `#main-content` 的 `transition-[padding-left]` 改成 FLIP 之后，用户反馈毫无改善。实测 React 同步渲染开销只有 0.2–19ms（5 技能 / 403 节点的 Chrome repro），说明 JS 和重排都不是主导项。真正的成本是 WKWebView 的**每帧重绘**：`<aside>` 是 `z-50` 的半透明浮层，200ms 内持续改变 width，而它正压在 `.ss-main-chrome` 上——那张卡片有 `bg-card/80` 半透明底、`ring-1`、`rounded-l-[26px]`，以及一道 `shadow-[0_24px_80px_-40px_...]`。`index.css` 里那段注释早就写明这类模糊重绘的代价（"a 95px blur repaint across the whole column"），只是没人把它和侧边栏动画联系起来。全仓另有 66 处 `backdrop-blur`。
-- Fix: 分两步。① 删掉 `#main-content` 的 `transition-[padding-left]`——即使不是主因，12 次全树重排也是纯浪费，这一步保留。② 二分：删掉 `<aside>` 的 `transition-[width]` 和临时加过的 FLIP，伸缩改为完全瞬时，零动画帧。
-- Self-check: `src/App.test.ts` 断言 `#main-content` 的 className 不含任何 `transition-[`，并先断言取到的确实是那个元素（否则正则失配会让守卫静默通过）。更一般的教训有两条：包裹页面树的容器不允许 CSS 过渡布局属性，需要位移就走 transform；以及**动画卡顿不要只查重排**——半透明层、大模糊阴影、backdrop-filter 之上的任何几何动画，成本在合成器而不是布局，用测量而不是推理来定位（先问"是点击那一下顿，还是整个过程掉帧"，两者指向完全不同的层）。
-
 ## 2026-08-21 - 发布者仓库卡片显示 11 个技能，点进去只有 3 个，刷新也不收敛
 
 - Symptom: `vercel/ai` 的仓库卡片写着 11 个技能，点进去列表只有 3 个；`publisher_repos` 与 `repo_skills` 两个 scope 都刷新过，数字照旧。skills.sh 自己的发布者页和仓库页都是 3。
 - Root cause: 同一个仓库有两个写入方，互不校正。`publisher_repos:<publisher>` 读 `/official` 聚合载荷，把 `skill_count=11` 写进 `marketplace_repo`，并把内嵌的 11 条技能写进 `marketplace_repo_skill`；`repo_skills:<source>` 抓仓库页，把同一张技能表 delete+reinsert 成 3 条。卡片读的是 `marketplace_repo.skill_count` 这个缓存列，列表读的是技能行，于是 11 对 3 永久并存。更糟的是聚合页的 `totalInstalls` 几乎每次都变，指纹不同就整表重写，把过期的 11 条再灌回来，列表本身也在 11 和 3 之间来回翻。
-- Fix: 两处。① `load_publisher_repos_snapshot` 的技能数改为从 `marketplace_repo_skill` 行数推导，没有行才回退到存储列——卡片与列表共用一个事实。② 聚合内嵌技能抽成 `seed_repo_skills_from_official_in_tx`，只给 `repo_skills:<source>` 从未成功过的仓库做种子；仓库页一旦抓过就是该仓库的权威，聚合不再覆盖。前端在 `repo_skills` 同步成功后同时失效 `publisherRepos` 查询，否则卡片缓存仍是旧值。
+- Fix: 两处。① `load_publisher_repos_snapshot` 的技能数改为从 `marketplace_repo_skill` 行数推导，没有行才回退到存储列——卡片与列表共用一个事实。② 聚合内嵌技能抽成 `seed_repo_skills_from_official_in_tx`，只给 `repo_skills:<source>` 从未成功过的仓库做种子；仓库页一旦抓过就是该仓库的权威，聚合不再覆盖。
 - Self-check: `snapshot/tests/part8.rs`——先种 3 条，模拟仓库页抓到 1 条并记成功，再跑一次种子必须仍是 1 条，且 `load_publisher_repos_snapshot` 对该仓库返回 1、对没有行的仓库返回存储列。更一般的教训：**一张表不能有两个不分先后的写入方**；任何"聚合页内嵌明细"都只配做种子，明细页一旦有自己的 scope 就要让位。
 
-## 2026-09-18 - "发现新技能"卡片的安装按钮静默失败：安装扫描用了过期缓存，错误又被前端吞掉
+## 2026-09-18 - "发现新技能"卡片安装用的缓存扫描看不到上游新增技能
 
-- Symptom: 巡逻在 mattpocock/skills 上游发现新技能 `pr` 并显示 ghost 卡片，但点"安装"毫无反应——按钮转回可点状态，无 toast、无对话框，技能也没有装上。
-- Root cause: 两个缺陷叠加。① `install_from_source` → `scan_repo_preferring_local_cache_for_skill` 只要本地存在 repo cache 检出就直接扫描它，从不 fetch；而发现新技能的巡逻走的是网络路径看到了上游新增。本地检出停在旧提交，`choose_install_skills` 找不到 `pr`，返回"not found / may have been deleted or renamed"。② `GhostSkillCard` 的 `catch {}` 注释写着"Error handled by parent"，但父级 `installGhostSkill` 只是把错误继续抛出，没有任何 toast——整条 ghost 安装路径是唯一没有错误提示的安装入口。
-- Fix: `scan_repo_preferring_local_cache_for_skill` 新增 `required_skills` 参数（`install_from_source` 传入显式请求的技能名）：缓存扫描后若任一显式身份不可解析（`find_target_skill` 与 `nameless_root_skill` 双重判定），warn 并回退到 `fetch_repo_scanned_detailed_in_session` 拉最新再扫；无显式请求时保持纯缓存快路径。前端新增 `handleInstallGhost`，失败时 `toast.error` 显示原因，与 `handleInstall` 一致。
-- Self-check: `pipeline_fetches_stale_cache_when_requested_skill_is_missing` 回归测试——先装 alpha 建立缓存，上游再提交 pr，第二次安装必须成功而不是报"not found"；前端测试断言 ghost 安装 reject 时 `toast.error` 被调用且包含原因。
+- Symptom: 巡逻在 mattpocock/skills 上游发现新技能 `pr` 并显示 ghost 卡片，但点"安装"失败或毫无反应，技能没有装上。
+- Root cause: `install_from_source` → `scan_repo_preferring_local_cache_for_skill` 只要本地存在 repo cache 检出就直接扫描它，从不 fetch；而发现新技能的巡逻走的是网络路径看到了上游新增。本地检出停在旧提交，`choose_install_skills` 找不到 `pr`，返回"not found / may have been deleted or renamed"。调用方又只把错误抛出，没有任何提示。
+- Fix: `scan_repo_preferring_local_cache_for_skill` 新增 `required_skills` 参数（`install_from_source` 传入显式请求的技能名）：缓存扫描后若任一显式身份不可解析（`find_target_skill` 与 `nameless_root_skill` 双重判定），warn 并回退到 `fetch_repo_scanned_detailed_in_session` 拉最新再扫；无显式请求时保持纯缓存快路径。安装失败必须有可见错误。
+- Self-check: `pipeline_fetches_stale_cache_when_requested_skill_is_missing` 回归测试——先装 alpha 建立缓存，上游再提交 pr，第二次安装必须成功而不是报"not found"。
 
 ## 2026-10-11 - 非标准布局技能的轮播图标每次点击都走网络 fetch，图标卡顿数秒
 
@@ -862,3 +914,10 @@
 - Root cause: 上一条目给 `scan_repo_preferring_local_cache_for_skill` 加的「显式请求的技能在本地不可解析就 fetch 重扫」判定，只看**浅扫描**（`full_depth=false`，仅优先目录）的结果。深路径技能的 `SKILL.md` 永远不出现在浅扫里，即使 lockfile 记录的 `source_folder` 已在该 checkout 物化、hub 链接完好，每次 harness 点击仍被判为「缓存缺失」，强制 `clone_or_fetch_repo_at_in_session`：git fetch → worktree 校验 → `reset --hard` → baseline 刷新 → 稀疏重应用，全链秒级。
 - Fix: `all_resolvable` 增加第三个判据 `recorded_install_payload_on_disk`：lockfile 里该技能（大小写不敏感、同 remote URL）的 `source_folder` 在此 checkout 内仍带 `SKILL.md` 即视为可解析，不 fetch。`source_folder` 为 `None`、含 `..` 段、或磁盘上已不存在时仍走原 fetch 回退。代价：上游此后新增的 harness 副本对本次点击不可见（缓存按定义滞后），与既有 cache-local 契约一致。
 - Self-check: `installed_monorepo_skill_reuses_cached_checkout_without_fetch`——深路径技能装一次后毒化 remote 与 cache origin，第二个 harness 点击必须离线成功且 lock 的 `source_folder` 不变；修复前该测试会进入 fetch 并因 remote 不可达而失败。
+
+## 2026-10-07 - 根技能永远「可更新」、嵌套路径技能被误报「上游已移除」
+
+- Symptom: 仓库根就是技能的来源（`skillPath` 为空）每次检查都显示有更新，更新后依旧；`skills/a/b` 这类含 `/` 的路径一检查就被标成「上游已移除」，但上游明明还在。
+- Root cause: 两处都在 Trees API 快速路径。① 按 ref 请求 `git/trees/{ref}` 时，响应顶层的 `sha` 是**该 ref 指向的 commit SHA**，不是根 tree SHA；锁里根技能记的是 `HEAD^{tree}`，两者永远不等。② 旧的 `subtree_from_api` 只认识根目录一层，路径含 `/` 直接返回 `None`，调用方把 `None` 解释成「上游已移除」，而不是「API 答不了，回退克隆」。
+- Fix: 检测先把 ref 解析成 commit，再读该 commit 的 `tree.sha`；嵌套路径逐层读子树。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
+- Self-check: `update_check_tests.rs` 的 `root_skill_compares_the_commit_tree_not_the_commit` 与 `nested_paths_walk_subtrees_and_only_missing_folders_are_removed`。凡是拿 GitHub API 的 `sha` 与锁里的 `skillFolderHash` 比较，先确认它是 tree 对象而不是 commit；「查不到」与「不存在」必须是两个结果。

@@ -1,0 +1,40 @@
+[package]
+name = "ss-gpui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GPUI desktop shell for SkillStar"
+
+[lints]
+workspace = true
+
+[lib]
+name = "ss_gpui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ss-gpui"
+path = "src/bin/ss-gpui.rs"
+
+[dependencies]
+gpui-kit = "0.7.1"
+ss-core = { path = "../ss-core" }
+ss-app = { path = "../ss-app" }
+ss-skills = { path = "../ss-skills" }
+ss-marketplace = { path = "../ss-marketplace" }
+ss-usage = { path = "../ss-usage" }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+
+[dev-dependencies]
+gpui-kit = { version = "0.7.1", features = ["test-support"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSCursor", "NSImage", "NSTrackingArea"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData"] }

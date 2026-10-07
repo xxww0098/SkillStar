@@ -26,14 +26,9 @@
   - 输入是 `git_ops::list_tree_paths(repo_dir)`。它对稀疏 cache、完整克隆、tarball 合成仓库都可用，tarball 合成树的结果会退化，可以接受。
   - 判定规则：存在 `.claude-plugin/plugin.json` 或 `.claude-plugin/marketplace.json`，并且 manifest 指向的插件目录下有 `hooks/` 或 `agents/`。
 
-**命令层（只做适配）**
-- `src-tauri/src/commands/github/repo.rs:161` 的 `install_from_scan(spec: Source, skills, …)`。
-
-**前端**
-- `src/types/marketplace.ts:87`：加 `git_ref?`、`subpath?`、`skill_filter?`、`plugin?`。这个类型是手写的，不走 `types:gen`。
-- `src/lib/ipc/commands/github.ts:33` 的参数改为 `spec`。`ImportModal.tsx:462` 和 `useSkills.ts:364, 390` 传 `spec: scanResult`，整个扫描结果本身就是 spec。
-- `src/lib/ipc/devMock/github.ts:65-81` 补上新字段。
-- `ImportModal.tsx` 在列表上方加一行提示，文案用 `t("githubImportModal.claudePluginHint")`；中英文放进 `src/i18n/locales/{en,zh-CN}.json`。不新增组件。
+**界面**
+- 导入对话框在 `crates/ss-gpui/src/my_skills/import_modal/`。扫描结果原样作为 spec 传给 `install_from_scan`，不重新拼 URL。
+- 有插件提示时在列表上方加一行。文案放进 `crates/ss-gpui/assets/locales/{en,zh-CN}.json`。不新增组件，也不恢复 TypeScript 类型或 dev mock。
 
 **CLI**
 - `--list` 和 install（`crates/skillstar-app/src/cli/install.rs:535` 附近）在 `plugin.is_some()` 时打印同样的一行提示。
@@ -45,13 +40,12 @@
   - `install_from_scan_keeps_ref_and_pin`
   - `plugin_hint_detects_hooks_and_agents`
   - `plugin_hint_is_none_without_manifest`
-- `bun run lint && bun run build && bun run test`：如果已有 ImportModal 或 useSkills 的前端测试，同步更新其中调用参数的断言。
-- `bash scripts/internal/check_command_boundaries.sh`、`bash scripts/internal/check_feature_imports.sh`。
+- `cargo test -p ss-gpui --lib`。不要跑已删除的前端门禁。
 - 离线 CLI 探针：`$E cargo run -q -p skillstar -- add https://github.com/pbakaus/impeccable.git --list`，输出里能看到插件提示那一行。
 
 ## 截图（本档有可见 UI）
 
-用 `bun run tauri dev`，或者 devMock 页面，打开导入框，粘贴 `https://github.com/pbakaus/impeccable/tree/main/.claude/skills/impeccable`，分别截两张图：扫描后的列表（含插件提示），以及安装完成后的状态。
+用 `cargo run -p skillstar -- gui` 打开导入框，粘贴 `https://github.com/pbakaus/impeccable/tree/main/.claude/skills/impeccable`，分别看扫描后的列表（含插件提示）和安装完成后的状态。
 
 对这两张图跑 screenshot-critique，这是本档接受前的最后一项检查。它提供的是不带预设的第二意见，只判断提示行是否清楚、有没有挤压列表。ImportModal 的其他视觉问题不在本档范围内。
 

@@ -2,4 +2,9 @@
 # 2026-09-29: 28 -> 25 on deleting MCP management (mcp_snapshot, mcp/probe).
 # 2026-10-05: 25 -> 22 on removing the model domain (D-082): models_commands,
 # ai/*, decide.rs, and skillstar-models/gateway signatures left with it.
+# 2026-10-07: 22 -> 20 after My Skills reinstall/uninstall and the import
+# dialog stopped returning Result<_, String> from skill install callbacks.
+# 2026-10-07: 20 -> 22 on the ss-* crate consolidation; marketplace import and
+# skill-card avatar fallbacks picked up two stringly-typed signatures. Debt:
+# convert them to a thiserror enum and drop back to 20.
 22

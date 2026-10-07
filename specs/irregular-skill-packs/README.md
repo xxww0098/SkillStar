@@ -175,8 +175,7 @@
   - `cargo test --workspace --locked`
   - `bash scripts/internal/check_file_size.sh`（重点看 `skill_install.rs`，现在 953 行）
 - 动到 `skillstar-git` 时：`bash scripts/internal/check_workspace_deps.sh`。
-- 动到前端或命令层时（05）：`bun run lint && bun run build && bun run test`、`check_command_boundaries.sh`、`check_feature_imports.sh`。
-- `bun run types:gen` 不需要跑：`ScanResult` 和 `SkillInstallTarget` 的 TS 类型是手写的（`src/types/marketplace.ts:87`、`src/types/skill.ts:181`）。PR 描述里说明这一点。
+- 动到导入界面时（05）：`cargo test -p ss-gpui --lib`。不要跑已删除的 `bun` 门禁，也不要恢复手写的 TypeScript 类型。
 - 下面这些回归测试任何一档都必须保持绿：
   - `installed_impeccable_deepseek_falls_back_to_a_skill_folder`
   - `installed_rust_skills_deepseek_retargets_from_cache_without_clone`

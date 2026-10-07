@@ -9,7 +9,7 @@
 # prior 66 diagnostics (dead code from the src-tauri command-layer migration,
 # collapsible-if / redundant-closure / doc-comment cleanups, etc.). The 1
 # remaining diagnostic is `needless_lifetimes` in
-# crates/skillstar-usage/src/fetchers/oauth/cursor.rs, which is off-limits to
+# crates/ss-usage/src/fetchers/oauth/cursor.rs, which is off-limits to
 # edit per project convention — do not fix it without explicit instruction.
 #
 # Re-verified 2026-08-14 against clippy 0.1.97 after rust-toolchain.toml
@@ -17,4 +17,10 @@
 # Until that pin landed this number had no fixed denominator — CI resolved
 # `stable` fresh on every run, so the lint set could move underneath it. Bump
 # `channel` and re-run this guard in the same commit, never separately.
-1
+#
+# Re-verified 2026-10-06 against clippy from rustc 1.99.0 after the toolchain
+# pin moved 1.97.1 -> 1.99.0. Count went 1 -> 56. New lints, not new code:
+# 41 redundant `#[must_use]`, 6 redundant closures, 2 serde attribute parse
+# failures, and 7 one-off warnings (including cargo's future-incompat note
+# for the `block` crate). Raised here as the toolchain-bump exception.
+56

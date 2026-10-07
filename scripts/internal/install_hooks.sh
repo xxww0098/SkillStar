@@ -33,8 +33,8 @@
 #
 # ## The ladder (measured on an M-series Mac, warm cargo target/)
 #
-#   pre-commit  ~5.4 s   pure-shell ratchets + biome
-#   pre-push    ~56 s    the above + i18n + tsc + vitest + cargo test + clippy
+#   pre-commit  structural ratchets
+#   pre-push    the above + cargo test --workspace --locked + clippy ratchet
 #
 # Both hooks are advisory in the sense that `git commit --no-verify` and
 # `git push --no-verify` bypass them. That is deliberate and documented: if the
@@ -194,10 +194,9 @@ PREAMBLE_EOF
 # ---------------------------------------------------------------------------
 # pre-commit — budget <= 6 s. Measured 2026-08-14, warm: 5.4 s total.
 #
-# Contains every ratchet that is pure shell (plus `cargo metadata`, which is
-# cached and costs ~0.1 s) and biome. check_i18n_hardcoded.sh is deliberately
-# NOT here: measured at 2.9 s it is by itself half the budget, and including it
-# pushes this hook to 8.3 s. It runs in pre-push instead.
+# Contains every remaining structural ratchet. The React/Tauri gates
+# (feature imports, command boundaries, TS orphans, biome) left with that
+# stack. See D-091.
 # ---------------------------------------------------------------------------
 write_pre_commit() {
   cat > "$HOOKS_DIR/pre-commit" <<HOOK_EOF
@@ -217,21 +216,11 @@ HOOK_EOF
 
 echo "[pre-commit] fast ratchets (~5s)"
 
-# Measured warm, 2026-08-14: 0.08 / 1.99 / 1.49 / 0.05 / 0.72 / 0.68 / 0.07 s.
-# check_ts_orphan_modules.sh added 2026-08-15: 0.32 s.
 gate check_workspace_deps.sh
 gate check_file_size.sh
-gate check_feature_imports.sh
-gate check_command_boundaries.sh
 gate check_error_strings.sh
 gate check_no_orphan_modules.sh
-gate check_ts_orphan_modules.sh
 gate check_dep_graph_doc.sh
-
-# biome over 516 files: 0.30 s.
-if [ -f package.json ]; then
-  step "biome lint" bun bun run lint
-fi
 
 summary_and_exit
 HOOK_EOF
@@ -293,30 +282,12 @@ echo "[pre-push] full gate (~1 min warm, several minutes on a cold cargo cache)"
 # Everything pre-commit runs — a commit may have been made with --no-verify.
 gate check_workspace_deps.sh
 gate check_file_size.sh
-gate check_feature_imports.sh
-gate check_command_boundaries.sh
 gate check_error_strings.sh
 gate check_no_orphan_modules.sh
-gate check_ts_orphan_modules.sh
 gate check_dep_graph_doc.sh
 
-# Too slow for pre-commit (2.9 s of a 6 s budget); lands here instead.
-gate check_i18n_hardcoded.sh
-
-# Frontend. `bun run build` is tsc + vite: ci.yml failure lesson #1 is that
-# lint + vitest do NOT substitute for it — release v0.0.3 burned all four
-# matrix legs on TypeScript errors that only the production build catches.
-if [ -f package.json ]; then
-  step "biome lint"   bun bun run lint     # 0.30 s
-  step "tsc + vite build" bun bun run build # 12.8 s
-  step "vitest"       bun bun run test     # 8.7 s
-fi
-
-# Rust. cargo test also regenerates the ts-rs bindings, so the freshness
-# guard runs after it, not before.
-step "cargo test --workspace --locked" cargo cargo test --workspace --locked  # 22.8 s
-gate check_generated_types.sh                                                 # 0.6 s
-gate check_clippy_ratchet.sh                                                  # 2.9 s
+step "cargo test --workspace --locked" cargo cargo test --workspace --locked
+gate check_clippy_ratchet.sh
 
 summary_and_exit
 HOOK_EOF
@@ -327,7 +298,7 @@ write_pre_commit
 write_pre_push
 
 printf 'install_hooks: installed pre-commit and pre-push into %s\n' "$HOOKS_DIR"
-printf '  pre-commit  ~5s   fast structural ratchets + biome\n'
-printf '  pre-push    ~56s  + i18n, tsc, vitest, cargo test, clippy ratchet\n'
+printf '  pre-commit  structural ratchets\n'
+printf '  pre-push    + cargo test --workspace --locked + clippy ratchet\n'
 printf '  bypass      git commit --no-verify  /  git push --no-verify\n'
 printf '  remove      bash scripts/internal/install_hooks.sh --uninstall\n'

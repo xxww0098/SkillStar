@@ -4,13 +4,13 @@
 
 本文件是本机团队智能（recall、skill health、friction notes、digest）的单一事实来源。这不是已删除的 Learn/教程域（[D-053](../../decisions.md#d-053移除学习功能与-skillstar-learning)）：不读写 `~/.skillstar/learning/`，不生成 Guide HTML，不启动 ACP。
 
-架构选择见 [D-056](../../decisions.md#d-056团队智能留在-skillstar-skills私有-module)。
+架构选择见 [D-056](../../decisions.md#d-056团队智能留在-ss-skills私有-module)。
 
 ## 所有权
 
-- `skillstar-skills::team` 拥有语料枚举、BM25、friction 评分、learnings/usage/recall 持久化与 health/digest 投影。
-- 路径只通过 `skillstar-core::infra::paths::team_store_path()`（`state/team.json`）。
-- CLI 适配在 `skillstar-app::cli::team`；本切片不增加 Tauri command 或 GUI 页。
+- `ss-skills::team` 拥有语料枚举、BM25、friction 评分、learnings/usage/recall 持久化与 health/digest 投影。
+- 路径只通过 `ss-core::infra::paths::team_store_path()`（`state/team.json`）。
+- CLI 适配在 `ss-app::cli::team`。本切片不增加 GUI 页。
 - `skillstar find` 仍只搜 Marketplace 快照。`skillstar team recall` 只搜已安装 Skill 与本地 notes。
 
 ## 闭环
@@ -24,7 +24,7 @@
 
 ## Recall
 
-- 语料：Hub（含指向 local 的 link）与 `hub/local` 下可读的 `SKILL.md`，加上 store 里的 notes。
+- 语料：Hub（含指向 local 的 link）与 `data/skills/local` 下可读的 `SKILL.md`，加上 store 里的 notes。
 - 分词：拉丁词（长度 ≥ 2，去掉短停用词）+ CJK 单字与二元组。
 - 排序：BM25（k1=1.2, b=0.75）；name 加权重复索引。命中的 learning 若绑定 Skill，给该 Skill 邻接 +1.5。
 - 空 query 返回空列表，不写 store。成功命中会追加 recall event，供 health 使用。
@@ -64,7 +64,7 @@ skillstar team used pr-review
 
 ## 非目标（本切片）
 
-- GUI 页、Tauri IPC、ts-rs DTO。
+- GUI 页。
 - 把 notes 推到 GitHub 共享频道或开 PR（teamai 的 contribute/MR 流程）。
 - codebase graph / teamwiki。
 - 复活 `skillstar-learning` crate 或 ACP 教程。
@@ -72,7 +72,7 @@ skillstar team used pr-review
 ## 验证
 
 ```bash
-cargo test -p skillstar-skills team
-cargo test -p skillstar-app --lib cli::mode_tests
-cargo test -p skillstar-core --lib infra::paths
+cargo test -p ss-skills team
+cargo test -p ss-app --lib cli::mode_tests
+cargo test -p ss-core --lib infra::paths
 ```

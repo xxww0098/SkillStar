@@ -1,23 +1,21 @@
 name: CI
 
-# Cross-platform quality gate: lint, tests, and the structural-governance
-# ratchets (file size / i18n hardcoding / feature-slice boundaries / stringly-
-# typed errors / clippy) on every PR and every push to main. Complements
-# windows-ci.yml (which catches Windows-specific path/shell regressions using
-# npm) — this workflow uses Bun, matching local development (bun.lock).
+# Cross-platform quality gate: Rust tests and the remaining structural
+# ratchets (file size, stringly-typed errors, orphan modules, dependency
+# graph, clippy) on every PR and every push to main. Complements
+# windows-ci.yml, which catches Windows-specific path and shell regressions.
+# The React/Bun gates left with the Tauri shell (D-091).
 #
 # ## Failure lessons (from Actions history — do not re-learn the hard way)
 #
-# 1. Always run a production frontend build here, not only lint + unit tests.
-#    Release v0.0.3 burned all four matrix legs because `bun run build` (tsc)
-#    failed on unused imports / incomplete fixtures / dead type comparisons.
-#    Until this job ran `bun run build`, those errors only appeared inside
-#    `tauri-action`'s beforeBuildCommand — after a tag was already pushed.
-#    Lint (Biome) and Vitest do not substitute for `tsc -b` in the Vite build.
+# 1. Do not re-add a frontend production build. Release v0.0.3 burned on
+#    TypeScript that only `tauri-action` compiled. That stack is retired
+#    (D-091). The gate that replaces it is `cargo test --workspace --locked`
+#    on this commit, which release.yml verifies rather than repeats.
 #
 # 2. Tests must not depend on the runner's real $HOME / host machine state.
 #    Observed failures:
-#    - `list_profiles_detection_does_not_create_skills_dirs` (skillstar-skills /
+#    - `list_profiles_detection_does_not_create_skills_dirs` (ss-skills /
 #      agents): "expected config root to count as installed" when the runner
 #      has (or lacks) real agent config roots under $HOME.
 #    - `commands::ssh_hosts::tests::*vps_yy*` (src-tauri): host resolve failed
@@ -30,9 +28,9 @@ name: CI
 #    Fixed via the SKILLSTAR_SSH_CONFIG override (ssh::system_config): ssh
 #    tests point it at a fixture file and never mutate HOME/USERPROFILE.
 #
-# 3. `cargo test --workspace` compiles src-tauri, so Linux needs the same
-#    webkit2gtk/gtk system packages as release.yml even though we never
-#    produce a desktop bundle in this job.
+# 3. `cargo test --workspace` compiles the GPUI shell, so Linux needs
+#    pkg-config, libxkbcommon-dev, libwayland-dev, and libvulkan-dev. Do not
+#    put webkit2gtk or GTK back; that linker set belonged to Tauri.
 #
 # 4. Ratchet gates + clippy + cargo-deny run only on Linux (see test-macos
 #    note). Duplicating clippy on macOS roughly doubles wall-clock time for
@@ -75,7 +73,7 @@ name: CI
 #    from {stable, 1.97.1} to {1.97.1}, so the key legitimately moved once.
 #
 # 8. test-linux has no timeout-minutes (GitHub default is 360). A ~7 minute
-#    job that dies at `skillstar-git` with "The operation was canceled" is
+#    job that dies at `ss-git` with "The operation was canceled" is
 #    not a tight cap and is not extra harness tests. The unix cancel test
 #    used to `kill -TERM -$pid`, which signals a process group; when the
 #    child was not isolated that is the Actions step group. Do not "fix"
@@ -97,39 +95,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Tauri's Linux build links against system webkit2gtk/gtk/appindicator;
-      # `cargo test --workspace` compiles the `skillstar` (src-tauri) crate,
-      # so these are needed even though this job never produces a bundle.
-      # Same package list as release.yml's ubuntu step.
+      # GPUI links Wayland, xkbcommon, and Vulkan. These are needed because
+      # cargo test --workspace compiles the skillstar binary. This job does
+      # not produce an installer.
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
+            pkg-config \
             build-essential \
             libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install JS dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Lint
-        run: bun run lint
-
-      # Production build (tsc + vite). Required gate — see failure lesson #1.
-      - name: Frontend production build
-        run: bun run build
-
-      - name: Frontend tests
-        run: bun run test
+            libxkbcommon-dev \
+            libwayland-dev \
+            libvulkan-dev
 
       # Rust version + component list have exactly one home: rust-toolchain.toml
       # (see failure lesson #7). Read it here and hand it to the action, so no
@@ -184,20 +162,8 @@ jobs:
       - name: Rust tests (workspace)
         run: cargo test --workspace --locked
 
-      - name: Generated-types freshness guard (skillstar-models + skillstar-marketplace + skillstar)
-        run: scripts/internal/check_generated_types.sh
-
       - name: File-size guard (structural governance)
         run: scripts/internal/check_file_size.sh
-
-      - name: i18n hardcoded-string guard
-        run: scripts/internal/check_i18n_hardcoded.sh
-
-      - name: Feature cross-import guard
-        run: scripts/internal/check_feature_imports.sh
-
-      - name: Tauri command boundary guard
-        run: scripts/internal/check_command_boundaries.sh
 
       - name: Stringly-typed error guard
         run: scripts/internal/check_error_strings.sh
@@ -207,14 +173,6 @@ jobs:
       # violations today, so this is blocking from day one.
       - name: Orphan-module guard (structural governance)
         run: scripts/internal/check_no_orphan_modules.sh
-
-      # The TypeScript twin of the walk above. A .ts/.tsx file that no entry
-      # point reaches is still linted, still type-checked and still runs its
-      # own co-located tests — which is exactly how ~4000 unreachable lines
-      # survived inside src/features/models with every gate green. Zero
-      # violations today, so this is blocking from day one.
-      - name: TS orphan-module guard (structural governance)
-        run: scripts/internal/check_ts_orphan_modules.sh
 
       # Proves the mermaid graph in docs/boundaries.md still matches the real
       # cargo dependency edges, both directions. Zero violations today.
@@ -258,32 +216,12 @@ jobs:
       - name: cargo-deny (advisories / licenses / sources)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          manifest-path: src-tauri/Cargo.toml
-          arguments: --config src-tauri/deny.toml
+          arguments: --config deny.toml
 
   test-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install JS dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Lint
-        run: bun run lint
-
-      # Same production-build gate as test-linux (lesson #1). Cheap relative
-      # to cargo test; keeps macOS green only when the app would actually ship.
-      - name: Frontend production build
-        run: bun run build
-
-      - name: Frontend tests
-        run: bun run test
 
       # Identical to test-linux's pair of steps — see the long comment there.
       - name: Resolve pinned Rust toolchain

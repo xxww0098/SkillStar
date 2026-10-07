@@ -2,69 +2,67 @@
 
 状态：active
 
-本文件维护跨功能平台服务：路径/存储、GitHub mirror、ACP、后台生命周期、CI 和 updater。全局运行不变量见 [../../architecture.md](../../architecture.md)。
+本文件维护跨功能平台服务：路径/存储、日志、GitHub mirror、ACP、后台生命周期、CI 和 updater。全局运行不变量见 [../../architecture.md](../../architecture.md)。
 
 ## 路径、存储和 HTTP
 
-- 数据根、hub 根和配置路径统一由 `skillstar-core` resolver 产生；UI 使用后端返回的 resolved path。桌面多开 profile 根是 `data_root()/instances/<app>/<id>/`（`instances_dir()`），清单在 `config/app_instances.json`；覆盖 `SKILLSTAR_DATA_DIR` 时两者一起走。
+- 数据根、hub 根和配置路径统一由 `ss-core` resolver 产生；UI 使用后端返回的 resolved path。桌面多开 profile 根是 `data_root()/instances/<app>/<id>/`（`instances_dir()`），清单在 `config/app_instances.json`；覆盖 `SKILLSTAR_DATA_DIR` 时两者一起走。
 - Storage overview 扫描 hub/cache/config 时不跟随 symlink/junction target，避免递归和 Windows 卡死。
-- Storage overview、cache cleanup 与 force-delete 的跨域维护流程由 `skillstar-app::storage_maintenance` 拥有；Tauri command 只调度并返回 DTO。
+- Storage overview、cache cleanup 与 force-delete 的跨域维护流程由 `ss-app::storage_maintenance` 拥有；GUI 只调度并展示结果。
 - `SKILLSTAR_DATA_DIR`、`SKILLSTAR_HUB_DIR` 覆盖适用于所有调用方。
 - 短探测走 `probe_http_client`。上游流式生成走同一代理指纹的流式客户端，见 [运行架构](../../architecture.md#网络)。都读 `config/proxy.json`。
+
+## 日志
+
+- 控制台订阅由 `ss-core::infra::logging` 独占：`skillstar` 的 GUI 路径调用 `init()`，MCP stdio 进程调用 `init_stderr()`。入口不得再各自拼装 `tracing-subscriber`。
+- 人类可读格式为单行：本地时间（毫秒，暗色）、按级别着色并对齐的 level、暗色 target、消息与结构化字段。stdout 非终端、`NO_COLOR` 或重定向时自动关闭 ANSI；`CLICOLOR_FORCE` 可强制开启。
+- `RUST_LOG` 覆盖过滤级别（桌面默认 `info`，MCP 默认 `error`）；`SKILLSTAR_LOG_JSON=1` 切换为结构化 JSON，供日志采集使用。
+- MCP stdio 的 stdout 仍只承载 JSON-RPC；其诊断只写 stderr 且不着色。
 
 ## GitHub Mirror
 
 - 配置写入 `~/.skillstar/config/github_mirror.json`，preset、校验、GitHub 族 URL rewrite、raw 文件连通性探测和 circuit breaker 由 core config module 拥有。健康状态写入 `~/.skillstar/state/github_mirror_health.json`（可重建，不是用户配置）。
 - 匿名公开流量改写 GitHub 族 origin：`github.com`、`raw.githubusercontent.com`、`codeload.github.com`、`objects.githubusercontent.com`、`gist.github.com`。通过每条 Git 子进程的 `-c url.*.insteadOf` 注入；永不修改用户全局 `.gitconfig`。`api.github.com` 只在**无 Authorization** 的 HTTP 路径上经加速源包装。
-- 连续两次传输失败打开 20 分钟熔断；候选链按最近延迟排序并跳过开路；全部开路则 fail-open。保存新配置重置 circuit；test 命令 GET 一个公开 raw 文件，而不是 HEAD 加速源根。
+- 加速源候选链按用户在 Settings 里排的顺序回退（`config.order`，首位为选中源）；连续两次传输失败打开 20 分钟熔断，熔断只把开路源从链中跳过，不改变其余源的相对顺序；全部开路则 fail-open。保存新配置重置 circuit；test 命令 GET 一个公开 raw 文件，而不是 HEAD 加速源根。
 - SOCKS5 出网使用 `socks5h`（远端 DNS）。新建代理配置带国内 LLM 默认 bypass，已有 `proxy.json` 不自动改写。
 - Settings 网络诊断探测代理、直连 GitHub、各加速源和 skills.sh。
-- Updater 插件直连 GitHub Releases 失败时，经匿名加速链读取 `latest.json` 只用于发现新版本；签名安装仍走插件，或提示用户打开 Releases 页面。永不从第三方加速源安装二进制。
+- 没有应用内更新器，也不再生成 `latest.json`。加速源不得用来安装二进制。
 
 ## ACP
 
-- ACP client 位于 `src-tauri/src/core/acp_client/`，是 Tauri 专用 adapter。
-- ACP 配置命令在 `commands/acp.rs`；built-in label 的兼容归一化只针对明确的旧 built-in command。
-- Skill 图文教程是 ACP 的活跃消费者。教程会话只面对隔离的 Skill staging 快照；SkillStar 客户端不暴露 terminal/写文件能力并拒绝非读取权限，prompt 同时禁止网络和修改。外部 ACP Agent 不是 OS sandbox，隔离快照是保护原 Skill 不被修改的硬边界；ACP transport 不拥有教程 freshness、HTML 校验或最终 artifact。
-- ACP Agent 的模型选择和鉴权由外部 Agent 自身配置负责；SkillStar 保存启动命令与显示名称，不把 Models provider 配置伪装成 ACP 模型选择。
-- `config/acp.json` 同时保存教程风格 id；Settings 只提供代码注册表中的受支持风格，后端按 id 选择版本化 prompt，不接受前端传入任意 prompt 文本。
+- ACP client 随 Tauri 壳删除，当前没有 GPUI 入口。不要把客户端放回域 crate 来绕过这个缺口。
+- 模型域已移除。外部 Agent 的模型选择不属于 SkillStar。
 
 ## 窗口、Tray 与后台运行
 
-- 后台运行开启时，主窗口 close 隐藏；关闭时退出应用并清理 tray。
-- tray 与 Settings 使用同一 patrol state/event，Start/Stop label 与实际状态一致。
-- tray 菜单同时展示用量额度概览，支持中英文自适应与数据实时刷新。
-- 独立 Usage window 等子窗口由后端创建和定位，前端只管理窗口内业务生命周期。
+- 后台运行偏好仍可让主窗口关闭时隐藏进程。没有托盘，也没有独立用量窗口。
+- 域里的 patrol 配置仍在，GPUI 不跑旧巡检循环；GUI 进程存活期间只跑 `ss-app` 的周期唤醒——频道到期自动升级（`channel_wake`）和通用技能自动更新（`skill_wake`，是否开启由 Settings 的「技能更新」偏好决定）。
+- GPUI kit 对话框出现在窗口正中，不贴在视口上方。确认框必须有「取消」和表示该操作的确认按钮：卸载、删除、移除用 danger，其余提交用 primary。按钮由 `chrome/dialog.rs` 绘制。不要只设 `Dialog::button_props`，普通 Dialog 不渲染它。账号页自己的遮罩卡片已经居中，不走这条路径。
 
 ## CI
 
-- `.github/workflows/ci.yml` 在 Linux/macOS 使用 Bun，执行 lint、生产 build、test、Cargo check/test；Linux 额外运行结构棘轮和 cargo-deny。
-- `.github/workflows/windows-ci.yml` 使用 `npm ci`，覆盖 lint、生产 build、前端测试和 workspace Rust 测试。
-- `bun.lock` 与 `package-lock.json` 同时受控；依赖变化同时更新。
-- workflow 顶部 `Failure lessons` 记录双 lockfile、tsc、真实 HOME/SSH 和 Windows-only 声明等事故。修改 workflow 前先阅读，不能把同类事故再引入。
-- 结构棘轮采用 shrink-only baseline：历史债告警，新债失败；workspace、feature import、文件大小与 command boundary 均由可执行脚本看门。
+- `.github/workflows/ci.yml` 在 Linux 和 macOS 运行 `cargo test --workspace --locked`。Linux 额外运行结构棘轮和 cargo-deny。
+- `.github/workflows/windows-ci.yml` 运行同一套 workspace Rust 测试，包含 `skillstar`。
+- 只有 `Cargo.lock`。不要恢复 `bun.lock` 或 `package-lock.json`。
+- workflow 顶部 `Failure lessons` 记录真实 HOME/SSH 和已退役的前端事故。修改 workflow 前先阅读。
+- 结构棘轮采用 shrink-only baseline：历史债告警，新债失败。看门脚本是 workspace 依赖、文件大小、错误字符串、孤儿模块和依赖图文档。
 
 ## Updater 与发布
 
-- `src-tauri/tauri.conf.json` 定义 updater endpoint、公钥和 artifact 生成；私钥只存在 GitHub Actions secrets 和维护者安全备份。
-- `commands/updater.rs` 执行 check、download/install 和 restart；失败返回错误，不伪装成“已是最新版”。
-- `useUpdater.ts` 负责 mount/周期检查、banner、retry 和 restart UX。
-- `v*` tag 触发 `.github/workflows/release.yml` 构建 macOS arm/x64、Linux 和 Windows，并生成签名 artifact/`latest.json`。
-- GitHub `/releases/latest` 只看到已发布 release；draft 构建完成后必须人工 publish，客户端才会发现更新。
+- 没有 updater endpoint，也没有签名私钥。不要恢复 `tauri-action` 或伪造 `latest.json`。
+- `v*` tag 触发 `.github/workflows/release.yml`，为 macOS arm/x64、Linux 和 Windows 上传 `skillstar` 二进制。
+- GitHub `/releases/latest` 只看到已发布 release。draft 上传完成后由维护者人工发布。客户端不会自动发现这次发布。
 
 发布前：
 
-1. 同步 `package.json`、`src-tauri/Cargo.toml`、`tauri.conf.json` 版本及 lockfile。
-2. 确认普通 CI 全绿并在本地运行 `bun run build`。
+1. 产品版本只改 `crates/skillstar/Cargo.toml`，并更新 `Cargo.lock`。
+2. 确认普通 CI 全绿。
 3. 提交后打 `vX.Y.Z` tag，等待 release matrix。
-4. 检查 installers、签名和 `latest.json` 后发布 draft。
+4. 检查四个二进制后发布 draft。
 
 ## 验证
 
 ```bash
-bun run lint
-bun run build
-bun run test
 cargo check --workspace --locked
 cargo test --workspace --locked
 ```

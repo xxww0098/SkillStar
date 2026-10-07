@@ -4,11 +4,11 @@
 
 ## Platform
 
-web — React SPA embedded in a Tauri v2 desktop shell (WKWebView on macOS). The design language is desktop-app dense, not marketing-page sparse; it must read correctly in both bundled themes (dark "OLED" default and light "paper").
+desktop — GPUI native shell. The design language is desktop-app dense, not marketing-page sparse; it must read correctly in both bundled themes (dark "OLED" default and light "paper").
 
 ## Stack
 
-Tauri v2 + React + TypeScript + Tailwind CSS v4 (theme tokens in src/index.css) + Radix primitives + react-i18next (zh-CN / en). Frontend reaches the Rust workspace only through Tauri invoke() and events.
+GPUI + Rust. Theme tokens live in crates/ss-gpui/src/theme.rs. Copy is zh-CN / en JSON under crates/ss-gpui/assets/locales. The shell calls domain facades directly.
 
 ## Users
 
@@ -28,9 +28,9 @@ Desktop app living next to the user's terminals and agents; Chinese-first UI wit
 
 ## Capabilities and Constraints
 
-- Surfaces: My Skills, Marketplace, Skill Cards, Projects, Settings (skills mode); Accounts (multi-account management: add/switch/import); Usage (read-only consumption view); plus lightweight usage card windows.
+- Surfaces: Skills mode holds My Skills, Marketplace, Skill Cards, Projects, and Settings. Accounts mode holds per-provider login cards, switching, and the usage shown on those cards. There is no separate Usage mode and no floating usage window.
 - Security: never render raw credentials; keys live in local AES-256-GCM JSON, never the system keychain (D-072). Claude account switching is file-based off macOS and unavailable on macOS by that same policy.
-- Accessibility: existing keyboard shortcuts, command palette, focus rings, and reduced-motion handling must survive any visual change.
+- Accessibility: both themes stay readable. Secondary and disabled text use their own foreground colors. Focus, overlays, and motion follow the GPUI Kit design guides.
 
 ## Product Principles
 

@@ -1,0 +1,993 @@
+//! Cursor OAuth fetcher.
+//!
+//! PKCE login polls `api2.cursor.sh/auth/poll`. Usage refresh reads
+//! `cursor.com/api/usage-summary` with the WorkOS cookie, and the plan tier
+//! from `api2.cursor.sh/auth/full_stripe_profile`.
+
+use chrono::Utc;
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::catalog::AuthMode;
+use crate::crypto;
+use crate::oauth::pkce::PkcePair;
+use crate::oauth::poll_flow::{Poll, PollConfig, run};
+use crate::oauth::token_refresh;
+use crate::storage;
+use crate::subscription::{Subscription, SubscriptionUsage, UsageUnit, UsageWindow};
+use crate::{UsageError, UsageResult};
+
+const LOGIN_URL: &str = "https://cursor.com/loginDeepControl";
+const POLL_ENDPOINT: &str = "https://api2.cursor.sh/auth/poll";
+const USAGE_SUMMARY_URL: &str = "https://cursor.com/api/usage-summary";
+/// Session-cookie endpoint that returns the logged-in account email (not in the JWT).
+const AUTH_ME_URL: &str = "https://cursor.com/api/auth/me";
+const STRIPE_PROFILE_URL: &str = "https://api2.cursor.sh/auth/full_stripe_profile";
+const OAUTH_TOKEN_URL: &str = "https://api2.cursor.sh/oauth/token";
+const CLIENT_ID: &str = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
+const POLL_INTERVAL_MS: u64 = 2000;
+const POLL_MAX_ATTEMPTS: usize = 150;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PollResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    auth_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct StripeProfile {
+    membership_type: Option<String>,
+    individual_membership_type: Option<String>,
+    is_team_member: Option<bool>,
+    is_enterprise: Option<bool>,
+    /// Some Cursor builds put the login email at the top level.
+    email: Option<String>,
+    /// Others nest it under Stripe `customer.email`.
+    customer: Option<StripeCustomer>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct StripeCustomer {
+    email: Option<String>,
+}
+
+/// `GET /api/auth/me` — primary source of the login email for card titles.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AuthMe {
+    email: Option<String>,
+    /// Fallback display fields seen in older / alternate payloads.
+    name: Option<String>,
+    #[serde(alias = "user_email")]
+    user_email: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RefreshTokenResponse {
+    #[serde(alias = "accessToken")]
+    access_token: Option<String>,
+    #[serde(alias = "refreshToken")]
+    refresh_token: Option<String>,
+}
+
+/// Spawn the browser-driven login. Returns `(auth_url, pending_id)`.
+///
+/// `target_subscription_id` is set when the flow was started from an existing
+/// card's "重新授权": the completed login then replaces that row in place
+/// instead of creating a duplicate.
+pub async fn start_login(
+    _region: Option<&str>,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<super::OAuthStartInfo> {
+    let pkce = PkcePair::generate();
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let auth_url = format!(
+        "{}?challenge={}&uuid={}&mode=login",
+        LOGIN_URL, pkce.challenge, uuid
+    );
+
+    let pending_id = crate::oauth::pending_state::register("cursor", None, auth_url.clone());
+    crate::oauth::pending_state::set_target_subscription_id(
+        &pending_id,
+        target_subscription_id.map(str::to_string),
+    );
+
+    // Spawn the polling task; it'll resolve the oneshot inside pending_state.
+    let pid = pending_id.clone();
+    let verifier = pkce.verifier.clone();
+    let session_uuid = uuid.clone();
+    tokio::spawn(async move {
+        let target_subscription_id = crate::oauth::pending_state::target_subscription_id(&pid);
+        let result = poll_for_tokens(session_uuid, verifier, target_subscription_id).await;
+        if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
+            let _ = tx.send(result);
+        }
+    });
+
+    Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
+}
+
+async fn poll_for_tokens(
+    uuid: String,
+    verifier: String,
+    target_subscription_id: Option<String>,
+) -> UsageResult<Subscription> {
+    let client = http_client()?;
+    let poll_url = format!("{}?uuid={}&verifier={}", POLL_ENDPOINT, uuid, verifier);
+
+    let config = PollConfig::new(POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS);
+    let tokens = run(config, |_attempt| {
+        let client = client.clone();
+        let url = poll_url.clone();
+        async move {
+            let resp = match client
+                .get(&url)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => return Ok(Poll::Failed(format!("Cursor 轮询失败：{}", e))),
+            };
+            let status = resp.status();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Ok(Poll::Pending);
+            }
+            if !status.is_success() {
+                // Transient — keep polling rather than abort.
+                tracing::warn!("[cursor] poll returned {}", status);
+                return Ok(Poll::Pending);
+            }
+            let body: PollResponse = match resp.json().await {
+                Ok(b) => b,
+                Err(_) => return Ok(Poll::Pending),
+            };
+            match (body.access_token, body.refresh_token) {
+                (Some(at), Some(rt)) => Ok(Poll::Ready((at, rt, body.auth_id))),
+                _ => Ok(Poll::Pending),
+            }
+        }
+    })
+    .await?;
+
+    let (access_token, refresh_token, auth_id) = tokens;
+    // Same catalog lock a Cursor refresh takes, so a queued refresh cannot
+    // patch pre-login credentials over the pair this login just stored.
+    crate::refresh_guard::with_catalog_lock("cursor", || async {
+        finalize_subscription(
+            access_token,
+            refresh_token,
+            auth_id,
+            target_subscription_id.as_deref(),
+        )
+        .await
+    })
+    .await?
+}
+
+async fn finalize_subscription(
+    access_token: String,
+    refresh_token: String,
+    auth_id: Option<String>,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<Subscription> {
+    let now = Utc::now().timestamp();
+    // Prefer a real email; never use WorkOS `user_…` ids as the card title.
+    let mut display = resolve_cursor_display_name(auth_id.as_deref(), None);
+
+    let mut sub = Subscription {
+        id: uuid::Uuid::new_v4().to_string(),
+        catalog_id: "cursor".to_string(),
+        display_name: display.clone(),
+        auth_mode: AuthMode::OAuth,
+        plan_tier: None,
+        monthly_price: None,
+        currency: "USD".to_string(),
+        billing_cycle: crate::subscription::BillingCycle::Monthly,
+        start_date: 0,
+        renew_date: 0,
+        auto_renew: false,
+        api_key_encrypted: None,
+        platform_token_encrypted: None,
+        access_token_encrypted: Some(crypto::encrypt(&access_token)),
+        refresh_token_encrypted: Some(crypto::encrypt(&refresh_token)),
+        access_token_expires_at: token_refresh::jwt_exp(&access_token),
+        id_token_encrypted: None,
+        oauth_account_id: auth_id.clone(),
+        oauth_region: None,
+        requires_reauth: false,
+        provider_state_encrypted: None,
+        cookie_jar_encrypted: None,
+        cookie_session_expires_at: None,
+        manual_quota: None,
+        note: None,
+        sort_index: 0,
+        created_at: now,
+        updated_at: now,
+    };
+
+    // Re-authorizing an existing card must land back on that card, keeping the
+    // user's price/note/order (docs/features/usage/README.md).
+    if let Some(existing) = super::common::reauth_target("cursor", target_subscription_id) {
+        super::common::carry_over_user_metadata(&mut sub, &existing, CURSOR_TITLE_PLACEHOLDERS);
+        display = sub.display_name.clone();
+    }
+
+    // First-time refresh — usage + plan + email from /api/auth/me (JWT has no email claim).
+    // Failures are non-fatal: the subscription gets created either way.
+    if let Ok((usage, account_email)) = fetch_with_tokens(&sub.id, &access_token).await {
+        if let Some(better) = prefer_email_display(
+            &display,
+            resolve_cursor_display_name(auth_id.as_deref(), account_email.as_deref()),
+        ) {
+            display = better;
+            sub.display_name = display;
+        }
+        storage::save_usage_snapshot(usage).ok();
+    }
+
+    let saved = storage::upsert_subscription(sub.clone()).map_err(|e| {
+        sub.requires_reauth = true;
+        UsageError::Other(format!("Cursor 订阅保存失败：{}", e))
+    })?;
+    Ok(saved)
+}
+
+pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
+    let mut access_token = decrypt_required(&subscription.access_token_encrypted)?;
+    if token_refresh::needs_refresh(subscription.access_token_expires_at)
+        && let Some(rt_cipher) = subscription.refresh_token_encrypted.as_deref()
+    {
+        let refresh_token = crypto::decrypt(rt_cipher);
+        if !refresh_token.is_empty()
+            && let Ok((at, rt_new)) = exchange_refresh(&refresh_token).await
+        {
+            subscription.access_token_encrypted = Some(crypto::encrypt(&at));
+            subscription.access_token_expires_at = token_refresh::jwt_exp(&at);
+            if let Some(rt) = rt_new {
+                subscription.refresh_token_encrypted = Some(crypto::encrypt(&rt));
+            }
+            access_token = at;
+        }
+    }
+    match fetch_with_tokens(&subscription.id, &access_token).await {
+        Ok((usage, account_email)) => {
+            // Upgrade placeholder / WorkOS-id titles once we learn the email.
+            let candidate = resolve_cursor_display_name(
+                subscription.oauth_account_id.as_deref(),
+                account_email.as_deref(),
+            );
+            if let Some(better) = prefer_email_display(&subscription.display_name, candidate) {
+                subscription.display_name = better;
+            }
+            Ok(usage)
+        }
+        Err(UsageError::AuthRequired) => Err(UsageError::AuthRequired),
+        Err(e) => Err(e),
+    }
+}
+
+/// Returns usage snapshot plus best-effort account email for the card title.
+async fn fetch_with_tokens(
+    subscription_id: &str,
+    access_token: &str,
+) -> UsageResult<(SubscriptionUsage, Option<String>)> {
+    let client = http_client()?;
+
+    // Profile / usage / identity are independent — fetch in parallel.
+    let (profile_res, usage_res, me_res) = tokio::join!(
+        fetch_stripe_profile(&client, access_token),
+        fetch_usage_summary(&client, access_token),
+        fetch_auth_me(&client, access_token),
+    );
+    // auth/me is best-effort identity only — a soft failure must not block usage refresh.
+    if matches!(&profile_res, Err(UsageError::AuthRequired))
+        || matches!(&usage_res, Err(UsageError::AuthRequired))
+    {
+        return Err(UsageError::AuthRequired);
+    }
+    let (profile, profile_err) = match profile_res {
+        Ok(p) => (Some(p), None),
+        Err(e) => (None, Some(format!("stripe_profile: {}", e))),
+    };
+    let plan_name = resolve_plan_name(profile.as_ref());
+    let account_email = me_res
+        .ok()
+        .and_then(|me| email_from_auth_me(&me))
+        .or_else(|| profile.as_ref().and_then(email_from_profile));
+
+    let (usage_json, usage_err) = match usage_res {
+        Ok(v) => (Some(v), None),
+        Err(e) => (None, Some(format!("usage-summary: {}", e))),
+    };
+    let total_window = usage_json.as_ref().and_then(parse_total_with_breakdown);
+    if total_window.is_none()
+        && let Some(v) = usage_json.as_ref()
+    {
+        tracing::warn!(
+            target: "cursor_fetcher",
+            "usage-summary 未识别字段：subscription_id={} body={}",
+            subscription_id,
+            v
+        );
+    }
+
+    let error = match (profile_err, usage_err) {
+        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+        (Some(e), None) | (None, Some(e)) => Some(e),
+        (None, None) => None,
+    };
+
+    Ok((
+        SubscriptionUsage {
+            subscription_id: subscription_id.to_string(),
+            fetched_at: Utc::now().timestamp(),
+            plan_name: Some(plan_name),
+            hourly: None,
+            weekly: None,
+            monthly: total_window,
+            balance: None,
+            credits: Vec::new(),
+            error,
+            api_keys: Vec::new(),
+            deepseek_analytics: None,
+        },
+        account_email,
+    ))
+}
+
+async fn fetch_stripe_profile(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> UsageResult<StripeProfile> {
+    let resp = client
+        .get(STRIPE_PROFILE_URL)
+        .bearer_auth(access_token)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Cursor stripe_profile: {}", e)))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(UsageError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(UsageError::Fetcher(format!(
+            "Cursor stripe_profile 状态码 {}",
+            status
+        )));
+    }
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("读取 stripe_profile 响应: {}", e)))?;
+    tracing::debug!("[cursor] stripe_profile raw body: {}", body);
+    serde_json::from_str::<StripeProfile>(&body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        UsageError::Fetcher(format!("解析 stripe_profile: {} | body={}", e, snippet))
+    })
+}
+
+async fn fetch_auth_me(client: &reqwest::Client, access_token: &str) -> UsageResult<AuthMe> {
+    let cookie = build_session_cookie(access_token)
+        .ok_or_else(|| UsageError::Other("无法从 access_token 解析 WorkOS user id".into()))?;
+    let resp = client
+        .get(AUTH_ME_URL)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::COOKIE, &cookie)
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        )
+        .send()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Cursor auth/me: {}", e)))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(UsageError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(UsageError::Fetcher(format!(
+            "Cursor auth/me 状态码 {}",
+            status
+        )));
+    }
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("读取 auth/me 响应: {}", e)))?;
+    tracing::debug!("[cursor] auth/me raw body: {}", body);
+    serde_json::from_str::<AuthMe>(&body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        UsageError::Fetcher(format!("解析 auth/me: {} | body={}", e, snippet))
+    })
+}
+
+async fn fetch_usage_summary(client: &reqwest::Client, access_token: &str) -> UsageResult<Value> {
+    let cookie = build_session_cookie(access_token)
+        .ok_or_else(|| UsageError::Other("无法从 access_token 解析 WorkOS user id".into()))?;
+    let resp = client
+        .get(USAGE_SUMMARY_URL)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::COOKIE, &cookie)
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        )
+        .send()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Cursor usage-summary: {}", e)))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(UsageError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(UsageError::Fetcher(format!(
+            "Cursor usage-summary 状态码 {}",
+            status
+        )));
+    }
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("读取 usage-summary 响应: {}", e)))?;
+    tracing::debug!("[cursor] usage-summary raw body: {}", body);
+    serde_json::from_str::<Value>(&body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        UsageError::Fetcher(format!("解析 usage-summary: {} | body={}", e, snippet))
+    })
+}
+
+async fn exchange_refresh(refresh_token: &str) -> UsageResult<(String, Option<String>)> {
+    let client = http_client()?;
+    let resp = client
+        .post(OAUTH_TOKEN_URL)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(&serde_json::json!({
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "refresh_token": refresh_token,
+        }))
+        .send()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Cursor refresh: {}", e)))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(UsageError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(UsageError::Fetcher(format!(
+            "Cursor refresh 状态码 {}",
+            status
+        )));
+    }
+    let body: RefreshTokenResponse = resp
+        .json()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("解析 refresh 响应: {}", e)))?;
+    let at = body
+        .access_token
+        .ok_or_else(|| UsageError::Fetcher("Cursor refresh 缺少 accessToken".into()))?;
+    Ok((at, body.refresh_token))
+}
+
+fn http_client() -> UsageResult<reqwest::Client> {
+    crate::http_client::usage_http_client()
+}
+
+fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
+    let cipher = cipher
+        .as_deref()
+        .ok_or_else(|| UsageError::Other("缺少 access_token".into()))?;
+    let pt = crypto::decrypt(cipher);
+    if pt.is_empty() {
+        return Err(UsageError::AuthRequired);
+    }
+    Ok(pt)
+}
+
+fn build_session_cookie(access_token: &str) -> Option<String> {
+    let payload = token_refresh::decode_jwt_payload(access_token)?;
+    let sub = payload.get("sub")?.as_str()?;
+    let user_id = sub.rsplit('|').next().unwrap_or(sub);
+    if !user_id.starts_with("user_") {
+        return None;
+    }
+    Some(format!(
+        "WorkosCursorSessionToken={}%3A%3A{}",
+        user_id, access_token
+    ))
+}
+
+fn looks_like_email(s: &str) -> bool {
+    let s = s.trim();
+    s.contains('@') && s.len() > 3 && !s.contains(' ')
+}
+
+fn email_from_profile(profile: &StripeProfile) -> Option<String> {
+    profile
+        .email
+        .as_deref()
+        .or_else(|| profile.customer.as_ref().and_then(|c| c.email.as_deref()))
+        .map(str::trim)
+        .filter(|s| looks_like_email(s))
+        .map(str::to_string)
+}
+
+fn email_from_auth_me(me: &AuthMe) -> Option<String> {
+    me.email
+        .as_deref()
+        .or(me.user_email.as_deref())
+        .or(me.name.as_deref().filter(|s| looks_like_email(s)))
+        .map(str::trim)
+        .filter(|s| looks_like_email(s))
+        .map(str::to_string)
+}
+
+/// Titles a fresh login is allowed to overwrite during re-authorization.
+const CURSOR_TITLE_PLACEHOLDERS: &[&str] = &["Cursor"];
+
+/// Card title: real account email only. Never surface WorkOS `user_…` ids
+/// (JWT `sub` looks like `auth0|user_01…` and is not human-readable).
+fn resolve_cursor_display_name(auth_id: Option<&str>, account_email: Option<&str>) -> String {
+    if let Some(email) = account_email.map(str::trim).filter(|s| looks_like_email(s)) {
+        return email.to_string();
+    }
+    if let Some(email) = auth_id.map(str::trim).filter(|s| looks_like_email(s)) {
+        return email.to_string();
+    }
+    "Cursor".to_string()
+}
+
+/// Replace placeholder / WorkOS-id titles with a real email. Never clobber a custom rename.
+fn prefer_email_display(current: &str, candidate: String) -> Option<String> {
+    let current = current.trim();
+    let candidate = candidate.trim();
+    if candidate.is_empty() || current == candidate || !looks_like_email(candidate) {
+        return None;
+    }
+    let placeholder = current.is_empty()
+        || current.eq_ignore_ascii_case("Cursor")
+        || current.starts_with("user_")
+        || current.contains("|user_");
+    if placeholder {
+        return Some(candidate.to_string());
+    }
+    None
+}
+
+fn resolve_plan_name(profile: Option<&StripeProfile>) -> String {
+    let Some(p) = profile else {
+        return "FREE".to_string();
+    };
+    if p.is_enterprise.unwrap_or(false) {
+        return "ENTERPRISE".to_string();
+    }
+    if p.is_team_member.unwrap_or(false) {
+        return "TEAM".to_string();
+    }
+    if let Some(m) = p
+        .individual_membership_type
+        .as_deref()
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("free"))
+    {
+        return m.to_uppercase();
+    }
+    p.membership_type
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_uppercase)
+        .unwrap_or_else(|| "FREE".to_string())
+}
+
+/// Included allowance in US cents, plus percent-only Auto and API pools.
+fn parse_total_with_breakdown(usage: &Value) -> Option<UsageWindow> {
+    let reset_at = usage
+        .get("billingCycleEnd")
+        .and_then(Value::as_str)
+        .and_then(parse_iso_epoch)
+        .or_else(|| pick_i64(usage, &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]]));
+
+    let sub_window = |label: &str, percent: f64| UsageWindow {
+        label: label.to_string(),
+        used: percent.round() as i64,
+        total: Some(100),
+        percent: Some(percent.round() as i32),
+        reset_at,
+        breakdown: Vec::new(),
+
+        unit: UsageUnit::Count,
+    };
+
+    if let Some(plan) = pick_plan_node(usage) {
+        let mut sub_bars = Vec::new();
+        if let Some(p) = plan
+            .get("autoPercentUsed")
+            .and_then(Value::as_f64)
+            .or_else(|| plan.get("auto_percent_used").and_then(Value::as_f64))
+        {
+            sub_bars.push(sub_window("Auto + Composer", p));
+        }
+        if let Some(p) = plan
+            .get("apiPercentUsed")
+            .and_then(Value::as_f64)
+            .or_else(|| plan.get("api_percent_used").and_then(Value::as_f64))
+        {
+            sub_bars.push(sub_window("API", p));
+        }
+
+        // Pools have no dollar cap. The included row does, in cents.
+        let percent_total = plan
+            .get("totalPercentUsed")
+            .and_then(Value::as_f64)
+            .or_else(|| plan.get("total_percent_used").and_then(Value::as_f64))
+            .or_else(|| {
+                let used = pick_number(plan, &["used", "totalSpend", "total_spend"])?;
+                let limit = pick_number(plan, &["limit"])?;
+                (limit > 0.0).then_some((used / limit) * 100.0)
+            });
+
+        if let Some(p) = percent_total.filter(|n| n.is_finite()) {
+            let percent_i = clamp_percent(p);
+            let (used, total, percent, unit) = included_amounts(plan, p, percent_i);
+            return Some(UsageWindow {
+                label: "Included".to_string(),
+                used,
+                total,
+                percent,
+                reset_at,
+                breakdown: sub_bars,
+                unit,
+            });
+        }
+    }
+
+    // Legacy shapes — keep as fallback in case Cursor ships variants.
+    let used = pick_i64(
+        usage,
+        &[
+            &["fastRequestsUsed"],
+            &["totalRequests"],
+            &["currentUsage", "used"],
+            &["usage", "used"],
+        ],
+    )?;
+    let total = pick_i64(
+        usage,
+        &[
+            &["fastRequestsLimit"],
+            &["limit"],
+            &["currentUsage", "total"],
+            &["usage", "total"],
+        ],
+    );
+    let percent = total
+        .filter(|t| *t > 0)
+        .map(|t| ((used as f64 / t as f64) * 100.0).round() as i32);
+    Some(UsageWindow {
+        label: "30d".to_string(),
+        used,
+        total,
+        percent,
+        reset_at,
+        breakdown: Vec::new(),
+
+        unit: UsageUnit::Count,
+    })
+}
+
+/// Cents from `used`/`limit` or `breakdown.total`; otherwise a 0–100 scale.
+fn included_amounts(
+    plan: &Value,
+    percent: f64,
+    percent_i: i32,
+) -> (i64, Option<i64>, Option<i32>, UsageUnit) {
+    let spent = pick_number(
+        plan,
+        &[
+            "used",
+            "totalSpend",
+            "total_spend",
+            "includedSpend",
+            "included_spend",
+        ],
+    )
+    .filter(|n| n.is_finite() && *n >= 0.0);
+    let limit = pick_number(plan, &["limit"]).filter(|n| n.is_finite() && *n > 0.0);
+    if let (Some(spent), Some(limit)) = (spent, limit) {
+        return (
+            spent.round() as i64,
+            Some(limit.round() as i64),
+            Some(clamp_percent(spent / limit * 100.0)),
+            UsageUnit::UsdCents,
+        );
+    }
+    if let Some(cap) = pick_i64(plan, &[&["breakdown", "total"]]).filter(|t| *t > 0) {
+        let used = ((percent / 100.0) * cap as f64).round() as i64;
+        return (used, Some(cap), Some(percent_i), UsageUnit::UsdCents);
+    }
+    (
+        i64::from(percent_i),
+        Some(100),
+        Some(percent_i),
+        UsageUnit::Count,
+    )
+}
+
+/// Resolve the plan node across Cursor's known `usage-summary` shapes.
+/// Order mirrors what the in-app Dashboard currently ships first.
+fn pick_plan_node(usage: &Value) -> Option<&Value> {
+    usage
+        .pointer("/individualUsage/plan")
+        .or_else(|| usage.pointer("/individual_usage/plan"))
+        .or_else(|| usage.get("planUsage"))
+        .or_else(|| usage.get("plan_usage"))
+}
+
+fn clamp_percent(value: f64) -> i32 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    if value >= 100.0 {
+        return 100;
+    }
+    value.round() as i32
+}
+
+/// Read a finite number from the first matching key on `root` (flat lookup).
+/// Mirrors cockpit-tools `pick_number` so string-encoded numbers stay valid.
+fn pick_number(root: &Value, keys: &[&str]) -> Option<f64> {
+    let obj = root.as_object()?;
+    for key in keys {
+        let Some(raw) = obj.get(*key) else {
+            continue;
+        };
+        if let Some(n) = raw.as_f64()
+            && n.is_finite()
+        {
+            return Some(n);
+        }
+        if let Some(text) = raw.as_str()
+            && let Ok(parsed) = text.trim().parse::<f64>()
+            && parsed.is_finite()
+        {
+            return Some(parsed);
+        }
+    }
+    None
+}
+
+fn parse_iso_epoch(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp())
+}
+
+fn pick_i64(value: &Value, paths: &[&[&str]]) -> Option<i64> {
+    for path in paths {
+        let mut cur = value;
+        let mut ok = true;
+        for key in *path {
+            match cur.get(*key) {
+                Some(v) => cur = v,
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            if let Some(n) = cur.as_i64() {
+                return Some(n);
+            }
+            if let Some(f) = cur.as_f64() {
+                return Some(f as i64);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_cents_plus_percent_shape() {
+        // Classic shape: breakdown.total (cents) + totalPercentUsed.
+        let usage = json!({
+            "billingCycleEnd": "2026-07-01T00:00:00Z",
+            "individualUsage": {
+                "plan": {
+                    "breakdown": { "total": 9495 },
+                    "totalPercentUsed": 49.0,
+                    "autoPercentUsed": 51.0,
+                    "apiPercentUsed": 43.0
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("should parse");
+        assert_eq!(w.label, "Included");
+        assert_eq!(w.total, Some(9495));
+        assert_eq!(w.percent, Some(49));
+        // used reconstructed from percent × cents.
+        assert_eq!(w.used, 4653);
+        assert_eq!(w.unit, UsageUnit::UsdCents);
+        assert_eq!(w.breakdown[0].unit, UsageUnit::Count);
+        assert_eq!(w.breakdown.len(), 2);
+        assert_eq!(w.breakdown[0].label, "Auto + Composer");
+        assert_eq!(w.breakdown[0].percent, Some(51));
+        assert_eq!(w.breakdown[1].label, "API");
+        assert_eq!(w.breakdown[1].percent, Some(43));
+        assert!(w.reset_at.is_some());
+    }
+
+    #[test]
+    fn parses_percent_only_shape() {
+        // Current Dashboard payload: totalPercentUsed but NO breakdown.total.
+        // This is the case that previously returned None → empty-card bug.
+        let usage = json!({
+            "billingCycleEnd": "2026-07-01T00:00:00Z",
+            "individualUsage": {
+                "plan": {
+                    "totalPercentUsed": 49.5,
+                    "autoPercentUsed": 51.0,
+                    "apiPercentUsed": 43.0
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("percent-only must parse");
+        assert_eq!(w.label, "Included");
+        assert_eq!(w.percent, Some(50)); // 49.5 rounds
+        assert_eq!(w.total, Some(100)); // degrades to percent scale
+        assert_eq!(w.unit, UsageUnit::Count);
+        assert_eq!(w.used, 50);
+        assert_eq!(w.breakdown.len(), 2);
+    }
+
+    #[test]
+    fn parses_used_limit_ratio_shape() {
+        // Accounts that ship used/limit instead of any percent field.
+        let usage = json!({
+            "billingCycleEnd": "2026-07-01T00:00:00Z",
+            "individualUsage": {
+                "plan": {
+                    "used": 2375,
+                    "limit": 9495
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("ratio fallback must parse");
+        assert_eq!(w.label, "Included");
+        assert_eq!(w.percent, Some(25)); // 2375/9495 ≈ 25.02
+        assert_eq!(w.unit, UsageUnit::UsdCents);
+        assert_eq!(w.used, 2375);
+        assert_eq!(w.total, Some(9495));
+    }
+
+    #[test]
+    fn included_percent_follows_cents_when_total_percent_disagrees() {
+        let pro = parse_total_with_breakdown(&json!({
+            "individualUsage": { "plan": {
+                "used": 1173, "limit": 2000, "totalPercentUsed": 100.0,
+                "autoPercentUsed": 1.0, "apiPercentUsed": 26.0
+            }}
+        }))
+        .unwrap();
+        assert_eq!(
+            (pro.used, pro.total, pro.percent, pro.unit),
+            (1173, Some(2000), Some(59), UsageUnit::UsdCents)
+        );
+        assert_eq!(pro.breakdown[0].unit, UsageUnit::Count);
+        assert_eq!(
+            (pro.breakdown[0].percent, pro.breakdown[1].percent),
+            (Some(1), Some(26))
+        );
+    }
+
+    #[test]
+    fn parses_snake_case_plan_paths() {
+        // Cursor occasionally ships snake_case variants of the same node.
+        let usage = json!({
+            "individual_usage": {
+                "plan": {
+                    "total_percent_used": 80.0,
+                    "auto_percent_used": 90.0,
+                    "api_percent_used": 70.0
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("snake_case must parse");
+        assert_eq!(w.percent, Some(80));
+        assert_eq!(w.breakdown.len(), 2);
+    }
+
+    #[test]
+    fn parses_flat_plan_usage_aliases() {
+        // Older flat aliases: planUsage / plan_usage at the root.
+        let usage = json!({ "planUsage": { "totalPercentUsed": 10.0 } });
+        let w = parse_total_with_breakdown(&usage).expect("flat alias must parse");
+        assert_eq!(w.percent, Some(10));
+        assert!(w.breakdown.is_empty());
+    }
+
+    #[test]
+    fn legacy_shape_still_supported() {
+        // Pre-breakdown shape: fastRequestsUsed / fastRequestsLimit at root.
+        let usage = json!({
+            "fastRequestsUsed": 30,
+            "fastRequestsLimit": 100,
+            "resetAt": 1751328000
+        });
+        let w = parse_total_with_breakdown(&usage).expect("legacy must parse");
+        assert_eq!(w.label, "30d");
+        assert_eq!(w.used, 30);
+        assert_eq!(w.total, Some(100));
+        assert_eq!(w.percent, Some(30));
+        assert_eq!(w.reset_at, Some(1751328000));
+    }
+
+    #[test]
+    fn returns_none_when_nothing_matches() {
+        let usage = json!({ "randomField": "value" });
+        assert!(parse_total_with_breakdown(&usage).is_none());
+    }
+
+    #[test]
+    fn clamps_non_finite_percent() {
+        let usage = json!({
+            "individualUsage": { "plan": { "totalPercentUsed": f64::NAN } }
+        });
+        // NaN percent → plan branch skips → no legacy fields → None.
+        assert!(parse_total_with_breakdown(&usage).is_none());
+    }
+
+    #[test]
+    fn display_name_prefers_account_email_over_auth_id() {
+        let name = resolve_cursor_display_name(Some("alice@example.com"), Some("from-me@x.com"));
+        assert_eq!(name, "from-me@x.com");
+    }
+
+    #[test]
+    fn display_name_uses_auth_id_email_when_no_me() {
+        let name = resolve_cursor_display_name(Some("alice@example.com"), None);
+        assert_eq!(name, "alice@example.com");
+    }
+
+    #[test]
+    fn display_name_never_uses_workos_user_id() {
+        // Previous bug: fell back to JWT `sub` → `user_01…` which is not readable.
+        assert_eq!(
+            resolve_cursor_display_name(Some("user_01JYNE26X44"), None),
+            "Cursor"
+        );
+        assert_eq!(resolve_cursor_display_name(None, None), "Cursor");
+    }
+
+    #[test]
+    fn prefer_email_upgrades_placeholder_and_user_id_only() {
+        assert_eq!(
+            prefer_email_display("Cursor", "user@x.com".into()).as_deref(),
+            Some("user@x.com")
+        );
+        assert_eq!(
+            prefer_email_display("user_01JYNE26X44", "user@x.com".into()).as_deref(),
+            Some("user@x.com")
+        );
+        assert_eq!(
+            prefer_email_display("My Work", "user@x.com".into()),
+            None,
+            "custom renames must not be overwritten"
+        );
+        assert_eq!(
+            prefer_email_display("Cursor", "user_01ABC".into()),
+            None,
+            "must not promote WorkOS ids into the title"
+        );
+    }
+}

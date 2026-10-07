@@ -1,20 +1,19 @@
 [workspace]
 resolver = "3"
 members = [
-  "src-tauri",
   "crates/*",
 ]
-default-members = ["src-tauri"]
+default-members = ["crates/skillstar"]
 
 # Shared package metadata. Members opt in with `edition.workspace = true` etc.
-# None of the skillstar-* crates are published — they are wired together with
+# None of the ss-* crates are published — they are wired together with
 # path deps — so they share one placeholder `version` instead of each keeping a
-# semver nobody consumes. `src-tauri` is the exception: it keeps its own
+# semver nobody consumes. `crates/skillstar` is the exception: it keeps its own
 # `version`, which is the product version, and inherits only edition/MSRV.
 [workspace.package]
 edition = "2024"
-rust-version = "1.94.1"
-version = "0.0.0"
+rust-version = "1.99"
+version = "0.0.1"
 # Matches the Apache-2.0 LICENSE at the repo root. Stating it here is what
 # stops `cargo deny check licenses` reporting every member as `unlicensed`:
 # the root LICENSE file is invisible to per-crate metadata.
@@ -25,7 +24,7 @@ license = "Apache-2.0"
 # table was introduced — the goal is convergence, not upgrades. Member crates
 # opt in with `dep = { workspace = true }` (optionally appending their own
 # extra `features = [...]`; workspace feature lists are unioned in, not
-# replaced). Path deps between our own skillstar-* crates stay declared
+# replaced). Path deps between our own ss-* crates stay declared
 # per-crate rather than routed through this table.
 [workspace.dependencies]
 aes = "0.8.4"
@@ -50,8 +49,6 @@ rand = "0.10.0"
 regex = "1.12"
 rmcp = { version = "3.4.0", default-features = false }
 schemars = "1.2.1"
-ring = "0.17.14"
-rsa = "0.10.0-rc.18"
 # system-proxy: honor HTTP(S)_PROXY env vars and the macOS/Windows system proxy
 # when the in-app proxy is not configured; without it api.github.com is a dead
 # 10s timeout per repo on proxied networks while git (which reads its own proxy
@@ -65,7 +62,6 @@ serde_yaml = "0.9.34"
 sha1 = "0.11.0"
 sha2 = "0.11.0"
 tar = "0.4"
-tauri = { version = "2.11.1", features = ["tray-icon", "image-png"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3" }

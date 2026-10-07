@@ -1,117 +1,81 @@
-# Frontend 约定
+# 界面约定
 
 状态：active
 
-本文件是 React 前端的共享边界、交互范式和视觉约定。具体 Accounts、Usage、Skills 等产品行为由相邻功能文档维护；完整目录树见 [../../boundaries.md](../../boundaries.md)。
+本文件只记 SkillStar 桌面壳自己的视觉与交互契约。目录和依赖见 [boundaries 的 GPUI 壳模块](../../boundaries.md#gpui-壳模块)。通用 GPUI Kit 界面判断以 [Design Guides](https://gpui-kit.com/docs/design-guides.md) 为准，这里不复述。
 
-## 结构与数据流
+各页的产品行为留在相邻功能文档。技能页见 [Skills](../skills/README.md)，市场见 [Marketplace](../marketplace/README.md)，账号布局见 [Accounts](../accounts/README.md)。
 
-- `src/pages/*.tsx` 是薄路由壳；页面目录目前只有 `src/pages/settings/`，不要在文档虚构不存在的 page 子目录。
-- `src/pages/Settings.tsx` 只组合各域公开的 settings section；section 及其数据 hooks 仍归各自的 feature，不在 `features/settings` 建跨域实现副本。
-- 产品实现放 `src/features/<domain>/`，内部 `api/`、`hooks/`、`lib/`、`components/` 默认私有。
-- 后端已归属某域的子系统在前端也作为该域子模块组织，不建立仅为目录对称而存在的平级 feature。
-- 跨 feature 复用的无业务展示组件放 `src/components/shared/`；原子 UI 放 `src/components/ui/`；纯工具放 `src/lib/`。
-- 前端业务数据只通过 `src/lib/ipc/` 中的 wrapper 调 Tauri `invoke()`，不得直接访问业务文件或远程 API。
-- 服务端状态使用 TanStack Query；本地组合状态使用 React hooks。没有经过决策记录，不引入另一个全局状态库。
-- 真正跨页的 deploy/detail/navigation 状态由 `App.tsx` 统一持有。
+## 壳
 
-## 桌面性能
+- 界面在 `crates/ss-gpui`。配色在 `src/theme.rs`，文案在 `assets/locales/`。`en` 与 `zh-CN` 同步。
+- 技能模式侧栏四项的图标在 `NavPage::icon`：技能 `Sparkle`，市场 `Store`，卡组 `GalleryVerticalEnd`（卡面在下，后卡边从下往上露出），项目 `Briefcase`。收起后只剩图标，四枚轮廓必须能分开。卡组空状态、项目空状态，以及技能空状态里去市场的按钮，用同一枚。
+- 这四项共用一块选中框。切换时框滑到新的一项，文字和图标颜色跟着走。打开设置或发布者详情时框在原位淡出，四项都不再显示选中。系统开启减少动态效果时框直接落在目标项上。
+- 页面在 `render` 里读 `theme::palette()`。新状态色先在 `Palette` 加字段，并配齐 `DARK` 与 `LIGHT`。`gui_prefs.json` 的 `background_style`（`"current"` 深、`"paper"` 浅）是主题持久化的唯一来源。侧栏主题按钮和 Settings › Appearance 都走 `theme::set_mode` / `toggle`。
+- 提示遮罩用 `theme::prompt_veil`，后面的页面保持可见。Kit 对话框读 `ThemeColor.overlay`，页内提示走 `chrome::prompt_mask`。
+- 悬停提示底色是黑色，文字是白色，两种模式一样，画在 `chrome::tooltip`。菜单、弹层、通知和搜索仍用卡片色：它们和提示共用 kit 的 popover 色，改那个字段会把这些一起涂黑。按钮的 `tooltip(字符串)` 不经过这个函数，提示挂在元素自己的 `.tooltip` 上。
+- 刷新图标只在该次请求进行中旋转，采样跟显示器刷新走（120Hz 屏幕上就是 120 帧）。旋转是字形上的绘制变换。技能网格、市场榜、发布者列表和账号额度区是重放视图：这些帧重绘图标和顶栏，不重新排版后面的卡片。骨架脉冲和重置卡闪烁仍是 20 帧。更新省略号大约每 400ms 一步。单张额度卡自己的刷新，以及重置卡的弹簧和闪烁，仍会重排额度区，因为额度卡高度不固定，不能按张缓存。
+- 悬停和按下在指针状态变化时重绘一次。颜色不走弹簧：弹簧每帧重绘整个窗口，鼠标划过卡片时会一直掉帧。详情列的「卸载」是唯一例外，见 [动画](#动画)。模式胶囊、技能侧栏选中框和重置卡的位移仍用临界阻尼弹簧，大约 80ms 内停住。
+- 顶栏空白可以拖动窗口。拖拽层铺在整行背后；按钮、分段轨道和搜索框调用 `occlude()`，按下它们不会拖动窗口。`overflow` 包装的弹性子项写 `w_auto()`，中间的空白才留得出来。
+- 顶栏搜索框点到框外会失焦，框内没有菜单和补全时按 Escape 也会失焦。这次失焦不拦截鼠标按下，空白处仍能拖动窗口。
+- 确认框在窗口正中，由 `chrome/dialog.rs` 绘制。按钮种类见 [platform](../platform/README.md)。打开时卡片仍从窗口顶部滑到这个位置。壳和主面板里的页面都是重放视图，这段动画不会把侧栏和后面的卡片网格每帧重排。
 
-- Query 默认 **不** `refetchOnWindowFocus`：Tauri 里打开文件选择器、OAuth 窗口或切到别的应用都会 blur webview，焦点回流不能变成一次全量 IPC。各页仍有显式刷新和（Skills）定时轮询；默认 `staleTime` 60s。
-- Skills 模式的列表页（我的技能 / 市场 / 卡组 / 项目 / 设置）由 `KeepAliveOutlet` 保活最近 3 个：侧栏来回不丢搜索、滚动和已加载 chunk。页面活跃上下文使隐藏页的 `ModalShell` 停用 portal 的焦点锁和关闭监听；portal 内部用 React `Activity` 隐藏并保留表单子树，返回时恢复表单自身的草稿，不改变其他页面 effects 的既有生命周期。`Activity` 不是 DOM Element，不能作为 `Dialog.Portal` asChild 的直接子节点——Presence 会对其调用 `getComputedStyle`，WKWebView 会抛错。发布者详情是钻入页，不保活。Skills 模式默认 hash 是 `#skills`。
-- 侧栏切换不再对每个 `activePage` 做进场位移；只在 Skills / Accounts / Usage 模式之间淡入。
-- `prefers-reduced-motion: reduce` 时全局停掉 `.animate-spin` / `.animate-pulse`，不依赖每个 spinner 自己写 `motion-safe:`。
+## 动画
 
-`scripts/internal/check_feature_imports.sh` 阻止新增跨 feature 深层导入，但允许从目标 feature 根 `index.ts` 导入。存量基线只能减少；跨域协作优先由 page 组合，确需依赖时只消费目标 feature 的公开入口；若组件确实无业务语义且通用，应先提升到 shared/lib，再改调用方。
+120 帧是显示器的刷新信号：这一帧的场景要在约 8ms 内交出去。GPUI 没有合成器补间。`div` 的位置会改布局边界；视图缓存命中时只按原坐标重放上一帧场景，不会把位移交给 GPU。`with_max_fps(120)` 改走定时器，比刷新信号更漂，不要用来追 120 帧。
 
-## Tauri 事件与流式 UX
+新动画先选一条通道：
 
-- 生命周期型订阅使用 `src/hooks/useTauriEvent`，由它处理 `listen()` promise 与卸载 cleanup 的竞争。
-- 单次请求流可以由对应 hook 管理监听，但必须处理 start、delta、complete、error 和中断。
-- 详情读取绑定当前所选资源身份；切换选择或关闭后，旧请求的成功、失败和后台刷新不得覆盖新选择的内容，也不应继续发起已无消费者的后续读取。
-- AI 摘要展示后端返回的 route/provider/fallback 元数据，不在前端猜测路由。
-- 安全扫描应区分文件准备和 AI chunk 进度，不能压成一个模糊 spinner。
+- 透明度、颜色、字形旋转走 `with_animation`，不设 `with_max_fps`。旋转只用 `icon_spin`（`chrome/mod.rs`），它是字形上的 `Transformation::rotate`。
+- 位置必须改布局时（选中框、对话框入场）把时长压短。位移弹簧用 `motion_spring`，临界阻尼，大约 80ms 内停。不动的重子树用 `replay_view`，或带确定宽高的 `.cached()`。对话框入场会改子树的布局边界，缓存键里有这块边界，滑动期间重放命中不了。整份 Markdown 要等滑动停再挂上，SKILL.md 悬浮窗就是这样。
+- 呼吸和省略号不需要每帧一个新样子。脉冲用 `pulse`（20 帧）。省略号大约 400ms 一步，继续 `with_max_fps`。
+- 详情列底部的「卸载」悬停时，底色从 `danger_bg` 走到 `danger_hover`，边框走向 `danger`，文字走向 `danger_fg`，垃圾桶图标轻轻抬起、放大并转动。进度用 `motion_spring`，大约 80ms 内停，指针离开时从当前进度返回。系统开启减少动态效果时直接落到终态。这是唯一走弹簧的悬停色，不要抄到技能卡或其它按钮上。卡片仍按张缓存，这次重绘不重新排版网格，也不走 `revise`。
 
-## 视觉系统
+`with_animation` 和 `with_spring` 标脏的是正在绘制的那个视图，祖先一起标脏，子孙和兄弟不会。重内容必须是这个视图的兄弟或子孙，并且自己是实体。整块区域用 `replay_view`：父级 `relative`，子视图绝对定位并铺满。固定宽高的卡片按张 `.cached()`，不要写成 `absolute().size_full()`，否则会盖住网格。不要在 `render` 里 `cx.new` 动画实体，每帧都会把动画重开。
 
-精确 token 在 `src/index.css` 和 Tailwind theme 中维护，本文只维护不变量：
+数据变化走页面的 `revise`，把代际加一。动画帧只 `notify` 页面，不走 `revise`。重放视图观察代际，不一致才 `notify` 自己。重放视图在页面的 `render` 里创建，这一帧页面已经被租走，构造函数接收页面上已经拿到的代际。重放视图的根写 `size_full`，铺满这块视图的边界；单独的 `flex_1` 在视图根上高度是 0，滚动容器会把卡片裁没。系统开启减少动态效果时，弹簧和 `with_animation` 直接落到终态，不要再自己调度帧。
 
-- 默认视觉是深色 OLED 分栏：窗口画布是 `--color-background`，侧栏与主工作区是不透明的 `--color-sidebar` 面板，卡片用 `--color-card` 抬升。`.ss-main-chrome` 禁止 `backdrop-filter` 和大模糊阴影。
-- 壳层：侧栏 `fixed top-2 left-2 bottom-2`，主栏 `pt-2 pr-2 pb-2`，左内边距 = 8px + 侧栏宽 + 8px；两栏都是 16px 圆角。不要给 `#main-content` 的 padding 加 CSS transition。
-- 浅色由应用内的 `data-bg-style="paper"` 驱动，与系统色彩偏好无关。需要随主题换色的状态色写 `text-amber-400 paper:text-amber-700` 这类 `paper:` variant（`@custom-variant paper`），不要用 `dark:`——它匹配的是系统偏好，在应用内主题切换时不生效。
-- 小字号次级文本优先使用有足够对比度的 `text-foreground/60–75`。disabled 状态不能只靠 `opacity-50`。
-- 大容器（侧栏、工作区、卡片、modal）使用 16px 圆角；紧凑控件使用较小尺度。
-- 动效只表达进入、退出、层级和直接反馈；尊重 `prefers-reduced-motion`。
-- 所有正文、焦点、禁用和错误状态满足 WCAG AA。
-- 模型与核心行为字段提供 `InfoTip`；枚举选项说明使用可解析的 `Label: explanation` 行，不在每个表单重造提示样式。
+回归看 `shell/dialog_motion.rs`：旁边有循环动画时，重视图的绘制次数不跟着帧数涨。根因和复发见 [errors](../../errors.md)。
 
-产品视觉方向是 Precise、Unified、Effortless；避免纯装饰 dashboard、过度霓虹、低对比度 glass 和无意义 motion。
+## 技能卡
 
-## 组件约定
+技能、市场、卡组各画自己的卡片内容（`my_skills/skill_card/`、`marketplace/market_card.rs`、`skill_cards/group_card.rs`）。窗口、技能卡和额度卡的宽度在 `layout.rs`；技能卡外框经 `skill_card/size.rs` 转出。外框只有 `skill_card/shell.rs` 的 `card_shell`：圆角和阴影按种类收在这里（技能卡 16px 带阴影，市场卡圆角 xl 带阴影，卡组圆角 xl 不带阴影），页面只传入选中与否。加载占位走 `card_placeholder`，不另画边框和底色。
 
-- 样式使用 Tailwind utilities；不新增 CSS Modules 或 styled-components。
-- 优先复用 `src/components/ui/`。需要焦点管理、Esc、portal 的组件使用 Radix primitive。
-- 紧凑状态标记用 `StatusChip`（inset ring、h-4/h-5），不要用会抬高、圆角更大的 `Badge`。多行表单输入用 `Textarea`；全幅代码编辑器（SkillEditor）仍是自己的 textarea。
-- 同一意图复制到第三处时才抽成 primitive，并在同一次变更里迁完调用点。不要为「以后可能复用」提前抽象。
-- 居中 modal 使用 `ModalShell`、`ModalHeader`、`ModalCloseButton`；Radix `AlertDialog` 和确有独特 surface 的对话框除外。`ModalShell` 由 Radix 管理层叠、portal 与焦点；Esc 只作用于最上层，不穿透到底层弹窗或页面快捷键。Esc 与 backdrop 共用 `dismissable` 门控，处理中不可关闭的弹窗仍拦截 Esc；调用方不再重复注册关闭监听。关闭后焦点返回打开前的控件。modal 活跃期间不启动全局命令面板，避免非模态命令面板与焦点锁冲突；关闭后 ⌘K / Ctrl+K 恢复，包括输入框内。
-- Settings 分区标题统一用 `SettingsSectionHeader`：图标井使用 primary，不用每区一种强调色。设置侧栏 lg 断点保持纯图标（900–1280px 窗口放不下文字），xl 起图标 + 文字标签。
-- 抽屉使用 `DrawerShell`，不要各自实现 overlay、Esc 和 focus 行为。
-- 外链元素使用 `ExternalAnchor`；按钮/程序化跳转使用 `openExternalUrl`，避免业务页面直接写 `<a target="_blank">`。
-- Publisher avatar 是无业务语义的展示 module，归 `src/components/shared/PublisherAvatar.tsx`；消费方只能依赖该 shared interface。
-- 动态颜色无法用 utility 表达时才使用 inline style。
-- 侧边栏导航的选中态由带 `layoutId` 的 motion 元素承载，切换时弹簧滑动；收起态改为静态高亮，不做滑动。新增导航区沿用这条约定，不要再写第三种选中态实现。
-- Skill 网格卡片只承载身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型文字、runtime、版本、仓库链接和「详情」不重复画在卡片上；这些信息留在筛选、图标、详情抽屉或安装向导。
-- 卡片列表（`.ss-cards-grid` / `.ss-cards-list`）第 13 项起由 CSS `content-visibility: auto` 跳过屏幕外的样式、布局和绘制；卡片高度由内容决定，`SkillGrid` 量出首张卡片写入 `--ss-card-h` 供 `contain-intrinsic-size` 占位。新增卡片列表沿用这两个类，不要自己写 JS 虚拟滚动。
+三张卡共用市场卡原来的蓝光悬停：边框变成强调色，底色换成 `card_hover`。打开详情、批量勾选、市场卡被点开、卡组展开仍是强调色边框，底色用 `card_active`；这时再悬停只把底色加深到 `card_active_hover`，边框保持强调色。
 
-## Agent 手动激活投影
+技能网格、市场榜单、发布者详情和账号额度卡共用 `skill_card/grid.rs` 的轨道：列数按卡片宽和间距从面板宽度算出；技能卡保持 `SKILL_CARD_W`，额度卡保持 `QUOTA_CARD_W`，都不随窗口变宽；末行用占位保持和完整行相同的卡宽。详情列打开时，先从面板内容宽度里减去列宽再算列数。主面板左右边框算在内容宽度之外，最右一张卡的边框和阴影留在滚动区域里面。技能页的列表模式不走这套轨道，每张卡占内容区一整行，见 [Skills](../skills/README.md)。技能页本地列表和市场榜按行虚拟化，只构建视口内的行。技能、市场和卡组工具栏右侧的网格/列表图标悬停分别是「网格」和「列表」。卡组用技能卡外框，自己换行，不走这套网格。额度卡的图例面在 `accounts/frame.rs`，不走技能卡外框。排布见 [Accounts](../accounts/README.md)。
 
-- 本机 Agent 的注册、手动启用和 rail 可见性规则由 [Skills 行为文档](../skills/README.md#agent-注册手动启用与项目检测) 维护；前端统一通过 `selectTargetableAgentProfiles` 按 `enabled` 投影。前端不得根据 binary、应用、目录或冻结兼容字段 `installed` 推断可用性。
-- 内置 Agent 的品牌图标统一通过 `src/components/ui/icons/agentIcons.ts` 投影到
-  `@lobehub/icons`；deep import 只允许出现在 `icons/lobe.ts`。包内无专属品牌时使用
-  `LobeHubMono`，不得为同步上游清单批量复制本地 SVG。
-- 项目级能力再通过 `supportsProjectDeploy` 判断；不要硬编码 global-only Agent id。
-- 全局能力通过后端 `has_global_skills()` 判断；空全局路径是“不支持全局部署”的能力标记，
-  不能被解释为当前工作目录。
-- Skills 和 Deck 的 Agent rail 复用 `AgentTargetCarousel`，图标和名称来自 `AgentProfile`。轮播轨道占满卡片底栏可用宽度，图标之间保持固定间距、不随剩余空间拉开；滚动箭头贴在轨道最左/最右，超出可视宽度时横向滚动，不固定可见个数。轮播只展示 Settings 已启用的 Agent；未启用的 profile 不占轮播位，即使资源仍挂着。传给 Skill 卡的 `onInstall` 必须接受并转发 `(url, name, agentId?)`；只接 `url` 会让已安装卡的灰图标点了没反应。未隐藏的箭头才 `pointer-events: auto`，不要把箭头叠在图标上。
-- Claude Settings profile `claude` 映射到唯一能力 id `claude-code`；不要生成第二张 Claude 卡。
-- 工具栏 `AgentFilterPill` 的条目是 `{ id, profile }`：`id` 是消费方筛选值，品牌图标与显示名只能取自 `profile`。用 `id` 解析图标会让与 profile id 拼写不同的筛选值静默退回通用字标。
-- SSH 远端 Agent 由远端 discovery 决定，不复用本机 rail。
+技能网格卡片只放身份、一条决策证据、一个主动作和例外状态。库内已安装、运输类型、runtime、版本和仓库链接不重复画在卡片上。界面语言为中文时，这条描述若是英文，换成已缓存的译文并套用设置里的译文样式；译文还没回来时仍显示原文。
 
-## 桌面交互
+来源 chip 只有 `skill_card/source_chip.rs`：仓库路径优先，作者 handle 兜底。点击先 `stop_propagation`，再由调用方打开链接。
 
-- destructive action 使用明确确认组件，不调用浏览器 `confirm()`。
-- 后端解析的路径直接展示；不要在浏览器重建数据目录。可编辑 Agent 路径显示平台分隔符，持久化的 `project_skills_rel` 仍规范为 `/`。
-- tray 与 Settings 的后台运行开关消费同一状态和事件；动作标签必须反映 Start/Stop 当前状态。
-- GitHub 账户是全局身份，不是一条设置项：登录入口常驻侧边栏底部工具区（设置/背景/收起之上），展示当前账户与状态（含「等待授权」和「登录已失效」），点击打开设备授权面板。关闭面板不取消进行中的设备流。需要登录的界面调用 `openGithubAccountMenu()` 打开同一面板，不再跳转 Settings section。入口与面板共享同一个 `useGitHubAuth` 实例，避免两份独立轮询的登录状态。
-- Marketplace、Accounts、Usage 等跨页面 request 使用带 nonce 的显式导航事件，避免用不可观察的模块变量传递。
-- Overlay titlebar 下，顶栏空白只有**被点中的那个**带 `data-tauri-drag-region` 的元素才能拖窗口（bare 属性不向子树继承）。沿用 `PageToolbar` 的 `flex-1` filler 吃掉中间松弛；新的顶栏 chrome（分段条、自定义 header）同样必须给空白处一段 filler，不要只把属性放在外层容器上。按钮和输入框不要标该属性。
+技能卡正文保持箭头光标。底栏 Agent 轮播的每一枚品牌 SVG 都是独立点击目标，指针停在这枚 SVG 上时改用手型光标。
 
-## 生成类型
+技能卡右上角正在更新时，文案取 `common.updating` 去掉末尾省略号，再按 `.`、`..`、`...` 循环。三个点的位置一直留着，徽标宽度不变。系统开启减少动态效果时停在三个点，不调度动画帧。工具栏「更新」和选择栏批量更新按点击时的可更新名单让这些卡进入同一状态；`busy` 在这两条路径上是批次记号，不是技能名。
 
-`src/types/generated/` 由 Rust 的 ts-rs 生成，禁止手改。修改来源结构体后执行：
+## 交互
 
-```bash
-bun run types:gen
-```
+- 详情读取绑定当前所选资源，只采纳这次选择的结果。
+- 长任务可以取消。失败要显示原因。
+- 设置是跨模式入口：打开设置页时保留当前 Skills / Accounts 上下文。设置按钮的选中态只表示当前是设置页。宽窗口下分区导航在内容列左侧；导航与侧栏的间隙等于导航与分区内容的间隙，内容列不随导航移动。
+- 后端解析的路径直接展示。可编辑 Agent 路径显示平台分隔符；持久化的 `project_skills_rel` 仍规范为 `/`。
+- 次级文本和 disabled 用独立的前景色，读得出来。
+- 浮在可悬停内容上的菜单、胶囊、回到顶部、对话框遮罩和弹出列表面板要挡住后面的指针。普通命中盒不会挡住后面的元素，指针在浮层上时背后的卡片仍会进入悬停。这些浮层调用 `occlude()`。贴在可滚动列表上、滚轮仍应滚动列表的小控件（选择胶囊、回到顶部）调用 `block_mouse_except_scroll()`。Kit 的 Popover、菜单和对话框已经挡住。
+- 本机 Agent 的注册、启用和 rail 可见性见 [Skills](../skills/README.md#agent-注册手动启用与项目检测)。界面按 `enabled` 投影。品牌图标在 `agent_icons.rs`。
 
-当前生成来源位于 `skillstar-marketplace`、`skillstar-usage`、`skillstar-app` 和 `src-tauri` package。CI 的 generated-types 检查负责发现漂移；精确类型清单以 Rust `#[derive(TS)]` 和生成脚本为准。
+当前壳没有托盘、深链、签名更新、命令面板、SSH 远端页和共享频道管理页。补页面时放进已有能力目录。运行侧的缺口见 [architecture](../../architecture.md#壳运行模型) 和 [platform](../platform/README.md)。
 
 ## 验证
 
 ```bash
-bun run lint
-bun run build
-bun run test
-bash scripts/internal/check_feature_imports.sh
-bash scripts/internal/check_i18n_hardcoded.sh
-bash scripts/internal/check_ts_orphan_modules.sh
+cargo test -p ss-gpui --lib
 ```
 
-新增或修改文案时同步 `src/i18n/locales/en.json` 与 `zh-CN.json`。
+新增或修改文案时同步 `crates/ss-gpui/assets/locales/en.json` 与 `zh-CN.json`。
 
 ## 文案术语
 
-同一概念只用一个名词和动词。界面不靠文学同义替换换词。
+同一概念只用一个名词和一个动词。
 
 | 概念 | EN | ZH |
 | --- | --- | --- |
@@ -128,6 +92,4 @@ bash scripts/internal/check_ts_orphan_modules.sh
 | 写入项目 | Deploy | 部署 |
 | 对某个 Agent 启用 | Link | 链接 |
 
-文件格式、协议和仓库路径仍用 `SKILL.md`、`skills/`。破坏性按钮写出对象和后果，不用 Yes / OK / Confirm。错误先说发生了什么，再说怎么恢复。
-
-`check_ts_orphan_modules.sh` 从 `src/main.tsx` 与 `src/pages/` 出发做可达性分析，`src/features/` 下的孤儿文件直接失败。注意 `check_i18n_hardcoded.sh` 只判定 CJK 字面量，裸英文文案不在它的覆盖范围内，需要人工走查。
+文件格式、协议和仓库路径仍用 `SKILL.md`、`skills/`。破坏性按钮写出对象和后果。错误先说发生了什么，再说怎么恢复。

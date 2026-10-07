@@ -21,7 +21,7 @@
 # build-dependencies do not constrain runtime layering and boundaries.md's
 # graph does not claim to show them.
 #
-# Node labels resolve to packages by name (`skillstar-core`) or by manifest
+# Node labels resolve to packages by name (`ss-core`) or by manifest
 # directory (`src-tauri`, whose package is named `skillstar`), so the diagram
 # can keep using the name a reader recognises.
 #

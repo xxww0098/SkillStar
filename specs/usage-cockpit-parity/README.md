@@ -3,6 +3,8 @@
 状态：closed（27/27）
 更新：2026-09-22
 
+本仓库的 React / Tauri 前端已按 D-091 删除。切片里让人改 `src/`、跑 `bun` 或生成 TypeScript 的步骤不要执行。`/tmp/cockpit-tools` 的 `src-tauri` 是外部参照，不是本仓库。
+
 ## Next Agent Prompt
 
 没有下一片。分支是 `feat/usage-cockpit-parity`，集成树在 `/Users/xxww/.grok/worktrees/usage-cockpit-parity`。主工作区 `main` 的无关未提交改动不要混进来。

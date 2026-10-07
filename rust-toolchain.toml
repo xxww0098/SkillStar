@@ -1,7 +1,7 @@
 # Pinned build toolchain. This is NOT the MSRV: `[workspace.package]
-# rust-version = "1.94.1"` in Cargo.toml is the lower-bound promise we make to
-# consumers, and it stays where it is. This file pins the toolchain everyone
-# — contributors, CI, release builds — actually compiles with, so that
+# rust-version = "1.99"` in Cargo.toml is the lower-bound promise. This file
+# pins the toolchain everyone — contributors, CI, release builds — actually
+# compiles with, so that
 # toolchain-sensitive gates have a fixed denominator. In particular
 # scripts/internal/clippy_baseline.txt counts diagnostics from one specific
 # clippy version; without this pin that count drifts every time GitHub's
@@ -16,6 +16,6 @@
 # scripts/internal/check_clippy_ratchet.sh in the same commit and update the
 # baseline if the new toolchain's lint set moves the count.
 [toolchain]
-channel = "1.97.1"
+channel = "1.99.0"
 profile = "minimal"
 components = ["clippy", "rustfmt"]
