@@ -14,6 +14,8 @@
 
 </div>
 
+![SkillStar 技能界面](./docs/assets/ui-skills.png)
+
 导入仓库会复用本地 Git 缓存：重复扫描默认不检查上游，安装只补取所选技能缺少的内容。需要新版本时在导入框点「刷新上游」，或运行 `skillstar install owner/repo --refresh`；设置中的缓存清理不会删除已安装技能。详见 [Skills 安装与更新](docs/features/skills/README.md#安装与更新)。
 
 ## SkillStar 是什么
