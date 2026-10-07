@@ -360,7 +360,7 @@ fn model_menu(
     current: String,
 ) -> impl IntoElement + use<> {
     let dismiss_popover = cx.entity().downgrade();
-    let mut panel = div()
+    let panel = div()
         .w(px(280.0))
         .rounded_xl()
         .border_1()

@@ -1,6 +1,7 @@
 //! Skill Cards — deck list (`skill_group::list_groups`). React source:
 //! `src/pages/SkillCards.tsx` + `features/my-skills/components/DeckCard.tsx`.
 
+pub(crate) mod create_group;
 mod deck_import;
 mod group_card;
 mod query;
@@ -8,11 +9,11 @@ mod query;
 use std::collections::HashSet;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::*;
 use ss_skills::agents::{AgentProfile, list_profiles};
-use ss_skills::skill_group::{SkillGroup, create_group, list_groups};
+use ss_skills::skill_group::{SkillGroup, list_groups};
 use ss_skills::workflows::agent_links::AgentLinkReport;
 use ss_skills::workflows::skill_group_links::{link_deck_to_enabled_agents, set_deck_agent};
 
@@ -257,60 +258,11 @@ impl Render for SkillCardsPage {
                 crate::i18n::t("skillCards.newGroup"),
             )
             .on_click(move |_, window, cx| {
+                // The deck editor reloads this page once the group is written.
                 let view = new_deck_view.clone();
-                let name_input = cx.new(|cx| {
-                    InputState::new(window, cx)
-                        .placeholder(crate::i18n::t("createGroupModal.groupName"))
+                create_group::open_create_group(window, cx, move |_, cx| {
+                    let _ = view.update(cx, |this, cx| this.refresh(cx));
                 });
-                let desc_input = cx.new(|cx| {
-                    InputState::new(window, cx)
-                        .placeholder(crate::i18n::t("createGroupModal.description"))
-                });
-                let icon_input = cx.new(|cx| {
-                    InputState::new(window, cx).placeholder("Emoji icon (e.g. 📦, ⚡, 🚀, 🧠)")
-                });
-                let name_ok = name_input.clone();
-                let desc_ok = desc_input.clone();
-                let icon_ok = icon_input.clone();
-                crate::chrome::open_form_dialog(
-                    window,
-                    cx,
-                    crate::i18n::t("createGroupModal.newGroup"),
-                    crate::i18n::t("createGroupModal.create"),
-                    false,
-                    240.0,
-                    move |_, _| {
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(Input::new(&name_input))
-                            .child(Input::new(&desc_input))
-                            .child(Input::new(&icon_input))
-                            .into_any_element()
-                    },
-                    move |_, cx| {
-                        let name = name_ok.read(cx).value().trim().to_string();
-                        let desc = desc_ok.read(cx).value().trim().to_string();
-                        let icon = icon_ok.read(cx).value().trim().to_string();
-                        if name.is_empty() {
-                            return false;
-                        }
-                        let final_icon = if icon.is_empty() {
-                            "📦".to_string()
-                        } else {
-                            icon
-                        };
-                        let _ = view.update(cx, |this, cx| {
-                            if let Ok(_) =
-                                create_group(name, desc, final_icon, Vec::new(), Default::default())
-                            {
-                                this.refresh(cx);
-                            }
-                        });
-                        true
-                    },
-                );
             }),
         );
         let grid_view = view.clone();
@@ -403,52 +355,9 @@ impl Render for SkillCardsPage {
                             .child(crate::i18n::t("skillCards.createFirst"))
                             .on_click(move |_, window, cx| {
                                 let view = empty_view.clone();
-                                let name_input = cx.new(|cx| {
-                                    InputState::new(window, cx)
-                                        .placeholder(crate::i18n::t("createGroupModal.groupName"))
+                                create_group::open_create_group(window, cx, move |_, cx| {
+                                    let _ = view.update(cx, |this, cx| this.refresh(cx));
                                 });
-                                let desc_input = cx.new(|cx| {
-                                    InputState::new(window, cx)
-                                        .placeholder(crate::i18n::t("createGroupModal.description"))
-                                });
-                                let name_ok = name_input.clone();
-                                let desc_ok = desc_input.clone();
-                                crate::chrome::open_form_dialog(
-                                    window,
-                                    cx,
-                                    crate::i18n::t("createGroupModal.newGroup"),
-                                    crate::i18n::t("createGroupModal.create"),
-                                    false,
-                                    200.0,
-                                    move |_, _| {
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .gap_2()
-                                            .child(Input::new(&name_input))
-                                            .child(Input::new(&desc_input))
-                                            .into_any_element()
-                                    },
-                                    move |_, cx| {
-                                        let name = name_ok.read(cx).value().trim().to_string();
-                                        let desc = desc_ok.read(cx).value().trim().to_string();
-                                        if name.is_empty() {
-                                            return false;
-                                        }
-                                        let _ = view.update(cx, |this, cx| {
-                                            if let Ok(_) = create_group(
-                                                name,
-                                                desc,
-                                                "📦".into(),
-                                                Vec::new(),
-                                                Default::default(),
-                                            ) {
-                                                this.refresh(cx);
-                                            }
-                                        });
-                                        true
-                                    },
-                                );
                             }),
                     ),
             );

@@ -152,6 +152,71 @@ impl IntoElement for Pulse {
     }
 }
 
+/// `Button variant="ghost" size="sm"` — label-only row action. Generic over
+/// the owning view so dialogs outside `import_modal` can reuse the pair.
+pub(crate) fn ghost_button<T: 'static>(
+    id: &'static str,
+    label: SharedString,
+    view: gpui::WeakEntity<T>,
+    action: impl Fn(&mut T, &mut Window, &mut gpui::Context<T>) + 'static,
+) -> MotionDiv {
+    div()
+        .id(id)
+        .h(px(28.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .cursor_pointer()
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(rgb(palette().fg))
+        .interaction_spring(
+            id,
+            true,
+            MotionPaint::new(),
+            MotionPaint::new().bg(rgb(palette().panel_hover)),
+        )
+        .child(label)
+        .on_click(move |_, window, cx| {
+            let _ = view.update(cx, |this, cx| action(this, window, cx));
+        })
+}
+
+/// `Button size="sm"` primary fill — footer commits and Done.
+pub(crate) fn primary_button<T: 'static>(
+    id: &'static str,
+    label: SharedString,
+    view: gpui::WeakEntity<T>,
+    action: impl Fn(&mut T, &mut Window, &mut gpui::Context<T>) + 'static,
+) -> MotionDiv {
+    div()
+        .id(id)
+        .h(px(28.0))
+        .px(px(20.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(6.0))
+        .rounded_md()
+        .bg(rgb(palette().accent))
+        .cursor_pointer()
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(rgb(palette().on_accent))
+        .child(label)
+        .on_click(move |_, window, cx| {
+            let _ = view.update(cx, |this, cx| action(this, window, cx));
+        })
+        .interaction_spring(
+            id,
+            true,
+            MotionPaint::new().bg(rgb(palette().accent)),
+            MotionPaint::new().bg(rgb(palette().accent_hover)),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use gpui_kit::Styled as _;

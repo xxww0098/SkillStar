@@ -1,22 +1,23 @@
-//! `Pack` phase — the Quick-Pack landing step. React closes `ImportModal`
-//! and opens `CreateGroupModal` once the skills finish installing; here the
-//! same dialog swaps bodies instead, keeping the input surface identical:
-//! emoji + name + description, member picker over installed skills, and a
-//! Cancel/Create bar. `pack_names` drives the duplicate-name guard.
+//! `CreateGroupDialog` — React `CreateGroupModal.tsx`, the deck editor with
+//! the member picker: emoji + name + description, pill strip of picked
+//! members, filter + checkbox list over installed skills, Cancel/Create bar.
+//!
+//! Two mounts share this one entity: the Skill Cards page opens it directly
+//! (`open_create_group`), and the import dialog's Quick Pack step embeds it
+//! in its `Phase::Pack` body. Either way the dialog layer supplies overlay
+//! and close chrome; the embedder paints the header row.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::input::Input;
+use gpui_kit::component::WindowExt;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use ss_skills::source_resolver::Source;
 
-use super::phases::{ghost_button, primary_button};
-use super::{ImportDialog, Phase, deck_name_from_source};
-use crate::chrome::{InteractionSpring, MotionPaint, icon};
+use crate::chrome::{InteractionSpring, MotionPaint, ghost_button, icon, primary_button};
 use crate::spawn_domain;
 use crate::theme::palette;
 
@@ -25,22 +26,73 @@ const EMOJI_OPTIONS: &[&str] = &[
     "💻", "🚀", "🎨", "🔧", "📦", "🧪", "📊", "🔐", "🌐", "📝", "⚡", "🤖", "🛠️", "📱", "🎯", "🧩",
 ];
 
-impl ImportDialog {
-    /// Entry point once `install_from_scan` succeeds with `pack = true`:
-    /// seed name = repo name, members = just-installed skills, then load the
-    /// full installed list (for the member picker) and existing group names
-    /// (for the duplicate guard).
-    pub(super) fn open_pack(
-        &mut self,
-        installed: &[String],
-        spec: &Source,
+/// Deck-write notification — the opener refreshes whatever page it owns
+/// (Skill Cards reloads itself; Quick Pack emits `GroupsChanged`).
+type OnCreated = Box<dyn Fn(&mut Window, &mut App)>;
+
+pub(crate) struct CreateGroupDialog {
+    name: Entity<InputState>,
+    desc: Entity<InputState>,
+    filter: Entity<InputState>,
+    query: String,
+    icon: String,
+    emoji_open: bool,
+    members: HashSet<String>,
+    /// (name, description) for every installed skill — member picker rows.
+    all: Vec<(String, String)>,
+    /// Existing group names, for the duplicate-name guard.
+    names: Vec<String>,
+    /// Default name handed to the name field on the first render —
+    /// `set_value` needs a `Window`, which only render supplies.
+    seed: Option<String>,
+    /// Dialog open focuses the shell, not the name field. The first render
+    /// moves the caret there once the shell is in the tree.
+    focus_name: bool,
+    on_created: OnCreated,
+    _subs: Vec<Subscription>,
+}
+
+impl CreateGroupDialog {
+    /// `seed` pre-fills the name (Quick Pack names the deck after the repo);
+    /// `members` pre-picks just-installed skills. The picker rows and the
+    /// duplicate-name guard load in the background right away.
+    pub(crate) fn new(
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        self.phase = Phase::Pack;
-        self.pack_seed = Some(deck_name_from_source(&spec.short));
-        self.pack_members = installed.iter().cloned().collect();
-        self.pack_emoji_open = false;
-        self.pack_query = String::new();
+        seed: Option<String>,
+        members: Vec<String>,
+        on_created: OnCreated,
+    ) -> Self {
+        let name = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(crate::i18n::t("createGroupModal.groupName"))
+        });
+        let desc = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(crate::i18n::t("createGroupModal.description"))
+        });
+        let filter = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(crate::i18n::t("createGroupModal.searchSkills"))
+        });
+        // Typing the deck name must re-render: the duplicate-name guard and
+        // the Create button state are computed in `render`.
+        let subs = vec![
+            cx.subscribe_in(&name, window, Self::on_name_event),
+            cx.subscribe_in(&filter, window, Self::on_filter_event),
+        ];
+        let this = Self {
+            name,
+            desc,
+            filter,
+            query: String::new(),
+            icon: "💻".to_string(),
+            emoji_open: false,
+            members: members.into_iter().collect(),
+            all: Vec::new(),
+            names: Vec::new(),
+            seed,
+            focus_name: true,
+            on_created,
+            _subs: subs,
+        };
         let view = cx.entity();
         spawn_domain(
             &view,
@@ -57,40 +109,67 @@ impl ImportDialog {
                 (skills, names)
             },
             |this, _cx, (skills, names)| {
-                this.pack_all = skills
+                this.all = skills
                     .unwrap_or_default()
                     .into_iter()
                     .map(|s| (s.name, s.description))
                     .collect();
-                this.pack_names = names.unwrap_or_default();
+                this.names = names.unwrap_or_default();
             },
         );
-        cx.notify();
+        this
     }
 
     /// `handleSave` — React's `createGroup` call passes no `skillSources`,
     /// so the map stays empty here too.
-    fn create_pack(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let name = self.pack_name.read(cx).value().trim().to_string();
-        let desc = self.pack_desc.read(cx).value().trim().to_string();
-        let mut members: Vec<String> = self.pack_members.iter().cloned().collect();
+    fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.name.read(cx).value().trim().to_string();
+        let desc = self.desc.read(cx).value().trim().to_string();
+        let mut members: Vec<String> = self.members.iter().cloned().collect();
         members.sort();
-        let dup = self.pack_names.iter().any(|n| n == &name);
+        let dup = self.names.iter().any(|n| n == &name);
         if name.is_empty() || members.is_empty() || dup {
             return;
         }
         match ss_skills::skill_group::create_group(
             name,
             desc,
-            self.pack_icon.clone(),
+            self.icon.clone(),
             members,
-            HashMap::new(),
+            std::collections::HashMap::new(),
         ) {
             Ok(_) => {
-                self.notify_groups_changed(cx);
-                self.close(window, cx);
+                (self.on_created)(window, cx);
+                window.close_dialog(cx);
             }
             Err(err) => crate::notify::toast(Notification::error(format!("{err:#}")), cx),
+        }
+    }
+
+    /// Name keystrokes only re-render — `render` reads the live value for
+    /// the duplicate-name guard and Create enablement.
+    fn on_name_event(
+        &mut self,
+        _state: &Entity<InputState>,
+        event: &InputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, InputEvent::Change) {
+            cx.notify();
+        }
+    }
+
+    fn on_filter_event(
+        &mut self,
+        _state: &Entity<InputState>,
+        event: &InputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, InputEvent::Change) {
+            self.query = self.filter.read(cx).value().to_string();
+            cx.notify();
         }
     }
 
@@ -99,19 +178,24 @@ impl ImportDialog {
     /// the Cancel/Create bar. The emoji grid renders as the column's last
     /// absolute child — GPUI paints in child order, so this keeps the
     /// overlay above the inputs it overlaps.
-    pub(super) fn render_pack(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        if let Some(seed) = self.pack_seed.take() {
+    fn render_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        if let Some(seed) = self.seed.take() {
             let _ = self
-                .pack_name
+                .name
                 .update(cx, |state, cx| state.set_value(seed, window, cx));
         }
+        if self.focus_name {
+            self.focus_name = false;
+            let handle = self.name.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        }
         let view = cx.entity().downgrade();
-        let name = self.pack_name.read(cx).value().trim().to_string();
-        let dup = !name.is_empty() && self.pack_names.iter().any(|n| n == &name);
-        let can_create = !name.is_empty() && !self.pack_members.is_empty() && !dup;
-        let query = self.pack_query.to_lowercase();
+        let name = self.name.read(cx).value().trim().to_string();
+        let dup = !name.is_empty() && self.names.iter().any(|n| n == &name);
+        let can_create = !name.is_empty() && !self.members.is_empty() && !dup;
+        let query = self.query.to_lowercase();
         let filtered: Vec<(String, String)> = self
-            .pack_all
+            .all
             .iter()
             .filter(|(n, d)| {
                 query.is_empty()
@@ -121,7 +205,7 @@ impl ImportDialog {
             .cloned()
             .collect();
         let all_marked =
-            !filtered.is_empty() && filtered.iter().all(|(n, _)| self.pack_members.contains(n));
+            !filtered.is_empty() && filtered.iter().all(|(n, _)| self.members.contains(n));
 
         // ── Icon button + name ────────────────────────────────────
         let emoji_view = view.clone();
@@ -141,39 +225,39 @@ impl ImportDialog {
                     .text_size(px(20.0))
                     .flex_shrink_0()
                     .cursor_pointer()
-                    .border_color(rgb(if self.pack_emoji_open {
+                    .border_color(rgb(if self.emoji_open {
                         palette().accent
                     } else if dup {
                         palette().danger
                     } else {
                         palette().border
                     }))
-                    .when(self.pack_emoji_open, |d| {
+                    .when(self.emoji_open, |d| {
                         d.bg(rgb(palette().accent).alpha(0.05))
                     })
-                    .child(self.pack_icon.clone())
+                    .child(self.icon.clone())
                     .on_click(move |_, _window, cx| {
                         let _ = emoji_view.update(cx, |this, cx| {
-                            this.pack_emoji_open = !this.pack_emoji_open;
+                            this.emoji_open = !this.emoji_open;
                             cx.notify();
                         });
                     })
                     .interaction_spring(
                         "pack-icon",
                         true,
-                        if self.pack_emoji_open {
+                        if self.emoji_open {
                             MotionPaint::new().bg(rgb(palette().accent).alpha(0.05))
                         } else {
                             MotionPaint::new()
                         },
-                        if self.pack_emoji_open {
+                        if self.emoji_open {
                             MotionPaint::new().bg(rgb(palette().accent).alpha(0.05))
                         } else {
                             MotionPaint::new().bg(rgb(palette().panel_hover))
                         },
                     ),
             )
-            .child(div().flex_1().min_w_0().child(Input::new(&self.pack_name)));
+            .child(div().flex_1().min_w_0().child(Input::new(&self.name)));
 
         let mut body = div()
             .flex()
@@ -202,14 +286,14 @@ impl ImportDialog {
                         )
                     }),
             )
-            .child(Input::new(&self.pack_desc));
+            .child(Input::new(&self.desc));
 
         // ── Selected member pills ─────────────────────────────────
-        if !self.pack_members.is_empty() {
-            let installed: HashSet<&String> = self.pack_all.iter().map(|(n, _)| n).collect();
+        if !self.members.is_empty() {
+            let installed: HashSet<&String> = self.all.iter().map(|(n, _)| n).collect();
             let mut pills = div().flex().flex_wrap().gap(px(6.0)).pr_1();
             // Installed members first, orphans after — React's pill sort.
-            let mut members: Vec<String> = self.pack_members.iter().cloned().collect();
+            let mut members: Vec<String> = self.members.iter().cloned().collect();
             members.sort_by_key(|n| !installed.contains(n));
             for member in members {
                 let orphan = !installed.contains(&member);
@@ -255,7 +339,7 @@ impl ImportDialog {
                     .on_click(move |_, _window, cx| {
                         let name = name.clone();
                         let _ = remove.update(cx, |this, cx| {
-                            this.pack_members.remove(&name);
+                            this.members.remove(&name);
                             cx.notify();
                         });
                     })
@@ -292,7 +376,7 @@ impl ImportDialog {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(Input::new(&self.pack_filter).prefix(
+                        .child(Input::new(&self.filter).prefix(
                             div().pl(px(4.0)).flex().items_center().child(icon(
                                 IconName::Search,
                                 14.0,
@@ -325,12 +409,12 @@ impl ImportDialog {
                                 let _ = all_view.update(cx, |this, cx| {
                                     if all_marked {
                                         for n in ids {
-                                            this.pack_members.remove(&n);
+                                            this.members.remove(&n);
                                         }
                                     } else {
                                         for n in ids {
-                                            if !this.pack_members.contains(&n) {
-                                                this.pack_members.insert(n);
+                                            if !this.members.contains(&n) {
+                                                this.members.insert(n);
                                             }
                                         }
                                     }
@@ -349,7 +433,16 @@ impl ImportDialog {
 
         // ── Member list ───────────────────────────────────────────
         let mut rows = div().flex().flex_col().gap(px(2.0));
-        if filtered.is_empty() {
+        if self.all.is_empty() {
+            rows = rows.child(
+                div()
+                    .py(px(24.0))
+                    .text_center()
+                    .text_sm()
+                    .text_color(rgb(palette().fg_muted))
+                    .child(crate::i18n::t("skillCards.noSkillsInstalled")),
+            );
+        } else if filtered.is_empty() {
             rows = rows.child(
                 div()
                     .py(px(24.0))
@@ -360,7 +453,7 @@ impl ImportDialog {
             );
         }
         for (ix, (skill_name, _desc)) in filtered.iter().enumerate() {
-            let picked = self.pack_members.contains(skill_name);
+            let picked = self.members.contains(skill_name);
             let name = skill_name.clone();
             let toggle = view.clone();
             rows = rows.child(
@@ -416,8 +509,8 @@ impl ImportDialog {
                     .on_click(move |_, _window, cx| {
                         let name = name.clone();
                         let _ = toggle.update(cx, |this, cx| {
-                            if !this.pack_members.remove(&name) {
-                                this.pack_members.insert(name);
+                            if !this.members.remove(&name) {
+                                this.members.insert(name);
                             }
                             cx.notify();
                         });
@@ -463,20 +556,20 @@ impl ImportDialog {
                     "pack-cancel",
                     crate::i18n::t("createGroupModal.cancel"),
                     cancel,
-                    |this, window, cx| this.close(window, cx),
+                    |_this, window, cx| window.close_dialog(cx),
                 ))
                 .child(
                     primary_button(
                         "pack-create",
                         crate::i18n::t("createGroupModal.create"),
                         create,
-                        |this, window, cx| this.create_pack(window, cx),
+                        |this, window, cx| this.create(window, cx),
                     )
                     .when(!can_create, |d| d.opacity(0.5)),
                 ),
         );
 
-        if self.pack_emoji_open {
+        if self.emoji_open {
             // The grid floats over the name field. Occlude so that field
             // does not take the hover face while the pointer is on an emoji.
             let mut grid = div()
@@ -493,7 +586,7 @@ impl ImportDialog {
                 .shadow_lg();
             for (ix, emoji) in EMOJI_OPTIONS.iter().enumerate() {
                 let pick = emoji.to_string();
-                let active = self.pack_icon == *emoji;
+                let active = self.icon == *emoji;
                 let pick_view = view.clone();
                 grid = grid.child(
                     div()
@@ -510,8 +603,8 @@ impl ImportDialog {
                         .on_click(move |_, _window, cx| {
                             let pick = pick.clone();
                             let _ = pick_view.update(cx, |this, cx| {
-                                this.pack_icon = pick;
-                                this.pack_emoji_open = false;
+                                this.icon = pick;
+                                this.emoji_open = false;
                                 cx.notify();
                             });
                         })
@@ -543,4 +636,72 @@ impl ImportDialog {
         }
         col
     }
+}
+
+impl Render for CreateGroupDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_body(window, cx)
+    }
+}
+
+/// Open the deck editor as its own centered dialog — the Skill Cards page's
+/// "New Deck" entry. Same surface chrome as the import modal: `p_0` dialog,
+/// modal-surface fill, and the plain `CreateGroupModal` header (no icon).
+pub(crate) fn open_create_group(
+    window: &mut Window,
+    cx: &mut App,
+    on_created: impl Fn(&mut Window, &mut App) + 'static,
+) {
+    let entity = cx.new(|cx| {
+        CreateGroupDialog::new(window, cx, None, Vec::new(), Box::new(on_created))
+    });
+    crate::chrome::open_centered(
+        window,
+        cx,
+        480.0,
+        crate::chrome::DialogChrome::Flush,
+        move |dialog, frame, _, _| {
+            // `.modal-surface`: rounded-xl, sidebar fill (card on paper).
+            let surface = if crate::theme::is_light() {
+                palette().card
+            } else {
+                palette().panel
+            };
+            let column = div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .child(header())
+                .child(entity.clone());
+            dialog
+                .w(px(512.0))
+                .p_0()
+                .rounded(px(12.0))
+                .bg(rgb(surface))
+                .border_color(rgb(palette().border))
+                .child(frame.measure(column))
+        },
+    )
+}
+
+/// The `CreateGroupModal` header — `px-6 pt-4 pb-3` + border-b, no icon well.
+fn header() -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .w_full()
+        .px(px(24.0))
+        .pt(px(16.0))
+        .pb(px(12.0))
+        .flex_shrink_0()
+        .border_b_1()
+        .border_color(rgb(palette().border_soft))
+        .child(
+            div()
+                .text_size(px(16.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(palette().fg))
+                .child(crate::i18n::t("createGroupModal.newGroup")),
+        )
 }

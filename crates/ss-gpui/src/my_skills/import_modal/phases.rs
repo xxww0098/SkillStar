@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use super::{ImportDialog, Phase, looks_like_share_code};
-use crate::chrome::{InteractionSpring, MotionPaint, icon, icon_spin};
+use crate::chrome::{InteractionSpring, MotionPaint, ghost_button, icon, icon_spin, primary_button};
 use crate::theme::palette;
 
 /// Rows that fit before the recent-repo list has to scroll.
@@ -597,70 +597,6 @@ pub(super) fn badge(label: SharedString, fg: u32, bg: u32) -> Div {
         .flex_shrink_0()
         .text_color(rgb(fg))
         .child(label)
-}
-
-/// `Button variant="ghost" size="sm"` — label-only row action.
-pub(super) fn ghost_button(
-    id: &'static str,
-    label: SharedString,
-    view: WeakEntity<ImportDialog>,
-    action: impl Fn(&mut ImportDialog, &mut Window, &mut Context<ImportDialog>) + 'static,
-) -> crate::chrome::MotionDiv {
-    div()
-        .id(id)
-        .h(px(28.0))
-        .px_3()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .cursor_pointer()
-        .text_xs()
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(palette().fg))
-        .interaction_spring(
-            id,
-            true,
-            MotionPaint::new(),
-            MotionPaint::new().bg(rgb(palette().panel_hover)),
-        )
-        .child(label)
-        .on_click(move |_, window, cx| {
-            let _ = view.update(cx, |this, cx| action(this, window, cx));
-        })
-}
-
-/// `Button size="sm"` primary fill — footer installs and Done.
-pub(super) fn primary_button(
-    id: &'static str,
-    label: SharedString,
-    view: WeakEntity<ImportDialog>,
-    action: impl Fn(&mut ImportDialog, &mut Window, &mut Context<ImportDialog>) + 'static,
-) -> crate::chrome::MotionDiv {
-    div()
-        .id(id)
-        .h(px(28.0))
-        .px(px(20.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .rounded_md()
-        .bg(rgb(palette().accent))
-        .cursor_pointer()
-        .text_xs()
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(palette().on_accent))
-        .child(label)
-        .on_click(move |_, window, cx| {
-            let _ = view.update(cx, |this, cx| action(this, window, cx));
-        })
-        .interaction_spring(
-            id,
-            true,
-            MotionPaint::new().bg(rgb(palette().accent)),
-            MotionPaint::new().bg(rgb(palette().accent_hover)),
-        )
 }
 
 /// Scan or full-depth scan. Primary is the Enter action; outline is the

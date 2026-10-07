@@ -216,8 +216,7 @@ fn open_reader(reader: Entity<SkillReader>, window: &mut Window, cx: &mut App) {
 impl crate::translation::TranslationHost for SkillReader {}
 
 impl Render for SkillReader {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body_h = reader_body_height(window.viewport_size().height.as_f32());
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let translate = self.show_translation;
         if self.revealed && translate {
             if let Phase::Ready(text) = &self.phase {
@@ -241,7 +240,7 @@ impl Render for SkillReader {
             .gap_3()
             .child(DialogTitle::new().pr_6().child(self.title()))
             .child(self.label_row(cx))
-            .child(self.body(body_h, translate, cx))
+            .child(self.body(translate, cx))
     }
 }
 
@@ -302,23 +301,20 @@ impl SkillReader {
         )
     }
 
-    fn body(&mut self, body_h: f32, translate: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn body(&mut self, translate: bool, cx: &mut Context<Self>) -> AnyElement {
         if !self.revealed {
-            return scroll_port(false, body_h, div());
+            return scroll_port(false, div());
         }
         match &self.phase {
-            Phase::Loading => scroll_port(
-                false,
-                body_h,
-                muted_line(crate::i18n::t("detailPanel.reading").to_string()),
-            ),
+            Phase::Loading => {
+                scroll_port(false, muted_line(crate::i18n::t("detailPanel.reading").to_string()))
+            }
             Phase::Failed(error) => self.failure(error.clone(), cx),
             Phase::Ready(text) if text.trim().is_empty() => scroll_port(
                 false,
-                body_h,
                 muted_line(crate::i18n::t("detailPanel.emptySkillMd").to_string()),
             ),
-            Phase::Ready(text) => scroll_port(true, body_h, file_column(text, translate)),
+            Phase::Ready(text) => scroll_port(true, file_column(text, translate)),
         }
     }
 
@@ -380,15 +376,15 @@ fn muted_line(text: String) -> Div {
         .child(text)
 }
 
-fn scroll_port(ready: bool, body_h: f32, child: impl IntoElement) -> AnyElement {
-    // An explicit height, not `flex_1`. The scrollable wrapper paints
-    // `size_full()` first; a percentage height becomes the whole reader and
-    // the port grows with the file. The card's max height then clips that
-    // port, and the wheel lands on a scroller that has nothing to scroll.
+fn scroll_port(ready: bool, child: impl IntoElement) -> AnyElement {
+    // The leftover height, not a budgeted one. The title and the file label
+    // are text, so any constant here goes stale and leaves a dead band under
+    // the card. `flex_1` hands the rest of the fixed shell to this frame,
+    // which makes the scroller's `size_full()` a definite height.
     // The selector stays on this frame: `overflow_y_scrollbar` moves a
     // selector on the scrolled element onto the content, which is as tall
     // as the file.
-    let mut frame = div().h(px(body_h)).w_full().min_w_0().flex_shrink_0();
+    let mut frame = div().flex_1().min_h_0().w_full().min_w_0();
     if ready {
         frame = frame.debug_selector(|| "skill-md-body".into());
     }
@@ -396,8 +392,7 @@ fn scroll_port(ready: bool, body_h: f32, child: impl IntoElement) -> AnyElement 
         .child(
             div()
                 .id("skill-md-reader")
-                .h(px(body_h))
-                .w_full()
+                .size_full()
                 .min_w_0()
                 .overflow_y_scrollbar()
                 .p_3()
@@ -575,8 +570,8 @@ mod tests {
     };
 
     use super::{
-        DIALOG_CHROME, DIALOG_MARGIN, HEADER, MdBlock, WINDOW_INSET, open_skill_markdown,
-        reader_body_height, reader_shell_height, split_markdown,
+        DIALOG_CHROME, DIALOG_MARGIN, MdBlock, WINDOW_INSET, open_skill_markdown,
+        reader_shell_height, split_markdown,
     };
 
     #[test]
@@ -846,14 +841,13 @@ mod tests {
                 card <= max_card + 0.5,
                 "viewport {viewport}: card {card} exceeds {max_card}"
             );
-            assert!(reader_body_height(viewport) + HEADER <= shell + 0.5);
         }
     }
 
     #[gpui_kit::test]
-    fn zz_probe_layout(cx: &mut gpui_kit::TestAppContext) {
+    fn the_file_fills_the_card_down_to_its_padding(cx: &mut gpui_kit::TestAppContext) {
         let cx = window(cx, true);
-        let body = (0..60)
+        let body = (0..40)
             .map(|index| format!("第 {index} 段说明这一步，句子足够长，会在卡片里换行。"))
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -861,22 +855,13 @@ mod tests {
             open_skill_markdown("demo".into(), body, window, cx);
         });
         paint(cx);
-        paint(cx);
         let dialog = cx.debug_bounds("dialog-0").expect("dialog");
         let port = cx.debug_bounds("skill-md-body").expect("body");
-        let column = cx.debug_bounds("skill-md-column").expect("column");
-        println!("PROBE dialog={dialog:?}");
-        println!("PROBE port={port:?}");
-        println!("PROBE column={column:?}");
-        println!(
-            "PROBE gap_below_port={:?} dialog_bottom_minus_port_bottom={:?}",
-            px(0.),
-            dialog.origin.y + dialog.size.height - (port.origin.y + port.size.height)
-        );
-        println!(
-            "PROBE shell_const={} body_const={}",
-            reader_shell_height(800.0),
-            reader_body_height(800.0)
+        let gap = dialog.origin.y + dialog.size.height - (port.origin.y + port.size.height);
+        assert_eq!(
+            gap,
+            px(DIALOG_CHROME / 2.),
+            "the card leaves a dead band under the file: port {port:?} dialog {dialog:?}"
         );
     }
 

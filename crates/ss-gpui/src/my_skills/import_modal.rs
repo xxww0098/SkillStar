@@ -8,7 +8,6 @@
 //! file budget is the only reason; `ImportDialog` owns all state here.
 
 mod helpers;
-mod pack;
 mod phases;
 mod progress;
 mod select;
@@ -74,20 +73,12 @@ pub(crate) struct ImportDialog {
     /// Git session backing the in-flight scan/install; `cancel()` aborts it.
     facade: Option<GitSkillFacade>,
     // ── Pack step (React `CreateGroupModal`, opened by Quick Pack) ───
-    pack_name: Entity<InputState>,
-    pack_desc: Entity<InputState>,
-    pack_filter: Entity<InputState>,
-    pack_query: String,
-    pack_icon: String,
-    pack_emoji_open: bool,
-    pack_members: HashSet<String>,
-    /// (name, description) for every installed skill — member picker rows.
-    pack_all: Vec<(String, String)>,
-    /// Existing group names, for the duplicate-name guard.
-    pack_names: Vec<String>,
-    /// Default name handed to the name field on the first Pack render —
-    /// `set_value` needs a `Window`, which only render supplies.
-    pack_seed: Option<String>,
+    /// The deck editor embedded in `Phase::Pack`. Created lazily in render —
+    /// its inputs need a `Window`, which the install-completion callback
+    /// that sets `pack_pending` does not have.
+    pack: Option<Entity<crate::skill_cards::create_group::CreateGroupDialog>>,
+    /// (seed name, pre-picked members) for the pending pack view.
+    pack_pending: Option<(String, Vec<String>)>,
     _subs: Vec<Subscription>,
 }
 
@@ -102,22 +93,9 @@ impl ImportDialog {
         });
         let filter =
             cx.new(|cx| InputState::new(window, cx).placeholder(crate::i18n::t("common.search")));
-        let pack_name = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(crate::i18n::t("createGroupModal.groupName"))
-        });
-        let pack_desc = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(crate::i18n::t("createGroupModal.description"))
-        });
-        let pack_filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(crate::i18n::t("createGroupModal.searchSkills"))
-        });
         let subs = vec![
             cx.subscribe_in(&url, window, Self::on_url_event),
             cx.subscribe_in(&filter, window, Self::on_filter_event),
-            // Typing the deck name must re-render: the duplicate-name guard
-            // and Create button state are computed in `render_pack`.
-            cx.subscribe_in(&pack_name, window, Self::on_pack_name_event),
-            cx.subscribe_in(&pack_filter, window, Self::on_pack_filter_event),
         ];
         let this = Self {
             page,
@@ -138,16 +116,8 @@ impl ImportDialog {
             share_existing: Vec::new(),
             summary: None,
             facade: None,
-            pack_name,
-            pack_desc,
-            pack_filter,
-            pack_query: String::new(),
-            pack_icon: "💻".to_string(),
-            pack_emoji_open: false,
-            pack_members: HashSet::new(),
-            pack_all: Vec::new(),
-            pack_names: Vec::new(),
-            pack_seed: None,
+            pack: None,
+            pack_pending: None,
             _subs: subs,
         };
         let view = cx.entity();
@@ -204,33 +174,6 @@ impl ImportDialog {
     ) {
         if matches!(event, InputEvent::Change) {
             self.filter_query = self.filter.read(cx).value().to_string();
-            cx.notify();
-        }
-    }
-
-    /// Name keystrokes only re-render — `render_pack` reads the live value for
-    /// the duplicate-name guard and Create enablement.
-    fn on_pack_name_event(
-        &mut self,
-        _state: &Entity<InputState>,
-        event: &InputEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if matches!(event, InputEvent::Change) {
-            cx.notify();
-        }
-    }
-
-    fn on_pack_filter_event(
-        &mut self,
-        _state: &Entity<InputState>,
-        event: &InputEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if matches!(event, InputEvent::Change) {
-            self.pack_query = self.pack_filter.read(cx).value().to_string();
             cx.notify();
         }
     }
@@ -375,6 +318,25 @@ impl ImportDialog {
                 }
             },
         );
+    }
+
+    /// Quick Pack continuation: stage the deck editor instead of the
+    /// Completed screen. The view itself is built on the next render — its
+    /// inputs need a `Window`, which this completion callback lacks. Seed
+    /// name = repo name, members = just-installed skills.
+    fn open_pack(
+        &mut self,
+        installed: &[String],
+        spec: &ss_skills::source_resolver::Source,
+        cx: &mut Context<Self>,
+    ) {
+        self.phase = Phase::Pack;
+        self.pack = None;
+        self.pack_pending = Some((
+            deck_name_from_source(&spec.short),
+            installed.to_vec(),
+        ));
+        cx.notify();
     }
 
     /// `handleParseShareCode`: decode the `ags-`/`agd-` payload, then mark the
@@ -711,7 +673,32 @@ impl Render for ImportDialog {
             Phase::Completed => self.render_completed(cx).into_any_element(),
             Phase::Failed => self.render_failed(cx).into_any_element(),
             Phase::SharePreview => self.render_share_preview(cx).into_any_element(),
-            Phase::Pack => self.render_pack(window, cx).into_any_element(),
+            Phase::Pack => {
+                // The install callback has no `Window`, so it only staged the
+                // seed and members; build the editor here, once, with one.
+                if self.pack.is_none() {
+                    let (seed, members) = self
+                        .pack_pending
+                        .take()
+                        .unwrap_or_else(|| (String::new(), Vec::new()));
+                    let seed = if seed.is_empty() { None } else { Some(seed) };
+                    let page = self.page.clone();
+                    self.pack = Some(cx.new(|cx| {
+                        crate::skill_cards::create_group::CreateGroupDialog::new(
+                            window,
+                            cx,
+                            seed,
+                            members,
+                            // Quick Pack wrote a deck — reload the cards page.
+                            Box::new(move |_, cx| {
+                                let _ =
+                                    page.update(cx, |_, cx| cx.emit(crate::nav::GroupsChanged));
+                            }),
+                        )
+                    }));
+                }
+                self.pack.clone().expect("pack view staged above").into_any_element()
+            }
         };
         div()
             .flex()

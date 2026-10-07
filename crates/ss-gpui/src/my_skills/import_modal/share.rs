@@ -10,9 +10,9 @@ use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use super::phases::{badge, count_pill, ghost_button};
+use super::phases::{badge, count_pill};
 use super::{ImportDialog, Phase};
-use crate::chrome::{InteractionSpring, MotionPaint, icon};
+use crate::chrome::{InteractionSpring, MotionPaint, ghost_button, icon};
 use crate::theme::palette;
 
 impl ImportDialog {
