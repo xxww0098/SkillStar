@@ -1,15 +1,43 @@
+[package]
+name = "skillstar"
+# Product version. Library crates inherit the placeholder in
+# `[workspace.package]`; release checks compare this field, passed in as
+# `CARGO_PKG_VERSION`. Do not switch this package to `version.workspace`.
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SkillStar desktop shell and CLI"
+publish = false
+
+# skillstar --version still comes from the Clap derive in ss-app, which
+# shares the same 0.0.1 until a release bumps both on purpose.
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "skillstar"
+path = "src/main.rs"
+
+[dependencies]
+ss-app = { path = "crates/ss-app" }
+ss-git = { path = "crates/ss-git" }
+ss-gpui = { path = "crates/ss-gpui" }
+
 [workspace]
 resolver = "3"
 members = [
+  ".",
   "crates/*",
 ]
-default-members = ["crates/skillstar"]
+default-members = ["."]
 
 # Shared package metadata. Members opt in with `edition.workspace = true` etc.
 # None of the ss-* crates are published — they are wired together with
 # path deps — so they share one placeholder `version` instead of each keeping a
-# semver nobody consumes. `crates/skillstar` is the exception: it keeps its own
-# `version`, which is the product version, and inherits only edition/MSRV.
+# semver nobody consumes. The root package above is the exception: its own
+# `version` is the product version, and it inherits only edition/MSRV.
 [workspace.package]
 edition = "2024"
 rust-version = "1.99"

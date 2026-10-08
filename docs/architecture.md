@@ -6,7 +6,7 @@
 
 ## 交付面与组合根
 
-SkillStar 有一个产品二进制 `skillstar`。`crates/skillstar/src/main.rs` 先处理 MCP serve，再处理 askpass，再把已知 CLI 子命令交给 `ss-app`，其余启动 GPUI。GUI 直接调用域 facade，没有 IPC 层。
+SkillStar 有一个产品二进制 `skillstar`。仓库根 `src/main.rs` 先处理 MCP serve，再处理 askpass，再把已知 CLI 子命令交给 `ss-app`，其余启动 GPUI。GUI 直接调用域 facade，没有 IPC 层。
 
 ```mermaid
 flowchart LR
@@ -31,7 +31,7 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 版本不在文档硬编码：
 
 - Rust edition、workspace 和共享依赖：根 `Cargo.toml`、各 package `Cargo.toml`、根 `Cargo.lock`。
-- 产品版本：`crates/skillstar/Cargo.toml`。
+- 产品版本：根 `Cargo.toml` 的 `[package] version`。
 - 依赖审查：根 `deny.toml`。
 - CI 和发布：`.github/workflows/`。
 

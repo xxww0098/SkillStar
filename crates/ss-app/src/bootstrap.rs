@@ -42,9 +42,9 @@ pub async fn refresh_marketplace_startup() -> anyhow::Result<()> {
 
 /// Background work that exists only while the GUI process is alive.
 ///
-/// `product_version` is the binary's product version (`crates/skillstar`'s
-/// `Cargo.toml`) — the value the release check compares against GitHub
-/// Releases.
+/// `product_version` is the binary's product version (the repo-root
+/// `Cargo.toml` `[package]` version) — the value the release check compares
+/// against GitHub Releases.
 pub fn spawn_gui_background(handle: &tokio::runtime::Handle, product_version: &'static str) {
     handle.spawn(async {
         if let Err(err) = refresh_marketplace_startup().await {

@@ -11,9 +11,9 @@ D-091 之前的条目可能引用 `src/`、`src-tauri/` 或 Tauri command。那�
 - 日期：2026-07-10
 - 状态：superseded by [D-091](#d-091退役-tauri-与-react全面转向-gpui)
 - 背景：独立 CLI package 会复制入口、依赖和跨域流程。
-- 决策：可执行文件只由一个 package 产出；启动时识别 CLI/GUI 模式。CLI 和 GUI 调用同一域 facade 或 `ss-app` use case。产出 package 已从 `src-tauri` 改为 `crates/skillstar`。
+- 决策：可执行文件只由一个 package 产出；启动时识别 CLI/GUI 模式。CLI 和 GUI 调用同一域 facade 或 `ss-app` use case。产出 package 在仓库根，入口是 `src/main.rs`。
 - 后果：`ss-app` 保持 library-only；不得重新添加第二个产品二进制。
-- 证据：`crates/skillstar/src/main.rs`、`crates/ss-app/src/cli/`。
+- 证据：`src/main.rs`、`crates/ss-app/src/cli/`。
 
 ## D-002：module-first，满足晋升条件后才拆 crate
 
@@ -816,9 +816,9 @@ D-091 之前的条目可能引用 `src/`、`src-tauri/` 或 Tauri command。那�
 - 日期：2026-10-06
 - 状态：accepted
 - 背景：D-089 只证明 GPUI 能直接调用域 crates。继续保留 Tauri 会让两个壳、两套构建和两套发布同时存在。用户要求退役 Tauri，而不是等 GPUI 功能对齐后再切换。
-- 决策：删除 `src-tauri/`、React SPA 和前端工具链。产品二进制改为 `crates/skillstar`。无参数、`gui` 和 `gui-gpui` 都启动 GPUI。已知 CLI 子命令仍走 `ss-app`。MCP serve 仍最先返回，且不初始化市场快照。进程启动（路径迁移、legacy cleanup、市场快照接线）和 GUI 存活期间的频道自动更新唤醒放在 `ss-app`。
+- 决策：删除 `src-tauri/`、React SPA 和前端工具链。产品二进制是仓库根 package `skillstar`，入口 `src/main.rs`。无参数、`gui` 和 `gui-gpui` 都启动 GPUI。已知 CLI 子命令仍走 `ss-app`。MCP serve 仍最先返回，且不初始化市场快照。进程启动（路径迁移、legacy cleanup、市场快照接线）和 GUI 存活期间的频道自动更新唤醒放在 `ss-app`。
 - 后果：获得——单一壳、单一 lockfile、GUI 直接调用域 facade。承担——托盘、dock 菜单、签名应用内更新、深链注册、后台巡检循环、SSH 远端界面、共享频道管理界面、用量图表和命令面板没有移植。这些能力的域实现仍在；缺的是 GPUI 界面和进程级插件。发布只上传 `skillstar` 二进制，不再产出 `.dmg`、`.deb`、`.msi` 或 `latest.json`。Windows release 仍使用 `windows` subsystem，不调用 `AllocConsole`。
-- 证据：`crates/skillstar/src/main.rs`、`crates/ss-app/src/bootstrap.rs`、`crates/ss-app/src/channel_wake.rs`、`crates/ss-gpui/src/lib.rs`、`.github/workflows/release.yml`。
+- 证据：`src/main.rs`、`crates/ss-app/src/bootstrap.rs`、`crates/ss-app/src/channel_wake.rs`、`crates/ss-gpui/src/lib.rs`、`.github/workflows/release.yml`。
 
 ## D-092：导入复用本地 Git 缓存并锁定预览提交
 
@@ -924,7 +924,7 @@ D-091 之前的条目可能引用 `src/`、`src-tauri/` 或 Tauri command。那�
 - 日期：2026-10-08
 - 状态：accepted
 - 背景：发版依赖 GitHub Releases（`v*` tag → release.yml → 维护者人工发布 draft），而 D-091 退役了签名更新器且二进制不签名。用户只能手动发现新版本，但自动下载/替换未签名二进制不可接受。
-- 决策：只做检测，不做安装。域逻辑放 `ss-core::infra::release_check` 私有 module：经匿名 GitHub 链路（`get_anonymous`，加速源优先、直连兜底）请求 `/releases/latest`，与产品版本做严格 `MAJOR.MINOR.PATCH` 三元组比较（剥一个 `v` 前缀，解析失败一律视为不新，杜绝坏 tag 误报升级）。产品版本 SSOT 仍是 `crates/skillstar/Cargo.toml`，由 `skillstar` 二进制以 `env!("CARGO_PKG_VERSION")` 传入 `ss_gpui::run` 与 `ss-app` 唤醒（其余 crate 共享占位 workspace 版本，不可直接用）。结果持久化 `state/app/release_check.json`；GUI 唤醒（`ss-app::release_check_wake`）每小时评估、24 小时至多检查一次，与技能更新检查共享同一份 GitHub API 限流冷却（`state/skills/github_api_cooldown.json`，抽为 `ss-core::infra::github_api_cooldown`，同 IP 共享 60 次/小时额度）；设置 → 关于 可手动检查并跳转 Releases 页，永不下载或替换二进制。
+- 决策：只做检测，不做安装。域逻辑放 `ss-core::infra::release_check` 私有 module：经匿名 GitHub 链路（`get_anonymous`，加速源优先、直连兜底）请求 `/releases/latest`，与产品版本做严格 `MAJOR.MINOR.PATCH` 三元组比较（剥一个 `v` 前缀，解析失败一律视为不新，杜绝坏 tag 误报升级）。产品版本 SSOT 仍是根 `Cargo.toml` 的 `[package] version`，由 `skillstar` 二进制以 `env!("CARGO_PKG_VERSION")` 传入 `ss_gpui::run` 与 `ss-app` 唤醒（其余 crate 共享占位 workspace 版本，不可直接用）。结果持久化 `state/app/release_check.json`；GUI 唤醒（`ss-app::release_check_wake`）每小时评估、24 小时至多检查一次，与技能更新检查共享同一份 GitHub API 限流冷却（`state/skills/github_api_cooldown.json`，抽为 `ss-core::infra::github_api_cooldown`，同 IP 共享 60 次/小时额度）；设置 → 关于 可手动检查并跳转 Releases 页，永不下载或替换二进制。
 - 后果：获得——客户端最迟 24 小时发现新发布（draft 人工发布后才可见，与发版流程兼容）；限流状态跨消费方一致，不会两家一起撞 403。承担——比较器不识别 prerelease tag（`v1.0.0-rc.1` 视为不新），仅提示不安装意味着升级仍需手动步骤；`get_anonymous` 吞掉响应头，403 只能记保守 1 小时冷却而非精确 reset。
 - 证据：`crates/ss-core/src/infra/release_check.rs`、`crates/ss-core/src/infra/github_api_cooldown.rs`、`crates/ss-app/src/release_check_wake.rs`、`crates/ss-gpui/src/settings/about.rs`、`docs/features/platform/README.md` 的「Updater 与发布」。
 

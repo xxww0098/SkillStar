@@ -50,13 +50,13 @@
 ## Updater 与发布
 
 - 没有 updater endpoint，也没有签名私钥。不要恢复 `tauri-action` 或伪造 `latest.json`。
-- 版本检查是 check-only（D-103）：域逻辑在 `ss-core::infra::release_check`，经匿名 GitHub 链路请求 `api.github.com` 的 `/releases/latest`，与产品版本（`crates/skillstar` 的 `CARGO_PKG_VERSION`，由 `skillstar` 二进制启动时传入 GUI）做严格 `MAJOR.MINOR.PATCH` 比较，解析不了的 tag 一律视为不新。结果持久化到 `state/app/release_check.json`；GUI 每小时评估一次、24 小时至多实际检查一次，共享 GitHub API 冷却（`state/skills/github_api_cooldown.json`，与技能更新检查同一份）期间跳过；设置 → 关于 可手动检查、打开 Releases 页。不下载、不替换二进制。
+- 版本检查是 check-only（D-103）：域逻辑在 `ss-core::infra::release_check`，经匿名 GitHub 链路请求 `api.github.com` 的 `/releases/latest`，与产品版本（根 `Cargo.toml` `[package]` 的 `CARGO_PKG_VERSION`，由 `skillstar` 二进制启动时传入 GUI）做严格 `MAJOR.MINOR.PATCH` 比较，解析不了的 tag 一律视为不新。结果持久化到 `state/app/release_check.json`；GUI 每小时评估一次、24 小时至多实际检查一次，共享 GitHub API 冷却（`state/skills/github_api_cooldown.json`，与技能更新检查同一份）期间跳过；设置 → 关于 可手动检查、打开 Releases 页。不下载、不替换二进制。
 - `v*` tag 触发 `.github/workflows/release.yml`，为 macOS arm/x64、Linux 和 Windows 上传 `skillstar` 二进制。
 - GitHub `/releases/latest` 只看到已发布 release。draft 上传完成后由维护者人工发布；发布后客户端最迟 24 小时内（或手动检查时）发现新版本，但只提示，不自动下载。
 
 发布前：
 
-1. 产品版本只改 `crates/skillstar/Cargo.toml`，并更新 `Cargo.lock`。
+1. 产品版本只改根 `Cargo.toml` 的 `[package] version`，并更新 `Cargo.lock`。
 2. 确认普通 CI 全绿。
 3. 提交后打 `vX.Y.Z` tag，等待 release matrix。
 4. 检查四个二进制后发布 draft。

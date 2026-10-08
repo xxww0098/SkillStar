@@ -8,10 +8,10 @@
 
 ```text
 SkillStar/
+├── src/main.rs                  # package skillstar：MCP、askpass、CLI、GPUI 分派
 ├── .claude/                     # 项目级 Claude 配置与本地 skill 入口
 ├── .github/workflows/           # 跨平台 CI 与发布
 ├── crates/
-│   ├── skillstar/        # 产品二进制：MCP、askpass、CLI、GPUI 分派
 │   ├── ss-core/          # 共享契约、配置与基础设施
 │   ├── ss-git/           # Git transport/ops/tree/history 叶子
 │   ├── ss-skills/        # 技能生命周期、共享频道、项目部署与 Agent profile
@@ -28,10 +28,10 @@ SkillStar/
 ├── vendor/
 │   └── gpui-component/          # 上游 0.7.1 vendored 副本，经 [patch.crates-io] 接入；唯一 diff 是悬浮窗入场动画（D-101）
 └── Cargo.toml / Cargo.lock / deny.toml
-                                  # Rust workspace、唯一 lockfile、cargo-deny 配置
+                                  # 根 Cargo.toml 同时是 workspace 与 package skillstar；唯一 lockfile、cargo-deny 配置
 ```
 
-`vendor/` 不是 workspace 成员：vendored crate 的清单带空 `[workspace]`，只被根 `Cargo.toml` 的 `[patch.crates-io]` 引用，结构与门禁脚本只扫 `crates/`。升级上游等于重新 vendor 并重放 [D-101](./decisions.md#d-101gpui-component-以-vendored-patch-引入悬浮窗入场统一为原地弹出) 的那一处 diff，不在此处做任何发散修改。
+`vendor/` 不是 workspace 成员：vendored crate 的清单带空 `[workspace]`，只被根 `Cargo.toml` 的 `[patch.crates-io]` 引用。结构门禁扫 `crates/` 与仓库根 `src/`，不扫 `vendor/`。升级上游等于重新 vendor 并重放 [D-101](./decisions.md#d-101gpui-component-以-vendored-patch-引入悬浮窗入场统一为原地弹出) 的那一处 diff，不在此处做任何发散修改。
 
 ## Workspace crate 所有权
 
@@ -152,11 +152,11 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | 接缝 | 规则 | 证据入口 |
 | --- | --- | --- |
 | GUI → 域 | GPUI view 经 `spawn_domain` 调用域 facade，不经 IPC | `crates/ss-gpui/src/lib.rs` |
-| 进程入口 | `skillstar` 先判断 MCP serve，再 askpass，再 CLI，其余进入 GPUI | `crates/skillstar/src/main.rs` |
+| 进程入口 | `skillstar` 先判断 MCP serve，再 askpass，再 CLI，其余进入 GPUI | `src/main.rs` |
 | 进程启动 | CLI 与 GUI 共用迁移和市场快照接线；MCP serve 不调用 | `crates/ss-app/src/bootstrap.rs` |
 | 跨域事务 | 放入 `ss-app`，由窄 facade 组合 | `crates/ss-app/src/` |
 | 技能自动更新 | 偏好归 `ss-core` config，检查与应用归 `ss-skills` facade，周期唤醒归 `ss-app`；壳只读写偏好 | `crates/ss-app/src/skill_wake.rs` |
-| 应用版本检查 | 检测归 `ss-core::infra::release_check`（check-only，不下载），周期唤醒归 `ss-app`，产品版本由 `skillstar` 二进制传入（D-103） | `crates/ss-core/src/infra/release_check.rs` |
+| 应用版本检查 | 检测归 `ss-core::infra::release_check`（check-only，不下载），周期唤醒归 `ss-app`，产品版本由根 `Cargo.toml` 的 `[package]` 传入（D-103） | `crates/ss-core/src/infra/release_check.rs` |
 | 项目技能 MCP | 本机 stdio 服务、项目技能推荐与批准编排在 `ss_app::project_skills_mcp`。工具参数在 `protocol`，不接收批准字段。`rmcp` 只加入 `ss-app` | `crates/ss-app/src/project_skills_mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/ss-core/src/infra/http_client.rs` |
 | 远端 SSH | `ss-sync` 只依赖 `ss-core`；SFTP 列出远端 hub，不消费 skills 域契约 | `crates/ss-sync/Cargo.toml` |
@@ -166,7 +166,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 1. 只影响一个现有域：先放该 crate/feature 的私有 module。
 2. 多域业务事务：放 `ss-app`，不要制造反向依赖。
 3. 仅窗口或 GPUI 展示：放 `crates/ss-gpui` 已有能力目录。
-4. 仅进程分派，不含域逻辑：放 `crates/skillstar`。
+4. 仅进程分派，不含域逻辑：放仓库根 `src/main.rs`（package `skillstar`）。
 5. 真正跨域且无业务语义的基础能力：才考虑 `ss-core`。
 6. 只有变更节奏、依赖集合或 deletion test 证明独立编译单元有收益时，才晋升为新 crate。
 7. 外部技术规范（如 Agent Skills frontmatter）若满足 D-002，可成为产品无关协议叶子；不得把产品编排塞进该叶子。

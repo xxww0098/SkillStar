@@ -71,7 +71,7 @@
 
 | 概念 | 所有者 |
 | --- | --- |
-| stdio 进程规则（不进 GUI、stdout 只有协议、跳过 askpass 与 marketplace init） | `crates/skillstar/src/main.rs` 的 `mcp` 分支 + `ss_app::project_skills_mcp::serve` |
+| stdio 进程规则（不进 GUI、stdout 只有协议、跳过 askpass 与 marketplace init） | `src/main.rs` 的 `mcp` 分支 + `ss_app::project_skills_mcp::serve` |
 | 项目绑定 | `skillstar_skills::projects::binding` |
 | 项目写锁 | `skillstar_skills::projects::write_lock` |
 | 共享路径 owner | `skillstar_skills::projects::owner` |
@@ -104,7 +104,7 @@
 
 ### 进程
 
-`skillstar mcp serve --stdio` 在 `crates/skillstar/src/main.rs` 里于 askpass 之前返回。漏掉时会打开桌面窗口。
+`skillstar mcp serve --stdio` 在 `src/main.rs` 里于 askpass 之前返回。漏掉时会打开桌面窗口。
 
 `argv[1] == "mcp"` 时，在 `handle_internal_askpass` 之前进入 serve。该函数在 `SKILLSTAR_GIT_ASKPASS_MODE=1` 时会 `println!` 并吞掉进程（`crates/ss-git/src/transport.rs`）。serve 自己迁移旧路径，不调用 `ss_app::bootstrap::prepare_process`，因此不初始化 marketplace snapshot。tracing 只写 stderr。stdout 只有换行分隔的 JSON-RPC。
 

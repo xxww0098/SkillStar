@@ -20,7 +20,7 @@ SkillStar 的界面在 `crates/ss-gpui`，域逻辑在 Rust workspace，同一�
 ## 架构红线
 
 - GUI 经 `spawn_domain` 调用域 facade。展示层不直接读业务文件或业务网络。
-- 进程分派只放 `crates/skillstar`。市场快照接线和频道周期唤醒放 `ss-app`。域逻辑进入 `crates/ss-*`。
+- 进程分派只放仓库根 `src/main.rs`（package `skillstar`）。市场快照接线和频道周期唤醒放 `ss-app`。域逻辑进入 `crates/ss-*`。
 - MCP serve 在 askpass 和市场快照初始化之前返回，且不调用 `prepare_process`。
 - 跨域 use case 进入 `ss-app`。域 crate 不靠反向依赖完成编排。
 - 远程 HTTP 走 `ss_core::infra::http_client::probe_http_client`，并遵守用户代理配置。

@@ -139,10 +139,10 @@ fn install_dock_icon() {
 /// each view.
 static TOKIO: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
 
-/// The product version the `skillstar` binary was built with (the version
-/// in `crates/skillstar/Cargo.toml` — every other crate shares a placeholder
-/// workspace version). Set by [`run`]; falls back to this crate's own
-/// version for the standalone dev bin and tests.
+/// The product version the `skillstar` binary was built with (the `[package]`
+/// version in the repo-root `Cargo.toml` — every other crate shares a
+/// placeholder workspace version). Set by [`run`]; falls back to this crate's
+/// own version for the standalone dev bin and tests.
 static PRODUCT_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 
 pub fn product_version() -> &'static str {
