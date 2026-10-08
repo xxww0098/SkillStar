@@ -84,4 +84,5 @@ test_parse
 .posit/
 .tabnine/
 .codegraph/
+.commandcode/
 .ignore
