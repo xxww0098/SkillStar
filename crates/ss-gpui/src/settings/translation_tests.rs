@@ -71,10 +71,8 @@ fn host_with_models<'a>(
 #[gpui_kit::test]
 fn model_combobox_reports_fetched_catalog_size(cx: &mut gpui_kit::TestAppContext) {
     let _dir = IsolatedDataDir::new();
-    cx.update(|cx| {
-        crate::init_components(cx);
-        crate::i18n::install(cx);
-    });
+    crate::init_test(cx);
+    cx.update(crate::i18n::install);
     let models: Vec<String> = (0..40).map(|index| format!("m{index:02}")).collect();
     let (_settings, cx) = host_with_models(cx, &models, "m07");
     cx.simulate_resize(size(px(1200.), px(800.)));
@@ -100,10 +98,8 @@ fn model_combobox_reports_fetched_catalog_size(cx: &mut gpui_kit::TestAppContext
 #[gpui_kit::test]
 fn model_combobox_keeps_current_model_when_catalog_lacks_it(cx: &mut gpui_kit::TestAppContext) {
     let _dir = IsolatedDataDir::new();
-    cx.update(|cx| {
-        crate::init_components(cx);
-        crate::i18n::install(cx);
-    });
+    crate::init_test(cx);
+    cx.update(crate::i18n::install);
     let models: Vec<String> = (0..3).map(|index| format!("m{index:02}")).collect();
     let (settings, cx) = host_with_models(cx, &models, "custom-model");
     cx.simulate_resize(size(px(1200.), px(800.)));
@@ -123,10 +119,8 @@ fn model_combobox_keeps_current_model_when_catalog_lacks_it(cx: &mut gpui_kit::T
 #[gpui_kit::test]
 fn model_combobox_empty_menu_renders_hint(cx: &mut gpui_kit::TestAppContext) {
     let _dir = IsolatedDataDir::new();
-    cx.update(|cx| {
-        crate::init_components(cx);
-        crate::i18n::install(cx);
-    });
+    crate::init_test(cx);
+    cx.update(crate::i18n::install);
     let (_settings, cx) = host_with_models(cx, &[], "");
     cx.simulate_resize(size(px(1200.), px(800.)));
     paint(cx);
@@ -141,10 +135,8 @@ fn model_combobox_empty_menu_renders_hint(cx: &mut gpui_kit::TestAppContext) {
 #[gpui_kit::test]
 fn model_combobox_change_event_pins_model(cx: &mut gpui_kit::TestAppContext) {
     let _dir = IsolatedDataDir::new();
-    cx.update(|cx| {
-        crate::init_components(cx);
-        crate::i18n::install(cx);
-    });
+    crate::init_test(cx);
+    cx.update(crate::i18n::install);
     let models: Vec<String> = (0..5).map(|index| format!("m{index:02}")).collect();
     let (settings, cx) = host_with_models(cx, &models, "");
     cx.simulate_resize(size(px(1200.), px(800.)));
