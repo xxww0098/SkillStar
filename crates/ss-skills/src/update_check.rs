@@ -5,8 +5,9 @@
 //! default branch a clone checks out when the lock records no ref), one
 //! request per nested subtree, and `git/commits/{sha}` for a root Skill — the
 //! Trees API reports the *commit* SHA at a branch, while the lock stores
-//! `HEAD^{tree}`. Anything the API cannot answer falls back to one temp clone
-//! of the group in the caller's Git session, so private repositories work.
+//! `HEAD^{tree}`. Anything the API cannot answer falls back to one trees-only
+//! temp snapshot of the group (`blob:none`, no worktree) in the caller's Git
+//! session, so private repositories work and no file content travels.
 //!
 //! Groups run with bounded concurrency. A GitHub rate limit is persisted with
 //! its reset time; until then every check skips the API and goes straight to
@@ -16,8 +17,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-use serde::{Deserialize, Serialize};
 
 use crate::fetch;
 use crate::git::transport::GitOperationSession;
@@ -245,7 +244,9 @@ async fn resolve_path<A: TreeApi>(
     Resolution::Unresolved
 }
 
-/// One temp clone for the group's unresolved paths, in the caller's session.
+/// One trees-only temp snapshot (`blob:none`, no worktree) for the group's
+/// unresolved paths, in the caller's session — the comparison reads tree
+/// SHAs and never needs file content.
 async fn clone_fallback(
     source_url: &str,
     git_ref: Option<String>,
@@ -267,7 +268,7 @@ async fn clone_fallback(
     let session = session.clone();
     let names = unresolved.clone();
     let measured = tokio::task::spawn_blocking(move || {
-        let checkout = fetch::fetch_source(&spec, &session)?;
+        let checkout = fetch::fetch_trees_only(&spec, &session)?;
         Ok::<_, anyhow::Error>(
             unresolved
                 .into_iter()
@@ -311,11 +312,6 @@ fn note_failure(failure: &FastPathFailure, api_open: &AtomicBool) {
 
 // ── rate-limit cooldown ─────────────────────────────────────────────
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct Cooldown {
-    reset_unix: u64,
-}
-
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -324,21 +320,11 @@ fn now_unix() -> u64 {
 }
 
 pub(crate) fn cooldown_active(now: u64) -> bool {
-    let path = ss_core::infra::paths::github_api_cooldown_path();
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<Cooldown>(&content).ok())
-        .is_some_and(|cooldown| cooldown.reset_unix > now)
+    ss_core::infra::github_api_cooldown::active(now)
 }
 
 fn record_cooldown(reset_unix: u64) {
-    let path = ss_core::infra::paths::github_api_cooldown_path();
-    let Ok(content) = serde_json::to_string(&Cooldown { reset_unix }) else {
-        return;
-    };
-    if let Err(error) = ss_core::infra::fs_ops::atomic_write(&path, content.as_bytes()) {
-        tracing::warn!(target: "skill_update_check", path = %path.display(), "unable to record the GitHub rate-limit cooldown: {error}");
-    }
+    ss_core::infra::github_api_cooldown::record(reset_unix);
 }
 
 #[cfg(test)]

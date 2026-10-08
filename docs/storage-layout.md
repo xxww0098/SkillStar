@@ -11,7 +11,7 @@
 ├── config/                 # 用户可编辑的声明式设置
 ├── data/                   # 持久业务数据与用户内容（不可自动清理）
 │   ├── skills/installed/   # 已安装技能规范副本（不写入 ~/.agents/skills）
-│   ├── skills/.skill-lock.json # 安装锁（vercel v3）
+│   ├── skills/.skill-lock.json # 安装锁（schema v3）
 │   ├── skills/local/       # 本地创作 Skill（经 skills/installed/<name> 链接暴露）
 │   ├── skills/install_baselines.json # 已安装 Skill 的安装内容 hash（判断本地修改）
 │   └── instances/          # 桌面多开 profile 与清单 app_instances.json
@@ -25,7 +25,8 @@
 │   └── sessions/           # Agent 会话解析 checkpoint 索引 index.json
 ├── state/                  # 需跨重启保留的运行状态
 │   ├── patrol/status.json  # 后台巡检状态
-│   ├── skills/github_api_cooldown.json # GitHub API 限流截止时间
+│   ├── skills/github_api_cooldown.json # GitHub API 限流截止时间（技能更新与版本检查共享）
+│   ├── app/release_check.json # 应用版本检查的最后结果（D-103）
 │   └── ...                 # 项目 manifest、team、更新投影等（Phase 3 前留在原地）
 ├── runtime/                # 进程协作文件；不参与备份
 │   └── locks/              # 跨进程锁（accounts/storage.lock、accounts/catalog-*.lock、skills/update.lock、skills/skill-lock.lock）
@@ -59,7 +60,7 @@
 
 导入 Git 缓存位于 `cache/skill-imports/`（`paths::skill_import_cache_dir`），进程锁位于 `runtime/locks/skill-imports/`（`paths::skill_import_locks_dir`）。清理 checkout 不删除锁文件。缓存可含私有仓库内容，Unix 目录权限为 0700。
 
-技能事务锁是 `runtime/locks/skills/update.lock`，安装锁文件的读改写锁是 `runtime/locks/skills/skill-lock.lock`。规范副本旁边的 `.skillstar-*` 暂存不在数据根里，不进入上面的备份分类；清扫规则见 [Skills 生命周期](./features/skills/README.md#生命周期)。
+技能事务锁是 `runtime/locks/skills/update.lock`，安装锁文件的读改写锁是 `runtime/locks/skills/skill-lock.lock`。规范副本旁边的 `.skillstar-*` 暂存不在数据根里，不进入上面的备份分类；清扫规则见 [Skills 生命周期](./features/skills/README.md#生命周期)。显式卸载如何同时清掉规范副本、锁和自有部署，以及设置重置只解除本地技能的纳管链接，也见那一节。
 
 ## 环境变量覆盖（不变）
 

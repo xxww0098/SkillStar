@@ -437,13 +437,7 @@ fn card_icon_button(
                 .bg(rgb(palette().os_fill))
                 .border(rgb(palette().os_active_edge)),
         )
-        .child(icon_spin(
-            ElementId::Name(format!("{element_id}-spin").into()),
-            glyph,
-            14.0,
-            ink,
-            spin,
-        ))
+        .child(icon_spin(glyph, 14.0, ink, spin))
         .tooltip(move |window, cx| crate::chrome::tooltip(tip.clone()).build(window, cx))
         .on_click(move |event, window, cx| {
             if dimmed {

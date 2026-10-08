@@ -376,47 +376,40 @@ where
                         &mut store.subscriptions[index],
                         &error,
                     ) {
-                        let rollback_failures = self.rollback_applied(&receipts).await;
+                        let returned = super::channel_receipt::restore_batch(
+                            &self.installer,
+                            &receipts,
+                            error.clone(),
+                        )
+                        .await;
                         store.subscriptions[index] = subscription_before_apply;
                         super::subscription_remote::mark_remote_failure(
                             &mut store.subscriptions[index],
                             &error,
                         );
                         self.subscriptions.save(&store)?;
-                        return Err(with_rollback_failures(error, rollback_failures));
+                        return Err(returned);
                     }
                     failures.insert(key, error);
                 }
             }
         }
 
-        let mut verified_receipts = Vec::with_capacity(receipts.len());
-        for receipt in &receipts {
-            match self.installer.verify(receipt).await {
-                Ok(()) => verified_receipts.push(receipt.clone()),
-                Err(error) => {
-                    if let Err(rollback) =
-                        ChannelSubscriptionUpdater::rollback(&self.installer, receipt).await
-                    {
-                        let mut rollback_failures = self.rollback_applied(&receipts).await;
-                        rollback_failures
-                            .push(format!("{}: {}", receipt.previous.id, rollback.message));
-                        return Err(with_rollback_failures(error, rollback_failures));
-                    }
-                    if let Some(skill) = store.subscriptions[index]
-                        .skills
-                        .iter_mut()
-                        .find(|skill| skill.id.eq_ignore_ascii_case(&receipt.previous.id))
-                    {
-                        *skill = receipt.previous.clone();
-                    }
-                    let key = receipt.previous.id.to_ascii_lowercase();
-                    applied.remove(&key);
-                    failures.insert(key, error);
-                }
+        let verified =
+            super::channel_receipt::verify_applied_receipts(&self.installer, &receipts).await?;
+        for (receipt, error) in verified.reverted {
+            let key = receipt.previous.id.to_ascii_lowercase();
+            if let Some(skill) = store.subscriptions[index]
+                .skills
+                .iter_mut()
+                .find(|skill| skill.id.eq_ignore_ascii_case(&receipt.previous.id))
+            {
+                *skill = receipt.previous;
             }
+            applied.remove(&key);
+            failures.insert(key, error);
         }
-        receipts = verified_receipts;
+        receipts = verified.kept;
 
         let mut snapshot = match self
             .build_update_snapshot(&store.subscriptions[index], &manifest)
@@ -424,7 +417,12 @@ where
         {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                let rollback_failures = self.rollback_applied(&receipts).await;
+                let returned = super::channel_receipt::restore_batch(
+                    &self.installer,
+                    &receipts,
+                    error.clone(),
+                )
+                .await;
                 if super::subscription_remote::mark_remote_failure(
                     &mut store.subscriptions[index],
                     &error,
@@ -436,7 +434,7 @@ where
                     );
                     self.subscriptions.save(&store)?;
                 }
-                return Err(with_rollback_failures(error, rollback_failures));
+                return Err(returned);
             }
         };
         for item in &mut snapshot.items {
@@ -482,30 +480,17 @@ where
         );
         store.subscriptions[index].last_update = Some(snapshot.clone());
         store.subscriptions[index].updated_at = Utc::now().to_rfc3339();
-        if let Err(error) = self.subscriptions.save(&store) {
-            let rollback_failures = self.rollback_applied(&receipts).await;
-            return Err(with_rollback_failures(error, rollback_failures));
-        }
-        for receipt in &receipts {
-            ChannelSubscriptionUpdater::finalize(&self.installer, receipt).await;
-        }
+        super::channel_receipt::commit_verified_receipts(
+            &self.installer,
+            &receipts,
+            self.subscriptions.save(&store),
+        )
+        .await?;
 
         Ok(ApplyChannelUpdateResult {
             snapshot,
             applied_skill_ids: applied.into_iter().collect(),
         })
-    }
-
-    async fn rollback_applied(&self, receipts: &[ChannelSkillUpdateReceipt]) -> Vec<String> {
-        let mut failures = Vec::new();
-        for receipt in receipts.iter().rev() {
-            if let Err(rollback) =
-                ChannelSubscriptionUpdater::rollback(&self.installer, receipt).await
-            {
-                failures.push(format!("{}: {}", receipt.previous.id, rollback.message));
-            }
-        }
-        failures
     }
 
     pub(super) async fn build_update_snapshot(
@@ -633,24 +618,6 @@ fn removed_item(installed: &ChannelSubscribedSkill) -> ChannelUpdateItem {
         error: None,
         pinned_target: None,
         error_code: None,
-    }
-}
-
-fn with_rollback_failures(
-    original: SharedChannelError,
-    failures: Vec<String>,
-) -> SharedChannelError {
-    if failures.is_empty() {
-        original
-    } else {
-        SharedChannelError::new(
-            original.code,
-            format!(
-                "{}; updated Skills also could not be rolled back: {}",
-                original.message,
-                failures.join(", ")
-            ),
-        )
     }
 }
 

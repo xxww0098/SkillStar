@@ -153,9 +153,9 @@ pub(crate) fn dialog_head(
         )
 }
 
-pub(crate) fn paste_hint<'a>(mode: AuthMode, warning: Option<&'a str>) -> Option<&'a str> {
+pub(crate) fn paste_hint(mode: AuthMode, warning: Option<&str>) -> Option<SharedString> {
     if let Some(warning) = warning.filter(|text| !text.is_empty()) {
-        return Some(warning);
+        return Some(warning.to_string().into());
     }
     match mode {
         AuthMode::TokenImport | AuthMode::OAuth => None,
@@ -178,26 +178,32 @@ pub(crate) fn or_divider() -> Div {
             div()
                 .text_size(px(12.0))
                 .text_color(rgb(palette().os_faint))
-                .child("或粘贴"),
+                .child(crate::i18n::t("accounts.orPaste")),
         )
         .child(line())
 }
 
-pub(crate) fn region_name(id: &str) -> &str {
+pub(crate) fn region_name(id: &str) -> SharedString {
     match id {
-        "zai" => "Z.ai",
-        "bigmodel" => "智谱",
-        other => other,
+        "zai" => "Z.ai".into(),
+        "bigmodel" => crate::i18n::t("accounts.regionBigmodel"),
+        other => other.to_string().into(),
     }
 }
 
-pub(crate) fn field_copy(mode: AuthMode) -> (&'static str, &'static str) {
+pub(crate) fn field_copy(mode: AuthMode) -> (SharedString, SharedString) {
     match mode {
-        AuthMode::ApiKey => ("API Key", "粘贴服务商控制台里的密钥"),
-        AuthMode::Cookie => ("Cookie", "粘贴浏览器里复制的 Cookie"),
-        AuthMode::TokenImport => ("凭证", "卡密、会话 JSON 或 refresh token"),
-        AuthMode::Manual => ("显示名称", "只在列表里显示，不会登录"),
-        AuthMode::OAuth => ("", ""),
+        AuthMode::ApiKey => ("API Key".into(), crate::i18n::t("accounts.apiKeyHint")),
+        AuthMode::Cookie => ("Cookie".into(), crate::i18n::t("accounts.cookieHint")),
+        AuthMode::TokenImport => (
+            crate::i18n::t("accounts.credentialLabel"),
+            crate::i18n::t("accounts.credentialHint"),
+        ),
+        AuthMode::Manual => (
+            crate::i18n::t("accounts.displayName"),
+            crate::i18n::t("accounts.displayNameHint"),
+        ),
+        AuthMode::OAuth => (SharedString::default(), SharedString::default()),
     }
 }
 
@@ -228,7 +234,6 @@ pub(crate) fn action_row(
     };
     let trailing = if spinning {
         crate::chrome::icon_spin(
-            ElementId::Name(format!("{element_id}-spin").into()),
             gpui_kit::assets::IconName::Loader,
             14.0,
             if primary {
@@ -368,7 +373,6 @@ pub(crate) fn commit_button(
         })
         .when(spinning, |row| {
             row.child(crate::chrome::icon_spin(
-                ElementId::Name(format!("{element_id}-spin").into()),
                 gpui_kit::assets::IconName::Loader,
                 14.0,
                 if primary {
@@ -473,19 +477,29 @@ mod tests {
 
     #[test]
     fn secret_fields_have_a_visible_label() {
-        assert_eq!(field_copy(AuthMode::ApiKey).0, "API Key");
-        assert_eq!(field_copy(AuthMode::TokenImport).0, "凭证");
+        let lang = crate::i18n::set_language_for_test("zh-CN");
+        assert_eq!(field_copy(AuthMode::ApiKey).0.as_ref(), "API Key");
+        assert_eq!(field_copy(AuthMode::TokenImport).0.as_ref(), "凭证");
         assert!(!field_copy(AuthMode::Cookie).1.is_empty());
         assert!(field_copy(AuthMode::OAuth).0.is_empty());
         assert!(paste_hint(AuthMode::TokenImport, None).is_none());
         assert_eq!(
-            paste_hint(AuthMode::ApiKey, None),
+            paste_hint(AuthMode::ApiKey, None).as_deref(),
             Some("粘贴服务商控制台里的密钥")
         );
         assert_eq!(
-            paste_hint(AuthMode::TokenImport, Some("注意")),
+            paste_hint(AuthMode::TokenImport, Some("注意")).as_deref(),
             Some("注意")
         );
-        assert_eq!(region_name("bigmodel"), "智谱");
+        assert_eq!(region_name("bigmodel").as_ref(), "智谱");
+        assert_eq!(region_name("zai").as_ref(), "Z.ai");
+
+        lang.set("en");
+        assert_eq!(
+            paste_hint(AuthMode::ApiKey, None).as_deref(),
+            Some("Paste the key from the provider console")
+        );
+        assert_eq!(field_copy(AuthMode::TokenImport).0.as_ref(), "Credential");
+        assert_eq!(region_name("bigmodel").as_ref(), "Zhipu");
     }
 }

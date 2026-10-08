@@ -1,11 +1,15 @@
 //! `skillstar channel`: check, apply and roll back shared-channel releases.
 //!
 //! Thin terminal surface over the shared-channel facade; review, divergence
-//! rules and rollback stay in ss-skills.
+//! rules and rollback stay in ss-skills. `export-marketplace` is local-only
+//! and runs without the facade or a GitHub sign-in.
+
+use std::path::Path;
 
 use ss_skills::channels::shared_channels::{
     ApplyChannelUpdateRequest, ChannelSkillUpdateResolution, ChannelUpdateItemState,
     ChannelUpdateSnapshot, RollbackChannelSkillRequest, SharedChannelError,
+    export_channel_marketplace,
 };
 use ss_skills::skill_update::LocalDivergenceResolution;
 
@@ -13,6 +17,15 @@ use super::ChannelCommand;
 use crate::channel_facade::{ProductionChannelFacade, production_facade};
 
 pub fn cmd_channel(command: ChannelCommand) {
+    if let ChannelCommand::ExportMarketplace {
+        repository_id,
+        out,
+        json,
+    } = command
+    {
+        export_marketplace(repository_id, &out, json);
+        return;
+    }
     let facade = match production_facade() {
         Ok(facade) => facade,
         Err(error) => fail(&format!(
@@ -36,6 +49,51 @@ pub fn cmd_channel(command: ChannelCommand) {
 fn fail(message: &str) -> ! {
     eprintln!("✗ {message}");
     std::process::exit(1);
+}
+
+#[derive(serde::Serialize)]
+struct ExportMarketplaceOutput<'a> {
+    repository_id: u64,
+    revision: u64,
+    path: &'a str,
+    plugins: &'a [String],
+    files: u64,
+}
+
+fn export_marketplace(repository_id: u64, out: &Path, json: bool) {
+    match export_channel_marketplace(repository_id, out) {
+        Ok(exported) => {
+            if json {
+                let output = ExportMarketplaceOutput {
+                    repository_id: exported.repository_id,
+                    revision: exported.revision,
+                    path: &exported.root.display().to_string(),
+                    plugins: &exported.plugin_names,
+                    files: exported.files,
+                };
+                match serde_json::to_string_pretty(&output) {
+                    Ok(text) => println!("{text}"),
+                    Err(error) => fail(&format!("Failed to serialize the export: {error}")),
+                }
+                return;
+            }
+            println!(
+                "✓ Exported {} plugin(s) ({}) at revision {} to {} — {} files",
+                exported.plugin_names.len(),
+                exported.plugin_names.join(", "),
+                exported.revision,
+                exported.root.display(),
+                exported.files
+            );
+            println!(
+                "Push the directory to a git repository, then install it with: claude plugin marketplace add <owner>/<repo>"
+            );
+        }
+        Err(error) => fail(&format!(
+            "Export failed ({:?}): {}",
+            error.code, error.message
+        )),
+    }
 }
 
 async fn run(
@@ -152,6 +210,11 @@ async fn run(
                 "✓ '{skill}' is pinned to {}; `skillstar channel apply {repository_id}` does not move it until you resume following.",
                 result.pin.target.tag_name
             );
+        }
+        ChannelCommand::ExportMarketplace { .. } => {
+            // Handled in `cmd_channel` before the facade is built: the export
+            // path is local-only and must not require a GitHub sign-in.
+            unreachable!("export-marketplace is dispatched before the facade is constructed")
         }
     }
     Ok(())

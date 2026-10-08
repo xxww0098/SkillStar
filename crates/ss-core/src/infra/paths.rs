@@ -290,6 +290,14 @@ pub fn github_api_cooldown_path() -> PathBuf {
     state_dir().join("skills").join("github_api_cooldown.json")
 }
 
+/// `state/app/release_check.json` — outcome of the last SkillStar release
+/// check. Written by the manual check and the daily background wake; the
+/// About section reads it so it can show a result without touching the
+/// network.
+pub fn app_release_check_state_path() -> PathBuf {
+    state_dir().join("app").join("release_check.json")
+}
+
 /// `data/skills/install_baselines.json` — content hash of every canonical
 /// Skill as SkillStar last installed it. Not rebuildable: it is what proves a
 /// Skill was not edited locally before an automatic update overwrites it.

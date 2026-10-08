@@ -37,6 +37,43 @@ impl IdeCredentialAdapter for Adapter {
         sync(sub)
     }
 
+    fn sync_after_refresh(
+        &self,
+        before: &Subscription,
+        sub: &Subscription,
+    ) -> UsageResult<Option<SwitchOutcome>> {
+        let Some(live) = read_live_session()? else {
+            return Ok(None);
+        };
+        if super::target::secret(before.access_token_encrypted.as_deref()).as_deref()
+            != Some(live.access_token.as_str())
+            || super::target::secret(before.refresh_token_encrypted.as_deref()).as_deref()
+                != Some(live.refresh_token.as_str())
+        {
+            return Ok(None);
+        }
+        let path = live_path()?;
+        // macOS may serve a Keychain session while a stale legacy DB remains.
+        // A quota refresh must not project that session into another DB login.
+        let Some(stored) = vscdb::read_antigravity_oauth_session(&path)? else {
+            return Ok(None);
+        };
+        if stored.access_token != live.access_token || stored.refresh_token != live.refresh_token {
+            return Ok(None);
+        }
+        let access = secret(sub.access_token_encrypted.as_deref(), "access_token")?;
+        let refresh = secret(sub.refresh_token_encrypted.as_deref(), "refresh_token")?;
+        vscdb::refresh_antigravity_oauth_token(
+            &path,
+            &access,
+            &refresh,
+            sub.access_token_expires_at
+                .or(live.expires_at)
+                .unwrap_or_default(),
+        )?;
+        Ok(Some(SwitchOutcome::direct_ok(CATALOG_ID, &path, false)))
+    }
+
     fn reconcile(&self) -> UsageResult<Option<CliAccountState>> {
         if !self.available() {
             return Ok(None);

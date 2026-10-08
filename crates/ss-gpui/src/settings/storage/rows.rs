@@ -9,7 +9,7 @@ use ss_app::storage_maintenance::StorageOverview;
 
 use super::SettingsPage;
 use super::parts::{clean_button, delete_button, folder_button};
-use crate::chrome::{InteractionSpring, MotionPaint};
+use crate::chrome::{InteractionSpring, MotionPaint, icon_spin};
 use crate::i18n::{t, tf};
 use crate::settings::{DeleteTarget, card, format_bytes};
 use crate::theme::palette;
@@ -193,11 +193,7 @@ impl SettingsPage {
                     .gap_2()
                     .text_xs()
                     .text_color(rgb(palette().fg_muted))
-                    .child(
-                        Icon::new(IconName::Loader)
-                            .size(px(12.0))
-                            .text_color(rgb(palette().fg_muted)),
-                    )
+                    .child(icon_spin(IconName::Loader, 12.0, palette().fg_muted, true))
                     .child(t("common.loading")),
             );
         }
@@ -547,11 +543,7 @@ fn health_button(
         .when(!busy, |d| d.cursor_pointer())
         .when(busy, |d| d.opacity(0.6))
         .when(busy && emphasize, |d| {
-            d.child(
-                Icon::new(IconName::Loader)
-                    .size(px(12.0))
-                    .text_color(rgb(color)),
-            )
+            d.child(icon_spin(IconName::Loader, 12.0, color, true))
         })
         .when(!busy && emphasize, |d| {
             d.child(

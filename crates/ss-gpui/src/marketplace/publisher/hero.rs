@@ -118,7 +118,10 @@ impl PublisherDetailPage {
                                             .items_center()
                                             .gap_1()
                                             .child(icon(IconName::Folder, 13.0, palette().fg_muted))
-                                            .child(format!("{} repositories", pub_.repo_count)),
+                                            .child(crate::i18n::tf(
+                                                "marketplace.repositoriesCount",
+                                                &[("count", &pub_.repo_count.to_string())],
+                                            )),
                                     )
                                     .child(
                                         div()
@@ -130,7 +133,10 @@ impl PublisherDetailPage {
                                                 13.0,
                                                 palette().fg_muted,
                                             ))
-                                            .child(format!("{} skills total", total_skills)),
+                                            .child(crate::i18n::tf(
+                                                "marketplace.skillsTotal",
+                                                &[("count", &total_skills.to_string())],
+                                            )),
                                     )
                                     .when(total_installs > 0, |d| {
                                         d.child(
@@ -143,9 +149,9 @@ impl PublisherDetailPage {
                                                     13.0,
                                                     palette().fg_muted,
                                                 ))
-                                                .child(format!(
-                                                    "{} installs",
-                                                    format_installs(total_installs)
+                                                .child(crate::i18n::tf(
+                                                    "marketplace.installsCount",
+                                                    &[("count", &format_installs(total_installs))],
                                                 )),
                                         )
                                     }),

@@ -77,11 +77,3 @@ pub(crate) fn add(def: CustomProfileDef, store: &dyn PrefsStore) -> Result<()> {
     prefs.custom_profiles.push(new_def);
     store.save(&prefs)
 }
-
-/// Remove a custom agent by id.
-pub(crate) fn remove(id: &str, store: &dyn PrefsStore) -> Result<()> {
-    let mut prefs = store.load();
-    prefs.custom_profiles.retain(|p| p.id != id);
-    prefs.enabled.remove(id);
-    store.save(&prefs)
-}

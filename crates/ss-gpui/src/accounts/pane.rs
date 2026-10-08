@@ -6,7 +6,7 @@
 use gpui_kit::*;
 
 use super::AccountsPage;
-use crate::layout::{ACCOUNTS_PAGE_PAD, CARD_GAP, QUOTA_CARD_W};
+use crate::layout::{CARD_GAP, PAGE_PAD, QUOTA_CARD_W};
 use crate::skill_card::{columns_for, pane_width};
 
 pub(super) struct AccountsPane {
@@ -39,7 +39,7 @@ impl Render for AccountsPane {
             CARD_GAP,
             pane_width(
                 f32::from(window.viewport_size().width),
-                ACCOUNTS_PAGE_PAD,
+                PAGE_PAD,
                 QUOTA_CARD_W,
             ),
         );
@@ -49,8 +49,8 @@ impl Render for AccountsPane {
                 .flex_1()
                 .min_h_0()
                 .size_full()
-                .px(px(ACCOUNTS_PAGE_PAD))
-                .pb(px(ACCOUNTS_PAGE_PAD))
+                .px(px(PAGE_PAD))
+                .pb(px(PAGE_PAD))
                 .child(page.render_pane(columns, cx.entity().downgrade()))
                 .into_any_element()
         });

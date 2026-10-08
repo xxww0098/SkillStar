@@ -21,8 +21,8 @@ pub fn extract_oauth_token_from_unified_oauth_token(data: &[u8]) -> Option<Unifi
 
         if field_num == 1 && wire_type == 2 {
             let (length, content_offset) = read_varint(data, new_offset).ok()?;
-            let length = length as usize;
-            if content_offset + length > data.len() {
+            let length = usize::try_from(length).ok()?;
+            if content_offset.checked_add(length)? > data.len() {
                 return None;
             }
             let entry = &data[content_offset..content_offset + length];
@@ -37,10 +37,6 @@ pub fn extract_oauth_token_from_unified_oauth_token(data: &[u8]) -> Option<Unifi
     None
 }
 
-pub fn extract_refresh_token_from_unified_oauth_token(data: &[u8]) -> Option<String> {
-    extract_oauth_token_from_unified_oauth_token(data).map(|token| token.refresh_token)
-}
-
 /// Build the `antigravityUnifiedStateSync.oauthToken` value used by the
 /// desktop IDE. The outer message is a repeated Topic.data entry; the row
 /// stores a base64-encoded OAuthTokenInfo protobuf.
@@ -52,6 +48,74 @@ pub fn create_unified_oauth_token(
 ) -> Vec<u8> {
     let oauth_info = create_oauth_info(access_token, refresh_token, expiry, email);
     create_unified_topic_entry(OAUTH_SENTINEL_KEY, &oauth_info)
+}
+
+/// Rotate only the OAuth fields, retaining client metadata at every nesting
+/// level and any unrelated topic entries. An unknown/malformed shape is not
+/// permission to replace the client's session with a synthetic one.
+pub(crate) fn refresh_unified_oauth_token(
+    data: &[u8],
+    access: &str,
+    refresh: &str,
+    expiry: i64,
+) -> Option<Vec<u8>> {
+    let mut result = Vec::new();
+    let mut offset = 0;
+    let mut found = false;
+    while offset < data.len() {
+        let (tag, start) = read_varint(data, offset).ok()?;
+        let end = skip_field(data, start, (tag & 7) as u8).ok()?;
+        let original = data.get(offset..end)?;
+        if tag == 10 {
+            let entry = extract_bytes_field(original, 1)?;
+            if extract_string_field(entry, 1).as_deref() == Some(OAUTH_SENTINEL_KEY) {
+                if found {
+                    return None;
+                }
+                let row = extract_bytes_field(entry, 2)?;
+                let info = general_purpose::STANDARD
+                    .decode(extract_string_field(row, 1)?)
+                    .ok()?;
+                let info = replace_field(&info, 1, &encode_string_field(1, access))?;
+                let info = replace_field(&info, 3, &encode_string_field(3, refresh))?;
+                let timestamp = replace_field(
+                    extract_bytes_field(&info, 4).unwrap_or_default(),
+                    1,
+                    &encode_varint_field(1, expiry.max(0) as u64),
+                )?;
+                let info = replace_field(&info, 4, &encode_len_delimited_field(4, &timestamp))?;
+                let row = replace_field(
+                    row,
+                    1,
+                    &encode_string_field(1, &general_purpose::STANDARD.encode(info)),
+                )?;
+                let entry = replace_field(entry, 2, &encode_len_delimited_field(2, &row))?;
+                result.extend(encode_len_delimited_field(1, &entry));
+                found = true;
+                offset = end;
+                continue;
+            }
+        }
+        result.extend_from_slice(original);
+        offset = end;
+    }
+    found.then_some(result)
+}
+
+fn replace_field(data: &[u8], field: u32, replacement: &[u8]) -> Option<Vec<u8>> {
+    let mut result = Vec::new();
+    let mut offset = 0;
+    while offset < data.len() {
+        let (tag, start) = read_varint(data, offset).ok()?;
+        let end = skip_field(data, start, (tag & 7) as u8).ok()?;
+        let original = data.get(offset..end)?;
+        if tag >> 3 != u64::from(field) {
+            result.extend_from_slice(original);
+        }
+        offset = end;
+    }
+    result.extend_from_slice(replacement);
+    Some(result)
 }
 
 fn create_oauth_info(
@@ -125,8 +189,8 @@ fn extract_oauth_token_from_unified_entry(data: &[u8]) -> Option<UnifiedOAuthTok
 
         if wire_type == 2 {
             let (length, content_offset) = read_varint(data, new_offset).ok()?;
-            let length = length as usize;
-            if content_offset + length > data.len() {
+            let length = usize::try_from(length).ok()?;
+            if content_offset.checked_add(length)? > data.len() {
                 return None;
             }
             let value = &data[content_offset..content_offset + length];
@@ -169,8 +233,8 @@ fn extract_string_field(data: &[u8], target_field: u32) -> Option<String> {
 
         if field_num == target_field && wire_type == 2 {
             let (length, content_offset) = read_varint(data, new_offset).ok()?;
-            let length = length as usize;
-            if content_offset + length > data.len() {
+            let length = usize::try_from(length).ok()?;
+            if content_offset.checked_add(length)? > data.len() {
                 return None;
             }
             return std::str::from_utf8(&data[content_offset..content_offset + length])
@@ -192,8 +256,8 @@ fn extract_bytes_field(data: &[u8], target_field: u32) -> Option<&[u8]> {
 
         if field_num == target_field && wire_type == 2 {
             let (length, content_offset) = read_varint(data, new_offset).ok()?;
-            let length = length as usize;
-            if content_offset + length > data.len() {
+            let length = usize::try_from(length).ok()?;
+            if content_offset.checked_add(length)? > data.len() {
                 return None;
             }
             return Some(&data[content_offset..content_offset + length]);
@@ -229,6 +293,9 @@ fn read_varint(data: &[u8], offset: usize) -> Result<(u64, usize), ()> {
             return Err(());
         }
         let byte = data[pos];
+        if shift == 63 && byte > 1 {
+            return Err(());
+        }
         result |= ((byte & 0x7F) as u64) << shift;
         pos += 1;
         if byte & 0x80 == 0 {
@@ -245,12 +312,66 @@ fn skip_field(data: &[u8], offset: usize, wire_type: u8) -> Result<usize, ()> {
             let (_, new_offset) = read_varint(data, offset)?;
             Ok(new_offset)
         }
-        1 => Ok(offset + 8),
+        1 => offset.checked_add(8).ok_or(()),
         2 => {
             let (length, content_offset) = read_varint(data, offset)?;
-            Ok(content_offset + length as usize)
+            content_offset
+                .checked_add(usize::try_from(length).map_err(|_| ())?)
+                .ok_or(())
         }
-        5 => Ok(offset + 4),
+        5 => offset.checked_add(4).ok_or(()),
         _ => Err(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotation_preserves_nested_client_fields_and_rejects_bad_blobs() {
+        let mut info =
+            create_oauth_info("old-access", "old-refresh", 100, Some("alice@example.com"));
+        let extra = encode_string_field(90, "client-private");
+        info.extend_from_slice(&extra);
+        let mut row = encode_string_field(1, &general_purpose::STANDARD.encode(info));
+        row.extend_from_slice(&extra);
+        let mut entry = encode_string_field(1, OAUTH_SENTINEL_KEY);
+        entry.extend(encode_len_delimited_field(2, &row));
+        entry.extend_from_slice(&extra);
+        let mut original = create_unified_topic_entry("unrelated", b"opaque");
+        original.extend(encode_len_delimited_field(1, &entry));
+        original.extend_from_slice(&extra);
+        let updated =
+            refresh_unified_oauth_token(&original, "new-access", "new-refresh", 200).unwrap();
+        let token = extract_oauth_token_from_unified_oauth_token(&updated).unwrap();
+        assert_eq!(token.access_token, "new-access");
+        assert_eq!(token.refresh_token, "new-refresh");
+        assert_eq!(token.expires_at, Some(200));
+        assert_eq!(token.email.as_deref(), Some("alice@example.com"));
+        // Decode each layer because protobuf field order is immaterial.
+        let first_len = create_unified_topic_entry("unrelated", b"opaque").len();
+        assert_eq!(&updated[..first_len], &original[..first_len]);
+        assert!(updated.ends_with(&extra));
+        let entry = extract_bytes_field(&updated[first_len..], 1).unwrap();
+        assert_eq!(
+            extract_string_field(entry, 90).as_deref(),
+            Some("client-private")
+        );
+        let row = extract_bytes_field(entry, 2).unwrap();
+        assert_eq!(
+            extract_string_field(row, 90).as_deref(),
+            Some("client-private")
+        );
+        let info = general_purpose::STANDARD
+            .decode(extract_string_field(row, 1).unwrap())
+            .unwrap();
+        assert_eq!(
+            extract_string_field(&info, 90).as_deref(),
+            Some("client-private")
+        );
+        assert!(refresh_unified_oauth_token(&[0x80; 20], "a", "r", 1).is_none());
+        assert!(refresh_unified_oauth_token(&[10, 127], "a", "r", 1).is_none());
+        assert!(refresh_unified_oauth_token(b"", "a", "r", 1).is_none());
     }
 }

@@ -35,6 +35,24 @@ impl IdeCredentialAdapter for Adapter {
         sync(sub)
     }
 
+    fn sync_after_refresh(
+        &self,
+        before: &Subscription,
+        sub: &Subscription,
+    ) -> UsageResult<Option<SwitchOutcome>> {
+        let Some(live) = read_live()? else {
+            return Ok(None);
+        };
+        if super::target::secret(before.access_token_encrypted.as_deref()).as_deref()
+            != Some(live.access_token.as_str())
+            || super::target::secret(before.refresh_token_encrypted.as_deref())
+                != live.refresh_token
+        {
+            return Ok(None);
+        }
+        self.sync(sub).map(Some)
+    }
+
     fn reconcile(&self) -> UsageResult<Option<CliAccountState>> {
         if !self.available() {
             return Ok(None);

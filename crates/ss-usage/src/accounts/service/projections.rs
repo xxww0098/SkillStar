@@ -1,20 +1,12 @@
 //! Read projections: list/summary/alert/dock views over stored subscriptions,
 //! the active-per-catalog pins, and API-key retrieval.
 
-use crate::accounts::dto::{
-    CatalogEntryDto, MonthlySpendEntry, SubscriptionAlertDto, SubscriptionDto, UsageSummary,
-};
+use crate::accounts::dto::{MonthlySpendEntry, SubscriptionDto, UsageSummary};
 use crate::subscription::BillingCycle;
-use crate::{alerts, catalog, crypto, storage};
+use crate::{alerts, crypto, storage};
 use ss_core::infra::error::AppError;
 
 use super::helpers::{fill_active, map_err};
-
-// ── Catalog ───────────────────────────────────────────────────────────
-
-pub fn list_usage_catalog() -> Vec<CatalogEntryDto> {
-    catalog::catalog().into_iter().map(Into::into).collect()
-}
 
 // ── List ──────────────────────────────────────────────────────────────
 
@@ -29,20 +21,6 @@ pub fn list_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
             fill_active(SubscriptionDto::from_parts(sub, usage), &active)
         })
         .collect())
-}
-
-// ── Alerts ────────────────────────────────────────────────────────────
-
-pub fn get_subscription_alerts() -> Result<Vec<SubscriptionAlertDto>, AppError> {
-    Ok(alerts::compute_alerts()
-        .map_err(map_err)?
-        .into_iter()
-        .map(Into::into)
-        .collect())
-}
-
-pub fn dismiss_subscription_alert(alert_id: String) -> Result<(), AppError> {
-    storage::dismiss_alert(&alert_id).map_err(map_err)
 }
 
 // ── Summary header ────────────────────────────────────────────────────

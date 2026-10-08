@@ -3,71 +3,14 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
-use ts_rs::TS;
 
 use super::approval::record_from_skillstar;
-use super::plan::{self, DeploymentPlan, PlanAction};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-pub struct ProjectSkillPlanChange {
-    pub name: String,
-    pub action: String,
-    pub skill_path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-pub struct ProjectSkillPlanDiff {
-    pub plan_id: String,
-    pub plan_hash: String,
-    pub root: String,
-    pub will_register: bool,
-    pub owner_id: String,
-    pub affected_agents: Vec<String>,
-    pub changes: Vec<ProjectSkillPlanChange>,
-}
-
-pub fn pending_plan_diffs(
-    project_path: &str,
-    now: DateTime<Utc>,
-) -> Result<Vec<ProjectSkillPlanDiff>> {
-    Ok(plan::pending_plans_for_root(project_path, now)?
-        .into_iter()
-        .map(|plan| plan_diff(&plan))
-        .collect())
-}
+use super::plan;
 
 pub fn approve_plan_from_skillstar(plan_id: &str, now: DateTime<Utc>) -> Result<()> {
     let plan = plan::load_plan(plan_id, now)?;
     record_from_skillstar(&plan.plan_id, &plan.plan_hash)?;
     Ok(())
-}
-
-fn plan_diff(plan: &DeploymentPlan) -> ProjectSkillPlanDiff {
-    ProjectSkillPlanDiff {
-        changes: plan
-            .skills
-            .iter()
-            .map(|skill| {
-                let action = match skill.action {
-                    PlanAction::Create => "create",
-                    PlanAction::Already => "already",
-                };
-                ProjectSkillPlanChange {
-                    skill_path: format!("{}/{}/SKILL.md", plan.physical_rel, skill.name)
-                        .replace('\\', "/"),
-                    name: skill.name.clone(),
-                    action: action.to_string(),
-                }
-            })
-            .collect(),
-        plan_id: plan.plan_id.clone(),
-        plan_hash: plan.plan_hash.clone(),
-        root: plan.root.clone(),
-        will_register: plan.will_register,
-        owner_id: plan.owner_id.clone(),
-        affected_agents: plan.affected_agents.clone(),
-    }
 }
 
 #[cfg(test)]

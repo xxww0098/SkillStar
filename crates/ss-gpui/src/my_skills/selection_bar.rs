@@ -276,7 +276,7 @@ impl MySkillsPage {
         let menu_open = self.link_menu_open;
         // Same agents as the card carousel: Settings switches decide the list.
         let enabled_profiles: Vec<_> =
-            super::skill_card::targetable_agent_profiles(&self.profiles).collect();
+            crate::skill_card::targetable_agent_profiles(&self.profiles).collect();
 
         div()
             .relative()

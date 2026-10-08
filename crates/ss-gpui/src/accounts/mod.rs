@@ -44,8 +44,6 @@ pub struct AccountsPage {
     /// Checkbox on the reset-card confirm. Cleared whenever that dialog opens.
     reset_acked: bool,
     reset_window: ss_usage::subscription::ResetWindow,
-    /// Account whose reset-card tooltip is open.
-    reset_tip_id: Option<String>,
     /// A countdown loop is already scheduled.
     reset_clock: bool,
     /// This refresh is spending a reset card, not switching or reloading.
@@ -83,7 +81,6 @@ impl AccountsPage {
             confirm_reset_id: None,
             reset_acked: false,
             reset_window: Default::default(),
-            reset_tip_id: None,
             reset_clock: false,
             resetting: false,
             reset_consumed: None,

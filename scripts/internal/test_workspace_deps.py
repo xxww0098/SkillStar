@@ -13,6 +13,7 @@ def metadata():
     names = [
         "ss-core", "ss-git", "ss-skills",
         "ss-marketplace", "ss-usage", "ss-sync",
+        "claude-marketplace",
         "ss-app", "ss-gpui", "skillstar",
     ]
     return {
@@ -38,6 +39,7 @@ class WorkspaceBoundaries(unittest.TestCase):
         meta = metadata()
         for source, target in [
             ("ss-skills", "ss-git"),
+            ("ss-skills", "claude-marketplace"),
             ("ss-usage", "ss-core"), ("ss-app", "ss-skills"),
             ("ss-app", "ss-marketplace"), ("skillstar", "ss-gpui"),
         ]:

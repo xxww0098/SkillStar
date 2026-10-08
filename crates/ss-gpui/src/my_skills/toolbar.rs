@@ -1,10 +1,13 @@
 //! My Skills toolbar. One row, matching `Toolbar` + `PageToolbar`:
 //! title and scope icons, search, agent filter, compact source menu, then
-//! import / attention / refresh / view. Refresh also checks upstream.
+//! attention / import / refresh / view. Refresh also checks upstream.
+
+use std::rc::Rc;
 
 mod origin_menu;
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_core::types::skill::Skill;
@@ -14,12 +17,17 @@ use super::MySkillsPage;
 use super::import_modal::ImportDialog;
 use super::types::{MySkillsScope, SourceFilter};
 use crate::chrome::{
-    InteractionSpring, MotionPaint, bar_count, bar_icon_button, bar_refresh_button, icon,
-    icon_spin, page_toolbar, segment_tab_compact, segment_track, toolbar_search,
-    view_toggle_button,
+    InteractionSpring, MotionPaint, SliderGeometry, SliderSegment, bar_count, bar_icon_button,
+    bar_refresh_button, icon, icon_spin, page_toolbar, segment_tab_compact, segment_track,
+    slider_segmented, toolbar_search,
 };
 use crate::theme::palette;
 use origin_menu::{origin_menu_button, repo_sources};
+
+/// One brand-glyph slot in the toolbar agent filter, and how many the
+/// lane holds. Fixed geometry: the lane never scrolls and never widens.
+const AGENT_FILTER_SLOT_W: f32 = 22.0;
+const AGENT_FILTER_SLOTS: usize = 6;
 
 fn needs_attention(skill: &Skill) -> bool {
     skill.update_available || skill.upstream_change.is_some()
@@ -70,6 +78,10 @@ impl MySkillsPage {
             bar = bar.filter(bar_count(IconName::Layers, filtered_count.to_string()));
         }
 
+        if all_attention > 0 || self.only_updates {
+            bar = bar.action(self.render_attention(view.clone(), attention, pending_updates));
+        }
+
         let import = view.clone();
         bar = bar.action(
             bar_icon_button("my-skills-import", IconName::Download, false)
@@ -78,10 +90,6 @@ impl MySkillsPage {
                 })
                 .on_click(move |_, window, cx| open_import(import.clone(), window, cx)),
         );
-
-        if all_attention > 0 || self.only_updates {
-            bar = bar.action(self.render_attention(view.clone(), attention, pending_updates));
-        }
 
         // One control: a manual check toasts, then reloads the list. The
         // silent background check still runs after ordinary list loads.
@@ -109,135 +117,113 @@ impl MySkillsPage {
                 }),
         );
 
-        let grid = view.clone();
-        let list = view;
         bar.action(
-            segment_track()
+            TabBar::new("my-skills-view")
+                .segmented()
+                .selected_index(if self.view_list { 1 } else { 0 })
+                .on_click(move |ix, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.view_list = *ix == 1;
+                        this.reset_list_scroll();
+                        this.revise(cx);
+                    });
+                })
                 .child(
-                    view_toggle_button(
-                        "my-skills-view-grid",
-                        IconName::LayoutGrid,
-                        !self.view_list,
-                    )
-                    .on_click(move |_, _, cx| {
-                        let _ = grid.update(cx, |this, cx| {
-                            this.view_list = false;
-                            this.reset_list_scroll();
-                            this.revise(cx);
-                        });
-                    }),
+                    Tab::new()
+                        .icon(IconName::LayoutGrid)
+                        .flex_1()
+                        .tooltip(|window, cx| {
+                            crate::chrome::tooltip(crate::i18n::t("toolbar.viewGrid"))
+                                .build(window, cx)
+                        }),
                 )
                 .child(
-                    view_toggle_button("my-skills-view-list", IconName::List, self.view_list)
-                        .on_click(move |_, _, cx| {
-                            let _ = list.update(cx, |this, cx| {
-                                this.view_list = true;
-                                this.reset_list_scroll();
-                                this.revise(cx);
-                            });
+                    Tab::new()
+                        .icon(IconName::List)
+                        .flex_1()
+                        .tooltip(|window, cx| {
+                            crate::chrome::tooltip(crate::i18n::t("toolbar.viewList"))
+                                .build(window, cx)
                         }),
                 ),
         )
         .build()
     }
 
-    /// Icon-only Local / Shared / Remote, same order and active tint as
-    /// `MySkillsScopeSwitch` (`bg-primary/20` + primary glyph).
-    fn render_scope_switch(&self, view: WeakEntity<Self>) -> Div {
-        let order = [
-            (MySkillsScope::Local, IconName::Laptop, "scope-local"),
-            (
-                MySkillsScope::Channels,
-                IconName::UsersRound,
-                "scope-shared",
-            ),
-            (MySkillsScope::Remote, IconName::Server, "scope-remote"),
+    /// Icon-only Local / Shared / Remote, same order as
+    /// `MySkillsScopeSwitch`. The sliding thumb is the shared segmented
+    /// control (`chrome::segmented`), the same one the sidebar mode switcher
+    /// uses.
+    fn render_scope_switch(&self, view: WeakEntity<Self>) -> AnyElement {
+        let selected = match self.scope {
+            MySkillsScope::Local => 0,
+            MySkillsScope::Channels => 1,
+            MySkillsScope::Remote => 2,
+        };
+        let segments = vec![
+            SliderSegment {
+                id: "my-skills-scope-local",
+                icon: Some(IconName::Laptop),
+                label: None,
+            },
+            SliderSegment {
+                id: "my-skills-scope-channels",
+                icon: Some(IconName::UsersRound),
+                label: None,
+            },
+            SliderSegment {
+                id: "my-skills-scope-remote",
+                icon: Some(IconName::Server),
+                label: None,
+            },
         ];
-        let mut track = div()
-            .flex()
-            .items_center()
-            .p(px(2.0))
-            .rounded_lg()
-            .border_1()
-            .border_color(rgb(palette().border))
-            .bg(rgb(palette().bg))
-            .occlude();
-        for (scope, glyph, id) in order {
-            let active = self.scope == scope;
-            let v = view.clone();
-            track = track.child(
-                div()
-                    .id(id)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .border_1()
-                    .border_color(rgb(if active {
-                        palette().accent_soft_edge
-                    } else {
-                        palette().bg
-                    }))
-                    .child(icon(
-                        glyph,
-                        14.0,
-                        if active {
-                            palette().accent
-                        } else {
-                            palette().fg_muted
-                        },
-                    ))
-                    .when(active, |d| d.bg(rgb(palette().accent_soft)))
-                    .on_click(move |_, _, cx| {
-                        let _ = v.update(cx, |this, cx| {
-                            this.scope = scope;
-                            this.revise(cx);
-                        });
-                    })
-                    .interaction_spring(
-                        id,
-                        true,
-                        if active {
-                            MotionPaint::new().bg(rgb(palette().accent_soft))
-                        } else {
-                            MotionPaint::new()
-                        },
-                        if active {
-                            MotionPaint::new().bg(rgb(palette().accent_soft))
-                        } else {
-                            MotionPaint::new().bg(rgb(palette().panel_hover))
-                        },
-                    ),
-            );
-        }
-        track
+        slider_segmented(
+            "my-skills-scope-motion",
+            &segments,
+            selected,
+            // Toolbar height is 32px: pad 2 per side plus the border leaves
+            // 26px slots, matching `segment_track`'s density.
+            SliderGeometry {
+                slot_w: 28.0,
+                slot_h: 26.0,
+                pad: 2.0,
+                icon_size: 14.0,
+            },
+            false,
+            Rc::new(move |ix, _, cx| {
+                let scope = match ix {
+                    1 => MySkillsScope::Channels,
+                    2 => MySkillsScope::Remote,
+                    _ => MySkillsScope::Local,
+                };
+                let _ = view.update(cx, |this, cx| {
+                    this.scope = scope;
+                    this.revise(cx);
+                });
+            }),
+        )
     }
 
-    /// "All" plus one brand glyph per enabled agent. Clicking the active
-    /// glyph clears the filter, matching `AgentFilterPill`.
-    ///
-    /// The glyph strip scrolls like the skill-card carousel
-    /// (`overflow_x_scroll`): a vertical mouse wheel maps onto the
-    /// horizontal axis. `overflow_x_scrollbar` locks that cross-axis, so
-    /// the same wheel would not move these icons.
+    /// "All" plus one brand glyph per enabled agent, six slots at most.
+    /// The glyph lane holds a fixed six-slot width whether the roster is
+    /// shorter or longer, so this filter never changes the toolbar length;
+    /// glyphs past the sixth don't render. Clicking the active glyph clears
+    /// the filter.
     fn render_agent_filter(&self, view: WeakEntity<Self>, profiles: &[&AgentProfile]) -> Div {
         let all = view.clone();
         let active_all = self.agent_filter.is_none();
         let mut icons = div()
-            .id("my-skills-agent-filter-icons")
             .flex()
             .items_center()
             .gap_0()
             .h_full()
-            .min_w_0()
-            // Five slots. More agents scroll inside the strip instead of
-            // widening the track over the search field.
-            .max_w(px(22.0 * 5.0))
-            .overflow_x_scroll();
-        for profile in profiles {
+            // Six fixed slots: the track keeps this length for any roster
+            // size instead of widening over the search field or clipping a
+            // seventh glyph at a scroll edge. Space pressure goes to the
+            // search field, never here.
+            .flex_shrink_0()
+            .w(px(AGENT_FILTER_SLOT_W * AGENT_FILTER_SLOTS as f32));
+        for profile in profiles.iter().take(AGENT_FILTER_SLOTS) {
             let id = profile.id.clone();
             let active = self.agent_filter.as_deref() == Some(profile.id.as_str());
             let v = view.clone();
@@ -248,7 +234,7 @@ impl MySkillsPage {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .w(px(22.0))
+                    .w(px(AGENT_FILTER_SLOT_W))
                     .h_full()
                     .rounded_md()
                     .cursor_pointer()
@@ -308,6 +294,11 @@ impl MySkillsPage {
             .child(icons)
     }
 
+    /// One warn capsule, in the card update pill's palette (`warn_bg` fill,
+    /// `warn_border` outline). The filter half reads like `bar_count` — glyph
+    /// plus count — and stays quiet; the solid half is the update action.
+    /// `segment_track` geometry: a 2px inset and each half's own `rounded_md`
+    /// keep the fills concentric with the outline.
     fn render_attention(&self, view: WeakEntity<Self>, attention: usize, pending: usize) -> Div {
         let pressed = self.only_updates;
         let updating = self.busy.as_deref() == Some("update_all");
@@ -320,8 +311,10 @@ impl MySkillsPage {
             .flex_shrink_0()
             .rounded_lg()
             .border_1()
-            .border_color(rgb(palette().warn))
-            .overflow_hidden()
+            .border_color(rgb(palette().warn_border))
+            .bg(rgb(palette().warn_bg))
+            .p(px(2.0))
+            .gap(px(2.0))
             .occlude()
             .child(
                 div()
@@ -330,40 +323,33 @@ impl MySkillsPage {
                     .items_center()
                     .h_full()
                     .gap(px(6.0))
-                    .px(px(10.0))
+                    .px(px(8.0))
+                    .rounded_md()
                     .cursor_pointer()
                     .text_xs()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(if pressed {
-                        palette().on_warn
-                    } else {
-                        palette().fg
-                    }))
-                    .when(pressed, |d| d.bg(rgb(palette().warn)))
+                    .text_color(rgb(palette().warn))
+                    // The glyph slot swaps to X instead of appending one, so
+                    // the count keeps its lane and the row stays two elements.
                     .child(icon(
-                        IconName::ListFilter,
-                        14.0,
                         if pressed {
-                            palette().on_warn
+                            IconName::X
                         } else {
-                            palette().warn
+                            IconName::ListFilter
                         },
+                        14.0,
+                        palette().warn,
                     ))
                     .child(attention.to_string())
-                    .tooltip({
-                        let pressed = pressed;
-                        move |window, cx| {
-                            crate::chrome::tooltip(crate::i18n::t(if pressed {
-                                "toolbar.showAllSkills"
-                            } else {
-                                "toolbar.filterUpdatesHint"
-                            }))
-                            .build(window, cx)
-                        }
+                    .tooltip(move |window, cx| {
+                        crate::chrome::tooltip(crate::i18n::t(if pressed {
+                            "toolbar.showAllSkills"
+                        } else {
+                            "toolbar.filterUpdatesHint"
+                        }))
+                        .build(window, cx)
                     })
-                    .when(pressed, |d| {
-                        d.child(icon(IconName::X, 12.0, palette().on_warn))
-                    })
+                    .when(pressed, |d| d.bg(rgb(palette().warn_hover)))
                     .on_click(move |_, _, cx| {
                         let _ = toggle.update(cx, |this, cx| {
                             this.only_updates = !this.only_updates;
@@ -373,65 +359,63 @@ impl MySkillsPage {
                     .interaction_spring(
                         "filter-updates-only",
                         true,
-                        if pressed {
-                            MotionPaint::new().bg(rgb(palette().warn))
+                        MotionPaint::new().bg(rgb(if pressed {
+                            palette().warn_hover
                         } else {
-                            MotionPaint::new()
-                        },
-                        if pressed {
-                            MotionPaint::new().bg(rgb(palette().warn))
-                        } else {
-                            MotionPaint::new().bg(rgb(palette().card_hover))
-                        },
+                            palette().warn_bg
+                        })),
+                        MotionPaint::new().bg(rgb(palette().warn_hover)),
                     ),
             );
         if pending > 0 {
-            group = group
-                .child(div().w(px(1.0)).h(px(16.0)).bg(rgb(palette().warn)))
-                .child(
-                    div()
-                        .id("my-skills-update-all")
-                        .flex()
-                        .items_center()
-                        .h_full()
-                        .gap(px(6.0))
-                        .px(px(10.0))
-                        .cursor_pointer()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(palette().warn))
-                        .child(icon_spin(
-                            "my-skills-update-all-spin",
-                            IconName::CircleArrowUp,
-                            14.0,
-                            palette().warn,
-                            updating,
-                        ))
-                        .child(crate::i18n::t("common.update"))
-                        .tooltip({
-                            let count = pending.to_string();
-                            move |window, cx| {
-                                let tip = if updating {
-                                    crate::i18n::t("common.updating")
-                                } else {
-                                    crate::i18n::tf(
-                                        "toolbar.updateAllHint",
-                                        &[("count", count.as_str())],
-                                    )
-                                };
-                                crate::chrome::tooltip(tip).build(window, cx)
-                            }
-                        })
-                        .on_click(move |_, _, cx| {
-                            let _ = update.update(cx, |this, cx| this.update_all_pending(cx));
-                        })
-                        .interaction_spring(
-                            "my-skills-update-all",
-                            !updating,
-                            MotionPaint::new(),
-                            MotionPaint::new().bg(rgb(palette().warn_hover)),
-                        ),
-                );
+            group = group.child(
+                div()
+                    .id("my-skills-update-all")
+                    .flex()
+                    .items_center()
+                    .h_full()
+                    .gap(px(6.0))
+                    .px(px(8.0))
+                    .rounded_md()
+                    .cursor_pointer()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .bg(rgb(palette().warn))
+                    .text_color(rgb(palette().on_warn))
+                    .when(updating, |d| d.opacity(0.8))
+                    .child(icon_spin(
+                        IconName::CircleArrowUp,
+                        14.0,
+                        palette().on_warn,
+                        updating,
+                    ))
+                    .child(crate::i18n::t("common.update"))
+                    .tooltip({
+                        let count = pending.to_string();
+                        move |window, cx| {
+                            let tip = if updating {
+                                crate::i18n::t("common.updating")
+                            } else {
+                                crate::i18n::tf(
+                                    "toolbar.updateAllHint",
+                                    &[("count", count.as_str())],
+                                )
+                            };
+                            crate::chrome::tooltip(tip).build(window, cx)
+                        }
+                    })
+                    .on_click(move |_, _, cx| {
+                        let _ = update.update(cx, |this, cx| this.update_all_pending(cx));
+                    })
+                    // Solid fill, so the hover dims it like `bar_primary`
+                    // instead of layering another tint over `warn`.
+                    .interaction_spring(
+                        "my-skills-update-all",
+                        !updating,
+                        MotionPaint::new().opacity(1.0),
+                        MotionPaint::new().opacity(0.9),
+                    ),
+            );
         }
         group
     }
@@ -477,4 +461,62 @@ fn open_import(view: WeakEntity<MySkillsPage>, window: &mut Window, cx: &mut App
                 })
         },
     );
+}
+
+#[cfg(test)]
+mod scope_switch_tests {
+    use gpui_kit::component::Root;
+    use gpui_kit::{AppContext, point, px, size};
+
+    use super::super::test_support::IsolatedDataDir;
+    use super::MySkillsPage;
+    use crate::my_skills::types::MySkillsScope;
+
+    fn paint(cx: &mut gpui_kit::VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} missing"));
+        cx.simulate_click(
+            point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + bounds.size.height / 2.,
+            ),
+            Default::default(),
+        );
+    }
+
+    /// The scope switch rides the shared sliding thumb (`chrome::segmented`):
+    /// the three pills mount in the toolbar and clicking one moves the page
+    /// scope, the state the thumb then springs to.
+    #[gpui_kit::test]
+    fn scope_switch_clicks_move_the_page_scope(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        crate::init_test(cx);
+        let page = cx.new(|cx| MySkillsPage::new(cx));
+        let shown = page.clone();
+        let (_root, cx) =
+            cx.add_window_view(move |window, cx| Root::new(shown.clone(), window, cx));
+        cx.simulate_resize(size(px(1200.), px(800.)));
+        paint(cx);
+
+        assert!(
+            cx.debug_bounds("my-skills-scope-channels").is_some(),
+            "scope pills missing from the toolbar"
+        );
+        click(cx, "my-skills-scope-channels");
+        paint(cx);
+        cx.update(|_, cx| {
+            assert_eq!(page.read(cx).scope, MySkillsScope::Channels);
+        });
+
+        click(cx, "my-skills-scope-remote");
+        paint(cx);
+        cx.update(|_, cx| {
+            assert_eq!(page.read(cx).scope, MySkillsScope::Remote);
+        });
+    }
 }

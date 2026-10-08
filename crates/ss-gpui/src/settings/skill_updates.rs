@@ -1,9 +1,9 @@
 //! Settings → Skill updates.
 //!
-//! One switch owns the mode: on is manual, off is automatic. Automatic mode
-//! shows the check frequency. The background monitor (`ss-app::skill_wake`)
-//! reads the same config file on every wake, so this section never schedules
-//! or runs an update itself.
+//! Mode is an explicit 手动/自动 segmented picker; automatic mode shows the
+//! check frequency. The background monitor (`ss-app::skill_wake`) reads the
+//! same config file on every wake, so this section never schedules or runs
+//! an update itself.
 
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -16,12 +16,15 @@ use crate::theme::palette;
 
 impl SettingsPage {
     pub(crate) fn render_skill_updates(&self, view: WeakEntity<Self>) -> impl IntoElement {
-        let manual = !self.skill_updates.auto_update;
-        let mode = t(if manual {
-            "settings.skillUpdatesManual"
+        let modes = [
+            ("manual", t("settings.skillUpdatesManual")),
+            ("auto", t("settings.skillUpdatesAuto")),
+        ];
+        let current = if self.skill_updates.auto_update {
+            "auto"
         } else {
-            "settings.skillUpdatesAuto"
-        });
+            "manual"
+        };
         section_shell(
             SettingsSection::SkillUpdates,
             None,
@@ -30,8 +33,32 @@ impl SettingsPage {
                 div()
                     .flex()
                     .flex_col()
-                    .child(Self::mode_row(manual, mode, view.clone()))
-                    .when(!manual, |column| {
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.0))
+                            .px_4()
+                            .py_4()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(palette().fg))
+                                    .child(t("settings.skillUpdatesMode")),
+                            )
+                            .child(choice_pills(
+                                "skill-update-mode",
+                                &modes,
+                                current,
+                                view.clone(),
+                                |this, id, cx| {
+                                    this.skill_updates.auto_update = id == "auto";
+                                    this.save_skill_updates(cx);
+                                },
+                            )),
+                    )
+                    .when(current == "auto", |column| {
                         column.child(Self::interval_row(
                             self.skill_updates.interval_minutes,
                             view,
@@ -39,46 +66,6 @@ impl SettingsPage {
                     }),
             ),
         )
-    }
-
-    fn mode_row(manual: bool, mode: SharedString, view: WeakEntity<Self>) -> gpui_kit::Div {
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .px_4()
-            .py_4()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(palette().fg))
-                            .child(t("settings.skillUpdatesMode")),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(palette().fg_muted))
-                            .child(mode),
-                    ),
-            )
-            .child(Self::toggle(
-                "skill-update-mode-toggle",
-                manual,
-                view,
-                |this, cx| {
-                    this.skill_updates.auto_update = !this.skill_updates.auto_update;
-                    this.save_skill_updates(cx);
-                },
-            ))
     }
 
     fn interval_row(minutes: u64, view: WeakEntity<Self>) -> gpui_kit::Div {

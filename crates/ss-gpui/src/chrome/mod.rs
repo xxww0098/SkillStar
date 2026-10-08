@@ -5,11 +5,16 @@
 mod dialog;
 mod motion;
 mod scroll_top;
+mod segmented;
+mod sheet;
 mod toolbar;
 
 use std::time::Duration;
 
 use gpui_kit::base::StyledExt;
+use gpui_kit::component::Icon;
+use gpui_kit::component::Sizable;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::*;
 
 use crate::theme::palette;
@@ -17,10 +22,11 @@ use crate::theme::palette;
 pub(crate) use dialog::{DialogChrome, open_centered, open_confirm, open_form_dialog};
 pub(crate) use motion::{InteractionSpring, MotionDiv, MotionPaint, motion_spring};
 pub(crate) use scroll_top::{back_to_top_button, is_list_scrolled_down};
+pub(crate) use segmented::{SliderGeometry, SliderSegment, slider_segmented, slider_segmented_at};
+pub(crate) use sheet::{SHEET_GAP, sheet};
 pub(crate) use toolbar::{
     PageBar, bar_count, bar_icon_button, bar_primary, bar_refresh_button, bar_secondary,
-    bar_text_chip, page_toolbar, segment_tab, segment_tab_compact, segment_track, toolbar_search,
-    view_toggle_button, window_drag,
+    bar_text_chip, page_toolbar, segment_tab_compact, segment_track, toolbar_search, window_drag,
 };
 
 /// Hover tip. Black surface, white text, in both modes.
@@ -65,29 +71,90 @@ pub(crate) fn icon(
 /// They stay stepped: a throb does not need a sample on every refresh.
 pub(crate) const PULSE_FPS: f32 = 20.0;
 
-/// Same glyph as [`icon`]. While `spin` is set it turns once per second,
-/// sampled on the display link (120Hz on a 120Hz screen), and stops on the
-/// next frame after the flag drops. A stable `anim_id` keeps the phase
-/// across redraws. The glyph is a paint transform; the heavy page behind it
-/// stays a replayed view so those frames do not lay the grid out again.
+/// Same glyph as [`icon`]. While `spin` is set the glyph is a kit
+/// [`Spinner`] and turns on the kit cadence; it stops on the next frame
+/// after the flag drops. Rotation stays a paint transform, so the heavy
+/// page behind it can stay a replayed view.
 pub(crate) fn icon_spin(
-    anim_id: impl Into<ElementId>,
     name: gpui_kit::assets::IconName,
     size: f32,
     color: u32,
     spin: bool,
 ) -> AnyElement {
-    let glyph = icon(name, size, color);
     if !spin {
+        return icon(name, size, color).into_any_element();
+    }
+    Spinner::new()
+        .icon(Icon::new(name))
+        .with_size(px(size))
+        .color(rgb(color).into())
+        .into_any_element()
+}
+
+/// Beam width for [`icon_sweep`]: a fading tail plus [`SWEEP_CORE_W`] pixels
+/// of bright core, crossing the glyph in one pass.
+const SWEEP_BEAM_W: f32 = 10.0;
+
+/// The bright leading edge of a sweep beam. The tail fades out behind it.
+const SWEEP_CORE_W: f32 = 2.0;
+
+/// Left offset of a sweep beam: fully left of the glyph at 0, fully past its
+/// right edge at 1, so one pass crosses the whole glyph. The animator applies
+/// it as a style offset, so a repeating pass also settles out of sight under
+/// `reduce_motion` instead of freezing mid-glyph.
+fn sweep_left(delta: f32, size: f32) -> Pixels {
+    px((size + SWEEP_BEAM_W) * delta.clamp(0.0, 1.0) - SWEEP_BEAM_W)
+}
+
+/// Same glyph as [`icon`]. While `sweep` is set, a laser beam crosses the
+/// glyph left to right about once per second, sampled on the display link,
+/// and stops on the next frame after the flag drops. The glyph dims while a
+/// pass runs, so the beam reads as the moving part. Like [`icon_spin`] a
+/// stable `anim_id` keeps the phase across redraws, and the pass is a style
+/// offset on a clipped one-glyph frame, so those frames do not lay the page
+/// out again either.
+pub(crate) fn icon_sweep(
+    anim_id: impl Into<ElementId>,
+    name: gpui_kit::assets::IconName,
+    size: f32,
+    color: u32,
+    sweep: bool,
+) -> AnyElement {
+    let glyph = icon(name, size, color);
+    if !sweep {
         return glyph.into_any_element();
     }
-    glyph
-        .with_animation(
-            anim_id,
-            Animation::new(Duration::from_secs(1)).repeat(),
-            |glyph, delta| {
-                glyph.transform(Transformation::rotate(percentage(delta.clamp(0.0, 1.0))))
-            },
+    let laser = rgb(palette().accent);
+    div()
+        .relative()
+        .w(px(size))
+        .h(px(size))
+        .overflow_hidden()
+        .child(div().size_full().opacity(0.35).child(glyph))
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .w(px(SWEEP_BEAM_W))
+                .h_full()
+                .flex()
+                .flex_row()
+                .child(
+                    div()
+                        .w(px(SWEEP_BEAM_W - SWEEP_CORE_W))
+                        .h_full()
+                        .bg(linear_gradient(
+                            90.,
+                            linear_color_stop(laser.alpha(0.0), 0.),
+                            linear_color_stop(laser.alpha(0.65), 1.),
+                        )),
+                )
+                .child(div().w(px(SWEEP_CORE_W)).h_full().bg(laser.alpha(0.95)))
+                .with_animation(
+                    anim_id,
+                    Animation::new(Duration::from_secs(1)).repeat(),
+                    move |beam, delta| beam.left(sweep_left(delta, size)),
+                ),
         )
         .into_any_element()
 }
@@ -219,7 +286,7 @@ pub(crate) fn primary_button<T: 'static>(
 
 #[cfg(test)]
 mod tests {
-    use gpui_kit::Styled as _;
+    use gpui_kit::{Pixels, Styled as _, px};
 
     #[test]
     fn tooltip_surface_is_black_with_white_text() {
@@ -227,5 +294,17 @@ mod tests {
         let style = tip.style();
         assert_eq!(style.background, Some(gpui_kit::rgb(0x000000).into()));
         assert_eq!(style.text.color, Some(gpui_kit::rgb(0xffffff).into()));
+    }
+
+    /// One pass has to start left of the glyph and end past its right edge,
+    /// whatever the animation feeds the closure.
+    #[test]
+    fn a_sweep_pass_covers_the_whole_glyph() {
+        let size = 14.0;
+        assert_eq!(super::sweep_left(0.0, size), px(-super::SWEEP_BEAM_W));
+        assert_eq!(super::sweep_left(1.0, size), px(size));
+        assert_eq!(super::sweep_left(-0.3, size), px(-super::SWEEP_BEAM_W));
+        assert_eq!(super::sweep_left(1.7, size), px(size));
+        let _mid: Pixels = super::sweep_left(0.5, size);
     }
 }

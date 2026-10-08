@@ -1,7 +1,7 @@
 //! Read side of installed skills under the D-081 canonical layout.
 //!
 //! Skills live as real copies in `~/.skillstar/data/skills/installed/<name>`; provenance comes
-//! from the vercel lock (`skill_lock`). Update badges are a `update_state`
+//! from the install lock (`skill_lock`). Update badges are a `update_state`
 //! projection refreshed by comparing lock hashes against upstream trees.
 
 use crate::agents::{self as agent_profile, AgentProfile};

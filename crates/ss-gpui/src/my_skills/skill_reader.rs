@@ -14,9 +14,6 @@
 use std::time::Duration;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::Icon;
-use gpui_kit::component::Sizable;
-use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::DialogTitle;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::text::TextView;
@@ -267,8 +264,11 @@ impl SkillReader {
         row
     }
 
-    /// Chinese UI, and only when some paragraph is still English.
-    fn translate_button(&self, cx: &mut Context<Self>) -> Option<Button> {
+    /// Icon-only translate button on the SKILL.md label row: the same glyph,
+    /// the same laser sweep, and the same opening-only choice as the detail
+    /// column's description button. Chinese prose is not something the
+    /// target would translate, so no button.
+    fn translate_button(&self, cx: &mut Context<Self>) -> Option<crate::chrome::MotionDiv> {
         let Phase::Ready(text) = &self.phase else {
             return None;
         };
@@ -277,27 +277,44 @@ impl SkillReader {
         }
         let showing = self.show_translation;
         let pending = showing && translation_pending(text);
-        let label = if showing && !pending {
+        let tip = if showing && !pending {
             crate::i18n::t("detailPanel.showOriginal")
         } else {
             crate::i18n::t("detailPanel.translate")
         };
         let view = cx.entity().downgrade();
         Some(
-            Button::new("skill-md-translate")
-                .small()
-                .outline()
+            div()
+                .id("skill-md-translate")
+                .p(px(3.0))
+                .rounded_md()
                 .flex_shrink_0()
-                .icon(Icon::new(IconName::Languages))
-                .label(label)
-                .loading(pending)
-                .debug_selector(|| "skill-md-translate".into())
+                .cursor_pointer()
+                .tooltip(move |window, cx| {
+                    crate::chrome::tooltip(tip.to_string()).build(window, cx)
+                })
+                .child(crate::chrome::icon_sweep(
+                    "skill-md-translate",
+                    IconName::Languages,
+                    14.0,
+                    palette().fg_muted,
+                    pending,
+                ))
                 .on_click(move |_, _, cx| {
                     let _ = view.update(cx, |this, cx| {
                         this.show_translation = !this.show_translation;
                         cx.notify();
                     });
-                }),
+                })
+                .interaction_spring(
+                    "skill-md-translate",
+                    true,
+                    MotionPaint::new().fg(rgb(palette().fg_muted)),
+                    MotionPaint::new()
+                        .fg(rgb(palette().fg))
+                        .bg(rgb(palette().card_hover)),
+                )
+                .debug_selector(|| "skill-md-translate".into()),
         )
     }
 
@@ -306,9 +323,10 @@ impl SkillReader {
             return scroll_port(false, div());
         }
         match &self.phase {
-            Phase::Loading => {
-                scroll_port(false, muted_line(crate::i18n::t("detailPanel.reading").to_string()))
-            }
+            Phase::Loading => scroll_port(
+                false,
+                muted_line(crate::i18n::t("detailPanel.reading").to_string()),
+            ),
             Phase::Failed(error) => self.failure(error.clone(), cx),
             Phase::Ready(text) if text.trim().is_empty() => scroll_port(
                 false,
@@ -569,6 +587,7 @@ mod tests {
         div, point, px, size,
     };
 
+    use super::super::test_support::IsolatedDataDir;
     use super::{
         DIALOG_CHROME, DIALOG_MARGIN, MdBlock, WINDOW_INSET, open_skill_markdown,
         reader_shell_height, split_markdown,
@@ -596,10 +615,8 @@ mod tests {
         cx: &mut gpui_kit::TestAppContext,
         reduce_motion: bool,
     ) -> &mut gpui_kit::VisualTestContext {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            cx.set_reduce_motion(reduce_motion);
-        });
+        crate::init_test(cx);
+        cx.update(|cx| cx.set_reduce_motion(reduce_motion));
         let (_root, cx) = cx.add_window_view(|window, cx| {
             let host = cx.new(|_| Blank);
             Root::new(host, window, cx)
@@ -758,53 +775,6 @@ mod tests {
             ),
             Default::default(),
         );
-    }
-
-    fn data_dir_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// Keeps translation config and cache off the real data root.
-    /// The lock drops after this type restores the previous directory.
-    struct IsolatedDataDir {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Option<std::ffi::OsString>,
-        root: std::path::PathBuf,
-    }
-
-    impl IsolatedDataDir {
-        fn new() -> Self {
-            let lock = data_dir_lock();
-            let root = std::env::temp_dir().join(format!(
-                "skillstar-reader-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            ));
-            std::fs::create_dir_all(&root).unwrap();
-            let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
-            unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", &root) };
-            Self {
-                _lock: lock,
-                previous,
-                root,
-            }
-        }
-    }
-
-    impl Drop for IsolatedDataDir {
-        fn drop(&mut self) {
-            unsafe {
-                match self.previous.take() {
-                    Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
-                    None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
-                }
-            }
-            let _ = std::fs::remove_dir_all(&self.root);
-        }
     }
 
     #[gpui_kit::test]

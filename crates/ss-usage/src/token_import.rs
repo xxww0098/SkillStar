@@ -52,7 +52,7 @@ const TOKEN_IMPORTERS: &[TokenImporter] = &[
     },
     TokenImporter {
         catalog_id: "devin-desktop",
-        import_from_token: crate::fetchers::oauth::windsurf::import_from_token,
+        import_from_token: crate::fetchers::oauth::devin_desktop::import_from_token,
     },
     TokenImporter {
         catalog_id: "kiro",

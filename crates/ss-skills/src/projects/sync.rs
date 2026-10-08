@@ -59,39 +59,27 @@ fn build_path_plans<'a>(
     profiles: &'a [agent_profile::AgentProfile],
 ) -> Vec<ProjectPathPlan<'a>> {
     let mut plans = Vec::<ProjectPathPlan<'a>>::new();
-    let mut index_by_path = HashMap::<String, usize>::new();
+    let mut seen_paths = HashSet::new();
 
     for profile in profiles {
-        let Some(agent_skills) = skills_list.agents.get(&profile.id) else {
-            continue;
-        };
-        if !profile.has_project_skills() {
+        if !profile.has_project_skills() || !skills_list.agents.contains_key(&profile.id) {
             continue;
         }
-
-        let index = match index_by_path.get(&profile.project_skills_rel).copied() {
-            Some(index) => index,
-            None => {
-                let index = plans.len();
-                plans.push(ProjectPathPlan {
-                    profile,
-                    skill_names: Vec::new(),
-                    mode: skills_list
-                        .deploy_modes
-                        .get(&profile.project_skills_rel)
-                        .copied()
-                        .unwrap_or_default(),
-                });
-                index_by_path.insert(profile.project_skills_rel.clone(), index);
-                index
-            }
-        };
-
-        for name in agent_skills {
-            if !plans[index].skill_names.contains(name) {
-                plans[index].skill_names.push(name.clone());
-            }
+        if !seen_paths.insert(profile.project_skills_rel.clone()) {
+            continue;
         }
+        let membership = super::owner::shared_path_membership(
+            profiles,
+            skills_list,
+            &profile.project_skills_rel,
+            "",
+            &[],
+        );
+        plans.push(ProjectPathPlan {
+            profile,
+            skill_names: membership.members,
+            mode: membership.mode.unwrap_or_default(),
+        });
     }
 
     plans
@@ -442,38 +430,15 @@ pub fn add_skills_to_project_with_mode(
             continue;
         }
 
-        // A shared physical path has one manifest owner. Preserve an existing
-        // owner when possible; otherwise the selected profile owns it.
-        let owner_id = super::owner::shared_path_owner(
+        // One owner and one member set for this physical path. Copy vs symlink
+        // stays with this call.
+        super::owner::collapse_shared_path(
+            &mut skills_list,
             &profiles,
-            &skills_list,
             &profile.project_skills_rel,
             &profile.id,
-        )
-        .owner_id
-        .unwrap_or_else(|| profile.id.clone());
-
-        let shared_agent_ids = profiles
-            .iter()
-            .filter(|candidate| candidate.project_skills_rel == profile.project_skills_rel)
-            .map(|candidate| candidate.id.clone())
-            .collect::<Vec<_>>();
-        let mut merged = Vec::new();
-        for shared_id in &shared_agent_ids {
-            if let Some(existing) = skills_list.agents.remove(shared_id) {
-                for name in existing {
-                    if !merged.contains(&name) {
-                        merged.push(name);
-                    }
-                }
-            }
-        }
-        for name in &deployable_skill_names {
-            if !merged.contains(name) {
-                merged.push(name.clone());
-            }
-        }
-        skills_list.agents.insert(owner_id, merged);
+            &deployable_skill_names,
+        );
         skills_list
             .deploy_modes
             .insert(profile.project_skills_rel.clone(), mode);

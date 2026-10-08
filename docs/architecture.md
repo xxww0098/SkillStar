@@ -46,7 +46,7 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 | 顶层目录分类（config/data/secrets/cache/state/runtime/logs） | 按数据用途分组，规则见 [storage-layout.md](./storage-layout.md) | `ss-core` + 对应域 |
 | 市场快照 SQLite（可重建缓存） | `~/.skillstar/cache/marketplace/` | `ss-marketplace` |
 | 已安装技能规范副本 | `~/.skillstar/data/skills/installed/<name>`（真实目录；`SKILLSTAR_DATA_DIR` 重植数据根时一起搬走） | `ss-skills::materialize` 写入，`installer`、更新和频道升级调用它（[D-100](./decisions.md#d-100已安装技能的规范副本放在-skillstar-数据根)） |
-| Skill 安装锁（vercel `.skill-lock.json` v3） | `~/.skillstar/data/skills/.skill-lock.json` | `ss-skills::skill_lock`。读侧对过新、损坏和过旧都展示为空且不改文件；写侧对过新或损坏先备份再拒绝，对旧 schema 备份后重写（[D-094](./decisions.md#d-094技能物化统一为校验暂存交换原语部署所有权由链接目标或部署标记证明)） |
+| Skill 安装锁（`.skill-lock.json` v3） | `~/.skillstar/data/skills/.skill-lock.json` | `ss-skills::skill_lock`。读侧对过新、损坏和过旧都展示为空且不改文件；写侧对过新或损坏先备份再拒绝，对旧 schema 备份后重写（[D-094](./decisions.md#d-094技能物化统一为校验暂存交换原语部署所有权由链接目标或部署标记证明)） |
 | 安装锁文件锁 | `~/.skillstar/runtime/locks/skills/skill-lock.lock` | `ss-skills::skill_lock`；只串行化锁文件的读改写 |
 | 技能事务锁 | `~/.skillstar/runtime/locks/skills/update.lock` | `ss-skills::skill_update`。安装、更新、频道升级和发布的网络在锁外；修复计划按锁重装时在已持有的锁内拉取（[D-098](./decisions.md#d-098技能生命周期不变量)） |
 | 本地创作 Skill | `~/.skillstar/data/skills/local/<name>`，经 `~/.skillstar/data/skills/installed/<name>` 链接暴露 | `ss-skills::local_skill`；v3 迁移随目录移动重建 Agent 链接（[storage-layout.md](./storage-layout.md)） |
@@ -54,10 +54,10 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 | 旧安装模型残留清理标记 | `~/.skillstar/state/agents-migration-done` | `ss-skills::legacy_cleanup`；首次启动幂等清理 `~/.skillstar/hub/{skills,repos}`、旧 `lock.json` 与指向旧 hub `skills/repos/content` 的 Agent 链接；指向 `hub/local` 的链接由 v3 迁移重指（[storage-layout.md](./storage-layout.md)） |
 | Project 技能 manifest | `~/.skillstar/state/projects/` | `ss-skills`；共享项目路径只记录一个 Agent owner |
 | 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `ss-skills::update_state` 唯一所有者；保存每技能 `update_available/upstream_change/checked_at` 投影，刷新与更新完成都写穿它，批量检查以 stamp/commit 防止旧结果覆盖新结果，UI 与事件只是投影 |
-| 技能安装内容基线 | `~/.skillstar/data/skills/install_baselines.json` | `ss-skills::install_baseline`；安装/更新成功后记 canonical 内容 hash、卸载时删除，只供自动更新判断本地修改（[D-095](./decisions.md#d-095更新检测按-tree-逐层解析安装基线保护自动更新频道升级由类型化授权与本地备份承担)），不进入 vercel 锁 |
+| 技能安装内容基线 | `~/.skillstar/data/skills/install_baselines.json` | `ss-skills::install_baseline`；安装/更新成功后记 canonical 内容 hash、卸载时删除，只供自动更新判断本地修改（[D-095](./decisions.md#d-095更新检测按-tree-逐层解析安装基线保护自动更新频道升级由类型化授权与本地备份承担)），不进入安装锁 |
 | GitHub API 限流冷却 | `~/.skillstar/state/skills/github_api_cooldown.json` | `ss-skills::update_check`；记录 GitHub 返回的限流截止时间，截止前更新检查直接走克隆回退 |
 | 本机团队智能（learnings / usage / recall / friction） | `~/.skillstar/state/team.json` | `ss-skills::team`；schema v1，未来版本 fail-closed。不是已删除的 `learning/` 教程树 |
-| Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `ss-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；部署以 `~/.skillstar/data/skills/installed` 为 canonical source 创建链接；`ss-skills::workflows::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
+| Agent profile、手动激活偏好与临时技能恢复 journal；可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `ss-skills::agents` 持有 profile 偏好和按物理 Global skills 目录保存的恢复 journal；部署以 `~/.skillstar/data/skills/installed` 为 canonical source 创建链接；`ss-skills::workflows::agent_managed_skills` 编排“先写 journal、后停用 / 仅 journal 恢复”事务。内置路径/能力跟随 skills CLI 注册表基线，Agent 不拥有 canonical 内容 |
 | 模型域遗留数据（provider store、网关配置/账本、决策权重） | `~/.skillstar/config/model_providers*.json`、`model_gateway.json`、`~/.skillstar/gateway/usage.jsonl`、`~/.skillstar/models/`、`cache/{model_catalog,gateway-catalog}/` | 模型域已整体移除（[D-082](./decisions.md)）：这些文件不再被写入，留在磁盘不主动清理；`model_gateway.json` 的 `prices` 覆盖与 `cache/gateway-catalog/models.dev.json` 仍被 `ss-usage::pricing` 只读，用于消费汇总的读时计价 |
 | Usage 订阅和 OAuth/token 状态（含加密 token，整体按秘密保护） | `~/.skillstar/secrets/accounts/usage/`；刷新/存储锁在 `runtime/locks/accounts/` | `ss-usage`；账号用例与消费汇总由 `ss-usage::accounts` 编排 |
 | CLI 凭据托管快照（整文件软链 custody） | 默认 `~/.skillstar/secrets/accounts/cli/<catalog_id>/<subscription_id>.json`；已有旧 catalog 路径兼容见 [storage-layout.md](./storage-layout.md) | `ss-usage::usage_switch`（D-077）；live 路径是 CLI 自己读取的凭证文件 |
@@ -102,7 +102,8 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 - 组织私有共享频道由 `ss-skills::channels::shared_channels` 拥有。GitHub 数字 repository ID 是跨重命名稳定身份；本地版本化 registry 只保存非敏感描述符和创建状态。创建前校验 selected-repository 安装及 Administration/Contents write，由 App 用户身份创建仓库；远端创建后必须先持久化 pending，再只读校验 GitHub 自动授予的 App 仓库访问并转 active。GitHub App 用户令牌不得用于修改安装仓库范围。
 - 频道订阅是第二次、本地且显式的同意：GitHub invitation 只授予仓库访问，订阅 facade 重新验证最新不可变 Release，Git scanner 固定到 manifest commit 并核对所选 content roots/hashes，之后才通过 staged Skill installer 写入 hub。版本化 subscription store 保存选择、release target 与非敏感 provenance；未知 schema 只能投影为只读摘要。新增 Skill 不自动加入既有选择，订阅写盘失败必须回滚本次新安装。
 - 频道升级 facade 默认检查、显式应用，并以订阅 Skill 为隔离事务单元。它从最新已验证 Release 与每项已安装 release hash/provenance 推导频道状态；只把完整内容仍等于 baseline 的 updated Skill 切到目标 commit 的隔离 ref cache。分歧或失败项保留替换前的规范副本（升级前留下的隐藏副本，不重新拉取），成功项独立前进；新增项只通知、removed 项不隐式删除。每项事务复用统一分歧解决、update state、Agent/Project reconciliation 与回滚接缝，最近一次检查结果持久化以支持重启和离线展示。
-- 单 Skill 历史回滚也由频道升级 facade 编排：它在同一仓库的已验证 manifest 集合中将当前 provenance/hash 解析为唯一安装 Release，只允许更早且仍包含该 Skill 的精确 target，再复用 staged update transaction 替换文件与部署。成功只更新该 Skill 的安装事实并写入 pin，不倒退频道整体 target；手动与自动批量应用均排除 pin。恢复跟随以一次 subscription store 事务清 pin 并按最新 Release 重建计划，不在该动作中直接替换 Skill。
+- 单 Skill 历史回滚也由频道升级 facade 编排：它在同一仓库的已验证 manifest 集合中将当前 provenance/hash 解析为唯一安装 Release，只允许更早且仍包含该 Skill 的精确 target，再复用 staged update transaction 替换文件与部署。回执的复核、订阅写入和失败补偿与批量升级共用一段流程，见 [Skills 生命周期](./features/skills/README.md#频道升级)。成功只更新该 Skill 的安装事实并写入 pin，不倒退频道整体 target；手动与自动批量应用均排除 pin。恢复跟随以一次 subscription store 事务清 pin 并按最新 Release 重建计划，不在该动作中直接替换 Skill。
+- 频道 marketplace 导出是纯本地只读管线：从 subscription registry 读取当前选择与安装 baseline，逐 Skill 重新对 canonical 副本做内容 hash 校验（相等才导出，fail-closed），再由协议叶子 `claude-marketplace`（[D-102](./decisions.md#d-102claude-code-插件市场格式独立为协议叶子-crate)）写出自包含的市场目录（根 `marketplace.json` + 每技能 `plugin.json` + 内容副本）。不经网络、不需要 GitHub 登录；输出目录必须不存在或为空。导出不修改订阅、锁或任何远端状态。
 - Release 移除是 manifest 与本地 tracked 集合的差异状态，不是删除指令。频道 facade 保留 Hub 内容、lockfile 与部署，直到用户显式卸载或转为本地副本；前者复用统一卸载清理，后者先以完整内容快照建立 `skills-local` 所有权，再解除频道跟踪。Hub/lockfile 先进入可恢复 staging，subscription store 在同一共享 mutation/update transaction 内提交；metadata 失败会恢复 Hub/lockfile 并删除未提交的本地安全副本，metadata 成功后的部署清理失败则保留已解除跟踪事实并报告剩余清理。未处理的 removal tombstone 会跨后续 Release 保留；移除 tracked/known/pin 后，未来同名重加只能进入带最终内容/provenance 校验的显式 staged install 路径。
 - GitHub 成员撤销与订阅访问冻结是两端独立、以远端为准的状态机。owner 端只删除 direct collaborator，随后复查 effective permission 并区分完全撤权、继承访问和未确认错误；subscriber 端把远端探测投影为 `active`、`revoked`、`offline`、`recoverable_failure`、`integrity_error`。非 active 状态一律冻结需要远端内容的 mutation 并保留 Hub、lockfile、部署和最近已验证快照；只有 revoked 额外开放逐项转本地/卸载。频道所有权 guard 位于域层通用 mutation 接缝，覆盖扫描/安装、更新、内容、本地收养、bundle/pack、项目导入及卸载，而不是只靠界面隐藏动作。检查在冻结时仍可只读重试，必须在隔离验证 cache 中重新通过 stable repository/organization ID、权限、manifest/tag/commit/path/hash 全链验证才恢复 active。网络/代理状态不得推断为撤权，完整性错误不得被普通重试结果或旧缓存绕过。该 guard 通过域内窄查询接缝实现：`ss-skills::skill_mutation::SkillMutationPolicy`（默认使用域内频道策略）由 `ss-skills::channels::policy::ChannelAwarePolicy` 实现，策略由技能域直接提供默认值，不依赖 GUI/CLI 启动注册。
 - 后台检查与受保护自动升级复用上述 facade，不是第二套更新器。`ss-skills` 以注入时间为所有订阅判定一小时检查窗口并持久化结果；只有按频道显式开启的偏好才允许选择并应用安全项。`ss-app::channel_wake` 只负责 GUI 进程存活期间的分钟级唤醒。它不发桌面通知。自动与手动扫描/应用共享 subscription mutation lease，实际文件替换继续共享全局 Skill update transaction lock，因此普通更新器并发移动 checkout 时，自动路径必须在写入前重新检查并暂停该项。
@@ -137,7 +138,7 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 
 - `ss-gpui` 的 `Shell` 负责窗口、侧栏和跨能力路由。能力目录拥有自己的 view。
 - 异步域调用经 `spawn_domain` 回到 view。不另建全局状态库。
-- i18n 的 `en` 与 `zh-CN` 同步，文案文件在 `crates/ss-gpui/assets/locales/`。
+- i18n 的 `en` 与 `zh-CN` 同步。应用文案在 `crates/ss-gpui/assets/locales/`。GPUI Kit 组件文案按 [I18n](https://gpui-kit.com/docs/i18n/) 用 `crates/ss-gpui/locales/ui.yml` 扩展，查找顺序是应用覆盖优先，缺的 key 回落到组件自带译文。
 
 ## 发布与验证
 

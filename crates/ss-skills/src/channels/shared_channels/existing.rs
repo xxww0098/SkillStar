@@ -416,19 +416,6 @@ where
         }
     }
 
-    pub fn without_scanner(
-        gateway: G,
-        registry: R,
-        sessions: ExistingChannelRegistrationSessions,
-    ) -> Self {
-        Self {
-            gateway,
-            registry,
-            scanner: None,
-            sessions,
-        }
-    }
-
     pub async fn list_candidates(
         &self,
         organization_id: u64,

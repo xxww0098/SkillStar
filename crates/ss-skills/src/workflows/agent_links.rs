@@ -28,10 +28,6 @@ pub struct AgentLinkReport {
 }
 
 impl AgentLinkReport {
-    pub fn is_clean(&self) -> bool {
-        self.skipped.is_empty() && self.failed.is_empty()
-    }
-
     pub fn served(&self, agent_id: &str) -> bool {
         self.applied.iter().any(|(agent, _)| agent == agent_id)
     }
@@ -43,25 +39,6 @@ impl AgentLinkReport {
                 .iter()
                 .chain(&self.failed)
                 .any(|issue| issue.agent_id == agent_id)
-    }
-
-    /// One line per problem pair, for a notice; `None` when every pair applied.
-    pub fn problem_summary(&self) -> Option<String> {
-        if self.is_clean() {
-            return None;
-        }
-        let lines = self
-            .failed
-            .iter()
-            .map(|issue| format!("{} → {}: {}", issue.skill, issue.agent_id, issue.reason))
-            .chain(self.skipped.iter().map(|issue| {
-                format!(
-                    "{} → {}: skipped, {}",
-                    issue.skill, issue.agent_id, issue.reason
-                )
-            }))
-            .collect::<Vec<_>>();
-        Some(lines.join("\n"))
     }
 
     pub(crate) fn link(&mut self, skill: &str, agent_id: &str, enable: bool) {

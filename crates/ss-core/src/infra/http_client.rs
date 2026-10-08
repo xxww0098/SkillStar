@@ -81,12 +81,6 @@ fn current_proxy_fingerprint() -> ProxyFingerprint {
 /// Connect budget shared by probes and the streaming client.
 pub const STREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How long a streaming call may wait for response headers.
-///
-/// The wait wraps `send` only. Reading the body is not under this deadline,
-/// and the client has no total timeout that would cut a stream off.
-pub const STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-
 fn apply_proxy(
     builder: reqwest::ClientBuilder,
     fingerprint: &ProxyFingerprint,
@@ -164,8 +158,8 @@ pub fn probe_http_client(timeout: Duration) -> Result<reqwest::Client> {
 
 /// Streaming client with the same `proxy.json` fingerprint as [`probe_http_client`].
 ///
-/// Connect is capped at [`STREAM_CONNECT_TIMEOUT`]. There is no total timeout:
-/// a long body stays open. Waiting for headers is [`send_stream`]'s job.
+/// Connect is capped at [`STREAM_CONNECT_TIMEOUT`]. There is no header deadline
+/// and no total timeout: a long body stays open.
 pub fn stream_http_client() -> Result<reqwest::Client> {
     let fingerprint = current_proxy_fingerprint();
     let mut guard = SHARED_STREAM_CLIENT
@@ -181,17 +175,6 @@ pub fn stream_http_client() -> Result<reqwest::Client> {
     let rebuilt = build_stream_client(&fingerprint)?;
     *guard = Some((fingerprint, rebuilt.clone()));
     Ok(rebuilt)
-}
-
-/// Send `builder` and stop waiting if the headers do not arrive in time.
-///
-/// `send` resolves when the headers arrive, so this deadline does not cover
-/// the body. Callers read the body from the returned response.
-pub async fn send_stream(builder: reqwest::RequestBuilder) -> Result<reqwest::Response> {
-    match tokio::time::timeout(STREAM_HEADER_TIMEOUT, builder.send()).await {
-        Ok(result) => result.context("upstream request failed"),
-        Err(_) => anyhow::bail!("upstream headers timed out"),
-    }
 }
 
 #[cfg(test)]
@@ -384,7 +367,6 @@ mod tests {
         }
 
         assert_eq!(STREAM_CONNECT_TIMEOUT, Duration::from_secs(10));
-        assert_eq!(STREAM_HEADER_TIMEOUT, Duration::from_secs(10 * 60));
         assert!(stream_total_timeout().is_none());
 
         proxy::save_config(&proxied(Some("localhost,10.1.0.0/16"))).unwrap();

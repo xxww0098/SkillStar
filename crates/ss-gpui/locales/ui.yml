@@ -1,0 +1,39 @@
+# Interface copy owned by the GPUI Kit components SkillStar renders.
+#
+# The app's own copy lives in `../assets/locales/{en,zh-CN}.json` and is read by
+# `crate::i18n`. Kit components read their copy through `rust-i18n`; the `run`
+# bootstrap extends the component backend with this file, so every key below is
+# namespaced `gpui_component.*` and wins over the kit's built-in default.
+#
+# Key names are copied verbatim from the kit's own locale file. Only the
+# strings SkillStar can surface are listed here; everything else falls through
+# to the kit built-ins. `Combobox.placeholder` and `Copy` are the exception:
+# the kit's code calls those keys but its catalog spells them
+# `ComboBox.placeholder` and `Input.Copy`, so they close that gap.
+_version: 2
+gpui_component:
+  # Edit menu of every kit `Input` (right-click). The terms match the app
+  # catalog's `common.copy` / `common.selectAll`.
+  Input:
+    Cut:
+      en: Cut
+      zh-CN: 剪切
+    Copy:
+      en: Copy
+      zh-CN: 复制
+    Paste:
+      en: Paste
+      zh-CN: 粘贴
+    Select All:
+      en: Select All
+      zh-CN: 全选
+  # Keys the kit's code calls but its catalog spells differently: `combobox.rs`
+  # asks for `Combobox.placeholder` and `clipboard.rs` for `Copy`. Without
+  # them those call sites render the raw key instead of copy.
+  Combobox:
+    placeholder:
+      en: Please select
+      zh-CN: 请选择
+  Copy:
+    en: Copy
+    zh-CN: 复制

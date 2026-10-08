@@ -31,6 +31,7 @@
 - 编辑既有 subscription 发起 OAuth 时，pending state 带原 subscription id；**每个 OAuth catalog 都必须把它传到 finalize**，成功后原位替换并保留用户 metadata/sort order，不新增重复卡片。用户自定义的卡片标题优先于登录带回的邮箱，只有占位标题会被升级。
 - 标准 form-grant token 交换走 `oauth::token_endpoint::post_token`。非标准 token 腿（例如 Kiro IDC、ZCode JSON）留在各自 fetcher，但错误分类必须与 `post_token` 同一张表。
 - refresh 只用窄 patch 更新 fetcher-owned runtime 字段，不能用网络请求开始时的旧整行覆盖用户刚修改的 metadata 或凭证。
+- 客户端自动同步以 adopt 之后、网络请求之前的凭据为基线；只有查询实际改变了令牌或有效期才写回，名称、套餐、额度、身份补全和相同明文的重新加密不触发写回。写回仍须确认客户端服务的是这次查询的原会话；客户端已切号、退出或自行轮换时，不用旧会话覆盖。轮换只修改认证字段，保留同账号的客户端私有资料；显式切号/重新同步继续走各自完整写回。
 - OAuth finalize 与 `local_import` 都在对应 catalog 的 `refresh_guard` 锁内完成写入，和 refresh 同属一个 serialization domain。
 - Antigravity 的“从本地导入”与切号使用同一读取优先级：macOS 当前桌面版本优先读 `gemini` / `antigravity` Keychain，旧版或未检测到系统凭据时再读 `state.vscdb`。导入复制当前 access/refresh，不向 Google 兑换刷新令牌，也不改 Keychain 或 `state.vscdb`。
 - Devin Desktop、Kiro、ZCode 的本地导入在写入前同样尽力核对一次额度，核对只用复制来的访问令牌，不兑换刷新令牌。核对失败仍保存凭据行，卡片可以之后再刷新。粘贴导入（`import_subscription_from_token`）必须刷新成功才落盘。
@@ -72,6 +73,7 @@
 
 ### ZCode 特例：billing 请求必须带设备标识
 
+- ZCode 额度查询不会轮换令牌，刷新额度后不写客户端凭据或设置文件。显式切号和手动重新同步才写回：`user_info` 必须含字符串 `id`、`username`、`displayName`；同一账号已有完整资料时保留原文（含 `rawProfile`、头像等客户端字段），不能用额度卡的摘要覆盖。不同账号不得沿用上一账号资料；缺少用户 ID 时写回失败，不覆盖客户端文件。
 - 配额数据链是三段：provider profile（zai 走 `chat.z.ai/api/oauth/userinfo` Bearer，BigModel 走 `open.bigmodel.cn/api/biz/customer/getCustomerInfo` 裸 token）+ billing 余额（`zcode.z.ai/api/v1/zcode-plan/billing/balance`，Bearer zcode JWT）+ 编程套餐三条额度（`GET {api.z.ai|open.bigmodel.cn}/api/monitor/usage/quota/limit`，`Authorization: Bearer` 上游 access token）。
 - 三条额度是 5 小时、每周、ZCode MCP。`limits[]` 里 `TOKENS_LIMIT` / `CREDIT_LIMIT` 用 `unit` 区分窗口：`unit` 3（`number` 缺省或 5）是 5 小时，`unit` 6（`number` 缺省或 1）是每周；`TIME_LIMIT` 是工具调用窗，只在 MCP 用量接口没有返回时占第三条。`percentage` 是已消耗比例。卡片只写剩余百分比，不把 `currentValue` / `usage` 画成已用 / 总量。`usageDetails` 里次数大于 0 的工具画在这条下面，不另作额度条。同一窗口出现两次，或 `unit` 对不上，就省略该窗，不按数组位置猜。没有 `limits` 时才读旧字段 `fiveHourPercent` / `weeklyPercent` / `monthlyMCPUsage`。这次请求失败时保留已经取到的 billing 余额。billing 只有一条余额、总量大于 100、且已消耗比例和 5 小时窗一致时，把绝对数量补进 5 小时条，不再另画一条 Quota；卡片仍只写剩余百分比。
 - 第三条 **ZCode MCP** 不在 `limits[]` 里。它是 `GET https://zcode.z.ai/api/v1/mcp/usage`：`Authorization: Bearer` zcode JWT，`X-Bigmodel-Authorization: Bearer` 上游 access token，`Bigmodel-Target-Type: PERSONAL`。`data.total_usage` 的 `used` / `limit` / `remaining` 决定这条条的剩余比例，文案只写剩余百分比，`next_refresh_at` 是重置时刻的 Unix 秒。业务 `code` 必须是 0。这条成功时盖过 `TIME_LIMIT`，因为界面上的第三条是 ZCode MCP，不是工具调用窗。失败则保留已有的月窗。
@@ -92,8 +94,8 @@ Antigravity 和 Cursor 不适合这套整文件软链模型，分别写入它们
 - 支持哪些 catalog 由切换适配器推导，不是 UI 手抄白名单：CLI 账号走 `usage_switch::target_for`，IDE 账号走 `usage_switch::ide` 的 `IdeCredentialAdapter` 注册表。Antigravity 和 Cursor 是最初的两个实现；其后的 IDE 只加注册表项，不改切号顺序。Antigravity 的“当前账号”优先读取 macOS Keychain 的 `gemini` / `antigravity` 条目；没有该条目时读取 `state.vscdb` 中 `antigravityUnifiedStateSync.oauthToken`。Cursor 的当前账号读取其 `state.vscdb` 的 `cursorAuth/accessToken`、`cursorAuth/refreshToken` 和 `cursorAuth/cachedEmail`，都不是 Usage 的 active pin。
 - 已登录且这张卡本来就是 pin 时，OAuth 完成会重写本机存储的范围是：有 IDE 适配器，或者 catalog 是 `xai`。Codex 的登录路径自己写 CLI 文件，不在完成时再写一遍。
 - 本地路径、`state.vscdb` 通用写、原子 JSON 和 macOS internet-password 在 `ss-usage` 的 `tool_paths` / `tool_store`。测试必须走 `SKILLSTAR_TOOL_SYNC_HOME`，不得碰真实 `$HOME` 或登录钥匙串。
-- 编辑器改名只迁 Electron user-data 目录，不动 `~/.codeium`：Windsurf 编辑器 2026-06 OTA 改名 Devin Desktop 后，配置与 skills 仍在 `~/.codeium/windsurf`，但 macOS `Application Support`（及各 OS 对应目录）下的 user-data 目录从 `Windsurf` 变成 `Devin`。`tool_paths::windsurf_state_db_path` 先取 `Devin` 再回退 `Windsurf`，未升级的旧安装继续可用。
-- 同一次改名把 catalog id 从 `windsurf` 换成 `devin-desktop`（`devin` 是 Devin for Terminal，不冲突）。旧值在读取边界迁移，不丢用户数据：订阅行的 `catalog_id` 与 pin map 的 key 在 `storage` 加载时改写回存（`storage::CATALOG_ID_RENAMES` 是唯一映射表）；实例记录靠 `DesktopAppId::DevinDesktop` 的 serde alias 与 `instances::store` 的 profile 目录改名；skills 的 enabled 偏好在 `profile_storage` 键迁移。OAuth 端点仍挂在 windsurf.com 域名，vscdb 存储键（`codeium.windsurf` 等）不变。
+- 编辑器改名只迁 Electron user-data 目录，不动 `~/.codeium`：Windsurf 编辑器 2026-06 OTA 改名 Devin Desktop 后，配置与 skills 仍在 `~/.codeium/windsurf`，但 macOS `Application Support`（及各 OS 对应目录）下的 user-data 目录从 `Windsurf` 变成 `Devin`。`tool_paths::devin_desktop_state_db_path` 先取 `Devin` 再回退 `Windsurf`，未升级的旧安装继续可用。
+- 同一次改名把 catalog id 从 `windsurf` 换成 `devin-desktop`（`devin` 是 Devin for Terminal，不冲突）。旧值在读取边界迁移，不丢用户数据：订阅行的 `catalog_id` 与 pin map 的 key 在 `storage` 加载时改写回存（`storage::CATALOG_ID_RENAMES` 是唯一映射表）；实例记录靠 `DesktopAppId::DevinDesktop` 的 serde alias 与 `instances::store` 的 profile 目录改名；skills 的 enabled 偏好在 `profile_storage` 键迁移。OAuth 端点仍挂在 windsurf.com 域名，vscdb 存储键（`codeium.windsurf` 等）不变。 Rust 模块、类型、函数及提示统一使用 Devin Desktop 命名；既有回调路径与 `SKILLSTAR_WINDSURF_SAFE_STORAGE_PASSWORD` 环境变量保留兼容。
 - 浏览器登录的 loopback `access_token` 有两种。Firebase ID token 仍走 `RegisterUser`，拿到 apiKey 之后 `GetOneTimeAuthToken` / `GetCurrentUser` 失败（含 401）只少会话和邮箱，不取消这次登录。当前 windsurf.com `/editor/auth-success` 放进回调的是浏览器里已经换好的会话 `authToken`。`RegisterUser` 对它返回 401 时按会话保存；`GetCurrentUser` 和 `GetPlanStatus` 也都拒绝，才是 `AuthRequired`。
 - 各 provider 的私有协议（Copilot 的 `token` scheme、Windsurf Connect-RPC、Kiro 双登录腿、ZCode `enc:v1`）以对应 fetcher 和其测试为准，不在这里抄字段表。缺字段省略窗口，不补成 0。
 - Antigravity 切换顺序：取得 catalog 锁 → 读取并解密目标账号 → 写入并验证 macOS Keychain（当前桌面版本）或生成官方 Unified OAuth protobuf、在 SQLite 事务内写入 `state.vscdb`（旧版/其它平台）→ 回读并校验 refresh token → 最后才落 active pin。目标存储不存在、无法写入或回读不一致时，pin 保持旧值并明确显示“切换未生效”。

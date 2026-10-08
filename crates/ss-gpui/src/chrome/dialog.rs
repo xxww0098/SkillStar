@@ -1,27 +1,25 @@
 //! Kit dialogs shared by every page.
 //!
-//! gpui-component 0.7.1 keeps Dialog::button_props as callbacks only.
-//! A regular Dialog never paints them, so a confirm opened that way has
-//! a title, a body, and a close button, and no cancel or commit button.
-//! It also pins the card's top edge at one tenth of the viewport.
+//! Every confirm goes through the kit AlertDialog (`open_confirm`,
+//! `open_form_dialog`): it paints the title, the description or the
+//! caller-built fields, and the centered footer with the cancel and
+//! commit buttons itself. The card sits at the kit's documented offset,
+//! a tenth of the viewport from the top, and enters with the same pop-in
+//! as every other floating surface.
 //!
-//! AlertDialog would paint the footer, but it hides the close button and
-//! does not expose margin_top, so it cannot be placed in the window
-//! center. These helpers draw the footer on a normal Dialog (danger for
-//! an irreversible commit, primary otherwise) and set margin_top from
-//! the card's measured height. The builder runs before layout, so the
-//! first frame uses the fallback and the next frame uses the measured height.
+//! `open_centered` stays on the plain Dialog for custom surfaces (the
+//! import modal, share sheet, reader) that own their buttons: a regular
+//! Dialog never paints `button_props`, its builder runs before layout,
+//! and the `DialogFrame` machinery measures the child to center the
+//! card, with the fallback height on the first frame.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::WindowExt;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::dialog::{Dialog, DialogFooter, DialogTitle};
-use gpui_kit::component::v_flex;
+use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::dialog::{AlertDialog, Dialog};
 use gpui_kit::*;
-
-use crate::theme::palette;
 
 /// Minimum distance from the window edge. Matches the kit's overflow clamp
 /// so a centered card that fits is not pulled back toward the top.
@@ -139,11 +137,38 @@ pub(crate) fn open_centered<F>(
     });
 }
 
-/// Centered confirm with a cancel button and a commit button.
+/// The commit-button variant for a confirm. danger is for an
+/// irreversible commit (uninstall, delete, remove); other commits use
+/// primary.
+fn commit_variant(danger: bool) -> ButtonVariant {
+    if danger {
+        ButtonVariant::Danger
+    } else {
+        ButtonVariant::Primary
+    }
+}
+
+/// The shared tail of both confirm flavors: cancel button, commit
+/// button, and the commit callback shared by Enter and the button.
+fn confirm_tail(
+    alert: AlertDialog,
+    ok_text: SharedString,
+    ok_variant: ButtonVariant,
+    on_ok: Rc<dyn Fn(&mut Window, &mut App) -> bool>,
+) -> AlertDialog {
+    alert
+        .confirm()
+        .ok_text(ok_text)
+        .ok_variant(ok_variant)
+        .cancel_text(crate::i18n::t("common.cancel"))
+        .on_ok(move |_, window, cx| on_ok(window, cx))
+}
+
+/// Message confirm: title, muted description, cancel, and a commit button.
 ///
-/// danger is for an irreversible commit (uninstall, delete, remove).
-/// Other commits use primary. Enter runs the same callback as the button;
-/// returning false leaves the dialog open.
+/// Backed by the kit AlertDialog, which draws the centered footer itself.
+/// Enter runs the same callback as the commit button; returning false
+/// leaves the dialog open.
 pub(crate) fn open_confirm<Ok>(
     window: &mut Window,
     cx: &mut App,
@@ -155,30 +180,33 @@ pub(crate) fn open_confirm<Ok>(
 ) where
     Ok: Fn(&mut Window, &mut App) -> bool + 'static,
 {
+    let title = title.into();
     let body = body.into();
-    open_form_dialog(
-        window,
-        cx,
-        title,
-        ok_text,
-        danger,
-        140.0,
-        move |_, _| muted_copy(body.clone()).into_any_element(),
-        on_ok,
-    );
+    let ok_text = ok_text.into();
+    let ok_variant = commit_variant(danger);
+    let on_ok: Rc<dyn Fn(&mut Window, &mut App) -> bool> = Rc::new(on_ok);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let on_ok = on_ok.clone();
+        confirm_tail(
+            alert.title(title.clone()).description(body.clone()),
+            ok_text.clone(),
+            ok_variant,
+            on_ok,
+        )
+    });
 }
 
-/// Centered short form: title, caller-built fields, cancel, and commit.
+/// Short form dialog: title, caller-built fields, cancel, and commit.
 ///
-/// body is called on every dialog paint. Create input entities before
-/// calling this, and only clone them inside body.
+/// Also a kit AlertDialog. body is called on every dialog paint. Create
+/// input entities before calling this, and only clone them inside body.
+/// Returning false from on_ok keeps the dialog open.
 pub(crate) fn open_form_dialog<B, Ok>(
     window: &mut Window,
     cx: &mut App,
     title: impl Into<SharedString>,
     ok_text: impl Into<SharedString>,
     danger: bool,
-    fallback_height: f32,
     body: B,
     on_ok: Ok,
 ) where
@@ -187,78 +215,17 @@ pub(crate) fn open_form_dialog<B, Ok>(
 {
     let title = title.into();
     let ok_text = ok_text.into();
+    let ok_variant = commit_variant(danger);
     let on_ok: Rc<dyn Fn(&mut Window, &mut App) -> bool> = Rc::new(on_ok);
-    open_centered(
-        window,
-        cx,
-        fallback_height,
-        DialogChrome::Padded,
-        move |dialog, frame, window, cx| {
-            let on_ok = on_ok.clone();
-            dialog
-                .on_ok({
-                    let on_ok = on_ok.clone();
-                    move |_, window, cx| on_ok(window, cx)
-                })
-                .child(frame.measure(confirm_card(
-                    title.clone(),
-                    body(window, cx),
-                    ok_text.clone(),
-                    danger,
-                    on_ok,
-                )))
-        },
-    );
-}
-
-fn muted_copy(text: SharedString) -> Div {
-    div()
-        .w_full()
-        .text_sm()
-        .text_color(rgb(palette().fg_muted))
-        .child(text)
-}
-
-fn confirm_card(
-    title: SharedString,
-    body: AnyElement,
-    ok_text: SharedString,
-    danger: bool,
-    on_ok: Rc<dyn Fn(&mut Window, &mut App) -> bool>,
-) -> impl IntoElement {
-    v_flex()
-        .w_full()
-        .gap_3()
-        .child(DialogTitle::new().pr_6().child(title))
-        .child(body)
-        .child(action_row(ok_text, danger, on_ok))
-}
-
-fn action_row(
-    ok_text: SharedString,
-    danger: bool,
-    on_ok: Rc<dyn Fn(&mut Window, &mut App) -> bool>,
-) -> DialogFooter {
-    let commit = Button::new("dialog-ok").label(ok_text);
-    let commit = if danger {
-        commit.danger()
-    } else {
-        commit.primary()
-    };
-    DialogFooter::new()
-        .w_full()
-        .child(
-            Button::new("dialog-cancel")
-                .label(crate::i18n::t("common.cancel"))
-                .on_click(|_, window, cx| {
-                    window.close_dialog(cx);
-                }),
+    window.open_alert_dialog(cx, move |alert, window, cx| {
+        let on_ok = on_ok.clone();
+        confirm_tail(
+            alert.title(title.clone()).child(body(window, cx)),
+            ok_text.clone(),
+            ok_variant,
+            on_ok,
         )
-        .child(commit.on_click(move |_, window, cx| {
-            if on_ok(window, cx) {
-                window.close_dialog(cx);
-            }
-        }))
+    });
 }
 
 #[cfg(test)]

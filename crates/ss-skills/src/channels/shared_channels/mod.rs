@@ -4,6 +4,7 @@
 //! layers never infer repository identity from mutable owner/name routing data.
 
 mod channel_auto_update;
+mod channel_receipt;
 mod channel_removal;
 mod channel_removal_installer;
 mod channel_rollback;
@@ -17,6 +18,7 @@ mod github;
 mod github_membership;
 mod github_status;
 mod install_authority;
+mod marketplace_export;
 mod membership;
 mod release;
 mod release_content_verifier;
@@ -43,6 +45,8 @@ mod channel_removal_tests;
 mod channel_rollback_tests;
 #[cfg(test)]
 mod channel_update_tests;
+#[cfg(test)]
+mod marketplace_export_tests;
 #[cfg(test)]
 mod subscription_installer_tests;
 #[cfg(test)]
@@ -79,6 +83,10 @@ pub use existing::{
 };
 pub use github::ProductionSharedChannelGateway;
 pub(crate) use install_authority::ChannelInstallAuthority;
+pub use marketplace_export::{
+    ChannelMarketplaceExport, PreparedChannelMarketplace, PreparedChannelPlugin,
+    build_channel_marketplace, export_channel_marketplace, write_prepared_marketplace,
+};
 pub use membership::{
     ChannelInvitation, ChannelInvitationAction, ChannelInviteRole, ChannelMember,
     ChannelMemberIdentity, ChannelMemberRevocationResult, ChannelMemberRevocationStatus,

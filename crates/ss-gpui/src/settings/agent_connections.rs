@@ -54,7 +54,7 @@ impl SettingsPage {
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(palette().fg))
-                            .child(t("settings.manualAgentActivation")),
+                            .child(t("settings.registeredAgents")),
                     ),
             )
             .child(
@@ -365,16 +365,16 @@ impl SettingsPage {
             .cursor_pointer()
             .text_xs()
             .font_weight(FontWeight::MEDIUM)
-            .text_color(rgb(palette().fg_muted))
+            .text_color(rgb(palette().accent))
             .interaction_spring(
                 "agent-show-more",
                 true,
                 MotionPaint::new()
                     .bg(rgb(palette().well))
-                    .fg(rgb(palette().fg_muted)),
+                    .fg(rgb(palette().accent)),
                 MotionPaint::new()
-                    .bg(rgb(palette().card_hover))
-                    .fg(rgb(palette().fg)),
+                    .bg(rgb(palette().accent_soft))
+                    .fg(rgb(palette().accent)),
             )
             .child(if open {
                 t("settings.collapseAgentList")
@@ -391,7 +391,7 @@ impl SettingsPage {
                     IconName::ChevronRight
                 })
                 .size(px(14.0))
-                .text_color(rgb(palette().fg_muted)),
+                .text_color(rgb(palette().accent)),
             )
             .on_click(move |_, _, cx| {
                 let _ = view.update(cx, |this, cx| {
@@ -441,7 +441,7 @@ impl SettingsPage {
                         d.bg(rgb(palette().accent_soft))
                             .text_color(rgb(palette().accent))
                     })
-                    .when(!expanded, |d| d.text_color(rgb(palette().fg_muted)))
+                    .when(!expanded, |d| d.text_color(rgb(palette().tag)))
                     .child(format!("{linked} {}", t("settings.linked")))
                     .child(
                         Icon::new(if expanded {
@@ -453,7 +453,7 @@ impl SettingsPage {
                         .text_color(rgb(if expanded {
                             palette().accent
                         } else {
-                            palette().fg_muted
+                            palette().tag
                         })),
                     )
                     .on_click(move |_, _, cx| {
@@ -468,7 +468,7 @@ impl SettingsPage {
                                 .bg(rgb(palette().accent_soft))
                                 .fg(rgb(palette().accent))
                         } else {
-                            MotionPaint::new().fg(rgb(palette().fg_muted))
+                            MotionPaint::new().fg(rgb(palette().tag))
                         },
                         if expanded {
                             MotionPaint::new()
@@ -704,6 +704,12 @@ fn status_badge(enabled: bool) -> Div {
         .px(px(6.0))
         .py(px(1.0))
         .rounded_md()
+        .border_1()
+        .border_color(rgb(if enabled {
+            palette().ok_border
+        } else {
+            palette().border
+        }))
         .bg(rgb(if enabled {
             palette().ok_bg
         } else {

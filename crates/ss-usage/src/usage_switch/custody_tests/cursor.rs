@@ -216,10 +216,16 @@ async fn cursor_refresh_window_adopts_and_projects_the_live_session() {
         "alice-refresh-rotated"
     );
 
+    let before_refresh = row.clone();
+    assert!(
+        sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
     row.access_token_encrypted = Some(crypto::encrypt("alice-access-from-skillstar"));
     row.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh-from-skillstar"));
     let mut row = storage::patch_oauth_credentials(&row).unwrap();
-    let outcome = sync_refreshed_active_subscription(&mut row, &lease)
+    let outcome = sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
         .unwrap()
         .expect("active Cursor account must be projected");
 
@@ -231,5 +237,24 @@ async fn cursor_refresh_window_adopts_and_projects_the_live_session() {
     assert_eq!(
         read_cursor_state(sb.home.path(), "cursorAuth/refreshToken"),
         "alice-refresh-from-skillstar"
+    );
+
+    // A login in the IDE while quota is in flight wins over the old pin.
+    let before_refresh = row.clone();
+    row.access_token_encrypted = Some(crypto::encrypt("alice-late-refresh"));
+    write_cursor_state(
+        sb.home.path(),
+        "bob-access",
+        "bob-refresh",
+        "bob@example.com",
+    );
+    assert!(
+        sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        read_cursor_state(sb.home.path(), "cursorAuth/accessToken"),
+        "bob-access"
     );
 }

@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="./docs/assets/skillstar-icon.svg" alt="SkillStar Logo" width="110" />
-
 # SkillStar 技能星球
 
 ### _Your Second Brain for Agent CLIs_
@@ -13,8 +11,6 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg)](./LICENSE)
 
 </div>
-
-![SkillStar 技能界面](./docs/assets/ui-skills.png)
 
 导入仓库会复用本地 Git 缓存：重复扫描默认不检查上游，安装只补取所选技能缺少的内容。需要新版本时在导入框点「刷新上游」，或运行 `skillstar install owner/repo --refresh`；设置中的缓存清理不会删除已安装技能。详见 [Skills 安装与更新](docs/features/skills/README.md#安装与更新)。
 
@@ -67,21 +63,21 @@ SkillStar 面向同时使用多个 Agent CLI 与多个订阅账号的开发者�
 - Settings 可通过 GitHub App 设备授权登录 `github.com`，无需粘贴 PAT；access/refresh token 只进入应用数据目录下的私有文件，不访问 macOS 钥匙串，代理、刷新、失效与登出状态均可见。该身份用于后续私有共享频道能力，所需 App 权限会在界面中解释。
 - 登录后可直接扫描、安装和更新当前身份有权访问的私有 `github.com` Skill 仓库，无需另外配置 `gh` 或全局 Git 凭据。认证只在单次 Git 操作期间提供；私有操作遵循 SkillStar 代理、支持取消，并且不会把 token 写入仓库 remote 或 Git 配置。
 - SSH 首次连接使用 host-key TOFU，在认证材料发送前完成信任检查。
-- 所有业务 HTTP 统一遵循 SkillStar proxy 配置（SOCKS5 出网走远端 DNS）；GitHub mirror 不修改用户全局 Git 配置。GitHub 加速按用户排序的候选链回退：失败的加速源会熔断，公开 GitHub 族流量与 skills.sh 可经加速源包装，全部失败才回退直连，且只用于公开仓库。没有应用内更新器。
+- 所有业务 HTTP 统一遵循 SkillStar proxy 配置（SOCKS5 出网走远端 DNS）；GitHub mirror 不修改用户全局 Git 配置。GitHub 加速按用户排序的候选链回退：失败的加速源会熔断，公开 GitHub 族流量与 skills.sh 可经加速源包装，全部失败才回退直连，且只用于公开仓库。应用内只做版本检查（设置 → 关于），不自动下载或替换二进制。
 - 测试和生成工具有专用临时 home，避免触碰真实 Agent 配置。
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest) 下载对应平台的 `skillstar` 二进制，放到 PATH 中。无参数启动桌面壳；`skillstar --help` 进入 CLI。
+从 [GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest) 下载对应平台的 `skillstar` 二进制，放到 PATH 中。无参数启动桌面壳；`skillstar --help` 进入 CLI。应用每天最多自动检查一次新版本并在「设置 → 关于」提示，仍需手动从 Releases 下载替换。
 
 Homebrew cask、`.dmg`、`.deb`、`.rpm`、AppImage、`.msi` 和签名应用内更新已随 Tauri 退役，当前没有替代安装包。从源码构建见下文。
 
 ## 开始使用
 
 先在 Settings 中手动启用准备使用的内置 Agent，或添加并启用自定义 Agent。SkillStar 不会探测
-binary、桌面应用或配置目录来自动启用 Agent；内置注册表同步
-[`vercel-labs/skills`](https://github.com/vercel-labs/skills) 的 Agent 目标能力；
-完整清单以 [`BUILTIN_AGENT_DEFS`](./crates/ss-skills/src/agents/builtin.rs) 及其测试为准。
+binary、桌面应用或配置目录来自动启用 Agent；内置注册表与 skills CLI 生态的
+Agent 目标能力保持同步；完整清单以
+[`BUILTIN_AGENT_DEFS`](./crates/ss-skills/src/agents/builtin.rs) 及其测试为准。
 
 典型流程：
 
@@ -96,15 +92,15 @@ binary、桌面应用或配置目录来自动启用 Agent；内置注册表同�
 
 ```bash
 skillstar find "code review"
-skillstar add vercel-labs/agent-skills
-skillstar add vercel-labs/agent-skills@frontend-design
-skillstar add https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines
-skillstar add vercel-labs/agent-skills --skill frontend-design --agent codex,claude-code
-skillstar add vercel-labs/agent-skills --skill '*' --agent '*'
-skillstar add vercel-labs/agent-skills --all          # 全部 Skill + 全部 Agent + -y
-skillstar add vercel-labs/agent-skills --global      # 部署到 Agent 用户级目录
-skillstar add vercel-labs/agent-skills --copy        # 强制复制，不创建 link
-skillstar add vercel-labs/agent-skills --list
+skillstar add owner/repo
+skillstar add owner/repo@frontend-design
+skillstar add https://github.com/owner/repo/tree/main/skills/web-design-guidelines
+skillstar add owner/repo --skill frontend-design --agent codex,claude-code
+skillstar add owner/repo --skill '*' --agent '*'
+skillstar add owner/repo --all          # 全部 Skill + 全部 Agent + -y
+skillstar add owner/repo --global      # 部署到 Agent 用户级目录
+skillstar add owner/repo --copy        # 强制复制，不创建 link
+skillstar add owner/repo --list
 ```
 
 `install` 与 `add` 等价；未加 `-y` 时会按需选择 Skill、Agent、Project/Global scope 和部署方式。`-y` 默认 Project，并只使用 Settings 中已手动启用的 Agent；若一个也没有则报错。`--agent` / `--all` 是显式覆盖。tree URL 里带子路径（如上面第 4 行）会钉住该副本，之后不随 Agent 换副本，更新也跟着这个路径；只有卸载才解钉。
@@ -135,9 +131,10 @@ skillstar channel list
 skillstar channel check [repository_id] [--json]
 skillstar channel apply <repository_id> [--keep-local a,b] [--discard-local c]
 skillstar channel rollback <repository_id> <skill> [--revision N] [--keep-local | --discard-local]
+skillstar channel export-marketplace <repository_id> --out <DIR> [--json]
 ```
 
-频道 Skill 只能通过 `channel` 子命令升级或回滚；本地改过的 Skill 必须显式选择保留为 `.local` 副本或丢弃改动。
+频道 Skill 只能通过 `channel` 子命令升级或回滚；本地改过的 Skill 必须显式选择保留为 `.local` 副本或丢弃改动。`export-marketplace` 把订阅里已安装的 Skill 导出成 Claude Code 插件市场目录（`marketplace.json` + 每技能一个插件），推到任意 git 仓库后用 `claude plugin marketplace add <owner>/<repo>` 安装；导出是纯本地操作，本地改过或副本缺失的 Skill 会让导出整体失败并列出原因。
 
 ### 团队智能（本机 Context / Improvement）
 

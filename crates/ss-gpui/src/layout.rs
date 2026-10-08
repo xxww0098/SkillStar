@@ -1,10 +1,13 @@
 //! Static widths for the window, skill cards, and quota cards.
 //!
 //! One row is the shared measure: three skill cards and two quota cards
-//! occupy the same width. The default window is that row, plus the expanded
-//! rail, the accounts page padding, and a little slack for the scrollbar.
-//! Cards do not grow when the window does. A wider pane adds another
-//! column. The pitch is `skill_card/grid.rs`; this file only holds the numbers.
+//! occupy the same width. The default window is picked so that row fills
+//! the pane exactly, with the rail expanded — no trailing slack, no
+//! clipped fourth column. The detail column reserves one card plus one
+//! gap, so opening it removes exactly one column: three columns closed,
+//! two open. Cards do not grow when the window does. A wider pane adds
+//! another column. The pitch is `skill_card/grid.rs`; this file only
+//! holds the numbers.
 
 /// Gap between cards in a row. Accounts `gap` and the skill grid use this.
 pub const CARD_GAP: f32 = 16.0;
@@ -19,6 +22,12 @@ pub const QUOTA_CARD_W: f32 = 512.0;
 
 /// Three skill cards, or two quota cards, including the gaps between them.
 pub const CARD_ROW_W: f32 = SKILL_CARD_W * 3.0 + CARD_GAP * 2.0;
+
+/// Track the detail column reserves beside the grid: one card plus one
+/// gap. Subtracting it from the pane removes exactly one grid column, so
+/// the default window holds three columns closed and two with the column
+/// open, both without remainder.
+pub const DETAIL_COLUMN_W: f32 = SKILL_CARD_W + CARD_GAP;
 
 /// Canvas gutter around the rail and the main panel.
 pub const SHELL_GAP: f32 = 8.0;
@@ -36,16 +45,25 @@ pub const SHELL_CHROME_W: f32 = SHELL_GAP * 3.0 + RAIL_W;
 /// so the card pane is this much narrower than [`SHELL_CHROME_W`] alone.
 pub const PANEL_BORDER_X: f32 = 2.0;
 
-/// Accounts page horizontal padding, each side.
-pub const ACCOUNTS_PAGE_PAD: f32 = 24.0;
-/// Skills and market page padding. `p_5` at the default scale.
-pub const SKILL_PAGE_PAD: f32 = 20.0;
+/// Page horizontal padding, each side, shared by the skills, market, and
+/// accounts pages (`p_5` at the default scale). One inset lets the default
+/// window hold one exact card row on every page.
+pub const PAGE_PAD: f32 = 20.0;
 
-/// Scrollbar and panel-border slack so the second quota card stays on the row.
-const ROW_SLACK: f32 = 16.0;
+/// Page toolbar band height, every page. The band carries the traffic-light
+/// clearance (overlay titlebar), so it starts at the panel's top border.
+pub const TOOLBAR_H: f32 = 56.0;
 
-/// Default window. Fits two quota cards and three skill cards with the rail open.
-pub const WINDOW_W: f32 = SHELL_CHROME_W + ACCOUNTS_PAGE_PAD * 2.0 + CARD_ROW_W + ROW_SLACK;
+/// Vertical padding of the skills page scroll region. The pair is not the
+/// page `PAGE_PAD`: it is the remainder that keeps four card strides inside
+/// the default window's track, so the last row lands fully in view without
+/// scrolling.
+pub const SKILL_SCROLL_PT: f32 = 12.0;
+pub const SKILL_SCROLL_PB: f32 = 10.0;
+
+/// Default window. With the rail expanded the pane is one exact card row:
+/// three skill columns, two quota columns, no remainder.
+pub const WINDOW_W: f32 = SHELL_CHROME_W + PANEL_BORDER_X + PAGE_PAD * 2.0 + CARD_ROW_W;
 pub const WINDOW_H: f32 = 800.0;
 
 /// Still holds one quota card and two skill cards.
@@ -54,17 +72,27 @@ pub const WINDOW_MIN_H: f32 = 600.0;
 
 const _: () = {
     assert!(QUOTA_CARD_W * 2.0 + CARD_GAP == CARD_ROW_W);
+    assert!(DETAIL_COLUMN_W == SKILL_CARD_W + CARD_GAP);
 
-    let accounts = WINDOW_W - SHELL_CHROME_W - PANEL_BORDER_X - ACCOUNTS_PAGE_PAD * 2.0;
-    assert!(accounts >= CARD_ROW_W);
-    let skills = WINDOW_W - SHELL_CHROME_W - PANEL_BORDER_X - SKILL_PAGE_PAD * 2.0;
-    assert!(skills >= CARD_ROW_W);
-    assert!(skills < SKILL_CARD_W * 4.0 + CARD_GAP * 3.0);
+    // Default window: the pane is the row exactly, closed and with the
+    // detail column open. One page padding for skills and accounts is what
+    // makes both pages exact at the same width.
+    let pane = WINDOW_W - SHELL_CHROME_W - PANEL_BORDER_X - PAGE_PAD * 2.0;
+    assert!(pane == CARD_ROW_W);
+    assert!(pane - DETAIL_COLUMN_W == SKILL_CARD_W * 2.0 + CARD_GAP);
 
-    let min_accounts = WINDOW_MIN_W - SHELL_CHROME_W - PANEL_BORDER_X - ACCOUNTS_PAGE_PAD * 2.0;
-    assert!(min_accounts >= QUOTA_CARD_W);
-    assert!(min_accounts < QUOTA_CARD_W * 2.0 + CARD_GAP);
-    let min_skills = WINDOW_MIN_W - SHELL_CHROME_W - PANEL_BORDER_X - SKILL_PAGE_PAD * 2.0;
-    assert!(min_skills >= SKILL_CARD_W * 2.0 + CARD_GAP);
-    assert!(min_skills < CARD_ROW_W);
+    // Minimum window keeps two skill columns and one quota card.
+    let min_pane = WINDOW_MIN_W - SHELL_CHROME_W - PANEL_BORDER_X - PAGE_PAD * 2.0;
+    assert!(min_pane >= SKILL_CARD_W * 2.0 + CARD_GAP);
+    assert!(min_pane < CARD_ROW_W);
+    assert!(min_pane >= QUOTA_CARD_W);
+    assert!(min_pane < QUOTA_CARD_W * 2.0 + CARD_GAP);
+
+    // Vertical lock at the default window: shell insets and borders 18,
+    // toolbar 56, scroll padding 22, four card strides 704 — no remainder,
+    // so the fourth card row is fully visible without scrolling. The
+    // marketplace and other pages keep their own padding and may scroll.
+    let track =
+        WINDOW_H - SHELL_GAP * 2.0 - PANEL_BORDER_X - TOOLBAR_H - SKILL_SCROLL_PT - SKILL_SCROLL_PB;
+    assert!(track == (SKILL_CARD_H + CARD_GAP) * 4.0);
 };

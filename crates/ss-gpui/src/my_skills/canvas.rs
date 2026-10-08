@@ -8,10 +8,12 @@
 //! so only the visible ones are built; laying out the whole library here is
 //! what made the page stutter.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
 use gpui_kit::*;
+use ss_core::types::skill::Skill;
 
 use super::detail_drawer;
 use super::skill_card::{SkillCardEmit, SkillCardEvent, prefetch_skill_avatar, render_skill_card};
@@ -99,13 +101,20 @@ impl SkillsCanvas {
             }
         }
         self.slots = next;
-        page.update(cx, |_, cx| {
+        page.update(cx, |page, cx| {
             crate::translation::schedule(
                 &cx.entity(),
                 sources,
                 crate::translation::Surface::Description,
                 cx,
             );
+            // A skill the drawer's button turned on keeps its translated line
+            // across restarts even while the Settings switch is off, and the
+            // cached entry is keyed by engine and model — after either one
+            // changes the card's lookup misses. Queue those misses here, or
+            // the card waits in English until the drawer reopens.
+            let chosen = chosen_descriptions(&page.skills, &page.description_choices);
+            crate::translation::schedule_when(&cx.entity(), chosen, true, cx);
         });
     }
 
@@ -184,6 +193,17 @@ fn card_emit(page: WeakEntity<MySkillsPage>, name: String) -> SkillCardEmit {
         }
         let _ = page.update(app, |this, cx| this.on_skill_card(&name, event, cx));
     })
+}
+
+/// Descriptions whose card is set to show a translation: skills the drawer's
+/// button turned on, regardless of the Settings switch. Used to queue misses
+/// after a restart or an engine change re-keyed the cache.
+fn chosen_descriptions(skills: &[Skill], choices: &HashMap<String, bool>) -> Vec<String> {
+    skills
+        .iter()
+        .filter(|skill| choices.get(&skill.name) == Some(&true))
+        .filter_map(|skill| description_source(skill).map(str::to_string))
+        .collect()
 }
 
 impl Render for SkillsCanvas {
@@ -461,7 +481,7 @@ mod tests {
             });
         });
         let shown = page.clone();
-        let (_root, mut cx) = cx.add_window_view(move |window, cx| {
+        let (_root, cx) = cx.add_window_view(move |window, cx| {
             let frame = cx.new(|_| Frame {
                 page: shown.clone(),
             });
@@ -515,5 +535,82 @@ mod tests {
             return None;
         }
         Some(front.intersect(&back).center())
+    }
+
+    fn local_skill(name: &str, description: &str) -> ss_core::types::skill::Skill {
+        use ss_core::types::skill::SkillType;
+        let mut skill = ss_core::types::skill::Skill::from_skills_sh(
+            name.into(),
+            description.into(),
+            0,
+            "local".into(),
+            String::new(),
+        );
+        skill.skill_type = SkillType::Local;
+        skill
+    }
+
+    #[test]
+    fn chosen_descriptions_follow_the_stored_overrides() {
+        let skills = vec![
+            local_skill("on", "Translate me."),
+            local_skill("off", "Keep me."),
+            local_skill("unset", "Follow the switch."),
+            local_skill("empty", "   "),
+        ];
+        let mut choices = std::collections::HashMap::new();
+        choices.insert("on".to_string(), true);
+        choices.insert("off".to_string(), false);
+        choices.insert("empty".to_string(), true);
+        assert_eq!(
+            super::chosen_descriptions(&skills, &choices),
+            vec!["Translate me.".to_string()],
+            "only skills set to the translation queue, and only real copy"
+        );
+    }
+
+    /// The stored choice survives a restart, but the cache is keyed by engine:
+    /// after the engine or model changes, the lookup misses. The card must
+    /// fall back to the original line while the miss is re-queued, not blank
+    /// or panic. LLM with no key keeps the queue blocked, so this test stays
+    /// off the network.
+    #[gpui_kit::test]
+    fn an_engine_change_leaves_the_chosen_card_on_its_original_line(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use super::super::test_support::IsolatedDataDir;
+
+        let _dir = IsolatedDataDir::new();
+        // Cached under the machine engine the session before last used.
+        ss_core::translation::remember("Build deep modules.", "zh-CN", "构建深模块。");
+        // The last session then chose the translation and switched engines.
+        ss_core::translation::set_description_choice("demo", true).unwrap();
+        let config = ss_core::translation::TranslationConfig {
+            engine: ss_core::translation::Engine::Llm,
+            ..ss_core::translation::TranslationConfig::default()
+        };
+        ss_core::translation::save_config(&config).unwrap();
+
+        crate::init_test(cx);
+        let page = cx.new(|cx| MySkillsPage::new(cx));
+        cx.update(|cx| {
+            page.update(cx, |page, cx| {
+                page.loading = false;
+                page.error = None;
+                page.skills = vec![local_skill("demo", "Build deep modules.")];
+                page.revise(cx);
+            });
+        });
+        let shown = page.clone();
+        let (_root, cx) = cx.add_window_view(move |window, cx| {
+            let frame = cx.new(|_| Frame { page: shown });
+            Root::new(frame, window, cx)
+        });
+        cx.simulate_resize(size(px(1400.), px(800.)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds("skill-card-desc-demo").is_some(),
+            "a re-keyed cache must fall back to the original, not vanish"
+        );
     }
 }

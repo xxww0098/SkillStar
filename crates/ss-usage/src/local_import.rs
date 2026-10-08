@@ -33,11 +33,11 @@ fn import_cursor() -> LocalImportFuture {
     Box::pin(crate::fetchers::oauth::cursor_import::import_from_local())
 }
 
-fn import_windsurf() -> LocalImportFuture {
+fn import_devin_desktop() -> LocalImportFuture {
     Box::pin(async {
-        let imported = crate::fetchers::oauth::windsurf::import_from_local()?;
-        let sub = crate::fetchers::oauth::windsurf::oauth_row_from_imported(imported)?;
-        persist_imported_subscription(sub, "Windsurf").await
+        let imported = crate::fetchers::oauth::devin_desktop::import_from_local()?;
+        let sub = crate::fetchers::oauth::devin_desktop::oauth_row_from_imported(imported)?;
+        persist_imported_subscription(sub, "Devin Desktop").await
     })
 }
 
@@ -76,7 +76,7 @@ const LOCAL_IMPORTERS: &[LocalImporter] = &[
     },
     LocalImporter {
         catalog_id: "devin-desktop",
-        import_from_local: import_windsurf,
+        import_from_local: import_devin_desktop,
     },
     LocalImporter {
         catalog_id: "kiro",

@@ -72,7 +72,7 @@ fn batch_global_deploy_honors_explicit_copy_mode() -> Result<()> {
     )?;
     assert_eq!(deployed, 1);
 
-    let target = home.join(".codex/skills/demo-skill");
+    let target = home.join(".agents/skills/demo-skill");
     assert!(target.join("SKILL.md").is_file());
     assert!(!ss_core::infra::fs_ops::is_link(&target));
 

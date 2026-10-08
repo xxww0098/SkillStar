@@ -15,7 +15,8 @@ pub use cache::{cache_key, lookup, remember};
 pub use config::{
     DEFAULT_LLM_URL, DEFAULT_TARGET, Engine, LLM_ACCOUNT_PROVIDERS, LlmAccountProvider, LlmAuth,
     TRANSLATION_LANGUAGES, TranslationConfig, TranslationLanguage, canonical_target, llm_account,
-    load_api_key, load_config, save_api_key, save_config, translation_language,
+    load_api_key, load_config, save_api_key, save_config, set_description_choice,
+    translation_language,
 };
 pub use models::{ModelListError, list_models};
 pub use themes::{DEFAULT_READER, Theme, reader_themes};

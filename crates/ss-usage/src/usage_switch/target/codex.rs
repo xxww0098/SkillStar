@@ -9,7 +9,9 @@ use crate::subscription::Subscription;
 use serde_json::{Map, Value};
 
 use super::super::error::{CustodyResult, MaterializeError};
-use super::{AccountIdentity, CliCredentialTarget, identity_from_jwt, secret};
+use super::{
+    AccountIdentity, CliCredentialTarget, identity_from_jwt, secret, subscription_identity,
+};
 
 /// What the user calls this CLI, for messages the user reads.
 const TOOL: &str = "Codex";
@@ -101,14 +103,23 @@ impl CliCredentialTarget for CodexTarget {
         let id_token =
             secret(sub.id_token_encrypted.as_deref()).ok_or_else(|| missing("id_token"))?;
 
-        let tokens = serde_json::json!({
-            "id_token": id_token,
-            "access_token": access_token,
-            "refresh_token": secret(sub.refresh_token_encrypted.as_deref()).unwrap_or_default(),
-            "account_id": sub.oauth_account_id,
-        });
+        let mut tokens = base
+            .filter(|base| self.identity(base).matches(&subscription_identity(sub)))
+            .and_then(|base| base.get("tokens"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        tokens.extend([
+            ("id_token".into(), Value::String(id_token)),
+            ("access_token".into(), Value::String(access_token)),
+            (
+                "refresh_token".into(),
+                Value::String(secret(sub.refresh_token_encrypted.as_deref()).unwrap_or_default()),
+            ),
+            ("account_id".into(), serde_json::json!(sub.oauth_account_id)),
+        ]);
         root.insert("OPENAI_API_KEY".into(), Value::Null);
-        root.insert("tokens".into(), tokens);
+        root.insert("tokens".into(), Value::Object(tokens));
         root.insert(
             "last_refresh".into(),
             Value::String(

@@ -5,12 +5,14 @@ pub(crate) mod create_group;
 mod deck_import;
 mod group_card;
 mod query;
+mod share_sheet;
 
 use std::collections::HashSet;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::*;
 use ss_skills::agents::{AgentProfile, list_profiles};
 use ss_skills::skill_group::{SkillGroup, list_groups};
@@ -19,7 +21,7 @@ use ss_skills::workflows::skill_group_links::{link_deck_to_enabled_agents, set_d
 
 use crate::chrome::{
     InteractionSpring, MotionPaint, bar_count, bar_primary, bar_secondary, icon, page_chrome,
-    page_toolbar, segment_track, toolbar_search, view_toggle_button,
+    page_toolbar, toolbar_search,
 };
 use crate::layout::CARD_ROW_W;
 use crate::nav::NavPage;
@@ -265,27 +267,34 @@ impl Render for SkillCardsPage {
                 });
             }),
         );
-        let grid_view = view.clone();
-        let list_view = view.clone();
+        let view_toggle = view.clone();
         let view_list = self.view_list;
         toolbar = toolbar.action(
-            segment_track()
+            TabBar::new("skill-cards-view")
+                .segmented()
+                .selected_index(if view_list { 1 } else { 0 })
+                .on_click(move |ix, _, cx| {
+                    let _ = view_toggle.update(cx, |this, cx| {
+                        this.view_list = *ix == 1;
+                        cx.notify();
+                    });
+                })
                 .child(
-                    view_toggle_button("skill-cards-view-grid", IconName::LayoutGrid, !view_list)
-                        .on_click(move |_, _, cx| {
-                            let _ = grid_view.update(cx, |this, cx| {
-                                this.view_list = false;
-                                cx.notify();
-                            });
+                    Tab::new()
+                        .icon(IconName::LayoutGrid)
+                        .flex_1()
+                        .tooltip(|window, cx| {
+                            crate::chrome::tooltip(crate::i18n::t("toolbar.viewGrid"))
+                                .build(window, cx)
                         }),
                 )
                 .child(
-                    view_toggle_button("skill-cards-view-list", IconName::List, view_list)
-                        .on_click(move |_, _, cx| {
-                            let _ = list_view.update(cx, |this, cx| {
-                                this.view_list = true;
-                                cx.notify();
-                            });
+                    Tab::new()
+                        .icon(IconName::List)
+                        .flex_1()
+                        .tooltip(|window, cx| {
+                            crate::chrome::tooltip(crate::i18n::t("toolbar.viewList"))
+                                .build(window, cx)
                         }),
                 ),
         );

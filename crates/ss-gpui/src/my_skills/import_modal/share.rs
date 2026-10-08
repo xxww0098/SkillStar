@@ -15,6 +15,13 @@ use super::{ImportDialog, Phase};
 use crate::chrome::{InteractionSpring, MotionPaint, ghost_button, icon};
 use crate::theme::palette;
 
+/// Rows that fit before the share list has to scroll. A `max_h` on the
+/// scrollable does not create wheel overflow — the wrapper leaves it on the
+/// content, which is then clamped to the viewport height.
+const SHARE_VISIBLE: usize = 6;
+/// Share-list viewport height, same `max_h` caveat as [`SHARE_VISIBLE`].
+const SHARE_VIEW_H: f32 = 280.0;
+
 impl ImportDialog {
     /// `ShareCodePreviewPhase`: deck header + warning banners + read-only
     /// skill list + Back / Install bar. `data === null` renders the error
@@ -134,7 +141,13 @@ impl ImportDialog {
                                         .child(data.d.clone()),
                                 ),
                         )
-                        .child(count_pill(format!("{} skills", data.s.len()))),
+                        .child(count_pill(
+                            crate::i18n::tf(
+                                "skillCards.shareCodeCount",
+                                &[("count", &data.s.len().to_string())],
+                            )
+                            .to_string(),
+                        )),
                 )
                 .when(has_embedded, |d| {
                     d.child(hint_banner(
@@ -255,14 +268,24 @@ impl ImportDialog {
                     }),
             );
         }
-        col = col.child(
+        col = col.child(if data.s.len() > SHARE_VISIBLE {
             div()
                 .px(px(24.0))
                 .pb_2()
-                .max_h(px(280.0))
-                .overflow_y_scrollbar()
-                .child(rows),
-        );
+                .h(px(SHARE_VIEW_H))
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .child(
+                    div()
+                        .id("import-share-list")
+                        .overflow_y_scrollbar()
+                        .child(rows),
+                )
+                .into_any_element()
+        } else {
+            div().px(px(24.0)).pb_2().child(rows).into_any_element()
+        });
 
         // Footer: Back + Install N
         let back = view.clone();

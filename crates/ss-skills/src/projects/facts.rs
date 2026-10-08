@@ -10,7 +10,7 @@ use serde::Serialize;
 use ss_core::infra::{fs_ops, paths as fs_paths};
 
 use super::binding::ObservedProject;
-use super::owner::shared_path_owner;
+use super::owner::shared_path_membership;
 use super::store::load_skills_list;
 use super::types::{ProjectDeployMode, SkillsList};
 use crate::agents::{self, AgentProfile};
@@ -79,8 +79,8 @@ fn row_for(
 ) -> Option<PhysicalSkillRow> {
     let rel = profile.project_skills_rel.clone();
     let directory = root.join(&rel);
-    let decision = shared_path_owner(profiles, skills_list, &rel, "");
-    let manifest_names = manifest_names(profiles, skills_list, &rel);
+    let membership = shared_path_membership(profiles, skills_list, &rel, "", &[]);
+    let manifest_names: BTreeSet<String> = membership.members.iter().cloned().collect();
     let mut names = manifest_names.clone();
     if let Ok(entries) = std::fs::read_dir(&directory) {
         for entry in entries.flatten() {
@@ -104,28 +104,11 @@ fn row_for(
     skills.sort_by(|left, right| left.name.cmp(&right.name));
     Some(PhysicalSkillRow {
         project_skills_rel: rel.clone(),
-        owner_id: decision.owner_id,
-        deploy_mode: skills_list.deploy_modes.get(&rel).copied(),
-        readers: decision.readers,
+        owner_id: membership.owner_id,
+        deploy_mode: membership.mode,
+        readers: membership.readers,
         skills,
     })
-}
-
-fn manifest_names(
-    profiles: &[AgentProfile],
-    skills_list: &SkillsList,
-    rel: &str,
-) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for profile in profiles {
-        if profile.project_skills_rel != rel {
-            continue;
-        }
-        if let Some(skills) = skills_list.agents.get(&profile.id) {
-            names.extend(skills.iter().cloned());
-        }
-    }
-    names
 }
 
 fn presence(directory: &Path, name: &str, in_manifest: bool) -> SkillPresence {

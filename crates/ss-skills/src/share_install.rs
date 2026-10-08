@@ -119,25 +119,13 @@ pub struct ShareCodeInstallSummary {
     pub outcomes: Vec<ShareSkillOutcome>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkippedSkill {
     pub name: String,
     pub reason: String,
     /// The underlying error, when one explains the skip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-}
-
-impl ShareCodeInstallSummary {
-    /// Names now present in the hub because of, or before, this run.
-    pub fn available_names(&self) -> Vec<String> {
-        self.installed_names
-            .iter()
-            .chain(&self.existing_names)
-            .chain(&self.embedded_names)
-            .cloned()
-            .collect()
-    }
 }
 
 fn normalize(name: &str) -> String {
@@ -169,7 +157,11 @@ fn install_embedded(name: &str, encoded: &str) -> anyhow::Result<()> {
     // the just-created local skill when it is not.
     let created_dir = ss_core::infra::paths::local_skills_dir().join(name);
     if let Err(reason) = crate::validation::ensure_installable(&created_dir) {
-        let _ = local_skill::delete(name);
+        if let Err(cleanup) = local_skill::delete(name) {
+            bail!(
+                "Embedded SKILL.md rejected: {reason}; removing the rejected skill also failed: {cleanup:#}"
+            );
+        }
         bail!("Embedded SKILL.md rejected: {reason}");
     }
     installed_skill::invalidate_cache();
@@ -180,6 +172,44 @@ fn install_embedded(name: &str, encoded: &str) -> anyhow::Result<()> {
 /// repositories resolve the same way as a direct repository install.
 pub fn install_from_share_code(skills: Vec<ShareCodeSkill>) -> ShareCodeInstallSummary {
     install_from_share_code_with(&GitSkillFacade::from_file_store(), skills)
+}
+
+/// Members installed from a share code, and whether a deck was created for them.
+#[derive(Debug)]
+pub struct ShareDeckImport {
+    pub summary: ShareCodeInstallSummary,
+    pub deck: crate::skill_group::DeckAttach,
+}
+
+/// Install share members, then create a deck when `deck` is set.
+///
+/// A blank deck name skips the group. A duplicate name is
+/// [`DeckAttach::NameTaken`]. Neither removes members that already installed.
+/// A group-store failure is returned with those members left in place.
+pub fn install_share_and_deck(
+    deck: bool,
+    name: &str,
+    description: String,
+    icon: String,
+    skills: Vec<ShareCodeSkill>,
+) -> anyhow::Result<ShareDeckImport> {
+    let summary = install_from_share_code(skills.clone());
+    let deck = if deck {
+        let sources = skills
+            .iter()
+            .filter(|skill| skill.remote().is_ok())
+            .map(|skill| (skill.n.clone(), skill.u.clone()))
+            .collect();
+        let names = skills
+            .iter()
+            .map(|skill| skill.n.clone())
+            .filter(|skill_name| !skill_name.is_empty())
+            .collect();
+        crate::skill_group::attach_imported_deck(name, "", description, icon, names, sources)?
+    } else {
+        crate::skill_group::DeckAttach::Skipped
+    };
+    Ok(ShareDeckImport { summary, deck })
 }
 
 /// Same as [`install_from_share_code`], on a caller-owned facade so the caller
@@ -282,7 +312,7 @@ impl ShareCodeInstallSummary {
 }
 
 /// Decoded share-code body. Field names match the TypeScript `ShareCodeData`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ShareCodePayload {
     pub n: String,
     #[serde(default)]
@@ -374,6 +404,46 @@ fn extract_share_code(text: &str) -> &str {
     &rest[..end]
 }
 
+/// Encode a payload into an `ags-` / `agd-` share code — the writer half of
+/// [`parse_share_code`], same wire layout: version byte, compression flag,
+/// little-endian f64 timestamp in milliseconds, then the payload as raw JSON
+/// or raw deflate, whichever is smaller, all Base64-encoded.
+///
+/// Skills with no remote source belong in a bundle, not a code; the caller
+/// decides what goes into `s`.
+pub fn encode_share_code(kind: ShareCodeKind, payload: &ShareCodePayload) -> String {
+    use std::io::Write;
+
+    use base64::Engine as _;
+
+    let json = serde_json::to_vec(payload).expect("share payload always serializes");
+    let mut encoder =
+        flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    let _ = encoder.write_all(&json);
+    let deflated = encoder.finish().unwrap_or_default();
+    let (body, compressed) = if deflated.len() < json.len() {
+        (deflated, 1u8)
+    } else {
+        (json, 0u8)
+    };
+
+    let mut bytes = Vec::with_capacity(body.len() + 10);
+    // The parser ignores the version value; the TypeScript writer emits 1.
+    bytes.push(1);
+    bytes.push(compressed);
+    bytes.extend_from_slice(&(chrono::Utc::now().timestamp_millis() as f64).to_le_bytes());
+    bytes.extend_from_slice(&body);
+
+    let prefix = match kind {
+        ShareCodeKind::Skills => "ags-",
+        ShareCodeKind::Deck => "agd-",
+    };
+    format!(
+        "{prefix}{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,6 +464,45 @@ mod tests {
             [ShareSkillOutcome::Skipped { name, reason }]
                 if name == "demo" && reason == "no_source"
         ));
+    }
+
+    #[test]
+    fn encoded_codes_round_trip_in_both_prefixes() {
+        let payload = ShareCodePayload {
+            n: "Pack".into(),
+            d: "Tools".into(),
+            i: "📦".into(),
+            s: vec![ShareCodeSkill {
+                n: "demo".into(),
+                u: "https://github.com/o/demo".into(),
+                c: None,
+                p: None,
+            }],
+        };
+        for kind in [ShareCodeKind::Skills, ShareCodeKind::Deck] {
+            let parsed = parse_share_code(&encode_share_code(kind, &payload))
+                .unwrap_or_else(|err| panic!("{kind:?}: {err}"));
+            assert_eq!(parsed.kind, kind);
+            assert_eq!(parsed.payload.n, "Pack");
+            assert_eq!(parsed.payload.i, "📦");
+            assert_eq!(parsed.payload.s.len(), 1);
+            assert_eq!(parsed.payload.s[0].u, "https://github.com/o/demo");
+        }
+    }
+
+    #[test]
+    fn a_large_payload_round_trips_through_the_compressed_path() {
+        // Repetitive text deflates far below its raw size, so the encoder
+        // must pick the compressed branch for it.
+        let payload = ShareCodePayload {
+            n: "Big".into(),
+            d: "x".repeat(24 * 1024),
+            i: String::new(),
+            s: Vec::new(),
+        };
+        let code = encode_share_code(ShareCodeKind::Deck, &payload);
+        let parsed = parse_share_code(&code).expect("compressed round trip");
+        assert_eq!(parsed.payload.d.len(), 24 * 1024);
     }
 
     #[test]

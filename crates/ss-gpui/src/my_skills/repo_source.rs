@@ -1,8 +1,8 @@
 //! Per-repo actions on the origin menu: reinstall every skill the repo
 //! currently ships, or uninstall every skill installed from that source.
 
+use crate::notify::Notice;
 use anyhow::anyhow;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use ss_core::types::skill::SkillType;
 
@@ -28,7 +28,7 @@ impl MySkillsPage {
             .map(|skill| skill.git_url.clone());
         let Some(url) = url else {
             crate::notify::toast(
-                Notification::error(crate::i18n::tf(
+                Notice::error(crate::i18n::tf(
                     "mySkills.reinstallRepoSourceMissing",
                     &[("source", source)],
                 )),
@@ -53,7 +53,7 @@ impl MySkillsPage {
                 match result {
                     Ok(count) => {
                         crate::notify::toast(
-                            Notification::success(crate::i18n::tf(
+                            Notice::success(crate::i18n::tf(
                                 "mySkills.reinstallRepoSuccess",
                                 &[("count", &count.to_string())],
                             )),
@@ -63,10 +63,7 @@ impl MySkillsPage {
                     Err(err) => {
                         let headline =
                             crate::i18n::tf("mySkills.reinstallRepoFailed", &[("source", &source)]);
-                        crate::notify::toast(
-                            Notification::error(format!("{headline}\n{err:#}")),
-                            cx,
-                        );
+                        crate::notify::toast(Notice::error(format!("{headline}\n{err:#}")), cx);
                     }
                 }
                 this.refresh(cx);
@@ -120,7 +117,7 @@ impl MySkillsPage {
             |this, cx, result: anyhow::Result<()>| {
                 this.busy = None;
                 if let Err(err) = result {
-                    crate::notify::toast(Notification::error(format!("{err:#}")), cx);
+                    crate::notify::toast(Notice::error(format!("{err:#}")), cx);
                 }
                 this.refresh(cx);
             },

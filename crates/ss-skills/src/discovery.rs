@@ -193,9 +193,9 @@ impl<'a> SkillDiscovery<'a> {
             .collect()
     }
 
-    /// Normal (non-full-depth) mode is root-first, vercel parity: a repo-root
-    /// `SKILL.md` is the skill and nested copies are not scanned further.
-    /// Full depth sees everything.
+    /// Normal (non-full-depth) mode is root-first, matching the skills CLI: a
+    /// repo-root `SKILL.md` is the skill and nested copies are not scanned
+    /// further. Full depth sees everything.
     fn limit_to_root_candidate(&self, candidates: Vec<SkillCandidate>) -> Vec<SkillCandidate> {
         let Some(root_skill) = candidates
             .iter()
@@ -405,7 +405,7 @@ pub fn discover_skills_without_dedup(
 
 // ── Deduplication ───────────────────────────────────────────────────
 
-/// One skill per identity, first-seen in priority order (vercel parity).
+/// One skill per identity, first-seen in priority order (skills CLI parity).
 ///
 /// Rank = (priority-container index, folder depth, path): `skills/foo`
 /// shadows `.claude/skills/foo`; inside one container the shallower folder

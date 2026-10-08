@@ -43,7 +43,6 @@ pub(crate) fn render_market_card(
     } else {
         original.clone()
     };
-    let translated = blurb != original;
     let stars = skill.stars;
 
     let mut tile = market_tile_box(
@@ -156,18 +155,13 @@ pub(crate) fn render_market_card(
             )),
     );
 
-    tile = tile.child({
-        let row = div()
+    tile = tile.child(
+        div()
             .text_xs()
             .text_color(rgb(palette().fg_muted))
             .line_clamp(2)
-            .child(blurb);
-        if translated {
-            crate::translation::paint_card(row)
-        } else {
-            row.into_any_element()
-        }
-    });
+            .child(blurb),
+    );
     if stars > 0 {
         tile = tile.child(
             div()
@@ -186,18 +180,22 @@ pub(crate) fn render_market_card(
         Some(ss_core::types::UpstreamChange::Removed { .. })
     ) {
         tile = tile.child(exception_chip(
-            "Removed",
+            crate::i18n::t("marketplace.removed"),
             palette().danger,
             palette().danger_bg,
         ));
     } else if skill.update_available {
-        tile = tile.child(exception_chip("Update", palette().warn, palette().warn_bg));
+        tile = tile.child(exception_chip(
+            crate::i18n::t("common.update"),
+            palette().warn,
+            palette().warn_bg,
+        ));
     }
 
     tile
 }
 
-fn exception_chip(label: &'static str, fg: u32, bg: u32) -> Div {
+fn exception_chip(label: impl Into<SharedString>, fg: u32, bg: u32) -> Div {
     div()
         .self_start()
         .px_1()
@@ -206,7 +204,7 @@ fn exception_chip(label: &'static str, fg: u32, bg: u32) -> Div {
         .text_size(px(10.0))
         .font_weight(FontWeight::BOLD)
         .text_color(rgb(fg))
-        .child(label)
+        .child(label.into())
 }
 
 fn install_action(

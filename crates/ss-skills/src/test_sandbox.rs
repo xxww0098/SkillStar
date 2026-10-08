@@ -44,7 +44,6 @@ impl Sandbox {
             ("XDG_STATE_HOME", None),
             ("XDG_CONFIG_HOME", Some(home.join(".config"))),
             ("CLAUDE_CONFIG_DIR", None),
-            ("CODEX_HOME", None),
             // Other Agent homes that would otherwise point a sweep or deploy
             // at the developer's real directories.
             ("AUTOHAND_HOME", None),

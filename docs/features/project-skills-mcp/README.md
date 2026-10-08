@@ -44,4 +44,6 @@ Projects 页在选中项目且存在未过期计划时，在列表上方展示�
 
 `apply_project_skills` 在项目写锁里核对计划、批准和幂等回执，然后调用严格启用。没有批准时返回 `ApprovalRequired`，不改项目树和项目索引。回执只在每一项都是链接意义上的 applied 或 already 时写入 `state/project-skill-receipts/<idempotency_key>.json`。回执里的 `runtime_visibility` 是 `unverified`。
 
+严格启用使用和普通项目部署相同的共享路径 owner 与 deploy mode，见 [Skills 部署 reconciliation](../skills/README.md#部署-reconciliation)。它自己的提交仍是批准、内容 hash 和只建链接。
+
 这个函数不向用户要确认，也不调用宽松部署或市场安装。

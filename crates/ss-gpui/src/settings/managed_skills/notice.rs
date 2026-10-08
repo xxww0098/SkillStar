@@ -1,12 +1,10 @@
 //! User-facing copy for a managed-skills toggle: what succeeded, what was
 //! skipped, and what failed.
 //!
-//! Outcomes leave the page as the window's standard toast. Nothing is parked
-//! in the Settings row: the page entity is KeepAlive for the whole session, so
-//! inline text there has no lifetime of its own.
+//! Outcomes leave the page through `notify::toast` into the shell's alert
+//! band. Nothing is parked in the Settings row: the page entity is KeepAlive
+//! for the whole session, so inline text there has no lifetime of its own.
 
-use gpui_kit::component::button::Button;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use ss_skills::workflows::agent_managed_skills::{
     AgentManagedSkillsAction, AgentManagedSkillsSkip, AgentManagedSkillsToggleReport,
@@ -14,10 +12,11 @@ use ss_skills::workflows::agent_managed_skills::{
 
 use super::state::{AgentNotice, AgentTone, SKIP_UNMANAGED_REAL_DIRECTORY};
 use crate::i18n::{t, tf};
+use crate::notify::Notice;
 
-/// Which toast family an outcome belongs to. Toasts in one family replace each
-/// other; families stack, so a failed re-read cannot erase the result that
-/// triggered it.
+/// Which alert family an outcome belongs to. Alerts in one family replace
+/// each other; families stack, so a failed re-read cannot erase the result
+/// that triggered it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum NoticeKind {
     /// A command the user just ran: clear, pause/restore, link or unlink.
@@ -28,35 +27,29 @@ pub(super) enum NoticeKind {
     Read,
 }
 
-struct ResultNotice;
-struct ReadNotice;
-
-/// Show one outcome as a toast on the active window.
+/// Show one outcome as an alert in the shell's band.
 ///
-/// A result toast autohides (the toast layer's default). A failed read stays
-/// until the user closes it. A skipped item keeps an "open the occupied
-/// folder" action, and an action pins the toast open — closing it is how the
-/// user accepts the skip.
+/// A result alert autohides. A failed read stays until the user closes it.
+/// A skipped item keeps an "open the occupied folder" action, and an action
+/// pins the alert open — closing it is how the user accepts the skip.
 pub(super) fn show_notice(notice: AgentNotice, kind: NoticeKind, key: &str, cx: &mut App) {
-    let mut toast = match notice.tone {
-        AgentTone::Ok => Notification::success(notice.text),
-        AgentTone::Warn => Notification::warning(notice.text),
-        AgentTone::Error => Notification::error(notice.text),
+    let mut alert = match notice.tone {
+        AgentTone::Ok => Notice::success(notice.text),
+        AgentTone::Warn => Notice::warning(notice.text),
+        AgentTone::Error => Notice::error(notice.text),
     };
-    let id = SharedString::from(key.to_string());
-    toast = match kind {
-        NoticeKind::Result => toast.id1::<ResultNotice>(id),
-        NoticeKind::Read => toast.id1::<ReadNotice>(id).autohide(false),
+    alert = match kind {
+        NoticeKind::Result => alert.replace_key(format!("managed-result-{key}")),
+        NoticeKind::Read => alert.replace_key(format!("managed-read-{key}")).pinned(),
     };
     if let Some(path) = notice.open_path {
-        toast = toast.action(move |_, _, _| {
-            let path = path.clone();
-            Button::new("managed-skills-open-occupied")
-                .label(t("skillToggle.openOccupiedFolder"))
-                .on_click(move |_, _, _| crate::os_open::open_folder(&path))
-        });
+        alert = alert
+            .pinned()
+            .action(t("skillToggle.openOccupiedFolder"), move |_, _| {
+                crate::os_open::open_folder(&path);
+            });
     }
-    crate::notify::toast(toast, cx);
+    crate::notify::toast(alert, cx);
 }
 
 /// Success copy for the one-click clear: the domain layer counts what it

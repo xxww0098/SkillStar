@@ -1,6 +1,6 @@
-//! The marketplace skill column. Same chrome as the skill drawer: fixed
-//! width, left border, title, close. The install action stays pinned so a
-//! long SKILL.md does not scroll the decision off screen.
+//! The marketplace skill column. Same chrome as the skill drawer: the
+//! shared floating sheet, title, close. The install action stays pinned so
+//! a long SKILL.md does not scroll the decision off screen.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::scroll::ScrollableElement;
@@ -52,61 +52,62 @@ pub(crate) fn market_detail_column(
         .flex()
         .flex_col()
         .min_h_0()
-        .overflow_hidden()
-        .border_l_1()
-        .border_color(rgb(palette().border))
-        .child(detail_header(prefix, skill, on_close))
+        .p(px(crate::chrome::SHEET_GAP))
         .child(
-            div()
-                .id(ElementId::Name(format!("{prefix}-detail-scroll").into()))
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scrollbar()
-                .px_4()
-                .py_3()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .child(description_section(
-                    prefix,
-                    description.as_deref(),
-                    loading,
-                    failed.as_deref(),
-                    on_retry,
-                ))
-                .when(
-                    has_metadata(
-                        skill,
-                        id.source.as_deref(),
-                        weekly.as_deref(),
-                        github_stars,
-                        first_seen.as_deref(),
-                    ),
-                    |body| {
-                        body.child(metadata_card(
+            crate::chrome::sheet(div())
+                .child(detail_header(prefix, skill, on_close))
+                .child(
+                    div()
+                        .id(ElementId::Name(format!("{prefix}-detail-scroll").into()))
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scrollbar()
+                        .px_4()
+                        .py_3()
+                        .flex()
+                        .flex_col()
+                        .gap_4()
+                        .child(description_section(
                             prefix,
-                            skill,
-                            id.source.as_deref(),
-                            weekly.as_deref(),
-                            github_stars,
-                            first_seen.as_deref(),
+                            description.as_deref(),
+                            loading,
+                            failed.as_deref(),
+                            on_retry,
                         ))
-                    },
+                        .when(
+                            has_metadata(
+                                skill,
+                                id.source.as_deref(),
+                                weekly.as_deref(),
+                                github_stars,
+                                first_seen.as_deref(),
+                            ),
+                            |body| {
+                                body.child(metadata_card(
+                                    prefix,
+                                    skill,
+                                    id.source.as_deref(),
+                                    weekly.as_deref(),
+                                    github_stars,
+                                    first_seen.as_deref(),
+                                ))
+                            },
+                        )
+                        .when(!audits.is_empty(), |body| {
+                            body.child(audit_section(&audits))
+                        })
+                        .when_some(readme, |body, readme| {
+                            body.child(skill_md_button(prefix, skill.name.clone(), readme))
+                        }),
                 )
-                .when(!audits.is_empty(), |body| {
-                    body.child(audit_section(&audits))
-                })
-                .when_some(readme, |body, readme| {
-                    body.child(skill_md_button(prefix, skill.name.clone(), readme))
-                }),
+                .child(detail_actions(
+                    prefix,
+                    skill,
+                    busy,
+                    source_url,
+                    on_toggle_install,
+                )),
         )
-        .child(detail_actions(
-            prefix,
-            skill,
-            busy,
-            source_url,
-            on_toggle_install,
-        ))
         .into_any_element()
 }
 
@@ -241,12 +242,7 @@ fn description_section(
         .when_some(description.map(str::to_string), |section, text| {
             let shown =
                 crate::translation::display(&text, crate::translation::Surface::Description);
-            let block = text_block(&shown, palette().fg);
-            section.child(if shown != text {
-                crate::translation::paint_card(block)
-            } else {
-                block.into_any_element()
-            })
+            section.child(text_block(&shown, palette().fg))
         })
         .when(description.is_none() && loading, |section| {
             section.child(muted_line(
@@ -639,13 +635,7 @@ fn detail_actions(
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
                 .when(!busy, |button| button.cursor_pointer())
-                .child(icon_spin(
-                    ElementId::Name(format!("{prefix}-detail-install-spin").into()),
-                    icon_name,
-                    14.0,
-                    fg,
-                    busy,
-                ))
+                .child(icon_spin(icon_name, 14.0, fg, busy))
                 .child(label.to_string())
                 .on_click(move |event, window, app| {
                     app.stop_propagation();

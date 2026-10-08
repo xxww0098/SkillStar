@@ -4,8 +4,11 @@
 //! prompt collapsed all of that into one field; this entity keeps each
 //! phase's own chrome, like `ModalShell` + the `import-modal/*` phases.
 //!
-//! Renderers live in `phases`/`select`/`pack`/`share` — the per-1000-line
-//! file budget is the only reason; `ImportDialog` owns all state here.
+//! Renderers live in `phases`/`select`/`share` — the per-1000-line file
+//! budget is the only reason; `ImportDialog` owns all state here. The Pack
+//! step embeds `skill_cards::create_group::CreateGroupDialog` instead of
+//! its own body: React opens the separate `CreateGroupModal` there, and the
+//! Skill Cards page opens that same entity for its "New Deck" button.
 
 mod helpers;
 mod phases;
@@ -13,7 +16,7 @@ mod progress;
 mod select;
 mod share;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
@@ -332,10 +335,7 @@ impl ImportDialog {
     ) {
         self.phase = Phase::Pack;
         self.pack = None;
-        self.pack_pending = Some((
-            deck_name_from_source(&spec.short),
-            installed.to_vec(),
-        ));
+        self.pack_pending = Some((deck_name_from_source(&spec.short), installed.to_vec()));
         cx.notify();
     }
 
@@ -409,29 +409,13 @@ impl ImportDialog {
             cx,
             async move {
                 tokio::task::spawn_blocking(move || {
-                    let summary = share_install::install_from_share_code(skills.clone());
-                    let mut deck_created = false;
-                    if deck && !name.trim().is_empty() {
-                        let sources: HashMap<String, String> = skills
-                            .iter()
-                            .filter(|s| s.remote().is_ok())
-                            .map(|s| (s.n.clone(), s.u.clone()))
-                            .collect();
-                        let names: Vec<String> = skills
-                            .iter()
-                            .map(|s| s.n.clone())
-                            .filter(|n| !n.is_empty())
-                            .collect();
-                        let icon = if icon_text.trim().is_empty() {
-                            "📦".to_string()
-                        } else {
-                            icon_text
-                        };
-                        deck_created =
-                            ss_skills::skill_group::create_group(name, desc, icon, names, sources)
-                                .is_ok();
-                    }
-                    Ok::<_, anyhow::Error>((summary, deck_created))
+                    let outcome = share_install::install_share_and_deck(
+                        deck, &name, desc, icon_text, skills,
+                    )?;
+                    Ok::<_, anyhow::Error>((
+                        outcome.summary,
+                        outcome.deck == ss_skills::skill_group::DeckAttach::Created,
+                    ))
                 })
                 .await
                 .unwrap_or_else(|err| Err(anyhow!("{err}")))
@@ -547,55 +531,41 @@ impl ImportDialog {
         self.phase = Phase::Installing;
         self.progress = Some(crate::i18n::t("importBundleModal.importing"));
         cx.notify();
-        let deck_path = path.clone();
         let view = cx.entity();
         spawn_domain(
             &view,
             cx,
             async move {
                 tokio::task::spawn_blocking(move || {
-                    ss_skills::skill_bundle::import_any_bundle(&path.to_string_lossy(), false)
-                        .map_err(|err| anyhow!("{err:#}"))
+                    let fallback = crate::i18n::t("importDeckBundleModal.deckBundle").to_string();
+                    ss_skills::skill_bundle::import_bundle_and_deck(
+                        &path.to_string_lossy(),
+                        &fallback,
+                        |count| {
+                            crate::i18n::tf(
+                                "importDeckBundleModal.skillsCount",
+                                &[("count", &count.to_string())],
+                            )
+                            .to_string()
+                        },
+                    )
+                    .map_err(|err| anyhow!("{err:#}"))
                 })
                 .await
                 .unwrap_or_else(|err| Err(anyhow!("{err}")))
             },
-            move |this, cx, result: anyhow::Result<AnyBundleImport>| {
-                if result.is_ok() {
-                    this.error = None;
-                }
+            move |this, cx, result: anyhow::Result<ss_skills::skill_bundle::BundleDeckImport>| {
                 match result {
-                    Ok(AnyBundleImport::Single(_)) => {
-                        this.installed = 1;
-                        this.phase = Phase::Completed;
-                        this.refresh_page(cx);
-                    }
-                    Ok(AnyBundleImport::Multi(result)) => {
-                        this.installed = result.skill_names.len();
-                        // `onDeckImported`: a deck bundle also creates its group,
-                        // named after the file. A failed create (duplicate name)
-                        // keeps the success phase — the skills are installed.
-                        let deck = ss_skills::skill_bundle::deck_name_from_bundle_path(
-                            &deck_path.to_string_lossy(),
-                        );
-                        let deck = if deck.is_empty() {
-                            crate::i18n::t("importDeckBundleModal.deckBundle").to_string()
-                        } else {
-                            deck
-                        };
-                        let desc = crate::i18n::tf(
-                            "importDeckBundleModal.skillsCount",
-                            &[("count", &result.skill_names.len().to_string())],
-                        )
-                        .to_string();
-                        let deck_created = ss_skills::skill_group::create_group(
-                            deck,
-                            desc,
-                            "📦".to_string(),
-                            result.skill_names.clone(),
-                            HashMap::new(),
-                        )
-                        .is_ok();
+                    Ok(outcome) => {
+                        this.error = None;
+                        let deck_created =
+                            outcome.deck == ss_skills::skill_group::DeckAttach::Created;
+                        match outcome.import {
+                            AnyBundleImport::Single(_) => this.installed = 1,
+                            AnyBundleImport::Multi(result) => {
+                                this.installed = result.skill_names.len();
+                            }
+                        }
                         this.phase = Phase::Completed;
                         this.refresh_page(cx);
                         if deck_created {
@@ -691,13 +661,15 @@ impl Render for ImportDialog {
                             members,
                             // Quick Pack wrote a deck — reload the cards page.
                             Box::new(move |_, cx| {
-                                let _ =
-                                    page.update(cx, |_, cx| cx.emit(crate::nav::GroupsChanged));
+                                let _ = page.update(cx, |_, cx| cx.emit(crate::nav::GroupsChanged));
                             }),
                         )
                     }));
                 }
-                self.pack.clone().expect("pack view staged above").into_any_element()
+                self.pack
+                    .clone()
+                    .expect("pack view staged above")
+                    .into_any_element()
             }
         };
         div()

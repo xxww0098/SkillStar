@@ -137,7 +137,7 @@ pub enum Commands {
     /// Remove one or more installed skills
     #[command(alias = "rm", alias = "uninstall")]
     Remove {
-        /// Skill name(s) to remove — space- or comma-separated (e.g. `rm a b` or `rm a,b`)
+        /// Skill name(s) or source(s) to remove — space- or comma-separated (e.g. `rm a b` or `rm a,b`); a name that is not an installed skill matches a lock source and removes every skill from it
         #[arg(required_unless_present = "all", value_delimiter = ',')]
         names: Vec<String>,
         /// Remove every installed skill
@@ -271,6 +271,16 @@ pub enum ChannelCommand {
         #[arg(long)]
         discard_local: bool,
     },
+    /// Export the channel's installed Skills as a Claude Code plugin
+    /// marketplace directory (local-only: no GitHub sign-in, no network)
+    ExportMarketplace {
+        repository_id: u64,
+        /// Directory to create; must not exist or be empty
+        #[arg(long = "out")]
+        out: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Subcommands of `skillstar mcp` that a person runs in a terminal.
@@ -312,7 +322,7 @@ pub struct RemoveOpts<'a> {
 pub fn run(args: Vec<String>, migrate_and_run: fn()) {
     // Channel ownership is enforced by the skills domain without startup registration.
 
-    // D-081: remove the pre-vercel hub/cache model once, idempotently.
+    // D-081: remove the pre-D-081 hub/cache model once, idempotently.
     ss_skills::legacy_cleanup::run_once();
 
     // Migration (only runs once at startup)

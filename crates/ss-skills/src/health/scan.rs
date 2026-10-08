@@ -80,12 +80,6 @@ pub struct SkillHealthReport {
     pub(super) lock_entries: BTreeMap<String, SkillLockEntry>,
 }
 
-impl SkillHealthReport {
-    pub fn is_healthy(&self) -> bool {
-        self.issues.is_empty()
-    }
-}
-
 fn issue(
     kind: IssueKind,
     skill: Option<&str>,

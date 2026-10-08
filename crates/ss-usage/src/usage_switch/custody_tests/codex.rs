@@ -13,6 +13,72 @@ const CODEX_ID_TOKEN: &str = concat!(
     "."
 );
 
+#[tokio::test(flavor = "current_thread")]
+async fn codex_refresh_preserves_client_fields_and_newer_logins() {
+    let sb = sandbox();
+    let mut row = subscription("codex-dana", "codex");
+    row.access_token_encrypted = Some(crypto::encrypt("codex-access"));
+    row.refresh_token_encrypted = Some(crypto::encrypt("codex-refresh"));
+    row.id_token_encrypted = Some(crypto::encrypt(CODEX_ID_TOKEN));
+    storage::upsert_subscription(row).unwrap();
+    activate_subscription("codex-dana").await.unwrap();
+    let path = sb.live("codex");
+    let mut root = read_json(&path);
+    root["tokens"]["clientExtension"] = json!({"version": 1});
+    fs::write(&path, serde_json::to_vec(&root).unwrap()).unwrap();
+    let lease = acquire_cli_refresh_lease("codex").await.unwrap();
+    let mut row = storage::get_subscription("codex-dana").unwrap();
+    adopt_active_cli_session_before_refresh(&mut row, &lease).unwrap();
+    let before = row.clone();
+    let original = fs::read(&path).unwrap();
+    row.access_token_encrypted = Some(crypto::encrypt("codex-access"));
+    row.display_name = "new label".into();
+    row.plan_tier = Some("new plan".into());
+    assert!(
+        sync_refreshed_active_subscription(&before, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(fs::read(&path).unwrap(), original);
+
+    row.access_token_encrypted = Some(crypto::encrypt("rotated-access"));
+    row.refresh_token_encrypted = Some(crypto::encrypt("rotated-refresh"));
+    assert!(
+        sync_refreshed_active_subscription(&before, &mut row, &lease)
+            .unwrap()
+            .unwrap()
+            .success
+    );
+    assert_eq!(
+        read_json(&path)["tokens"]["clientExtension"],
+        json!({"version": 1})
+    );
+    assert_eq!(read_json(&path)["tokens"]["access_token"], "rotated-access");
+
+    let before = row.clone();
+    let mut newer = read_json(&path);
+    newer["tokens"]["access_token"] = json!("client-newer-access");
+    newer["tokens"]["refresh_token"] = json!("client-newer-refresh");
+    fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
+    row.access_token_encrypted = Some(crypto::encrypt("late-access"));
+    assert!(
+        sync_refreshed_active_subscription(&before, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(read_json(&path), newer);
+    fs::remove_file(&path).unwrap();
+    assert!(
+        sync_refreshed_active_subscription(&before, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !path.exists(),
+        "quota refresh must not log a client back in"
+    );
+}
+
 // ── Codex ────────────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "current_thread")]

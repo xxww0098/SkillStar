@@ -6,7 +6,7 @@ use crate::storage;
 use ss_core::infra::error::AppError;
 
 use super::helpers::{fill_active, map_err};
-use crate::accounts::dto::{CliAccountStateDto, SubscriptionDto, SwitchOutcomeDto};
+use crate::accounts::dto::{CliAccountStateDto, SubscriptionDto};
 
 // ── Multi-account: active-per-catalog (Phase 7) ───────────────────────
 
@@ -33,24 +33,6 @@ pub async fn set_active_subscription(subscription_id: String) -> Result<Subscrip
     let mut dto = fill_active(SubscriptionDto::from_parts(sub, usage), &active);
     dto.switch_result = Some(outcome.into());
     Ok(dto)
-}
-
-/// Re-push the active account for `catalog_id` into its CLI config, without
-/// changing which account is active. Used by the "重新同步到 CLI" button when
-/// a previous switch failed (e.g. missing id_token that has since been
-/// refreshed).
-///
-/// Returns the DTO rather than the domain outcome: `set_active_subscription`
-/// already contracts against `SwitchOutcomeDto`, and two commands describing
-/// the same event through two different types is how a new field lands on one
-/// of them and not the other.
-pub async fn switch_active_subscription_to_cli(
-    catalog_id: String,
-) -> Result<SwitchOutcomeDto, AppError> {
-    crate::usage_switch::resync_active_subscription(&catalog_id)
-        .await
-        .map(SwitchOutcomeDto::from)
-        .map_err(map_err)
 }
 
 /// Which account each CLI is *actually* serving, keyed by catalog id.

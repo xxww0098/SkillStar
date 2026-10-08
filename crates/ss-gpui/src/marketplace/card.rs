@@ -175,7 +175,10 @@ impl MarketplacePage {
                                 .items_center()
                                 .gap_1()
                                 .child(icon(IconName::Folder, 12.0, palette().fg_muted))
-                                .child(format!("{} repos", pub_.repo_count)),
+                                .child(crate::i18n::tf(
+                                    "marketplace.repoCount",
+                                    &[("count", &pub_.repo_count.to_string())],
+                                )),
                         )
                         .child(
                             div()
@@ -183,7 +186,10 @@ impl MarketplacePage {
                                 .items_center()
                                 .gap_1()
                                 .child(icon(IconName::Package, 12.0, palette().fg_muted))
-                                .child(format!("{} skills", pub_.skill_count)),
+                                .child(crate::i18n::tf(
+                                    "marketplace.skillCount",
+                                    &[("count", &pub_.skill_count.to_string())],
+                                )),
                         ),
                 ),
         )
@@ -372,7 +378,10 @@ impl MarketplacePage {
                             .border_color(rgb(palette().border))
                             .text_xs()
                             .text_color(rgb(palette().fg_muted))
-                            .child(format!("{} publishers", self.publishers.len())),
+                            .child(crate::i18n::tf(
+                                "marketplace.publishersCount",
+                                &[("count", &self.publishers.len().to_string())],
+                            )),
                     ),
             )
             .child(

@@ -2,6 +2,37 @@
 
 状态：active
 
+## 2026-10-08 - 详情列测试偶发全 None：canvas 缓存命中帧不重画、不注册 debug_bounds
+
+- Symptom: `my_skills::detail_drawer` 的两个交互测试（`the_button_translates_this_opening_only`、`the_card_follows_the_drawer_translation_choice`）并行跑时偶发红：点击后断言 `debug_bounds` 全是 `None`——不仅翻译行，连关闭按钮、描述行、translate 按钮都「消失」。eprintln 证实点击处理器已触发、状态已翻转，纯属性量丢失。主树上红率不定（0/12 到 12/12 都出现过）。
+- Root cause: MySkillsPage 经 `chrome::replay_view` 渲染，即 `view.cached(absolute().size_full())`。缓存命中的帧 GPUI 直接复制上一帧的 scene，不重新 paint 内部元素，该帧 `debug_bounds` 没有任何注册——测试恰好在缓存命中帧后查询，卡片和抽屉的选择器就全部读 `None`。这不是抽屉结构问题：被吞的是整棵 canvas 子树。主树红率受工作树里其他未提交改动（设置/翻译/域线程）影响，与详情列改动无关。
+- Fix: 归因协议——用独立 `git worktree` 建基线（HEAD + 仅待测改动）跑同组测试对照：基线 0/12 红、主树偶红即证明 flake 属树的其余状态，不属新改动。两个陷阱一并记下：probe 只能用 `.debug_selector()` 注册的名字（`.id()` 不进 debug_bounds，用它做探针会得出「元素全没了」的假结论）；`capture_screenshot` 有观察者效应，会掩盖而非修复缓存帧问题。
+- Files: `crates/ss-gpui/src/chrome/mod.rs`（`replay_view`）、`crates/ss-gpui/src/my_skills/detail_drawer.rs` 测试。
+- Self-check: 复现时先建 worktree 基线归因，别在主树上反复重跑猜。写依赖 `debug_bounds` 的测试前，确认断言前有一次让 canvas 失效的真实 paint（`revise`/notify 后 paint）；探针一律 `debug_selector`。
+
+## 2026-10-08 - 项目页点行内「软链接」胶囊，agent 行折叠收起
+
+- Symptom: 项目详情「按智能体管理技能」里，点击某智能体行的「软链接 / 复制」部署模式胶囊，除了切换模式，该行折叠的技能编辑区同时被收起。行内启用开关此前有同一类症状（点击后展开态异常）。
+- Root cause: 模式胶囊嵌在带 `on_click` 折叠切换的 `agent-top` 行内。GPUI 的 mouse-up click 监听按注册逆序（子先父后）派发，子元素点击处理器不调 `cx.stop_propagation()` 时事件继续到达父级行的 `on_click`，`expanded_agent` 被再次翻转，展开态收起。同一嵌套陷阱在同一行内已出现两次（启用开关、模式胶囊）。
+- Fix: 行内控件（模式胶囊、启用开关）的 `on_click` 先 `cx.stop_propagation()` 再改状态。回归防线：`clicking_the_deploy_mode_capsule_keeps_the_row_expanded` 断言点击胶囊后部署模式翻转且 `expanded_agent` 不变。
+- Files: `crates/ss-gpui/src/projects/{agent_item,mod}.rs`。
+- Self-check: `cargo test -p ss-gpui --lib --locked projects::tests::clicking_the_deploy_mode_capsule_keeps_the_row_expanded`。以后往可折叠行里加任何可点控件（chip、按钮、开关），`on_click` 第一行先 `cx.stop_propagation()`，对照同行的模式胶囊与启用开关。
+
+## 2026-10-08 - 项目页卡片撑满整栏、行内路径胶囊拉宽、规则 chips 均匀散开（半步间距 helper）
+
+- Symptom: 项目详情页三处布局同时失常：左栏选中项目卡竖向撑满整个 rail（内容垂直居中），agent 行的 `.agents/skills` 路径胶囊拉成约 550px 宽、文本居中像禁用输入框，检测规则 chips 以约 300px 等间隔散开整行。三者只在项目页出现。
+- Root cause: 本版 gpui 的半步间距 helper（`py_2_5`、`gap_1_5`、`px_1_5` 等 Tailwind 风格 `*_1_5`/`*_2_5`）不是 0.5 步进语义，实测膨胀为每份约 100–300px（`py_2_5` 单侧 ≈109px、`gap_1_5` ≈302px）。整数步 helper（`p_2`、`px_3`、`gap_4` 等）数值正常。半步 helper 只被项目模块（`crates/ss-gpui/src/projects/`）使用，其余页面用整数步，所以只有这页坏。
+- Fix: 项目模块内全部换回整数步语义刻度（卡片 `py_2`、分组 `gap_2`、chips 与小控件 `gap_1`、徽章 `px_1`/`px_2`），路径胶囊改为右侧安静 mono 文本不再做底框。回归防线：`project_cards_stay_compact` 用 `debug_bounds` 断言卡片高度 < 80px。
+- Files: `crates/ss-gpui/src/projects/{mod,detail,agent_item}.rs`。
+- Self-check: `cargo test -p ss-gpui --lib --locked projects::tests::project_cards_stay_compact`。新写界面时禁用一切 `*_1_5`/`*_2_5`/`*_0_5` 间距 helper，先跑 `grep -rn "_1_5()\|_2_5()\|_0_5()" crates/ss-gpui/src`，命中即换整数步；间距刻度见 [界面](./features/frontend/README.md)。
+
+## 2026-10-07 - 新建卡组成员列表滚轮翻不动（max_h 滚动盒家族性复发，六处同修）
+
+- Symptom: 「新建卡组」对话框技能多于一屏时，成员选择列表滚轮翻不动，底部条目被裁掉。同款写法还潜伏在分享码预览列表、导入扫描选择列表、导入完成 summary 胶囊、来源菜单仓库列表和市场搜索面板。
+- Root cause: 滚动包装（`overflow_y_scrollbar`）把调用方元素重写为内容节点：`h_auto` 只重置 height，调用方写的 `max_h` 原样留在内容上，内容布局高度被截到 ≤ 视口高，滚动盒自己不溢出，滚轮位移夹回 0；看到的裁切来自外层。和「导入框最近仓库滚轮翻不动」「SKILL.md 悬浮窗滚轮翻不动」是同一类：单点修复后新增代码又复制了旧写法，没有全仓清点和防线。
+- Fix: 六处统一改成「外框明确像素高度 + 行数超过阈值才滚动，少时高度跟内容走」：`skill_cards/create_group.rs`（成员列表 + 已选胶囊条）、`my_skills/import_modal/{select,share,phases}.rs`、`my_skills/toolbar/origin_menu.rs`、`marketplace/spotlight.rs`。界面约定落在 [frontend README](./features/frontend/README.md#交互)。
+- Self-check: `cargo test -p ss-gpui --lib --locked create_group::tests`（滚轮事件驱动真实滚动路径）。新滚动盒上线前先跑 `grep -rn "max_h" crates/ss-gpui/src | grep -v "max_h(px(1"`，任何与 `overflow_*_scrollbar` 同链的 `max_h` 都是复发。给滚动盒喂 fixture 的测试要注意：窗口重建会重跑 `add_window_view` 闭包（复用同一 entity），且 `spawn_domain` 的加载回调在 tokio runtime 上，`run_until_parked` 排不出它——必须等加载完成位再播种，否则迟到的回调把 fixture 清空，表现为「滚不动」的假红。
+
 ## 2026-10-07 - 光标闪一下又变回箭头
 
 - Symptom: 指针移到技能卡底栏的品牌 SVG、按钮，或点进输入框时，光标变成手型或工字，马上又变回箭头。鼠标停住也不再变。
@@ -15,8 +46,8 @@
 - Symptom: 添加 Devin 账号，浏览器里登录完成后对话框显示 `失败: Usage: auth required (token expired or revoked)`。
 - Root cause: `windsurf.com/editor/auth-success` 已经用 Firebase ID token 调过 `GetOneTimeAuthToken`，loopback 的 `access_token` 是响应里的 `authToken`。登录完成仍把这个值当成 Firebase ID token 交给 `RegisterUser`。`register.windsurf.com` 回 401 `invalid token`，被收成 `UsageError::AuthRequired`。同一句也会出现在旧路径：`RegisterUser` 已经发了 apiKey，随后 `GetOneTimeAuthToken` 的 401 却把整次登录判失败。
 - Fix: `RegisterUser` 认证失败时，把回调 token 当作已签发的会话，并用 `GetCurrentUser` / `GetPlanStatus` 确认。两个都拒绝才仍是 `AuthRequired`。Firebase 路径上，apiKey 已经到手之后，会话和资料请求的 401 不再取消登录。
-- Files: `crates/ss-usage/src/fetchers/oauth/windsurf/login.rs`。行为见 [Usage](./features/usage/README.md)。
-- Self-check: `cargo test -p ss-usage --lib --locked windsurf::login`。再点一次「登录」，浏览器完成后应出现账号，而不是这条失败。复发时先看回调 `access_token` 是不是又被送进 `RegisterUser`。
+- Files: `crates/ss-usage/src/fetchers/oauth/devin_desktop/login.rs`。行为见 [Usage](./features/usage/README.md)。
+- Self-check: `cargo test -p ss-usage --lib --locked devin_desktop::login`。再点一次「登录」，浏览器完成后应出现账号，而不是这条失败。复发时先看回调 `access_token` 是不是又被送进 `RegisterUser`。
 
 ## 2026-10-07 - 导入框最近仓库滚轮翻不动
 
@@ -195,7 +226,7 @@
 
 - Symptom: `~/.agents/.skill-lock.json` 被更新的 `npx skills` 写过，或文件损坏之后，SkillStar 一次安装或卸载把锁变成几乎为空。其他工具写下的条目消失，技能还在磁盘上，但失去来源。
 - Root cause: 写侧把解析失败和版本不符都当成「没有锁」，用默认空对象覆盖。读侧展示成空是安全的；写侧覆盖不是。
-- Fix: 过新或损坏先做滚动备份，再拒绝写入。安装和卸载在改目录之前就失败。旧 schema 仍在写入时备份后从空锁重写，与 vercel 一致。显式恢复才是 `skill_lock::reset_after_backup`。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
+- Fix: 过新或损坏先做滚动备份，再拒绝写入。安装和卸载在改目录之前就失败。旧 schema 仍在写入时备份后从空锁重写。显式恢复才是 `skill_lock::reset_after_backup`。规则见 [技能生命周期](./features/skills/README.md#生命周期)。
 - Self-check: `skill_lock_tests` 里版本过新或损坏的写入必须失败，原文件还在。新的写锁路径走 `mutate` 或 `load_for_write`，不要 `load()` 之后直接 `save`。
 
 ## 2026-10-07 - 内容 hash 拼接碰撞把不同目录当成同一份
@@ -211,6 +242,7 @@
 - Root cause: gpui-component 0.7.1 的 Dialog::button_props 只保存回调。普通 Dialog 绘制时不读它；只有 AlertDialog 在没有自定义 footer 时才画出默认按钮。垂直位置在 margin_top 缺省时是视口高度的十分之一。AlertDialog 不公开 margin_top，调用方改不了。
 - Fix: chrome/dialog.rs 自己画取消和确认按钮（卸载、删除、移除用 danger，其余提交用 primary），并用下一帧量到的高度设置 margin_top，把卡片放到窗口正中。导入框自己有按钮，只走居中。输入 entity 仍须在 open_dialog 之前创建。
 - Self-check: cargo test -p ss-gpui --locked dialog::tests。打开技能页勾选技能点卸载，确认框应在窗口正中，底部有「取消」和红色「卸载」。复发时先看新的 open_dialog 是否又只设了 button_props。
+- 2026-10-08 更新：确认类弹窗已全部改回 kit 的 AlertDialog——`open_confirm`、`open_form_dialog` 都封装 `open_alert_dialog`，账号页的重置额度确认（含勾选确认）同迁。footer 按钮由 kit 绘制，位置接受 kit 契约（视口十分之一，入场为落点上方的原地弹出）；测试用 `dispatch_action(Confirm)` 触发提交、`debug_bounds("dialog-0")` 断言开合。自绘 footer 与量高居中只保留给 `open_centered` 的自定义弹窗（导入框、分享、阅读器）。本条根因里「普通 Dialog 不渲染 `button_props`」仍对那条路径成立。
 
 ## 2026-10-06 - 启用 Agent 后技能卡轮播 SVG 不立刻出现
 
@@ -253,6 +285,20 @@
 - Root cause: `get_leaderboard_local` 一次交回整份榜单（SSR 约 600 行，再加搜索 API 补充，大约 600–800 张卡片）。GPUI 的滚动和 `.hover()` 都会 `notify` 当前 view，于是每一帧都把全部卡片重建并交给 Taffy。卡片上的 `line_clamp` 还要做文本测量。
 - Fix: `crates/ss-gpui/src/marketplace/card.rs` 用 `uniform_list` 按行虚拟化，只构建视口内的行；行高固定，否则第一行的高度会被套到后面每一行上。这只行高就是三张页面卡共用的外框 `skill_card::{CARD_W, CARD_H}`，技能页、市场瓦片（含发布者）和卡组共用它；卡组多出来的技能和 Agent 在卡片内部滚动，外框不跟着变高。改矮会裁切，改高会让虚拟列表行距和真实卡片错开。搜索输入 200ms 防抖，进行中的更早一次加载用 `load_epoch` 丢弃。列数按 `layout.rs` 的展开侧栏和固定的 `SKILL_CARD_W` 计算。卡片不拉伸，所以收起侧栏后若多出一列，也不会把卡片裁掉或拉宽。不要把轨道改回 `flex_1`。
 - Self-check: `cargo test -p ss-gpui --locked columns_follow_the_card_pitch`。复发时先看市场列表是不是又退回 `card_grid` 把 `self.skills` 全铺进一棵元素树；发布者详情（`marketplace/publisher`）仍是全量网格，仓库技能很多时会以同样的方式卡。
+
+## 2026-10-08 - 刷新额度后 ZCode 报 Account request credential is unavailable
+
+- Symptom: SkillStar 刷新账号额度后，ZCode 的 `account:bigmodel-individual-coding-plan` 请求失败，重新登录才能恢复。
+- Root cause: 通用刷新收尾无条件调用 IDE sync，ZCode sync 复用了切号写回，将官方 `oauth:bigmodel:user_info` 覆盖成只有 ID、邮箱等摘要的 JSON。本机 ZCode 的 `OAuthCredentialRepo.loadUserProfile` 要求字符串 `id`、`username`、`displayName`；资料缺字段返回 null，`AccountProviderRequestAuthService` 因此无法解析账号请求凭据。仅验证加密往返无法发现这种客户端协议错误。
+- Fix: ZCode 额度查询不轮换令牌，`sync_after_refresh` 跳过客户端写回；显式切号/手动同步保留同身份的完整官方资料，生成资料时补齐客户端必需字段，缺 ID 拒绝覆盖。行为契约见 [Usage](./features/usage/README.md#zcode-特例billing-请求必须带设备标识)。
+- Self-check: `cargo test -p ss-usage --locked zcode`；`refresh_preserves_the_bigmodel_request_identity` 在临时 HOME 中走实际刷新同步入口，断言凭据与设置字节不变、手动同步保留官方资料、跨账号切号不沿用旧身份。
+
+## 2026-10-08 - 额度刷新无变化也重写客户端，令牌轮换覆盖私有字段
+
+- Symptom: 同源排查中，测试复现 Windsurf/Kiro 查询后无条件重写登录、Kiro 认证 JSON 和 Codex 嵌套 `tokens` 丢失附加字段、Antigravity OAuth protobuf 丢失未知字段，以及 Cursor 查询期间手动切号被旧 pin 覆盖。
+- Root cause: 刷新收尾只有成功/失败判断，没有比较网络请求前后的实际令牌；IDE sync 复用了完整切号写回，也没有核对网络等待期间客户端是否已换会话。解密回读只验证已知字段，看不到被删除的客户端资料。
+- Fix: 以 adopt 后的会话为基线，对比令牌明文与有效期；只读 IDE 默认不写回，允许轮换的平台写前比对原会话。Kiro 只更新认证字段，不重建 profile/usage/registration；Codex 保留同身份 token 对象的扩展字段；Antigravity 对现有 protobuf 原位替换 token/expiry 字段。CLI 已退出或自行轮换时跳过写回，最新 live 文件优先于旧 snapshot。行为契约见 [Usage](./features/usage/README.md#oauth-与刷新)。
+- Self-check: `cargo test -p ss-usage --locked`。`refresh_window`、`sync_projects_a_refreshed_subscription` 和 `codex_refresh_preserves_client_fields_and_newer_logins` 覆盖无变化、必要轮换、会话变更与字段保留；protobuf 测试验证多层未知字段和损坏输入。测试只用临时 HOME，真实客户端重启后的认证仍需运行验证。
 
 ## 2026-10-05 - ZCode 配额 400 code 3001：billing/balance 开始强制 X-Device-Mid
 

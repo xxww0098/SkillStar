@@ -8,7 +8,6 @@
 
 use anyhow::{Context, Result};
 use ss_core::infra::{fs_ops, paths as fs_paths};
-use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
 
@@ -39,7 +38,6 @@ pub fn import_scanned_skills(
     std::fs::create_dir_all(&hub_dir)
         .with_context(|| format!("failed to create hub dir: {}", hub_dir.display()))?;
 
-    // Preserve any previously chosen owner for shared project paths.
     let mut existing = load_skills_list(&canonical_project_name)
         .or_else(|| {
             if project_name != canonical_project_name.as_str() {
@@ -49,19 +47,6 @@ pub fn import_scanned_skills(
             }
         })
         .unwrap_or_default();
-
-    let mut owner_by_path: HashMap<String, String> = HashMap::new();
-    for agent_id in existing.agents.keys() {
-        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
-            continue;
-        };
-        if !profile.has_project_skills() {
-            continue;
-        }
-        owner_by_path
-            .entry(profile.project_skills_rel.clone())
-            .or_insert_with(|| agent_id.clone());
-    }
 
     let mut imported_to_hub = Vec::new();
     let mut symlink_count = 0u32;
@@ -100,14 +85,6 @@ pub fn import_scanned_skills(
             );
             continue;
         }
-
-        let effective_agent_id = owner_by_path
-            .get(&source_profile.project_skills_rel)
-            .cloned()
-            .unwrap_or_else(|| target.agent_id.clone());
-        owner_by_path
-            .entry(source_profile.project_skills_rel.clone())
-            .or_insert_with(|| effective_agent_id.clone());
 
         let hub_skill_dir = hub_dir.join(&target.name);
 
@@ -153,10 +130,13 @@ pub fn import_scanned_skills(
 
         symlink_count += 1;
 
-        let agent_skills = existing.agents.entry(effective_agent_id).or_default();
-        if !agent_skills.contains(&target.name) {
-            agent_skills.push(target.name.clone());
-        }
+        super::owner::collapse_shared_path(
+            &mut existing,
+            &profiles,
+            &source_profile.project_skills_rel,
+            &target.agent_id,
+            std::slice::from_ref(&target.name),
+        );
     }
 
     existing.updated_at = chrono::Utc::now().to_rfc3339();

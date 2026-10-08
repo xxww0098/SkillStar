@@ -25,8 +25,8 @@ pub use types::*;
 
 use std::time::Duration;
 
+use crate::notify::Notice;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use ss_core::types::skill::Skill;
 use ss_marketplace::OfficialPublisher;
@@ -311,7 +311,8 @@ impl MarketplacePage {
                 this.refreshing = false;
                 match res {
                     Ok(_) => {
-                        this.status_message = Some("Snapshot synced".to_string());
+                        this.status_message =
+                            Some(crate::i18n::t("marketplace.snapshotSynced").to_string());
                         this.load_now(cx, false);
                         // The backfill round the sync spawned is still running;
                         // re-read once more when it has had time to write.
@@ -328,7 +329,7 @@ impl MarketplacePage {
                         .detach();
                     }
                     Err(err) => {
-                        this.snapshot_error = Some(format!("Sync failed: {err}"));
+                        this.snapshot_error = Some(err.to_string());
                     }
                 }
                 this.revise(cx);
@@ -366,10 +367,10 @@ impl MarketplacePage {
                 match res {
                     Ok(name) => {
                         crate::notify::toast(
-                            Notification::success(if install {
-                                format!("Installed {name}")
+                            Notice::success(if install {
+                                crate::i18n::tf("marketplace.installedName", &[("name", &name)])
                             } else {
-                                format!("Uninstalled {name}")
+                                crate::i18n::tf("marketplace.uninstalledName", &[("name", &name)])
                             }),
                             cx,
                         );
@@ -383,10 +384,14 @@ impl MarketplacePage {
                     }
                     Err(err) => {
                         crate::notify::toast(
-                            Notification::error(format!(
-                                "{} failed: {err}",
-                                if install { "Install" } else { "Uninstall" }
-                            )),
+                            Notice::error(if install {
+                                crate::i18n::tf("marketplace.installFailedDetail", &[("err", &err)])
+                            } else {
+                                crate::i18n::tf(
+                                    "marketplace.uninstallFailedDetail",
+                                    &[("err", &err)],
+                                )
+                            }),
                             cx,
                         );
                     }

@@ -9,10 +9,11 @@
 
 use std::collections::HashSet;
 
+use crate::notify::Notice;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::WindowExt;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -25,6 +26,18 @@ use crate::theme::palette;
 const EMOJI_OPTIONS: &[&str] = &[
     "💻", "🚀", "🎨", "🔧", "📦", "🧪", "📊", "🔐", "🌐", "📝", "⚡", "🤖", "🛠️", "📱", "🎯", "🧩",
 ];
+
+/// Rows that fit before the member picker has to scroll.
+const PICKER_VISIBLE: usize = 5;
+/// Picker viewport height. A `max_h` on the scrollable does not create wheel
+/// overflow: the wrapper leaves it on the content, which is then clamped to
+/// the viewport height and the wheel offset back to zero.
+const PICKER_VIEW_H: f32 = 160.0;
+/// Picked members that fit before the pill strip has to scroll (roughly five
+/// wrapped rows at the 512px dialog width).
+const PILLS_VISIBLE: usize = 20;
+/// Pill-strip viewport height, same `max_h` caveat as [`PICKER_VIEW_H`].
+const PILLS_VIEW_H: f32 = 140.0;
 
 /// Deck-write notification — the opener refreshes whatever page it owns
 /// (Skill Cards reloads itself; Quick Pack emits `GroupsChanged`).
@@ -40,6 +53,10 @@ pub(crate) struct CreateGroupDialog {
     members: HashSet<String>,
     /// (name, description) for every installed skill — member picker rows.
     all: Vec<(String, String)>,
+    /// Set once the background picker load has applied its result. The load
+    /// runs on the domain tokio runtime, so tests must wait for this before
+    /// seeding `all`, or the late callback overwrites the fixture.
+    picker_loaded: bool,
     /// Existing group names, for the duplicate-name guard.
     names: Vec<String>,
     /// Default name handed to the name field on the first render —
@@ -87,6 +104,7 @@ impl CreateGroupDialog {
             emoji_open: false,
             members: members.into_iter().collect(),
             all: Vec::new(),
+            picker_loaded: false,
             names: Vec::new(),
             seed,
             focus_name: true,
@@ -115,6 +133,7 @@ impl CreateGroupDialog {
                     .map(|s| (s.name, s.description))
                     .collect();
                 this.names = names.unwrap_or_default();
+                this.picker_loaded = true;
             },
         );
         this
@@ -142,7 +161,7 @@ impl CreateGroupDialog {
                 (self.on_created)(window, cx);
                 window.close_dialog(cx);
             }
-            Err(err) => crate::notify::toast(Notification::error(format!("{err:#}")), cx),
+            Err(err) => crate::notify::toast(Notice::error(format!("{err:#}")), cx),
         }
     }
 
@@ -232,9 +251,7 @@ impl CreateGroupDialog {
                     } else {
                         palette().border
                     }))
-                    .when(self.emoji_open, |d| {
-                        d.bg(rgb(palette().accent).alpha(0.05))
-                    })
+                    .when(self.emoji_open, |d| d.bg(rgb(palette().accent).alpha(0.05)))
                     .child(self.icon.clone())
                     .on_click(move |_, _window, cx| {
                         let _ = emoji_view.update(cx, |this, cx| {
@@ -291,7 +308,12 @@ impl CreateGroupDialog {
         // ── Selected member pills ─────────────────────────────────
         if !self.members.is_empty() {
             let installed: HashSet<&String> = self.all.iter().map(|(n, _)| n).collect();
-            let mut pills = div().flex().flex_wrap().gap(px(6.0)).pr_1();
+            let mut pills = div()
+                .flex()
+                .flex_wrap()
+                .gap(px(6.0))
+                .pr_1()
+                .debug_selector(|| "pack-pills-rows".into());
             // Installed members first, orphans after — React's pill sort.
             let mut members: Vec<String> = self.members.iter().cloned().collect();
             members.sort_by_key(|n| !installed.contains(n));
@@ -361,7 +383,21 @@ impl CreateGroupDialog {
                     );
                 pills = pills.child(pill);
             }
-            body = body.child(div().max_h(px(140.0)).overflow_y_scrollbar().child(pills));
+            // More than a few wrapped rows scroll inside a fixed viewport;
+            // fewer render at their natural height. See [`PICKER_VIEW_H`].
+            let scroll = self.members.len() > PILLS_VISIBLE;
+            body = body.child(if scroll {
+                div()
+                    .h(px(PILLS_VIEW_H))
+                    .w_full()
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .debug_selector(|| "pack-pills-viewport".into())
+                    .child(div().id("pack-pills").overflow_y_scrollbar().child(pills))
+                    .into_any_element()
+            } else {
+                pills.into_any_element()
+            });
         }
 
         // ── Search + select-all ───────────────────────────────────
@@ -432,7 +468,11 @@ impl CreateGroupDialog {
         );
 
         // ── Member list ───────────────────────────────────────────
-        let mut rows = div().flex().flex_col().gap(px(2.0));
+        let mut rows = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .debug_selector(|| "pack-picker-rows".into());
         if self.all.is_empty() {
             rows = rows.child(
                 div()
@@ -456,6 +496,8 @@ impl CreateGroupDialog {
             let picked = self.members.contains(skill_name);
             let name = skill_name.clone();
             let toggle = view.clone();
+            let check_name = skill_name.clone();
+            let check_toggle = view.clone();
             rows = rows.child(
                 div()
                     .id(ElementId::named_usize("pack-row", ix))
@@ -468,23 +510,20 @@ impl CreateGroupDialog {
                     .cursor_pointer()
                     .when(picked, |d| d.bg(rgb(palette().accent).alpha(0.05)))
                     .child(
-                        div()
-                            .size(px(16.0))
-                            .flex_shrink_0()
-                            .rounded(px(4.0))
-                            .border(px(1.5))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(picked, |d| {
-                                d.bg(rgb(palette().accent))
-                                    .border_color(rgb(palette().accent))
-                            })
-                            .when(!picked, |d| {
-                                d.border_color(rgb(palette().fg_muted).alpha(0.30))
-                            })
-                            .when(picked, |d| {
-                                d.child(icon(IconName::Check, 10.0, palette().on_accent))
+                        Checkbox::new(ElementId::named_usize("pack-check", ix))
+                            .checked(picked)
+                            .on_click(move |checked, _, cx| {
+                                // The row owns clicks elsewhere on it; a
+                                // checkbox click must not also fire the row.
+                                cx.stop_propagation();
+                                let _ = check_toggle.update(cx, |this, cx| {
+                                    if *checked {
+                                        this.members.insert(check_name.clone());
+                                    } else {
+                                        this.members.remove(&check_name);
+                                    }
+                                    cx.notify();
+                                });
                             }),
                     )
                     .child(
@@ -531,13 +570,27 @@ impl CreateGroupDialog {
                     ),
             );
         }
-        body = body.child(
+        // More rows than the viewport holds scroll inside a fixed height;
+        // fewer render at their natural height. See [`PICKER_VIEW_H`].
+        let picker_scroll = filtered.len() > PICKER_VISIBLE;
+        body = body.child(if picker_scroll {
             div()
-                .max_h(px(160.0))
-                .overflow_y_scrollbar()
-                .rounded_lg()
-                .child(rows),
-        );
+                .h(px(PICKER_VIEW_H))
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .debug_selector(|| "pack-picker-viewport".into())
+                .child(
+                    div()
+                        .id("pack-picker")
+                        .overflow_y_scrollbar()
+                        .rounded_lg()
+                        .child(rows),
+                )
+                .into_any_element()
+        } else {
+            div().rounded_lg().child(rows).into_any_element()
+        });
 
         // ── Footer + emoji overlay ────────────────────────────────
         let cancel = view.clone();
@@ -652,9 +705,8 @@ pub(crate) fn open_create_group(
     cx: &mut App,
     on_created: impl Fn(&mut Window, &mut App) + 'static,
 ) {
-    let entity = cx.new(|cx| {
-        CreateGroupDialog::new(window, cx, None, Vec::new(), Box::new(on_created))
-    });
+    let entity =
+        cx.new(|cx| CreateGroupDialog::new(window, cx, None, Vec::new(), Box::new(on_created)));
     crate::chrome::open_centered(
         window,
         cx,
@@ -704,4 +756,162 @@ fn header() -> Div {
                 .text_color(rgb(palette().fg))
                 .child(crate::i18n::t("createGroupModal.newGroup")),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::component::Root;
+    use gpui_kit::{
+        AppContext, Context, IntoElement, ParentElement, Render, ScrollDelta, ScrollWheelEvent,
+        Styled, Window, div, point, px, size,
+    };
+
+    use super::CreateGroupDialog;
+    use crate::test_support::IsolatedDataDir;
+
+    /// The dialog's column is 512px wide on the real surface; the pill strip
+    /// wraps against that width, so the host has to match it.
+    struct GroupHost {
+        dialog: gpui_kit::Entity<CreateGroupDialog>,
+    }
+
+    impl Render for GroupHost {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .flex()
+                .justify_center()
+                .child(div().w(px(512.0)).child(self.dialog.clone()))
+        }
+    }
+
+    fn paint(cx: &mut gpui_kit::VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn seeded<'a>(
+        cx: &'a mut gpui_kit::TestAppContext,
+        all: Vec<(String, String)>,
+        members: Vec<String>,
+    ) -> (
+        &'a mut gpui_kit::VisualTestContext,
+        gpui_kit::Entity<CreateGroupDialog>,
+    ) {
+        crate::init_test(cx);
+        let built = std::rc::Rc::new(std::cell::RefCell::<
+            Option<gpui_kit::Entity<CreateGroupDialog>>,
+        >::default());
+        let sink = built.clone();
+        let (_root, cx) = cx.add_window_view(move |window, cx| {
+            // The view closure can run again on a window rebuild — reuse the
+            // entity so fixtures seeded on it keep driving what is on screen.
+            let dialog = {
+                let mut slot = sink.borrow_mut();
+                slot.get_or_insert_with(|| {
+                    cx.new(|cx| {
+                        CreateGroupDialog::new(window, cx, None, Vec::new(), Box::new(|_, _| {}))
+                    })
+                })
+                .clone()
+            };
+            let host = cx.new(|_| GroupHost {
+                dialog: dialog.clone(),
+            });
+            Root::new(host, window, cx)
+        });
+        let dialog = built
+            .borrow()
+            .as_ref()
+            .expect("the dialog entity was never built")
+            .clone();
+        // Let the background picker load (empty under the isolated data dir)
+        // before the fixture list goes in, and let it finish before the test
+        // starts scrolling: the load lands on the domain tokio runtime, whose
+        // completion `run_until_parked` cannot observe — a late callback
+        // would otherwise swap the seeded list for the empty one mid-test.
+        // Yielding real time is what lets the runtime thread get scheduled
+        // while the test binary is fighting the parallel suites for CPUs.
+        for _ in 0..500 {
+            if cx.update(|_window, app| dialog.read(app).picker_loaded) {
+                break;
+            }
+            cx.run_until_parked();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        cx.update(|_window, app| {
+            dialog.update(app, |this, _| {
+                this.all = all;
+                this.members = members.into_iter().collect();
+            });
+        });
+        cx.simulate_resize(size(px(1200.), px(800.)));
+        (cx, dialog)
+    }
+
+    fn wheel_down(
+        cx: &mut gpui_kit::VisualTestContext,
+        selector: &'static str,
+        rows: &'static str,
+    ) {
+        let port = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector}"));
+        let before = cx
+            .debug_bounds(rows)
+            .unwrap_or_else(|| panic!("{rows}"))
+            .origin
+            .y;
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(port.origin.x + px(32.0), port.origin.y + px(40.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-280.0))),
+            ..Default::default()
+        });
+        paint(cx);
+        let after = cx
+            .debug_bounds(rows)
+            .unwrap_or_else(|| panic!("{rows}"))
+            .origin
+            .y;
+        assert!(
+            after < before,
+            "the wheel did not scroll {rows}: before {before:?} after {after:?} port {port:?}"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn the_wheel_moves_a_long_member_list(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        let all = (0..12)
+            .map(|ix| (format!("skill-number-{ix:02}"), String::new()))
+            .collect();
+        let (cx, _dialog) = seeded(cx, all, Vec::new());
+        paint(cx);
+        let port = cx
+            .debug_bounds("pack-picker-viewport")
+            .expect("picker viewport");
+        assert!(
+            port.size.height <= px(200.0),
+            "the picker viewport grew with its content: {port:?}"
+        );
+        wheel_down(cx, "pack-picker-viewport", "pack-picker-rows");
+    }
+
+    #[gpui_kit::test]
+    fn the_wheel_moves_a_long_pill_strip(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        let all = (0..24)
+            .map(|ix| (format!("skill-number-{ix:02}"), String::new()))
+            .collect();
+        let members = (0..24).map(|ix| format!("skill-number-{ix:02}")).collect();
+        let (cx, _dialog) = seeded(cx, all, members);
+        paint(cx);
+        let port = cx
+            .debug_bounds("pack-pills-viewport")
+            .expect("pill viewport");
+        assert!(
+            port.size.height <= px(180.0),
+            "the pill viewport grew with its content: {port:?}"
+        );
+        wheel_down(cx, "pack-pills-viewport", "pack-pills-rows");
+    }
 }

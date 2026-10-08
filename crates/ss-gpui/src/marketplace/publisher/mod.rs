@@ -7,9 +7,9 @@ mod board;
 mod card;
 mod hero;
 
+use crate::notify::Notice;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use ss_core::types::skill::Skill;
 use ss_marketplace::snapshot::{
@@ -227,7 +227,8 @@ impl PublisherDetailPage {
                 this.refreshing = false;
                 match res {
                     Ok(_) => {
-                        this.status_message = Some("Snapshot refreshed".to_string());
+                        this.status_message =
+                            Some(crate::i18n::t("marketplace.snapshotRefreshed").to_string());
                         if let Some(active) = this.active_repo.clone() {
                             this.load_repo_skills(cx, &active);
                         } else {
@@ -235,7 +236,7 @@ impl PublisherDetailPage {
                         }
                     }
                     Err(err) => {
-                        this.snapshot_error = Some(format!("Sync error: {err}"));
+                        this.snapshot_error = Some(err.to_string());
                     }
                 }
                 this.revise(cx);
@@ -267,10 +268,10 @@ impl PublisherDetailPage {
                 match res {
                     Ok(name) => {
                         crate::notify::toast(
-                            Notification::success(if install {
-                                format!("Installed {name}")
+                            Notice::success(if install {
+                                crate::i18n::tf("marketplace.installedName", &[("name", &name)])
                             } else {
-                                format!("Uninstalled {name}")
+                                crate::i18n::tf("marketplace.uninstalledName", &[("name", &name)])
                             }),
                             cx,
                         );
@@ -281,10 +282,14 @@ impl PublisherDetailPage {
                     }
                     Err(err) => {
                         crate::notify::toast(
-                            Notification::error(format!(
-                                "{} failed: {err}",
-                                if install { "Install" } else { "Uninstall" }
-                            )),
+                            Notice::error(if install {
+                                crate::i18n::tf("marketplace.installFailedDetail", &[("err", &err)])
+                            } else {
+                                crate::i18n::tf(
+                                    "marketplace.uninstallFailedDetail",
+                                    &[("err", &err)],
+                                )
+                            }),
                             cx,
                         );
                     }

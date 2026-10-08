@@ -1,5 +1,6 @@
-//! group-card. One expandable row per skill group, with its agent links,
-//! duplicate/delete commands, and the skill rows it reveals.
+//! group-card. One expandable card per skill group, with its skill-name
+//! chips, count badge, duplicate/delete commands, and the shared agent
+//! carousel in the footer.
 //!
 //! The outer box is `crate::skill_card::card_shell`. The page module keeps
 //! state and commands; this file paints one card.
@@ -16,7 +17,10 @@ use super::SkillCardsPage;
 use crate::chrome::icon;
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::layout::CARD_ROW_W;
-use crate::skill_card::{CardFace, CardShell, CardWidth, card_shell};
+use crate::skill_card::{
+    AgentRailClick, AgentRailSlot, CardFace, CardShell, CardWidth, agent_footer_bar, agent_rail,
+    card_shell, targetable_agent_profiles,
+};
 use crate::theme::palette;
 
 impl SkillCardsPage {
@@ -97,6 +101,48 @@ impl SkillCardsPage {
                     .flex()
                     .items_center()
                     .gap_1()
+                    // The deck's one number rides with the header actions:
+                    // left of copy, in the slot the skill card gives stars.
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .flex_shrink_0()
+                            .px_2()
+                            .py(px(2.0))
+                            .rounded_md()
+                            .bg(rgb(palette().card_hover))
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(palette().accent_fg))
+                            .child(icon(IconName::Layers, 12.0, palette().accent))
+                            .child(crate::i18n::tf(
+                                "skillCards.skillsCount",
+                                &[("count", &total_skills.to_string())],
+                            )),
+                    )
+                    .child(
+                        div()
+                            .id(ElementId::Name(format!("share-btn-{id}").into()))
+                            .p_1()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .interaction_spring(
+                                format!("share-btn-{id}"),
+                                true,
+                                MotionPaint::new(),
+                                MotionPaint::new().bg(rgb(palette().card)),
+                            )
+                            .child(icon(IconName::Share2, 14.0, palette().fg_muted))
+                            .on_click({
+                                let group_clone = group.clone();
+                                move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    super::share_sheet::open_share_sheet(&group_clone, window, cx);
+                                }
+                            }),
+                    )
                     .child(
                         div()
                             .id(ElementId::Name(format!("dup-btn-{id}").into()))
@@ -113,6 +159,7 @@ impl SkillCardsPage {
                             .on_click({
                                 let view = view.clone();
                                 move |_, _, cx| {
+                                    cx.stop_propagation();
                                     let _ = view.update(cx, |this, cx| {
                                         if let Ok(_) = duplicate_group(&dup_id) {
                                             this.refresh(cx);
@@ -138,13 +185,17 @@ impl SkillCardsPage {
                                 let view = view.clone();
                                 let group_name = group_name.clone();
                                 move |_, window, cx| {
+                                    cx.stop_propagation();
                                     let view = view.clone();
                                     let del_id = del_id.clone();
                                     let group_name = group_name.clone();
                                     crate::chrome::open_confirm(
                                         window,
                                         cx,
-                                        format!("Delete \"{group_name}\"?"),
+                                        crate::i18n::tf(
+                                            "skillCards.deleteDeckTitle",
+                                            &[("name", &group_name)],
+                                        ),
                                         crate::i18n::t("skillCards.deleteDeckHint"),
                                         crate::i18n::t("common.delete"),
                                         true,
@@ -165,39 +216,23 @@ impl SkillCardsPage {
                     ),
             );
 
-        let meta_row = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .pt_1()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .px_2()
-                    .py(px(2.0))
-                    .rounded_md()
-                    .bg(rgb(palette().card_hover))
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(palette().accent_fg))
-                    .child(icon(IconName::Layers, 12.0, palette().accent))
-                    .child(format!("{total_skills} skills")),
-            )
-            .when(missing_count > 0, |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .px_1()
-                        .text_xs()
-                        .text_color(rgb(palette().warn))
-                        .child(icon(IconName::TriangleAlert, 12.0, palette().warn))
-                        .child(format!("{missing_count} missing")),
-                )
-            });
+        // The count badge moved up to the header actions; the body keeps
+        // only the missing-skills warning.
+        let missing_row = (missing_count > 0).then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .pt_1()
+                .px_1()
+                .text_xs()
+                .text_color(rgb(palette().warn))
+                .child(icon(IconName::TriangleAlert, 12.0, palette().warn))
+                .child(crate::i18n::tf(
+                    "skillCards.missingCount",
+                    &[("count", &missing_count.to_string())],
+                ))
+        });
 
         let max_visible_collapsed = 4;
         let visible_skills: Vec<&String> = if expanded {
@@ -242,7 +277,10 @@ impl SkillCardsPage {
                     .rounded_md()
                     .text_xs()
                     .text_color(rgb(palette().fg_muted))
-                    .child(format!("+{} more", total_skills - max_visible_collapsed)),
+                    .child(crate::i18n::tf(
+                        "common.moreCount",
+                        &[("count", &(total_skills - max_visible_collapsed).to_string())],
+                    )),
             );
         }
 
@@ -252,139 +290,60 @@ impl SkillCardsPage {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let mut agent_row = div()
-            .mt_1()
-            .pt_2()
-            .border_t_1()
-            .border_color(rgb(palette().border))
-            .flex()
-            .flex_col()
-            .gap_1_5();
-
-        let header_deploy = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(palette().fg_muted))
-                    .child(crate::i18n::t("skillCards.deployToAgent")),
-            )
+        // The footer is the same carousel the skill card rides: one brand
+        // icon per targetable agent, linked slots highlighted. A slot click
+        // toggles the deck's link; the rocket deploys to every agent at once.
+        let slots: Vec<AgentRailSlot> = targetable_agent_profiles(&self.profiles)
+            .map(|profile| AgentRailSlot {
+                id: profile.id.clone(),
+                linked: group_links.contains(&profile.id),
+                pending: false,
+            })
+            .collect();
+        let rail_click: AgentRailClick = {
+            let view = view.clone();
+            let group_clone = group.clone();
+            std::rc::Rc::new(move |slot, cx| {
+                let _ = view.update(cx, |this, cx| {
+                    this.toggle_agent_for_deck(&group_clone, &slot.id, cx);
+                });
+            })
+        };
+        let deploy_label = crate::i18n::t("skillCards.deployAll");
+        let footer = agent_footer_bar()
             .child(
                 div()
                     .id(ElementId::Name(format!("deploy-all-{id}").into()))
                     .flex()
                     .items_center()
-                    .gap_1()
-                    .px_2()
-                    .py(px(2.0))
-                    .rounded_md()
+                    .justify_center()
+                    .size(px(28.0))
+                    .flex_shrink_0()
+                    .rounded(px(12.0))
                     .bg(rgb(palette().accent))
-                    .text_color(rgb(palette().on_accent))
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
                     .cursor_pointer()
+                    .tooltip(move |window, cx| {
+                        crate::chrome::tooltip(deploy_label.clone()).build(window, cx)
+                    })
+                    .child(icon(IconName::Rocket, 14.0, palette().on_accent))
+                    .on_click({
+                        let view = view.clone();
+                        let group_clone = group.clone();
+                        move |_, _, cx| {
+                            cx.stop_propagation();
+                            let _ = view.update(cx, |this, cx| {
+                                this.deploy_all_for_deck(&group_clone, cx);
+                            });
+                        }
+                    })
                     .interaction_spring(
                         format!("deploy-all-{id}"),
                         true,
                         MotionPaint::new().opacity(1.0),
                         MotionPaint::new().opacity(0.9),
-                    )
-                    .child(icon(IconName::Rocket, 11.0, palette().on_accent))
-                    .child(crate::i18n::t("skillCards.deployAll"))
-                    .on_click({
-                        let view = view.clone();
-                        let group_clone = group.clone();
-                        move |_, _, cx| {
-                            let _ = view
-                                .update(cx, |this, cx| this.deploy_all_for_deck(&group_clone, cx));
-                        }
-                    }),
-            );
-
-        agent_row = agent_row.child(header_deploy);
-
-        let mut agent_chips = div().flex().flex_wrap().gap_1();
-        for profile in &self.profiles {
-            if !profile.enabled {
-                continue;
-            }
-            let agent_id = profile.id.clone();
-            let is_linked = group_links.contains(&agent_id);
-
-            let pill = div()
-                .id(ElementId::Name(
-                    format!("agent-link-{id}-{agent_id}").into(),
-                ))
-                .flex()
-                .items_center()
-                .gap_1()
-                .px_2()
-                .py(px(2.0))
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(if is_linked {
-                    palette().accent
-                } else {
-                    palette().border
-                }))
-                .bg(rgb(if is_linked {
-                    palette().accent_soft
-                } else {
-                    palette().card_hover
-                }))
-                .text_xs()
-                .cursor_pointer()
-                .text_color(rgb(if is_linked {
-                    palette().fg
-                } else {
-                    palette().fg_muted
-                }))
-                .interaction_spring(
-                    format!("agent-link-{id}-{agent_id}"),
-                    true,
-                    MotionPaint::new()
-                        .bg(rgb(if is_linked {
-                            palette().accent_soft
-                        } else {
-                            palette().card_hover
-                        }))
-                        .fg(rgb(if is_linked {
-                            palette().fg
-                        } else {
-                            palette().fg_muted
-                        }))
-                        .opacity(1.0),
-                    MotionPaint::new()
-                        .bg(rgb(if is_linked {
-                            palette().accent_soft
-                        } else {
-                            palette().card_hover
-                        }))
-                        .fg(rgb(palette().fg))
-                        .opacity(1.0),
-                )
-                .when(is_linked, |d| {
-                    d.child(icon(IconName::Check, 10.0, palette().ok))
-                })
-                .child(profile.display_name.clone())
-                .on_click({
-                    let view = view.clone();
-                    let group_clone = group.clone();
-                    let agent_id = agent_id.clone();
-                    move |_, _, cx| {
-                        let _ = view.update(cx, |this, cx| {
-                            this.toggle_agent_for_deck(&group_clone, &agent_id, cx)
-                        });
-                    }
-                });
-
-            agent_chips = agent_chips.child(pill);
-        }
-
-        agent_row = agent_row.child(agent_chips);
+                    ),
+            )
+            .child(agent_rail("deck", &id, &slots, rail_click));
 
         card_shell(CardShell {
             id: ElementId::Name(format!("deck-{id}").into()),
@@ -413,10 +372,10 @@ impl SkillCardsPage {
                 .gap_1()
                 .px_3()
                 .pb_3()
-                .child(meta_row)
-                .child(chips)
-                .child(agent_row),
+                .when_some(missing_row, |d, row| d.child(row))
+                .child(chips),
         )
+        .child(footer)
         .on_click(move |_, _, cx| {
             let id = id.clone();
             let _ = view.update(cx, |this, cx| {

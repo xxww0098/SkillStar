@@ -1,6 +1,6 @@
 //! SkillStar's own record of each canonical Skill's content as installed.
 //!
-//! The vercel lock only carries the upstream git tree SHA, which says nothing
+//! The install lock only carries the upstream git tree SHA, which says nothing
 //! about edits made to the canonical copy afterwards. Every staged install
 //! records the content hash it just wrote here (`data/skills/
 //! install_baselines.json`), so the background auto-updater can refuse to

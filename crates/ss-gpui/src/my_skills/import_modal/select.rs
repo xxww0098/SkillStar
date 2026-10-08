@@ -4,6 +4,8 @@
 //! advisory vs blocking frontmatter badges, hover-reveal reinstall).
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::Disableable;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
@@ -15,6 +17,11 @@ use super::phases::count_pill;
 use crate::chrome::icon;
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::theme::palette;
+
+/// Rows that fit before the select list has to scroll. A `max_h` on the
+/// scrollable does not create wheel overflow — the wrapper leaves it on the
+/// content, which is then clamped to the viewport height.
+const SELECT_VISIBLE: usize = 7;
 
 impl ImportDialog {
     pub(super) fn render_select(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -270,17 +277,28 @@ impl ImportDialog {
                     })),
             );
         }
+        let select_scroll = filtered.len() > SELECT_VISIBLE;
         for skill in filtered {
             rows = rows.child(self.skill_row(skill, view.clone()));
         }
-        col = col.child(
+        col = col.child(if select_scroll {
             div()
                 .px(px(24.0))
                 .pb_2()
-                .max_h(list_max_h)
-                .overflow_y_scrollbar()
-                .child(rows),
-        );
+                .h(list_max_h)
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .child(
+                    div()
+                        .id("import-select-list")
+                        .overflow_y_scrollbar()
+                        .child(rows),
+                )
+                .into_any_element()
+        } else {
+            div().px(px(24.0)).pb_2().child(rows).into_any_element()
+        });
 
         // ── Install bar ────────────────────────────────────────────
         let install_view = view.clone();
@@ -442,6 +460,8 @@ impl ImportDialog {
         let blocking = !issues.is_empty() && !skill.installable;
         let group: SharedString = format!("import-row-{}", skill.folder_path).into();
         let toggle = view;
+        let check_id = skill.id.clone();
+        let check_toggle = toggle.clone();
 
         div()
             .id(ElementId::Name(row_id.clone()))
@@ -479,38 +499,28 @@ impl ImportDialog {
                     .gap_3()
                     .flex_1()
                     .min_w_0()
-                    // Checkbox — `w-4 h-4 rounded border-[1.5px]`
+                    // Selection checkbox. "Already installed" stays with the
+                    // row badge; the box only marks what the install bar
+                    // will act on.
                     .child(
-                        div()
-                            .size(px(16.0))
-                            .flex_shrink_0()
-                            .rounded(px(4.0))
-                            .border(px(1.5))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(selected, |d| {
-                                d.bg(rgb(palette().accent))
-                                    .border_color(rgb(palette().accent))
-                            })
-                            .when(installed && !selected, |d| {
-                                d.bg(rgb(palette().ok).alpha(0.20))
-                                    .border_color(rgb(palette().ok).alpha(0.40))
-                            })
-                            .when(!selected && !installed, |d| {
-                                d.border_color(rgb(palette().fg_muted).alpha(0.30))
-                            })
-                            .when(selected || installed, |d| {
-                                d.child(icon(
-                                    IconName::Check,
-                                    10.0,
-                                    if selected {
-                                        palette().on_accent
-                                    } else {
-                                        palette().ok
-                                    },
-                                ))
-                            }),
+                        Checkbox::new(ElementId::Name(
+                            format!("import-check-{}", skill.folder_path).into(),
+                        ))
+                        .checked(selected)
+                        .disabled(!skill.installable)
+                        .on_click(move |checked, _, cx| {
+                            // The row also toggles on click; a click that
+                            // landed on the checkbox must not fire both.
+                            cx.stop_propagation();
+                            let _ = check_toggle.update(cx, |this, cx| {
+                                if *checked {
+                                    this.selected.insert(check_id.clone());
+                                } else {
+                                    this.selected.remove(&check_id);
+                                }
+                                cx.notify();
+                            });
+                        }),
                     )
                     // Name + badges + description
                     .child(

@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::notification::Notification;
+use crate::notify::Notice;
 use gpui_kit::*;
 use ss_core::types::skill::SkillType;
 use ss_skills::git_skill::GitSkillFacade;
@@ -95,7 +95,7 @@ impl MySkillsPage {
                         }
                     }
                     Err(err) => crate::notify::toast(
-                        Notification::error(format!(
+                        Notice::error(format!(
                             "{}: {err:#}",
                             crate::i18n::t("mySkills.updateFailed")
                         )),
@@ -131,9 +131,9 @@ impl MySkillsPage {
                     Ok(states) if manual => {
                         let pending = states.iter().filter(|state| state.update_available).count();
                         let note = if pending == 0 {
-                            Notification::success(crate::i18n::t("mySkills.checkUpdatesNone"))
+                            Notice::success(crate::i18n::t("mySkills.checkUpdatesNone"))
                         } else {
-                            Notification::info(crate::i18n::tf(
+                            Notice::info(crate::i18n::tf(
                                 "mySkills.checkUpdatesFound",
                                 &[("count", &pending.to_string())],
                             ))
@@ -142,7 +142,7 @@ impl MySkillsPage {
                     }
                     Ok(_) => {}
                     Err(err) if manual => crate::notify::toast(
-                        Notification::error(format!(
+                        Notice::error(format!(
                             "{}: {err:#}",
                             crate::i18n::t("mySkills.checkUpdatesFailed")
                         )),
@@ -175,7 +175,7 @@ impl MySkillsPage {
 
 /// One toast for a batch update: what was updated, then everything that needs
 /// the user (failures, skips, renames, unrefreshed Agent or Project copies).
-fn report_notification(report: &SkillUpdateReport) -> Option<Notification> {
+fn report_notification(report: &SkillUpdateReport) -> Option<Notice> {
     let lines = report_lines(report);
     if lines.is_empty() {
         return None;
@@ -184,11 +184,11 @@ fn report_notification(report: &SkillUpdateReport) -> Option<Notification> {
     let failed = report.failed.len();
     let text = lines.join("\n");
     Some(if failed > 0 && updated == 0 {
-        Notification::error(text)
+        Notice::error(text)
     } else if failed == 0 && lines.len() == 1 && updated > 0 {
-        Notification::success(text)
+        Notice::success(text)
     } else {
-        Notification::warning(text)
+        Notice::warning(text)
     })
 }
 

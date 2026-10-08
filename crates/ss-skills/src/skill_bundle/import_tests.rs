@@ -113,6 +113,7 @@ fn a_tampered_multi_bundle_installs_nothing() {
             name: "alpha".into(),
             description: String::new(),
             file_count: 1,
+            source_url: None,
         }],
         checksum: import::checksum_for_test(&[b"original".as_slice()]),
     };
@@ -147,6 +148,7 @@ fn one_invalid_skill_rolls_back_the_whole_deck() {
                 name: name.into(),
                 description: String::new(),
                 file_count: 1,
+                source_url: None,
             })
             .collect(),
         checksum: import::checksum_for_test(&[good.as_bytes(), bad]),
@@ -168,6 +170,107 @@ fn one_invalid_skill_rolls_back_the_whole_deck() {
         "alpha must roll back with beta"
     );
     assert!(residue().is_empty(), "left behind: {:?}", residue());
+}
+
+#[test]
+fn linked_members_install_through_the_share_pipeline() {
+    let sandbox = Sandbox::new();
+    // The linked member is already installed, so the share pipeline takes
+    // the Existing branch — no network — and its git lock entry must
+    // survive the bundle import untouched.
+    hub_skill("linked");
+    crate::skill_lock::mutate(|lock| {
+        lock.upsert(
+            "linked",
+            SkillLockEntry {
+                source: "owner/linked".into(),
+                source_type: SourceType::Github,
+                source_url: "https://github.com/owner/linked.git".into(),
+                git_ref: None,
+                skill_path: None,
+                skill_folder_hash: None,
+                installed_at: String::new(),
+                updated_at: String::new(),
+                extra: Default::default(),
+            },
+        );
+    })
+    .unwrap();
+
+    let content = skill_md("local");
+    let manifest = MultiManifest {
+        format_version: FORMAT_VERSION,
+        created_at: String::new(),
+        skills: vec![
+            MultiManifestEntry {
+                name: "linked".into(),
+                description: String::new(),
+                file_count: 0,
+                source_url: Some("https://github.com/owner/linked.git".into()),
+            },
+            MultiManifestEntry {
+                name: "local".into(),
+                description: String::new(),
+                file_count: 1,
+                source_url: None,
+            },
+        ],
+        // The checksum covers content members only; a link adds no files.
+        checksum: import::checksum_for_test(&[content.as_bytes()]),
+    };
+    let manifest = serde_json::to_vec(&manifest).unwrap();
+    let bundle = sandbox.root().join("deck.agd");
+    write_tar_gz(
+        &bundle,
+        &[
+            (MULTI_MANIFEST_NAME, &manifest),
+            ("local/SKILL.md", content.as_bytes()),
+        ],
+    );
+
+    let result = import_multi_bundle(&bundle.to_string_lossy(), false).unwrap();
+
+    let mut names = result.skill_names.clone();
+    names.sort();
+    assert_eq!(names, vec!["linked".to_string(), "local".to_string()]);
+    assert!(result.skipped.is_empty(), "{:?}", result.skipped);
+    assert!(hub().join("local/SKILL.md").is_file());
+    // The linked member keeps its git lock entry — a bundle import must not
+    // rewrite it as a `bundle` source.
+    let lock = crate::skill_lock::load();
+    let entry = lock
+        .entry_for_folder("linked")
+        .map(|(_, entry)| entry.clone())
+        .expect("linked keeps its lock entry");
+    assert_eq!(entry.source_url, "https://github.com/owner/linked.git");
+    assert_eq!(entry.source_type, SourceType::Github);
+}
+
+#[test]
+fn a_link_with_an_unsupported_remote_is_reported_as_skipped() {
+    let sandbox = Sandbox::new();
+    let manifest = MultiManifest {
+        format_version: FORMAT_VERSION,
+        created_at: String::new(),
+        skills: vec![MultiManifestEntry {
+            name: "linked".into(),
+            description: String::new(),
+            file_count: 0,
+            source_url: Some("file:///tmp/nope".into()),
+        }],
+        checksum: import::checksum_for_test(&[]),
+    };
+    let manifest = serde_json::to_vec(&manifest).unwrap();
+    let bundle = sandbox.root().join("deck.agd");
+    write_tar_gz(&bundle, &[(MULTI_MANIFEST_NAME, &manifest)]);
+
+    let result = import_multi_bundle(&bundle.to_string_lossy(), false).unwrap();
+
+    assert!(result.skill_names.is_empty(), "{:?}", result.skill_names);
+    let skip = result.skipped.first().expect("one skipped member");
+    assert_eq!(skip.name, "linked");
+    assert_eq!(skip.reason, "unsupported_source");
+    assert!(!hub().join("linked").exists());
 }
 
 #[test]

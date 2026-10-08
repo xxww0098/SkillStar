@@ -64,6 +64,7 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
             .map_err(map_err)?;
         crate::usage_switch::adopt_active_cli_session_before_refresh(&mut sub, &cli_lease)
             .map_err(map_err)?;
+        let before_refresh = sub.clone();
         // Set by both arms below; a dead auth verdict is the only case that
         // skips the CLI push.
         let should_sync_cli;
@@ -95,8 +96,12 @@ async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto,
             }
         };
         let switch_result = if should_sync_cli {
-            crate::usage_switch::sync_refreshed_active_subscription(&mut sub, &cli_lease)
-                .map_err(map_err)?
+            crate::usage_switch::sync_refreshed_active_subscription(
+                &before_refresh,
+                &mut sub,
+                &cli_lease,
+            )
+            .map_err(map_err)?
         } else {
             None
         };

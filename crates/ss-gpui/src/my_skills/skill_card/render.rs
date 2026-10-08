@@ -7,13 +7,15 @@ use std::time::Duration;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt;
 use gpui_kit::component::{Icon, Sizable};
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_core::types::skill::{SkillType, UpstreamChange};
 
 use super::avatar::{avatar_look, cached_owner_avatar};
-use super::{SkillCardAgent, SkillCardEvent, SkillCardProps};
-use crate::skill_card::{CardFace, CardShell, CardWidth, card_shell, skill_source_chip};
+use super::{SkillCardEvent, SkillCardProps};
+use crate::skill_card::{
+    AgentRailSlot, CardFace, CardShell, CardWidth, agent_footer_bar, agent_rail, card_shell,
+    skill_source_chip,
+};
 
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::theme::palette;
@@ -31,6 +33,7 @@ pub fn render_skill_card(props: SkillCardProps, emit: SkillCardEmit, cx: &App) -
         installing,
         selectable,
         library,
+        translate_override,
     } = props;
     let name = skill.name.clone();
 
@@ -55,6 +58,7 @@ pub fn render_skill_card(props: SkillCardProps, emit: SkillCardEmit, cx: &App) -
         installing,
         selectable,
         library,
+        translate_override,
         emit.clone(),
         cx,
     ));
@@ -83,6 +87,7 @@ fn card_body(
     installing: bool,
     selectable: bool,
     library: bool,
+    translate_override: Option<bool>,
     emit: SkillCardEmit,
     cx: &App,
 ) -> impl IntoElement {
@@ -139,8 +144,13 @@ fn card_body(
     let (desc, translated) = match super::super::description_source(skill) {
         None => (crate::i18n::t("skillCard.noDescription").to_string(), false),
         Some(source) => {
-            let shown =
-                crate::translation::display(source, crate::translation::Surface::Description);
+            let shown = match translate_override {
+                // The drawer's button chose for its opening; the card follows.
+                Some(on) => crate::translation::display_when(source, on),
+                None => {
+                    crate::translation::display(source, crate::translation::Surface::Description)
+                }
+            };
             let translated = shown != source;
             (shown, translated)
         }
@@ -157,19 +167,21 @@ fn card_body(
         .overflow_hidden()
         .child(header)
         .child({
-            let row = div()
+            let desc_selector = skill.name.clone();
+            div()
                 .flex_shrink_0()
                 .flex_grow_0()
                 .overflow_hidden()
                 .text_xs()
                 .text_color(rgb(palette().fg_muted))
                 .line_clamp(2)
-                .child(desc);
-            if translated {
-                crate::translation::paint_card(row)
-            } else {
-                row.into_any_element()
-            }
+                .debug_selector(move || {
+                    format!(
+                        "skill-card-{}-{desc_selector}",
+                        if translated { "translation" } else { "desc" }
+                    )
+                })
+                .child(desc)
         })
 }
 
@@ -491,9 +503,9 @@ fn status_action(
 }
 
 fn card_footer(
-    scope: &'static str,
+    scope: &str,
     skill: &ss_core::types::skill::Skill,
-    agents: &[SkillCardAgent],
+    agents: &[AgentRailSlot],
     library: bool,
     emit: SkillCardEmit,
 ) -> Option<AnyElement> {
@@ -501,19 +513,7 @@ fn card_footer(
     if stars.is_none() && agents.is_empty() {
         return None;
     }
-    let mut footer = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .w_full()
-        .min_w_0()
-        .h(px(42.0))
-        .flex_shrink_0()
-        .px(px(14.0))
-        .border_t_1()
-        .border_color(rgb(palette().border))
-        .bg(rgb(palette().well));
+    let mut footer = agent_footer_bar();
     if let Some(stars) = stars {
         footer = footer.child(
             div()
@@ -533,98 +533,22 @@ fn card_footer(
         );
     }
     if !agents.is_empty() {
-        footer = footer.child(agent_rail(scope, skill, agents, emit));
+        // Same branch as the React carousel: a linked icon unlinks, a git
+        // source installs onto that agent, anything else toggles the link on.
+        let git_url = skill.git_url.clone();
+        footer = footer.child(agent_rail(
+            scope,
+            &skill.name,
+            agents,
+            std::rc::Rc::new(move |slot, cx| {
+                emit(
+                    SkillCardEvent::carousel(slot.linked, &git_url, &slot.id),
+                    cx,
+                );
+            }),
+        ));
     }
     Some(footer.into_any_element())
-}
-
-fn agent_rail(
-    scope: &'static str,
-    skill: &ss_core::types::skill::Skill,
-    agents: &[SkillCardAgent],
-    emit: SkillCardEmit,
-) -> impl IntoElement {
-    let mut rail = div()
-        .id(eid(scope, "rail", &skill.name))
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(6.0))
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .overflow_x_scroll();
-    for agent in agents {
-        let linked = agent.linked;
-        let pending = agent.pending;
-        let event = SkillCardEvent::carousel(linked, &skill.git_url, &agent.id);
-        let mut glyph = img(crate::agent_icons::agent_icon_path(&agent.id))
-            .w(px(16.0))
-            .h(px(16.0))
-            .flex_shrink_0()
-            .cursor_pointer();
-        // Pending only dims. The linked flag already flipped, so the color
-        // changes on the click instead of after the filesystem call returns.
-        if !linked {
-            glyph = glyph.grayscale(true).opacity(0.45);
-        }
-        if pending {
-            glyph = glyph.opacity(0.55);
-        }
-        let emit = emit.clone();
-        rail = rail.child(
-            div()
-                .id(eid(scope, &format!("agent-{}", agent.id), &skill.name))
-                .flex()
-                .items_center()
-                .justify_center()
-                .size(px(28.0))
-                .flex_shrink_0()
-                .flex_grow_0()
-                .rounded(px(12.0))
-                .cursor_pointer()
-                .border_1()
-                .when(linked, |button| {
-                    button
-                        .bg(rgb(palette().info_bg))
-                        .border_color(rgb(palette().info_border))
-                })
-                .when(!linked, |button| button.border_color(rgb(palette().well)))
-                .child(glyph)
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    if pending {
-                        return;
-                    }
-                    emit(event.clone(), cx);
-                })
-                .interaction_spring(
-                    format!("{scope}-agent-{}-{}", agent.id, skill.name),
-                    !pending,
-                    if linked {
-                        MotionPaint::new()
-                            .bg(rgb(palette().info_bg))
-                            .border(rgb(palette().info_border))
-                    } else {
-                        MotionPaint::new().border(rgb(palette().well))
-                    },
-                    if linked || pending {
-                        if linked {
-                            MotionPaint::new()
-                                .bg(rgb(palette().info_bg))
-                                .border(rgb(palette().info_border))
-                        } else {
-                            MotionPaint::new().border(rgb(palette().well))
-                        }
-                    } else {
-                        MotionPaint::new()
-                            .bg(rgb(palette().card_hover))
-                            .border(rgb(palette().border))
-                    },
-                ),
-        );
-    }
-    rail
 }
 
 /// One ellipsis step. The window rebuilds once per step, not once per refresh.

@@ -546,12 +546,35 @@ pub(super) fn is_api_key(subscription: &Subscription) -> bool {
         .unwrap_or(false)
 }
 
-pub(super) fn user_info_json(subscription: &Subscription) -> String {
-    let mut map = Map::new();
-    if let Some(id) = nonempty(subscription.oauth_account_id.as_deref()) {
-        map.insert("user_id".to_string(), Value::String(id.clone()));
-        map.insert("id".to_string(), Value::String(id));
+pub(super) fn preserve_user_info(
+    credentials: &Map<String, Value>,
+    material: &mut OauthMaterial,
+    key: &[u8; 32],
+) -> UsageResult<()> {
+    let expected: Value = serde_json::from_str(&material.user_info)?;
+    // ZCode resolves account request keys through this profile, not just the
+    // access token. Keep the official profile only for the same identity.
+    if let Some(raw) = decrypt_optional(credentials, &user_key(&material.provider), key)?
+        && let Ok(profile) = serde_json::from_str::<Value>(&raw)
+        && profile.get("id") == expected.get("id")
+        && ["username", "displayName"]
+            .iter()
+            .all(|field| profile.get(field).is_some_and(Value::is_string))
+    {
+        material.user_info = raw;
     }
+    Ok(())
+}
+
+pub(super) fn user_info_json(subscription: &Subscription) -> UsageResult<String> {
+    let id = nonempty(subscription.oauth_account_id.as_deref())
+        .ok_or_else(|| UsageError::Other("ZCode 账号缺少用户 ID，切换未生效".into()))?;
+    let mut map = Map::new();
+    map.insert("user_id".to_string(), Value::String(id.clone()));
+    map.insert("id".to_string(), Value::String(id.clone()));
+    let name = nonempty(Some(&subscription.display_name)).unwrap_or(id);
+    map.insert("username".to_string(), Value::String(name.clone()));
+    map.insert("displayName".to_string(), Value::String(name));
     if let Some(name) = nonempty(Some(subscription.display_name.as_str())) {
         if name.contains('@') && name.len() > 3 && !name.contains(' ') {
             map.insert("email".to_string(), Value::String(name));
@@ -559,7 +582,7 @@ pub(super) fn user_info_json(subscription: &Subscription) -> String {
             map.insert("name".to_string(), Value::String(name));
         }
     }
-    Value::Object(map).to_string()
+    Ok(Value::Object(map).to_string())
 }
 
 fn user_id_from_info(raw: &str) -> Option<String> {

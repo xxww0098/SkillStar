@@ -2,8 +2,8 @@
 //!
 //! A dashed frame holds weekly / five-hour rows: an ink count card (sheets
 //! behind it peek toward the top-right to show depth), the window name, the
-//! earliest expiry, and 重置. Spending opens a confirm
-//! that stays disabled until the checkbox is checked. Cards past `now` drop
+//! earliest expiry, and 重置. Spending opens a kit AlertDialog whose commit
+//! is inert until the checkbox is checked. Cards past `now` drop
 //! without waiting for the next fetch. A successful redemption lifts and fades one card.
 //!
 //! `schedule.rs` owns the window arithmetic, `view.rs` the card geometry.
@@ -13,9 +13,8 @@ mod view;
 
 use std::time::Duration;
 
-use gpui_kit::component::button::Button;
+use gpui_kit::component::WindowExt;
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::{Disableable, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_usage::accounts::SubscriptionDto;
@@ -203,7 +202,6 @@ impl AccountsPage {
                     })
                     .child(reset_stack(
                         &key,
-                        view.clone(),
                         shown.count,
                         &shown.expiries,
                         fill,
@@ -217,7 +215,6 @@ impl AccountsPage {
                         &digits,
                         unit.as_ref(),
                         shown.countdown,
-                        self.reset_tip_id.as_deref() == Some(&key),
                     ))
                     .child(reset_meta(&window_label(window), &subtitle, shown.urgent))
                     .child(reset_button(
@@ -292,15 +289,13 @@ impl AccountsPage {
         self.confirm_reset_id = Some(id);
         self.reset_window = target;
         self.reset_acked = false;
-        self.reset_tip_id = None;
         let view = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_alert_dialog(cx, move |alert, _, cx| {
             let acked = view.upgrade().is_some_and(|v| v.read(cx).reset_acked);
             let toggle = view.clone();
-            let confirm = view.clone();
-            let close = view.clone();
             let enter = view.clone();
-            dialog
+            let close = view.clone();
+            alert
                 .title(crate::i18n::t("usage.resetCardSpendTitle"))
                 .width(px(440.0))
                 .child(
@@ -320,28 +315,12 @@ impl AccountsPage {
                             });
                         }),
                 )
-                .footer(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("accounts-reset-cancel")
-                                .outline()
-                                .label(crate::i18n::t("common.cancel"))
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            Button::new("accounts-reset-ok")
-                                .label(crate::i18n::t("usage.resetCardConfirm"))
-                                .disabled(!acked)
-                                .on_click(move |_, window, cx| {
-                                    if confirm_reset(&confirm, cx) {
-                                        window.close_dialog(cx);
-                                    }
-                                }),
-                        ),
-                )
+                // The commit stays inert until the ack box is checked:
+                // confirm_reset re-reads reset_acked and returns false, so
+                // neither the button nor Enter closes the dialog early.
+                .confirm()
+                .ok_text(crate::i18n::t("usage.resetCardConfirm"))
+                .cancel_text(crate::i18n::t("common.cancel"))
                 .on_ok(move |_, _, cx| confirm_reset(&enter, cx))
                 .on_close(move |_, _, cx| {
                     let _ = close.update(cx, |this, cx| {

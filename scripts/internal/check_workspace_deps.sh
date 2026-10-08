@@ -27,9 +27,10 @@ errors = []
 # Unknown packages must first establish ownership here and in boundaries.md.
 ALLOWED = {
     "ss-core": set(),
+    "claude-marketplace": set(),
     "ss-gpui": {"ss-core", "ss-app", "ss-skills", "ss-marketplace", "ss-usage"},
     "ss-git": {"ss-core"},
-    "ss-skills": {"ss-core", "ss-git"},
+    "ss-skills": {"ss-core", "ss-git", "claude-marketplace"},
     "ss-marketplace": {"ss-core"},
     "ss-usage": {"ss-core"},
     "ss-sync": {"ss-core"},

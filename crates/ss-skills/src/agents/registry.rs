@@ -62,11 +62,11 @@ pub fn find_profile<'a>(profiles: &'a [AgentProfile], agent_id: &str) -> Result<
         .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))
 }
 
-/// Map upstream canonical ids onto SkillStar's three legacy persisted ids, and
+/// Map standard Agent ids onto SkillStar's three legacy persisted ids, and
 /// Antigravity's per-state ids onto the single profile that serves all three.
 /// `windsurf` folds onto `devin-desktop`: the editor was rebranded Devin
 /// Desktop in 2026-06 and SkillStar renamed the profile accordingly; the
-/// upstream `vercel-labs/skills` id is still `windsurf`.
+/// id other tools still publish is `windsurf`.
 pub fn compatible_profile_id(agent_id: &str) -> &str {
     match agent_id {
         "claude-code" => "claude",

@@ -1,6 +1,9 @@
 use super::*;
-use crate::git::transport::{GitAuthMaterial, NoopGitProgressSink};
+use crate::git::transport::{
+    GitAuthMaterial, GitOperationPhase, GitOperationProgress, GitProgressSink, NoopGitProgressSink,
+};
 use crate::skill_lock::SourceType;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn session() -> GitOperationSession {
     GitOperationSession::new(
@@ -51,6 +54,16 @@ impl UpstreamFixture {
             url: git_upstream_url(dir.path()),
             dir,
         }
+    }
+
+    fn head_branch(&self) -> String {
+        let output = ss_core::infra::path_env::command_with_path("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&self.dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git rev-parse failed");
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
     }
 
     fn bump(&self) {
@@ -422,10 +435,100 @@ fn auto_update_keeps_locally_edited_skills() {
 
     let manual = crate::git_skill::GitSkillFacade::new(session()).update_skills(&["foo".into()]);
     assert_eq!(manual.updated.len(), 1, "{manual:?}");
+    assert!(manual.kept_local.is_empty(), "{manual:?}");
     assert_eq!(
         crate::install_baseline::local_content("foo"),
         crate::install_baseline::LocalContent::Unchanged
     );
+}
+
+/// An edit that lands while the update fetch is in flight is still inside the
+/// protected admission. The check has already recorded availability, so the
+/// old pre-fetch filter would have let the name through.
+#[test]
+fn auto_update_keeps_an_edit_made_during_fetch() {
+    let _sandbox = crate::test_sandbox::Sandbox::new();
+    let upstream = UpstreamFixture::new();
+    install_foo(&upstream);
+    // An unpinned file:// source is borrowed in place and never talks to the
+    // session. Pin the branch so the apply fetch goes through Git and the
+    // progress sink can write during that fetch.
+    let branch = upstream.head_branch();
+    skill_lock::mutate(|lock| {
+        lock.skills.get_mut("foo").unwrap().git_ref = Some(branch);
+    })
+    .unwrap();
+    let canonical = ss_core::infra::paths::agents_skill_dir("foo");
+    let body_path = canonical.join("SKILL.md");
+    let preserved = "---\nname: foo\ndescription: local\n---\nlocal edit\n";
+    let sink = Arc::new(EditDuringApplyFetch {
+        body_path: body_path.clone(),
+        body: preserved.to_string(),
+        edited: AtomicBool::new(false),
+    });
+    let fetching =
+        GitOperationSession::new("update-test", GitAuthMaterial::missing(), sink.clone());
+
+    upstream.bump();
+    let before = skill_lock::load().skills["foo"].skill_folder_hash.clone();
+    let report = block_on(auto_update_locked_skills(&fetching));
+
+    assert!(
+        sink.edited.load(Ordering::SeqCst),
+        "apply fetch emitted no progress; the during-fetch edit was not exercised"
+    );
+    assert!(report.updated.is_empty(), "{report:?}");
+    assert_eq!(report.kept_local, vec!["foo".to_string()], "{report:?}");
+    assert!(report.failed.is_empty(), "{report:?}");
+    assert_eq!(std::fs::read_to_string(&body_path).unwrap(), preserved);
+    assert_eq!(
+        skill_lock::load().skills["foo"].skill_folder_hash.clone(),
+        before
+    );
+    assert_eq!(crate::update_state::get("foo"), Some(true));
+    assert_eq!(
+        crate::update_state::upstream_change("foo"),
+        Some(crate::update_state::UpstreamChange::LocalChanges {
+            baseline_missing: false
+        })
+    );
+
+    let manual = crate::git_skill::GitSkillFacade::new(session()).update_skills(&["foo".into()]);
+    assert_eq!(manual.updated.len(), 1, "{manual:?}");
+    assert!(manual.kept_local.is_empty(), "{manual:?}");
+    let overwritten = std::fs::read_to_string(&body_path).unwrap();
+    assert!(overwritten.contains("v2"), "{overwritten}");
+    assert!(!overwritten.contains("local edit"), "{overwritten}");
+}
+
+/// Writes the canonical body on the first apply-fetch progress event.
+///
+/// The upstream check emits progress before it records availability. Waiting
+/// for that record keeps the edit out of the check and inside the fetch that
+/// follows.
+struct EditDuringApplyFetch {
+    body_path: std::path::PathBuf,
+    body: String,
+    edited: AtomicBool,
+}
+
+impl GitProgressSink for EditDuringApplyFetch {
+    fn emit(&self, progress: GitOperationProgress) {
+        if progress.phase != GitOperationPhase::Running {
+            return;
+        }
+        if crate::update_state::get("foo") != Some(true) {
+            return;
+        }
+        if self
+            .edited
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        std::fs::write(&self.body_path, &self.body).unwrap();
+    }
 }
 
 /// Removal found by a check or by an update attempt must reach the projection
@@ -592,4 +695,171 @@ fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+/// The apply half reuses the persistent import cache a scan/install left:
+/// after a bump the cached revision moves to the new upstream commit instead
+/// of the update cloning the repository from scratch into a temp dir.
+#[test]
+fn apply_refreshes_the_persistent_import_cache() {
+    let _sandbox = crate::test_sandbox::Sandbox::new();
+    let upstream = UpstreamFixture::new();
+    let branch = git_in(upstream.dir.path(), &["branch", "--show-current"]);
+    let mut spec = Source::parse(&upstream.url).unwrap();
+    // A pinned ref cannot borrow the local working tree, so the install goes
+    // through the persistent import cache a remote install would use.
+    spec.git_ref = Some(branch.clone());
+    {
+        let checkout = fetch::fetch_for_install(&spec, &["skills/foo"], &session()).unwrap();
+        installer::install_units(
+            checkout.dir(),
+            &spec,
+            &[InstallUnit {
+                id: "foo".into(),
+                folder_path: "skills/foo".into(),
+            }],
+        )
+        .unwrap();
+    }
+    skill_lock::mutate(|lock| {
+        if let Some(entry) = lock.skills.get_mut("foo") {
+            entry.source_type = SourceType::Github;
+        }
+    })
+    .unwrap();
+
+    let cache_dir = ss_core::infra::paths::skill_import_cache_dir()
+        .join(fetch::import_cache_key(&spec.repo_url, Some(&branch)));
+    let metadata_path = cache_dir.join(".git/skillstar-import.json");
+    let before: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    let before = before["revision"].as_str().unwrap().to_string();
+
+    upstream.bump();
+    let results = apply_updates(&["foo".to_string()], &session());
+    assert!(
+        matches!(&results[0].result, UpdateResult::Updated { .. }),
+        "{results:?}"
+    );
+
+    let after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    assert_ne!(
+        after["revision"].as_str(),
+        Some(before.as_str()),
+        "the update must refresh the cached checkout, not bypass it"
+    );
+    let content =
+        std::fs::read_to_string(ss_core::infra::paths::agents_skill_dir("foo").join("SKILL.md"))
+            .unwrap();
+    assert!(content.contains("v2"), "{content}");
+}
+
+/// A batch spanning several sources applies them as separate groups: every
+/// source moves, and one dead source fails its own names only.
+#[test]
+fn multi_source_batches_apply_every_group_and_isolate_failures() {
+    let _sandbox = crate::test_sandbox::Sandbox::new();
+    let alpha = UpstreamFixture::new();
+    let beta = UpstreamFixture::new();
+    UpstreamFixture::commit(
+        beta.dir.path(),
+        "skills/bar",
+        "---\nname: bar\ndescription: v1\n---\n",
+    );
+    install_foo(&alpha);
+    let bar_spec = Source::parse(&beta.url).unwrap();
+    {
+        let checkout = fetch::fetch_for_install(&bar_spec, &["skills/bar"], &session()).unwrap();
+        installer::install_units(
+            checkout.dir(),
+            &bar_spec,
+            &[InstallUnit {
+                id: "bar".into(),
+                folder_path: "skills/bar".into(),
+            }],
+        )
+        .unwrap();
+    }
+    // file:// installs record local provenance; model GitHub like `install_foo`.
+    skill_lock::mutate(|lock| {
+        if let Some(entry) = lock.skills.get_mut("bar") {
+            entry.source_type = SourceType::Github;
+        }
+    })
+    .unwrap();
+    // A lock entry whose upstream is gone; it must fail without stopping the rest.
+    let mut gone = entry(
+        "file:///skillstar-test-no-such-upstream",
+        "skills/gone",
+        None,
+    );
+    gone.source_type = SourceType::Github;
+    skill_lock::mutate(|lock| {
+        lock.upsert("gone", gone);
+    })
+    .unwrap();
+
+    alpha.bump();
+    UpstreamFixture::commit(
+        beta.dir.path(),
+        "skills/bar",
+        "---\nname: bar\ndescription: v2\n---\n",
+    );
+    let results = apply_updates(
+        &["foo".to_string(), "bar".to_string(), "gone".to_string()],
+        &session(),
+    );
+    assert!(
+        matches!(&results[0].result, UpdateResult::Updated { .. }),
+        "{results:?}"
+    );
+    assert!(
+        matches!(&results[1].result, UpdateResult::Updated { .. }),
+        "{results:?}"
+    );
+    assert!(
+        matches!(&results[2].result, UpdateResult::Failed(reason) if !reason.is_empty()),
+        "{results:?}"
+    );
+    for name in ["foo", "bar"] {
+        let content =
+            std::fs::read_to_string(ss_core::infra::paths::agents_skill_dir(name).join("SKILL.md"))
+                .unwrap();
+        assert!(content.contains("v2"), "{name}: {content}");
+    }
+}
+
+/// A pinned-ref entry cannot borrow a local working tree; the check fallback
+/// must still compare tree SHAs from a `blob:none` snapshot at that ref.
+#[tokio::test]
+async fn check_clone_fallback_reads_trees_at_a_pinned_ref() {
+    let _guard = crate::lock_test_env_async();
+    let sandbox = tempfile::tempdir().unwrap();
+    let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+    unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", sandbox.path().join("data")) };
+
+    let upstream = UpstreamFixture::new();
+    let branch = git_in(upstream.dir.path(), &["branch", "--show-current"]);
+    let spec = Source::parse(&upstream.url).unwrap();
+    let probe = fetch::fetch_source(&spec, &GitOperationSession::public()).unwrap();
+    let v1 = fetch::folder_tree_hash(probe.dir(), Some("skills/foo")).unwrap();
+
+    let mut pinned = entry(&upstream.url, "skills/foo", Some(v1.clone()));
+    pinned.git_ref = Some(branch.clone());
+    let verdicts = check_upstream(&[("foo".to_string(), pinned)], None, &session()).await;
+    assert_eq!(verdicts["foo"], Upstream::Hash(v1));
+
+    upstream.bump();
+    let mut pinned = entry(&upstream.url, "skills/foo", Some("deadbeef".into()));
+    pinned.git_ref = Some(branch);
+    let verdicts = check_upstream(&[("foo".to_string(), pinned)], None, &session()).await;
+    assert_ne!(verdicts["foo"], Upstream::Hash("deadbeef".into()));
+
+    unsafe {
+        match previous {
+            Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+            None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+        }
+    }
 }

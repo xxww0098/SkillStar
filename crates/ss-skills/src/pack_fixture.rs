@@ -32,7 +32,6 @@ impl Sandbox {
             ("GIT_CONFIG_GLOBAL", Some(temp.path().join("gitconfig"))),
             ("GIT_CONFIG_NOSYSTEM", Some(PathBuf::from("1"))),
             ("DSH_HOME", None),
-            ("CODEX_HOME", None),
         ];
         let previous = overrides
             .iter()

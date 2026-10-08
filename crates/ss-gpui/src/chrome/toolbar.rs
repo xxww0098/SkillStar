@@ -12,6 +12,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::InteractiveElementExt as _;
 use gpui_kit::component::input::{Escape, Input, InputState};
 use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::toolbar::{Toolbar, ToolbarGroup};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -117,16 +118,21 @@ impl PageBar {
         // them in a `size_full` root, so without an explicit auto width that
         // root would claim the whole zone and the slack in the middle
         // would disappear.
-        let mut filters = div()
+        let filters = div()
             .flex()
-            .items_center()
-            .gap_2()
             .min_w_0()
             .w_auto()
-            .overflow_x_scrollbar();
-        for filter in self.filters {
-            filters = filters.child(filter);
-        }
+            .overflow_x_scrollbar()
+            .child({
+                // `extend` takes the controls as non-sized content so they
+                // keep their own pixels; the group adds the accessible label.
+                let mut group =
+                    ToolbarGroup::new(SharedString::from(format!("{}-filters", self.drag_id)))
+                        .label(crate::i18n::t("toolbar.filtersGroup"))
+                        .gap_2();
+                group.extend(self.filters);
+                group
+            });
         let center = div()
             .flex()
             .flex_1()
@@ -134,17 +140,37 @@ impl PageBar {
             .h_full()
             .items_center()
             .gap(px(8.0))
+            .overflow_hidden()
             .child(filters)
             .child(div().flex_1().min_w_0().h_full());
+        let actions = {
+            let mut group =
+                ToolbarGroup::new(SharedString::from(format!("{}-actions", self.drag_id)))
+                    .label(crate::i18n::t("toolbar.actionsGroup"))
+                    .gap_2();
+            group.extend(self.actions);
+            group
+        };
 
-        let mut actions = div().flex().items_center().gap_2().flex_shrink_0();
-        for action in self.actions {
-            actions = actions.child(action);
+        // Command band. One kit [`Toolbar`] carries the search field, the
+        // filter group, the slack, and the action group. Every control keeps
+        // its own pixels (content, not sized children); the bar adds the
+        // ARIA toolbar role and arrow-key roving focus across whatever inside
+        // is focusable — the search field today, kit commands as they land.
+        let mut commands = Toolbar::new(SharedString::from(format!("{}-commands", self.drag_id)))
+            .h_full()
+            .flex_1()
+            .min_w_0()
+            .p_0()
+            .gap(px(12.0));
+        if let Some(search) = self.search {
+            commands = commands.content(search);
         }
+        let commands = commands.content(center).content(actions);
 
         // 24px gutters, 12px between zones. Those pixels belong to this row,
         // which has no hitbox, so the layer behind receives the press.
-        let mut row = div()
+        let row = div()
             .flex()
             .flex_1()
             .min_w_0()
@@ -152,16 +178,13 @@ impl PageBar {
             .items_center()
             .px(px(24.0))
             .gap(px(12.0))
-            .child(title_zone);
-        if let Some(search) = self.search {
-            row = row.child(search);
-        }
-        row = row.child(center.overflow_hidden()).child(actions);
+            .child(title_zone)
+            .child(commands);
 
         div()
             .relative()
             .flex()
-            .h(px(56.0))
+            .h(px(crate::layout::TOOLBAR_H))
             .w_full()
             .flex_shrink_0()
             .border_b_1()
@@ -234,13 +257,7 @@ pub(crate) fn bar_icon_button(id: &'static str, glyph: IconName, spin: bool) -> 
         .bg(rest_bg)
         .when(spin, |button| button.opacity(0.55))
         .when(!spin, |button| button.cursor_pointer())
-        .child(super::icon_spin(
-            ElementId::Name(format!("{id}-spin").into()),
-            glyph,
-            14.0,
-            color,
-            spin,
-        ))
+        .child(super::icon_spin(glyph, 14.0, color, spin))
         .occlude()
         .interaction_spring(
             id,
@@ -368,14 +385,6 @@ pub(crate) fn segment_track() -> Div {
         .occlude()
 }
 
-pub(crate) fn segment_tab(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    active: bool,
-) -> MotionDiv {
-    segment_tab_with(id, label, active, px(12.0))
-}
-
 /// Same tab, with less horizontal padding. Skills filters use this so the
 /// source and agent tracks stay beside search instead of painting over it.
 pub(crate) fn segment_tab_compact(
@@ -432,46 +441,6 @@ fn segment_tab_with(
         .when(active, |d| d.bg(rgb(palette().accent_soft)))
         .child(label.into())
         .interaction_spring(key, true, rest, hover)
-}
-
-/// Grid / list switch. `list` selects the list glyph. Callers attach clicks.
-/// The glyph is the only label, so the tooltip names the mode.
-pub(crate) fn view_toggle_button(id: &'static str, glyph: IconName, active: bool) -> MotionDiv {
-    let tip_key = if glyph == IconName::List {
-        "toolbar.viewList"
-    } else {
-        "toolbar.viewGrid"
-    };
-    let mut rest = MotionPaint::new();
-    let mut hover = MotionPaint::new();
-    if active {
-        let fill = rgb(palette().accent_soft);
-        rest = rest.bg(fill);
-        hover = hover.bg(fill);
-    } else {
-        hover = hover.bg(rgb(palette().panel_hover));
-    }
-    div()
-        .id(id)
-        .w(px(32.0))
-        .h_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .cursor_pointer()
-        .when(active, |d| d.bg(rgb(palette().accent_soft)))
-        .child(icon(
-            glyph,
-            14.0,
-            if active {
-                palette().accent_fg
-            } else {
-                palette().fg_muted
-            },
-        ))
-        .tooltip(move |window, cx| super::tooltip(crate::i18n::t(tip_key)).build(window, cx))
-        .interaction_spring(id, true, rest, hover)
 }
 
 pub(crate) fn bar_secondary(

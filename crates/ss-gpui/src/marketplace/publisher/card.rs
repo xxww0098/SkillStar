@@ -77,7 +77,10 @@ impl PublisherDetailPage {
                         .items_center()
                         .gap_1()
                         .child(icon(IconName::Package, 12.0, palette().fg_muted))
-                        .child(format!("{} skills", repo.skill_count)),
+                        .child(crate::i18n::tf(
+                            "marketplace.skillCount",
+                            &[("count", &repo.skill_count.to_string())],
+                        )),
                 )
                 .when_some(installs, |row, label| {
                     row.child(

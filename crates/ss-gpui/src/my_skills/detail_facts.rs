@@ -93,17 +93,6 @@ pub(crate) fn format_updated(raw: &str) -> Option<String> {
     )
 }
 
-pub(crate) fn format_updated_offset(raw: &str, east_seconds: i32) -> Option<String> {
-    let zone = chrono::FixedOffset::east_opt(east_seconds)?;
-    let parsed = chrono::DateTime::parse_from_rfc3339(raw.trim()).ok()?;
-    Some(
-        parsed
-            .with_timezone(&zone)
-            .format("%Y-%m-%d %H:%M")
-            .to_string(),
-    )
-}
-
 pub(crate) fn upstream_note(skill: &Skill) -> Option<UpstreamNote> {
     match &skill.upstream_change {
         Some(UpstreamChange::Removed { .. }) => Some(UpstreamNote::Removed {
@@ -246,14 +235,6 @@ mod tests {
         assert_eq!(
             shown_author(Some("someone-else"), &lines),
             Some("someone-else")
-        );
-    }
-
-    #[test]
-    fn formats_rfc3339_to_the_chosen_offset_minute() {
-        assert_eq!(
-            format_updated_offset("2026-10-06T17:06:51.266952+00:00", 8 * 3600).as_deref(),
-            Some("2026-10-07 01:06")
         );
     }
 

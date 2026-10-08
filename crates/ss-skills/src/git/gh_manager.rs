@@ -272,51 +272,6 @@ fn publish_session() -> GitOperationSession {
     )
 }
 
-// ── List User Repos ─────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserRepo {
-    /// e.g. "user/my-skills"
-    pub full_name: String,
-    /// e.g. "https://github.com/user/my-skills"
-    pub url: String,
-    /// e.g. "My skills collection"
-    pub description: String,
-    /// true if public
-    pub is_public: bool,
-    /// Top-level directories in the repo (for showing existing skill folders)
-    pub folders: Vec<String>,
-}
-
-/// List GitHub repositories that could serve as skill monorepos.
-///
-/// Covers personal, collaborator and organization-member repositories, so an
-/// organization repository can finally be chosen as a publish target — the
-/// previous `gh repo list <login>` call could only ever see personal ones.
-pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
-    let client = GhRestClient::from_file_store()?;
-    Ok(client
-        .list_repositories(limit)?
-        .into_iter()
-        .map(|repo| UserRepo {
-            full_name: repo.full_name,
-            url: repo.html_url,
-            description: repo.description,
-            is_public: !repo.private,
-            folders: Vec::new(), // Filled lazily by inspect_repo_folders
-        })
-        .collect())
-}
-
-/// Inspect the skill folders inside a repo's top-level `skills/` directory.
-/// Used to show existing skill folders (and detect name clashes) when the user
-/// picks a repo. Skills always publish under `skills/<name>`, so we list that
-/// directory rather than the repo root.
-pub fn inspect_repo_folders(repo_full_name: &str) -> Result<Vec<String>> {
-    let client = GhRestClient::from_file_store()?;
-    Ok(client.list_skill_folders(repo_full_name)?)
-}
-
 // ── Git Init ────────────────────────────────────────────────────────
 
 /// Ensure the directory is a git repository with at least one commit.

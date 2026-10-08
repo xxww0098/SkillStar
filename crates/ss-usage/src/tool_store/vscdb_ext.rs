@@ -51,16 +51,21 @@ mod tests {
     #[test]
     fn upsert_delete_and_multi_key_write_preserve_unrelated_rows() {
         let (_dir, path) = empty_db();
-        upsert_item(&path, "Windsurf", "auth", "one").expect("upsert");
+        upsert_item(&path, "Devin Desktop", "auth", "one").expect("upsert");
         assert_eq!(item(&path, "auth").as_deref(), Some("one"));
         assert_eq!(item(&path, "unrelated").as_deref(), Some("keep"));
 
-        write_items(&path, "Windsurf", &[("auth", "two"), ("extra", "three")]).expect("multi");
+        write_items(
+            &path,
+            "Devin Desktop",
+            &[("auth", "two"), ("extra", "three")],
+        )
+        .expect("multi");
         assert_eq!(item(&path, "auth").as_deref(), Some("two"));
         assert_eq!(item(&path, "extra").as_deref(), Some("three"));
         assert_eq!(item(&path, "unrelated").as_deref(), Some("keep"));
 
-        delete_item(&path, "Windsurf", "auth").expect("delete");
+        delete_item(&path, "Devin Desktop", "auth").expect("delete");
         assert_eq!(item(&path, "auth"), None);
         assert_eq!(item(&path, "extra").as_deref(), Some("three"));
         assert_eq!(item(&path, "unrelated").as_deref(), Some("keep"));
@@ -94,12 +99,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let missing = dir.path().join("state.vscdb");
         for error in [
-            upsert_item(&missing, "Windsurf", "k", "v").expect_err("upsert"),
-            delete_item(&missing, "Windsurf", "k").expect_err("delete"),
-            write_items(&missing, "Windsurf", &[("k", "v")]).expect_err("write"),
+            upsert_item(&missing, "Devin Desktop", "k", "v").expect_err("upsert"),
+            delete_item(&missing, "Devin Desktop", "k").expect_err("delete"),
+            write_items(&missing, "Devin Desktop", &[("k", "v")]).expect_err("write"),
         ] {
             let text = error.to_string();
-            assert!(text.contains("未找到 Windsurf state.vscdb"), "{text}");
+            assert!(text.contains("未找到 Devin Desktop state.vscdb"), "{text}");
             assert!(!text.contains("Cursor"), "{text}");
         }
     }

@@ -55,6 +55,10 @@ schemars = "1.2.1"
 # config) succeeds.
 reqwest = { version = "0.13.3", default-features = false, features = ["system-proxy"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
+# Interface copy for the app shell: `ss-gpui` loads its own locale file with
+# `rust_i18n::i18n!` and extends the kit's component copy with it. See
+# docs/decisions.md (D-104).
+rust-i18n = "4.2.4"
 ruzstd = "0.9.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -72,6 +76,14 @@ ts-rs = "12.0.1"
 url = "2.5.8"
 uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
+
+# Local, minimal-diff fork of the upstream crate (longbridge/gpui-kit). The
+# dialog entrance motion differs from upstream: the card pops in at its
+# resting spot instead of sliding from the window top. Keep the vendored tree
+# byte-close to the published source; upstream sync means re-vendoring and
+# re-applying that one change. See docs/decisions.md (D-101).
+[patch.crates-io]
+gpui-component = { path = "vendor/gpui-component" }
 
 # Workspace-wide lint table. This is inert for any member that does not also
 # carry `[lints] workspace = true`, so every member opts in explicitly.

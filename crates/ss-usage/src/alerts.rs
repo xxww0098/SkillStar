@@ -8,7 +8,7 @@ use chrono::Utc;
 use crate::UsageResult;
 use crate::storage;
 use crate::subscription::{
-    AlertKind, AlertSeverity, Subscription, SubscriptionAlert, SubscriptionUsage, UsageUnit,
+    AlertKind, AlertSeverity, Subscription, SubscriptionAlert, SubscriptionUsage,
 };
 
 const SECONDS_PER_DAY: i64 = 86_400;

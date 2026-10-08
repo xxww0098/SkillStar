@@ -50,7 +50,7 @@ fn is_gui_arg(first_arg: &str) -> bool {
 }
 
 fn launch_gui() {
-    if let Err(err) = ss_gpui::run() {
+    if let Err(err) = ss_gpui::run(env!("CARGO_PKG_VERSION")) {
         eprintln!("skillstar gui failed: {err}");
         std::process::exit(1);
     }

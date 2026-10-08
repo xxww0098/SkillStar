@@ -5,8 +5,6 @@
 //!
 //! This mirrors the `.repos/` pattern used for repo-cached skills.
 
-use crate::deployment;
-use crate::projects;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use ss_core::types::{Skill, SkillCategory, extract_skill_description};
@@ -14,12 +12,14 @@ use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
 mod intake;
+mod removal;
 mod repair;
 pub use intake::{
     IntakeAction, IntakeApplyOptions, IntakeFinding, IntakeKind, IntakeOutcome, IntakePlan,
     IntakeReport, IntakeStatus, IntakeStep, IntakeStepOutcome, apply as apply_agent_intake,
     apply_with as apply_agent_intake_with, plan as plan_agent_intake, scan as scan_agent_intake,
 };
+pub(crate) use removal::{delete_files_and_lock, unlink_hub_and_lock};
 pub use repair::{SkillRepairIssue, SkillRepairReport, repair_installations};
 
 #[derive(Debug, Clone, Serialize)]
@@ -484,43 +484,11 @@ pub fn reconcile_hub_symlinks() {
 
 /// Delete a local skill completely.
 ///
-/// 1. Remove agent symlinks
-/// 2. Remove hub symlink (`skills/<name>`)
-/// 3. Delete `skills-local/<name>/` directory
+/// Admission stays here. Deployment order, the hub link, the local directory
+/// and the lock live in the uninstall module.
 pub fn delete(name: &str) -> Result<()> {
     crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)?;
-    // Remove symlinks from all agents
-    let _ = deployment::remove_skill_from_all_agents(name);
-    let _ = projects::remove_skill_from_all_projects(name);
-
-    // Remove hub symlink
-    let hub_dir = ss_core::infra::paths::hub_skills_dir();
-    let hub_path = hub_dir.join(name);
-    if hub_path.symlink_metadata().is_ok() {
-        if ss_core::infra::fs_ops::is_link(&hub_path) {
-            ss_core::infra::fs_ops::remove_symlink(&hub_path)
-                .with_context(|| format!("Failed to remove hub symlink for '{}'", name))?;
-        } else {
-            // Not a symlink — should not happen for local skills, but handle gracefully
-            std::fs::remove_dir_all(&hub_path)
-                .with_context(|| format!("Failed to remove hub directory for '{}'", name))?;
-        }
-    }
-
-    // Delete the local skill directory
-    let local_dir = ss_core::infra::paths::local_skills_dir();
-    let local_path = local_dir.join(name);
-    if local_path.exists() {
-        std::fs::remove_dir_all(&local_path)
-            .with_context(|| format!("Failed to delete local skill directory '{}'", name))?;
-    }
-
-    crate::skill_lock::mutate(|lock| {
-        lock.remove(name);
-    })
-    .with_context(|| format!("Failed to remove the install lock entry for '{name}'"))?;
-
-    Ok(())
+    crate::skill_install::remove_local_skill(name)
 }
 
 /// Graduate a local skill after publishing to GitHub.

@@ -4,29 +4,39 @@
 //! Ollama, or Command Code key already saved in Accounts. The user picks
 //! one account as the default. The model starts as that service's
 //! recommendation (OpenCode Go: `deepseek-v4.1-flash`). Fetch only fills the
-//! model dropdown, which stays closed until opened; picking one keeps it
-//! until the account changes. Themes only change how a cached translation
-//! is painted.
+//! model combobox, which stays closed until opened; picking one keeps it
+//! until the account changes. The combobox is searchable and caps its menu
+//! height, scrolling longer catalogs; the footer states the catalog size.
+//! Themes only change how the SKILL.md reader paints a cached translation;
+//! descriptions always stay plain.
 
+use std::rc::Rc;
+
+use gpui_kit::App;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
-use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::popover::Popover;
-use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::combobox::Combobox;
+use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_core::translation::{self, Engine};
 use ss_usage::accounts::{SubscriptionDto, list_subscriptions};
 
+use crate::chrome::{SliderGeometry, SliderSegment, slider_segmented};
 use crate::spawn_domain;
 
 use super::{SettingsPage, SettingsSection, card, choice_pills, field_label, section_shell};
 use crate::theme::palette;
 
 impl SettingsPage {
-    pub(crate) fn render_translation(&self, view: WeakEntity<Self>) -> impl IntoElement {
+    pub(crate) fn render_translation(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        view: WeakEntity<Self>,
+    ) -> impl IntoElement {
         let engine = match self.translation.engine {
             Engine::Machine => "machine",
             Engine::Llm => "llm",
@@ -35,10 +45,23 @@ impl SettingsPage {
             ("machine", crate::i18n::t("settings.tranEngineMachine")),
             ("llm", crate::i18n::t("settings.tranEngineLlm")),
         ];
-        let targets: Vec<(&'static str, SharedString)> = translation::TRANSLATION_LANGUAGES
+        let targets: Vec<SliderSegment> = translation::TRANSLATION_LANGUAGES
             .iter()
-            .map(|language| (language.code, SharedString::from(language.label)))
+            .map(|language| SliderSegment {
+                id: language.code,
+                icon: None,
+                label: Some(SharedString::from(language.label)),
+            })
             .collect();
+        // `starts_with` keeps the old `choice_pills` fallback: a stored
+        // dialect code still lands on its base language's slot.
+        let target_ix = translation::TRANSLATION_LANGUAGES
+            .iter()
+            .position(|language| {
+                self.translation.target_lang == language.code
+                    || self.translation.target_lang.starts_with(language.code)
+            })
+            .unwrap_or(0);
         let mut body = div()
             .flex()
             .flex_col()
@@ -66,19 +89,31 @@ impl SettingsPage {
                     this.save_translation(cx);
                 },
             ))
-            .child(field_label(
-                crate::i18n::t("settings.tranTarget"),
-                choice_pills(
-                    "tran-target",
+            .child(field_label(crate::i18n::t("settings.tranTarget"), {
+                // 72px slots hold the widest endonym ("简体中文" at
+                // text_xs) with centered padding; all five fit the
+                // settings column without wrapping.
+                let pick = view.clone();
+                slider_segmented(
+                    "tran-target-motion",
                     &targets,
-                    self.translation.target_lang.as_str(),
-                    view.clone(),
-                    |this, id, cx| {
-                        this.translation.target_lang = id.to_string();
-                        this.save_translation(cx);
+                    target_ix,
+                    SliderGeometry {
+                        slot_w: 72.0,
+                        slot_h: 32.0,
+                        pad: 2.0,
+                        icon_size: 14.0,
                     },
-                ),
-            ))
+                    false,
+                    Rc::new(move |ix, _, cx| {
+                        let _ = pick.update(cx, |this, cx| {
+                            this.translation.target_lang =
+                                translation::TRANSLATION_LANGUAGES[ix].code.to_string();
+                            this.save_translation(cx);
+                        });
+                    }),
+                )
+            }))
             .child(
                 div()
                     .text_xs()
@@ -141,7 +176,7 @@ impl SettingsPage {
                             .child(crate::i18n::t("settings.tranLlmAccountHint")),
                     );
                 if translation::llm_account(&self.translation.llm_account_catalog).is_some() {
-                    body = body.child(self.model_field(view.clone()));
+                    body = body.child(self.model_field(window, cx, view.clone()));
                 }
             }
         }
@@ -190,6 +225,12 @@ impl SettingsPage {
     }
 
     pub(crate) fn save_translation(&mut self, cx: &mut Context<Self>) {
+        // This page never edits the per-skill description choices; take what
+        // is on disk so a save cannot wipe a choice the drawer made while
+        // this page held its older copy.
+        if let Ok(disk) = translation::load_config() {
+            self.translation.description_choices = disk.description_choices;
+        }
         if let Err(error) = translation::save_config(&self.translation) {
             tracing::warn!("failed to save translation settings: {error}");
         }
@@ -217,7 +258,7 @@ impl SettingsPage {
         self.save_translation(cx);
     }
 
-    fn select_llm_model(&mut self, model: String, cx: &mut Context<Self>) {
+    pub(crate) fn select_llm_model(&mut self, model: String, cx: &mut Context<Self>) {
         let model = model.trim().to_string();
         if model.is_empty()
             || (self.translation.llm_model_pinned && self.translation.llm_model == model)
@@ -259,6 +300,7 @@ impl SettingsPage {
                         this.llm_models = models;
                         this.llm_models_for = account_id;
                         this.llm_models_error = None;
+                        this.llm_fetch_seq += 1;
                     }
                     Err(error) => this.llm_models_error = Some(model_list_message(&error)),
                 }
@@ -268,24 +310,50 @@ impl SettingsPage {
         cx.notify();
     }
 
-    fn model_field(&self, view: WeakEntity<Self>) -> Div {
-        let model = self.translation.llm_model.clone();
+    pub(crate) fn model_field(
+        &mut self,
+        window: &mut Window,
+        cx: &mut App,
+        view: WeakEntity<Self>,
+    ) -> Div {
+        self.sync_llm_model_state(window, cx);
         let loading = self.llm_models_loading;
         let pull_view = view.clone();
-        // Fetch fills the dropdown data only. The popover stays closed so a
-        // full model list never pushes the settings card open on its own.
-        let fetched = self.llm_models_for == self.translation.llm_account_id
-            && !self.llm_models.is_empty();
-        let models = if fetched {
-            self.llm_models.clone()
-        } else {
-            Vec::new()
-        };
-        let trigger_label: SharedString = if model.is_empty() {
-            "—".into()
-        } else {
-            model.clone().into()
-        };
+        // Fetch fills the combobox data only. The menu stays closed so a full
+        // model list never pushes the settings card open on its own.
+        let fetched =
+            self.llm_models_for == self.translation.llm_account_id && !self.llm_models.is_empty();
+        let total = self.llm_models.len().to_string();
+        let combobox = Combobox::new(&self.llm_model_state)
+            .placeholder("—")
+            .search_placeholder(crate::i18n::t("settings.tranLlmModelSearch"))
+            .w_full()
+            .small()
+            .font_family("monospace")
+            .menu_max_h(px(280.0))
+            .empty(|_, _| {
+                div()
+                    .p_2()
+                    .text_xs()
+                    .text_color(rgb(palette().fg_muted))
+                    .whitespace_normal()
+                    .child(crate::i18n::t("settings.tranLlmModelEmpty"))
+            })
+            .when(fetched, |this| {
+                let total = total.clone();
+                this.footer(move |_, _| {
+                    div()
+                        .debug_selector(|| "tran-llm-model-total".into())
+                        .flex()
+                        .justify_center()
+                        .text_xs()
+                        .text_color(rgb(palette().fg_muted))
+                        .child(crate::i18n::tf(
+                            "settings.tranLlmModelTotal",
+                            &[("count", &total)],
+                        ))
+                })
+            });
         let mut field = field_label(
             crate::i18n::t("settings.tranLlmModel"),
             div()
@@ -297,24 +365,8 @@ impl SettingsPage {
                     div()
                         .min_w_0()
                         .flex_1()
-                        .child(
-                            Popover::new("tran-llm-models")
-                                .anchor(Anchor::TopLeft)
-                                .offset(px(6.0))
-                                .appearance(false)
-                                .trigger(
-                                    Button::new("tran-llm-model-trigger")
-                                        .outline()
-                                        .small()
-                                        .w_full()
-                                        .font_family("monospace")
-                                        .label(trigger_label)
-                                        .dropdown_caret(true),
-                                )
-                                .content(move |_, _, cx| {
-                                    model_menu(cx, view.clone(), models.clone(), model.clone())
-                                }),
-                        ),
+                        .debug_selector(|| "tran-llm-model-field".into())
+                        .child(combobox),
                 )
                 .child(
                     Button::new("tran-llm-pull")
@@ -342,78 +394,61 @@ impl SettingsPage {
                     .child(error.clone()),
             );
         }
+        // After a fetch the hint states the catalog size, so a scrolled
+        // menu never reads as the full list.
+        let hint = if fetched {
+            let count = self.llm_models.len().to_string();
+            crate::i18n::tf("settings.tranLlmModelCount", &[("count", &count)])
+        } else {
+            crate::i18n::t("settings.tranLlmModelHint")
+        };
         field = field.child(
             div()
                 .text_xs()
                 .text_color(rgb(palette().fg_muted))
                 .whitespace_normal()
-                .child(crate::i18n::t("settings.tranLlmModelHint")),
+                .child(hint),
         );
         field
     }
-}
 
-fn model_menu(
-    cx: &mut Context<gpui_kit::component::popover::PopoverState>,
-    view: WeakEntity<SettingsPage>,
-    models: Vec<String>,
-    current: String,
-) -> impl IntoElement + use<> {
-    let dismiss_popover = cx.entity().downgrade();
-    let panel = div()
-        .w(px(280.0))
-        .rounded_xl()
-        .border_1()
-        .border_color(rgb(palette().border))
-        .bg(rgb(palette().card))
-        .p_2()
-        .shadow_lg();
-    if models.is_empty() {
-        return panel.child(
-            div()
-                .text_xs()
-                .text_color(rgb(palette().fg_muted))
-                .whitespace_normal()
-                .child(crate::i18n::t("settings.tranLlmModelEmpty")),
+    /// Push the fetched catalog and the current model into the combobox state.
+    ///
+    /// Fetch callbacks carry no `Window`, so this runs from `model_field`
+    /// during render; `llm_models_synced` keeps it to one pass per change
+    /// (account, fetch generation, or current model). The current model is
+    /// kept as an explicit first row when the catalog does not list it, so
+    /// the trigger always shows what is configured.
+    fn sync_llm_model_state(&mut self, window: &mut Window, cx: &mut App) {
+        let current = self.translation.llm_model.trim().to_string();
+        let key = format!(
+            "{}|{}|{}",
+            self.translation.llm_account_id, self.llm_fetch_seq, current
         );
+        if self.llm_models_synced.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        let fetched =
+            self.llm_models_for == self.translation.llm_account_id && !self.llm_models.is_empty();
+        let mut rows = if fetched {
+            self.llm_models.clone()
+        } else {
+            Vec::new()
+        };
+        if !current.is_empty() && !rows.iter().any(|id| id == &current) {
+            rows.insert(0, current.clone());
+        }
+        let selected: Vec<String> = if current.is_empty() {
+            Vec::new()
+        } else {
+            vec![current]
+        };
+        self.llm_models_synced = Some(key);
+        _ = self.llm_model_state.update(cx, move |state, cx| {
+            state.set_items(SearchableVec::new(rows), window, cx);
+            state.set_selected_values(&selected, window, cx);
+        });
     }
-    let mut rows = Vec::with_capacity(models.len() + 1);
-    if !current.is_empty() && !models.iter().any(|id| id == &current) {
-        rows.push(current.to_string());
-    }
-    rows.extend(models.iter().cloned());
-    // The catalog scrolls inside the popover so long model lists stay in the
-    // dropdown instead of stretching the settings column.
-    let mut list = div()
-        .id("tran-llm-models")
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .max_h(px(280.0))
-        .overflow_y_scrollbar();
-    for id in rows {
-        let selected = id == current;
-        let model = id.clone();
-        let row_view = view.clone();
-        let row_dismiss = dismiss_popover.clone();
-        list = list.child(
-            Button::new(ElementId::Name(format!("tran-model-{id}").into()))
-                .ghost()
-                .small()
-                .w_full()
-                .font_family("monospace")
-                .label(id)
-                .selected(selected)
-                .on_click(move |_, window, app| {
-                    app.stop_propagation();
-                    let model = model.clone();
-                    let _ = row_view.update(app, |this, cx| this.select_llm_model(model, cx));
-                    let _ =
-                        row_dismiss.update(app, |state, cx| state.dismiss(window, cx));
-                }),
-        );
-    }
-    panel.child(list)
 }
 
 fn model_list_message(error: &anyhow::Error) -> String {
@@ -480,10 +515,10 @@ fn collapsed_themes<'a>(
     if shown.iter().any(|theme| theme.id == current) {
         return shown;
     }
-    if let Some(selected) = themes.iter().copied().find(|theme| theme.id == current) {
-        if let Some(last) = shown.last_mut() {
-            *last = selected;
-        }
+    if let Some(selected) = themes.iter().copied().find(|theme| theme.id == current)
+        && let Some(last) = shown.last_mut()
+    {
+        *last = selected;
     }
     shown
 }
@@ -741,4 +776,86 @@ fn credential_pill(
                 this.select_llm_account(account_id, catalog, cx);
             });
         })
+}
+
+#[cfg(test)]
+mod target_slider_tests {
+    use gpui_kit::{AppContext, Context, IntoElement, Window, point, px, size};
+
+    use super::SettingsPage;
+    use crate::test_support::IsolatedDataDir;
+
+    /// `SettingsPage::new` needs a window, so the page is built inside the
+    /// window closure and kept in a thin host the test can read back.
+    struct TranslationHost(gpui_kit::Entity<SettingsPage>);
+
+    impl gpui_kit::Render for TranslationHost {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            self.0.clone()
+        }
+    }
+
+    fn paint(cx: &mut gpui_kit::VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} missing"));
+        cx.simulate_click(
+            point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + bounds.size.height / 2.,
+            ),
+            Default::default(),
+        );
+    }
+
+    /// The translation-language row rides the shared sliding thumb
+    /// (`chrome::segmented`): the five endonym pills mount and clicking one
+    /// persists the new target language.
+    #[gpui_kit::test]
+    fn target_slider_clicks_switch_language(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        crate::init_test(cx);
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            let page = cx.new(|cx| SettingsPage::new(window, cx));
+            TranslationHost(page)
+        });
+        let page = cx.update(|_, cx| host.read(cx).0.clone());
+        // A tall window keeps every settings section inside the viewport, so
+        // the translation card needs no scrolling to be clickable.
+        cx.simulate_resize(size(px(1200.), px(2400.)));
+        paint(cx);
+        paint(cx);
+
+        let en = cx
+            .debug_bounds("en")
+            .expect("language pills missing from the translation section");
+        let ja = cx.debug_bounds("ja").expect("ja pill mounts beside en");
+        // Equal 72px slots with the 2px gap: enough centered padding for the
+        // widest endonym without the track outgrowing the settings column.
+        assert_eq!(en.size.width, px(72.0));
+        assert_eq!(ja.origin.x - en.origin.x, px(74.0));
+        assert!(
+            en.size.height >= px(30.0) && en.size.height <= px(34.0),
+            "pill height stays at the settings row density, got {}",
+            en.size.height
+        );
+
+        click(cx, "en");
+        paint(cx);
+        paint(cx);
+        cx.update(|_, cx| {
+            assert_eq!(page.read(cx).translation.target_lang, "en");
+        });
+
+        click(cx, "ja");
+        paint(cx);
+        paint(cx);
+        cx.update(|_, cx| {
+            assert_eq!(page.read(cx).translation.target_lang, "ja");
+        });
+    }
 }

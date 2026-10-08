@@ -21,8 +21,8 @@ use crate::accounts::theme::palette;
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::spawn_domain;
 
-const FORM_NEED_TEXT: &str = "请先填写内容";
-const FORM_NEED_CALLBACK: &str = "请先粘贴回调链接";
+const FORM_NEED_TEXT: &str = "accounts.needSecret";
+const FORM_NEED_CALLBACK: &str = "accounts.needCallback";
 
 fn form_error(message: &str) -> bool {
     message == FORM_NEED_TEXT || message == FORM_NEED_CALLBACK
@@ -50,13 +50,17 @@ impl AccountsPage {
         cx: &mut Context<Self>,
     ) {
         let entry = find_catalog_entry(&catalog_id);
-        let placeholder = entry.as_ref().map(secret_placeholder).unwrap_or("");
+        let placeholder = entry.as_ref().map(secret_placeholder).unwrap_or_default();
         self.add_secret = Some(cx.new(|cx| InputState::new(window, cx).placeholder(placeholder)));
         let oauth = entry
             .as_ref()
             .is_some_and(|entry| entry.auth_modes.contains(&AuthMode::OAuth));
-        self.add_callback = oauth
-            .then(|| cx.new(|cx| InputState::new(window, cx).placeholder("回调链接或授权 code")));
+        self.add_callback = oauth.then(|| {
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(crate::i18n::t("accounts.callbackPlaceholder"))
+            })
+        });
         self.add_region = entry
             .as_ref()
             .and_then(|entry| entry.regions.first().copied())
@@ -178,7 +182,7 @@ impl AccountsPage {
                         this.add_pending = None;
                         this.add_catalog = None;
                         this.add_error = None;
-                        this.status = Some("已添加账号".into());
+                        this.status = Some(crate::i18n::t("accounts.added").to_string());
                         this.load();
                     }
                     Err(err) => {
@@ -210,7 +214,7 @@ impl AccountsPage {
                 match res {
                     Ok(_) => {
                         this.add_catalog = None;
-                        this.status = Some("已从本机导入".into());
+                        this.status = Some(crate::i18n::t("accounts.importedLocal").to_string());
                         this.load();
                     }
                     Err(err) => this.add_error = Some(err.to_string()),
@@ -244,7 +248,8 @@ impl AccountsPage {
                     match res {
                         Ok(_) => {
                             this.add_catalog = None;
-                            this.status = Some("已导入凭证".into());
+                            this.status =
+                                Some(crate::i18n::t("accounts.importedCredential").to_string());
                             this.load();
                         }
                         Err(err) => this.add_error = Some(err.to_string()),
@@ -284,7 +289,7 @@ impl AccountsPage {
             Ok(_) => {
                 self.add_catalog = None;
                 self.add_error = None;
-                self.status = Some("已添加账号".into());
+                self.status = Some(crate::i18n::t("accounts.added").to_string());
                 self.load();
             }
             Err(err) => self.add_error = Some(err.to_string()),
@@ -301,8 +306,12 @@ impl AccountsPage {
             .unwrap_or_else(|| catalog_id.clone());
         let close = view.clone();
 
-        let mut card =
-            dialog_card(480.0).child(dialog_head(&catalog_id, "添加账号", &title, close));
+        let mut card = dialog_card(480.0).child(dialog_head(
+            &catalog_id,
+            &crate::i18n::t("accounts.addAccount"),
+            &title,
+            close,
+        ));
 
         let mut stack = div().flex().flex_col().gap(px(10.0)).px(px(24.0)).w_full();
 
@@ -314,7 +323,7 @@ impl AccountsPage {
                     .bg(rgb(palette().os_fill))
                     .text_size(px(12.0))
                     .text_color(rgb(palette().os_bad))
-                    .child(format!("失败: {err}")),
+                    .child(crate::i18n::tf("accounts.actionFailed", &[("err", err)])),
             );
         }
 
@@ -404,22 +413,22 @@ impl AccountsPage {
                 div()
                     .text_size(px(12.0))
                     .text_color(rgb(palette().os_muted))
-                    .child("没自动返回时，粘贴回调链接或授权 code"),
+                    .child(crate::i18n::t("accounts.callbackHint")),
             );
             panel = panel.child(
                 Input::new(input)
-                    .aria_label("回调")
+                    .aria_label(crate::i18n::t("accounts.callbackLabel"))
                     .h(px(40.0))
                     .rounded(px(10.0)),
             );
             if self.add_error.as_deref() == Some(FORM_NEED_CALLBACK) {
-                panel = panel.child(form_error_line(FORM_NEED_CALLBACK));
+                panel = panel.child(form_error_line(&crate::i18n::t(FORM_NEED_CALLBACK)));
             }
             let submit = view.clone();
             panel = panel.child(commit_button(
                 "accounts-submit-callback",
-                "提交回调",
-                "正在提交",
+                &crate::i18n::t("accounts.submitCallback"),
+                &crate::i18n::t("accounts.submitting"),
                 true,
                 saving,
                 self.add_busy.is_some(),
@@ -471,9 +480,9 @@ impl AccountsPage {
         if entry.auth_modes.contains(&AuthMode::OAuth) {
             rows = rows.child(action_row(
                 "accounts-login-oauth",
-                "登录",
-                "打开浏览器完成登录",
-                "正在登录",
+                &crate::i18n::t("accounts.signIn"),
+                &crate::i18n::t("accounts.signInHint"),
+                &crate::i18n::t("accounts.signingIn"),
                 true,
                 busy == Some("login"),
                 busy.is_some(),
@@ -484,9 +493,9 @@ impl AccountsPage {
         if local_import_supported(entry.id) {
             rows = rows.child(action_row(
                 "accounts-login-import",
-                "导入本机会话",
-                "复制本机已有登录，原来的凭证保持不动",
-                "正在核对额度",
+                &crate::i18n::t("accounts.importSession"),
+                &crate::i18n::t("accounts.importSessionHint"),
+                &crate::i18n::t("accounts.checkingQuota"),
                 false,
                 busy == Some("import"),
                 busy.is_some(),
@@ -503,7 +512,7 @@ impl AccountsPage {
         });
         if let Some(mode) = paste {
             if let Some(input) = &self.add_secret {
-                let label = field_copy(mode).0;
+                let (label, _) = field_copy(mode);
                 if has_session {
                     rows = rows.child(or_divider());
                 }
@@ -513,7 +522,7 @@ impl AccountsPage {
                         .text_size(px(12.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgb(palette().fg))
-                        .child(label),
+                        .child(label.clone()),
                 );
                 block = block.child(
                     Input::new(input)
@@ -522,7 +531,7 @@ impl AccountsPage {
                         .rounded(px(10.0)),
                 );
                 if self.add_error.as_deref() == Some(FORM_NEED_TEXT) {
-                    block = block.child(form_error_line(FORM_NEED_TEXT));
+                    block = block.child(form_error_line(&crate::i18n::t(FORM_NEED_TEXT)));
                 }
                 if let Some(hint) = paste_hint(mode, entry.warning) {
                     block = block.child(
@@ -533,10 +542,12 @@ impl AccountsPage {
                             .child(hint.to_string()),
                     );
                 }
+                let save = save_label(mode);
+                let save_busy = save_busy_label(mode);
                 block = block.child(commit_button(
                     "accounts-login-save",
-                    save_label(mode),
-                    save_busy_label(mode),
+                    &save,
+                    &save_busy,
                     !has_session,
                     saving,
                     busy.is_some(),
@@ -599,16 +610,16 @@ impl AccountsPage {
     pub(crate) fn render_warn(&self, kind: WarnKind, view: WeakEntity<Self>) -> impl IntoElement {
         let (title, body, ok_label, danger) = match kind {
             WarnKind::Logout => (
-                "退出账号",
-                "退出后这个账号会从列表里删除，需要重新登录才能再读取额度。",
-                "退出",
+                crate::i18n::t("accounts.signOutTitle"),
+                crate::i18n::t("accounts.signOutBody"),
+                crate::i18n::t("accounts.signOut"),
                 true,
             ),
         };
         let dismiss = view.clone();
         let confirm = view.clone();
         let card = dialog_card(440.0)
-            .child(dialog_head("", title, "", dismiss.clone()))
+            .child(dialog_head("", title.as_ref(), "", dismiss.clone()))
             .child(
                 div()
                     .px(px(24.0))
@@ -624,7 +635,7 @@ impl AccountsPage {
                     .px(px(24.0))
                     .child(ghost_button(
                         "accounts-warn-cancel",
-                        "取消",
+                        &crate::i18n::t("common.cancel"),
                         dismiss,
                         |this, cx| {
                             this.confirm_delete_id = None;
@@ -634,7 +645,7 @@ impl AccountsPage {
                     ))
                     .child(primary_button(
                         "accounts-warn-ok",
-                        ok_label,
+                        ok_label.as_ref(),
                         danger,
                         confirm,
                         move |this, cx| {
@@ -660,33 +671,54 @@ fn auth_url_of(start: &OAuthStartDto) -> String {
     }
 }
 
-fn secret_placeholder(entry: &ss_usage::catalog::CatalogEntry) -> &'static str {
+fn secret_placeholder(entry: &ss_usage::catalog::CatalogEntry) -> SharedString {
     if entry.auth_modes.contains(&AuthMode::ApiKey) {
-        "API key"
+        "API key".into()
     } else if entry.auth_modes.contains(&AuthMode::Cookie) {
-        "Cookie"
+        "Cookie".into()
     } else if entry.auth_modes.contains(&AuthMode::TokenImport) {
-        "卡密 / JSON / refresh token"
+        crate::i18n::t("accounts.credentialPlaceholder")
     } else if entry.auth_modes.contains(&AuthMode::Manual) {
-        "显示名称"
+        crate::i18n::t("accounts.displayNamePlaceholder")
     } else {
-        ""
+        SharedString::default()
     }
 }
 
-fn save_label(mode: AuthMode) -> &'static str {
+fn save_label(mode: AuthMode) -> SharedString {
     match mode {
-        AuthMode::ApiKey => "保存密钥",
-        AuthMode::Cookie => "保存 Cookie",
-        AuthMode::TokenImport => "导入凭证",
-        AuthMode::Manual => "保存",
-        AuthMode::OAuth => "继续",
+        AuthMode::ApiKey => crate::i18n::t("accounts.saveKey"),
+        AuthMode::Cookie => crate::i18n::t("accounts.saveCookie"),
+        AuthMode::TokenImport => crate::i18n::t("accounts.importCredential"),
+        AuthMode::Manual => crate::i18n::t("common.save"),
+        AuthMode::OAuth => crate::i18n::t("accounts.continue"),
     }
 }
 
-fn save_busy_label(mode: AuthMode) -> &'static str {
+fn save_busy_label(mode: AuthMode) -> SharedString {
     match mode {
-        AuthMode::TokenImport => "正在核对凭证",
-        AuthMode::ApiKey | AuthMode::Cookie | AuthMode::Manual | AuthMode::OAuth => "正在保存",
+        AuthMode::TokenImport => crate::i18n::t("accounts.checkingCredential"),
+        AuthMode::ApiKey | AuthMode::Cookie | AuthMode::Manual | AuthMode::OAuth => {
+            crate::i18n::t("common.saving")
+        }
+    }
+}
+
+impl AccountsPage {
+    pub fn sync_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let (Some(input), Some(catalog_id)) = (&self.add_secret, self.add_catalog.clone())
+            && let Some(entry) = find_catalog_entry(&catalog_id)
+        {
+            crate::i18n::sync_placeholder(input, secret_placeholder(&entry), window, cx);
+        }
+        if let Some(input) = &self.add_callback {
+            crate::i18n::sync_placeholder(
+                input,
+                crate::i18n::t("accounts.callbackPlaceholder"),
+                window,
+                cx,
+            );
+        }
+        self.revise(cx);
     }
 }

@@ -124,6 +124,11 @@ pub struct TranslationConfig {
     pub translate_descriptions: bool,
     /// English paragraphs in the SKILL.md reader.
     pub translate_skill_md: bool,
+    /// Per-skill description-translation choice made on the drawer's button,
+    /// keyed by skill name. A skill not in the map follows the
+    /// `translate_descriptions` switch; one in the map keeps its line in the
+    /// chosen language across restarts.
+    pub description_choices: std::collections::HashMap<String, bool>,
     /// Style for a translated description and for the line under a paragraph.
     pub reader_theme: String,
     /// Language the translation is written in. Missing or unknown values are Simplified Chinese.
@@ -148,6 +153,7 @@ impl Default for TranslationConfig {
             engine: Engine::Machine,
             translate_descriptions: false,
             translate_skill_md: false,
+            description_choices: std::collections::HashMap::new(),
             reader_theme: DEFAULT_READER.to_string(),
             target_lang: DEFAULT_TARGET.to_string(),
             llm_base_url: DEFAULT_LLM_URL.to_string(),
@@ -252,6 +258,14 @@ pub fn save_config(config: &TranslationConfig) -> Result<()> {
     Ok(())
 }
 
+/// Remember one skill's description-translation choice made on the drawer's
+/// button, so the card and the drawer keep that language across restarts.
+pub fn set_description_choice(skill: &str, translated: bool) -> Result<()> {
+    let mut config = load_config()?;
+    config.description_choices.insert(skill.to_string(), translated);
+    save_config(&config)
+}
+
 pub fn load_api_key() -> String {
     let path = crate::infra::paths::translation_api_key_path();
     std::fs::read_to_string(path)
@@ -273,7 +287,10 @@ pub fn save_api_key(key: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Engine, TranslationConfig, load_api_key, load_config, save_api_key, save_config};
+    use super::{
+        Engine, TranslationConfig, load_api_key, load_config, save_api_key, save_config,
+        set_description_choice,
+    };
     use tempfile::TempDir;
 
     fn isolated() -> (std::sync::MutexGuard<'static, ()>, TempDir) {
@@ -300,8 +317,31 @@ mod tests {
         let config: TranslationConfig = serde_json::from_str(r#"{"engine":"machine"}"#).unwrap();
         assert!(!config.translate_descriptions);
         assert!(!config.translate_skill_md);
+        assert!(config.description_choices.is_empty());
         assert_eq!(config.engine, Engine::Machine);
         assert_eq!(config.target_lang, "zh-CN");
+    }
+
+    #[test]
+    fn description_choice_survives_save_and_reload() {
+        let (_guard, _temp) = isolated();
+        set_description_choice("demo", true).unwrap();
+        set_description_choice("other", false).unwrap();
+        // A later choice for the same skill replaces the earlier one.
+        set_description_choice("demo", false).unwrap();
+        let loaded = load_config().unwrap();
+        assert_eq!(
+            loaded.description_choices.get("demo"),
+            Some(&false),
+            "the last choice for a skill must win"
+        );
+        assert_eq!(loaded.description_choices.get("other"), Some(&false));
+        // A full save from a loaded config keeps the choices.
+        save_config(&loaded).unwrap();
+        assert_eq!(load_config().unwrap().description_choices, loaded.description_choices);
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
     }
 
     #[test]

@@ -17,9 +17,8 @@ pub struct SkillGroup {
     ///
     /// A fresh deck starts empty: creating a deck never claims an Agent, even
     /// when its Skills are already linked there by the install-time global
-    /// deploy. `None` marks a deck written before decks owned this state; the
-    /// `ss-app::skill_group_links` backfill resolves it once from the
-    /// on-disk Agent state so existing decks keep the rail they had.
+    /// deploy. `None` means the deck never recorded a rail. The deck page shows
+    /// that the same way as an empty set: unlinked.
     #[serde(default)]
     pub agent_links: Option<Vec<String>>,
     pub created_at: String,
@@ -92,6 +91,62 @@ pub fn create_group(
     save_store(&store)?;
 
     Ok(group)
+}
+
+/// What happened when an import tried to create the deck for members that are
+/// already installed. Member install is not undone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckAttach {
+    Created,
+    /// A deck with this name already exists. The import itself succeeded.
+    NameTaken,
+    /// No deck name, or no member names. Nothing was written.
+    Skipped,
+}
+
+/// Create the deck for a finished member install.
+///
+/// A blank name uses `fallback_name`. Still blank, or no member names, skips
+/// the write. A duplicate name is [`DeckAttach::NameTaken`], not an error.
+/// Any other store failure is returned after the members are left in place.
+pub fn attach_imported_deck(
+    name: &str,
+    fallback_name: &str,
+    description: String,
+    icon: String,
+    skills: Vec<String>,
+    skill_sources: std::collections::HashMap<String, String>,
+) -> Result<DeckAttach> {
+    if skills.is_empty() {
+        return Ok(DeckAttach::Skipped);
+    }
+    let resolved = if name.trim().is_empty() {
+        fallback_name.trim()
+    } else {
+        name.trim()
+    };
+    if resolved.is_empty() {
+        return Ok(DeckAttach::Skipped);
+    }
+    if list_groups().iter().any(|group| group.name == resolved) {
+        return Ok(DeckAttach::NameTaken);
+    }
+    let icon = if icon.trim().is_empty() {
+        "📦".to_string()
+    } else {
+        icon
+    };
+    match create_group(
+        resolved.to_string(),
+        description,
+        icon,
+        skills,
+        skill_sources,
+    ) {
+        Ok(_) => Ok(DeckAttach::Created),
+        Err(error) if error.to_string().contains("already exists") => Ok(DeckAttach::NameTaken),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn update_group(
@@ -195,15 +250,15 @@ pub fn duplicate_group(id: &str) -> Result<SkillGroup> {
         Some(links) if !links.is_empty() => {
             update_group(copy.id.clone(), None, None, None, None, None, Some(links))
         }
-        // `None` means the source is still awaiting backfill; leaving the copy
-        // empty would freeze it as "on no Agent". Inherit the unresolved state
-        // so the next backfill pass resolves both from the same disk truth.
+        // `None` means the source never recorded a rail. `create_group` starts
+        // a deck with an empty rail, so put the copy back to `None`. The deck
+        // page treats both as unlinked.
         Some(_) => Ok(copy),
         None => clear_agent_links(&copy.id).map(|_| copy),
     }
 }
 
-/// Reset a deck to the unresolved (pre-backfill) state.
+/// Put a copy back to `None`. `create_group` starts a deck with an empty rail.
 fn clear_agent_links(id: &str) -> Result<()> {
     let mut store = load_store();
     let Some(group) = store.groups.iter_mut().find(|g| g.id == id) else {
@@ -211,29 +266,6 @@ fn clear_agent_links(id: &str) -> Result<()> {
     };
     group.agent_links = None;
     save_store(&store)
-}
-
-/// Resolve `None` Agent links for decks the backfill has just computed.
-///
-/// Writes the whole store once and leaves `updated_at` alone — this is a
-/// storage migration, not a user edit.
-pub fn backfill_agent_links(resolved: &[(String, Vec<String>)]) -> Result<()> {
-    if resolved.is_empty() {
-        return Ok(());
-    }
-    let mut store = load_store();
-    let mut changed = false;
-    for (id, links) in resolved {
-        if let Some(group) = store
-            .groups
-            .iter_mut()
-            .find(|g| &g.id == id && g.agent_links.is_none())
-        {
-            group.agent_links = Some(dedupe_agent_links(links.clone()));
-            changed = true;
-        }
-    }
-    if changed { save_store(&store) } else { Ok(()) }
 }
 
 fn dedupe_agent_links(links: Vec<String>) -> Vec<String> {
@@ -307,6 +339,101 @@ mod tests {
     }
 
     #[test]
+    fn imported_deck_reports_a_taken_name_without_a_second_group() {
+        let _sandbox = sandbox();
+        new_deck("taken");
+        let status = attach_imported_deck(
+            "taken",
+            "fallback",
+            "desc".into(),
+            String::new(),
+            vec!["member".into()],
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(status, DeckAttach::NameTaken);
+        assert_eq!(list_groups().len(), 1);
+        assert_eq!(list_groups()[0].skills, vec!["git-flow".to_string()]);
+    }
+
+    #[test]
+    fn imported_deck_skips_a_blank_name_and_uses_a_fallback() {
+        let _sandbox = sandbox();
+        let skipped = attach_imported_deck(
+            "  ",
+            "",
+            "desc".into(),
+            String::new(),
+            vec!["member".into()],
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(skipped, DeckAttach::Skipped);
+        assert!(list_groups().is_empty());
+
+        let created = attach_imported_deck(
+            "",
+            "fallback",
+            "desc".into(),
+            "  ".into(),
+            vec!["member".into()],
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(created, DeckAttach::Created);
+        let groups = list_groups();
+        assert_eq!(groups[0].name, "fallback");
+        assert_eq!(groups[0].icon, "📦");
+    }
+
+    #[test]
+    fn share_deck_keeps_the_installed_member_when_the_name_is_taken() {
+        let _sandbox = crate::test_sandbox::Sandbox::new();
+        let content = "---\nname: member\ndescription: d\n---\nbody\n";
+        let skill = crate::share_install::ShareCodeSkill {
+            n: "member".into(),
+            u: String::new(),
+            c: Some(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                content,
+            )),
+            p: None,
+        };
+        let first = crate::share_install::install_share_and_deck(
+            true,
+            "Deck",
+            "d".into(),
+            String::new(),
+            vec![skill.clone()],
+        )
+        .unwrap();
+        assert_eq!(first.deck, DeckAttach::Created);
+        assert_eq!(first.summary.embedded_names, vec!["member".to_string()]);
+        let body = std::fs::read_to_string(
+            ss_core::infra::paths::local_skills_dir().join("member/SKILL.md"),
+        )
+        .unwrap();
+
+        let second = crate::share_install::install_share_and_deck(
+            true,
+            "Deck",
+            "d".into(),
+            String::new(),
+            vec![skill],
+        )
+        .unwrap();
+        assert_eq!(second.deck, DeckAttach::NameTaken);
+        assert_eq!(list_groups().len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(
+                ss_core::infra::paths::local_skills_dir().join("member/SKILL.md")
+            )
+            .unwrap(),
+            body
+        );
+    }
+
+    #[test]
     fn duplicate_inherits_source_links() {
         let _sandbox = sandbox();
         let deck = new_deck("original");
@@ -323,32 +450,5 @@ mod tests {
 
         let copy = duplicate_group(&deck.id).unwrap();
         assert_eq!(copy.agent_links, Some(vec!["claude".to_string()]));
-    }
-
-    #[test]
-    fn backfill_only_resolves_unresolved_decks() {
-        let _sandbox = sandbox();
-        let legacy = new_deck("legacy");
-        let explicit = new_deck("explicit");
-        clear_agent_links(&legacy.id).unwrap();
-
-        backfill_agent_links(&[
-            (legacy.id.clone(), vec!["claude".to_string()]),
-            // Already resolved to "no Agent" by the user — must not be revived.
-            (explicit.id.clone(), vec!["codex".to_string()]),
-        ])
-        .unwrap();
-
-        let groups = list_groups();
-        let by_id = |id: &str| {
-            groups
-                .iter()
-                .find(|g| g.id == id)
-                .unwrap()
-                .agent_links
-                .clone()
-        };
-        assert_eq!(by_id(&legacy.id), Some(vec!["claude".to_string()]));
-        assert_eq!(by_id(&explicit.id), Some(Vec::new()));
     }
 }

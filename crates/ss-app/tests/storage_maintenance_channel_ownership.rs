@@ -62,7 +62,6 @@ impl Sandbox {
         previous.push(("SKILLSTAR_TOOL_SYNC_HOME", previous_sync));
         for variable in [
             "CLAUDE_CONFIG_DIR",
-            "CODEX_HOME",
             "AUTOHAND_HOME",
             "DSH_HOME",
             "GROK_HOME",

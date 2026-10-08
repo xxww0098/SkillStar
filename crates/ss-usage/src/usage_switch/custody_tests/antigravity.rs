@@ -79,10 +79,25 @@ async fn antigravity_refresh_window_adopts_and_projects_the_live_session() {
         "alice-refresh-rotated"
     );
 
+    let before_refresh = row.clone();
+    assert!(
+        sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
+    let path = antigravity_state_db(sb.home.path());
+    let key = "antigravityUnifiedStateSync.oauthToken";
+    let encoded = crate::vscdb::read_item_string(&path, key).unwrap().unwrap();
+    let mut blob =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap();
+    let extension = [0x98, 0x06, 0x07]; // unknown field 99, varint 7
+    blob.extend(extension);
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, blob);
+    crate::vscdb::write_labeled_items(&path, "Antigravity", &[(key, &encoded)]).unwrap();
     row.access_token_encrypted = Some(crypto::encrypt("alice-access-from-skillstar"));
     row.refresh_token_encrypted = Some(crypto::encrypt("alice-refresh-from-skillstar"));
     let mut row = storage::patch_oauth_credentials(&row).unwrap();
-    let outcome = sync_refreshed_active_subscription(&mut row, &lease)
+    let outcome = sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
         .unwrap()
         .expect("active Antigravity account must be projected");
 
@@ -90,6 +105,13 @@ async fn antigravity_refresh_window_adopts_and_projects_the_live_session() {
     let live = read_antigravity_state(sb.home.path());
     assert_eq!(live.access_token, "alice-access-from-skillstar");
     assert_eq!(live.refresh_token, "alice-refresh-from-skillstar");
+    let encoded = crate::vscdb::read_item_string(&path, key).unwrap().unwrap();
+    let blob = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap();
+    assert!(
+        blob.windows(extension.len())
+            .any(|bytes| bytes == extension),
+        "rotation must preserve client-private protobuf fields"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -4,6 +4,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{Selectable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -11,8 +12,14 @@ use ss_core::types::skill::Skill;
 
 use super::super::MySkillsPage;
 use super::super::types::SourceFilter;
-use crate::chrome::{InteractionSpring, MotionPaint, icon, icon_spin, segment_tab, segment_track};
+use crate::chrome::{InteractionSpring, MotionPaint, icon, icon_spin};
 use crate::theme::palette;
+
+/// Repo rows (the all-repos entry included) that fit before the origin menu
+/// has to scroll. A `max_h` on the scrollable does not create wheel overflow.
+const ORIGIN_REPOS_VISIBLE: usize = 8;
+/// Repo-list viewport height, same `max_h` caveat as [`ORIGIN_REPOS_VISIBLE`].
+const ORIGIN_REPOS_VIEW_H: f32 = 280.0;
 
 pub(super) fn origin_menu_button(
     view: WeakEntity<MySkillsPage>,
@@ -101,13 +108,15 @@ fn origin_menu(
     if !show_repos {
         return panel;
     }
+    // More rows than the viewport holds scroll inside a fixed height; fewer
+    // render at their natural height. A `max_h` on the scrollable does not
+    // create wheel overflow — the wrapper leaves it on the content.
+    let repo_rows = repos.len() + 1;
     let mut list = div()
         .id("my-skills-origin-repos")
         .flex()
         .flex_col()
-        .gap(px(2.0))
-        .max_h(px(280.0))
-        .overflow_y_scrollbar();
+        .gap(px(2.0));
     let v = view.clone();
     list = list.child(repo_row(
         "origin-repo-all",
@@ -225,7 +234,22 @@ fn origin_menu(
                             .text_color(rgb(palette().fg_muted))
                             .child(crate::i18n::t("toolbar.repo")),
                     )
-                    .child(list),
+                    .child(if repo_rows > ORIGIN_REPOS_VISIBLE {
+                        div()
+                            .h(px(ORIGIN_REPOS_VIEW_H))
+                            .w_full()
+                            .min_w_0()
+                            .flex_shrink_0()
+                            .child(
+                                div()
+                                    .id("origin-repo-scroll")
+                                    .overflow_y_scrollbar()
+                                    .child(list),
+                            )
+                            .into_any_element()
+                    } else {
+                        list.into_any_element()
+                    }),
             ),
     );
     panel
@@ -235,31 +259,30 @@ fn source_segment(
     view: WeakEntity<MySkillsPage>,
     dismiss_popover: WeakEntity<gpui_kit::component::popover::PopoverState>,
     source_filter: SourceFilter,
-) -> Div {
-    let mut track = segment_track().w_full();
+) -> TabBar {
+    let selected = SourceFilter::ALL
+        .iter()
+        .position(|kind| *kind == source_filter)
+        .unwrap_or(0);
+    let mut bar = TabBar::new("source-filter")
+        .segmented()
+        .w_full()
+        .selected_index(selected)
+        .on_click(move |ix, window, app| {
+            let kind = SourceFilter::ALL[*ix];
+            let _ = view.update(app, |this, cx| {
+                this.source_filter = kind;
+                if kind == SourceFilter::Local {
+                    this.repo_filter = None;
+                }
+                this.revise(cx);
+            });
+            let _ = dismiss_popover.update(app, |state, cx| state.dismiss(window, cx));
+        });
     for kind in SourceFilter::ALL {
-        let view = view.clone();
-        let dismiss = dismiss_popover.clone();
-        track = track.child(
-            segment_tab(
-                ElementId::Name(format!("source-filter-{kind:?}").into()),
-                kind.label(),
-                source_filter == kind,
-            )
-            .flex_1()
-            .on_click(move |_, window, app| {
-                let _ = view.update(app, |this, cx| {
-                    this.source_filter = kind;
-                    if kind == SourceFilter::Local {
-                        this.repo_filter = None;
-                    }
-                    this.revise(cx);
-                });
-                let _ = dismiss.update(app, |state, cx| state.dismiss(window, cx));
-            }),
-        );
+        bar = bar.child(Tab::new().label(kind.label()).flex_1());
     }
-    track
+    bar
 }
 
 fn repo_row(
@@ -464,13 +487,7 @@ fn repo_icon_button(
         .flex_shrink_0()
         .when(dimmed, |d| d.opacity(0.5))
         .when(live, |d| d.cursor_pointer())
-        .child(icon_spin(
-            ElementId::Name(format!("{id}-spin").into()),
-            glyph,
-            14.0,
-            color,
-            spin,
-        ))
+        .child(icon_spin(glyph, 14.0, color, spin))
         .tooltip({
             let tip = tip.clone();
             move |window, cx| crate::chrome::tooltip(tip.clone()).build(window, cx)

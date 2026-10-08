@@ -64,11 +64,6 @@ pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
     custom::add(def, &TomlPrefsStore)
 }
 
-/// Remove a custom agent profile by id.
-pub fn remove_custom_profile(id: &str) -> Result<()> {
-    custom::remove(id, &TomlPrefsStore)
-}
-
 /// Toggle an agent's enabled state; returns the new state.
 pub fn toggle_profile(id: &str) -> Result<bool> {
     registry::toggle(id, &TomlPrefsStore)

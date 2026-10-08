@@ -58,12 +58,10 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
     fs::create_dir_all(&project).unwrap();
     let previous_home = std::env::var_os("HOME");
     let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
-    let previous_codex = std::env::var_os("CODEX_HOME");
     let previous_tool_home = std::env::var_os("SKILLSTAR_TOOL_SYNC_HOME");
     set_env("HOME", &home);
     set_env("SKILLSTAR_DATA_DIR", &data);
     set_env("SKILLSTAR_TOOL_SYNC_HOME", &tool_home);
-    remove_env("CODEX_HOME");
     crate::deployment::invalidate_profile_cache();
     crate::update_state::reset_for_test();
 
@@ -132,7 +130,7 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
         )?;
 
         assert!(crate::agents::toggle_profile("codex")?);
-        let agent_copy = home.join(".codex/skills/writer");
+        let agent_copy = home.join(".agents/skills/writer");
         fs::create_dir_all(&agent_copy)?;
         fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;
         crate::deployment::ownership::mark_copy_for_test(&agent_copy, "writer");
@@ -318,7 +316,6 @@ fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() 
 
     restore_env("HOME", previous_home);
     restore_env("SKILLSTAR_DATA_DIR", previous_data);
-    restore_env("CODEX_HOME", previous_codex);
     restore_env("SKILLSTAR_TOOL_SYNC_HOME", previous_tool_home);
     crate::deployment::invalidate_profile_cache();
     crate::update_state::reset_for_test();

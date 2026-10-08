@@ -2,13 +2,18 @@
 //! table. Mirrors `App.tsx` in the React SPA: nav state lives here,
 //! capabilities are child entities.
 
+use std::rc::Rc;
+
 use gpui_kit::component::Sizable;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_marketplace::OfficialPublisher;
 
 use crate::accounts::AccountsPage;
-use crate::chrome::{InteractionSpring, MotionPaint, motion_spring, replay_view, window_drag};
+use crate::chrome::{
+    InteractionSpring, MotionPaint, SliderGeometry, SliderSegment, motion_spring, replay_view,
+    slider_segmented_at, window_drag,
+};
 use crate::layout::{
     RAIL_COLLAPSED_W as RAIL_COLLAPSED_PX, RAIL_W as RAIL_EXPANDED_PX, SHELL_GAP as SHELL_GAP_PX,
 };
@@ -39,6 +44,8 @@ pub struct Shell {
     /// selection box fades out where it is.
     nav_slot: u8,
     pages: Pages,
+    /// Bottom alert band fed by `notify::toast`.
+    notices: Entity<crate::notify::NoticeBoard>,
     /// Keeps the `Marketplace → SelectPublisher` subscription alive.
     _subscriptions: Vec<Subscription>,
 }
@@ -147,7 +154,7 @@ impl Shell {
                     let _ = marketplace.update(cx, |page, cx| page.sync_language(window, cx));
                     let _ = skill_cards.update(cx, |page, cx| page.sync_language(window, cx));
                     let _ = projects.update(cx, |page, cx| page.sync_language(window, cx));
-                    let _ = accounts.update(cx, |page, cx| page.revise(cx));
+                    let _ = accounts.update(cx, |page, cx| page.sync_language(window, cx));
                     let _ = publisher.update(cx, |page, cx| page.sync_language(window, cx));
                     let _ = settings.update(cx, |page, cx| page.sync_language(window, cx));
                 })
@@ -176,12 +183,21 @@ impl Shell {
             Ok("settings") => (NavPage::Settings, AppMode::Skills),
             _ => (NavPage::default(), AppMode::default()),
         };
+        // The alert band: pages push through `notify::toast`, which finds
+        // this board via a global. Board changes repaint the shell because
+        // the band is part of the shell's own scene.
+        let notices = cx.new(|_| crate::notify::NoticeBoard::default());
+        crate::notify::NoticeBoard::register(&notices, cx);
+        subs.push(cx.observe(&notices, |_, _, cx| {
+            cx.notify();
+        }));
         Self {
             page: initial_page,
             mode: initial_mode,
             collapsed: false,
             nav_slot: nav::skills_nav_slot(initial_page).unwrap_or(0),
             pages,
+            notices,
             _subscriptions: subs,
         }
     }
@@ -313,7 +329,11 @@ impl Render for Shell {
                             .min_h_0()
                             .size_full()
                             .child(mount_page(body)),
-                    ),
+                    )
+                    // The alert band docks below the page content: docking at
+                    // the top would push the toolbar band that carries the
+                    // window's traffic-light clearance out of alignment.
+                    .child(self.notices.read(cx).render()),
             )
             .child(render_sidebar(
                 self.page,
@@ -556,10 +576,9 @@ const MODE_SWITCHER_INSET_COLLAPSED_PX: f32 = 6.0;
 /// Skills/Accounts segmented pills — mirrors `ModeSwitcher`. Icon-only
 /// stacked buttons when the rail is collapsed.
 ///
-/// The selected capsule is one absolutely positioned thumb that springs
-/// between the two slots instead of each pill painting its own highlight,
-/// so the capsule glides when the mode changes. Label colors crossfade on
-/// the same spring; `reduce_motion` snaps it (handled by `with_spring`).
+/// The selected capsule is the shared sliding thumb (`chrome::segmented`),
+/// so it glides when the mode changes and the scope switch below the toolbar
+/// behaves the same way. `reduce_motion` snaps it (`with_spring`).
 fn render_mode_switcher(
     mode: AppMode,
     collapsed: bool,
@@ -579,9 +598,9 @@ fn render_mode_switcher(
 }
 
 /// Slot geometry derives from the rail width minus the wrapper inset and the
-/// track's border (1) plus padding (4) per side; the thumb mirrors one pill.
+/// track's padding (4) plus border (1) per side; the thumb mirrors one pill.
 fn mode_switcher_track(mode: AppMode, t: f32, collapsed: bool, shell: &WeakEntity<Shell>) -> Div {
-    const TRACK_CHROME_PX: f32 = 1.0 + 4.0;
+    const TRACK_PAD_PX: f32 = 4.0;
     const GAP_PX: f32 = 2.0;
     const PILL_H_PX: f32 = 32.0;
     let rail_w = if collapsed {
@@ -594,99 +613,53 @@ fn mode_switcher_track(mode: AppMode, t: f32, collapsed: bool, shell: &WeakEntit
     } else {
         MODE_SWITCHER_INSET_PX
     };
-    let inner_w = rail_w - 2.0 * inset - 2.0 * TRACK_CHROME_PX;
+    let chrome = TRACK_PAD_PX + 1.0;
+    let inner_w = rail_w - 2.0 * inset - 2.0 * chrome;
     let pill_w = if collapsed {
         inner_w
     } else {
         (inner_w - GAP_PX) / 2.0
     };
 
-    // Out-of-flow capsule. Children after it paint on top, so the pills keep
-    // receiving clicks while the capsule slides underneath them.
-    let stride = if collapsed {
-        PILL_H_PX + GAP_PX
-    } else {
-        pill_w + GAP_PX
-    };
-    let thumb = div()
-        .absolute()
-        .w(px(pill_w))
-        .h(px(PILL_H_PX))
-        .rounded_md()
-        .bg(rgb(palette().card))
-        .border_1()
-        .border_color(rgb(palette().border))
-        .shadow_sm();
-    let thumb = if collapsed {
-        thumb.left_1().top(px(TRACK_CHROME_PX - 1.0 + t * stride))
-    } else {
-        thumb.top_1().left(px(TRACK_CHROME_PX - 1.0 + t * stride))
-    };
-
-    let modes: [(AppMode, &str, &str, assets::IconName); 2] = [
-        (
-            AppMode::Skills,
-            "mode-skills",
-            "sidebar.modeSkills",
-            assets::IconName::LayoutGrid,
-        ),
-        (
-            AppMode::Accounts,
-            "mode-accounts",
-            "sidebar.modeAccounts",
-            assets::IconName::Users,
-        ),
+    let segments = vec![
+        SliderSegment {
+            id: "mode-skills",
+            icon: Some(assets::IconName::LayoutGrid),
+            label: (!collapsed).then(|| crate::i18n::t("sidebar.modeSkills")),
+        },
+        SliderSegment {
+            id: "mode-accounts",
+            icon: Some(assets::IconName::Users),
+            label: (!collapsed).then(|| crate::i18n::t("sidebar.modeAccounts")),
+        },
     ];
-    let mut track = div()
-        .relative()
-        .flex()
-        .w_full()
-        .gap(px(GAP_PX))
-        .p_1()
-        .rounded_lg()
-        .bg(rgb(palette().bg))
-        .border_1()
-        .border_color(rgb(palette().border))
-        .when(collapsed, |d| d.flex_col())
-        .child(thumb);
-    for (ix, (m, id, label_key, name)) in modes.iter().enumerate() {
-        let active = *m == mode;
-        // Spring overshoot may push t past [0, 1]; the capsule enjoys it, the
-        // color mix must not extrapolate.
-        let near = (if ix == 0 { 1.0 - t } else { t }).clamp(0.0, 1.0);
-        let pill = div()
-            .id(ElementId::Name((*id).into()))
-            .flex()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .h(px(PILL_H_PX))
-            .rounded_md()
-            .cursor_pointer()
-            .text_color(rgb(theme::mix_hsl(palette().fg_muted, palette().fg, near)))
-            .child(icon(
-                *name,
-                if collapsed { 16.0 } else { 14.0 },
-                theme::mix_hsl(palette().fg_muted, palette().accent_fg, near),
-            ))
-            .when(!collapsed, |d| {
-                d.gap(px(6.0))
-                    .child(div().text_xs().child(crate::i18n::t(*label_key)))
-            })
-            .when(active, |d| d.font_weight(FontWeight::SEMIBOLD))
-            .interaction_spring(
-                *id,
-                true,
-                MotionPaint::new().opacity(1.0),
-                MotionPaint::new().opacity(1.0),
-            );
-        let shell = shell.clone();
-        let m = *m;
-        track = track.child(pill.on_click(move |_, _, cx| {
-            let _ = shell.update(cx, |this, cx| this.set_mode(m, cx));
-        }));
-    }
-    track
+    let selected = if mode == AppMode::Accounts { 1 } else { 0 };
+    slider_segmented_at(
+        t,
+        &segments,
+        selected,
+        SliderGeometry {
+            slot_w: pill_w,
+            slot_h: PILL_H_PX,
+            pad: TRACK_PAD_PX,
+            icon_size: if collapsed { 16.0 } else { 14.0 },
+        },
+        collapsed,
+        &mode_switch_on_click(shell),
+    )
+    .w_full()
+}
+
+fn mode_switch_on_click(shell: &WeakEntity<Shell>) -> Rc<dyn Fn(usize, &mut Window, &mut App)> {
+    let shell = shell.clone();
+    Rc::new(move |ix, _, cx| {
+        let m = if ix == 1 {
+            AppMode::Accounts
+        } else {
+            AppMode::Skills
+        };
+        let _ = shell.update(cx, |this, cx| this.set_mode(m, cx));
+    })
 }
 
 /// Per-capability entities kept alive across navigation.

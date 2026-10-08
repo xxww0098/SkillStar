@@ -6,9 +6,13 @@ mod detail;
 
 pub(crate) use agent_item::render_agent_item;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::*;
@@ -186,12 +190,16 @@ impl ProjectsPage {
         ) {
             Ok((_, count)) => {
                 self.dirty = false;
-                self.status_message =
-                    Some(format!("Successfully deployed {count} link(s) to project"));
+                let count = count.to_string();
+                self.status_message = Some(
+                    crate::i18n::tf("projects.deploySuccess", &[("count", &count)]).to_string(),
+                );
                 self.refresh(cx);
             }
             Err(err) => {
-                self.status_message = Some(format!("Deploy failed: {err}"));
+                let err = err.to_string();
+                self.status_message =
+                    Some(crate::i18n::tf("projects.deployFailed", &[("err", &err)]).to_string());
                 cx.notify();
             }
         }
@@ -261,32 +269,20 @@ impl ProjectsPage {
 
         if self.projects.is_empty() {
             list_col = list_col.child(
-                div()
-                    .flex_1()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .px_4()
-                    .gap_2()
-                    .child(icon(IconName::Folder, 28.0, palette().fg_muted))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_align(TextAlign::Center)
-                            .text_color(rgb(palette().fg))
-                            .child(crate::i18n::t("projects.emptyTitle")),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .text_xs()
-                            .text_align(TextAlign::Center)
-                            .text_color(rgb(palette().fg_muted))
-                            .child(crate::i18n::t("projects.emptyDesc")),
-                    ),
+                Empty::new().header(
+                    EmptyHeader::new()
+                        .media(EmptyMedia::new().child(icon(
+                            IconName::Folder,
+                            28.0,
+                            palette().fg_muted,
+                        )))
+                        .title(EmptyTitle::new().child(crate::i18n::t("projects.emptyTitle")))
+                        .description(
+                            EmptyDescription::new()
+                                .text_xs()
+                                .child(crate::i18n::t("projects.emptyDesc")),
+                        ),
+                ),
             );
         } else if filtered.is_empty() {
             list_col = list_col.child(
@@ -329,6 +325,7 @@ impl ProjectsPage {
 
                 let card = div()
                     .id(ElementId::Name(format!("proj-card-{name}").into()))
+                    .debug_selector(|| format!("proj-card-{name}"))
                     .w_full()
                     .flex_grow_0()
                     .flex_shrink_0()
@@ -337,7 +334,7 @@ impl ProjectsPage {
                     .items_center()
                     .justify_between()
                     .px_3()
-                    .py_2_5()
+                    .py_2()
                     .rounded_lg()
                     .cursor_pointer()
                     .border_1()
@@ -369,7 +366,7 @@ impl ProjectsPage {
                         div()
                             .flex()
                             .items_center()
-                            .gap_2_5()
+                            .gap_2()
                             .flex_1()
                             .min_w_0()
                             .child(icon(
@@ -466,42 +463,109 @@ impl Render for ProjectsPage {
                 IconName::Plus,
                 crate::i18n::t("projects.registerProject"),
             )
+            .debug_selector(|| "projects-register-btn".into())
             .on_click(move |_, window, cx| {
                 let view = reg_view.clone();
                 let path_input = cx.new(|cx| {
                     InputState::new(window, cx).placeholder("/path/to/project/workspace")
                 });
                 let submitted = path_input.clone();
+                // Shared between the dialog body, the browse picker and the
+                // commit callback, which run on different paints.
+                let error = Rc::new(RefCell::new(None::<SharedString>));
+                let body_error = error.clone();
+                let browse_error = error.clone();
+                let browse_input = path_input.clone();
                 crate::chrome::open_form_dialog(
                     window,
                     cx,
-                    "Register Local Project",
+                    crate::i18n::t("projects.registerDialogTitle"),
                     crate::i18n::t("projects.registerProject"),
                     false,
-                    160.0,
                     move |_, _| {
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(Input::new(&path_input))
-                            .into_any_element()
+                        // The wrapper only carries the test selector; it adds
+                        // no styling, so its bounds stay the button's bounds.
+                        let browse = div().debug_selector(|| "projects-browse".into()).child({
+                            let path_input = browse_input.clone();
+                            let error = browse_error.clone();
+                            Button::new("projects-browse")
+                                .label(crate::i18n::t("projects.browseFolder"))
+                                .on_click(move |_, window, cx| {
+                                    let receiver = cx.prompt_for_paths(PathPromptOptions {
+                                        files: false,
+                                        directories: true,
+                                        multiple: false,
+                                        prompt: Some(crate::i18n::t("projects.chooseDir")),
+                                    });
+                                    let path_input = path_input.clone();
+                                    let error = error.clone();
+                                    window
+                                        .spawn(cx, async move |cx| {
+                                            let picked = receiver
+                                                .await
+                                                .ok()
+                                                .and_then(|r| r.ok())
+                                                .flatten()
+                                                .and_then(|p| p.into_iter().next());
+                                            if let Some(path) = picked {
+                                                let _ = cx.update(|window, cx| {
+                                                    let text = path.to_string_lossy().to_string();
+                                                    path_input.update(cx, |state, cx| {
+                                                        state.set_value(text, window, cx)
+                                                    });
+                                                    *error.borrow_mut() = None;
+                                                    window.refresh();
+                                                });
+                                            }
+                                        })
+                                        .detach();
+                                })
+                        });
+                        let mut body = div().flex().flex_col().gap_2().w_full().child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .gap_2()
+                                .w_full()
+                                .child(div().flex_1().min_w_0().child(Input::new(&path_input)))
+                                .child(browse),
+                        );
+                        if let Some(message) = body_error.borrow().clone() {
+                            body = body.child(
+                                div()
+                                    .debug_selector(|| "projects-register-error".into())
+                                    .w_full()
+                                    .text_sm()
+                                    .text_color(rgb(palette().danger))
+                                    .child(message),
+                            );
+                        }
+                        body.into_any_element()
                     },
-                    move |_, cx| {
+                    move |window, cx| {
                         let path = submitted.read(cx).value().trim().to_string();
                         if path.is_empty() {
+                            *error.borrow_mut() =
+                                Some(crate::i18n::t("projects.registerEmptyPath"));
+                            window.refresh();
                             return false;
                         }
-                        let _ = view.update(cx, |this, cx| match register_project(&path) {
+                        match register_project(&path) {
                             Ok(entry) => {
-                                this.refresh(cx);
-                                this.select_project(entry, cx);
+                                let _ = view.update(cx, |this, cx| {
+                                    this.refresh(cx);
+                                    this.select_project(entry, cx);
+                                });
+                                true
                             }
                             Err(err) => {
-                                tracing::warn!("register_project failed: {err}")
+                                tracing::warn!("register_project failed: {err}");
+                                *error.borrow_mut() =
+                                    Some(crate::i18n::t("projects.registerFailed"));
+                                window.refresh();
+                                false
                             }
-                        });
-                        true
+                        }
                     },
                 );
             }),
@@ -573,5 +637,248 @@ impl Render for ProjectsPage {
         }
 
         page_chrome(toolbar, layout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::component::Root;
+    use gpui_kit::{
+        AppContext, Context, IntoElement, Modifiers, ParentElement, Render, Styled, Window, div,
+        point, px, size,
+    };
+
+    use super::ProjectsPage;
+    use crate::test_support::IsolatedDataDir;
+
+    struct PageHost {
+        page: gpui_kit::Entity<ProjectsPage>,
+    }
+
+    impl Render for PageHost {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(self.page.clone())
+        }
+    }
+
+    fn paint(cx: &mut gpui_kit::VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn click_center(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        paint(cx);
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not on screen"));
+        cx.simulate_click(
+            point(
+                bounds.origin.x + bounds.size.width / 2.0,
+                bounds.origin.y + bounds.size.height / 2.0,
+            ),
+            Modifiers::default(),
+        );
+        paint(cx);
+    }
+
+    /// Commits the open dialog the way Enter does: the kit's Confirm
+    /// action on the focused node. The AlertDialog footer has no
+    /// test selector of its own.
+    fn commit_dialog(cx: &mut gpui_kit::VisualTestContext) {
+        cx.dispatch_action(gpui_kit::component::dialog::Confirm { secondary: false });
+        paint(cx);
+    }
+
+    fn open_register_dialog(cx: &mut gpui_kit::TestAppContext) -> &mut gpui_kit::VisualTestContext {
+        crate::init_test(cx);
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let page = cx.new(ProjectsPage::new);
+            let host = cx.new(|_| PageHost { page });
+            Root::new(host, window, cx)
+        });
+        cx.simulate_resize(size(px(1200.), px(800.)));
+        click_center(cx, "projects-register-btn");
+        cx
+    }
+
+    /// Regression: the project card must stay content-sized. A half-step
+    /// spacing helper (`py_2_5` etc.) balloons to ~100px per side in this
+    /// gpui, which stretched the card to fill the rail; see docs/errors.md.
+    #[gpui_kit::test]
+    fn project_cards_stay_compact(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        crate::init_test(cx);
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let page = cx.new(ProjectsPage::new);
+            page.update(cx, |this, cx| {
+                this.projects.push(super::ProjectEntry {
+                    name: "Compact".into(),
+                    path: "/tmp/compact".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                });
+                let proj = this.projects[0].clone();
+                this.set_active_project(proj);
+                cx.notify();
+            });
+            let host = cx.new(|_| PageHost { page });
+            Root::new(host, window, cx)
+        });
+        cx.simulate_resize(size(px(1200.), px(800.)));
+        paint(cx);
+        let bounds = cx
+            .debug_bounds("proj-card-Compact")
+            .expect("the project card is not on screen");
+        assert!(
+            bounds.size.height < px(80.0),
+            "the project card grew to {:?}; a half-step spacing helper is probably back",
+            bounds.size
+        );
+    }
+
+    /// The detail scroll area must start below the header, not overlap it.
+    #[gpui_kit::test]
+    fn detail_body_starts_below_header(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        crate::init_test(cx);
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let page = cx.new(ProjectsPage::new);
+            page.update(cx, |this, cx| {
+                this.projects.push(super::ProjectEntry {
+                    name: "Overlap".into(),
+                    path: "/tmp/overlap".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                });
+                let proj = this.projects[0].clone();
+                this.set_active_project(proj);
+                cx.notify();
+            });
+            let host = cx.new(|_| PageHost { page });
+            Root::new(host, window, cx)
+        });
+        cx.simulate_resize(size(px(1200.), px(800.)));
+        paint(cx);
+        let card = cx
+            .debug_bounds("agents-card")
+            .expect("the agents card is not on screen");
+        let rail = cx.debug_bounds("proj-card-Overlap").expect("rail card");
+        assert!(
+            card.origin.y >= rail.origin.y,
+            "the detail card top {:?} sits above the header bottom (rail top {:?})",
+            card.origin,
+            rail.origin
+        );
+    }
+
+    #[gpui_kit::test]
+    fn browse_fills_the_path_and_commit_registers_the_project(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        let picked = std::env::temp_dir().join(format!(
+            "skillstar-register-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&picked).unwrap();
+
+        let cx = open_register_dialog(cx);
+        click_center(cx, "projects-browse");
+        assert!(
+            cx.did_prompt_for_paths(),
+            "the browse button did not open the system picker"
+        );
+        let chosen = picked.clone();
+        cx.simulate_path_prompt_response(move |_| Some(vec![chosen]));
+        cx.run_until_parked();
+        paint(cx);
+
+        commit_dialog(cx);
+        let registered: Vec<String> = super::list_projects().into_iter().map(|p| p.path).collect();
+        assert!(
+            registered.contains(&picked.to_string_lossy().to_string()),
+            "the picked folder was not registered: {registered:?}"
+        );
+        let _ = std::fs::remove_dir_all(&picked);
+    }
+
+    #[gpui_kit::test]
+    fn an_empty_commit_keeps_the_dialog_open_with_the_reason(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        let cx = open_register_dialog(cx);
+
+        commit_dialog(cx);
+        assert!(
+            cx.debug_bounds("projects-register-error").is_some(),
+            "the empty-path reason is not shown"
+        );
+        assert!(
+            cx.debug_bounds("dialog-0").is_some(),
+            "the dialog closed on a failed commit"
+        );
+        assert!(super::list_projects().is_empty());
+    }
+
+    /// Regression: the deploy-mode capsule sits inside the collapsible row,
+    /// so its click must not also toggle the row's expand state.
+    #[gpui_kit::test]
+    fn clicking_the_deploy_mode_capsule_keeps_the_row_expanded(cx: &mut gpui_kit::TestAppContext) {
+        let _dir = IsolatedDataDir::new();
+        crate::init_test(cx);
+        let page_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let slot = page_slot.clone();
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let page = cx.new(ProjectsPage::new);
+            page.update(cx, |this, cx| {
+                this.projects.push(super::ProjectEntry {
+                    name: "Mode".into(),
+                    path: "/tmp/mode".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                });
+                let proj = this.projects[0].clone();
+                this.set_active_project(proj);
+                this.profiles = vec![ss_skills::agents::AgentProfile {
+                    id: "cursor".into(),
+                    display_name: "Cursor".into(),
+                    icon: String::new(),
+                    global_skills_dir: std::path::PathBuf::new(),
+                    project_skills_rel: ".cursor/skills".into(),
+                    installed: true,
+                    enabled: true,
+                    synced_count: 0,
+                }];
+                this.agent_skills
+                    .insert("cursor".into(), vec!["demo".into()]);
+                this.expanded_agent = Some("cursor".into());
+                cx.notify();
+            });
+            *slot.borrow_mut() = Some(page.clone());
+            let host = cx.new(|_| PageHost { page });
+            Root::new(host, window, cx)
+        });
+        cx.simulate_resize(size(px(1200.), px(800.)));
+        paint(cx);
+        assert!(
+            cx.debug_bounds("agent-top-cursor").is_some(),
+            "the agent row is not on screen"
+        );
+
+        click_center(cx, "mode-toggle-cursor");
+
+        let page = page_slot.borrow().clone().unwrap();
+        let (mode, expanded) = page.read_with(cx, |this, _| {
+            (
+                this.deploy_modes.get(".cursor/skills").copied(),
+                this.expanded_agent.clone(),
+            )
+        });
+        assert_eq!(
+            mode,
+            Some(super::ProjectDeployMode::Copy),
+            "the capsule did not flip the deploy mode"
+        );
+        assert_eq!(
+            expanded.as_deref(),
+            Some("cursor"),
+            "the row collapsed when the deploy mode was toggled"
+        );
     }
 }

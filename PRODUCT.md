@@ -8,7 +8,7 @@ desktop — GPUI native shell. The design language is desktop-app dense, not mar
 
 ## Stack
 
-GPUI + Rust. Theme tokens live in crates/ss-gpui/src/theme.rs. Copy is zh-CN / en JSON under crates/ss-gpui/assets/locales. The shell calls domain facades directly.
+GPUI + Rust. Theme tokens live in crates/ss-gpui/src/theme.rs. App copy is zh-CN / en JSON under crates/ss-gpui/assets/locales. Kit component strings follow the GPUI Kit i18n guide and are overridden from crates/ss-gpui/locales/ui.yml. The shell calls domain facades directly.
 
 ## Users
 

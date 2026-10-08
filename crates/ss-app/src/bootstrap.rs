@@ -41,7 +41,11 @@ pub async fn refresh_marketplace_startup() -> anyhow::Result<()> {
 }
 
 /// Background work that exists only while the GUI process is alive.
-pub fn spawn_gui_background(handle: &tokio::runtime::Handle) {
+///
+/// `product_version` is the binary's product version (`crates/skillstar`'s
+/// `Cargo.toml`) — the value the release check compares against GitHub
+/// Releases.
+pub fn spawn_gui_background(handle: &tokio::runtime::Handle, product_version: &'static str) {
     handle.spawn(async {
         if let Err(err) = refresh_marketplace_startup().await {
             tracing::error!(target: "marketplace_snapshot", "startup refresh failed: {err}");
@@ -49,6 +53,7 @@ pub fn spawn_gui_background(handle: &tokio::runtime::Handle) {
     });
     crate::channel_wake::spawn(handle);
     crate::skill_wake::spawn(handle);
+    crate::release_check_wake::spawn(handle, product_version);
 }
 
 #[cfg(test)]

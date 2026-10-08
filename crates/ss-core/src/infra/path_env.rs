@@ -160,7 +160,7 @@ pub fn command_with_path(program: &str) -> Command {
     cmd
 }
 
-/// Probe whether a desktop application is installed at a well-known path.
+/// Resolve a desktop app install path when present.
 ///
 /// `app_name` is the product name without extension, e.g. `"Cursor"`, `"ZCode"`.
 /// - macOS: `/Applications/{name}.app` and `~/Applications/{name}.app`
@@ -168,12 +168,7 @@ pub fn command_with_path(program: &str) -> Command {
 ///   `%LOCALAPPDATA%\Programs\{name-lower}\{name}.exe`,
 ///   `%ProgramFiles%\{name}\{name}.exe`, plus Claude-specific MSIX /
 ///   WindowsApps probes (Store installs land under `Packages\Claude_*`)
-/// - Linux: no stable official paths for these IDEs — returns false.
-pub fn desktop_app_installed(app_name: &str) -> bool {
-    desktop_app_path(app_name).is_some()
-}
-
-/// Resolve a desktop app install path when present (see [`desktop_app_installed`]).
+/// - Linux: no stable official paths for these IDEs — returns `None`.
 pub fn desktop_app_path(app_name: &str) -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {

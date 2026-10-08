@@ -230,7 +230,7 @@ fn global_state_db(os: DesktopOs, app_dir: &str) -> Option<PathBuf> {
 /// Windsurf 编辑器 2026-06 OTA 改名 Devin Desktop 后，Electron user-data
 /// 目录从 `Windsurf` 变成 `Devin`；`~/.codeium/windsurf` 配置目录不受影响。
 /// 先取新目录，未升级的安装回退旧目录，都不存在时以新目录为准。
-pub fn windsurf_state_db_path() -> Option<PathBuf> {
+pub fn devin_desktop_state_db_path() -> Option<PathBuf> {
     let os = current_desktop_os()?;
     let devin = global_state_db(os, "Devin");
     let legacy = global_state_db(os, "Windsurf");
@@ -359,7 +359,7 @@ mod tests {
         assert_ne!(sandbox, real_home.as_path());
 
         let ide_rows: &[(&str, &str, &[&str])] = &[
-            ("windsurf", "Devin", STATE_DB),
+            ("devin-desktop", "Devin", STATE_DB),
             ("windsurf-legacy", "Windsurf", STATE_DB),
             ("kiro", "Kiro", &[]),
         ];
@@ -387,7 +387,7 @@ mod tests {
 
         let host = current_desktop_os().expect("desktop os");
         assert_eq!(
-            windsurf_state_db_path(),
+            devin_desktop_state_db_path(),
             Some(expect(sandbox, host, "Devin", STATE_DB)),
             "falls back to the Devin dir when neither exists"
         );
@@ -398,13 +398,13 @@ mod tests {
         std::fs::create_dir_all(devin_dir.parent().expect("parent")).expect("devin dir");
         std::fs::write(&devin_dir, b"").expect("devin db");
         assert_eq!(
-            windsurf_state_db_path(),
+            devin_desktop_state_db_path(),
             Some(devin_dir.clone()),
             "prefers the Devin dir when both exist"
         );
         std::fs::remove_file(&devin_dir).expect("remove devin db");
         assert_eq!(
-            windsurf_state_db_path(),
+            devin_desktop_state_db_path(),
             Some(legacy_dir.clone()),
             "falls back to the legacy Windsurf dir"
         );

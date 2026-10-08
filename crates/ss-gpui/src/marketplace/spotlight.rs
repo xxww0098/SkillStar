@@ -15,6 +15,14 @@ use super::types::icon;
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::theme::palette;
 
+/// Suggestion rows that fit before the spotlight panel has to scroll. A
+/// `max_h` on the scrollable does not create wheel overflow — the wrapper
+/// leaves it on the content, which is then clamped to the viewport height.
+const SPOTLIGHT_VISIBLE: usize = 9;
+/// Suggestion-list viewport height (the panel's old 360px max minus the
+/// padding, the input, and the gaps), same caveat as [`SPOTLIGHT_VISIBLE`].
+const SPOTLIGHT_LIST_H: f32 = 300.0;
+
 impl MarketplacePage {
     /// Spotlight trigger: search glyph and ⌘F, or the active query. Picking a
     /// row sets the query, because this shell has no skill detail drawer.
@@ -73,10 +81,8 @@ impl MarketplacePage {
                     .content(move |popover, _window, cx| {
                         let dismiss = cx.entity().downgrade();
                         let _ = popover;
-                        let mut panel = div()
+                        let panel = div()
                             .w(px(320.0))
-                            .max_h(px(360.0))
-                            .overflow_y_scrollbar()
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -87,12 +93,17 @@ impl MarketplacePage {
                             .bg(rgb(palette().card))
                             .shadow_lg()
                             .child(Input::new(&input));
+                        // More names than the viewport holds scroll inside a
+                        // fixed height; fewer render at their natural height.
+                        // A `max_h` on the scrollable does not create wheel
+                        // overflow — the wrapper leaves it on the content.
+                        let mut list = div().flex().flex_col().gap_1();
                         for (index, name) in names.iter().enumerate() {
                             let pick = name.clone();
                             let view = menu_view.clone();
                             let search = menu_search.clone();
                             let dismiss = dismiss.clone();
-                            panel = panel.child(
+                            list = list.child(
                                 div()
                                     .id(ElementId::Name(format!("mk-spot-{index}").into()))
                                     .px_2()
@@ -123,7 +134,22 @@ impl MarketplacePage {
                                     }),
                             );
                         }
-                        panel
+                        panel.child(if names.len() > SPOTLIGHT_VISIBLE {
+                            div()
+                                .h(px(SPOTLIGHT_LIST_H))
+                                .w_full()
+                                .min_w_0()
+                                .flex_shrink_0()
+                                .child(
+                                    div()
+                                        .id("mk-spotlight-list")
+                                        .overflow_y_scrollbar()
+                                        .child(list),
+                                )
+                                .into_any_element()
+                        } else {
+                            list.into_any_element()
+                        })
                     }),
             )
             .when(active, |row| {

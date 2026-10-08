@@ -19,11 +19,16 @@ use crate::spawn_domain;
 
 pub(crate) use column::market_detail_column;
 
-/// Matches the skill detail column. A test locks the two widths together.
-pub(super) const DRAWER_W: f32 = 370.0;
+/// Track the card grid reserves for the floating sheet, matching the skill
+/// detail column: one card plus one gap ([`crate::layout::DETAIL_COLUMN_W`]),
+/// so the open grid loses exactly one column. A test locks the two widths
+/// together. The sheet itself paints [`crate::chrome::SHEET_GAP`] narrower
+/// on each side of the track.
+pub(super) const DRAWER_W: f32 = crate::layout::DETAIL_COLUMN_W;
 
-/// Pane width the card grid may use. An open column is subtracted before
-/// the column count is chosen, the same way My Skills does it.
+/// Pane width the card grid may use. The open column's track is subtracted
+/// before the column count is chosen, the same way My Skills does it; the
+/// sheet's floating ring lives inside that track.
 pub(super) fn market_grid_width(viewport_width: f32, drawer_open: bool) -> f32 {
     let width = crate::skill_card::card_content_width(viewport_width);
     if drawer_open { width - DRAWER_W } else { width }
@@ -466,13 +471,9 @@ mod tests {
         let open = market_grid_width(crate::layout::WINDOW_W, true);
         let two_cards = crate::skill_card::CARD_W * 2.0 + crate::skill_card::CARD_GAP;
         assert_eq!(grid_columns(open), 2);
-        assert!(
-            open - two_cards >= 4.0,
-            "the last card's border needs room inside the pane, open={open} cards={two_cards}"
-        );
-        assert!(
-            open - two_cards < crate::skill_card::CARD_GAP,
-            "the column should take the slack beside two cards, not leave a spare column's gap"
+        assert_eq!(
+            open, two_cards,
+            "the open pane is exactly two card tracks, no remainder"
         );
     }
 

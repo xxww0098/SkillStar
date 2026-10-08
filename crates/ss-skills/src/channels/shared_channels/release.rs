@@ -365,15 +365,6 @@ where
         }
     }
 
-    pub fn without_scanner(gateway: G, registry: R, sessions: ChannelPublishSessions) -> Self {
-        Self {
-            gateway,
-            registry,
-            scanner: None,
-            sessions,
-        }
-    }
-
     pub async fn preview(
         &self,
         repository_id: u64,

@@ -389,6 +389,16 @@ async fn missing_secrets_and_garbage_json_do_not_replace_the_file() {
     assert!(outcome.error.unwrap().contains("JWT"));
     assert_eq!(std::fs::read(&path).unwrap(), b"[]");
 
+    let mut no_id = storage::get_subscription("zcode-a").unwrap();
+    no_id.id = "zcode-no-id".into();
+    no_id.oauth_account_id = None;
+    storage::upsert_subscription(no_id).unwrap();
+    let (_, outcome) = super::Adapter.activate("zcode-no-id").unwrap();
+    assert!(!outcome.success);
+    assert!(outcome.error.unwrap().contains("用户 ID"));
+    assert_eq!(std::fs::read(&path).unwrap(), b"[]");
+    assert_eq!(pin().as_deref(), Some("zcode-a"));
+
     let mut bad = empty_row("zcode-bad");
     bad.oauth_region = Some("nope".into());
     bad.access_token_encrypted = Some(crypto::encrypt("access"));
@@ -754,3 +764,6 @@ async fn forget_ignores_a_different_token_for_the_same_provider() {
     super::Adapter.forget("zcode-a").unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), before);
 }
+
+#[path = "zcode_refresh_tests.rs"]
+mod refresh;

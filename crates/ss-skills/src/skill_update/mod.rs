@@ -121,6 +121,10 @@ pub struct SkillUpdateReport {
     pub identity_changed: Vec<SkillIdentityChange>,
     /// Local creations and bundle installs: no upstream to update from.
     pub not_updatable: Vec<String>,
+    /// Automatic admission kept these canonical copies. Manual updates leave
+    /// this empty; the update module already recorded the local-change marker.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_local: Vec<String>,
     /// Project copies of updated Skills that could not be refreshed, as
     /// `<project>: <reason>`.
     pub project_failures: Vec<String>,

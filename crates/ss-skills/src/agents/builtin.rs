@@ -1,4 +1,4 @@
-//! Built-in Agent definitions synchronized with `vercel-labs/skills`.
+//! Built-in Agent definitions for the skills CLI ecosystem.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -62,10 +62,10 @@ const fn unsupported() -> GlobalDirDef {
 }
 
 // The three legacy SkillStar ids (`claude`, `kiro`, `hermes`) retain
-// their persisted identity. CLI/API normalization accepts the corresponding
-// upstream ids. Every other row uses the upstream id verbatim. `omp`,
-// `deepseek` and `workbuddy` are SkillStar extensions kept after the
-// synchronized upstream block.
+// their persisted identity. CLI/API normalization accepts the standard
+// ids the CLIs publish. Every other row uses the standard id verbatim.
+// `omp`, `deepseek` and `workbuddy` are SkillStar extensions kept after
+// the shared block.
 const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "aider-desk",
@@ -147,7 +147,11 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "codex",
         "Codex",
-        env_or_home("CODEX_HOME", &[".codex"], &["skills"]),
+        // Codex standardized its global skills on the shared `~/.agents/skills`
+        // location; `~/.codex/skills` is the legacy path it no longer documents.
+        // Deployments to the canonical root are skipped, so this row is a
+        // no-op consumer of the canonical copy.
+        home(&[".agents", "skills"]),
         ".agents/skills",
     ),
     (
@@ -275,7 +279,7 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".iflow", "skills"]),
         ".iflow/skills",
     ),
-    // Upstream keeps `~/.kilocode` as the legacy config dir for installed
+    // Kilo keeps `~/.kilocode` as the legacy config dir for installed
     // detection only; skills live in `~/.kilo/skills` and the shared
     // `.agents/skills` project path.
     (
@@ -284,7 +288,7 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".kilo", "skills"]),
         ".agents/skills",
     ),
-    // Upstream pins this under a literal `~/.config` prefix, not XDG.
+    // Kimchi resolves this under a literal `~/.config` prefix, not XDG.
     (
         "kimchi",
         "Kimchi",
@@ -503,7 +507,7 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         env_or_home("DSH_HOME", &[".dsh"], &["skills"]),
         ".dsh/skills",
     ),
-    // WorkBuddy (Tencent) — not yet in vercel-labs/skills main. Global
+    // WorkBuddy (Tencent) — SkillStar extension. Global
     // ~/.workbuddy/skills, project .workbuddy/skills.
     (
         "workbuddy",
@@ -731,8 +735,9 @@ mod tests {
         "universal",
     ];
 
-    /// Upstream ids fold onto persisted SkillStar ids through the same alias
-    /// table the CLI and IPC use, so this test cannot drift from it.
+    /// Standard ids the Agent CLIs publish fold onto persisted SkillStar ids
+    /// through the same alias table the CLI and IPC use, so this test cannot
+    /// drift from it.
     fn skillstar_id(upstream: &str) -> &str {
         crate::agents::compatible_profile_id(upstream)
     }

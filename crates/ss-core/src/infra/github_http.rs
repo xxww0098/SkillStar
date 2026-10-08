@@ -99,20 +99,6 @@ fn anonymous_candidates(url: &str) -> Vec<Candidate> {
     out
 }
 
-/// Fetch SkillStar's `latest.json` through the anonymous GitHub chain so the
-/// updater can still *see* a newer version when the plugin's direct GitHub
-/// Releases endpoint is blocked. Install still goes through the signed plugin
-/// path or a manual Releases download — this never downloads an unsigned
-/// installer from a third-party accelerator.
-pub async fn fetch_github_latest_json(url: &str, timeout: Duration) -> Result<serde_json::Value> {
-    let response = get_anonymous(url, timeout).await?;
-    if !response.status().is_success() {
-        anyhow::bail!("latest.json returned HTTP {}", response.status());
-    }
-    let body = response.text().await?;
-    serde_json::from_str(&body).context("latest.json was not valid JSON")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

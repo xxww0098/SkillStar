@@ -233,12 +233,9 @@ pub fn blocked_hint() -> Option<SharedString> {
     Some(crate::i18n::t("detailPanel.translationNeedsAccount"))
 }
 
-/// Translation style from Settings, for a string that already has a translation.
-pub fn paint_card(row: Div) -> AnyElement {
-    paint_reader(row)
-}
-
-/// Same style, for the line under an English paragraph.
+/// Translation style from Settings, for the reader's translated line under an
+/// English paragraph. Descriptions never take this style: cards and detail
+/// columns paint a translation as plain text.
 pub fn paint_reader(row: Div) -> AnyElement {
     paint(
         row,

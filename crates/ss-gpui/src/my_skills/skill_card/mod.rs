@@ -19,14 +19,7 @@ use ss_skills::agents::AgentProfile;
 use ss_skills::deployment::{SKIP_CANONICAL_ROOT_AGENT, ToggleSkillOutcome};
 
 use crate::i18n::{t, tf};
-
-/// One slot in the brand-icon carousel.
-#[derive(Clone, Debug)]
-pub struct SkillCardAgent {
-    pub id: String,
-    pub linked: bool,
-    pub pending: bool,
-}
+use crate::skill_card::AgentRailSlot;
 
 /// Inputs for one card. `library` hides rank, stars, and the Install label
 /// the way the React card does for My Skills.
@@ -37,13 +30,17 @@ pub struct SkillCardAgent {
 pub struct SkillCardProps {
     pub scope: &'static str,
     pub skill: Skill,
-    pub agents: Vec<SkillCardAgent>,
+    pub agents: Vec<AgentRailSlot>,
     pub selected: bool,
     pub highlighted: bool,
     pub updating: bool,
     pub installing: bool,
     pub selectable: bool,
     pub library: bool,
+    /// Description translation remembered for this skill by the drawer's
+    /// button. `None` follows the Settings switch; a translated card keeps
+    /// its choice after the drawer moves to another skill.
+    pub translate_override: Option<bool>,
 }
 
 /// UI event. Domain work is [`SkillCardEvent::command`].
@@ -136,17 +133,6 @@ pub(crate) fn fetches_before_link(in_hub: bool, agent_specific: bool) -> bool {
     !(in_hub && agent_specific)
 }
 
-/// Agents the card rail, the detail deployment switches, and the batch
-/// link menu may offer. Same set: a global skills directory, and enabled
-/// in Settings. A disabled profile stays off every one of those surfaces.
-pub(super) fn targetable_agent_profiles(
-    profiles: &[AgentProfile],
-) -> impl Iterator<Item = &AgentProfile> {
-    profiles
-        .iter()
-        .filter(|profile| profile.has_global_skills() && profile.enabled)
-}
-
 /// Enabled agents with a global skills directory, in profile order.
 /// `pending` keys are `{skill}::{agent id}`. A profile disabled in Settings
 /// stays off the rail even while a skill still links it — matching the React
@@ -155,10 +141,10 @@ pub fn skill_card_agents(
     skill: &Skill,
     profiles: &[AgentProfile],
     pending: &HashSet<String>,
-) -> Vec<SkillCardAgent> {
+) -> Vec<AgentRailSlot> {
     let links = skill.agent_links.as_deref().unwrap_or(&[]);
-    targetable_agent_profiles(profiles)
-        .map(|profile| SkillCardAgent {
+    crate::skill_card::targetable_agent_profiles(profiles)
+        .map(|profile| AgentRailSlot {
             id: profile.id.clone(),
             linked: skill.installed && links.iter().any(|link| link == &profile.display_name),
             pending: pending.contains(&format!("{}::{}", skill.name, profile.id)),
@@ -254,7 +240,7 @@ fn toggle_skip_message(name: &str, code: &str, path: &str) -> String {
 mod tests {
     use super::{
         AgentProfile, Skill, SkillCardCommand, SkillCardEvent, run_skill_card_command,
-        skill_card_agents, targetable_agent_profiles,
+        skill_card_agents,
     };
     use std::collections::HashSet;
 
@@ -323,15 +309,28 @@ mod tests {
 
     #[test]
     fn targetable_profiles_are_the_carousel_set() {
+        // The filter itself lives in `crate::skill_card::agent_rail`; this
+        // suite keeps the cards-side behavior: a disabled profile never
+        // occupies a slot.
         let mut no_global = profile("no-global", true);
         no_global.global_skills_dir = std::path::PathBuf::new();
         let profiles = [profile("on", true), profile("off", false), no_global];
 
-        let ids: Vec<_> = targetable_agent_profiles(&profiles)
-            .map(|profile| profile.id.as_str())
+        let mut skill = Skill::from_skills_sh(
+            "demo".into(),
+            "desc".into(),
+            0,
+            "author".into(),
+            "https://github.com/a/b".into(),
+        );
+        skill.installed = true;
+
+        let ids: Vec<_> = skill_card_agents(&skill, &profiles, &HashSet::new())
+            .into_iter()
+            .map(|slot| slot.id)
             .collect();
 
-        assert_eq!(ids, vec!["on"]);
+        assert_eq!(ids, vec!["on".to_string()]);
     }
 
     /// The toggle path must not block when another Skill write holds the
@@ -358,12 +357,17 @@ mod tests {
     }
 
     struct CardEnv {
+        /// Same lock as the drawer/reader translation suites: `CardEnv`
+        /// redirects the data root, so it must not race another suite's
+        /// `SKILLSTAR_DATA_DIR` read or restore.
+        _lock: std::sync::MutexGuard<'static, ()>,
         previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
         root: std::path::PathBuf,
     }
 
     impl CardEnv {
         fn new() -> Self {
+            let lock = super::super::test_support::data_dir_lock();
             let root = std::env::temp_dir().join(format!(
                 "skillstar-card-{}-{}",
                 std::process::id(),
@@ -382,7 +386,6 @@ mod tests {
                 ("SKILLSTAR_TOOL_SYNC_HOME", Some(root.join("tool-home"))),
                 ("XDG_STATE_HOME", None),
                 ("CLAUDE_CONFIG_DIR", None),
-                ("CODEX_HOME", None),
             ];
             let previous = assignments
                 .iter()
@@ -396,7 +399,11 @@ mod tests {
                     }
                 }
             }
-            Self { previous, root }
+            Self {
+                _lock: lock,
+                previous,
+                root,
+            }
         }
     }
 

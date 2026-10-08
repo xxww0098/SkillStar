@@ -18,6 +18,16 @@ pub(super) trait IdeCredentialAdapter: Send + Sync {
 
     fn sync(&self, sub: &Subscription) -> UsageResult<SwitchOutcome>;
 
+    /// Read-only fetchers never write the client. Rotating adapters opt in
+    /// and verify the pre-request session still owns the live store.
+    fn sync_after_refresh(
+        &self,
+        _before: &Subscription,
+        _sub: &Subscription,
+    ) -> UsageResult<Option<SwitchOutcome>> {
+        Ok(None)
+    }
+
     fn reconcile(&self) -> UsageResult<Option<CliAccountState>>;
 
     fn adopt_before_refresh(&self, sub: &mut Subscription) -> UsageResult<()>;
@@ -29,7 +39,7 @@ const IDE_ADAPTERS: &[&'static dyn IdeCredentialAdapter] = &[
     &super::antigravity::Adapter,
     &super::cursor::Adapter,
     &super::kiro::Adapter,
-    &super::windsurf::Adapter,
+    &super::devin_desktop::Adapter,
     &super::zcode::Adapter,
 ];
 

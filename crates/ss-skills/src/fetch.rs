@@ -126,6 +126,23 @@ pub(crate) fn fetch_for_install_at_revision(
     Ok(checkout)
 }
 
+/// Update apply: refresh the persistent import cache at the locked ref and
+/// materialize only the group's skill folders.
+///
+/// A cache left by a previous scan or install costs one
+/// `git fetch --depth=1 --filter=blob:none` plus the folders' changed blobs
+/// instead of a fresh full clone; a cold cache still downloads blobs for the
+/// selected folders only.
+pub(crate) fn fetch_for_update(
+    spec: &Source,
+    folders: &[&str],
+    session: &GitOperationSession,
+) -> Result<Checkout> {
+    let checkout = fetch_import(spec, &folder_patterns(folders)?, true, None, session)?;
+    checkout.complete_linked_payloads(folders, session)?;
+    Ok(checkout)
+}
+
 fn fetch_import(
     spec: &Source,
     patterns: &[String],
@@ -216,6 +233,47 @@ pub fn fetch_source(spec: &Source, session: &GitOperationSession) -> Result<Chec
         None => git_ops::clone_repo_shallow_in_session(&spec.repo_url, &dest, session),
     }
     .with_context(|| format!("Failed to fetch '{}'", spec.repo_url))?;
+    Ok(Checkout {
+        dir: dest,
+        _temp: Some(temp),
+        _cache_lock: None,
+        revision: None,
+        cache_hit: false,
+        cached_at: None,
+    })
+}
+
+/// Temp snapshot for hash comparison (update checks): a `blob:none` partial
+/// clone with no worktree, so only commits and trees travel — the check
+/// compares tree SHAs and never reads file content. Unpinned local sources
+/// are borrowed in place, exactly like [`fetch_source`].
+pub(crate) fn fetch_trees_only(spec: &Source, session: &GitOperationSession) -> Result<Checkout> {
+    if spec.git_ref.is_none()
+        && let Some(local) = local_source_dir(&spec.repo_url)
+    {
+        return Ok(Checkout {
+            dir: local,
+            _temp: None,
+            _cache_lock: None,
+            revision: None,
+            cache_hit: false,
+            cached_at: None,
+        });
+    }
+
+    let temp = tempfile::Builder::new()
+        .prefix("skillstar-check-")
+        .tempdir()
+        .context("Failed to create temp clone directory")?;
+    let dest = temp.path().join("repo");
+    session.emit_stage(
+        crate::git::transport::InstallStage::Fetching,
+        &spec.short,
+        None,
+    );
+    note_remote_git_lock_depth();
+    git_ops::clone_repo_partial_in_session(&spec.repo_url, &dest, spec.git_ref.as_deref(), session)
+        .with_context(|| format!("Failed to fetch '{}'", spec.repo_url))?;
     Ok(Checkout {
         dir: dest,
         _temp: Some(temp),

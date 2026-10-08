@@ -8,15 +8,16 @@
 > [../frontend/README.md](../frontend/README.md)。
 
 SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需选做。内置 Skills
-分发注册表以 `vercel-labs/skills/src/agents.ts` 为兼容基线；同步上游时必须同时核对
+分发注册表与 skills CLI（`npx skills`）发布的 Agent 清单保持同步；同步时必须同时核对
 Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以作为扩展保留，
-但不能改变同名上游 Agent 的目录语义。
+但不能改变同名 Agent 的目录语义。
 
 2026-10 上游对齐要点：`grok` 与 `gemini-cli` 已被上游正式收录，从 extension 区
 归位同步区（`grok` 增加 `$GROK_HOME` 支持；`gemini-cli` 项目路径改共享
 `.agents/skills`）；`pi` 与 `kilo` 改为 open-skills 语义（Pi 原生读共享路径；
 Kilo 全局目录为 `~/.kilo/skills`，`~/.kilocode` 仅上游用于安装检测）；`droid`
-项目路径改共享 `.agents/skills`，全局目录留在 `~/.factory/skills` 供旧安装清理。
+项目路径改共享 `.agents/skills`，全局目录留在 `~/.factory/skills` 供旧安装清理；
+`codex` 全局目录改共享 `~/.agents/skills`（`~/.codex/skills` 是上游已弃用的旧位置）。
 旧目录中已部署的链接不做迁移，用户重新部署即更新。`discovery` 的
 `PRIORITY_SKILL_DIRS` 与上游 `AGENT_PROJECT_SKILL_DIRS` 保持超集关系，缺的容器
 目录（`.grok`、`.kilo`、`.kimchi`、`.minimax`、`.posit/assistant`、`.zcode`）
@@ -92,8 +93,8 @@ Agent 卡片展开后的已链接面板列出该物理 Global skills 目录当�
 `unlink_all_skills_from_agent`，一次清掉该目录里全部受管部署——非受管的真实目录/文件
 原样保留，不视为失败。操作按目录去重并复用受管技能的 pending 门闩（共享目录期间所有
 profile 一起置灰），完成后重新读取该目录状态并以界面语言报告清除数量。结果走窗口的标准
-toast，不在页面里留常驻文本：成功与普通错误自动消失；跳过项带「打开该目录」动作，动作会让
-toast 保持到用户关闭，关闭即表示接受跳过（见 `settings/managed_skills/notice.rs`）。
+通知带（`notify.rs`，见 [界面约定](../frontend/README.md#壳)），不在页面里留常驻文本：成功与普通错误自动消失；跳过项带「打开该目录」动作，动作会让
+该通知保持到用户关闭，关闭即表示接受跳过（见 `settings/managed_skills/notice.rs`）。
 GPUI 侧实现见 `crates/ss-gpui/src/settings/agent_connections.rs` 与
 `settings/managed_skills/`。
 
@@ -137,7 +138,7 @@ GPUI 侧实现见 `crates/ss-gpui/src/settings/agent_connections.rs` 与
 成功数、失败数与耗时；批次报告保留每个失败 Skill 的完整 error chain。遇到目标位置已有
 非 SkillStar 管理的真实目录时必须 fail closed、保留该目录：该项记为 `skipped`（code
 `unmanaged_real_directory` + 冲突路径），不得记为 `failed`，也不得覆盖。UI 用界面语言说明
-原因，并提供「打开该目录」；关闭 toast 即表示接受跳过。单项 `toggle_skill_for_agent` 仍把
+原因，并提供「打开该目录」；关闭该通知即表示接受跳过。单项 `toggle_skill_for_agent` 仍把
 同一种碰撞映射为错误，避免用户以为已经链上。
 
 Settings 的「当前受管技能」主开关不是 Agent 的启用开关，也不是 Hub 同步。它通过
@@ -169,8 +170,8 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
 命令 `pi`）是同源但独立的产品：配置根互不读取（`~/.omp` vs `~/.pi/agent`），OMP 自带
 `~/.omp/agent/config.yml`（modelRoles）、自有 models.db 目录、会话与认证状态，本机可并存。
 
-- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区（与 `deepseek`、`workbuddy` 并列，不在
-  vercel-labs 上游 id 内）：全局技能目录 `~/.omp/agent/skills`，项目级 `.omp/skills`；
+- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区（与 `deepseek`、`workbuddy` 并列的
+  SkillStar 扩展）：全局技能目录 `~/.omp/agent/skills`，项目级 `.omp/skills`；
   `ss-skills::discovery` 的优先级目录包含 `.omp/skills`。
 - `~/.omp/agent/managed-skills` 是 OMP Auto-Learn 的自动生成目录（`manage_skill`
   工具写入），**不纳入** SkillStar 的发现、部署与卸载——工具生成内容不当作
@@ -183,22 +184,22 @@ OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-
 ### WorkBuddy 注册说明
 
 WorkBuddy 是腾讯的办公 Agent，技能目录与 CodeBuddy 同构（`~/.workbuddy/skills` /
-`.workbuddy/skills`），但产品与配置根都独立，不能共用 `codebuddy` 那一行。它还不在
-`vercel-labs/skills` 上游清单里，所以落在 `BUILTIN_AGENT_DEFS` 的 extension 区。
+`.workbuddy/skills`），但产品与配置根都独立，不能共用 `codebuddy` 那一行。它是
+SkillStar 扩展，落在 `BUILTIN_AGENT_DEFS` 的 extension 区。
 Lobe Icons 没有对应品牌字形，图标走通用 `LobeHubMono`。
 
 轴①已接入。
 
 ### Devin 注册说明
 
-Devin 是 Cognition 的软件工程 Agent，`devin` 行与 `vercel-labs/skills` 上游逐字一致：显示名
+Devin 是 Cognition 的软件工程 Agent，`devin` 行与各工具发布的清单逐字一致：显示名
 `Devin for Terminal`，全局 `~/.config/devin/skills`，项目 `.devin/skills`（上游 id 就在
-`UPSTREAM_AGENT_IDS` 内，不是 extension 区）。图标走 Lobe Icons 的品牌字形 `DevinColor`。
+同步清单内，不是 extension 区）。图标走 Lobe Icons 的品牌字形 `DevinColor`。
 
 轴①已接入。Windsurf 编辑器 2026-06 OTA 改名 Devin Desktop：SkillStar 的 profile id 与
 显示名随之改为 `devin-desktop` / Devin Desktop，但 skills 路径不变（全局
 `~/.codeium/windsurf/skills`、项目 `.windsurf/skills`，`~/.codeium` 目录结构 OTA 后原样保留）。
-上游 `vercel-labs/skills` 的 id 仍是 `windsurf`，`compatible_profile_id` 的别名表把它折叠到
+其他工具发布的 id 仍是 `windsurf`，`compatible_profile_id` 的别名表把它折叠到
 `devin-desktop`；旧 `--agent windsurf` CLI 参数与持久化偏好同样经别名/键迁移落到新 id，见
 Usage 文档的 tool_paths 与存储迁移规则。编辑器的 Electron user-data 目录（OAuth/切号读取的
 `state.vscdb` 所在）则随 OTA 从 `Windsurf` 改名为 `Devin`。同属 Cognition 不代表它和

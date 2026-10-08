@@ -178,6 +178,7 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
             skill_names: vec![r.name],
             total_file_count: r.file_count,
             replaced_count: usize::from(r.replaced),
+            skipped: Vec::new(),
         });
     }
     let manifest: MultiManifest =
@@ -199,7 +200,8 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
     }
 
     let mut folders = HashSet::new();
-    let mut skills = Vec::new();
+    let mut content_skills = Vec::new();
+    let mut linked = Vec::new();
     for entry in &manifest.skills {
         let name = folder_name(&entry.name)
             .with_context(|| "Invalid Skill name in multi-bundle manifest")?;
@@ -209,10 +211,28 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
                 entry.name
             );
         }
+        if let Some(url) = entry
+            .source_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+        {
+            // Linked member: the share-code pipeline installs it, exactly as
+            // if the recipient had pasted the URL — same git install, same
+            // updatable lock entry. Files, if a hand-made archive also
+            // carries them, give way to the updatable source.
+            linked.push(crate::share_install::ShareCodeSkill {
+                n: name,
+                u: url.to_string(),
+                c: None,
+                p: None,
+            });
+            continue;
+        }
         let Some(files) = by_skill.remove(&entry.name) else {
             continue;
         };
-        skills.push(BundleSkill {
+        content_skills.push(BundleSkill {
             name,
             files: sorted(files),
         });
@@ -220,17 +240,28 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
     ensure_checksum(
         &manifest.checksum,
         &checksum(
-            skills
+            content_skills
                 .iter()
                 .flat_map(|skill| skill.files.iter().map(|(_, content)| content.as_slice())),
         ),
     )?;
 
-    let installed = install(file_path, skills, force)?;
+    // Content members land all-or-nothing; linked members install one by one
+    // through the git pipeline and never roll the content members back.
+    let installed = install(file_path, content_skills, force)?;
+    let mut skill_names: Vec<String> = installed.iter().map(|skill| skill.name.clone()).collect();
+    let mut skipped = Vec::new();
+    if !linked.is_empty() {
+        let summary = crate::share_install::install_from_share_code(linked);
+        skill_names.extend(summary.installed_names.iter().cloned());
+        skill_names.extend(summary.existing_names.iter().cloned());
+        skipped = summary.skipped;
+    }
     Ok(ImportMultiBundleResult {
         total_file_count: installed.iter().map(|skill| skill.file_count).sum(),
         replaced_count: installed.iter().filter(|skill| skill.replaced).count(),
-        skill_names: installed.into_iter().map(|skill| skill.name).collect(),
+        skill_names,
+        skipped,
     })
 }
 

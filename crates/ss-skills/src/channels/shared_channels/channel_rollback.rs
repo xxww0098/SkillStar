@@ -245,8 +245,9 @@ where
                 return Err(error);
             }
         };
-        if let Err(error) = self.installer.verify(&receipt).await {
-            let error = rollback_after_error(&self.installer, &receipt, error).await;
+        if let Err(error) =
+            super::channel_receipt::verify_historical_receipt(&self.installer, &receipt).await
+        {
             super::subscription_remote::persist_remote_failure(
                 &self.subscriptions,
                 &mut store,
@@ -281,7 +282,9 @@ where
         {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                let error = rollback_after_error(&self.installer, &receipt, error).await;
+                let error =
+                    super::channel_receipt::restore_historical(&self.installer, &receipt, error)
+                        .await;
                 super::subscription_remote::persist_remote_failure(
                     &self.subscriptions,
                     &mut store,
@@ -294,14 +297,12 @@ where
         next_store.subscriptions[index].last_update = Some(snapshot.clone());
         next_store.subscriptions[index].updated_at = Utc::now().to_rfc3339();
         let subscriptions = self.subscriptions.clone();
-        if let Err(error) = self
+        let committed = self
             .installer
             .verify_and_commit(&receipt, Box::new(move || subscriptions.save(&next_store)))
-            .await
-        {
-            return Err(rollback_after_error(&self.installer, &receipt, error).await);
-        }
-        self.installer.finalize(&receipt).await;
+            .await;
+        super::channel_receipt::commit_historical_receipt(&self.installer, &receipt, committed)
+            .await?;
         Ok(ChannelSkillRollbackResult { snapshot, pin })
     }
 
@@ -523,23 +524,6 @@ fn validate_skill_id(skill_id: &str) -> Result<(), SharedChannelError> {
         ));
     }
     Ok(())
-}
-
-async fn rollback_after_error<I: ChannelSubscriptionUpdater>(
-    installer: &I,
-    receipt: &super::ChannelSkillUpdateReceipt,
-    error: SharedChannelError,
-) -> SharedChannelError {
-    match installer.rollback(receipt).await {
-        Ok(()) => error,
-        Err(rollback) => SharedChannelError::new(
-            error.code,
-            format!(
-                "{}; the staged historical version could not be rolled back: {}",
-                error.message, rollback.message
-            ),
-        ),
-    }
 }
 
 fn release_conflict() -> SharedChannelError {

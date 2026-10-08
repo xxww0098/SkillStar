@@ -21,12 +21,12 @@ pub(crate) const TRANSIENT_PREFIX: &str = ".skillstar-";
 
 /// The canonical folder name for a Skill identity (frontmatter `name`).
 ///
-/// vercel-labs/skills `sanitizeName` mapping: lowercase, every run outside
-/// `[a-z0-9._]` becomes one `-`, leading/trailing `.`/`-` are trimmed, at most
-/// 255 bytes. Where vercel would fall back to a shared placeholder this
-/// refuses instead: an identity that maps to nothing, or that contains
-/// non-ASCII characters (which the mapping would silently drop and make
-/// distinct Skills collide), is not installable.
+/// Skill-name folding rules for the canonical folder name: lowercase, every run
+/// outside `[a-z0-9._]` becomes one `-`, leading/trailing `.`/`-` are trimmed,
+/// at most 255 bytes. Where the shared skills CLI would fall back to a
+/// placeholder this refuses instead: an identity that maps to nothing, or that
+/// contains non-ASCII characters (which the mapping would silently drop and
+/// make distinct Skills collide), is not installable.
 pub fn canonical_skill_name(id: &str) -> Result<String> {
     if !id.is_ascii() {
         bail!("Skill name {id:?} contains non-ASCII characters and has no safe folder name");

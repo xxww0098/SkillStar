@@ -222,7 +222,7 @@ fn write_subscription(subscription: &Subscription) -> UsageResult<SwitchOutcome>
 }
 
 fn write_oauth(subscription: &Subscription) -> UsageResult<SwitchOutcome> {
-    let material = oauth_material(subscription)?;
+    let mut material = oauth_material(subscription)?;
     let key = credential_key();
     let credentials = credentials_path();
     let settings = settings_path();
@@ -231,6 +231,7 @@ fn write_oauth(subscription: &Subscription) -> UsageResult<SwitchOutcome> {
     } else {
         Map::new()
     };
+    store::preserve_user_info(&cred_map, &mut material, &key)?;
     apply_oauth(&mut cred_map, &material, &key)?;
     let settings_map = with_mode(
         if settings.is_file() {
@@ -502,7 +503,7 @@ fn oauth_material(subscription: &Subscription) -> UsageResult<OauthMaterial> {
         access,
         refresh: plain(&subscription.refresh_token_encrypted),
         jwt,
-        user_info: user_info_json(subscription),
+        user_info: user_info_json(subscription)?,
     })
 }
 

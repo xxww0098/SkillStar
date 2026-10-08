@@ -1,17 +1,20 @@
-//! The effective price of one catalog model (lifted read-only from the
-//! retired gateway domain).
+//! The effective price of a model id (lifted read-only from the retired
+//! gateway domain). Session rows name a model, not the provider that
+//! served it, so [`effective_price_by_model`] is the only lookup.
 //!
-//! [`effective_price`] resolves two tiers, first hit wins:
+//! Two tiers, first hit wins:
 //!
 //! 1. the top-level `prices` map of `config/model_gateway.json` — the
-//!    user's override file, exact `"<catalog>/<model>"` key first, then
-//!    the `"<catalog>"` wildcard. The file is a leftover of the removed
-//!    model gateway; it is read leniently forever so a user's price
-//!    overrides keep billing, but nothing writes it anymore;
-//! 2. the models.dev cache cost of that catalog entry
-//!    (`<data_root>/cache/gateway-catalog/models.dev.json`). The cache is
-//!    also a leftover: this module never refreshes it, so prices freeze
-//!    at whatever the last sync stored (D-082).
+//!    user's override file. The first `"<catalog>/<model>"` key whose
+//!    model half matches wins. A catalog-only wildcard does not: the
+//!    session row does not say which catalog it belongs to. The file is
+//!    a leftover of the removed model gateway; it is read leniently so a
+//!    user's price overrides keep billing, but nothing writes it anymore;
+//! 2. the models.dev cache
+//!    (`<data_root>/cache/gateway-catalog/models.dev.json`), scanned in
+//!    provider order. The cache is also a leftover: this module never
+//!    refreshes it, so prices freeze at whatever the last sync stored
+//!    (D-082).
 //!
 //! An explicit zero price is a price: an override row exists as soon as
 //! its key is in the map, and a catalog cost counts as soon as it names
@@ -119,29 +122,6 @@ struct CatalogCost {
     cache_write: Option<f64>,
 }
 
-/// The effective price of `catalog/model`. Both files read leniently: a
-/// missing or broken file is no overrides / no catalog, so a lookup can
-/// only answer `None` (unpriced), never fail.
-pub fn effective_price(catalog: &str, model: &str) -> Option<ModelCost> {
-    let overrides = price_overrides_at(&config_dir().join("model_gateway.json"));
-    if let Some(cost) = resolve_override(&overrides, catalog, model) {
-        return Some(cost);
-    }
-    catalog_cost_at(&models_dev_cache_path(), catalog, model)
-        .as_ref()
-        .and_then(ModelCost::from_catalog)
-}
-
-/// Tier 1 as a pure lookup: exact `catalog/model` key first, then the
-/// catalog wildcard.
-fn resolve_override(doc: &PricesDoc, catalog: &str, model: &str) -> Option<ModelCost> {
-    let exact = format!("{catalog}/{model}");
-    doc.prices
-        .get(exact.as_str())
-        .or_else(|| doc.prices.get(catalog))
-        .map(ModelCost::from_row)
-}
-
 /// The effective price of a model id whose provider is not known — the
 /// session-file world, where a row names a model but not the provider
 /// that served it.
@@ -213,23 +193,6 @@ fn price_overrides_at(path: &Path) -> PricesDoc {
         .unwrap_or_default()
 }
 
-/// The cached cost of `provider/model`; every malformed level reads as
-/// absent, the way the gateway's lenient schema did.
-fn catalog_cost_at(path: &Path, provider: &str, model: &str) -> Option<CatalogCost> {
-    if provider.is_empty() || provider == "group" || model.is_empty() || model.contains('/') {
-        return None;
-    }
-    let cache: BTreeMap<String, serde_json::Value> =
-        serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    let cost = cache
-        .get(provider)?
-        .get("models")?
-        .get(model)?
-        .get("cost")?
-        .clone();
-    serde_json::from_value::<CatalogCost>(cost).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,33 +200,6 @@ mod tests {
     fn write(path: &Path, body: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
-    }
-
-    #[test]
-    fn overrides_win_exact_key_first_then_the_wildcard() {
-        let doc: PricesDoc = serde_json::from_str(
-            r#"{"prices":{"deepseek/deepseek-chat":{"input":9.0},"deepseek":{"output":5.0}}}"#,
-        )
-        .unwrap();
-        assert_eq!(doc.prices.len(), 2);
-        // The exact row wins over the wildcard.
-        assert_eq!(
-            resolve_override(&doc, "deepseek", "deepseek-chat"),
-            Some(ModelCost {
-                input: 9.0,
-                ..ModelCost::default()
-            })
-        );
-        // A model with no exact row falls to the catalog wildcard.
-        assert_eq!(
-            resolve_override(&doc, "deepseek", "deepseek-reasoner"),
-            Some(ModelCost {
-                output: 5.0,
-                ..ModelCost::default()
-            })
-        );
-        // Another catalog has no row at all.
-        assert_eq!(resolve_override(&doc, "glm", "glm-4.7"), None);
     }
 
     #[test]
@@ -277,25 +213,14 @@ mod tests {
                 .prices
                 .is_empty()
         );
-
-        let cache = dir.path().join("models.dev.json");
-        write(&cache, "{\"openai\":");
-        assert!(catalog_cost_at(&cache, "openai", "gpt-test").is_none());
-        // Reserved group name and degenerate ids never hit the catalog.
-        assert!(catalog_cost_at(&cache, "group", "m").is_none());
-        assert!(catalog_cost_at(&cache, "", "m").is_none());
-        assert!(catalog_cost_at(&cache, "openai", "a/b").is_none());
     }
 
     #[test]
     fn a_catalog_cost_must_name_a_unit() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = dir.path().join("models.dev.json");
-        write(
-            &cache,
-            r#"{"a":{"models":{"named":{"cost":{"output":2.0}},"anonymous":{"cost":{}},"absent":{}}}}"#,
-        );
-        let named = catalog_cost_at(&cache, "a", "named").unwrap();
+        let named = CatalogCost {
+            output: Some(2.0),
+            ..CatalogCost::default()
+        };
         assert_eq!(
             ModelCost::from_catalog(&named),
             Some(ModelCost {
@@ -303,9 +228,7 @@ mod tests {
                 ..ModelCost::default()
             })
         );
-        let anonymous = catalog_cost_at(&cache, "a", "anonymous").unwrap();
-        assert_eq!(ModelCost::from_catalog(&anonymous), None);
-        assert!(catalog_cost_at(&cache, "a", "absent").is_none());
+        assert_eq!(ModelCost::from_catalog(&CatalogCost::default()), None);
     }
 
     #[test]

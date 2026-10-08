@@ -1,9 +1,10 @@
 //! The reset card and its confirmation dialog: the ink stack, the sheets
-//! behind it, the face, the tip list, and the acknowledgement box.
+//! behind it, the face, the expiry tooltip, and the acknowledgement box.
 
 use std::time::Duration;
 
 use gpui_kit::component::button::Button;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -12,10 +13,6 @@ use ss_usage::subscription::ResetWindow;
 use super::AccountsPage;
 use super::schedule::{expiry_line, format_stamp};
 use crate::accounts::theme::palette;
-
-/// Above menus (`POPUP_PRIORITY` is 100) and the kit tooltip overlay (200).
-/// Native `.tooltip()` still paints after every deferred draw.
-const RESET_TIP_PRIORITY: usize = 1_000;
 
 pub(super) fn reset_meta(label: &str, subtitle: &str, urgent: bool) -> Div {
     div()
@@ -79,7 +76,6 @@ pub(super) fn reset_button(
 
 pub(super) fn reset_stack(
     id: &str,
-    view: WeakEntity<AccountsPage>,
     count: i64,
     expiries: &[i64],
     fill: u32,
@@ -90,11 +86,14 @@ pub(super) fn reset_stack(
     digits: &str,
     unit: &str,
     countdown: bool,
-    tip_open: bool,
 ) -> AnyElement {
     let depth = (count.max(0) as usize).min(3);
     let account_id = id.to_string();
+    // The expiry list rides the kit tooltip overlay: it paints above every
+    // deferred draw, is never clipped by the accounts scroller, and shows
+    // and hides without revising the page.
     let has_tip = !expiries.is_empty();
+    let tip_expiries = expiries.to_vec();
     let mut stack = div()
         .id(ElementId::Name(format!("reset-stack-{account_id}").into()))
         .relative()
@@ -102,22 +101,20 @@ pub(super) fn reset_stack(
         .w(px(CARD_W))
         .h(px(CARD_H))
         .mt(px(SHEET_PEEK * 2.0))
-        .on_hover({
-            let account_id = account_id.clone();
-            let view = view.clone();
-            move |hovered, _, cx| {
-                let account_id = account_id.clone();
-                let _ = view.update(cx, |this, cx| {
-                    let open = this.reset_tip_id.as_deref() == Some(account_id.as_str());
-                    if *hovered && has_tip && !open {
-                        this.reset_tip_id = Some(account_id);
-                        this.revise(cx);
-                    } else if !*hovered && open {
-                        this.reset_tip_id = None;
-                        this.revise(cx);
-                    }
-                });
-            }
+        .when(has_tip, |el| {
+            let rows = tip_expiries.clone();
+            el.tooltip(move |window, cx| {
+                let rows = rows.clone();
+                Tooltip::element(move |_, _| reset_tip_rows(&rows))
+                    .bg(rgb(palette().panel))
+                    .border_1()
+                    .border_color(rgb(palette().os_line))
+                    .shadow_xl()
+                    .rounded(px(8.0))
+                    .p(px(8.0))
+                    .text_color(rgb(palette().fg))
+                    .build(window, cx)
+            })
         });
     // Farther sheets first. Each one is a full card shifted up and right so
     // only its top-right corner clears the card in front.
@@ -136,12 +133,6 @@ pub(super) fn reset_stack(
         blink,
         countdown,
     ));
-    if tip_open && !expiries.is_empty() {
-        // In-tree absolute children paint before later siblings, so the label,
-        // reset button, next row, and legend cover this list. Defer it so it
-        // paints after the tree and is not clipped by the accounts scroller.
-        stack = stack.child(deferred(reset_tip(expiries)).with_priority(RESET_TIP_PRIORITY));
-    }
     if let Some(started) = consumed {
         stack = stack.child(
             div()
@@ -258,24 +249,10 @@ pub(super) fn reset_face(
     }
 }
 
-pub(super) fn reset_tip(expiries: &[i64]) -> Div {
-    // Deferred paint puts this list over the next row. Occlude so those
-    // buttons do not hover while the pointer is on the list.
-    let mut tip = div()
-        .occlude()
-        .absolute()
-        .left_0()
-        .top(px(52.0))
-        .min_w(px(180.0))
-        .flex()
-        .flex_col()
-        .gap(px(4.0))
-        .p(px(8.0))
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(rgb(palette().os_line))
-        .bg(rgb(palette().panel))
-        .shadow_xl();
+/// The expiry rows a hovered reset stack shows in its kit tooltip. Pure
+/// content: the tooltip wrapper owns position, padding, and the card colors.
+fn reset_tip_rows(expiries: &[i64]) -> Div {
+    let mut tip = div().flex().flex_col().gap(px(4.0));
     for (index, stamp) in expiries.iter().copied().enumerate() {
         let when = expiry_line(&format_stamp(stamp));
         tip = tip.child(

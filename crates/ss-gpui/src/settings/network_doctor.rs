@@ -2,12 +2,11 @@
 //! `src/features/settings/sections/NetworkDoctorSection.tsx`.
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_core::config::network_doctor::NetworkHostCheck;
 
-use crate::chrome::{InteractionSpring, MotionPaint};
+use crate::chrome::{InteractionSpring, MotionPaint, icon_spin};
 use crate::i18n::t;
 use crate::spawn_domain;
 use crate::theme::palette;
@@ -44,6 +43,9 @@ impl SettingsPage {
     pub(crate) fn render_network_doctor(&self, view: WeakEntity<Self>) -> impl IntoElement {
         let diagnosing = self.diagnosing;
         let v = view.clone();
+        // The section's single action: accent ghost so it reads as the
+        // primary button without introducing a filled style nothing else
+        // on the page uses.
         let mut action = div()
             .id("doctor-run")
             .h(px(28.0))
@@ -53,15 +55,13 @@ impl SettingsPage {
             .gap_1()
             .rounded_md()
             .border_1()
-            .border_color(rgb(palette().border))
+            .border_color(rgb(palette().accent_soft_edge))
             .text_xs()
-            .text_color(rgb(palette().fg))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(rgb(palette().accent))
             .when(diagnosing, |d| {
-                d.opacity(0.7).child(
-                    Icon::new(IconName::Loader)
-                        .size(px(14.0))
-                        .text_color(rgb(palette().fg_muted)),
-                )
+                d.opacity(0.7)
+                    .child(icon_spin(IconName::Loader, 14.0, palette().accent, true))
             })
             .when(!diagnosing, |d| d.cursor_pointer())
             .child(t("settings.networkDoctorRun"))
@@ -69,7 +69,7 @@ impl SettingsPage {
                 "doctor-run",
                 !diagnosing,
                 MotionPaint::new(),
-                MotionPaint::new().bg(rgb(palette().card_hover)),
+                MotionPaint::new().bg(rgb(palette().accent_soft)),
             );
         if !diagnosing {
             action = action.on_click(move |_, _, cx| {

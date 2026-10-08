@@ -12,7 +12,6 @@ pub use agent_intake::{
 use ss_core::infra::error::AppError;
 use ss_core::infra::{fs_ops, paths};
 use ss_git::repo_history;
-use ss_skills::deployment;
 use ss_skills::skill_lock;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -214,10 +213,12 @@ pub async fn preview_force_delete_installed_skills() -> Result<Vec<String>, AppE
 /// Uninstall every Skill SkillStar installed, one by one.
 ///
 /// Scope is the install lock (entries with a source SkillStar understands)
-/// plus the hub links of local Skills. Each goes through the ordinary
-/// uninstall, so only SkillStar's own Agent/Project deployments are removed
-/// and folders SkillStar does not own stay. An unreadable lock aborts before
-/// anything is deleted.
+/// plus the hub links of local Skills. Locked names go through ordinary
+/// uninstall. A local hub link drops SkillStar's deployments, the hub symlink
+/// and the lock entry, and leaves the original files in the local-skills
+/// directory. A deployment cleanup failure leaves that copy and its lock
+/// entry in place and is reported in `failed`. An unreadable lock aborts
+/// before anything is deleted.
 pub async fn force_delete_installed_skills() -> Result<ForceDeleteSkillsReport, AppError> {
     tokio::task::spawn_blocking(|| -> Result<ForceDeleteSkillsReport, AppError> {
         let _transaction_guard = ss_skills::skill_update::acquire_update_transaction_lock()?;
@@ -244,26 +245,11 @@ pub async fn force_delete_installed_skills() -> Result<ForceDeleteSkillsReport, 
                 Err(error) => report.failed.push(format!("{name}: {error}")),
             }
         }
-        let hub_dir = paths::hub_skills_dir();
-        let mut unlinked = Vec::new();
         for name in &local_links {
-            let _ = deployment::remove_skill_from_all_agents(name);
-            let _ = ss_skills::projects::remove_skill_from_all_projects(name);
-            match fs_ops::remove_symlink(&hub_dir.join(name)) {
-                Ok(()) => {
-                    report.removed.push(name.clone());
-                    unlinked.push(name.clone());
-                }
+            match ss_skills::skill_install::release_local_hub_link(name) {
+                Ok(()) => report.removed.push(name.clone()),
                 Err(error) => report.failed.push(format!("{name}: {error:#}")),
             }
-        }
-        if !unlinked.is_empty() {
-            skill_lock::mutate(|lock| {
-                for name in &unlinked {
-                    lock.remove(name);
-                }
-            })
-            .map_err(|error| AppError::Lockfile(format!("{error:#}")))?;
         }
         report.kept = ss_skills::installer::installed_names()
             .into_iter()
@@ -310,12 +296,12 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
         ss_skills::skill_mutation::notify_bulk_skill_removal(&removed_skill_list)?;
 
         for name in &removed_skill_names {
-            let _ = fs_ops::remove_symlink(&hub_dir.join(name));
+            ss_skills::skill_install::clear_owned_deployments(name)
+                .map_err(|error| AppError::Other(format!("{name}: {error:#}")))?;
         }
-
-        // Remove linked references from agent skill dirs.
         for name in &removed_skill_names {
-            let _ = deployment::remove_skill_from_all_agents(name);
+            fs_ops::remove_symlink(&hub_dir.join(name))
+                .map_err(|error| AppError::Other(format!("{name}: {error:#}")))?;
         }
 
         // Prune lockfile entries for removed cache-backed skills.
@@ -478,7 +464,6 @@ async fn clean_broken_skills_except(excluded: HashSet<String>) -> Result<usize, 
         let _transaction_guard = ss_skills::skill_update::acquire_update_transaction_lock()?;
         let hub_dir = ss_core::infra::paths::hub_skills_dir();
         let mut fixed: usize = 0;
-        let mut removed_names: HashSet<String> = HashSet::new();
 
         // Phase 1: Remove broken symlinks from hub
         if let Ok(entries) = std::fs::read_dir(&hub_dir) {
@@ -495,20 +480,16 @@ async fn clean_broken_skills_except(excluded: HashSet<String>) -> Result<usize, 
                     if excluded.contains(&name) || is_channel_managed(&name) {
                         continue;
                     }
-                    if fs_ops::remove_symlink(&path).is_ok() {
-                        removed_names.insert(name);
-                        fixed += 1;
-                    }
+                    ss_skills::skill_install::clear_owned_deployments(&name)
+                        .map_err(|error| AppError::Other(format!("{name}: {error:#}")))?;
+                    fs_ops::remove_symlink(&path)
+                        .map_err(|error| AppError::Other(format!("{name}: {error:#}")))?;
+                    fixed += 1;
                 }
             }
         }
 
-        // Phase 2: Clean agent-side symlinks for removed skills
-        for name in &removed_names {
-            let _ = deployment::remove_skill_from_all_agents(name);
-        }
-
-        // Phase 3: Prune orphaned install-lock entries. Keys are not directory
+        // Prune orphaned install-lock entries. Keys are not directory
         // names — vercel records the raw frontmatter name (`My Skill` lives in
         // `my-skill`). A key that does not map, or a folder we cannot stat, stays.
         let orphans_removed =
@@ -909,7 +890,6 @@ mod tests {
                 ("XDG_CONFIG_HOME", Some(home.join(".config"))),
                 ("XDG_STATE_HOME", None),
                 ("CLAUDE_CONFIG_DIR", None),
-                ("CODEX_HOME", None),
                 ("AUTOHAND_HOME", None),
                 ("DSH_HOME", None),
                 ("GROK_HOME", None),

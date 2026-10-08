@@ -278,9 +278,9 @@ D-091 之前的条目可能引用 `src/`、`src-tauri/` 或 Tauri command。那�
 - 日期：2026-08-13
 - 状态：accepted
 - 背景：Deck 卡片底部的 Agent rail 原本是纯派生量——卡组内已安装 Skill 全部链接到某 Agent 就点亮。自从 GUI 安装会把新装 Skill 部署到全部已启用 Agent（见 `crates/ss-app/src/global_deploy.rs`），任何新建卡组一出生就全亮，rail 不再表达任何用户意图，"取消链接"成了唯一可用操作。
-- 决策：`SkillGroup` 增加 `agent_links: Option<Vec<String>>`，语义是**用户为这个卡组显式认领的 Agent**。新建卡组为空集，rail 全灰；点亮才批量链接成员 Skill。派生量降级为漂移指示：已认领但成员并非全部实际链接时显示 mixed，未认领一律不点亮。`None` 表示该卡组早于此字段，由 `ss-app::skill_group_links` 按旧派生规则一次性回填并落盘，避免升级瞬间抹掉用户既有的 rail。
-- 后果：获得——新建卡组的默认状态回到"什么都没做"，rail 重新可读为意图；卡组与 Skill 两级链接语义分离，安装期全局部署不再污染卡组视图。承担——两级状态可能漂移，必须靠 mixed 显式暴露，不能静默取整；回填规则是一次性近似（以回填当刻的磁盘状态为准），此后不再重算。
-- 证据：`crates/ss-skills/src/skill_group.rs` 与 `crates/ss-app/src/skill_group_links.rs` 的测试；行为见 `docs/features/skills/README.md`。
+- 决策：`SkillGroup` 增加 `agent_links: Option<Vec<String>>`，语义是**用户为这个卡组显式认领的 Agent**。新建卡组为空集，rail 全灰；点亮才批量链接成员 Skill。派生量降级为漂移指示：已认领但成员并非全部实际链接时显示 mixed，未认领一律不点亮。`None` 与空集合一样，卡组页按未点亮显示，不从成员链接反推，也不另做一次回填。
+- 后果：获得——新建卡组的默认状态回到"什么都没做"，rail 重新可读为意图；卡组与 Skill 两级链接语义分离，安装期全局部署不再污染卡组视图。承担——两级状态可能漂移，必须靠 mixed 显式暴露，不能静默取整；缺少 `agent_links` 的历史卡组按未点亮显示。
+- 证据：`crates/ss-skills/src/skill_group.rs` 与 `crates/ss-skills/src/workflows/skill_group_links.rs`；行为见 `docs/features/skills/README.md`。
 
 ## D-031：技能发布链路并入单一 GitHub App 身份，`gh` CLI 退出远程路径
 
@@ -770,7 +770,7 @@ D-091 之前的条目可能引用 `src/`、`src-tauri/` 或 Tauri command。那�
 - 日期：2026-10-05
 - 状态：accepted
 - 背景：模型域和 Usage 顶层页面移除后，Provider 元数据只剩账号消费者，账号 facade/消费汇总仍绕经 app；共享频道与技能安装、锁、部署共用事务却分属 crate，并要求每个入口手动注册保护策略。
-- 决策：共享频道与 patrol 并入 `ss-skills::channels`；Agent 暂停/恢复、安装后部署、Deck 链接回填归 `skills::workflows`。账号 facade、DTO 与消费汇总下沉 `ss-usage::accounts`，Provider 元数据下沉其私有 `providers`；保留 usage package 名和所有磁盘/IPC 契约。app 保留 CLI、项目技能 MCP、市场与技能编排及全局维护，不保留单域转发兼容壳。
+- 决策：共享频道与 patrol 并入 `ss-skills::channels`；Agent 暂停/恢复、安装后部署、Deck 的 Agent rail 归 `skills::workflows`。账号 facade、DTO 与消费汇总下沉 `ss-usage::accounts`，Provider 元数据下沉其私有 `providers`；保留 usage package 名和所有磁盘/IPC 契约。app 保留 CLI、项目技能 MCP、市场与技能编排及全局维护，不保留单域转发兼容壳。
 - 决策：保留 Marketplace 快照/FTS、Git 传输、SSH 传输及 skill-spec 规范叶子的独立边界（规范叶子部分由 D-099 取代）；不为了对应导航而把它们塞入产品大 crate。以完整 workspace 边白名单约束新增依赖。
 - 后果：消除 channels → skills、app → usage 的编译依赖；频道保护默认生效，不再依赖组合根注册；合并后的环境变量测试共用所属 crate 的隔离锁。承担技能域编译单元变大，但第三方依赖集合几乎重合；后续拆分须重新证明独立生命周期或依赖收益。D-004/D-049 的 Provider SSOT 不变量保留，位置由本决策取代。
 - 证据：`crates/ss-skills/src/channels/`、`crates/ss-skills/src/workflows/`、`crates/ss-usage/src/accounts/`、`scripts/internal/check_workspace_deps.sh`。
@@ -900,6 +900,33 @@ D-091 之前的条目可能引用 `src/`、`src-tauri/` 或 Tauri command。那�
 - 决策：规范副本改为 `~/.skillstar/data/skills/installed/<name>`，锁改为 `~/.skillstar/data/skills/.skill-lock.json`。安装、导入、本地创作和频道安装都只写这里。`~/.agents/skills` 恢复为普通 Agent 目录：只有用户把技能部署到读取它的 Agent 时才在那里建链接。启动时把旧目录里的条目和旧锁迁到新位置（新位置已有同名条目或锁则保留新的），并改写仍指向旧目录的 Agent 链接。`SKILLSTAR_HUB_DIR` 测试沙箱仍把规范根放在 `<hub>/skills`。项目内的 `.agents/skills` 不变。
 - 后果：获得——新技能不再因为落在共享目录里而自动出现在所有读取该目录的 Agent 上。承担——不再与 `npx skills` 共用同一份正文和锁；那些 Agent 要再次看到已迁走的技能，需要用户显式链接。
 - 证据：`ss_core::infra::paths::agents_skills_root`、`skill_lock_path`、`ss_skills::storage_migration::migrate_installed_skills`。
+
+## D-101：gpui-component 以 vendored patch 引入，悬浮窗入场统一为原地弹出
+
+- 日期：2026-10-07
+- 状态：accepted
+- 背景：所有悬浮窗（确认框、导入框、SKILL.md 悬浮窗、账号登录等）的入场动画写死在 `gpui-component` 的 `Dialog::render_once` 里：顶边从窗口顶部一路插值到 `margin_top`（约半个窗口高的滑入），且 crate 没有公开开关。产品要求悬浮窗在落点原地弹出（pop in），与 popover 的入场语言一致，而不是从上面飞入。GPUI（gpui-pre 0.3.8）没有子树 transform，无法做真正的缩放弹出，只能以「淡入 + 从落点上方 8px 落定 + 阴影渐显」近似。
+- 决策：把 `gpui-component` 0.7.1 完整 vendor 到 `vendor/gpui-component/`，根 `Cargo.toml` 以 `[patch.crates-io]` 指向它；vendor 清单加空 `[workspace]` 隔离，不入 workspace members。vendor 树保持与发布版字节接近，唯一改动是 `dialog.rs` 的入场插值：`y * delta`（顶部 → 落点）改为 `y + POP_ENTER_OFFSET * (1 - delta)`（落点上方 8px → 落点，`POP_ENTER_OFFSET = -8px`，与 `popover::DROPDOWN_ENTER_OFFSET` 同值）。淡入与阴影动画保留。上游升级时重新 vendor 并重放这一处改动。
+- 后果：获得——全部悬浮窗入场统一为原地弹出，滑入带来的半窗口位移掉帧面也随之消失；改动不经过 fork 发版即可生效。承担——仓库多约 3.9MB 的 vendor 树；上游发版频繁（一周内 0.6→0.7），升级要手动同步；vendor 的内联测试引用其 monorepo 布局里的 `themes/*.json`，发布包本身编不过，须以 `cargo test -p ss-gpui` 为验证面。
+- 证据：`vendor/gpui-component/src/dialog/dialog.rs`（`POP_ENTER_OFFSET`、`pop-in`）、根 `Cargo.toml` 的 `[patch.crates-io]`、`ss-gpui` 的 `shell::dialog_motion` 测试。
+
+## D-102：Claude Code 插件市场格式独立为协议叶子 crate
+
+- 日期：2026-10-07
+- 状态：accepted
+- 背景：共享频道要把已发布技能导出为外部 harness 可消费的 Claude Code 插件市场目录（`marketplace.json` + 每插件 `plugin.json`）。该格式是 Claude Code 定义、Cursor/Devin/Factory Droid 等共同消费的事实标准，其演进由上游规范驱动，与 SkillStar 的发布列车不同步。若把 schema 与目录写出放进 `ss-skills`，外部格式变更会持续扰动产品 crate 的编译单元；而未来「发布时注入频道仓库」若复用同一 schema，也不能反向依赖 `ss-skills`。
+- 决策：新建产品无关叶子 `crates/claude-marketplace`，只拥有外部格式：`marketplace.json` / `plugin.json` 的类型（解析宽松、生成只覆盖自包含相对路径形态）、命名与路径校验、以及自包含 marketplace 目录写出。不得依赖任何 `ss-*` crate，不得引入业务 HTTP/DB/打包依赖；频道注册表读取、baseline 校验与技能内容物化留在 `ss-skills::channels` 的私有导出模块。与 [D-099](#d-099skillmd-解析收回-ss-skills-私有模块) 的关系：D-099 收回的是无独立演进收益的 SKILL.md 解析；本叶子的变更节奏由上游 Claude Code 规范驱动。若长期只有单一消费方且格式稳定，按 D-099 同一先例收回 `ss-skills`。
+- 后果：获得——外部格式演进隔离在独立编译单元，导出与未来发布注入共用一份 schema 不成环。承担——多一个 workspace member 及其依赖边维护；schema 覆盖面刻意保守（只生成相对路径源），远程源形态只解析不生成。
+- 证据：`crates/claude-marketplace/`、`ss_skills::channels::shared_channels` 的 marketplace 导出模块、`scripts/internal/check_workspace_deps.sh` 白名单。
+
+## D-103：应用版本检查为 check-only，共享 GitHub API 冷却
+
+- 日期：2026-10-08
+- 状态：accepted
+- 背景：发版依赖 GitHub Releases（`v*` tag → release.yml → 维护者人工发布 draft），而 D-091 退役了签名更新器且二进制不签名。用户只能手动发现新版本，但自动下载/替换未签名二进制不可接受。
+- 决策：只做检测，不做安装。域逻辑放 `ss-core::infra::release_check` 私有 module：经匿名 GitHub 链路（`get_anonymous`，加速源优先、直连兜底）请求 `/releases/latest`，与产品版本做严格 `MAJOR.MINOR.PATCH` 三元组比较（剥一个 `v` 前缀，解析失败一律视为不新，杜绝坏 tag 误报升级）。产品版本 SSOT 仍是 `crates/skillstar/Cargo.toml`，由 `skillstar` 二进制以 `env!("CARGO_PKG_VERSION")` 传入 `ss_gpui::run` 与 `ss-app` 唤醒（其余 crate 共享占位 workspace 版本，不可直接用）。结果持久化 `state/app/release_check.json`；GUI 唤醒（`ss-app::release_check_wake`）每小时评估、24 小时至多检查一次，与技能更新检查共享同一份 GitHub API 限流冷却（`state/skills/github_api_cooldown.json`，抽为 `ss-core::infra::github_api_cooldown`，同 IP 共享 60 次/小时额度）；设置 → 关于 可手动检查并跳转 Releases 页，永不下载或替换二进制。
+- 后果：获得——客户端最迟 24 小时发现新发布（draft 人工发布后才可见，与发版流程兼容）；限流状态跨消费方一致，不会两家一起撞 403。承担——比较器不识别 prerelease tag（`v1.0.0-rc.1` 视为不新），仅提示不安装意味着升级仍需手动步骤；`get_anonymous` 吞掉响应头，403 只能记保守 1 小时冷却而非精确 reset。
+- 证据：`crates/ss-core/src/infra/release_check.rs`、`crates/ss-core/src/infra/github_api_cooldown.rs`、`crates/ss-app/src/release_check_wake.rs`、`crates/ss-gpui/src/settings/about.rs`、`docs/features/platform/README.md` 的「Updater 与发布」。
 
 ## 新增记录格式
 

@@ -14,7 +14,10 @@ mod import;
 
 pub use import::{import_bundle, import_multi_bundle};
 
-const FORMAT_VERSION: u32 = 1;
+/// v2: multi manifests may carry `source_url` on an entry — linked members
+/// ship without files. Older readers reject v2 instead of silently dropping
+/// those members; v1 archives (all content) still import.
+const FORMAT_VERSION: u32 = 2;
 const MANIFEST_NAME: &str = "manifest.json";
 const MULTI_MANIFEST_NAME: &str = "multi_manifest.json";
 
@@ -235,6 +238,39 @@ pub fn deck_name_from_bundle_path(file_path: &str) -> String {
     stem.to_string()
 }
 
+/// A bundle import plus the deck created for an `.agd`.
+///
+/// Single-skill `.ags` imports leave [`DeckAttach::Skipped`]. A duplicate deck
+/// name is [`DeckAttach::NameTaken`] and does not roll back installed members.
+#[derive(Debug)]
+pub struct BundleDeckImport {
+    pub import: AnyBundleImport,
+    pub deck: crate::skill_group::DeckAttach,
+}
+
+pub fn import_bundle_and_deck(
+    file_path: &str,
+    fallback_name: &str,
+    describe: impl Fn(usize) -> String,
+) -> Result<BundleDeckImport> {
+    let import = import_any_bundle(file_path, false)?;
+    let deck = match &import {
+        AnyBundleImport::Single(_) => crate::skill_group::DeckAttach::Skipped,
+        AnyBundleImport::Multi(result) => {
+            let name = deck_name_from_bundle_path(file_path);
+            crate::skill_group::attach_imported_deck(
+                &name,
+                fallback_name,
+                describe(result.skill_names.len()),
+                "📦".to_string(),
+                result.skill_names.clone(),
+                std::collections::HashMap::new(),
+            )?
+        }
+    };
+    Ok(BundleDeckImport { import, deck })
+}
+
 // ── Multi-skill export ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +278,12 @@ pub struct MultiManifestEntry {
     pub name: String,
     pub description: String,
     pub file_count: usize,
+    /// Git remote of a remotely-installed member. The bundle ships the link
+    /// instead of the files, and the importer runs the normal git pipeline,
+    /// so the outcome matches installing from the URL directly. Only local
+    /// members ship their files. Absent in v1 archives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,6 +292,46 @@ pub struct MultiManifest {
     pub created_at: String,
     pub skills: Vec<MultiManifestEntry>,
     pub checksum: String,
+}
+
+/// The git upstream of an installed skill, when the lock records one the
+/// share pipeline accepts (an https/ssh Git remote). Such members ship as
+/// links; members without one ship their files.
+fn remote_source_url(lock: &crate::skill_lock::SkillLock, skill_name: &str) -> Option<String> {
+    let (_, entry) = lock.entry_for_folder(skill_name)?;
+    let url = entry.source_url.trim();
+    if url.is_empty() || !entry.source_type.is_updatable() {
+        return None;
+    }
+    crate::share_install::share_remote(url)
+        .is_ok()
+        .then(|| url.to_string())
+}
+
+/// Export a deck's skills into one `.agd` bundle, naming it after the deck
+/// and dropping it in the downloads directory (home as fallback). Only
+/// skills present in the hub are packed; missing members are skipped.
+///
+/// The name follows the `<deck>-bundle-<timestamp>.agd` convention that
+/// [`deck_name_from_bundle_path`] strips, so re-importing the file rebuilds
+/// the deck under its original name.
+pub fn export_deck_bundle(skill_names: &[String], deck_name: &str) -> Result<PathBuf> {
+    let safe: String = deck_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let stamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
+    let out_dir = dirs::download_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let out = out_dir.join(format!("{safe}-bundle-{stamp}.agd"));
+    export_multi_bundle(skill_names, &out.to_string_lossy())
 }
 
 /// Export multiple skills into a single `.agd` bundle archive.
@@ -282,10 +364,24 @@ pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<
 
     let mut manifest_entries: Vec<MultiManifestEntry> = Vec::new();
     let mut global_hasher = Sha256::new();
+    let lock = crate::skill_lock::load();
 
     for skill_name in skill_names {
         let skill_dir = hub.join(skill_name);
         if !skill_dir.exists() {
+            continue;
+        }
+
+        // A remotely-installed member ships as its link: the importer runs
+        // the git pipeline, so the result matches installing from the URL
+        // directly. Only members without an updatable remote ship files.
+        if let Some(url) = remote_source_url(&lock, skill_name) {
+            manifest_entries.push(MultiManifestEntry {
+                name: skill_name.clone(),
+                description: ss_core::types::extract_skill_description(&skill_dir),
+                file_count: 0,
+                source_url: Some(url),
+            });
             continue;
         }
 
@@ -308,6 +404,7 @@ pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<
             name: skill_name.clone(),
             description,
             file_count: files.len(),
+            source_url: None,
         });
 
         for rel_path in &files {
@@ -361,6 +458,9 @@ pub struct ImportMultiBundleResult {
     pub total_file_count: usize,
     /// Number of skills that replaced existing ones
     pub replaced_count: usize,
+    /// Linked members whose source could not be installed (already-existing
+    /// and freshly installed members are not listed here).
+    pub skipped: Vec<crate::share_install::SkippedSkill>,
 }
 
 /// Preview a `.agd` multi-bundle manifest without extracting.
@@ -544,6 +644,73 @@ mod roundtrip_tests {
             "my-bundle-of-skills"
         );
         assert_eq!(deck_name_from_bundle_path("/tmp/beta.AGD"), "beta");
+    }
+
+    #[test]
+    fn deck_export_names_round_trip_through_the_import_stem_rule() {
+        let sandbox = Sandbox::new();
+        hub_skill("alpha");
+        hub_skill("beta");
+
+        // `HOME` is re-rooted, so the downloads default lands in the sandbox.
+        let path = export_deck_bundle(&["alpha".into(), "beta".into()], "My Deck").unwrap();
+
+        assert!(path.is_file(), "bundle missing at {}", path.display());
+        assert!(
+            path.starts_with(sandbox.0.home()),
+            "export must not touch the real home: {}",
+            path.display()
+        );
+        assert_eq!(
+            deck_name_from_bundle_path(&path.to_string_lossy()),
+            "My-Deck"
+        );
+    }
+
+    #[test]
+    fn a_remotely_installed_member_ships_as_a_link() {
+        let sandbox = Sandbox::new();
+        hub_skill("remote");
+        hub_skill("local");
+        crate::skill_lock::mutate(|lock| {
+            lock.upsert(
+                "remote",
+                crate::skill_lock::SkillLockEntry {
+                    source: "owner/remote".into(),
+                    source_type: crate::skill_lock::SourceType::Github,
+                    source_url: "https://github.com/owner/remote.git".into(),
+                    git_ref: None,
+                    skill_path: None,
+                    skill_folder_hash: None,
+                    installed_at: String::new(),
+                    updated_at: String::new(),
+                    extra: Default::default(),
+                },
+            );
+        })
+        .unwrap();
+
+        let bundle = sandbox.bundle_path("deck.agd");
+        export_multi_bundle(&["remote".into(), "local".into()], &bundle).unwrap();
+
+        let manifest = preview_multi_bundle(&bundle).unwrap();
+        let remote = manifest
+            .skills
+            .iter()
+            .find(|entry| entry.name == "remote")
+            .expect("remote entry");
+        assert_eq!(
+            remote.source_url.as_deref(),
+            Some("https://github.com/owner/remote.git")
+        );
+        assert_eq!(remote.file_count, 0, "a link ships no files");
+        let local = manifest
+            .skills
+            .iter()
+            .find(|entry| entry.name == "local")
+            .expect("local entry");
+        assert_eq!(local.source_url, None);
+        assert!(local.file_count >= 1, "a local member ships its files");
     }
 }
 

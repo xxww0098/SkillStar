@@ -9,7 +9,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_core::config::github_mirror::{self, CUSTOM_ENTRY_ID, builtin_presets};
 
-use crate::chrome::{InteractionSpring, MotionPaint};
+use crate::chrome::{InteractionSpring, MotionPaint, icon_spin};
 use crate::i18n::{t, tf};
 use crate::spawn_domain;
 use crate::theme::palette;
@@ -356,11 +356,7 @@ impl SettingsPage {
                 )
             })
             .when(testing, |d| {
-                d.child(
-                    Icon::new(IconName::Loader)
-                        .size(px(12.0))
-                        .text_color(rgb(palette().fg_muted)),
-                )
+                d.child(icon_spin(IconName::Loader, 12.0, palette().fg_muted, true))
             })
             .child(label)
             .on_click(move |_, _, cx| {

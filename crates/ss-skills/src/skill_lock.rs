@@ -1,9 +1,11 @@
-//! vercel-labs/skills compatible install lock: `.skill-lock.json` v3.
+//! Shared-writer install lock: `.skill-lock.json` v3.
 //!
 //! One entry per installed skill identity, keyed by the canonical folder
 //! name. The lock is the only install provenance: updates compare the
 //! recorded `skill_folder_hash` (a git tree SHA of the skill's folder in the
 //! source repo) against the upstream tree and reinstall on mismatch (D-081).
+//! The file layout is the one the `skills` CLI (npx skills) also reads and
+//! writes, so installs from either tool stay interoperable.
 //!
 //! SkillStar never destroys a lock it cannot read: readers see an empty lock
 //! for a corrupt or newer-version file, but writers back the file up and fail
@@ -60,7 +62,7 @@ impl SourceType {
 /// Lock entries grouped by their `(source_url, git_ref)` update unit.
 pub type SourceGroups = BTreeMap<(String, Option<String>), Vec<(String, SkillLockEntry)>>;
 
-/// One installed skill, mirroring vercel's per-skill lock fields.
+/// One installed skill entry in the shared lock schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillLockEntry {
@@ -69,8 +71,8 @@ pub struct SkillLockEntry {
     pub source_type: SourceType,
     /// Clone URL used to re-fetch this skill for updates.
     pub source_url: String,
-    /// Branch/tag/SHA pinned at install time. vercel names it `ref`; early
-    /// SkillStar builds wrote `gitRef`.
+    /// Branch/tag/SHA pinned at install time. The shared schema names it
+    /// `ref`; early SkillStar builds wrote `gitRef`.
     #[serde(
         rename = "ref",
         alias = "gitRef",
@@ -99,9 +101,9 @@ pub struct SkillLock {
     pub version: u32,
     /// Keyed by canonical skill folder name.
     pub skills: BTreeMap<String, SkillLockEntry>,
-    /// vercel `lastSelectedAgents`.
+    /// Agents selected by the most recent install, shared with the skills CLI.
     pub last_selected_agents: Vec<String>,
-    /// Top-level fields SkillStar does not model (e.g. vercel `dismissed`).
+    /// Top-level fields SkillStar does not model (e.g. `dismissed`).
     pub extra: BTreeMap<String, Value>,
     /// Entries as read, written back verbatim while their parsed form is
     /// unchanged, so an unknown `sourceType` string survives a rewrite.
@@ -128,8 +130,8 @@ impl Default for SkillLock {
 pub enum LockFileState {
     Missing,
     Ready(SkillLock),
-    /// Written by an older schema; vercel resets these, so SkillStar does too
-    /// (after a backup).
+    /// Written by an older schema; the shared writer resets these, so
+    /// SkillStar does too (after a backup).
     Outdated(u64),
     /// Written by a newer lock writer; never overwritten.
     TooNew(u64),
@@ -343,8 +345,9 @@ impl SkillLock {
     }
 
     /// Every key whose Skill lives in canonical folder `folder`: the folder
-    /// name itself first, then keys other writers used (vercel keys entries by
-    /// the raw frontmatter name, e.g. `My Skill` for folder `my-skill`).
+    /// name itself first, then keys other writers used (the skills CLI keys
+    /// entries by the raw frontmatter name, e.g. `My Skill` for folder
+    /// `my-skill`).
     pub fn keys_for_folder(&self, folder: &str) -> Vec<String> {
         let mut keys: Vec<String> = self
             .skills
@@ -374,7 +377,7 @@ impl SkillLock {
     ///
     /// Entries other writers recorded for the same folder under another key
     /// are folded into this one: fields SkillStar does not model (`extra`,
-    /// e.g. vercel's `pluginName`) and the first `installed_at` survive, the
+    /// e.g. `pluginName`) and the first `installed_at` survive, the
     /// new entry's own fields win.
     pub fn upsert(&mut self, name: &str, entry: SkillLockEntry) {
         // Intake records `local/<agent>`. That must not replace a git source
@@ -447,8 +450,9 @@ pub fn load() -> SkillLock {
     SkillLock::load(&lock_path())
 }
 
-/// The canonical folder a lock key installs into: vercel derives the folder
-/// from the key with the same mapping as [`crate::installer::canonical_skill_name`].
+/// The canonical folder a lock key installs into: other writers derive the
+/// folder from the key with the same mapping as
+/// [`crate::installer::canonical_skill_name`].
 /// `None` for a key no folder can safely carry.
 pub fn folder_for_key(key: &str) -> Option<String> {
     crate::materialize::canonical_skill_name(key).ok()

@@ -4,10 +4,12 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use ss_core::infra::release_check::{RELEASES_PAGE_URL, ReleaseCheckOutcome};
 use ss_skills::git::gh_manager::GitStatus;
 
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::i18n::{t, tf};
+use crate::spawn_domain;
 
 use super::{SettingsPage, SettingsSection, card, section_shell};
 use crate::theme::palette;
@@ -17,9 +19,37 @@ impl SettingsPage {
         let mut body = card();
         body = body.child(self.git_row(view.clone()));
         body = body.child(self.gh_row(view.clone()));
-        body = body.child(self.version_row());
+        body = body.child(self.version_row(view.clone()));
         body = body.child(self.data_path_row());
         section_shell(SettingsSection::About, None, None, body)
+    }
+
+    pub(crate) fn run_release_check(&mut self, cx: &mut Context<Self>) {
+        if self.release_checking {
+            return;
+        }
+        self.release_checking = true;
+        let entity = cx.entity();
+        spawn_domain(
+            &entity,
+            cx,
+            async {
+                Ok::<_, anyhow::Error>(
+                    ss_core::infra::release_check::run_check(crate::product_version()).await,
+                )
+            },
+            |this, _cx, result| {
+                this.release_checking = false;
+                if let Ok(outcome) = result {
+                    this.release_check = Some(ss_core::infra::release_check::ReleaseCheckRecord {
+                        last_checked_unix: ss_core::infra::github_api_cooldown::now_unix(),
+                        current_version: crate::product_version().to_string(),
+                        outcome,
+                    });
+                }
+            },
+        );
+        cx.notify();
     }
 
     fn git_row(&self, view: WeakEntity<Self>) -> Div {
@@ -80,42 +110,41 @@ impl SettingsPage {
             install_instructions,
             ..
         }) = &self.git_status
+            && !install_instructions.is_empty()
         {
-            if !install_instructions.is_empty() {
-                let mut commands = div()
-                    .px_4()
-                    .py_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .bg(rgb(palette().input))
-                    .border_b_1()
-                    .border_color(rgb(palette().border))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .text_xs()
-                            .text_color(rgb(palette().fg_muted))
-                            .child(
-                                Icon::new(IconName::Terminal)
-                                    .size(px(14.0))
-                                    .text_color(rgb(palette().fg_muted)),
-                            )
-                            .child(tf("settings.gitInstallCommandLabel", &[("os", os)])),
-                    );
-                for inst in install_instructions {
-                    commands = commands.child(command_row(
-                        &format!("git-{}", inst.label),
-                        &inst.label,
-                        &inst.command,
-                        self.copied.as_deref(),
-                        view.clone(),
-                    ));
-                }
-                wrap = wrap.child(commands);
+            let mut commands = div()
+                .px_4()
+                .py_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .bg(rgb(palette().input))
+                .border_b_1()
+                .border_color(rgb(palette().border))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_xs()
+                        .text_color(rgb(palette().fg_muted))
+                        .child(
+                            Icon::new(IconName::Terminal)
+                                .size(px(14.0))
+                                .text_color(rgb(palette().fg_muted)),
+                        )
+                        .child(tf("settings.gitInstallCommandLabel", &[("os", os)])),
+                );
+            for inst in install_instructions {
+                commands = commands.child(command_row(
+                    &format!("git-{}", inst.label),
+                    &inst.label,
+                    &inst.command,
+                    self.copied.as_deref(),
+                    view.clone(),
+                ));
             }
+            wrap = wrap.child(commands);
         }
         wrap
     }
@@ -221,7 +250,9 @@ impl SettingsPage {
         wrap
     }
 
-    fn version_row(&self) -> Div {
+    fn version_row(&self, view: WeakEntity<Self>) -> Div {
+        let checking = self.release_checking;
+        let check_view = view.clone();
         div()
             .px_4()
             .py_4()
@@ -262,20 +293,80 @@ impl SettingsPage {
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(palette().violet_fg))
-                                    .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                                    .child(format!("v{}", crate::product_version())),
                             ),
                     ),
             )
             .child(
                 div()
-                    .px_2()
-                    .py(px(2.0))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(palette().border))
-                    .text_xs()
-                    .text_color(rgb(palette().fg_muted))
-                    .child(t("settings.updateUnavailable")),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when_some(release_check_chip(self), |d, chip| d.child(chip))
+                    .child(
+                        div()
+                            .id("about-releases")
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .child(
+                                Icon::new(IconName::ExternalLink)
+                                    .size(px(14.0))
+                                    .text_color(rgb(palette().fg_muted)),
+                            )
+                            .on_click(move |_, _, _| {
+                                crate::os_open::open_external(RELEASES_PAGE_URL)
+                            })
+                            .interaction_spring(
+                                "about-releases",
+                                true,
+                                MotionPaint::new(),
+                                MotionPaint::new().bg(rgb(palette().card_hover)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("about-check-update")
+                            .h(px(28.0))
+                            .px_3()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgb(palette().border))
+                            .cursor_pointer()
+                            .text_xs()
+                            .text_color(if checking {
+                                rgb(palette().fg_muted)
+                            } else {
+                                rgb(palette().fg)
+                            })
+                            .child(
+                                Icon::new(IconName::RefreshCw)
+                                    .size(px(12.0))
+                                    .text_color(rgb(palette().fg_muted)),
+                            )
+                            .child(if checking {
+                                t("settings.checkingUpdate")
+                            } else {
+                                t("settings.checkUpdate")
+                            })
+                            .on_click(move |_, _, cx| {
+                                let _ = check_view.update(cx, |this, cx| {
+                                    this.run_release_check(cx);
+                                });
+                            })
+                            .interaction_spring(
+                                "about-check-update",
+                                true,
+                                MotionPaint::new(),
+                                MotionPaint::new().bg(rgb(palette().card_hover)),
+                            ),
+                    ),
             )
     }
 
@@ -354,11 +445,77 @@ fn gh_install_command() -> Option<&'static str> {
     }
 }
 
-fn display_home(path: &str) -> String {
-    if let Ok(home) = std::env::var("HOME") {
-        if let Some(rest) = path.strip_prefix(&home) {
-            return format!("~{rest}");
+/// The outcome chip next to the version row. `None` before the first check.
+fn release_check_chip(page: &SettingsPage) -> Option<AnyElement> {
+    if page.release_checking {
+        return Some(
+            plain_chip(t("settings.checkingUpdate"), palette().fg_muted).into_any_element(),
+        );
+    }
+    match page.release_check.as_ref().map(|record| &record.outcome) {
+        None => None,
+        Some(ReleaseCheckOutcome::UpToDate) => {
+            Some(plain_chip(t("settings.upToDate"), palette().ok).into_any_element())
         }
+        Some(ReleaseCheckOutcome::NoPublishedRelease) => Some(
+            plain_chip(t("settings.noPublishedRelease"), palette().fg_muted).into_any_element(),
+        ),
+        Some(ReleaseCheckOutcome::Failed { .. }) => {
+            Some(plain_chip(t("settings.updateCheckFailed"), palette().fg_muted).into_any_element())
+        }
+        Some(ReleaseCheckOutcome::Available { tag, url }) => {
+            let label = tf("settings.updateFoundDesc", &[("version", tag)]);
+            let open = url.clone();
+            Some(
+                div()
+                    .id("about-update-available")
+                    .px_2()
+                    .py(px(2.0))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(rgb(palette().violet))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(rgb(palette().violet_fg))
+                    .child(
+                        Icon::new(IconName::Download)
+                            .size(px(12.0))
+                            .text_color(rgb(palette().violet_fg)),
+                    )
+                    .child(label)
+                    .on_click(move |_, _, _| crate::os_open::open_external(&open))
+                    .interaction_spring(
+                        "about-update-available",
+                        true,
+                        MotionPaint::new(),
+                        MotionPaint::new().bg(rgb(palette().card_hover)),
+                    )
+                    .into_any_element(),
+            )
+        }
+    }
+}
+
+fn plain_chip(label: SharedString, color: u32) -> Div {
+    div()
+        .px_2()
+        .py(px(2.0))
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(palette().border))
+        .text_xs()
+        .text_color(rgb(color))
+        .child(label)
+}
+
+fn display_home(path: &str) -> String {
+    if let Ok(home) = std::env::var("HOME")
+        && let Some(rest) = path.strip_prefix(&home)
+    {
+        return format!("~{rest}");
     }
     path.to_string()
 }

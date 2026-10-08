@@ -6,9 +6,11 @@ mod commands;
 mod detail_agents;
 pub mod detail_drawer;
 mod detail_facts;
+mod detail_parts;
 mod detail_uninstall;
 pub mod empty_state;
 mod filters;
+mod github_sign_in;
 mod import_modal;
 mod repo_source;
 pub mod selection_bar;
@@ -52,6 +54,13 @@ pub struct MySkillsPage {
     pub(crate) search: Option<Entity<InputState>>,
     pub(crate) search_query: String,
     pub(crate) selected_skill: Option<String>,
+    /// Per-skill description-translation choice made on the drawer's button.
+    /// A skill not in the map follows the Settings switch; a skill the user
+    /// translated keeps its line in the chosen language even after the
+    /// drawer moves to another skill. The map is loaded from and written back
+    /// to the translation config, so choices survive a restart; the switch
+    /// itself is never written.
+    description_choices: std::collections::HashMap<String, bool>,
     /// Pointer is on the detail-column uninstall control. Hover frames read
     /// this and notify the canvas; they do not bump [`Self::content_epoch`].
     uninstall_hover: bool,
@@ -68,6 +77,8 @@ pub struct MySkillsPage {
     /// `{skill}::{agent id}` while a carousel install or toggle is in flight.
     pub(crate) pending_agents: HashSet<String>,
     pub(crate) error: Option<String>,
+    /// GitHub 会话状态,频道空状态的登录卡消费。`None` = 尚未读到。
+    pub(crate) github: Option<ss_skills::github_auth::GitHubConnectionStatus>,
     pub(crate) _subscription: Option<Subscription>,
     /// Bumped when Settings reloads profiles, so an in-flight `refresh`
     /// cannot paint the pre-toggle snapshot back over the carousel.
@@ -99,6 +110,9 @@ impl MySkillsPage {
             search: None,
             search_query: String::new(),
             selected_skill: None,
+            description_choices: ss_core::translation::load_config()
+                .map(|config| config.description_choices)
+                .unwrap_or_default(),
             uninstall_hover: false,
             selected_batch: HashSet::new(),
             link_menu_open: false,
@@ -109,6 +123,7 @@ impl MySkillsPage {
             last_update_check: None,
             pending_agents: HashSet::new(),
             error: None,
+            github: None,
             _subscription: None,
             profiles_epoch: 0,
             content_epoch: 0,
@@ -159,6 +174,21 @@ impl MySkillsPage {
             }
             this.revise(cx);
         });
+
+        // GitHub 会话:频道空状态的登录卡与登录对话框共用同一 facade,
+        // 身份缓存在两次刷新之间存活,避免每次刷新都打一次 GitHub API。
+        let auth = github_sign_in::shared_auth_facade();
+        spawn_domain(
+            &view,
+            cx,
+            async move { auth.status().await.map_err(anyhow::Error::new) },
+            |this, cx, status| {
+                if let Ok(status) = status {
+                    this.github = Some(status);
+                    this.revise(cx);
+                }
+            },
+        );
     }
 
     /// Settings changed which agents are enabled. Synchronous: the carousel
@@ -176,6 +206,9 @@ impl MySkillsPage {
 
     /// Open or close the detail column. A different skill drops the uninstall
     /// hover, so the next button starts at rest instead of the previous face.
+    /// A skill's description-translation choice is remembered: moving the
+    /// drawer to another skill does not put a translated card back to
+    /// English.
     pub(super) fn select_detail(&mut self, name: Option<String>) {
         if self.selected_skill != name {
             self.uninstall_hover = false;
@@ -316,3 +349,8 @@ impl Render for MySkillsPage {
 impl EventEmitter<SelectPage> for MySkillsPage {}
 
 impl EventEmitter<GroupsChanged> for MySkillsPage {}
+
+#[cfg(test)]
+pub(super) mod test_support {
+    pub(super) use crate::test_support::{IsolatedDataDir, data_dir_lock};
+}

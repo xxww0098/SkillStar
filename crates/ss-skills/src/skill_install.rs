@@ -1,5 +1,5 @@
 //! D-081 install pipeline: parse → temp fetch → discover → copy to canonical
-//! → vercel lock. One entry for GUI, CLI, carousel and batch installs.
+//! → install lock. One entry for GUI, CLI, carousel and batch installs.
 //!
 //! There is no persistent repository cache and no harness copy ranking:
 //! every install re-fetches the source shallowly into a temp dir and
@@ -247,19 +247,63 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
 pub fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String> {
     crate::content::validate_skill_name(name)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
-    crate::skill_lock::ensure_writable().map_err(|error| error.to_string())?;
-    let _transaction = crate::skill_update::acquire_update_transaction_lock()
-        .map_err(|error| format!("{error:#}"))?;
     if local_skill::is_local_skill(name) {
-        local_skill::delete(name).map_err(|e| e.to_string())?;
-        installed_skill::invalidate_cache();
-        return Ok(());
+        return local_skill::delete(name).map_err(|error| format!("{error:#}"));
     }
+    remove_hub_skill(name).map_err(|error| format!("{error:#}"))
+}
 
-    let _ = crate::deployment::remove_skill_from_all_agents(name).map_err(|e| e.to_string());
-    let _ = crate::projects::remove_skill_from_all_projects(name).map_err(|e| e.to_string());
-    installer::uninstall_canonical(name).map_err(|e| e.to_string())?;
+/// Agent display names and project names whose SkillStar deployments were removed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeploymentCleanup {
+    pub agents: Vec<String>,
+    pub projects: Vec<String>,
+}
+
+/// Remove SkillStar-owned Agent deployments, then Project deployments.
+///
+/// Does not touch the canonical copy, the local original, or the install lock.
+/// `Err` means an owned deployment is still present; callers must not delete
+/// the body or the lock after that.
+pub fn clear_owned_deployments(name: &str) -> anyhow::Result<DeploymentCleanup> {
+    let agents = crate::deployment::remove_skill_from_all_agents(name)?;
+    let projects = crate::projects::remove_skill_from_all_projects(name)?;
+    Ok(DeploymentCleanup { agents, projects })
+}
+
+fn begin_removal(name: &str) -> anyhow::Result<crate::skill_update::UpdateTransactionGuard> {
+    crate::skill_lock::ensure_writable()?;
+    let guard = crate::skill_update::acquire_update_transaction_lock()?;
+    clear_owned_deployments(name)?;
+    Ok(guard)
+}
+
+fn remove_hub_skill(name: &str) -> anyhow::Result<()> {
+    let _guard = begin_removal(name)?;
+    installer::uninstall_canonical(name)?;
     crate::update_state::set(name, false);
+    installed_skill::invalidate_cache();
+    Ok(())
+}
+
+pub(crate) fn remove_local_skill(name: &str) -> anyhow::Result<()> {
+    let _guard = begin_removal(name)?;
+    local_skill::delete_files_and_lock(name)?;
+    installed_skill::invalidate_cache();
+    Ok(())
+}
+
+/// Settings reset for one local hub link.
+///
+/// Clears owned deployments, then the hub symlink and the lock entry. The
+/// directory under `skills/local` stays. A deployment or lock failure leaves
+/// the hub link in place. Does not apply the mutation gate; the settings
+/// reset admits names only after `notify_bulk_skill_removal`.
+pub fn release_local_hub_link(name: &str) -> anyhow::Result<()> {
+    crate::content::validate_skill_name(name)
+        .map_err(|error| anyhow::anyhow!("Invalid Skill name: {error}"))?;
+    let _guard = begin_removal(name)?;
+    local_skill::unlink_hub_and_lock(name)?;
     installed_skill::invalidate_cache();
     Ok(())
 }
@@ -368,12 +412,23 @@ where
             true,
         );
     }
-    let _ = crate::deployment::remove_skill_from_all_agents(name);
-    let _ = crate::projects::remove_skill_from_all_projects(name);
+    // The canonical copy and lock are already committed. A deployment failure
+    // stays on this result as committed cleanup, not as a rollback.
+    if let Err(error) = clear_owned_deployments(name) {
+        return fail(
+            format!("Skill '{name}' was removed but deployment cleanup failed: {error:#}"),
+            true,
+            true,
+        );
+    }
     crate::update_state::set(name, false);
     installed_skill::invalidate_cache();
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "skill_removal_tests.rs"]
+mod removal_tests;
 
 /// Discover within a fetched source, preserving its ref, scope and identity filter.
 pub fn scan_parsed_checkout(

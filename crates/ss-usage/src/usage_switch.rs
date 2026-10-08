@@ -28,13 +28,13 @@
 mod antigravity;
 mod cursor;
 mod custody;
+mod devin_desktop;
 mod error;
 mod ide;
 #[cfg(target_os = "macos")]
 mod keychain;
 mod kiro;
 mod target;
-mod windsurf;
 mod zcode;
 
 use std::collections::HashMap;
@@ -522,16 +522,23 @@ pub fn adopt_active_cli_session_before_refresh(
 /// After SkillStar's own refresh produced a newer generation, write it into
 /// the snapshot — which *is* the CLI's live file.
 pub fn sync_refreshed_active_subscription(
+    before: &Subscription,
     subscription: &mut Subscription,
     lease: &CliRefreshLease,
 ) -> UsageResult<Option<SwitchOutcome>> {
+    if before.id != subscription.id
+        || before.catalog_id != subscription.catalog_id
+        || same_refresh_credentials(before, subscription)
+    {
+        return Ok(None);
+    }
     if let Some(adapter) = lease.ide {
         if storage::get_active_subscription(&subscription.catalog_id)?.as_deref()
             != Some(subscription.id.as_str())
         {
             return Ok(None);
         }
-        return Ok(Some(adapter.sync(subscription)?));
+        return adapter.sync_after_refresh(before, subscription);
     }
     let Some(target) = lease.target else {
         return Ok(None);
@@ -542,12 +549,35 @@ pub fn sync_refreshed_active_subscription(
         return Ok(None);
     }
     let custody = Custody::open(target)?;
+    if !custody.refresh_matches(before) {
+        return Ok(None);
+    }
     Ok(Some(match custody.project_refreshed(subscription) {
         Ok(activated) => SwitchOutcome::ok(custody.tool_id(), custody.live_path(), &activated),
         Err(error) => {
             SwitchOutcome::fail(custody.tool_id(), custody.live_path(), error.to_string())
         }
     }))
+}
+
+/// Encryption uses a random nonce. Compare token values, not ciphertext or
+/// profile/plan metadata that a read-only quota request may fill in.
+fn same_refresh_credentials(before: &Subscription, after: &Subscription) -> bool {
+    before.access_token_expires_at == after.access_token_expires_at
+        && [
+            (
+                &before.access_token_encrypted,
+                &after.access_token_encrypted,
+            ),
+            (
+                &before.refresh_token_encrypted,
+                &after.refresh_token_encrypted,
+            ),
+            (&before.id_token_encrypted, &after.id_token_encrypted),
+            (&before.api_key_encrypted, &after.api_key_encrypted),
+        ]
+        .into_iter()
+        .all(|(left, right)| target::secret(left.as_deref()) == target::secret(right.as_deref()))
 }
 
 #[cfg(test)]

@@ -39,44 +39,29 @@ fn extract_share_token(text: &str) -> &str {
     &rest[..end]
 }
 
-/// `gitOperationErrorMessage` — React keeps these as English `defaultValue`s
-/// (no catalog keys), so the literal strings here are byte-identical output.
+/// `gitOperationErrorMessage`. Known transport codes use `mySkills.git*`.
+/// Anything else is returned unchanged so the raw detail still shows.
 pub(super) fn git_error_message(raw: &str) -> String {
-    const MAP: &[(&str, &str)] = &[
-        (
-            "token_expired:",
-            "Your GitHub session expired. Refresh it in Settings, then retry.",
-        ),
-        (
-            "not_authenticated:",
-            "Sign in to GitHub in Settings, then retry this private repository.",
-        ),
-        (
-            "credential_unavailable:",
-            "Unlock the system credential store, then retry.",
-        ),
-        (
-            "unauthorized:",
-            "The signed-in GitHub user does not have access to this repository.",
-        ),
-        (
-            "app_not_installed:",
-            "Install or authorize the SkillStar GitHub App for this repository, then retry.",
-        ),
-        (
-            "network:",
-            "GitHub could not be reached. Check the SkillStar proxy and your network, then retry.",
-        ),
-        ("cancelled:", "The repository operation was cancelled."),
-        (
-            "unsafe_remote:",
-            "Remove credentials from the repository URL and use SkillStar GitHub login instead.",
-        ),
-    ];
-    MAP.iter()
-        .find(|(code, _)| raw.contains(code))
-        .map(|(_, msg)| msg.to_string())
-        .unwrap_or_else(|| raw.to_string())
+    let key = if raw.contains("token_expired:") {
+        "mySkills.gitTokenExpired"
+    } else if raw.contains("not_authenticated:") {
+        "mySkills.gitNotAuthenticated"
+    } else if raw.contains("credential_unavailable:") {
+        "mySkills.gitCredentialUnavailable"
+    } else if raw.contains("unauthorized:") {
+        "mySkills.gitUnauthorized"
+    } else if raw.contains("app_not_installed:") {
+        "mySkills.gitAppNotInstalled"
+    } else if raw.contains("network:") {
+        "mySkills.gitNetwork"
+    } else if raw.contains("cancelled:") {
+        "mySkills.gitCancelled"
+    } else if raw.contains("unsafe_remote:") {
+        "mySkills.gitUnsafeRemote"
+    } else {
+        return raw.to_string();
+    };
+    crate::i18n::t(key).to_string()
 }
 
 #[cfg(test)]
@@ -118,10 +103,16 @@ mod tests {
 
     #[test]
     fn git_errors_map_to_actionable_text() {
+        let lang = crate::i18n::set_language_for_test("en");
         assert_eq!(
             git_error_message("network: dns broke"),
             "GitHub could not be reached. Check the SkillStar proxy and your network, then retry."
         );
         assert_eq!(git_error_message("anything else"), "anything else");
+        lang.set("zh-CN");
+        assert_eq!(
+            git_error_message("network: dns broke"),
+            "连不上 GitHub。请检查 SkillStar 的代理和网络后再试。"
+        );
     }
 }

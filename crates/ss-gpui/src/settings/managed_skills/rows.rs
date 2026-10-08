@@ -3,13 +3,14 @@
 
 use std::collections::HashSet;
 
+use gpui_kit::component::Disableable;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::*;
 use ss_skills::agents::AgentProfile;
 use ss_skills::workflows::agent_managed_skills::AgentManagedSkillsState;
 
 use super::SettingsPage;
 use super::state::{PauseAction, PauseSnapshot, PauseStatus, global_skills_target_key};
-use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::i18n::{t, tf};
 use crate::theme::palette;
 
@@ -20,7 +21,6 @@ impl SettingsPage {
         let snapshot = pause_snapshot(self.managed.states.get(&key));
         let disabled =
             pending || matches!(snapshot.status, PauseStatus::Loading | PauseStatus::Empty);
-        let tinted = matches!(snapshot.status, PauseStatus::Paused | PauseStatus::Partial);
         let status = managed_status_text(pending, &snapshot);
         let emphasized = matches!(snapshot.status, PauseStatus::Paused | PauseStatus::Partial);
         let agent_id = profile.id.clone();
@@ -55,7 +55,6 @@ impl SettingsPage {
                 &format!("managed-skills-{}", profile.id),
                 snapshot.checked,
                 disabled,
-                tinted,
                 view,
                 move |this, cx| this.toggle_managed_skills(&agent_id, cx),
             ))
@@ -74,61 +73,19 @@ fn managed_switch(
     id: &str,
     checked: bool,
     disabled: bool,
-    tinted: bool,
     view: WeakEntity<SettingsPage>,
     apply: impl Fn(&mut SettingsPage, &mut Context<SettingsPage>) + 'static,
-) -> impl IntoElement {
-    let track = if checked {
-        palette().accent
-    } else if tinted {
-        palette().accent_soft
-    } else {
-        palette().border
-    };
-    let mut switch = div()
-        .flex_shrink_0()
-        .w(px(36.0))
-        .h(px(20.0))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .bg(rgb(track))
-        .child(
-            div()
-                .w(px(16.0))
-                .h(px(16.0))
-                .rounded_full()
-                .bg(rgb(0xffffff))
-                .ml(px(if checked { 18.0 } else { 2.0 })),
-        );
-    if tinted && !checked {
-        switch = switch
-            .border_1()
-            .border_color(rgb(palette().accent_soft_edge));
-    }
-    if disabled {
-        switch = switch.opacity(0.5);
-    } else {
-        switch = switch.cursor_pointer();
-    }
-    switch
-        .id(ElementId::Name(id.to_string().into()))
+) -> Switch {
+    Switch::new(ElementId::Name(id.to_string().into()))
+        .checked(checked)
+        .disabled(disabled)
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
-            if disabled {
-                return;
-            }
             let _ = view.update(cx, |this, cx| {
                 apply(this, cx);
                 cx.notify();
             });
         })
-        .interaction_spring(
-            id.to_string(),
-            !disabled,
-            MotionPaint::new().opacity(1.0),
-            MotionPaint::new().opacity(1.0),
-        )
 }
 
 fn managed_status_text(pending: bool, snapshot: &PauseSnapshot) -> SharedString {

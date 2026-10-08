@@ -19,6 +19,7 @@ path = "src/bin/ss-gpui.rs"
 
 [dependencies]
 gpui-kit = "0.7.1"
+rust-i18n = { workspace = true }
 ss-core = { path = "../ss-core" }
 ss-app = { path = "../ss-app" }
 ss-skills = { path = "../ss-skills" }

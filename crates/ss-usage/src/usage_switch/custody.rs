@@ -457,12 +457,21 @@ impl Custody {
             .unwrap_or(snapshot))
     }
 
-    /// Write a generation SkillStar just refreshed into the snapshot, which
-    /// *is* the live file. Caller must hold [`Self::lock`].
-    ///
-    /// Refuses when the CLI is serving somebody else: the pin is a cache, and
-    /// overwriting another account's live session because a cache disagreed is
-    /// exactly the failure custody exists to prevent.
+    /// A logout or a client-side rotation during the HTTP request wins.
+    pub(super) fn refresh_matches(&self, before: &Subscription) -> bool {
+        let Some(root) = self.authoritative_root() else {
+            return false;
+        };
+        if self.target.access_token(&root).is_none() {
+            return false;
+        }
+        let mut current = before.clone();
+        self.target.absorb(&root, &mut current);
+        super::same_refresh_credentials(before, &current)
+    }
+
+    /// Write a refreshed generation while holding the CLI lock. The caller
+    /// must first confirm the live credentials still match its request baseline.
     pub(super) fn project_refreshed(&self, sub: &Subscription) -> CustodyResult<Activated> {
         let state = self.probe()?;
         let serving = matches!(&state, LinkState::LinkedTo(id) if id == &sub.id);
@@ -471,7 +480,7 @@ impl Custody {
                 tool: self.target.tool_id(),
             });
         }
-        let base = self.read_snapshot(&sub.id).or_else(|| self.live_root());
+        let base = self.live_root().or_else(|| self.read_snapshot(&sub.id));
         let root = self.target.materialize(sub, base.as_ref())?;
         self.write_snapshot(&sub.id, &root)?;
         let mode = if self.link_target_id().as_deref() == Some(sub.id.as_str()) {

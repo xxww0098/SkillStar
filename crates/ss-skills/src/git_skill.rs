@@ -190,8 +190,7 @@ impl GitSkillFacade {
         .and_then(|installed| {
             let expected = crate::installer::canonical_skill_name(&target.id)?;
             installed
-                .iter()
-                .any(|installed| *installed == expected)
+                .contains(&expected)
                 .then_some(())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
@@ -267,16 +266,6 @@ impl GitSkillFacade {
         skill_install::install_skills_batch_in_session(url, names, &self.session)
     }
 
-    pub fn install_skills_batch_for_agent(
-        &self,
-        url: &str,
-        names: &[String],
-        _agent_id: &str,
-    ) -> Result<Vec<Skill>, AppError> {
-        skill_install::install_skills_batch_in_session(url, names, &self.session)
-            .map_err(AppError::from)
-    }
-
     /// D-081 overwrite-update: refetch the locked source and reinstall.
     pub fn update_skill(&self, name: &str) -> anyhow::Result<UpdateResult> {
         let report = self.update_skills(std::slice::from_ref(&name.to_string()));
@@ -298,6 +287,16 @@ impl GitSkillFacade {
     }
 
     pub fn update_skills(&self, names: &[String]) -> SkillUpdateReport {
+        self.update_skills_admitting(names, crate::update::OverwriteAdmission::Overwrite)
+    }
+
+    /// Same path as [`Self::update_skills`]. `admission` is enforced inside
+    /// the update module at commit time, not by filtering names here.
+    pub(crate) fn update_skills_admitting(
+        &self,
+        names: &[String],
+        admission: crate::update::OverwriteAdmission,
+    ) -> SkillUpdateReport {
         let policy = crate::skill_mutation::policy();
         let mut report = SkillUpdateReport::default();
         let mut generic: Vec<String> = Vec::new();
@@ -317,7 +316,7 @@ impl GitSkillFacade {
             }
         }
         let mut refreshed = Vec::new();
-        for applied in crate::update::apply_updates(&generic, &self.session) {
+        for applied in crate::update::apply_updates_admitting(&generic, &self.session, admission) {
             let name = applied.name;
             match applied.result {
                 crate::update::UpdateResult::Updated { .. } => {
@@ -364,6 +363,7 @@ impl GitSkillFacade {
                     });
                 }
                 crate::update::UpdateResult::NotUpdatable => report.not_updatable.push(name),
+                crate::update::UpdateResult::KeptLocal => report.kept_local.push(name),
                 crate::update::UpdateResult::Failed(error) => {
                     report.failed.push(SkillUpdateFailure { name, error })
                 }
@@ -381,8 +381,8 @@ impl GitSkillFacade {
         installed_skill::refresh_skill_updates_in_session(&self.session).await
     }
 
-    /// Background auto-update: check upstream, then overwrite-reinstall every
-    /// Skill whose tree changed. See crate::update::auto_update_locked_skills.
+    /// Background auto-update. Baseline eligibility is re-checked at commit.
+    /// See crate::update::auto_update_locked_skills.
     pub async fn auto_update_skills(&self) -> crate::update::AutoUpdateReport {
         crate::update::auto_update_locked_skills(&self.session).await
     }

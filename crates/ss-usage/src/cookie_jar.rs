@@ -75,10 +75,6 @@ pub fn serialize_cookie_jar(entries: &[CookieEntry]) -> String {
     serde_json::to_string(entries).unwrap_or_default()
 }
 
-pub fn deserialize_cookie_jar(json: &str) -> Option<Vec<CookieEntry>> {
-    serde_json::from_str(json).ok()
-}
-
 pub fn build_cookie_header(entries: &[CookieEntry]) -> String {
     entries
         .iter()

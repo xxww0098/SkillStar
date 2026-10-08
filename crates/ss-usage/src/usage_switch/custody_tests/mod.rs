@@ -641,13 +641,22 @@ async fn the_refresh_window_adopts_the_cli_generation_and_projects_ours() {
         "never spend a refresh token the CLI already replaced"
     );
 
+    let before_refresh = row.clone();
+    let original = fs::read(sb.live("xai")).unwrap();
+    assert!(
+        sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(fs::read(sb.live("xai")).unwrap(), original);
+
     // Now SkillStar's own refresh produces the next generation.
     row.access_token_encrypted = Some(crypto::encrypt(ALICE_CLI_TOKEN));
     row.access_token_expires_at = Some(2_100_000_000);
     row.refresh_token_encrypted = Some(crypto::encrypt("r3-from-skillstar"));
     let row = storage::patch_oauth_credentials(&row).unwrap();
     let mut row = row;
-    let outcome = sync_refreshed_active_subscription(&mut row, &lease)
+    let outcome = sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
         .unwrap()
         .expect("the active account must be projected");
 
@@ -673,7 +682,7 @@ async fn the_refresh_window_is_a_no_op_for_an_account_that_is_not_current() {
     let lease = acquire_cli_refresh_lease("xai").await.unwrap();
     adopt_active_cli_session_before_refresh(&mut bob, &lease).unwrap();
     assert!(
-        sync_refreshed_active_subscription(&mut bob, &lease)
+        sync_refreshed_active_subscription(&bob.clone(), &mut bob, &lease)
             .unwrap()
             .is_none()
     );

@@ -24,6 +24,8 @@ mod settings;
 mod shell;
 mod skill_card;
 mod skill_cards;
+#[cfg(test)]
+mod test_support;
 mod theme;
 mod translation;
 
@@ -36,6 +38,11 @@ use gpui_kit::*;
 use std::borrow::Cow;
 
 use layout::{WINDOW_H, WINDOW_MIN_H, WINDOW_MIN_W, WINDOW_W};
+
+// App copy lives in `assets/locales/*.json` and is read by [`i18n`]. The kit
+// owns its own copy; `locales/ui.yml` carries the `gpui_component` overrides
+// that [`run`] extends the component backend with.
+rust_i18n::i18n!("locales", fallback = "en");
 
 /// Asset source that layers the SkillStar app icon over gpui-kit's full
 /// Lucide catalogue. Paths under `icons/` that Lucide doesn't carry
@@ -132,6 +139,26 @@ fn install_dock_icon() {
 /// each view.
 static TOKIO: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
 
+/// The product version the `skillstar` binary was built with (the version
+/// in `crates/skillstar/Cargo.toml` — every other crate shares a placeholder
+/// workspace version). Set by [`run`]; falls back to this crate's own
+/// version for the standalone dev bin and tests.
+static PRODUCT_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+pub fn product_version() -> &'static str {
+    PRODUCT_VERSION
+        .get()
+        .copied()
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// Component locales, then the kit. `extend!` has to run before
+/// [`gpui_kit::init`]; see <https://gpui-kit.com/docs/i18n/>.
+pub(crate) fn init_components(cx: &mut App) {
+    i18n::extend_component_copy();
+    gpui_kit::init(cx);
+}
+
 /// Test-context bootstrap shared by every `#[gpui_kit::test]`. The gpui
 /// test scheduler treats any foreign-thread wakeup as nondeterminism,
 /// but page constructors kick off real tokio work through
@@ -141,7 +168,7 @@ static TOKIO: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock
 #[cfg(test)]
 pub(crate) fn init_test(cx: &mut gpui_kit::TestAppContext) {
     cx.executor().allow_parking();
-    cx.update(|cx| gpui_kit::init(cx));
+    cx.update(init_components);
 }
 
 fn tokio() -> &'static tokio::runtime::Runtime {
@@ -294,13 +321,16 @@ where
 
 /// Owns the process once invoked — returns only when the GPUI app exits.
 /// Called by the `skillstar` binary and the standalone `ss-gpui` bin.
-pub fn run() -> anyhow::Result<()> {
+/// `product_version` is the caller's `CARGO_PKG_VERSION`; only the
+/// `skillstar` crate's is the product version.
+pub fn run(product_version: &'static str) -> anyhow::Result<()> {
+    let _ = PRODUCT_VERSION.set(product_version);
     ss_core::infra::logging::init();
     ss_app::bootstrap::prepare_process();
-    ss_app::bootstrap::spawn_gui_background(tokio().handle());
+    ss_app::bootstrap::spawn_gui_background(tokio().handle(), product_version);
 
     gpui_kit::application().with_assets(AppAssets).run(|cx| {
-        gpui_kit::init(cx);
+        init_components(cx);
         install_fonts(cx);
         install_scrollbar_theme(cx);
         #[cfg(target_os = "macos")]

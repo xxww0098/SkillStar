@@ -11,7 +11,7 @@
 use gpui_kit::*;
 
 use super::{CARD_GAP, CARD_W};
-use crate::layout::{PANEL_BORDER_X, SHELL_CHROME_W, SKILL_PAGE_PAD};
+use crate::layout::{PAGE_PAD, PANEL_BORDER_X, SHELL_CHROME_W};
 
 /// How many fixed-width tracks of `card_w` fit in `content_width`.
 pub const fn columns_for(card_w: f32, gap: f32, content_width: f32) -> usize {
@@ -39,7 +39,7 @@ pub const fn pane_width(viewport_width: f32, page_pad: f32, card_w: f32) -> f32 
 
 /// Skill-card pane. Quota cards call [`pane_width`] with their padding and width.
 pub const fn card_content_width(viewport_width: f32) -> f32 {
-    pane_width(viewport_width, SKILL_PAGE_PAD, CARD_W)
+    pane_width(viewport_width, PAGE_PAD, CARD_W)
 }
 
 const _: () = assert!(grid_columns(card_content_width(crate::layout::WINDOW_W)) == 3);
@@ -112,7 +112,7 @@ pub fn card_rows(
 mod tests {
     use super::{CARD_GAP, CARD_W};
     use super::{card_content_width, columns_for, grid_columns, pane_width};
-    use crate::layout::{ACCOUNTS_PAGE_PAD, QUOTA_CARD_W, WINDOW_MIN_W, WINDOW_W};
+    use crate::layout::{PAGE_PAD, QUOTA_CARD_W, WINDOW_MIN_W, WINDOW_W};
 
     #[test]
     fn columns_follow_the_card_pitch() {
@@ -133,6 +133,7 @@ mod tests {
     fn content_width_never_drops_below_one_card() {
         assert_eq!(card_content_width(0.0), CARD_W);
         let default = card_content_width(WINDOW_W);
+        assert_eq!(default, crate::layout::CARD_ROW_W);
         assert_eq!(grid_columns(default), 3);
         assert!(
             grid_columns(card_content_width(1600.0)) >= grid_columns(card_content_width(1200.0)),
@@ -142,8 +143,8 @@ mod tests {
 
     #[test]
     fn quota_cards_use_the_same_pitch() {
-        let wide = pane_width(WINDOW_W, ACCOUNTS_PAGE_PAD, QUOTA_CARD_W);
-        let narrow = pane_width(WINDOW_MIN_W, ACCOUNTS_PAGE_PAD, QUOTA_CARD_W);
+        let wide = pane_width(WINDOW_W, PAGE_PAD, QUOTA_CARD_W);
+        let narrow = pane_width(WINDOW_MIN_W, PAGE_PAD, QUOTA_CARD_W);
         assert_eq!(columns_for(QUOTA_CARD_W, CARD_GAP, wide), 2);
         assert_eq!(columns_for(QUOTA_CARD_W, CARD_GAP, narrow), 1);
         assert!(

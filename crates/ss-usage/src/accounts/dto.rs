@@ -8,43 +8,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::accounts::consumption::{Group, Period, SeriesPoint, Totals};
-use crate::catalog::{AuthMode, CatalogEntry, CatalogTier};
+use crate::catalog::AuthMode;
 use crate::fetchers::oauth::OAuthFlow;
-use crate::subscription::{
-    AlertKind, AlertSeverity, BillingCycle, ManualQuota, Subscription, SubscriptionAlert,
-    SubscriptionUsage,
-};
-
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct CatalogEntryDto {
-    pub id: String,
-    pub display_name: String,
-    pub description: String,
-    pub tier: CatalogTier,
-    pub auth_modes: Vec<AuthMode>,
-    pub brand_color: String,
-    pub default_currency: String,
-    pub subscription_url: String,
-    pub warning: Option<String>,
-    pub regions: Vec<String>,
-}
-
-impl From<CatalogEntry> for CatalogEntryDto {
-    fn from(e: CatalogEntry) -> Self {
-        Self {
-            id: e.id.to_string(),
-            display_name: e.display_name.to_string(),
-            description: e.description.to_string(),
-            tier: e.tier,
-            auth_modes: e.auth_modes.to_vec(),
-            brand_color: e.brand_color.to_string(),
-            default_currency: e.default_currency.to_string(),
-            subscription_url: e.subscription_url.to_string(),
-            warning: e.warning.map(|s| s.to_string()),
-            regions: e.regions.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-}
+use crate::subscription::{BillingCycle, ManualQuota, Subscription, SubscriptionUsage};
 
 #[derive(Debug, Clone, Serialize, TS)]
 pub struct SubscriptionDto {
@@ -315,27 +281,6 @@ impl From<crate::usage_switch::CliAccountState> for CliAccountStateDto {
             Domain::LinkedTo { subscription_id } => Self::LinkedTo { subscription_id },
             Domain::Diverged => Self::Diverged,
             Domain::Missing => Self::Missing,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct SubscriptionAlertDto {
-    pub id: String,
-    pub subscription_id: String,
-    pub severity: AlertSeverity,
-    pub kind: AlertKind,
-    pub message: String,
-}
-
-impl From<SubscriptionAlert> for SubscriptionAlertDto {
-    fn from(a: SubscriptionAlert) -> Self {
-        Self {
-            id: a.id,
-            subscription_id: a.subscription_id,
-            severity: a.severity,
-            kind: a.kind,
-            message: a.message,
         }
     }
 }

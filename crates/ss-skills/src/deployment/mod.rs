@@ -419,26 +419,6 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create project-level skill symlinks in a project directory.
-///
-/// This is a thin facade over `crate::projects::add_skills_to_project()` — all
-/// project-level skill management is canonically owned by `project_manifest`.
-///
-/// The function registers the project (if not already registered), merges the
-/// requested skills into `skills-list.json`, and creates symlinks incrementally
-/// without clearing other agents' directories.
-pub fn create_project_skills(
-    project_path: &Path,
-    selected_skills: &[String],
-    agent_types: &[String],
-) -> Result<u32> {
-    crate::projects::add_skills_to_project(
-        &project_path.to_string_lossy(),
-        selected_skills,
-        agent_types,
-    )
-}
-
 pub fn create_project_skills_with_mode(
     project_path: &Path,
     selected_skills: &[String],

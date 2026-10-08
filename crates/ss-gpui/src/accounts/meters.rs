@@ -301,12 +301,14 @@ mod tests {
 
     #[test]
     fn past_reset_reads_as_soon() {
+        let _lang = crate::i18n::set_language_for_test("zh-CN");
         assert_eq!(format_reset(0), "");
         assert_eq!(format_reset(1), "即将重置");
     }
 
     #[test]
     fn countdown_uses_compact_units_and_omits_zero_parts() {
+        let _lang = crate::i18n::set_language_for_test("zh-CN");
         let now = super::current_epoch_seconds();
         for (minutes, expected) in [
             (6 * 1440 + 22 * 60 + 31, "6天22时31分"),
@@ -397,6 +399,7 @@ mod tests {
 
     #[test]
     fn count_windows_show_only_the_remaining_caption() {
+        let _lang = crate::i18n::set_language_for_test("zh-CN");
         assert_eq!(super::amount_text(&window(Some(13), 13, Some(100))), "");
         assert_eq!(super::amount_text(&window(Some(0), 0, Some(100))), "");
         assert_eq!(

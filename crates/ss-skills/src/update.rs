@@ -1,14 +1,15 @@
-//! vercel-labs/skills update semantics (D-081).
+//! Skill update semantics (D-081).
 //!
 //! Check = compare each lock entry's `skill_folder_hash` (a git tree SHA)
 //! against the upstream tree, grouped by `(source_url, git_ref)` so skills on
 //! different refs never compare against the wrong tree (`crate::update_check`).
-//! Apply = fetch each source group into one temp checkout and
-//! overwrite-reinstall — manual updates do not detect or preserve local edits.
-//! The background monitor skips Skills whose
-//! content no longer matches their install baseline (D-095).
+//! Apply = fetch each source group through the persistent sparse import cache
+//! (refreshed at the locked ref). Groups run with bounded concurrency; the
+//! installs still serialize on the update-transaction lock. Manual updates
+//! overwrite. Automatic updates re-check the install baseline under that lock
+//! and keep a canonical copy that is no longer provably as installed (D-095).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -59,6 +60,20 @@ pub enum UpdateResult {
     NotUpdatable,
     /// Entry missing from the lock or source unparsable.
     Failed(String),
+    /// Automatic admission left the canonical copy in place. The content no
+    /// longer matches the install baseline, or that cannot be proven.
+    KeptLocal,
+}
+
+/// Whether this apply may replace a canonical copy that diverged from its
+/// install baseline. The decision is applied under the transaction lock,
+/// after the fetch, so an edit that lands while the network runs still counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverwriteAdmission {
+    /// Manual update. Local edits are replaced.
+    Overwrite,
+    /// Background update. Skip when the baseline does not match.
+    ProtectBaseline,
 }
 
 /// Check upstream state for the given lock entries.
@@ -79,19 +94,34 @@ pub async fn check_upstream(
     crate::update_check::check_upstream_with(entries, Arc::new(api), session).await
 }
 
+/// Source groups fetched and applied at the same time, mirroring the check
+/// path's concurrency. The fetches overlap; each install still runs under the
+/// update-transaction lock, whose process mutex queues the worker threads.
+const MAX_CONCURRENT_UPDATE_SOURCES: usize = 4;
+
 /// Overwrite-reinstall the named skills from their locked sources.
 ///
-/// Skills sharing a `(source, ref)` are fetched once. One skill per unit of
-/// work: a failure is reported for that name only and does not block the
-/// rest. Skills whose upstream folder vanished are reported as
-/// [`UpdateResult::Removed`] for the UI's remove/convert exits.
+/// Skills sharing a `(source, ref)` are fetched once, through the persistent
+/// sparse import cache refreshed at that ref. Groups run with bounded
+/// concurrency. One skill per unit of work: a failure is reported for that
+/// name only and does not block the rest. Skills whose upstream folder
+/// vanished are reported as [`UpdateResult::Removed`] for the UI's
+/// remove/convert exits.
 pub fn apply_updates(names: &[String], session: &GitOperationSession) -> Vec<AppliedUpdate> {
+    apply_updates_admitting(names, session, OverwriteAdmission::Overwrite)
+}
+
+pub(crate) fn apply_updates_admitting(
+    names: &[String],
+    session: &GitOperationSession,
+    admission: OverwriteAdmission,
+) -> Vec<AppliedUpdate> {
     let lock = skill_lock::load();
     let mut outcomes: BTreeMap<String, UpdateResult> = BTreeMap::new();
     let mut groups: skill_lock::SourceGroups = BTreeMap::new();
     for name in names {
-        // `name` is the canonical folder. vercel may have recorded the entry
-        // under the raw frontmatter name instead.
+        // `name` is the canonical folder. Other lock writers may have recorded
+        // the entry under the raw frontmatter name instead.
         match lock.entry_for_folder(name) {
             None => {
                 outcomes.insert(
@@ -112,38 +142,7 @@ pub fn apply_updates(names: &[String], session: &GitOperationSession) -> Vec<App
         }
     }
 
-    for ((source_url, git_ref), members) in groups {
-        let spec = match Source::parse(&source_url) {
-            Ok(mut spec) => {
-                spec.git_ref = git_ref.or(spec.git_ref);
-                spec.subpath = None;
-                spec.skill_filter = None;
-                spec
-            }
-            Err(error) => {
-                for (name, _) in members {
-                    outcomes.insert(name, UpdateResult::Failed(error.to_string()));
-                }
-                continue;
-            }
-        };
-        // Fetch outside the transaction (network); each Skill re-validates its
-        // entry under it so a concurrent reinstall or uninstall is not overwritten.
-        let checkout = match fetch::fetch_source(&spec, session) {
-            Ok(checkout) => checkout,
-            Err(error) => {
-                let reason = format!("{error:#}");
-                for (name, _) in members {
-                    outcomes.insert(name, UpdateResult::Failed(reason.clone()));
-                }
-                continue;
-            }
-        };
-        for (name, entry) in members {
-            let result = apply_from_checkout(checkout.dir(), &spec, &name, &entry);
-            outcomes.insert(name, result);
-        }
-    }
+    apply_source_groups(groups, session, admission, &mut outcomes);
 
     names
         .iter()
@@ -153,6 +152,80 @@ pub fn apply_updates(names: &[String], session: &GitOperationSession) -> Vec<App
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| UpdateResult::Failed(format!("'{name}' produced no result"))),
+        })
+        .collect()
+}
+
+/// Fetch and apply every source group, at most
+/// [`MAX_CONCURRENT_UPDATE_SOURCES`] groups at a time. Groups are
+/// independent sources, so the network waits overlap; a group's failure is
+/// reported for its names only.
+fn apply_source_groups(
+    groups: skill_lock::SourceGroups,
+    session: &GitOperationSession,
+    admission: OverwriteAdmission,
+    outcomes: &mut BTreeMap<String, UpdateResult>,
+) {
+    let queue = std::sync::Mutex::new(VecDeque::from_iter(groups));
+    let applied = std::sync::Mutex::new(Vec::<(String, UpdateResult)>::new());
+    std::thread::scope(|scope| {
+        let workers = MAX_CONCURRENT_UPDATE_SOURCES.min(queue.lock().expect("group queue").len());
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let group = queue.lock().expect("group queue").pop_front();
+                    let Some(((source_url, git_ref), members)) = group else {
+                        break;
+                    };
+                    let results =
+                        fetch_and_apply_group(&source_url, git_ref, members, session, admission);
+                    applied.lock().expect("group results").extend(results);
+                }
+            });
+        }
+    });
+    outcomes.extend(applied.into_inner().expect("group results"));
+}
+
+/// One group's fetch, then its members' installs. The fetch runs outside the
+/// update transaction (network); each Skill re-validates its entry under it
+/// so a concurrent reinstall or uninstall is not overwritten.
+fn fetch_and_apply_group(
+    source_url: &str,
+    git_ref: Option<String>,
+    members: Vec<(String, SkillLockEntry)>,
+    session: &GitOperationSession,
+    admission: OverwriteAdmission,
+) -> Vec<(String, UpdateResult)> {
+    let fail_all = |members: Vec<(String, SkillLockEntry)>, reason: String| {
+        members
+            .into_iter()
+            .map(|(name, _)| (name, UpdateResult::Failed(reason.clone())))
+            .collect::<Vec<_>>()
+    };
+    let spec = match Source::parse(source_url) {
+        Ok(mut spec) => {
+            spec.git_ref = git_ref.or(spec.git_ref);
+            spec.subpath = None;
+            spec.skill_filter = None;
+            spec
+        }
+        Err(error) => return fail_all(members, error.to_string()),
+    };
+    let folders = members
+        .iter()
+        .map(|(_, entry)| entry.skill_path.clone().unwrap_or_default())
+        .collect::<Vec<String>>();
+    let folder_refs = folders.iter().map(String::as_str).collect::<Vec<&str>>();
+    let checkout = match fetch::fetch_for_update(&spec, &folder_refs, session) {
+        Ok(checkout) => checkout,
+        Err(error) => return fail_all(members, format!("{error:#}")),
+    };
+    members
+        .into_iter()
+        .map(|(name, entry)| {
+            let result = apply_from_checkout(checkout.dir(), &spec, &name, &entry, admission);
+            (name, result)
         })
         .collect()
 }
@@ -173,15 +246,17 @@ pub struct AutoUpdateReport {
     pub error: Option<String>,
 }
 
-/// Background auto-update: check every generic locked Skill, then
-/// overwrite-reinstall the ones whose upstream tree changed and whose content
-/// still equals its install baseline.
+/// Background auto-update: check every generic locked Skill, then apply the
+/// ones whose upstream tree changed.
 ///
-/// The manual entries run the same pair — the check through
-/// crate::installed_skill::refresh_skill_updates_in_session and the apply
-/// through crate::git_skill::GitSkillFacade::update_skills — so the badge,
-/// lock, Agent/Project links and installed cache move together. Channel-managed
-/// Skills, local creations and bundle installs never participate.
+/// Local-edit eligibility is not decided here. The apply admits with
+/// [`OverwriteAdmission::ProtectBaseline`], so the baseline is read again
+/// under the transaction lock after the fetch. A renamed upstream still needs
+/// the user's decision and is not retried. The manual entry
+/// ([`crate::git_skill::GitSkillFacade::update_skills`]) is the overwrite
+/// admission of the same path, so the badge, lock, Agent/Project links and
+/// installed cache move together. Channel-managed Skills, local creations and
+/// bundle installs never participate.
 pub async fn auto_update_locked_skills(session: &GitOperationSession) -> AutoUpdateReport {
     let mut report = AutoUpdateReport::default();
     let states = match crate::installed_skill::refresh_skill_updates_in_session(session).await {
@@ -192,24 +267,18 @@ pub async fn auto_update_locked_skills(session: &GitOperationSession) -> AutoUpd
         }
     };
     report.checked = states.len();
-    let mut pending = Vec::new();
-    for state in states.into_iter().filter(|state| {
-        // A renamed upstream needs the user's decision; retrying is pointless.
-        state.update_available
-            && !matches!(
-                state.upstream_change,
-                Some(crate::update_state::UpstreamChange::IdentityChanged { .. })
-            )
-    }) {
-        // Re-read the content now: the check may have run before an edit.
-        match crate::install_baseline::local_change(&state.name) {
-            None => pending.push(state.name),
-            Some(change) => {
-                crate::update_state::record(&state.name, true, Some(change));
-                report.kept_local.push(state.name);
-            }
-        }
-    }
+    let pending: Vec<String> = states
+        .into_iter()
+        .filter(|state| {
+            // A renamed upstream needs the user's decision; retrying is pointless.
+            state.update_available
+                && !matches!(
+                    state.upstream_change,
+                    Some(crate::update_state::UpstreamChange::IdentityChanged { .. })
+                )
+        })
+        .map(|state| state.name)
+        .collect();
     if pending.is_empty() {
         return report;
     }
@@ -218,7 +287,8 @@ pub async fn auto_update_locked_skills(session: &GitOperationSession) -> AutoUpd
     // the async worker the way the channel installers do.
     let session = session.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        crate::git_skill::GitSkillFacade::new(session).update_skills(&pending)
+        crate::git_skill::GitSkillFacade::new(session)
+            .update_skills_admitting(&pending, OverwriteAdmission::ProtectBaseline)
     })
     .await;
 
@@ -230,6 +300,7 @@ pub async fn auto_update_locked_skills(session: &GitOperationSession) -> AutoUpd
                 .map(|result| result.skill.name)
                 .collect();
             report.skipped = outcome.skipped;
+            report.kept_local = outcome.kept_local;
             report.failed = outcome.failed;
         }
         Err(error) => report.error = Some(format!("auto update task failed: {error}")),
@@ -242,6 +313,7 @@ fn apply_from_checkout(
     spec: &Source,
     name: &str,
     entry: &SkillLockEntry,
+    admission: OverwriteAdmission,
 ) -> UpdateResult {
     let _transaction = match crate::skill_update::acquire_update_transaction_lock() {
         Ok(guard) => guard,
@@ -257,6 +329,12 @@ fn apply_from_checkout(
         return UpdateResult::Failed(format!(
             "'{name}' changed while its update was being fetched; retry the update"
         ));
+    }
+    if admission == OverwriteAdmission::ProtectBaseline
+        && let Some(change) = crate::install_baseline::local_change(name)
+    {
+        crate::update_state::record(name, true, Some(change));
+        return UpdateResult::KeptLocal;
     }
     let outcome = reinstall_from_checkout(checkout, spec, name, entry);
     if let UpdateResult::Updated { folder_hash } = &outcome {

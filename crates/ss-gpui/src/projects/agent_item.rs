@@ -2,6 +2,7 @@
 //! deploy mode switch (symlink vs copy), and activation toggle.
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_skills::agents::AgentProfile;
@@ -12,46 +13,24 @@ use crate::chrome::icon;
 use crate::chrome::{InteractionSpring, MotionPaint};
 use crate::theme::palette;
 
-/// Pill-style Switch component for toggling agent activation.
+/// Kit Switch for toggling agent activation.
 pub fn render_switch(
     id: &str,
     enabled: bool,
     view: WeakEntity<ProjectsPage>,
     agent_id: String,
-) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(id.to_string().into()))
-        .w(px(36.0))
-        .h(px(20.0))
-        .rounded_full()
-        .cursor_pointer()
-        .bg(rgb(if enabled {
-            palette().accent
-        } else {
-            palette().border
-        }))
-        .flex()
-        .items_center()
-        .child(
-            div()
-                .w(px(16.0))
-                .h(px(16.0))
-                .rounded_full()
-                .bg(rgb(0xffffff))
-                .ml(px(if enabled { 18.0 } else { 2.0 })),
-        )
+) -> Switch {
+    Switch::new(ElementId::Name(id.to_string().into()))
+        .checked(enabled)
         .on_click(move |_, _, cx| {
+            // The switch sits inside the collapsible row; a click here must
+            // not also bubble up into the expand toggle.
+            cx.stop_propagation();
             let agent_id = agent_id.clone();
             let _ = view.update(cx, |this, cx| {
                 this.toggle_agent(&agent_id, cx);
             });
         })
-        .interaction_spring(
-            id.to_string(),
-            true,
-            MotionPaint::new().opacity(1.0),
-            MotionPaint::new().opacity(1.0),
-        )
 }
 
 /// Render a single Agent row inside the project detail view.
@@ -97,6 +76,7 @@ pub fn render_agent_item(
 
     let top = div()
         .id(ElementId::Name(format!("agent-top-{agent_id}").into()))
+        .debug_selector(|| format!("agent-top-{agent_id}"))
         .flex()
         .items_center()
         .justify_between()
@@ -115,6 +95,7 @@ pub fn render_agent_item(
                 .items_center()
                 .gap_2()
                 .flex_1()
+                .min_w_0()
                 .child(icon(
                     if is_expanded {
                         IconName::ChevronDown
@@ -124,15 +105,18 @@ pub fn render_agent_item(
                     14.0,
                     palette().fg_muted,
                 ))
-                .child(icon(
-                    IconName::Bot,
-                    16.0,
-                    if is_enabled {
-                        palette().accent_fg
-                    } else {
-                        palette().fg_muted
-                    },
-                ))
+                // Brand SVG from the same registry the card rails paint;
+                // dimmed while the agent is off for this project.
+                .child({
+                    let mut glyph = img(crate::agent_icons::agent_icon_path(&profile.id))
+                        .w(px(16.0))
+                        .h(px(16.0))
+                        .flex_shrink_0();
+                    if !is_enabled {
+                        glyph = glyph.grayscale(true).opacity(0.65);
+                    }
+                    glyph
+                })
                 .child(
                     div()
                         .text_sm()
@@ -142,18 +126,9 @@ pub fn render_agent_item(
                         } else {
                             palette().fg_muted
                         }))
+                        .min_w_0()
+                        .truncate()
                         .child(profile.display_name.clone()),
-                )
-                .child(
-                    div()
-                        .px_1_5()
-                        .py(px(1.0))
-                        .rounded_sm()
-                        .bg(rgb(palette().well))
-                        .text_xs()
-                        .font_family("JetBrains Mono")
-                        .text_color(rgb(palette().fg_muted))
-                        .child(rel_path.clone()),
                 )
                 .when(is_enabled, |d| {
                     d.child(
@@ -165,7 +140,11 @@ pub fn render_agent_item(
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(palette().accent_fg))
-                            .child(format!("{} skills", skills.len())),
+                            .flex_shrink_0()
+                            .child(crate::i18n::tf(
+                                "projects.skillsCount",
+                                &[("count", &skills.len().to_string())],
+                            )),
                     )
                 }),
         )
@@ -174,12 +153,26 @@ pub fn render_agent_item(
                 .flex()
                 .items_center()
                 .gap_3()
+                .flex_shrink_0()
+                // Deploy target inside the project, kept quiet: it identifies
+                // the lane rather than asking for input.
+                .child(
+                    div()
+                        .max_w(px(200.0))
+                        .text_xs()
+                        .font_family("JetBrains Mono")
+                        .text_color(rgb(palette().fg_muted))
+                        .min_w_0()
+                        .truncate()
+                        .child(rel_path.clone()),
+                )
                 .when(is_enabled, |d| {
                     let mode_view = view.clone();
                     let rel_path_clone = rel_path.clone();
                     d.child(
                         div()
                             .id(ElementId::Name(format!("mode-toggle-{agent_id}").into()))
+                            .debug_selector(|| format!("mode-toggle-{agent_id}"))
                             .flex()
                             .items_center()
                             .gap_1()
@@ -204,6 +197,7 @@ pub fn render_agent_item(
                                 palette().accent_fg
                             }))
                             .cursor_pointer()
+                            .flex_shrink_0()
                             .interaction_spring(
                                 format!("mode-toggle-{agent_id}"),
                                 true,
@@ -235,8 +229,16 @@ pub fn render_agent_item(
                                     palette().accent_fg
                                 },
                             ))
-                            .child(if is_copy { "Copy" } else { "Symlink" })
+                            .child(if is_copy {
+                                crate::i18n::t("projects.deployCopy")
+                            } else {
+                                crate::i18n::t("projects.deploySymlink")
+                            })
                             .on_click(move |_, _, cx| {
+                                // The capsule sits inside the collapsible row;
+                                // a click here must not also bubble up into the
+                                // expand toggle.
+                                cx.stop_propagation();
                                 let rel = rel_path_clone.clone();
                                 let _ = mode_view.update(cx, |this, cx| {
                                     this.toggle_deploy_mode(&rel, cx);
@@ -284,7 +286,7 @@ pub fn render_agent_item(
                     .child(crate::i18n::t("projects.noSkillsAssigned")),
             );
         } else {
-            let mut chips = div().flex().flex_wrap().gap_1_5();
+            let mut chips = div().flex().flex_wrap().gap_1();
             for skill_name in &skills {
                 let remove_view = view.clone();
                 let aid = agent_id.clone();
@@ -340,7 +342,7 @@ pub fn render_agent_item(
             let mut add_section = div()
                 .flex()
                 .flex_col()
-                .gap_1_5()
+                .gap_1()
                 .pt_2()
                 .border_t_1()
                 .border_color(rgb(palette().well));

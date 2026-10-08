@@ -380,8 +380,6 @@ pub struct MonetaryBalance {
 }
 
 /// Computed alert (banner / toast trigger) — never persisted, recomputed each refresh.
-// Not `TS`-derived: the frontend contract for an alert is
-// `usage::SubscriptionAlertDto`, which owns the generated `SubscriptionAlert.ts`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionAlert {
     /// Stable id (subscription_id + kind) so dismiss is idempotent.

@@ -20,13 +20,18 @@ mod skill_repair;
 mod skill_updates;
 mod storage;
 mod translation;
+#[cfg(test)]
+mod translation_tests;
 
 use std::collections::HashMap;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
+use gpui_kit::component::combobox::{ComboboxEvent, ComboboxState};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ss_app::storage_maintenance::StorageOverview;
@@ -169,6 +174,8 @@ pub struct SettingsPage {
     pub(crate) gh_installed: bool,
     pub(crate) data_root: String,
     pub(crate) copied: Option<String>,
+    pub(crate) release_check: Option<ss_core::infra::release_check::ReleaseCheckRecord>,
+    pub(crate) release_checking: bool,
     pub(crate) prefs: GuiPrefs,
     pub(crate) proxy: ProxyConfig,
     pub(crate) proxy_host: Entity<InputState>,
@@ -211,6 +218,14 @@ pub struct SettingsPage {
     pub(crate) llm_models_for: String,
     pub(crate) llm_models_loading: bool,
     pub(crate) llm_models_error: Option<String>,
+    /// Model dropdown state. Items and selection are re-synced from
+    /// `llm_models` during render — async fetch callbacks carry no `Window`.
+    pub(crate) llm_model_state: Entity<ComboboxState<SearchableVec<String>>>,
+    /// Bumped after each successful fetch so the render sync notices refetches
+    /// that leave the account, count, and current model unchanged.
+    pub(crate) llm_fetch_seq: u64,
+    /// Sync key of the combobox items/selection last applied.
+    pub(crate) llm_models_synced: Option<String>,
     pub(crate) agent_search: Entity<InputState>,
     pub(crate) agent_query: String,
     pub(crate) agent_filter: AgentFilter,
@@ -262,6 +277,15 @@ impl SettingsPage {
         {
             let _ = ss_core::translation::save_config(&translation_config);
         }
+        let llm_model_state = cx.new(|cx| {
+            ComboboxState::new(
+                SearchableVec::new(Vec::<String>::new()),
+                Vec::new(),
+                window,
+                cx,
+            )
+            .searchable(true)
+        });
 
         let mut subscriptions = Vec::new();
         for input in [
@@ -303,6 +327,21 @@ impl SettingsPage {
                 }
             },
         ));
+        subscriptions.push(cx.subscribe_in(
+            &llm_model_state,
+            window,
+            |this,
+             _: &Entity<ComboboxState<SearchableVec<String>>>,
+             event: &ComboboxEvent<SearchableVec<String>>,
+             _,
+             cx| {
+                if let ComboboxEvent::Change(values) = event
+                    && let Some(model) = values.first()
+                {
+                    this.select_llm_model(model.clone(), cx);
+                }
+            },
+        ));
         let mut page = Self {
             section: SettingsSection::AgentConnections,
             scroll: ScrollHandle::new(),
@@ -310,6 +349,11 @@ impl SettingsPage {
             gh_installed: gh_manager::is_gh_installed(),
             data_root: paths::data_root().display().to_string(),
             copied: None,
+            // Sync domain call, same shape as `check_git_status` above: one
+            // tiny local read, no spawn — constructors stay deterministic
+            // for the strict test scheduler.
+            release_check: ss_core::infra::release_check::last_record(),
+            release_checking: false,
             prefs: prefs::load(),
             proxy_status: None,
             proxy_expanded: false,
@@ -352,6 +396,9 @@ impl SettingsPage {
             llm_models_for: String::new(),
             llm_models_loading: false,
             llm_models_error: None,
+            llm_model_state,
+            llm_fetch_seq: 0,
+            llm_models_synced: None,
             agent_query: String::new(),
             agent_filter: AgentFilter::All,
             show_all_agents: false,
@@ -503,34 +550,17 @@ impl SettingsPage {
         rail
     }
 
-    /// Shared pill-style switch used by several sections.
+    /// Shared kit Switch used by several sections. The click stops
+    /// propagation: the proxy and GitHub-mirror cards sit the switch inside
+    /// a clickable collapse header.
     pub(crate) fn toggle(
         id: &str,
         enabled: bool,
         view: WeakEntity<Self>,
         apply: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-    ) -> crate::chrome::MotionDiv {
-        div()
-            .id(ElementId::Name(id.to_string().into()))
-            .w(px(36.0))
-            .h(px(20.0))
-            .rounded_full()
-            .cursor_pointer()
-            .bg(rgb(if enabled {
-                palette().accent
-            } else {
-                palette().border
-            }))
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .w(px(16.0))
-                    .h(px(16.0))
-                    .rounded_full()
-                    .bg(rgb(0xffffff))
-                    .ml(px(if enabled { 18.0 } else { 2.0 })),
-            )
+    ) -> Switch {
+        Switch::new(ElementId::Name(id.to_string().into()))
+            .checked(enabled)
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 let _ = view.update(cx, |this, cx| {
@@ -538,12 +568,6 @@ impl SettingsPage {
                     cx.notify();
                 });
             })
-            .interaction_spring(
-                id.to_string(),
-                true,
-                MotionPaint::new().opacity(1.0),
-                MotionPaint::new().opacity(1.0),
-            )
     }
 }
 
@@ -579,7 +603,8 @@ impl Render for SettingsPage {
             self.render_skill_updates(view.clone()).into_any_element(),
             self.render_appearance(view.clone()).into_any_element(),
             self.render_language(view.clone()).into_any_element(),
-            self.render_translation(view.clone()).into_any_element(),
+            self.render_translation(window, cx, view.clone())
+                .into_any_element(),
             self.render_storage(view.clone()).into_any_element(),
             self.render_about(view.clone()).into_any_element(),
         ];

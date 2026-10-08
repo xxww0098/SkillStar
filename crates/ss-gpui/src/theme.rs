@@ -473,7 +473,10 @@ fn theme_colors() -> ThemeColor {
         button_info_active: c(p.info_bg),
 
         switch: c(p.edge),
-        switch_thumb: c(p.panel),
+        // The thumb must clear the `edge` track in both themes. `panel` is
+        // the card surface itself and disappears on it; `on_accent` is white
+        // in both, matching the switch this projection was written for.
+        switch_thumb: c(p.on_accent),
         slider_bar: c(p.well),
         slider_thumb: c(p.accent),
         progress_bar: c(p.accent),

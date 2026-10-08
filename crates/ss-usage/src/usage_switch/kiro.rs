@@ -62,6 +62,54 @@ impl IdeCredentialAdapter for Adapter {
         sync(sub)
     }
 
+    fn sync_after_refresh(
+        &self,
+        before: &Subscription,
+        sub: &Subscription,
+    ) -> UsageResult<Option<SwitchOutcome>> {
+        let Some(live) = read_live()? else {
+            return Ok(None);
+        };
+        let previous = material_of(before);
+        if previous.access != live.access || previous.refresh != live.refresh {
+            return Ok(None);
+        }
+        // Rotation is not an account switch: keep the client profile, usage
+        // state, registration, and unknown token fields exactly as they were.
+        let material = material_of(sub);
+        let mut token = read_value(&auth_token_path())?
+            .as_object()
+            .cloned()
+            .ok_or_else(readback_error)?;
+        let rotated = token_document(&material, false, None, None);
+        for (field, aliases) in [
+            ("accessToken", &["access_token", "token"][..]),
+            ("refreshToken", &["refresh_token"][..]),
+            ("expiresAt", &["expires_at"][..]),
+        ] {
+            if let Some(value) = rotated.get(field) {
+                for key in aliases {
+                    if token.contains_key(*key) {
+                        token.insert((*key).into(), value.clone());
+                    }
+                }
+                token.insert(field.into(), value.clone());
+            }
+        }
+        let plan = Plan {
+            token_path: auth_token_path(),
+            token: Value::Object(token),
+            registration: None,
+            profile: None,
+            database: None,
+        };
+        let backups = capture_plan(&plan)?;
+        if let Err(error) = apply_and_verify(&plan) {
+            return Err(restore_all(&backups, error));
+        }
+        Ok(Some(success_outcome(&plan, &backups)))
+    }
+
     fn reconcile(&self) -> UsageResult<Option<CliAccountState>> {
         if !self.available() {
             return Ok(None);

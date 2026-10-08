@@ -11,7 +11,7 @@ use ss_core::infra::{fs_ops, paths as fs_paths};
 
 use super::binding::{ObservedProject, contained_child};
 use super::facts::inspect_project_skills;
-use super::owner::shared_path_owner;
+use super::owner::shared_path_membership;
 use super::store::{load_skills_list, save_skills_list};
 use super::types::{ProjectDeployMode, SkillsList};
 use super::write_lock::lock_project_write;
@@ -63,20 +63,18 @@ pub fn enable_project_skills_strict(
         .iter()
         .find(|profile| profile.id == agent_id && profile.has_project_skills())
         .context("agent has no project skills")?;
-    let decision = shared_path_owner(
+    let membership = shared_path_membership(
         &profiles,
         &skills_list,
         &profile.project_skills_rel,
         agent_id,
+        &[],
     );
-    let owner_id = decision
+    let owner_id = membership
         .owner_id
         .clone()
         .context("strict enable does not invent an owner")?;
-    let mode = skills_list
-        .deploy_modes
-        .get(&profile.project_skills_rel)
-        .copied();
+    let mode = membership.mode;
 
     let mut items = Vec::with_capacity(skills.len());
     for (name, expected_hash) in skills {

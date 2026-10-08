@@ -1,7 +1,7 @@
-//! vercel-labs/skills install semantics (D-081).
+//! Skill install semantics (D-081).
 //!
 //! Install = copy a skill folder into the canonical `~/.skillstar/data/skills/installed/<name>`
-//! as real files and record provenance in the vercel lock. Same-name installs
+//! as real files and record provenance in the install lock. Same-name installs
 //! from any source overwrite. Agent symlinking stays in `deployment`. A new
 //! install is not linked into every enabled Agent. This module owns disk + lock only.
 //!
@@ -25,7 +25,7 @@ use crate::source_resolver::Source;
 
 pub use crate::materialize::canonical_skill_name;
 
-/// Directory/file names never copied out of a source folder (vercel parity).
+/// Directory/file names never copied out of a source folder (skills CLI parity).
 pub const COPY_EXCLUDES: &[&str] = &[".git", "__pycache__", "__pypackages__", "metadata.json"];
 
 /// One skill to install out of a fetched checkout.
@@ -45,7 +45,7 @@ struct PreparedUnit<'a> {
 
 /// Copy `units` from `checkout` into canonical and write lock entries.
 ///
-/// Overwrite semantics (vercel parity): an existing canonical folder with the
+/// Overwrite semantics (skills CLI parity): an existing canonical folder with the
 /// same name is replaced; provenance in the lock is rewritten. The batch fails
 /// closed before any disk mutation when a unit's frontmatter does not pass the
 /// install gate, when its identity has no safe canonical folder name, or when
@@ -226,9 +226,9 @@ fn display_folder(folder: &str) -> &str {
 
 /// Remove the canonical folder and lock entry for one skill.
 ///
-/// Agent/project links are removed by the caller (`deployment`, `projects`);
-/// this function touches canonical + lock only. The folder is moved aside
-/// first and put back when the lock cannot be rewritten.
+/// Agent and project deployments are cleared by the uninstall module before
+/// this runs. The folder is moved aside first and put back when the lock
+/// cannot be rewritten.
 pub fn uninstall_canonical(name: &str) -> Result<()> {
     crate::content::validate_skill_name(name)?;
     let _transaction = crate::skill_update::acquire_update_transaction_lock()?;

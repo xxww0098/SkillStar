@@ -46,7 +46,10 @@ impl MySkillsPage {
             |this, cx, res| {
                 this.busy = None;
                 if let Err(err) = res {
-                    this.error = Some(format!("Uninstall failed: {err}"));
+                    this.error = Some(
+                        crate::i18n::tf("mySkills.uninstallFailedReason", &[("err", &err)])
+                            .to_string(),
+                    );
                 }
                 this.refresh(cx);
             },
@@ -80,7 +83,10 @@ impl MySkillsPage {
             |this, cx, res| {
                 this.busy = None;
                 if let Err(err) = res {
-                    this.error = Some(format!("Batch uninstall failed: {err}"));
+                    this.error = Some(
+                        crate::i18n::tf("mySkills.batchUninstallFailedReason", &[("err", &err)])
+                            .to_string(),
+                    );
                 }
                 this.refresh(cx);
             },
@@ -307,10 +313,7 @@ impl MySkillsPage {
                 }
                 match res {
                     Ok(Some(notice)) => {
-                        crate::notify::toast(
-                            gpui_kit::component::notification::Notification::warning(notice),
-                            cx,
-                        );
+                        crate::notify::toast(crate::notify::Notice::warning(notice), cx);
                     }
                     Ok(None) => {}
                     Err(err) => {
@@ -318,7 +321,7 @@ impl MySkillsPage {
                             this.restore_agent_link(snap);
                         }
                         crate::notify::toast(
-                            gpui_kit::component::notification::Notification::warning(format!(
+                            crate::notify::Notice::warning(format!(
                                 "{}: {err}",
                                 crate::i18n::t("common.failed")
                             )),
@@ -353,6 +356,7 @@ impl MySkillsPage {
             installing: false,
             selectable: true,
             library: true,
+            translate_override: self.description_choices.get(&skill.name).copied(),
         }
     }
 
@@ -375,7 +379,10 @@ impl MySkillsPage {
             },
             |this, cx, res| {
                 if let Err(err) = res {
-                    this.error = Some(format!("Batch link failed: {err}"));
+                    this.error = Some(
+                        crate::i18n::tf("mySkills.batchLinkFailedReason", &[("err", &err)])
+                            .to_string(),
+                    );
                 }
                 this.selected_batch.clear();
                 this.refresh(cx);
@@ -402,7 +409,10 @@ impl MySkillsPage {
             },
             |this, cx, res| {
                 if let Err(err) = res {
-                    this.error = Some(format!("Batch unlink failed: {err}"));
+                    this.error = Some(
+                        crate::i18n::tf("mySkills.batchUnlinkFailedReason", &[("err", &err)])
+                            .to_string(),
+                    );
                 }
                 this.selected_batch.clear();
                 this.refresh(cx);

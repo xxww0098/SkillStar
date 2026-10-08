@@ -16,6 +16,9 @@ dist-ssr
 # directories named `target` at any depth, e.g. usage_switch/target/).
 src-tauri/target/
 /target/
+# The vendored gpui-component tree is source (D-101). Its build output is not
+# covered by the root-only /target/ rule above.
+vendor/**/target/
 
 # Cargo workspace owns one lockfile at the repository root.
 **/Cargo.lock

@@ -29,7 +29,33 @@ pub fn cmd_remove(opts: RemoveOpts<'_>) {
         }
         names.into_iter().collect()
     } else {
-        opts.names.to_vec()
+        // Names resolve to installed skills first. A name that is not one
+        // falls back to matching the lock's `source` field, so one argument
+        // uninstalls every skill from that source repo.
+        let lock = skill_lock::load();
+        let hub_dir = ss_core::infra::paths::hub_skills_dir();
+        let mut expanded: BTreeSet<String> = BTreeSet::new();
+        for name in opts.names {
+            let is_skill = local_skill::is_local_skill(name)
+                || hub_dir.join(name).exists()
+                || lock.skills.contains_key(name);
+            if is_skill {
+                expanded.insert(name.to_string());
+                continue;
+            }
+            let from_source: Vec<String> = lock
+                .skills
+                .iter()
+                .filter(|(_, entry)| entry.source == *name)
+                .map(|(key, _)| key.clone())
+                .collect();
+            if from_source.is_empty() {
+                expanded.insert(name.to_string());
+            } else {
+                expanded.extend(from_source);
+            }
+        }
+        expanded.into_iter().collect()
     };
 
     if targets.is_empty() {

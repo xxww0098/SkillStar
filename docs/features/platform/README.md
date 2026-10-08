@@ -26,7 +26,7 @@
 - 加速源候选链按用户在 Settings 里排的顺序回退（`config.order`，首位为选中源）；连续两次传输失败打开 20 分钟熔断，熔断只把开路源从链中跳过，不改变其余源的相对顺序；全部开路则 fail-open。保存新配置重置 circuit；test 命令 GET 一个公开 raw 文件，而不是 HEAD 加速源根。
 - SOCKS5 出网使用 `socks5h`（远端 DNS）。新建代理配置带国内 LLM 默认 bypass，已有 `proxy.json` 不自动改写。
 - Settings 网络诊断探测代理、直连 GitHub、各加速源和 skills.sh。
-- 没有应用内更新器，也不再生成 `latest.json`。加速源不得用来安装二进制。
+- 没有应用内更新器：版本检查只提示不下载，也不再生成 `latest.json`。加速源不得用来安装二进制。见 [Updater 与发布](#updater-与发布)。
 
 ## ACP
 
@@ -36,8 +36,8 @@
 ## 窗口、Tray 与后台运行
 
 - 后台运行偏好仍可让主窗口关闭时隐藏进程。没有托盘，也没有独立用量窗口。
-- 域里的 patrol 配置仍在，GPUI 不跑旧巡检循环；GUI 进程存活期间只跑 `ss-app` 的周期唤醒——频道到期自动升级（`channel_wake`）和通用技能自动更新（`skill_wake`，是否开启由 Settings 的「技能更新」偏好决定）。
-- GPUI kit 对话框出现在窗口正中，不贴在视口上方。确认框必须有「取消」和表示该操作的确认按钮：卸载、删除、移除用 danger，其余提交用 primary。按钮由 `chrome/dialog.rs` 绘制。不要只设 `Dialog::button_props`，普通 Dialog 不渲染它。账号页自己的遮罩卡片已经居中，不走这条路径。
+- 域里的 patrol 配置仍在，GPUI 不跑旧巡检循环；GUI 进程存活期间只跑 `ss-app` 的周期唤醒——频道到期自动升级（`channel_wake`）、通用技能自动更新（`skill_wake`，是否开启由 Settings 的「技能更新」偏好决定）和应用版本检查（`release_check_wake`，24 小时至多一次）。
+- 确认类弹窗（消息确认、表单、账号页重置额度）都走 kit 的 AlertDialog（`chrome::open_confirm` / `open_form_dialog`）：卡片停在视口上方十分之一处（kit 契约），footer 按钮由 kit 绘制，必须有「取消」和表示该操作的确认按钮：卸载、删除、移除用 danger，其余提交用 primary。自带按钮体系的自定义弹窗（导入框、分享、阅读器）仍走 `chrome/dialog.rs` 的居中 Dialog，不要只设 `Dialog::button_props`，普通 Dialog 不渲染它。账号页自己的遮罩卡片已经居中，不走这条路径。
 
 ## CI
 
@@ -50,8 +50,9 @@
 ## Updater 与发布
 
 - 没有 updater endpoint，也没有签名私钥。不要恢复 `tauri-action` 或伪造 `latest.json`。
+- 版本检查是 check-only（D-103）：域逻辑在 `ss-core::infra::release_check`，经匿名 GitHub 链路请求 `api.github.com` 的 `/releases/latest`，与产品版本（`crates/skillstar` 的 `CARGO_PKG_VERSION`，由 `skillstar` 二进制启动时传入 GUI）做严格 `MAJOR.MINOR.PATCH` 比较，解析不了的 tag 一律视为不新。结果持久化到 `state/app/release_check.json`；GUI 每小时评估一次、24 小时至多实际检查一次，共享 GitHub API 冷却（`state/skills/github_api_cooldown.json`，与技能更新检查同一份）期间跳过；设置 → 关于 可手动检查、打开 Releases 页。不下载、不替换二进制。
 - `v*` tag 触发 `.github/workflows/release.yml`，为 macOS arm/x64、Linux 和 Windows 上传 `skillstar` 二进制。
-- GitHub `/releases/latest` 只看到已发布 release。draft 上传完成后由维护者人工发布。客户端不会自动发现这次发布。
+- GitHub `/releases/latest` 只看到已发布 release。draft 上传完成后由维护者人工发布；发布后客户端最迟 24 小时内（或手动检查时）发现新版本，但只提示，不自动下载。
 
 发布前：
 

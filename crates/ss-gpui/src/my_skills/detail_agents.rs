@@ -1,5 +1,7 @@
 //! Master switch for the skill detail column's agent deployment list.
 
+use gpui_kit::component::Disableable;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::*;
 use ss_skills::agents::AgentProfile;
 
@@ -56,31 +58,20 @@ impl MySkillsPage {
                     .child(crate::i18n::t("detailPanel.allAgents").to_string()),
             )
             .child(
-                {
-                    let switch = slide_switch(&toggle_key, all_on);
-                    if busy { switch.opacity(0.55) } else { switch }
-                }
-                .tooltip(move |window, cx| {
-                    crate::chrome::tooltip(crate::i18n::t(if all_on {
+                slide_switch(&toggle_key, all_on)
+                    .disabled(busy)
+                    .tooltip(crate::i18n::t(if all_on {
                         "detailPanel.unlinkAll"
                     } else {
                         "detailPanel.linkAll"
                     }))
-                    .build(window, cx)
-                })
-                .on_click(move |_, _, cx| {
-                    let s_name = s_name.clone();
-                    let ids = ids.clone();
-                    let _ = view.update(cx, |this, cx| {
-                        this.set_skill_agent_links(&s_name, &ids, enable, cx);
-                    });
-                })
-                .interaction_spring(
-                    toggle_key,
-                    true,
-                    MotionPaint::new().opacity(1.0),
-                    MotionPaint::new().opacity(1.0),
-                ),
+                    .on_click(move |_, _, cx| {
+                        let s_name = s_name.clone();
+                        let ids = ids.clone();
+                        let _ = view.update(cx, |this, cx| {
+                            this.set_skill_agent_links(&s_name, &ids, enable, cx);
+                        });
+                    }),
             )
     }
 }
@@ -91,28 +82,8 @@ pub(super) fn profile_is_linked(profile: &AgentProfile, links: &[String]) -> boo
         .any(|link| link == &profile.display_name || link == &profile.id)
 }
 
-/// The same pill the per-agent rows use, before the click and hover spring.
-pub(super) fn slide_switch(id: &str, on: bool) -> Stateful<Div> {
-    div()
-        .id(ElementId::Name(id.to_string().into()))
-        .w(px(34.0))
-        .h(px(18.0))
-        .rounded_full()
-        .cursor_pointer()
-        .flex_shrink_0()
-        .bg(rgb(if on {
-            palette().accent
-        } else {
-            palette().border
-        }))
-        .flex()
-        .items_center()
-        .child(
-            div()
-                .w(px(14.0))
-                .h(px(14.0))
-                .rounded_full()
-                .bg(rgb(palette().on_accent))
-                .ml(px(if on { 17.0 } else { 2.0 })),
-        )
+/// The kit Switch the per-agent rows share; click, tooltip, and busy state
+/// are attached by the callers.
+pub(super) fn slide_switch(id: &str, on: bool) -> Switch {
+    Switch::new(ElementId::Name(id.to_string().into())).checked(on)
 }

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::index::register_project;
+use super::owner::shared_path_owner;
 use super::store::{load_skills_list, save_skills_list};
 use super::types::{SkillsList, prune_deploy_modes_for_agents};
 use crate::agents as agent_profile;
@@ -23,9 +24,7 @@ pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
     let entry = register_project(project_path)?;
     let project = Path::new(project_path);
     let profiles = agent_profile::list_profiles();
-    let existing_agents = load_skills_list(&entry.name)
-        .map(|list| list.agents)
-        .unwrap_or_default();
+    let existing_list = load_skills_list(&entry.name).unwrap_or_default();
 
     // Group profiles by project_skills_rel while preserving profile order.
     let mut path_order = Vec::new();
@@ -83,14 +82,12 @@ pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
             continue;
         }
 
-        // Prefer previously configured owner for shared paths.
-        let owner = group_profiles
-            .iter()
-            .find(|profile| existing_agents.contains_key(&profile.id))
-            .or_else(|| group_profiles.first())
-            .map(|profile| profile.id.clone());
-
-        let Some(owner_id) = owner else {
+        let Some(first) = group_profiles.first() else {
+            continue;
+        };
+        let Some(owner_id) =
+            shared_path_owner(group_profiles, &existing_list, &rel_path, &first.id).owner_id
+        else {
             continue;
         };
 
@@ -103,13 +100,9 @@ pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
         names.dedup();
     }
 
-    let prior_deploy = load_skills_list(&entry.name)
-        .map(|list| list.deploy_modes)
-        .unwrap_or_default();
-
     let mut rebuilt = SkillsList {
         agents: rebuilt_agents,
-        deploy_modes: prior_deploy,
+        deploy_modes: existing_list.deploy_modes,
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
     prune_deploy_modes_for_agents(

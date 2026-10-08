@@ -5,20 +5,29 @@
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Disableable;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::tag::Tag;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use super::{ImportDialog, Phase, looks_like_share_code};
-use crate::chrome::{InteractionSpring, MotionPaint, ghost_button, icon, icon_spin, primary_button};
+use crate::chrome::{
+    InteractionSpring, MotionPaint, ghost_button, icon, icon_spin, primary_button,
+};
 use crate::theme::palette;
 
 /// Rows that fit before the recent-repo list has to scroll.
 const RECENT_VISIBLE: usize = 4;
 /// Viewport height. A `max_h` on the scrollable does not create wheel overflow.
 const RECENT_VIEW_H: f32 = 144.0;
+/// Summary entries (chips + skipped rows) that fit before the done-phase
+/// summary block has to scroll.
+const SUMMARY_VISIBLE: usize = 12;
+/// Summary-block viewport height, same `max_h` caveat as [`RECENT_VIEW_H`].
+const SUMMARY_VIEW_H: f32 = 220.0;
 
 impl ImportDialog {
     /// `ModalHeader` — `px-6 pt-4 pb-3` + border-b, 32px accent well with the
@@ -303,13 +312,7 @@ impl ImportDialog {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon_spin(
-                        "import-loading-spin",
-                        IconName::Loader,
-                        24.0,
-                        palette().accent,
-                        true,
-                    )),
+                    .child(icon_spin(IconName::Loader, 24.0, palette().accent, true)),
             )
             .child(
                 div()
@@ -390,14 +393,15 @@ impl ImportDialog {
             );
 
         // Share-code summary chips: already had / installed now / skipped.
+        // More entries than the viewport holds scroll inside a fixed height;
+        // fewer render at their natural height. A `max_h` on the scrollable
+        // does not create wheel overflow (see `RECENT_VIEW_H`).
         if let Some(summary) = &self.summary {
-            let mut block = div()
-                .w_full()
-                .max_h(px(220.0))
-                .overflow_y_scrollbar()
-                .flex()
-                .flex_col()
-                .gap_3();
+            let entries = summary.existing_names.len()
+                + summary.installed_names.len()
+                + summary.embedded_names.len()
+                + summary.skipped.len();
+            let mut block = div().w_full().flex().flex_col().gap_3();
             if !summary.existing_names.is_empty() {
                 block = block.child(chip_group(
                     crate::i18n::tf(
@@ -477,7 +481,22 @@ impl ImportDialog {
                 }
                 block = block.child(skipped);
             }
-            col = col.child(block);
+            col = col.child(if entries > SUMMARY_VISIBLE {
+                div()
+                    .h(px(SUMMARY_VIEW_H))
+                    .w_full()
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .child(
+                        div()
+                            .id("import-summary")
+                            .overflow_y_scrollbar()
+                            .child(block),
+                    )
+                    .into_any_element()
+            } else {
+                block.into_any_element()
+            });
         }
 
         // Installed fine, but linking into enabled Agents fell short.
@@ -571,31 +590,28 @@ impl ImportDialog {
 
 // ── Shared chips / banners / buttons ───────────────────────────────
 
-/// Muted count pill — `text-micro bg-muted px-1.5 py-0.5 rounded-md`.
-pub(super) fn count_pill(label: String) -> Div {
-    div()
-        .px(px(6.0))
-        .py(px(2.0))
-        .rounded_md()
-        .bg(rgb(palette().well))
-        .text_size(px(11.0))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(palette().fg_muted))
-        .flex_shrink_0()
-        .child(label)
+/// Muted count pill — a kit `Tag` in the muted well pair.
+pub(super) fn count_pill(label: String) -> Tag {
+    Tag::custom(
+        rgb(palette().well).into(),
+        rgb(palette().fg_muted).into(),
+        rgb(palette().well).into(),
+    )
+    .small()
+    .flex_shrink_0()
+    .font_weight(FontWeight::MEDIUM)
+    .child(label)
 }
 
-/// Small inline status chip — `text-micro px-1.5 py-0.5 rounded-full`.
-pub(super) fn badge(label: SharedString, fg: u32, bg: u32) -> Div {
-    div()
-        .px(px(6.0))
-        .py(px(2.0))
+/// Small inline status chip — a kit `Tag` carrying the app's soft fg/bg
+/// pair. The border is painted in the bg color: the soft chip has no rim,
+/// and the kit always draws one.
+pub(super) fn badge(label: SharedString, fg: u32, bg: u32) -> Tag {
+    Tag::custom(rgb(bg).into(), rgb(fg).into(), rgb(bg).into())
+        .small()
         .rounded_full()
-        .bg(rgb(bg))
-        .text_size(px(11.0))
-        .font_weight(FontWeight::MEDIUM)
         .flex_shrink_0()
-        .text_color(rgb(fg))
+        .font_weight(FontWeight::MEDIUM)
         .child(label)
 }
 

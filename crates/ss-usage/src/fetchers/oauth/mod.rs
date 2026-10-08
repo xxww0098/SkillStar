@@ -26,7 +26,7 @@ pub mod github_copilot;
 pub mod kiro;
 pub mod xai;
 // registration lands with the catalog row
-pub mod windsurf;
+pub mod devin_desktop;
 pub mod zcode;
 
 pub use start_info::{OAuthFlow, OAuthStartInfo};
@@ -63,7 +63,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "antigravity" => antigravity::fetch(subscription).await,
         "xai" => xai::fetch(subscription).await,
         "github-copilot" => github_copilot::fetch(subscription).await,
-        "devin-desktop" => windsurf::fetch(subscription).await,
+        "devin-desktop" => devin_desktop::fetch(subscription).await,
         "kiro" => kiro::fetch(subscription).await,
         "zcode" => zcode::fetch(subscription).await,
         other => Err(super::unsupported(other)),
@@ -87,7 +87,7 @@ pub async fn start_login(
         "antigravity" => antigravity::start_login(region, target_subscription_id).await,
         "xai" => xai::start_login(region, target_subscription_id).await,
         "github-copilot" => github_copilot::start_login(region, target_subscription_id).await,
-        "devin-desktop" => windsurf::start_login(region, target_subscription_id).await,
+        "devin-desktop" => devin_desktop::start_login(region, target_subscription_id).await,
         "kiro" => kiro::start_login(region, target_subscription_id).await,
         "zcode" => zcode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),

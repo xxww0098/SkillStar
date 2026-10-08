@@ -8,11 +8,14 @@ use gpui_kit::*;
 use ss_app::storage_maintenance::StorageOverview;
 
 use super::SettingsPage;
-use crate::chrome::{InteractionSpring, MotionPaint};
+use crate::chrome::{InteractionSpring, MotionPaint, icon, icon_spin};
 use crate::i18n::{t, tf};
 use crate::settings::DeleteTarget;
 use crate::theme::palette;
 
+/// Routine maintenance, not destruction: caches rebuild on demand, so this
+/// stays a neutral ghost button. The two-step force-delete buttons below it
+/// keep the danger treatment.
 pub(super) fn clean_button(
     cleaning: bool,
     loading: bool,
@@ -28,28 +31,15 @@ pub(super) fn clean_button(
         .flex_shrink_0()
         .rounded_md()
         .border_1()
-        .border_color(rgb(if cleaning || loading {
-            palette().border
-        } else {
-            palette().danger_border
-        }))
+        .border_color(rgb(palette().border))
         .text_xs()
-        .text_color(rgb(palette().danger))
+        .text_color(rgb(palette().fg))
         .when(!cleaning && !loading, |d| d.cursor_pointer())
         .when(cleaning || loading, |d| d.opacity(0.6))
-        .when(cleaning, |d| {
-            d.child(
-                Icon::new(IconName::Loader)
-                    .size(px(14.0))
-                    .text_color(rgb(palette().danger)),
-            )
-        })
-        .when(!cleaning, |d| {
-            d.child(
-                Icon::new(IconName::Trash)
-                    .size(px(14.0))
-                    .text_color(rgb(palette().danger)),
-            )
+        .child(if cleaning {
+            icon_spin(IconName::Loader, 14.0, palette().fg_muted, true)
+        } else {
+            icon(IconName::Eraser, 14.0, palette().accent).into_any_element()
         })
         .child(if cleaning {
             t("settings.cleaning")
@@ -66,7 +56,7 @@ pub(super) fn clean_button(
             "storage-clean",
             !cleaning && !loading,
             MotionPaint::new(),
-            MotionPaint::new().bg(rgb(palette().danger_bg)),
+            MotionPaint::new().bg(rgb(palette().card_hover)),
         )
 }
 
@@ -93,11 +83,7 @@ pub(super) fn delete_button(
         .rounded_md()
         .cursor_pointer();
     if busy {
-        button = button.child(
-            Icon::new(IconName::Loader)
-                .size(px(16.0))
-                .text_color(rgb(palette().danger)),
-        );
+        button = button.child(icon_spin(IconName::Loader, 16.0, palette().danger, true));
     } else if armed {
         button = button.child(
             div()

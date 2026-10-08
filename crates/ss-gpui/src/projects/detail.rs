@@ -4,11 +4,12 @@
 use std::path::Path;
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use ss_skills::projects::{ProjectDeployMode, ProjectEntry, remove_project, update_project_path};
+use ss_skills::projects::{ProjectEntry, remove_project, update_project_path};
 
 use super::{ProjectsPage, render_agent_item};
 use crate::chrome::icon;
@@ -163,19 +164,85 @@ pub fn render_project_detail(
                                     InputState::new(window, cx).default_value(current_path.clone())
                                 });
                                 let submitted = path_input.clone();
+                                // The browse button fills the input on a later
+                                // paint, so it carries its own handle.
+                                let browse_input = path_input.clone();
                                 crate::chrome::open_form_dialog(
                                     window,
                                     cx,
-                                    "Change Project Path",
+                                    crate::i18n::t("projects.changePathTitle"),
                                     crate::i18n::t("common.update"),
                                     false,
-                                    160.0,
                                     move |_, _| {
+                                        let browse = div()
+                                            .debug_selector(|| "project-change-path-browse".into())
+                                            .child({
+                                                let path_input = browse_input.clone();
+                                                Button::new("project-change-path-browse")
+                                                    .label(crate::i18n::t("projects.browseFolder"))
+                                                    .on_click(move |_, window, cx| {
+                                                        let receiver = cx.prompt_for_paths(
+                                                            PathPromptOptions {
+                                                                files: false,
+                                                                directories: true,
+                                                                multiple: false,
+                                                                prompt: Some(crate::i18n::t(
+                                                                    "projects.chooseDir",
+                                                                )),
+                                                            },
+                                                        );
+                                                        let path_input = path_input.clone();
+                                                        window
+                                                            .spawn(cx, async move |cx| {
+                                                                let picked = receiver
+                                                                    .await
+                                                                    .ok()
+                                                                    .and_then(|r| r.ok())
+                                                                    .flatten()
+                                                                    .and_then(|p| {
+                                                                        p.into_iter().next()
+                                                                    });
+                                                                if let Some(path) = picked {
+                                                                    let _ =
+                                                                        cx.update(|window, cx| {
+                                                                            let text = path
+                                                                                .to_string_lossy()
+                                                                                .to_string();
+                                                                            path_input.update(
+                                                                                cx,
+                                                                                |state, cx| {
+                                                                                    state.set_value(
+                                                                                        text,
+                                                                                        window, cx,
+                                                                                    )
+                                                                                },
+                                                                            );
+                                                                            window.refresh();
+                                                                        });
+                                                                }
+                                                            })
+                                                            .detach();
+                                                    })
+                                            });
                                         div()
                                             .flex()
                                             .flex_col()
                                             .gap_2()
-                                            .child(Input::new(&path_input))
+                                            .w_full()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .gap_2()
+                                                    .w_full()
+                                                    .child(
+                                                        div()
+                                                            .flex_1()
+                                                            .min_w_0()
+                                                            .child(Input::new(&path_input)),
+                                                    )
+                                                    .child(browse),
+                                            )
                                             .into_any_element()
                                     },
                                     move |_, cx| {
@@ -219,13 +286,20 @@ pub fn render_project_detail(
                             MotionPaint::new().bg(rgb(palette().danger_hover)),
                         )
                         .child(icon(IconName::Trash, 12.0, palette().danger))
+                        .tooltip(|window, cx| {
+                            crate::chrome::tooltip(crate::i18n::t("projects.removeProject"))
+                                .build(window, cx)
+                        })
                         .on_click(move |_, window, cx| {
                             let view = remove_view.clone();
                             let name = proj_name_for_dialog.clone();
                             crate::chrome::open_confirm(
                                 window,
                                 cx,
-                                format!("Remove project \"{name}\"?"),
+                                crate::i18n::tf(
+                                    "projects.removeConfirmTitle",
+                                    &[("name", name.as_str())],
+                                ),
                                 crate::i18n::t("projects.unregisterHint"),
                                 crate::i18n::t("projects.removeProject"),
                                 true,
@@ -265,7 +339,142 @@ pub fn render_project_detail(
         .gap_4()
         .p_4();
 
-    // ── Section 1: Detected Agent Rule Files Chips ───────────────────
+    // ── Section 1: Per-Agent Skill Management (the page's primary task) ──
+    let mut agents_card = div()
+        .debug_selector(|| "agents-card".into())
+        .w_full()
+        .flex_grow_0()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p_3()
+        .rounded_xl()
+        .bg(rgb(palette().card))
+        .border_1()
+        .border_color(rgb(palette().border));
+
+    // Same targetable set as the card rails: only agents the user enabled in
+    // Settings, further limited to the ones that accept project skills.
+    let visible_agents: Vec<_> = page
+        .profiles
+        .iter()
+        .filter(|profile| profile.has_project_skills() && profile.enabled)
+        .collect();
+
+    // The working state counts agents switched on for this project, while the
+    // list shows every candidate, so the counter names both numbers.
+    let enabled_agents_count = page.agent_skills.len();
+    agents_card =
+        agents_card.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(rgb(palette().fg))
+                        .child(crate::i18n::t("projects.perAgentTitle")),
+                )
+                .when(!visible_agents.is_empty(), |d| {
+                    d.child(div().text_xs().text_color(rgb(palette().fg_muted)).child(
+                        crate::i18n::tf(
+                            "projects.agentsEnabledTotal",
+                            &[
+                                ("enabled", &enabled_agents_count.to_string()),
+                                ("total", &visible_agents.len().to_string()),
+                            ],
+                        ),
+                    ))
+                }),
+        );
+
+    if visible_agents.is_empty() {
+        agents_card = agents_card.child(
+            div()
+                .text_xs()
+                .italic()
+                .text_color(rgb(palette().fg_muted))
+                .child(crate::i18n::t("projects.noAgentsEnabled")),
+        );
+    }
+    let mut agent_list = div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .flex_nowrap()
+        .justify_start()
+        .gap_2();
+    for profile in visible_agents {
+        let agent_row = render_agent_item(profile, page, view.clone());
+        agent_list = agent_list.child(agent_row);
+    }
+
+    agents_card = agents_card.child(agent_list);
+    body = body.child(agents_card);
+
+    // ── Section 2: Deploy Mode Legend ────────────────────────────────────
+    // Static explainer for the per-row mode capsules; the current mode is
+    // always visible on the rows themselves, so nothing is summarized here.
+    let mode_row =
+        |icon_name: IconName, icon_color: u32, name_key: &'static str, hint_key: &'static str| {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(icon(icon_name, 13.0, icon_color))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(palette().fg))
+                        .child(crate::i18n::t(name_key)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(palette().fg_muted))
+                        .child(crate::i18n::t(hint_key)),
+                )
+        };
+    let mode_card = div()
+        .w_full()
+        .flex_grow_0()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .px_3()
+        .py_2()
+        .rounded_lg()
+        .border_1()
+        .border_color(rgb(palette().border))
+        .bg(rgb(palette().card))
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(palette().fg))
+                .child(crate::i18n::t("projects.deployMode")),
+        )
+        .child(mode_row(
+            IconName::Link2,
+            palette().accent_fg,
+            "projects.deploySymlink",
+            "projects.deployModeSymlinkHint",
+        ))
+        .child(mode_row(
+            IconName::Copy,
+            palette().warn,
+            "projects.deployCopy",
+            "projects.deployModeCopyHint",
+        ));
+
+    body = body.child(mode_card);
+
+    // ── Section 3: Detected Agent Rule Files Chips ───────────────────────
     let mut rules_card = div()
         .w_full()
         .flex_grow_0()
@@ -287,7 +496,7 @@ pub fn render_project_detail(
             div()
                 .flex()
                 .items_center()
-                .gap_1_5()
+                .gap_1()
                 .child(icon(IconName::Scan, 14.0, palette().accent_fg))
                 .child(
                     div()
@@ -301,7 +510,10 @@ pub fn render_project_detail(
             div()
                 .text_xs()
                 .text_color(rgb(palette().fg_muted))
-                .child(format!("{} found", page.detected_rules.len())),
+                .child(crate::i18n::tf(
+                    "projects.rulesFound",
+                    &[("count", &page.detected_rules.len().to_string())],
+                )),
         );
 
     rules_card = rules_card.child(rules_header);
@@ -315,7 +527,7 @@ pub fn render_project_detail(
                 .child(crate::i18n::t("projects.noRules")),
         );
     } else {
-        let mut chips_row = div().flex().flex_wrap().gap_1_5();
+        let mut chips_row = div().flex().flex_wrap().gap_1();
         for rule in &page.detected_rules {
             chips_row = chips_row.child(
                 div()
@@ -332,6 +544,7 @@ pub fn render_project_detail(
                     .child(icon(IconName::FileText, 12.0, palette().accent_fg))
                     .child(
                         div()
+                            .font_family("JetBrains Mono")
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(palette().fg))
                             .child(rule.name.clone()),
@@ -342,125 +555,6 @@ pub fn render_project_detail(
     }
 
     body = body.child(rules_card);
-
-    // ── Section 2: Deployment Mode Overview ──────────────────────────
-    let has_copy_mode = page
-        .deploy_modes
-        .values()
-        .any(|m| *m == ProjectDeployMode::Copy);
-    let mode_card = div()
-        .w_full()
-        .flex_grow_0()
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_between()
-        .px_3()
-        .py_2()
-        .rounded_lg()
-        .border_1()
-        .border_color(rgb(palette().border))
-        .bg(rgb(palette().card))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(icon(
-                    if has_copy_mode { IconName::Copy } else { IconName::Link2 },
-                    15.0,
-                    if has_copy_mode { palette().warn } else { palette().accent_fg },
-                ))
-                .child(
-                    div()
-                        .text_xs()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(rgb(palette().fg))
-                                .child(if has_copy_mode {
-                                    "Deploy Mode: Standalone Copy mode active"
-                                } else {
-                                    "Deploy Mode: Symlink (Default - live link to Hub)"
-                                }),
-                        )
-                        .child(
-                            div()
-                                .text_color(rgb(palette().fg_muted))
-                                .child(if has_copy_mode {
-                                    "Files are physically copied into project directories. Hub updates will not affect project."
-                                } else {
-                                    "Symlinks automatically reflect upstream skill updates from your local hub."
-                                }),
-                        ),
-                ),
-        )
-        .child(
-            div()
-                .px_2()
-                .py(px(2.0))
-                .rounded_full()
-                .border_1()
-                .border_color(rgb(if has_copy_mode { palette().warn_border } else { palette().info_border }))
-                .bg(rgb(if has_copy_mode { palette().warn_bg } else { palette().info_bg }))
-                .text_xs()
-                .text_color(rgb(if has_copy_mode { palette().warn } else { palette().accent_fg }))
-                .child(if has_copy_mode { "Copy Mode" } else { "Strict Symlink" }),
-        );
-
-    body = body.child(mode_card);
-
-    // ── Section 3: Agent Skill Configuration List ────────────────────
-    let mut agents_card = div()
-        .w_full()
-        .flex_grow_0()
-        .flex_shrink_0()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .p_3()
-        .rounded_xl()
-        .bg(rgb(palette().card))
-        .border_1()
-        .border_color(rgb(palette().border));
-
-    agents_card = agents_card.child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(palette().fg))
-                    .child(crate::i18n::t("projects.perAgentTitle")),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(palette().fg_muted))
-                    .child(format!("{} agents configured", page.agent_skills.len())),
-            ),
-    );
-
-    let mut agent_list = div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .flex_nowrap()
-        .justify_start()
-        .gap_2();
-    for profile in &page.profiles {
-        if !profile.has_project_skills() {
-            continue;
-        }
-        let agent_row = render_agent_item(profile, page, view.clone());
-        agent_list = agent_list.child(agent_row);
-    }
-
-    agents_card = agents_card.child(agent_list);
-    body = body.child(agents_card);
 
     col = col.child(
         div()
@@ -503,12 +597,18 @@ pub fn render_project_detail(
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(rgb(palette().fg))
-                                .child(format!("{total_assigned_skills} skills across {enabled_agents_count} agents")),
+                                .child(crate::i18n::tf(
+                                    "projects.footerSummary",
+                                    &[
+                                        ("skills", &total_assigned_skills.to_string()),
+                                        ("agents", &enabled_agents_count.to_string()),
+                                    ],
+                                )),
                         )
                         .when(page.dirty, |d| {
                             d.child(
                                 div()
-                                    .px_1_5()
+                                    .px_1()
                                     .py(px(1.0))
                                     .rounded_sm()
                                     .bg(rgb(palette().warn_bg))
@@ -529,16 +629,17 @@ pub fn render_project_detail(
                     )
                 }),
         )
-        .child(
+        .child(if page.dirty {
             div()
                 .id("proj-save-sync")
+                .debug_selector(|| "proj-save-sync".into())
                 .flex()
                 .items_center()
-                .gap_1_5()
+                .gap_1()
                 .px_4()
                 .py(px(7.0))
                 .rounded_lg()
-                .bg(rgb(if page.dirty { palette().accent } else { palette().edge }))
+                .bg(rgb(palette().accent))
                 .text_sm()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(palette().on_accent))
@@ -555,8 +656,26 @@ pub fn render_project_detail(
                     let _ = save_view.update(cx, |this, cx| {
                         this.save_and_sync_current(cx);
                     });
-                }),
-        );
+                })
+                .into_any_element()
+        } else {
+            // Nothing to apply yet: keep the label visible but quiet and inert.
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_4()
+                .py(px(7.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(rgb(palette().border))
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(palette().fg_muted))
+                .child(icon(IconName::Check, 14.0, palette().fg_muted))
+                .child(crate::i18n::t("projects.saveAndSync"))
+                .into_any_element()
+        });
 
     col = col.child(footer);
     col

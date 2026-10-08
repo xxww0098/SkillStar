@@ -275,6 +275,31 @@ fn jwt_subject(access_token: &str) -> Option<String> {
 
 const ANTIGRAVITY_OAUTH_KEY: &str = "antigravityUnifiedStateSync.oauthToken";
 
+pub(crate) fn refresh_antigravity_oauth_token(
+    db_path: &Path,
+    access: &str,
+    refresh: &str,
+    expiry: i64,
+) -> UsageResult<()> {
+    let invalid = || UsageError::Other("Antigravity 原会话无法解析，未写回刷新凭据".into());
+    if access.trim().is_empty() || refresh.trim().is_empty() {
+        return Err(invalid());
+    }
+    let encoded = read_item_string(db_path, ANTIGRAVITY_OAUTH_KEY)?.ok_or_else(invalid)?;
+    let blob = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded.trim())
+        .map_err(|_| invalid())?;
+    let updated =
+        crate::protobuf_oauth::refresh_unified_oauth_token(&blob, access, refresh, expiry)
+            .ok_or_else(invalid)?;
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, updated);
+    write_labeled_items(db_path, "Antigravity", &[(ANTIGRAVITY_OAUTH_KEY, &encoded)])?;
+    let actual = read_antigravity_oauth_session(db_path)?.ok_or_else(invalid)?;
+    if actual.access_token != access || actual.refresh_token != refresh {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AntigravityOAuthSession {
     pub access_token: String,

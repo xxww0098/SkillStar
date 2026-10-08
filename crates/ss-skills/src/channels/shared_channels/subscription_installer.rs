@@ -534,13 +534,11 @@ mod tests {
         fs::create_dir_all(&project).unwrap();
         let previous_home = std::env::var_os("HOME");
         let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
-        let previous_codex = std::env::var_os("CODEX_HOME");
         let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
         set_env("HOME", &home);
         set_env("SKILLSTAR_DATA_DIR", &data);
         // The merged skills test binary may inherit an outer Hub override.
         set_env("SKILLSTAR_HUB_DIR", temp.path().join("hub"));
-        remove_env("CODEX_HOME");
         crate::deployment::invalidate_profile_cache();
 
         let result = (|| {
@@ -564,7 +562,7 @@ mod tests {
                 crate::content::snapshot_path("writer", &repository.join("skills/writer"))?
                     .content_hash;
             assert!(crate::agents::toggle_profile("codex")?);
-            let agent_copy = home.join(".codex/skills/writer");
+            let agent_copy = home.join(".agents/skills/writer");
             fs::create_dir_all(&agent_copy)?;
             fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;
             crate::deployment::ownership::mark_copy_for_test(&agent_copy, "writer");
@@ -659,10 +657,6 @@ mod tests {
         match previous_hub {
             Some(value) => set_env("SKILLSTAR_HUB_DIR", value),
             None => remove_env("SKILLSTAR_HUB_DIR"),
-        }
-        match previous_codex {
-            Some(value) => set_env("CODEX_HOME", value),
-            None => remove_env("CODEX_HOME"),
         }
         crate::deployment::invalidate_profile_cache();
         result.unwrap();

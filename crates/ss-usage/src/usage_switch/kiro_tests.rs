@@ -782,24 +782,45 @@ async fn sync_projects_a_refreshed_subscription_without_moving_the_pin() {
 
     let lease = acquire_cli_refresh_lease("kiro").await.unwrap();
     let mut inactive = storage::get_subscription("kiro-bob").unwrap();
+    let before_inactive = inactive.clone();
     inactive.access_token_encrypted = Some(crypto::encrypt("access-bob-rotated"));
     assert!(
-        sync_refreshed_active_subscription(&mut inactive, &lease)
+        sync_refreshed_active_subscription(&before_inactive, &mut inactive, &lease)
             .unwrap()
             .is_none()
     );
     assert_eq!(read_json(&auth_path())["accessToken"], "access-ada");
 
     let mut row = storage::get_subscription("kiro-ada").unwrap();
+    let before_refresh = row.clone();
+    let mut token = read_json(&auth_path());
+    token["clientSessionMetadata"] = json!({"generation": 7});
+    std::fs::write(auth_path(), serde_json::to_vec(&token).unwrap()).unwrap();
+    let profile_before = std::fs::read(profile_path()).unwrap();
+    let usage_before = item(&db_path(), USAGE_DB_KEY);
+    let original = std::fs::read(auth_path()).unwrap();
+    assert!(
+        sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
+            .unwrap()
+            .is_none(),
+        "reading quota without rotating tokens must not rewrite the Kiro login"
+    );
+    assert_eq!(std::fs::read(auth_path()).unwrap(), original);
     row.access_token_encrypted = Some(crypto::encrypt("access-rotated"));
     row.refresh_token_encrypted = Some(crypto::encrypt("refresh-rotated"));
     let mut row = storage::patch_oauth_credentials(&row).unwrap();
-    let outcome = sync_refreshed_active_subscription(&mut row, &lease)
+    let outcome = sync_refreshed_active_subscription(&before_refresh, &mut row, &lease)
         .unwrap()
         .expect("active kiro row is projected");
     assert!(outcome.success, "{:?}", outcome.error);
     assert_eq!(read_json(&auth_path())["accessToken"], "access-rotated");
     assert_eq!(read_json(&auth_path())["refreshToken"], "refresh-rotated");
+    assert_eq!(
+        read_json(&auth_path())["clientSessionMetadata"],
+        json!({"generation": 7})
+    );
+    assert_eq!(std::fs::read(profile_path()).unwrap(), profile_before);
+    assert_eq!(item(&db_path(), USAGE_DB_KEY), usage_before);
     assert!(read_json(&auth_path()).get("clientSecret").is_none());
     assert_eq!(
         read_json(&registration_path(BUILDER_ID_START_URL))["clientSecret"],
