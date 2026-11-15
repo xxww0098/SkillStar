@@ -1,0 +1,39 @@
+[package]
+name = "ss-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Internal path dep, never goes to crates.io.
+publish = false
+
+[lib]
+name = "ss_app"
+path = "src/lib.rs"
+# No doc tests in this workspace; the crates are internal path deps, not a
+# published API whose examples need to keep compiling.
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+dirs.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+ss-channels = { path = "../ss-channels" }
+ss-core = { path = "../ss-core" }
+ss-git = { path = "../ss-git" }
+ss-marketplace = { path = "../ss-marketplace" }
+ss-mcp = { path = "../ss-mcp" }
+ss-skills = { path = "../ss-skills" }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+uuid.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+tempfile = { workspace = true }

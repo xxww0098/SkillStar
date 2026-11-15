@@ -1,0 +1,17 @@
+# No rustflags here on purpose.
+#
+# This file used to pass `-C link-arg=-Wl,-no_compact_unwind` for both Apple
+# targets, to silence the `__eh_frame` warning on the debug `skillstar` link.
+# Measured 2026-11-15: a workspace-wide copy of that flag also strips the
+# compact unwind tables every other binary needs, so panics could not unwind at
+# all in test and dev builds (even a bare `std::thread::spawn(|| panic!())`
+# aborted with `fatal runtime error: failed to initiate panic, error 5`). That
+# silently broke panic isolation (`tokio` JoinError, `catch_unwind`) and made
+# panic-recovery tests unreachable without a per-command RUSTFLAGS override.
+#
+# The flag now lives in the root package's build.rs, scoped to the `skillstar`
+# binary only. See docs/errors.md (2026-10-09 and 2026-11-15).
+#
+# Do not add link flags here again: an explicit RUSTFLAGS replaces this list,
+# and one workspace-wide link flag changes unwinding for every binary, not just
+# the one that prints the warning.

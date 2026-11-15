@@ -1,0 +1,172 @@
+[package]
+name = "ss-bin"
+# Product version. Library crates inherit the placeholder in
+# `[workspace.package]`; release checks compare this field, passed in as
+# `CARGO_PKG_VERSION`. Do not switch this package to `version.workspace`.
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SkillStar desktop shell and CLI"
+publish = false
+
+# The product binary keeps the Apple link flag that silences the
+# __eh_frame warning; it is scoped to that binary on purpose
+# (docs/errors.md, 2026-11-15).
+build = "build.rs"
+
+# skillstar --version still comes from the Clap derive in ss-app, which
+# shares the same 0.0.1 until a release bumps both on purpose.
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "skillstar"
+path = "src/main.rs"
+
+[dependencies]
+ss-app = { path = "crates/ss-app" }
+ss-git = { path = "crates/ss-git" }
+ss-mcp = { path = "crates/ss-mcp" }
+
+# The product GUI: the nsh AppView host, where every page (accounts
+# included) now lives (D-110). The crate ships one host per desktop (AppKit
+# on macOS, Win32 on Windows); a Linux host joins when that platform crate is
+# wired, and the binary reports the gap until then.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+ss-gui-host = { path = "gui/host" }
+
+
+[workspace]
+resolver = "3"
+members = [
+  ".",
+  # Every domain crate is listed by name (no glob: a stray directory must not
+  # join the build silently). Register a new crate here too.
+  "crates/ss-accounts",
+  "crates/ss-app",
+  "crates/ss-channels",
+  "crates/ss-core",
+  "crates/ss-git",
+  "crates/ss-marketplace",
+  "crates/ss-mcp",
+  "crates/ss-skills",
+  # The nsh GUI: the bridge crate (`ss-gui-bridge`) the TSX imports, and the
+  # AppView host (`ss-gui-host`) the product binary launches (wave-7 收编, D-110).
+  "gui/host",
+  "gui/native",
+]
+default-members = ["."]
+
+# Shared package metadata. Members opt in with `edition.workspace = true` etc.
+# None of the ss-* crates are published — they are wired together with
+# path deps — so they share one placeholder `version` instead of each keeping a
+# semver nobody consumes. The root package above is the exception: its own
+# `version` is the product version, and it inherits only edition/MSRV.
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+version = "0.0.1"
+# Matches the Apache-2.0 LICENSE at the repo root. Stating it here is what
+# stops `cargo deny check licenses` reporting every member as `unlicensed`:
+# the root LICENSE file is invisible to per-crate metadata.
+license = "Apache-2.0"
+
+# Shared third-party dependency versions for every member crate that pulls in
+# ≥2 of them. Pin to whatever Cargo.lock already resolved at the time this
+# table was introduced — the goal is convergence, not upgrades. Member crates
+# opt in with `dep = { workspace = true }` (optionally appending their own
+# extra `features = [...]`; workspace feature lists are unioned in, not
+# replaced). Path deps between our own ss-* crates stay declared
+# per-crate rather than routed through this table.
+[workspace.dependencies]
+aes-gcm = "0.10"
+anyhow = "1.0.102"
+async-trait = "0.1"
+base64 = "0.22"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.1", features = ["derive"] }
+dirs = "6.0.0"
+flate2 = "1"
+futures = "0.3"
+gix = { version = "0.80", default-features = false, features = ["max-control", "blocking-http-transport-reqwest-rust-tls", "revision", "credentials"] }
+htmd = "0.5.5"
+junction = "2.0.0"
+machine-uid = "0.5"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.34.0"
+rand = "0.10.0"
+regex = "1.12"
+# rmcp: hard-pin. 3.5.1 makes the project-skills MCP serve tests abort with a
+# double panic (the stdio test harness redirects stderr, so even the first
+# panic message is lost — "failed to initiate panic, error 5", SIGABRT;
+# `server_capabilities_omit_roots` is the smallest repro, 2026-10-12). Retest
+# the protocol_tests suite before lifting this pin. See docs/errors.md.
+rmcp = { version = "=3.4.0", default-features = false }
+schemars = "1.2.1"
+# system-proxy: honor HTTP(S)_PROXY env vars and the macOS/Windows system proxy
+# when the in-app proxy is not configured; without it api.github.com is a dead
+# 10s timeout per repo on proxied networks while git (which reads its own proxy
+# config) succeeds.
+reqwest = { version = "0.13.3", default-features = false, features = ["system-proxy"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_yaml = "0.9.34"
+sha2 = "0.11.0"
+tar = "0.4"
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3" }
+toml = "1.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.8"
+uuid = { version = "1.23.1", features = ["v4"] }
+which = "8.0.2"
+
+# Workspace-wide lint table. This is inert for any member that does not also
+# carry `[lints] workspace = true`, so every member opts in explicitly.
+#
+# Ratchet rule: a lint only enters this table at `deny` when its violation count
+# across the workspace is measured to be 0 on the day it lands, so adding it
+# never turns CI red. Lints with real existing volume (`clippy::unwrap_used` at
+# 2744 sites, `clippy::expect_used` at 689) stay out entirely — a table of
+# ignored warnings dilutes the signal from the entries that mean something.
+[workspace.lints.clippy]
+todo = "deny"           # measured 0 occurrences workspace-wide, 2026-08-14
+unimplemented = "deny"  # measured 0 occurrences workspace-wide, 2026-08-14
+dbg_macro = "deny"      # measured 0 occurrences workspace-wide, 2026-08-14
+
+[profile.release]
+# `thin` rather than `fat`: measured on this workspace (2026-08-14, cold build,
+# aarch64-apple-darwin) fat took 425.20s for a 31.1 MiB binary, thin took
+# 299.09s for 33.5 MiB — 29.7% less build time for 7.6% more size. Runtime cost
+# was NOT measured; the heavy work here is file I/O, git transport, HTTP and
+# SQLite rather than compute, so the tradeoff is judged worth it.
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Release-shaped build for packaging smoke tests — "does the bundle start?" —
+# where final runtime performance does not matter. Measured 149.42s cold vs the
+# release profile's 299.09s. Artifacts land in target/release-fast/, not
+# target/release/.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+
+# Same opt-level / LTO / codegen-units as `release`, plus line tables and
+# frame-pointer-friendly symbols so samply / cargo-flamegraph can name frames.
+# `strip` must stay off — inheriting `release`'s `strip = "symbols"` produces
+# `[unknown]` graphs (PERF-06). Force frame pointers on the profiling command
+# with `RUSTFLAGS='-C force-frame-pointers=yes'`, not the default rustflags.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+[profile.profiling.build-override]
+debug = false

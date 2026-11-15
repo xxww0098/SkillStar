@@ -1,0 +1,39 @@
+# Normalize line endings on checkin; check out with the platform default,
+# except where a tool requires a specific ending.
+* text=auto
+
+# Shell scripts must stay LF even when checked out on Windows (Git Bash / WSL)
+*.sh   text eol=lf
+
+# Windows batch / PowerShell scripts want CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Source files: force LF so diffs stay stable across platforms
+*.rs   text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.cjs  text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Lockfiles & binaries: never touch
+*.lock   -text
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.icns   binary
+*.svg    text eol=lf
+*.woff   binary
+*.woff2  binary
+*.ttf    binary

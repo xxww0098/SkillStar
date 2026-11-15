@@ -1,0 +1,32 @@
+{
+  "cloudaicompanionProject": {
+    "id": "projects/antigravity-demo",
+    "name": "Antigravity Demo"
+  },
+  "currentTier": {
+    "id": "free-tier",
+    "usesGcpTos": false
+  },
+  "paidTier": {
+    "id": "PRO",
+    "availableCredits": [
+      {
+        "creditType": "GOOGLE_ONE_AI",
+        "creditAmount": "25",
+        "minimumCreditAmountForUsage": "1"
+      },
+      {
+        "creditType": "GEMINI_CODE_ASSIST",
+        "creditAmount": "5"
+      },
+      {
+        "creditType": "LEGACY",
+        "minimumCreditAmountForUsage": "1"
+      }
+    ]
+  },
+  "allowedTiers": [
+    { "id": "free-tier", "isDefault": true },
+    { "id": "legacy-tier" }
+  ]
+}

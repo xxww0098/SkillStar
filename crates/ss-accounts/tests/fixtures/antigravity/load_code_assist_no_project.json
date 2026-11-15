@@ -1,0 +1,10 @@
+{
+  "currentTier": {
+    "id": "standard-tier",
+    "usesGcpTos": true
+  },
+  "allowedTiers": [
+    { "id": "standard-tier", "isDefault": true },
+    { "id": "free-tier" }
+  ]
+}

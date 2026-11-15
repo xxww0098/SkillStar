@@ -1,0 +1,7 @@
+# The compiled TSX bundle (nsh build output) and cargo's own tree. The
+# bundle is a build product: regenerate with
+#   nsh build -o gui/host/gen gui
+# (host/build.rs also produces it when the nsh CLI is available).
+gen/
+target/
+Cargo.lock

@@ -1,0 +1,111 @@
+name: Windows CI
+
+# Catches Windows-specific regressions (paths, shell calls, line endings)
+# that local macOS/Linux development would miss.
+#
+# ## Failure lessons (from Actions history — do not re-learn the hard way)
+#
+# 1. There is no JavaScript lockfile to keep in sync. The React/Bun/npm
+#    path was retired with Tauri (D-091). Do not re-add `npm ci` or a second
+#    lockfile to this workflow.
+#
+# 2. Historical: through 2026-07 this job died on `npm ci` lockfile drift
+#    before any Windows Rust test ran. That is why a red install step was
+#    never "Windows is flaky". The lesson stays: do not hide a failing
+#    dependency step by loosening the install command.
+#
+# 3. Keep the file-size guard on bash even on Windows runners — the ratchet
+#    scripts assume a POSIX shell.
+#
+# 4. Do not re-add `--exclude skillstar`. The old src-tauri test exe died
+#    on GitHub Windows runners with 0xc0000139 because it linked WebView2.
+#    The current skillstar binary is GPUI and does not link WebView2, so the
+#    workspace test includes it. Re-excluding it would hide Windows GUI
+#    compile failures.
+#
+# 5. Channel content-hash fixtures must pin `core.autocrlf=false` and
+#    `core.eol=lf` (and treat files as `-text`). Windows runners default
+#    `autocrlf=true`, so `git archive` / clone rewrite LF fixtures and
+#    `sha256:` no longer matches Linux. Do not "fix" this by accepting
+#    whatever hash Windows computed, and do not hardcode a second Windows
+#    digest.
+#
+# 6. After those hash fixtures go green, `configured_proxy_is_operation_local`
+#    can fail next: Windows env names are case-insensitive, so
+#    `env_remove("http_proxy")` plus `env("HTTP_PROXY", …)` does not leave a
+#    distinct `http_proxy=None` in `get_envs()`. Isolate process proxy env
+#    with an inherited canary and probe the child; do not weaken password
+#    redaction, and do not require Unix `Some(None)` from `get_envs()`.
+#
+# 7. A Windows directory `readonly` bit does not stop `fs::copy` from
+#    creating files in that directory. After hash/proxy fixtures go green,
+#    `migration_aborts_when_the_backup_cannot_be_written` can succeed the
+#    v4 write (unix `0o500` never applied). Occupy the permanent backup
+#    path as a directory so copy fails on every OS; do not drop BackupFailed.
+#
+# 8. Git `insteadOf` fixtures must use `local_file_url`. `file://C:\Users\…`
+#    loses every backslash (gitconfig escape) and clone looks for
+#    `C:Users…`. Pin test repos to LF (`core.autocrlf=false`, `* -text`)
+#    before the first commit; do not assert Unix `\n` against an autocrlf
+#    checkout. Compare Windows paths by `Path::components`, not display().
+#
+# 9. A dangling hub junction must still resolve to the shared checkout.
+#    `std::fs::canonicalize` fails when `skills/alpha` is already gone, and
+#    the raw Windows path may be `RUNNER~1` while the cache dir is
+#    `runneradmin`. `is_inside` / `repo_root_of` use
+#    `canonicalize_existing_prefix`. The source_dropped fixture must reset
+#    to the drop commit oid (not `origin/HEAD`), assert the cache lost
+#    `skills/alpha`, and leave a dangling hub link — do not skip
+#    SourceMissing, and do not treat a leftover real hub directory as gone.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pin out of rust-toolchain.toml instead of hard-coding it —
+      # identical to ci.yml's steps, where the long rationale lives (ci.yml
+      # failure lesson #7). `shell: bash` matters here: this runner defaults to
+      # pwsh, and the script is POSIX sh.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Rust tests (workspace)
+        run: cargo test --workspace --locked
+
+      - name: File-size guard (structural governance)
+        shell: bash
+        run: scripts/internal/check_file_size.sh

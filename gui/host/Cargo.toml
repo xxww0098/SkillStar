@@ -1,0 +1,42 @@
+[package]
+name = "ss-gui-host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+
+# Product AppView host for `gui/` (workspace member of the
+# repository root; `ss-bin` calls `ss_gui_host::run`).
+[dependencies]
+# nsh platform crates, pinned to the CLI's version (=0.5.1; bump together
+# with the nsh CLI — same rule as ../native). nsh-base ships the base UI
+# set (the components the TSX uses); `highlight` is the feature set the
+# generated development host enables.
+nsh-core = "=0.5.1"
+nsh-base = { version = "=0.5.1", features = ["highlight"] }
+
+# The app's own native bridge (nsh.json "rust"): the facade registry the
+# TSX bundle imports as `skillstar-gui/native`.
+ss-gui-bridge = { path = "../native" }
+
+# Process-level parity with ss_gpui::run (crates/ss-gpui/src/lib.rs:328):
+# logging init (ss-core) plus bootstrap + GUI background wakes (ss-app).
+# The wave-7 收编 diff adds this crate to the root workspace with the
+# ALLOWED edges host -> {ss-core, ss-app} — see the runbook.
+ss-core = { path = "../../crates/ss-core" }
+ss-app = { path = "../../crates/ss-app" }
+
+# Same tokio feature set the GPUI shell builds its domain runtime with
+# (crates/ss-gpui/Cargo.toml: `workspace = true, features = ["full"]`).
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS AppView backend: AppView/run_app/AppOptions. Off macOS the
+# crate is empty, and run() reports the platform gap instead.
+nsh-platform-macos = "=0.5.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# The Win32 AppView backend: the same AppView/run_app/AppOptions over D2D and
+# DirectWrite. Windows CI (`windows-ci.yml`) is what compiles this path.
+nsh-platform-windows = "=0.5.1"

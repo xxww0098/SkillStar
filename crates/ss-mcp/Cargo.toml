@@ -1,0 +1,37 @@
+[package]
+name = "ss-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Internal path dep, never goes to crates.io.
+publish = false
+
+[lib]
+# No doc tests in this workspace; the crates are internal path deps, not a
+# published API whose examples need to keep compiling.
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "elicitation", "transport-async-rw"] }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+ss-core = { path = "../ss-core" }
+ss-skills = { path = "../ss-skills" }
+tokio = { workspace = true, features = ["full"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+ss-git = { path = "../ss-git" }
+tempfile = { workspace = true }
+
+[target."cfg(windows)".dev-dependencies]
+junction = { workspace = true }

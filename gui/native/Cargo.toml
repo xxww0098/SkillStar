@@ -1,0 +1,38 @@
+[package]
+name = "ss-gui-bridge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+
+# Bridge crate for `gui/` (folded into the repository root
+# workspace; exports `#[native_module("skillstar-gui/native")]` for TSX).
+[dependencies]
+# Keep the nsh-* crates at the CLI's version; bump them together with the
+# nsh CLI (see the mixed template's README note). nsh-base joins when a
+# wave first uses its base components (the .nsh runners ship their own).
+nsh-core = "0.5.1"
+
+# SkillStar domain crates, by path: one entry per page domain the bridge
+# exposes. A new domain joins with its facade, not before.
+ss-core = { path = "../../crates/ss-core" }
+ss-marketplace = { path = "../../crates/ss-marketplace" }
+ss-skills = { path = "../../crates/ss-skills" }
+# Accounts page: the unified accounts domain (`ss-accounts` owns store,
+# switch writers, OAuth login, and quota/usage snapshots).
+ss-accounts = { path = "../../crates/ss-accounts" }
+# Wave 7 (settings sections 2): the storage / skill-repair / about slice —
+# `ss_app::storage_maintenance` (overview, two-step force deletes, cache
+# clean, repair preview/apply, agent intake) is that section's domain seam.
+ss-app = { version = "0.0.1", path = "../../crates/ss-app" }
+# Whole-DTO serialization for the accounts facade. nsh-core re-exports only
+# its Value/Map types; serde_json joins here for DTO conversion (the same
+# version the tree already unifies on).
+serde_json = "1"
+# Bounded semaphore concurrency for background GitHub avatar downloads.
+tokio = { version = "1", features = ["sync"] }
+# Test-only: the storage facade's domain futures (storage_maintenance's
+# async entry points) need a runtime to drive; version tracks what the
+# tree already unifies on (the ss-app edge pulls tokio 1.x anyway).
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

@@ -1,0 +1,31 @@
+{
+  "limits": [
+    {
+      "kind": "session",
+      "percent": 12.0,
+      "resets_at": "2026-01-01T05:00:00Z"
+    },
+    {
+      "kind": "weekly_all",
+      "utilization": "63.5",
+      "resets_at": 1767225600
+    },
+    {
+      "kind": "weekly_scoped",
+      "percent": 90.0,
+      "resets_at": "2026-01-02T00:00:00Z",
+      "scope": {
+        "model": {
+          "display_name": "Opus"
+        }
+      }
+    }
+  ],
+  "five_hour": {
+    "utilization": 88.0,
+    "resets_at": 1767225600
+  },
+  "seven_day": {
+    "utilization": 99.0
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "individual_usage": {
+    "plan": {
+      "totalPercentUsed": 40.0,
+      "breakdown": {
+        "total": 2000
+      }
+    }
+  }
+}

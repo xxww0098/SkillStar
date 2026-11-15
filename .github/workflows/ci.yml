@@ -1,0 +1,266 @@
+name: CI
+
+# Cross-platform quality gate: Rust tests and the remaining structural
+# ratchets (file size, stringly-typed errors, orphan modules, dependency
+# graph, clippy) on every PR and every push to main. Complements
+# windows-ci.yml, which catches Windows-specific path and shell regressions.
+# The React/Bun gates left with the Tauri shell (D-091).
+#
+# ## Failure lessons (from Actions history — do not re-learn the hard way)
+#
+# 1. Do not re-add a frontend production build. Release v0.0.3 burned on
+#    TypeScript that only `tauri-action` compiled. That stack is retired
+#    (D-091). The gate that replaces it is `cargo test --workspace --locked`
+#    on this commit, which release.yml verifies rather than repeats.
+#
+# 2. Tests must not depend on the runner's real $HOME / host machine state.
+#    Observed failures:
+#    - `list_profiles_detection_does_not_create_skills_dirs` (ss-skills /
+#      agents): "expected config root to count as installed" when the runner
+#      has (or lacks) real agent config roots under $HOME.
+#    - `commands::ssh_hosts::tests::*vps_yy*` (src-tauri): host resolve failed
+#      with "system host 'vps-yy' not found" and poisoned a shared HOME mutex,
+#      cascading into sibling tests. Fixture HOME via env is correct in intent,
+#      but any code path that still reads the real user SSH config or fails to
+#      serialize HOME mutations will red this job on clean GitHub runners.
+#    Rule (same spirit as SKILLSTAR_TOOL_SYNC_HOME): sandbox $HOME / data dirs
+#    in tests; never require a developer's ~/.ssh/config Host alias to exist.
+#    Fixed via the SKILLSTAR_SSH_CONFIG override (ssh::system_config): ssh
+#    tests point it at a fixture file and never mutate HOME/USERPROFILE.
+#
+# 3. `cargo test --workspace` compiles the GPUI shell, so Linux needs
+#    pkg-config, libxkbcommon-dev, libwayland-dev, libvulkan-dev, and the
+#    font stack (libfontconfig1-dev, libfreetype6-dev) for
+#    yeslogic-fontconfig-sys. Do not put webkit2gtk or GTK back; that linker
+#    set belonged to Tauri.
+#
+# 4. Ratchet gates + clippy + cargo-deny run only on Linux (see test-macos
+#    note). Duplicating clippy on macOS roughly doubles wall-clock time for
+#    no new platform signal.
+#
+# 5. cargo-deny was continue-on-error while pre-existing findings were being
+#    triaged, because a gate that is red on day one just teaches everyone to
+#    ignore red. That is finished: as of 2026-08-14 all four categories exit 0
+#    (the last blocker, html2md's GPL-3.0+, was replaced by htmd/Apache-2.0)
+#    and the step is blocking. Re-check the whole run exits 0 before ever
+#    relaxing it again — see the step comment below.
+#
+# 6. This workflow only fires on push-to-main / PR, so it is NOT the first
+#    line of defence for work that has not been pushed yet. On 2026-08-14 main
+#    sat 22 commits ahead of origin with the last CI run 10 days old, meaning
+#    every gate below had run zero times against that work. The same ratchets
+#    now also run locally as git hooks; install them once per clone with
+#    `bash scripts/internal/install_hooks.sh` (see README, "Git hooks"). When
+#    you add or remove a ratchet step here, mirror it in that installer.
+#
+# 7. Do NOT go back to `dtolnay/rust-toolchain@stable`. That ref installs
+#    whatever `stable` is today, and then the first `cargo` call in the repo
+#    makes rustup read rust-toolchain.toml and download 1.97.1 as well — two
+#    toolchains per runner where one is used. Worse, the `components: clippy`
+#    that used to sit on that step attached clippy to the `stable` toolchain
+#    that nothing here ever invokes; the clippy the ratchet actually runs came
+#    from rustup's own rust-toolchain.toml handling. The `@master` +
+#    `toolchain:` form below installs the pinned version once, with clippy and
+#    rustfmt attached to it directly.
+#    Two things to know before touching those steps:
+#    - The version and the component list are read out of rust-toolchain.toml
+#      at run time, so that file stays the single source of truth and no
+#      workflow carries a copy of "1.97.1" to drift out of sync.
+#    - `@master` is required when passing `toolchain:` as an input; the
+#      `@stable` / `@1.97.1` refs are branches whose only job is to supply a
+#      default. See the action's own README.
+#    Expect ONE cold Swatinem/rust-cache run per job after this change, then
+#    normal hit rates. That is not a regression: rust-cache hashes `rustc -vV`
+#    for the default toolchain plus every installed toolchain, and the set went
+#    from {stable, 1.97.1} to {1.97.1}, so the key legitimately moved once.
+#
+# 8. test-linux has no timeout-minutes (GitHub default is 360). A ~7 minute
+#    job that dies at `ss-git` with "The operation was canceled" is
+#    not a tight cap and is not extra harness tests. The unix cancel test
+#    used to `kill -TERM -$pid`, which signals a process group; when the
+#    child was not isolated that is the Actions step group. Do not "fix"
+#    this by raising a timeout that does not exist, and do not drop the
+#    cancel coverage.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GPUI links Wayland, xkbcommon, and Vulkan. These are needed because
+      # cargo test --workspace compiles the skillstar binary. This job does
+      # not produce an installer.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            build-essential \
+            libssl-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev
+
+      # Rust version + component list have exactly one home: rust-toolchain.toml
+      # (see failure lesson #7). Read it here and hand it to the action, so no
+      # workflow ever carries a second copy of the version number.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+
+          # Fail loudly rather than install something nobody chose:
+          #  - empty `components` would silently drop clippy/rustfmt and turn
+          #    check_clippy_ratchet.sh into a gate that never runs;
+          #  - a two-part `channel` ("1.98" rather than "1.98.0") is worse than
+          #    it looks: dtolnay's parser matches /^1\.[0-9]+$/ and rewrites it
+          #    into a date-derived version. Only an exact x.y.z passes through
+          #    its parser untouched.
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components — clippy/rustfmt must stay installed or the clippy ratchet stops running"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Workspace dependency and lockfile guard
+        run: scripts/internal/check_workspace_deps.sh
+
+      # There is deliberately NO separate `cargo check --workspace` step before
+      # this one — do not re-add it. Measured back-to-back on one machine with
+      # cold target dirs: `check` (85.07 s) followed by `test --no-run`
+      # (115.20 s) = 200.27 s, versus 124.80 s for `test --no-run` alone. The
+      # check step buys the later test compile only 9.60 s, so it burns ~75 s
+      # of wall clock per leg on every PR. `cargo test --workspace` reports the
+      # same compile errors and strictly more of them (it also builds `tests/`
+      # and `#[cfg(test)]` code), and on this job the clippy ratchet below runs
+      # `--all-targets`, type-checking every target a second time anyway.
+      - name: Rust tests (workspace)
+        run: cargo test --workspace --locked
+
+      - name: File-size guard (structural governance)
+        run: scripts/internal/check_file_size.sh
+
+      - name: Stringly-typed error guard
+        run: scripts/internal/check_error_strings.sh
+
+      # Reachability walk: a `.rs` file no `mod` declaration points at is not
+      # compiled, linted or tested, yet reads like delivered code. Zero
+      # violations today, so this is blocking from day one.
+      - name: Orphan-module guard (structural governance)
+        run: scripts/internal/check_no_orphan_modules.sh
+
+      # Proves the mermaid graph in docs/boundaries.md still matches the real
+      # cargo dependency edges, both directions. Zero violations today.
+      - name: Dependency-graph documentation guard
+        run: scripts/internal/check_dep_graph_doc.sh
+
+      - name: Clippy ratchet
+        run: scripts/internal/check_clippy_ratchet.sh
+
+      # Blocking as of 2026-08-14 (cargo-deny 0.20.2). All four categories
+      # exit 0 — verified locally on this commit:
+      #   `advisories ok, bans ok, licenses ok, sources ok`
+      #
+      #   advisories  anyhow (unsound), quick-xml (2 vulns, via a plist
+      #               1.8->1.10 bump) and a yanked crypto-bigint were fixed by
+      #               upgrading. The remaining 10 are allowlisted in deny.toml,
+      #               each with its own reason and re-evaluation trigger: 9
+      #               are `unmaintained` (what is left of Tauri's archived
+      #               Linux GTK3 stack, async-openai's backoff, tauri-utils'
+      #               parsing helpers), and the single live vulnerability is
+      #               RUSTSEC-2023-0071 (rsa Marvin attack) reached via russh,
+      #               which has no fixed version upstream at all. Ten gtk-rs
+      #               GTK3 entries were deleted on 2026-09-22: the advisory-db
+      #               withdrew them on 2026-08-14, and an ignore that matches
+      #               nothing (`advisory-not-detected`) fails the check.
+      #   bans        ok. `cargo tree --duplicates` noise stays a warning here;
+      #               duplicate-version findings are not build-breaking.
+      #   sources     ok — crates.io only.
+      #   licenses    ok. The last blocker was html2md (GPL-3.0+) against an
+      #               Apache-2.0 statically linked binary; it was replaced by
+      #               htmd (Apache-2.0) rather than allowlisted, so no copyleft
+      #               obligation was papered over. The ~15 crates missing a
+      #               `license` field were fixed by inheriting it from
+      #               [workspace.package]; tiny-keccak CC0-1.0 and webpki-roots
+      #               CDLA-Permissive-2.0 are explicitly allowed as low-risk
+      #               permissive licences.
+      #
+      # If this step ever goes red, fix the dependency — do not re-add
+      # continue-on-error and do not widen deny.toml's allow list to make a
+      # copyleft finding disappear.
+      - name: cargo-deny (advisories / licenses / sources)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          arguments: --config deny.toml
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Identical to test-linux's pair of steps — see the long comment there.
+      - name: Resolve pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)"
+          components="$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' rust-toolchain.toml | tr -d ' "' | head -1)"
+          [ -n "$channel" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] channel"; exit 1; }
+          [ -n "$components" ] || { echo "::error::rust-toolchain.toml: cannot read [toolchain] components"; exit 1; }
+          case "$channel" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::rust-toolchain.toml channel must be an exact x.y.z version, got '$channel'"; exit 1 ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "pinned toolchain: $channel (components: $components)"
+
+      - name: Set up Rust ${{ steps.rust.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: ${{ steps.rust.outputs.components }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # No separate `cargo check --workspace` step here either — same reasoning
+      # and same measurements as test-linux above. Note the difference: this
+      # leg has no clippy run, so `cargo test --workspace` is the ONLY thing
+      # that compiles Rust on macOS. It must stay.
+      - name: Rust tests (workspace)
+        run: cargo test --workspace --locked
+      # Ratchet gates + clippy + cargo-deny intentionally do not re-run here —
+      # they're platform-agnostic checks already covered by test-linux, and
+      # duplicating the clippy compile (the slowest step) would roughly
+      # double this workflow's wall-clock time for no new signal.

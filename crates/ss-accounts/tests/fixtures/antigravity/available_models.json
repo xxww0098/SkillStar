@@ -1,0 +1,40 @@
+{
+  "models": {
+    "gemini-3-pro-high": {
+      "displayName": "Gemini 3 Pro (high)",
+      "quotaInfo": {
+        "remainingFraction": 0.5,
+        "resetTime": "2026-01-01T05:00:00Z"
+      }
+    },
+    "claude-sonnet-4-6": {
+      "displayName": "Claude Sonnet 4.6",
+      "quotaInfo": {
+        "remainingFraction": 0.125
+      }
+    },
+    "gpt-oss-120b-medium": {
+      "quotaInfo": {
+        "remainingFraction": 1.0
+      }
+    },
+    "imagen-4": {
+      "displayName": "Imagen 4",
+      "quotaInfo": {
+        "remainingFraction": 0.9
+      }
+    },
+    "chat_editor": {
+      "displayName": "Chat Editor",
+      "quotaInfo": {
+        "remainingFraction": 0.3
+      }
+    },
+    "gemini-2.5-flash": {
+      "displayName": "Gemini 2.5 Flash",
+      "quotaInfo": {
+        "resetTime": "2026-01-01T05:00:00Z"
+      }
+    }
+  }
+}

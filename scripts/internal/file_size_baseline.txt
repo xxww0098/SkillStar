@@ -1,0 +1,9 @@
+# Grandfathered files that already exceed their line limit (structural debt).
+# The guard FAILS on any NEW file over the limit, but only WARNS on these —
+# so the ratchet only tightens. As files are split below the limit, delete the
+# corresponding line here; once a file drops under the limit the guard will
+# tell you to remove its stale baseline entry.
+#
+# Limits: 1000 lines for source, 1500 for test files (see check_file_size.sh).
+# Test files were an outright exemption until 2026-08-14. No file currently
+# exceeds the cap, so this list stays empty.

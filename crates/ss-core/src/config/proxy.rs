@@ -1,0 +1,205 @@
+use anyhow::Result;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum ProxyType {
+    #[default]
+    Http,
+    Https,
+    Socks5,
+    Socks5h,
+}
+
+impl ProxyType {
+    fn parse_loose(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "http" => Self::Http,
+            "https" => Self::Https,
+            "socks5" => Self::Socks5,
+            "socks5h" => Self::Socks5h,
+            _ => Self::Http,
+        }
+    }
+
+    /// Scheme as the user configured it (settings UI / `proxy.json`).
+    pub fn as_scheme(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Https => "https",
+            Self::Socks5 => "socks5",
+            Self::Socks5h => "socks5h",
+        }
+    }
+
+    /// Scheme used on the wire. Both SOCKS5 variants resolve DNS **remotely**
+    /// (`socks5h`) so a poisoned local resolver cannot steer the handshake.
+    pub fn as_transport_scheme(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Https => "https",
+            Self::Socks5 | Self::Socks5h => "socks5h",
+        }
+    }
+}
+
+fn deserialize_proxy_type<'de, D>(deserializer: D) -> Result<ProxyType, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(ProxyType::parse_loose(&raw))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProxyConfig {
+    pub enabled: bool,
+    #[serde(default, deserialize_with = "deserialize_proxy_type")]
+    pub proxy_type: ProxyType,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub bypass: Option<String>,
+}
+
+/// Default `NO_PROXY` for a newly created `proxy.json`.
+///
+/// Localhost plus mainland-China LLM endpoints that a GFW user typically
+/// wants to reach *without* hairpinning through their proxy. Existing files
+/// are never rewritten: a stored `bypass: null` stays `null`.
+pub const DEFAULT_BYPASS: &str = "localhost,127.0.0.1,::1,.local,.deepseek.com,.zhipuai.cn,.bigmodel.cn,.moonshot.cn,.minimax.io,.volces.com,.aliyuncs.com";
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            proxy_type: ProxyType::default(),
+            host: String::new(),
+            port: 7897,
+            username: None,
+            password: None,
+            bypass: Some(DEFAULT_BYPASS.to_string()),
+        }
+    }
+}
+
+fn config_path() -> PathBuf {
+    crate::infra::paths::proxy_config_path()
+}
+
+pub fn load_config() -> Result<ProxyConfig> {
+    let path = config_path();
+    if !path.exists() {
+        return Ok(ProxyConfig::default());
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let config: ProxyConfig = serde_json::from_str(&content).unwrap_or_default();
+    Ok(config)
+}
+
+pub fn save_config(config: &ProxyConfig) -> Result<()> {
+    let path = config_path();
+    let content = serde_json::to_string_pretty(config)?;
+    crate::infra::fs_ops::atomic_write(&path, content.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProxyConfig, ProxyType, load_config, save_config};
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_config_returns_default_when_missing() {
+        let _guard = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = TempDir::new().unwrap();
+
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        let config = load_config().unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.proxy_type, ProxyType::Http);
+        assert_eq!(config.port, 7897);
+        assert_eq!(config.bypass.as_deref(), Some(super::DEFAULT_BYPASS));
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
+    }
+
+    #[test]
+    fn save_and_load_config_roundtrip() {
+        let _guard = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = TempDir::new().unwrap();
+
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        let original = ProxyConfig {
+            enabled: true,
+            proxy_type: ProxyType::Socks5,
+            host: "127.0.0.1".into(),
+            port: 1080,
+            username: Some("alice".into()),
+            password: Some("secret".into()),
+            bypass: Some("localhost,127.0.0.1".into()),
+        };
+
+        save_config(&original).unwrap();
+        let loaded = load_config().unwrap();
+
+        assert!(loaded.enabled);
+        assert_eq!(loaded.proxy_type, ProxyType::Socks5);
+        assert_eq!(loaded.host, "127.0.0.1");
+        assert_eq!(loaded.port, 1080);
+        assert_eq!(loaded.username.as_deref(), Some("alice"));
+        assert_eq!(loaded.password.as_deref(), Some("secret"));
+        assert_eq!(loaded.bypass.as_deref(), Some("localhost,127.0.0.1"));
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
+    }
+
+    #[test]
+    fn socks5h_roundtrips_and_is_not_folded_into_socks5() {
+        let _guard = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = TempDir::new().unwrap();
+
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        let original = ProxyConfig {
+            enabled: true,
+            proxy_type: ProxyType::Socks5h,
+            host: "127.0.0.1".into(),
+            port: 1080,
+            username: None,
+            password: None,
+            bypass: Some("localhost".into()),
+        };
+        save_config(&original).unwrap();
+        let loaded = load_config().unwrap();
+        assert_eq!(loaded.proxy_type, ProxyType::Socks5h);
+        assert_eq!(loaded.proxy_type.as_scheme(), "socks5h");
+        assert_eq!(loaded.proxy_type.as_transport_scheme(), "socks5h");
+        assert_eq!(ProxyType::Socks5.as_transport_scheme(), "socks5h");
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
+    }
+}
