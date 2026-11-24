@@ -364,14 +364,18 @@ pub(super) fn append_targets_18_to_35(roots: &McpPathRoots, specs: &mut Vec<Buil
     });
 
     // 34. zed
-    let zed_path = if cfg!(windows) {
-        roots.win_app_data.join("Zed").join("settings.json")
-    } else {
-        roots
-            .env_override("SKILLSTAR_ZED_CONFIG_DIR")
-            .unwrap_or_else(|| roots.xdg_config_home.join("zed"))
-            .join("settings.json")
-    };
+    // The override is read on every platform; only the default directory is
+    // platform-specific.
+    let zed_dir = roots
+        .env_override("SKILLSTAR_ZED_CONFIG_DIR")
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                roots.win_app_data.join("Zed")
+            } else {
+                roots.xdg_config_home.join("zed")
+            }
+        });
+    let zed_path = zed_dir.join("settings.json");
     specs.push(BuiltInTargetSpec {
         id: "zed".into(),
         name: "Zed".into(),
