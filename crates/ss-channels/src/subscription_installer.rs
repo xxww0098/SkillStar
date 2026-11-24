@@ -595,7 +595,7 @@ mod tests {
                     html_url: "https://github.com/acme/channel".into(),
                     // D-081 fetches the remote directly (no repo cache), so
                     // the fixture serves the release over a file:// remote.
-                    clone_url: format!("file://{}", repository.display()),
+                    clone_url: ss_git::ops::local_file_url(&repository),
                     private: true,
                     permissions: RepositoryPermissions {
                         admin: false,

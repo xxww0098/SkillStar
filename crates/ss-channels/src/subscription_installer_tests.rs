@@ -65,6 +65,29 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
+/// Create a one-skill release repository at `origin`, with `SKILL.md` ending
+/// in `body`, staged but not committed.
+///
+/// The newlines are pinned to LF on purpose: a Windows checkout defaults to
+/// `core.autocrlf=true` and would rewrite the file on clone, so its content
+/// hash would no longer match the manifest (windows-ci.yml, failure lesson 5).
+fn stage_release_origin(origin: &Path, body: &str) {
+    let skill_root = origin.join("skills/writer");
+    std::fs::create_dir_all(&skill_root).unwrap();
+    std::fs::write(
+        skill_root.join("SKILL.md"),
+        format!("---\nname: writer\ndescription: Writer\n---\n{body}\n"),
+    )
+    .unwrap();
+    git(origin, &["init", "-q"]);
+    git(origin, &["config", "user.email", "tests@skillstar.local"]);
+    git(origin, &["config", "user.name", "SkillStar Tests"]);
+    git(origin, &["config", "core.autocrlf", "false"]);
+    git(origin, &["config", "core.eol", "lf"]);
+    std::fs::write(origin.join(".gitattributes"), "* -text\n").unwrap();
+    git(origin, &["add", "."]);
+}
+
 fn install_fixture() -> (InstallSandbox, ChannelInstallReceipt, PathBuf, PathBuf) {
     let sandbox = InstallSandbox::new();
     let repo = ss_core::infra::paths::repos_cache_dir().join("acme--channel");
@@ -227,19 +250,7 @@ async fn production_installer_verifies_the_exact_release_checkout() {
     let (_sandbox, _receipt, _installed_repo, _hub_skill) = install_fixture();
     let origin = ss_core::infra::paths::hub_root().join("verifier-origin");
     let skill_root = origin.join("skills/writer");
-    std::fs::create_dir_all(&skill_root).unwrap();
-    std::fs::write(
-        skill_root.join("SKILL.md"),
-        "---\nname: writer\ndescription: Writer\n---\n# Verified\n",
-    )
-    .unwrap();
-    git(&origin, &["init", "-q"]);
-    git(&origin, &["config", "user.email", "tests@skillstar.local"]);
-    git(&origin, &["config", "user.name", "SkillStar Tests"]);
-    git(&origin, &["config", "core.autocrlf", "false"]);
-    git(&origin, &["config", "core.eol", "lf"]);
-    std::fs::write(origin.join(".gitattributes"), "* -text\n").unwrap();
-    git(&origin, &["add", "."]);
+    stage_release_origin(&origin, "# Verified");
     git(&origin, &["commit", "-m", "verified release"]);
     let commit = git(&origin, &["rev-parse", "HEAD"]);
     let hash = ss_skills::content::snapshot_path("writer", &skill_root)
@@ -256,10 +267,7 @@ async fn production_installer_verifies_the_exact_release_checkout() {
         name: "channel".into(),
         default_branch: "main".into(),
         html_url: "https://github.com/acme/channel".into(),
-        clone_url: format!(
-            "file://{}",
-            std::fs::canonicalize(&origin).unwrap().display()
-        ),
+        clone_url: ss_git::ops::local_file_url(&std::fs::canonicalize(&origin).unwrap()),
         private: true,
         permissions: super::RepositoryPermissions {
             admin: false,
@@ -307,16 +315,7 @@ async fn channel_install_fetches_outside_the_transaction_lock() {
     let probe = ss_skills::fetch::RemoteGitLockProbe::arm(sandbox.root().join("channel-lock-probe"));
     let origin = sandbox.root().join("origin");
     let skill_root = origin.join("skills/writer");
-    std::fs::create_dir_all(&skill_root).unwrap();
-    std::fs::write(
-        skill_root.join("SKILL.md"),
-        "---\nname: writer\ndescription: Writer\n---\n# released\n",
-    )
-    .unwrap();
-    git(&origin, &["init", "-q"]);
-    git(&origin, &["config", "user.email", "tests@skillstar.local"]);
-    git(&origin, &["config", "user.name", "SkillStar Tests"]);
-    git(&origin, &["add", "."]);
+    stage_release_origin(&origin, "# released");
     git(&origin, &["commit", "-qm", "release"]);
     let commit = git(&origin, &["rev-parse", "HEAD"]);
     let hash = ss_skills::content::snapshot_path("writer", &skill_root)
@@ -386,16 +385,7 @@ async fn channel_release_verification_fetches_outside_the_transaction_lock() {
     let probe = ss_skills::fetch::RemoteGitLockProbe::arm(sandbox.root().join("verify-lock-probe"));
     let origin = sandbox.root().join("origin");
     let skill_root = origin.join("skills/writer");
-    std::fs::create_dir_all(&skill_root).unwrap();
-    std::fs::write(
-        skill_root.join("SKILL.md"),
-        "---\nname: writer\ndescription: Writer\n---\n# released\n",
-    )
-    .unwrap();
-    git(&origin, &["init", "-q"]);
-    git(&origin, &["config", "user.email", "tests@skillstar.local"]);
-    git(&origin, &["config", "user.name", "SkillStar Tests"]);
-    git(&origin, &["add", "."]);
+    stage_release_origin(&origin, "# released");
     git(&origin, &["commit", "-qm", "release"]);
     let commit = git(&origin, &["rev-parse", "HEAD"]);
     let hash = ss_skills::content::snapshot_path("writer", &skill_root)

@@ -68,7 +68,8 @@ fn the_live_client_is_matched_to_its_row() {
         .expect("antigravity is one of the agents");
     assert_eq!(antigravity.identity, None);
     assert!(
-        antigravity.source.ends_with("Antigravity IDE/User/globalStorage/state.vscdb"),
+        std::path::Path::new(&antigravity.source)
+            .ends_with("Antigravity IDE/User/globalStorage/state.vscdb"),
         "{}",
         antigravity.source
     );

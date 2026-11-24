@@ -242,7 +242,12 @@ mod project_binding_tests {
         assert_eq!(observed.root, fs::canonicalize(&alias).unwrap());
         assert_eq!(manifest_bytes().as_deref(), Some(before.as_slice()));
         let stored = fs::read_to_string(fs_paths::projects_manifest_path()).unwrap();
-        assert!(stored.contains(alias.to_str().unwrap()));
+        // The manifest is JSON, which escapes the backslashes of a Windows path.
+        let alias_json = serde_json::to_string(alias.to_str().unwrap()).unwrap();
+        assert!(
+            stored.contains(&alias_json[1..alias_json.len() - 1]),
+            "{stored}"
+        );
         assert_ne!(alias, real);
     }
 
