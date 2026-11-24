@@ -74,8 +74,8 @@ fn writes_the_shape_the_cli_reads() {
     assert_eq!(outcome.agent, "codex");
     assert_eq!(outcome.live.as_deref(), Some("one"));
     assert_eq!(
-        outcome.target,
-        fixture.home().join("home/.codex/auth.json").display().to_string()
+        std::path::Path::new(&outcome.target),
+        fixture.home().join("home/.codex/auth.json")
     );
 
     let path = fixture.auth_path();
@@ -145,7 +145,7 @@ fn live_and_read_agree_on_the_account_id() {
         live.refresh_fingerprint.as_deref(),
         Some(crate::identity::fingerprint("rt-three").as_str())
     );
-    assert!(live.source.ends_with(".codex/auth.json"));
+    assert!(std::path::Path::new(&live.source).ends_with(".codex/auth.json"));
 
     let local = read(&fixture.roots).expect("read").expect("a session");
     assert_eq!(local.tokens.access_token, access_token("three"));

@@ -100,6 +100,30 @@ fn reset_caches() {
     crate::update_state::reset_for_test();
 }
 
+/// Set a file's or a directory's modification time to ten seconds past the
+/// epoch — long before every age threshold the sweeps use.
+///
+/// `File::open` followed by `set_times` only works on unix: Windows opens
+/// without `FILE_FLAG_BACKUP_SEMANTICS`, so it cannot open a directory at all,
+/// and a read-only handle lacks `FILE_WRITE_ATTRIBUTES` for any target.
+pub fn backdate(path: &Path) {
+    let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10);
+    let times = std::fs::FileTimes::new().set_modified(when);
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        std::fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+    };
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path);
+    file.unwrap().set_times(times).unwrap();
+}
+
 impl Drop for Sandbox {
     fn drop(&mut self) {
         reset_caches();

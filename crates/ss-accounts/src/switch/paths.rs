@@ -476,9 +476,10 @@ mod tests {
         let base = temp.path().join("elsewhere");
         let setting = temp.path().join("home/.zcode/v2/setting.json");
         std::fs::create_dir_all(setting.parent().expect("dir")).expect("dir");
+        // serde_json 转义 Windows 路径里的反斜杠；手拼的 JSON 在那里不是合法转义。
         std::fs::write(
             &setting,
-            format!(r#"{{"dataBaseDir":"{}"}}"#, base.display()),
+            serde_json::json!({ "dataBaseDir": base }).to_string(),
         )
         .expect("setting");
         assert_eq!(zcode_home(&roots), base.join(".zcode"));

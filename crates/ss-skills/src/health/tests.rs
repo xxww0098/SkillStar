@@ -420,12 +420,7 @@ fn repair_restores_a_removed_skill_after_the_sweep_that_runs_under_the_lock() {
     std::fs::rename(hub.join("alpha"), &removed).unwrap();
     let old = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 60);
     crate::materialize::write_transient_born_at(&removed, old);
-    let file = std::fs::File::open(&removed).unwrap();
-    file.set_times(
-        std::fs::FileTimes::new()
-            .set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10)),
-    )
-    .unwrap();
+    crate::test_sandbox::backdate(&removed);
 
     let repair = plan(&scan());
     assert!(

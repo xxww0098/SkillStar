@@ -280,7 +280,7 @@ fn sweep_keeps_a_backup_whose_target_is_gone_and_drops_an_old_stage() {
     let old_backup = root.join(".skillstar-backup-missing");
     std::fs::create_dir_all(&old_backup).unwrap();
     std::fs::write(old_backup.join("SKILL.md"), "only copy").unwrap();
-    backdate(&old_backup);
+    crate::test_sandbox::backdate(&old_backup);
     write_transient_born_at(
         &old_backup,
         std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 60),
@@ -321,13 +321,6 @@ fn rename_retries_a_transient_failure_and_stops_when_the_source_is_missing() {
     })
     .unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
-}
-
-fn backdate(path: &std::path::Path) {
-    let file = std::fs::File::open(path).unwrap();
-    let times = std::fs::FileTimes::new()
-        .set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10));
-    file.set_times(times).unwrap();
 }
 
 fn count_files(dir: &std::path::Path) -> u64 {

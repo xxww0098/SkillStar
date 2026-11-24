@@ -70,8 +70,8 @@ fn a_switch_writes_sealed_values_and_the_family_mode() {
     assert_eq!(outcome.agent, "zcode");
     assert_eq!(outcome.live.as_deref(), Some("user-1"));
     assert_eq!(
-        outcome.target,
-        fixture.home().join("home/.zcode/v2/credentials.json").display().to_string()
+        std::path::Path::new(&outcome.target),
+        fixture.home().join("home/.zcode/v2/credentials.json")
     );
 
     let body: Value =

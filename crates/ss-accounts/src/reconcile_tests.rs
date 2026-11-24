@@ -55,7 +55,7 @@ fn the_live_client_is_matched_to_its_row() {
         .expect("codex present");
     assert_eq!(codex.identity.as_deref(), Some("acc-live"));
     assert_eq!(codex.account_id.as_deref(), Some(stored.id.as_str()));
-    assert!(codex.source.ends_with(".codex/auth.json"));
+    assert!(std::path::Path::new(&codex.source).ends_with(".codex/auth.json"));
 
     // The other agents have no credential here, and saying so is not an error.
     assert_eq!(live.len(), crate::Agent::supported().len());

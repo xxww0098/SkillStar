@@ -76,8 +76,8 @@ fn writes_the_entry_under_the_scope_key_the_cli_reads() {
     assert_eq!(outcome.agent, "grok");
     assert_eq!(outcome.live.as_deref(), Some("user-1"));
     assert_eq!(
-        outcome.target,
-        fixture.home().join("home/.grok/auth.json").display().to_string()
+        std::path::Path::new(&outcome.target),
+        fixture.home().join("home/.grok/auth.json")
     );
 
     let body: Value = serde_json::from_slice(&std::fs::read(fixture.auth_path()).expect("read"))

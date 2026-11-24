@@ -171,6 +171,36 @@ fn jsonc_editor_preserves_comments_trailing_commas_custom_fields_and_siblings() 
     assert!(final_parsed["mcpServers"]["user-custom"].is_object());
 }
 
+/// BOM and CRLF survive a read-modify-write of a plain file on every platform.
+#[test]
+fn bom_crlf_preserved_across_writes() {
+    let _sb = SandboxEnv::enter();
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("mcp.json");
+
+    let mut initial_bytes = Vec::from(b"\xEF\xBB\xBF".as_slice());
+    initial_bytes.extend_from_slice(b"{\r\n  \"mcpServers\": {}\r\n}\r\n");
+    fs::write(&path, &initial_bytes).unwrap();
+
+    let (_, text, pres, _) = read_lossless(&path).unwrap().unwrap();
+    assert!(pres.has_bom);
+    assert!(pres.crlf);
+    let patched = patch_json_path(
+        &text,
+        &["mcpServers"],
+        "demo",
+        Some(&serde_json::json!({ "command": "npx" })),
+    )
+    .unwrap();
+    assert!(write_lossless_with_backup(&path, Some(&initial_bytes), &patched, &pres).unwrap());
+
+    assert_preserved_encoding(&fs::read(&path).unwrap());
+}
+
+/// Symlinks are a unix property of the lossless editor: the write goes to the
+/// link's target and the link stays a link. Windows needs a privilege to create
+/// one, so the plain-file case above is what runs there.
+#[cfg(unix)]
 #[test]
 fn bom_crlf_and_symlink_preserved_across_writes() {
     let _sb = SandboxEnv::enter();
@@ -181,11 +211,7 @@ fn bom_crlf_and_symlink_preserved_across_writes() {
     let mut initial_bytes = Vec::from(b"\xEF\xBB\xBF".as_slice());
     initial_bytes.extend_from_slice(b"{\r\n  \"mcpServers\": {}\r\n}\r\n");
     fs::write(&real_file, &initial_bytes).unwrap();
-
-    #[cfg(unix)]
     std::os::unix::fs::symlink(&real_file, &link_path).unwrap();
-    #[cfg(not(unix))]
-    fs::write(&link_path, &initial_bytes).unwrap();
 
     let (_, text, pres, resolved) = read_lossless(&link_path).unwrap().unwrap();
     assert!(pres.has_bom);
@@ -204,8 +230,6 @@ fn bom_crlf_and_symlink_preserved_across_writes() {
     .unwrap();
     let changed = write_lossless_with_backup(&link_path, Some(&initial_bytes), &patched, &pres).unwrap();
     assert!(changed);
-
-    #[cfg(unix)]
     assert!(
         fs::symlink_metadata(&link_path)
             .unwrap()
@@ -213,8 +237,10 @@ fn bom_crlf_and_symlink_preserved_across_writes() {
             .is_symlink(),
         "symlink must stay a symlink"
     );
+    assert_preserved_encoding(&fs::read(&real_file).unwrap());
+}
 
-    let disk_raw = fs::read(&real_file).unwrap();
+fn assert_preserved_encoding(disk_raw: &[u8]) {
     assert!(disk_raw.starts_with(b"\xEF\xBB\xBF"), "BOM preserved");
     let disk_str = String::from_utf8_lossy(&disk_raw[3..]);
     assert!(disk_str.contains("\r\n"), "CRLF preserved");

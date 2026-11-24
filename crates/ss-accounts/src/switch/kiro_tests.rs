@@ -76,12 +76,10 @@ fn an_idc_switch_writes_the_login_the_registration_and_the_profile() {
     assert_eq!(outcome.agent, "kiro");
     assert_eq!(outcome.live.as_deref(), Some("user-1"));
     assert_eq!(
-        outcome.target,
+        std::path::Path::new(&outcome.target),
         fixture
             .home()
             .join("home/.aws/sso/cache/kiro-auth-token.json")
-            .display()
-            .to_string()
     );
 
     let token: Value =

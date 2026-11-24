@@ -296,7 +296,13 @@ mod project_binding_tests {
 
     fn symlink_pair(env: &mut EnvGuard, name: &str) -> (PathBuf, PathBuf) {
         let n = SUFFIX.fetch_add(1, Ordering::Relaxed);
-        if let Ok(tmp) = fs::canonicalize("/tmp") {
+        // `/tmp` is an alias only where it is itself absolute and redirected
+        // (macOS: `/private/tmp`). On Windows `/tmp` names a directory on the
+        // current drive — not an absolute path, and not a link — so the
+        // junction pair below is what runs there.
+        if Path::new("/tmp").is_absolute()
+            && let Ok(tmp) = fs::canonicalize("/tmp")
+        {
             let alias = PathBuf::from("/tmp").join(format!("skillstar-bind-{name}-{n}"));
             if tmp != Path::new("/tmp") && !alias.exists() {
                 fs::create_dir_all(&alias).unwrap();

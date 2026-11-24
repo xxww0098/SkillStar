@@ -336,7 +336,7 @@ fn activate_writes_the_client_and_moves_last_used_at() {
 
     let outcome = activate_with(&stored.id, oauth_rotates, usage_ok).expect("activate");
     assert_eq!(outcome.previous, None);
-    assert!(outcome.target.ends_with(".codex/auth.json"));
+    assert!(std::path::Path::new(&outcome.target).ends_with(".codex/auth.json"));
     assert!(outcome.account.is_active);
     let used_at = outcome.account.last_used_at.expect("last_used_at");
     assert_eq!(
