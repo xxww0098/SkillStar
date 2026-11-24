@@ -318,3 +318,47 @@ fn parse_install_input_keeps_windows_path_backslashes() {
     let spaced = parse_install_input("npx skills add my\\ skills").unwrap();
     assert_eq!(spaced.source, "my skills");
 }
+
+#[test]
+fn file_url_path_input_keeps_the_caller_prefixing_rule() {
+    use super::file_url_to_path_input;
+    assert_eq!(
+        file_url_to_path_input("file:///var/tmp/repo"),
+        Some("/var/tmp/repo")
+    );
+    // `file://server/share/repo` is a host path here; the caller adds the
+    // leading slash, as it always has.
+    assert_eq!(
+        file_url_to_path_input("file://server/share/repo"),
+        Some("server/share/repo")
+    );
+    assert_eq!(file_url_to_path_input("https://github.com/o/r"), None);
+}
+
+#[cfg(windows)]
+#[test]
+fn file_url_path_input_drops_the_slash_before_a_drive_letter() {
+    use super::file_url_to_path_input;
+    // Both spellings are what `local_file_url` and a user may hand over.
+    assert_eq!(
+        file_url_to_path_input("file:///C:/Users/dev/repo"),
+        Some("C:/Users/dev/repo")
+    );
+    assert_eq!(
+        file_url_to_path_input("file://C:/Users/dev/repo"),
+        Some("C:/Users/dev/repo")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn source_parse_accepts_a_drive_letter_file_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = crate::git::ops::local_file_url(dir.path());
+    let source =
+        Source::parse(&url).expect("a `file:///C:/…` URL names the directory it came from");
+    let name = dir.path().file_name().unwrap().to_str().unwrap();
+    assert_eq!(source.short, format!("local/{name}"));
+    // `scan_repo_with_refresh` parses the canonical URL a second time.
+    Source::parse(&source.repo_url).expect("the canonical URL re-parses");
+}

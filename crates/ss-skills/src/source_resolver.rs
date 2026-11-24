@@ -118,22 +118,34 @@ fn looks_like_local_source(input: &str) -> bool {
         || input.starts_with('~')
 }
 
+/// Undo the form [`ss_git::ops::local_file_url`] writes: drop the scheme and,
+/// for a drive-letter path, the slash that precedes the drive. That slash is
+/// part of the URL, not of the path — kept, it turns `C:/…` into a path that
+/// Windows cannot resolve. Every reader of a `file://` source goes through
+/// here, so the two sides cannot drift apart again.
+pub(crate) fn file_url_to_path_input(repo_url: &str) -> Option<&str> {
+    let rest = repo_url.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
+    match rest.strip_prefix('/') {
+        Some(after) if cfg!(windows) && is_windows_drive_path(after) => Some(after),
+        _ => Some(rest),
+    }
+}
+
 fn parse_local_source(
     input: &str,
     git_ref: Option<String>,
     skill_filter: Option<String>,
 ) -> Result<Source> {
-    let path = if let Some(rest) = input.strip_prefix("file://") {
-        let rest = rest.strip_prefix("//").unwrap_or(rest);
-        PathBuf::from(
+    let path = match file_url_to_path_input(input) {
+        Some(rest) => PathBuf::from(
             if rest.len() >= 2 && rest.as_bytes()[1] == b':' || rest.starts_with('/') {
                 rest.to_string()
             } else {
                 format!("/{rest}")
             },
-        )
-    } else {
-        PathBuf::from(input)
+        ),
+        None => PathBuf::from(input),
     };
     if !path.exists() {
         return Err(anyhow!(

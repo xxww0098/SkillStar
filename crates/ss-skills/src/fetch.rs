@@ -334,16 +334,7 @@ impl Drop for RemoteGitLockProbe {
 
 /// A `file://` source's real directory, when the URL points at one.
 pub fn local_source_dir(repo_url: &str) -> Option<PathBuf> {
-    let rest = repo_url.strip_prefix("file://")?;
-    let rest = rest.strip_prefix("//").unwrap_or(rest);
-    // `local_file_url` writes a drive-letter path as `file:///C:/…`: that first
-    // slash belongs to the URL, not to the path.
-    let rest = match rest.strip_prefix('/') {
-        Some(after) if cfg!(windows) && crate::source_resolver::is_windows_drive_path(after) => {
-            after
-        }
-        _ => rest,
-    };
+    let rest = crate::source_resolver::file_url_to_path_input(repo_url)?;
     let absolute =
         (cfg!(windows) && rest.len() >= 2 && rest.as_bytes()[1] == b':') || rest.starts_with('/');
     if !absolute {
