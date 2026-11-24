@@ -46,6 +46,18 @@
 # rsa 0.10.0-rc.19 still arrives — now through nsh-js -> quickjs-jit-stdlib
 # (the JS runtime the TSX pages run on). The RUSTSEC-2023-0071 entry stays,
 # with its reachability rewritten below.
+#
+# Updated 2026-11-25 (first v0.0.1 release attempt): the step ran for the
+# first time since the nsh migration against a fresh advisory-db and reported
+# 12 errors. Fixed by upgrade, no entry needed (a return means a regression):
+#   RUSTSEC-2026-0386  tokio 1.52.3 -> 1.54.1                (unsound AsyncFd)
+#   RUSTSEC-2026-0592  url 2.5.8 -> 2.5.9                    (Url::origin overflow)
+#   RUSTSEC-2026-0383  webpki-root-certs 1.0.7 -> 1.0.12    (distrusted emSign roots)
+#   RUSTSEC-2026-0459  rusqlite 0.39.0 -> 0.41.1 with r2d2_sqlite 0.34.0 -> 0.36.0
+#                      and libsqlite3-sys 0.37.0 -> 0.39.1  (bundled SQLite CVE)
+#   yanked             chacha20 0.10.0 -> 0.10.2
+# Five `unmaintained` notices have no fixed version and are allowlisted in
+# the UNMAINTAINED group below.
 
 [advisories]
 version = 2
@@ -82,6 +94,78 @@ the next dependency review or if RUSTSEC-2023-0071 ever gains a patched
 version. This entry is a stopgap for an unfixable upstream, not an
 acceptance of the risk in perpetuity — it deserves an explicit owner
 sign-off it has not yet had.
+""" },
+
+  # ---------------------------------------------------------------------
+  # UNMAINTAINED — maintenance-risk notes, not vulnerabilities. Each one is
+  # here because no fixed version exists; the reason says who pulls the
+  # crate in and what moving off it would take.
+  # ---------------------------------------------------------------------
+  { id = "RUSTSEC-2026-0543", reason = """
+chrono 0.4.45 — unmaintained. A direct workspace dependency of ss-accounts,
+ss-app, ss-channels, ss-core, ss-git, ss-marketplace, ss-mcp, ss-mcp-hub and
+ss-skills, and also reached through every nsh 0.6.1 crate, rmcp and schemars.
+The advisory names no fixed version.
+
+Exposure: none today — this is a maintenance notice. The debt is real and it
+is ours: nine crates depend on chrono directly, so moving to a maintained
+library is a source change, not a lockfile change, and is deliberately not
+smuggled into a dependency patch.
+
+RE-EVALUATE: at the next dependency review, schedule the migration; at once
+if a vulnerability is filed against chrono.
+""" },
+  { id = "RUSTSEC-2025-0141", reason = """
+bincode 1.3.3 — unmaintained. Reached only through nsh 0.6.1's syntax
+highlighter: syntect 5.3.0, via nsh-base and two-face 0.4.5. No SkillStar
+crate calls bincode, and nothing here can be upgraded — syntect 5.x is the
+line that uses bincode 1, and the nsh crates are pinned to =0.6.1.
+
+Exposure: maintenance notice only. It sits inside syntax highlighting of the
+text the app renders, behind the pinned framework version.
+
+RE-EVALUATE: whenever the nsh pins move, or when the advisory-db withdraws
+the entry (an ignore that matches nothing fails the check).
+""" },
+  { id = "RUSTSEC-2026-0206", reason = """
+rustybuzz 0.20.1 — unmaintained. Reached only through the nsh SVG renderer:
+resvg 0.46.0 -> usvg 0.46.0. No fixed version without a newer resvg, and nsh
+pins 0.46. No SkillStar crate calls rustybuzz.
+
+Exposure: maintenance notice only — text shaping inside SVG rendering of the
+icons the app ships.
+
+RE-EVALUATE: whenever the nsh pins move, or when the advisory-db withdraws
+the entry.
+""" },
+  { id = "RUSTSEC-2026-0192", reason = """
+ttf-parser 0.25.1 — unmaintained. Reached through nsh 0.6.1 only: nsh-core,
+nsh-macros, and resvg 0.46.0 (usvg, fontdb, rustybuzz). Same situation as
+rustybuzz above — no fixed version, pinned by the framework, and no
+SkillStar crate calls it.
+
+Exposure: maintenance notice only — font parsing in nsh's text and SVG
+rendering, over the system font set and the app's own assets.
+
+RE-EVALUATE: whenever the nsh pins move, or when the advisory-db withdraws
+the entry.
+""" },
+  { id = "RUSTSEC-2024-0449", reason = """
+unsafe-libyaml 0.2.11 — unmaintained. Reached through serde_yaml
+0.9.34+deprecated, a direct workspace dependency of ss-core, ss-mcp-hub and
+ss-skills: it parses SKILL.md front matter and agent MCP config files.
+serde_yaml is archived too, so nothing on this line will be fixed; the
+maintained candidates (serde_yaml_ng, serde-saphyr, serde_yml) each parse a
+little differently.
+
+Exposure: none today — the advisory is a maintenance notice, not a
+vulnerability. The debt weighs more here than for the entries above, because
+this parser sits in front of YAML that comes from the network and from other
+tools' config files.
+
+RE-EVALUATE: at the next dependency review, budget the migration with the
+existing YAML tests as the corpus; at once if a vulnerability is filed
+against unsafe-libyaml or serde_yaml.
 """ },
 
 ]
