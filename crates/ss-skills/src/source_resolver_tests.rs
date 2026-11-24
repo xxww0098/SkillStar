@@ -297,3 +297,24 @@ fn source_serde_uses_scan_field_names() {
     let roundtripped: Source = serde_json::from_value(json).unwrap();
     assert_eq!(roundtripped, source);
 }
+
+#[test]
+fn parse_install_input_keeps_windows_path_backslashes() {
+    // Inside double quotes a backslash only escapes `"`, `\`, `` ` `` and `$`
+    // (the POSIX rule); PowerShell and cmd never use it as an escape at all.
+    let quoted =
+        parse_install_input("npx skills add \"C:\\Users\\dev\\My Repo\\skills\" --skill beta").unwrap();
+    assert_eq!(quoted.source, "C:\\Users\\dev\\My Repo\\skills");
+    assert_eq!(quoted.skills, vec!["beta"]);
+
+    // Unquoted: a word that opens with a drive letter is a Windows path.
+    let bare = parse_install_input("npx skills add C:\\Users\\dev\\skills --all").unwrap();
+    assert_eq!(bare.source, "C:\\Users\\dev\\skills");
+    assert!(bare.all);
+
+    // The POSIX escapes keep their meaning everywhere else.
+    let escaped = parse_install_input("npx skills add \"a\\\"b\"").unwrap();
+    assert_eq!(escaped.source, "a\"b");
+    let spaced = parse_install_input("npx skills add my\\ skills").unwrap();
+    assert_eq!(spaced.source, "my skills");
+}

@@ -468,6 +468,9 @@ fn tokenize_shell_words(input: &str) -> Vec<String> {
     let mut current = String::new();
     let mut in_single = false;
     let mut in_double = false;
+    // A word that opens with a drive letter (`C:`) is a Windows path: outside
+    // quotes its backslashes stay literal, the way PowerShell and cmd read them.
+    let mut windows_path = false;
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
         if in_single {
@@ -479,7 +482,9 @@ fn tokenize_shell_words(input: &str) -> Vec<String> {
             continue;
         }
         if in_double {
-            if ch == '\\' {
+            // POSIX shells escape only these four here; before anything else a
+            // backslash is literal, which is what a quoted Windows path needs.
+            if ch == '\\' && matches!(chars.peek(), Some('"' | '\\' | '`' | '$')) {
                 if let Some(next) = chars.next() {
                     current.push(next);
                 }
@@ -493,6 +498,7 @@ fn tokenize_shell_words(input: &str) -> Vec<String> {
         match ch {
             '\'' => in_single = true,
             '"' => in_double = true,
+            '\\' if windows_path => current.push(ch),
             '\\' => {
                 if let Some(next) = chars.next() {
                     current.push(next);
@@ -501,9 +507,13 @@ fn tokenize_shell_words(input: &str) -> Vec<String> {
             c if c.is_whitespace() => {
                 if !current.is_empty() {
                     tokens.push(std::mem::take(&mut current));
+                    windows_path = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                current.push(ch);
+                windows_path |= is_windows_drive_path(&current);
+            }
         }
     }
     if !current.is_empty() {
@@ -694,7 +704,7 @@ fn is_valid_repo_segment(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-fn is_windows_drive_path(input: &str) -> bool {
+pub(crate) fn is_windows_drive_path(input: &str) -> bool {
     let bytes = input.as_bytes();
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }

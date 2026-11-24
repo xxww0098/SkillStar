@@ -336,6 +336,14 @@ impl Drop for RemoteGitLockProbe {
 pub fn local_source_dir(repo_url: &str) -> Option<PathBuf> {
     let rest = repo_url.strip_prefix("file://")?;
     let rest = rest.strip_prefix("//").unwrap_or(rest);
+    // `local_file_url` writes a drive-letter path as `file:///C:/…`: that first
+    // slash belongs to the URL, not to the path.
+    let rest = match rest.strip_prefix('/') {
+        Some(after) if cfg!(windows) && crate::source_resolver::is_windows_drive_path(after) => {
+            after
+        }
+        _ => rest,
+    };
     let absolute =
         (cfg!(windows) && rest.len() >= 2 && rest.as_bytes()[1] == b':') || rest.starts_with('/');
     if !absolute {
@@ -393,6 +401,18 @@ mod tests {
     fn missing_local_dir_is_none() {
         assert!(local_source_dir("file:///definitely/not/here").is_none());
         assert!(local_source_dir("https://github.com/o/r.git").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_letter_file_url_resolves_to_its_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = git_ops::local_file_url(dir.path());
+        assert!(url.starts_with("file:///"), "{url}");
+        assert_eq!(
+            std::fs::canonicalize(local_source_dir(&url).expect("the directory")).unwrap(),
+            std::fs::canonicalize(dir.path()).unwrap()
+        );
     }
 
     #[test]
