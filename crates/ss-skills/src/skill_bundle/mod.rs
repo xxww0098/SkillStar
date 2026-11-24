@@ -116,12 +116,7 @@ pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<Path
     // Determine output path
     let out_path = match output_path {
         Some(p) => PathBuf::from(p),
-        None => {
-            let out_dir = dirs::download_dir()
-                .or_else(dirs::home_dir)
-                .unwrap_or_else(|| PathBuf::from("."));
-            out_dir.join(format!("{}.ags", skill_name))
-        }
+        None => default_export_dir().join(format!("{}.ags", skill_name)),
     };
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -308,6 +303,17 @@ fn remote_source_url(lock: &crate::skill_lock::SkillLock, skill_name: &str) -> O
         .then(|| url.to_string())
 }
 
+/// Where a bundle export lands when the caller names no directory: the
+/// downloads directory, else the home directory, else the working directory.
+///
+/// On unix `dirs` reads `HOME`; on Windows it asks the operating system, so a
+/// re-rooted `HOME` does not move this directory.
+pub fn default_export_dir() -> PathBuf {
+    dirs::download_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 /// Export a deck's skills into one `.agd` bundle, naming it after the deck
 /// and dropping it in the downloads directory (home as fallback). Only
 /// skills present in the hub are packed; missing members are skipped.
@@ -316,6 +322,15 @@ fn remote_source_url(lock: &crate::skill_lock::SkillLock, skill_name: &str) -> O
 /// [`deck_name_from_bundle_path`] strips, so re-importing the file rebuilds
 /// the deck under its original name.
 pub fn export_deck_bundle(skill_names: &[String], deck_name: &str) -> Result<PathBuf> {
+    export_deck_bundle_to(&default_export_dir(), skill_names, deck_name)
+}
+
+/// [`export_deck_bundle`] into a directory the caller chooses.
+pub fn export_deck_bundle_to(
+    out_dir: &Path,
+    skill_names: &[String],
+    deck_name: &str,
+) -> Result<PathBuf> {
     let safe: String = deck_name
         .chars()
         .map(|c| {
@@ -327,9 +342,6 @@ pub fn export_deck_bundle(skill_names: &[String], deck_name: &str) -> Result<Pat
         })
         .collect();
     let stamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
-    let out_dir = dirs::download_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
     let out = out_dir.join(format!("{safe}-bundle-{stamp}.agd"));
     export_multi_bundle(skill_names, &out.to_string_lossy())
 }
@@ -652,18 +664,25 @@ mod roundtrip_tests {
         hub_skill("alpha");
         hub_skill("beta");
 
-        // `HOME` is re-rooted, so the downloads default lands in the sandbox.
-        let path = export_deck_bundle(&["alpha".into(), "beta".into()], "My Deck").unwrap();
+        // A caller-chosen directory keeps the export off the real home on every
+        // OS: on Windows `dirs` asks the system and ignores the re-rooted `HOME`.
+        let out_dir = sandbox.0.home().join("exports");
+        let path =
+            export_deck_bundle_to(&out_dir, &["alpha".into(), "beta".into()], "My Deck").unwrap();
 
         assert!(path.is_file(), "bundle missing at {}", path.display());
-        assert!(
-            path.starts_with(sandbox.0.home()),
-            "export must not touch the real home: {}",
-            path.display()
-        );
+        assert_eq!(path.parent(), Some(out_dir.as_path()), "{}", path.display());
         assert_eq!(
             deck_name_from_bundle_path(&path.to_string_lossy()),
             "My-Deck"
+        );
+
+        // On unix the default directory follows `HOME`, which the sandbox re-rooted.
+        #[cfg(unix)]
+        assert!(
+            default_export_dir().starts_with(sandbox.0.home()),
+            "default export dir must follow HOME: {}",
+            default_export_dir().display()
         );
     }
 
