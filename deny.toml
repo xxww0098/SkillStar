@@ -12,7 +12,11 @@
 #   sources     PASSES
 #
 # `cargo deny check --config deny.toml` is the workspace check. CI points at
-# this file. An ignore that matches nothing fails as advisory-not-detected.
+# this file and runs cargo-deny 0.22.1, the version cargo-deny-action@v2 pins;
+# an older local cargo-deny reports a different set of notices, so check with
+# the CI version before trusting a local run. An ignore that matches nothing
+# is reported as advisory-not-detected — an error on the versions the notes
+# below were written for, a warning on 0.22.1. Stale entries are deleted either way.
 #
 # Fixed by upgrade in this same change (no allowlist entry needed, and none
 # should be added if they come back — they mean a real regression):
@@ -58,10 +62,24 @@
 #   yanked             chacha20 0.10.0 -> 0.10.2
 # Five `unmaintained` notices have no fixed version and are allowlisted in
 # the UNMAINTAINED group below.
+#
+# Updated 2026-11-25: cargo-deny 0.22.1 reports `unmaintained` notices for the
+# workspace's direct dependencies only. Four of the five UNMAINTAINED entries
+# matched nothing on CI (advisory-not-detected) while a 0.20.2 on a developer
+# machine still listed them as errors, so `unmaintained = "all"` under
+# [advisories] pins the scope the allowlist was written for. The same run
+# prints warning[patched] for RUSTSEC-2023-0071 and suggests
+# `cargo update -p rsa`: rsa 0.10.0 dropped the `sha2` feature that
+# quickjs-jit-stdlib 0.14.2 enables, so `cargo update -p rsa --precise 0.10.0`
+# does not resolve and the entry stays until nsh-js moves.
 
 [advisories]
 version = 2
 db-urls = ["https://github.com/rustsec/advisory-db"]
+# cargo-deny 0.22 reports `unmaintained` for the workspace's direct
+# dependencies only; the UNMAINTAINED entries below also cover transitive
+# crates, so the older scope is stated here instead of inherited.
+unmaintained = "all"
 
 # Every entry below is a dependency we cannot move off today. `unmaintained`
 # and `vulnerability` are deliberately kept apart: unmaintained is a
