@@ -13,7 +13,12 @@ pub mod ranker;
 pub mod recommend;
 mod stdio;
 
+pub use approval::{ApprovalRecord, ApprovalSource};
 pub use cli_approve::run_approve;
+pub use plan::{
+    PendingPlanOperation, PendingProjectSkillPlan, approve_project_skill_plan,
+    pending_project_skill_plan,
+};
 pub use stdio::{is_mcp_invocation, is_mcp_serve, serve, serve_with};
 
 #[cfg(test)]

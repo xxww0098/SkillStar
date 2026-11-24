@@ -27,10 +27,6 @@ pub enum AccountError {
     /// Login or quota layer failure, passed through with its own message.
     #[error("{0}")]
     Domain(String),
-
-    /// Placeholder while a slice is being implemented.
-    #[error("not implemented yet")]
-    Unimplemented,
 }
 
 impl From<crate::oauth::OAuthError> for AccountError {

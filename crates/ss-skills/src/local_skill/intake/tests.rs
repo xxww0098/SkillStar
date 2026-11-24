@@ -340,3 +340,50 @@ fn extra_file_in_the_backup_is_restored_instead_of_committed() {
     assert!(!fs_ops::is_link(&agent));
     assert!(agent.is_dir());
 }
+
+#[test]
+fn os_junk_files_do_not_block_adopt_or_relink_and_are_stripped_from_canonical() {
+    let sandbox = Sandbox::production();
+    sandbox.enable_agent("claude");
+    let claude = claude_skills(&sandbox);
+    let canonical = paths::hub_skills_dir();
+
+    // Adopt candidate visited by macOS Finder / Windows Explorer.
+    write_skill(&claude.join("finder-skill"), "finder-skill", "finder body");
+    std::fs::write(claude.join("finder-skill/.DS_Store"), b"junk").unwrap();
+    std::fs::create_dir_all(claude.join("finder-skill/docs")).unwrap();
+    std::fs::write(claude.join("finder-skill/docs/guide.md"), b"guide").unwrap();
+    std::fs::write(claude.join("finder-skill/docs/Thumbs.db"), b"thumbs").unwrap();
+
+    // Relink candidate whose real skill files match canonical, plus .DS_Store.
+    write_skill(&canonical.join("twin-ds"), "twin-ds", "same content");
+    write_skill(&claude.join("twin-ds"), "twin-ds", "same content");
+    std::fs::write(claude.join("twin-ds/.DS_Store"), b"finder-meta").unwrap();
+
+    let planned = plan(&scan());
+    assert!(
+        planned.steps.iter().any(|step| {
+            step.skill == "finder-skill" && step.action == IntakeAction::Adopt
+        }),
+        "{planned:?}"
+    );
+    assert!(
+        planned.steps.iter().any(|step| {
+            step.skill == "twin-ds" && step.action == IntakeAction::Relink
+        }),
+        "{planned:?}"
+    );
+
+    let outcome = apply(&planned).unwrap();
+    assert!(outcome.failed().next().is_none(), "{outcome:?}");
+    assert_eq!(outcome.applied_count(), 2, "{outcome:?}");
+
+    assert!(fs_ops::is_link(&claude.join("finder-skill")));
+    assert!(fs_ops::is_link(&claude.join("twin-ds")));
+    assert!(!canonical.join("finder-skill/.DS_Store").exists());
+    assert!(!canonical.join("finder-skill/docs/Thumbs.db").exists());
+    assert_eq!(
+        std::fs::read(canonical.join("finder-skill/docs/guide.md")).unwrap(),
+        b"guide"
+    );
+}

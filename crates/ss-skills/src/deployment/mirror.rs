@@ -123,6 +123,45 @@ pub(crate) fn sync(agent_id: &str, source_dir: &Path) {
     }
 }
 
+/// Remove conflicting foreign/modified entries for `skill_name` inside
+/// non-reserved mirrors of `agent_id` when the user explicitly requests
+/// taking over an unmanaged deployment, archiving the first real directory
+/// if `archive_slot` does not already hold a snapshot.
+pub(crate) fn clear_foreign_skill_in_mirrors(
+    agent_id: &str,
+    source_dir: &Path,
+    skill_name: &str,
+    archive_slot: &mut Option<crate::backup::BackupEntry>,
+) -> Result<()> {
+    let mirrors = crate::agents::global_mirror_dirs(agent_id);
+    if mirrors.is_empty() {
+        return Ok(());
+    }
+    let reserved = reserved_dirs(source_dir);
+    for mirror in mirrors {
+        if !mirror.parent().is_some_and(Path::exists)
+            || reserved.contains(&fs_ops::canonicalize_existing_prefix(&mirror))
+        {
+            continue;
+        }
+        let target = mirror.join(skill_name);
+        if matches!(
+            ownership::owned_deployment(&target, skill_name),
+            Ownership::Foreign | Ownership::SkillStarModifiedCopy
+        ) {
+            if archive_slot.is_none() && !fs_ops::is_link(&target) && target.is_dir() {
+                *archive_slot = crate::backup::archive_skill(
+                    skill_name,
+                    &target,
+                    crate::backup::BackupReason::CopyConflict,
+                )?;
+            }
+            materialize::remove_entry(&target)?;
+        }
+    }
+    Ok(())
+}
+
 /// Mirror entries a [`sync`] of `agent_id` would change: missing or stale
 /// SkillStar deployments, and SkillStar deployments gone from the source.
 /// Foreign entries are never drift.

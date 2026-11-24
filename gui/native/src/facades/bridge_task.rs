@@ -14,13 +14,12 @@
 //!   skips `on_close` still aborts the git session).
 //! * **Progress stream** — a `std::sync::mpsc` channel whose sender side is a
 //!   `Send + Sync` sink on the blocking pool (the `DialogProgressSink` shape,
-//!   progress.rs:38-46) and whose receiver is drained by
-//!   [`pump_progress`] on the engine thread: every [`PROGRESS_TICK_MS`] keep
-//!   only the newest event (`rx.try_recv` loop, progress.rs:63-73) and
-//!   `Callback::post` it for the next JS turn. The tick *is* the 120ms
-//!   throttle — faster domain events collapse to the last one per window,
-//!   so the throttle lives in this crate (see the slot contracts for why
-//!   not in TSX).
+//!   progress.rs:38-46) and whose receiver is drained by [`drain_latest`] on
+//!   the engine thread: every [`PROGRESS_TICK_MS`] keep only the newest event
+//!   (`rx.try_recv` loop, progress.rs:63-73) and `Callback::post` it for the
+//!   next JS turn. The tick *is* the 120ms throttle — faster domain events
+//!   collapse to the last one per window, so the throttle lives in this crate
+//!   (see the slot contracts for why not in TSX).
 //! * **Stale gating** — a cancelled job's pump stops consuming and stops
 //!   posting (`JobFlag::cancelled` check each tick, the `still`/phase gate
 //!   of progress.rs:81-93); events already queued when cancel lands are
@@ -36,9 +35,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
 
-use nsh_core::JsonValue;
 use nsh_core::prelude::*;
 
 /// The import dialog's watcher tick (progress.rs:61) — the one throttle
@@ -180,36 +177,6 @@ pub(crate) fn drain_latest<E>(rx: &Receiver<E>) -> Drained<E> {
         }
     }
     Drained { latest, disconnected }
-}
-
-/// The progress pump every wave-4 facade task runs on the engine thread:
-/// every `tick`, keep the newest event the channel holds and `post` it to
-/// TSX for the next JS turn; return when the channel disconnects (the
-/// worker finished and dropped its sender) or the job was cancelled
-/// (progress.rs:57-96's watcher, with `JobFlag` as the phase gate).
-///
-/// A cancelled job consumes nothing further and posts nothing more — the
-/// events already queued in JS are the TS epoch's to drop.
-#[allow(dead_code)] // Kept for future streaming tasks after BridgeDemo removal.
-pub(crate) async fn pump_progress(
-    rx: Receiver<JsonValue>,
-    on_event: Callback<JsonValue>,
-    flag: JobFlag,
-    tick: Duration,
-) {
-    loop {
-        timer(tick).await;
-        if flag.cancelled() {
-            return;
-        }
-        let drained = drain_latest(&rx);
-        if let Some(event) = drained.latest {
-            on_event.post(event);
-        }
-        if drained.disconnected {
-            return;
-        }
-    }
 }
 
 #[cfg(test)]

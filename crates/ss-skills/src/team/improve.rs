@@ -124,7 +124,11 @@ pub fn share_learning(draft: LearningDraft, now: DateTime<Utc>) -> Result<Learni
             "Learning body cannot be empty. Pass --body with what the session taught.".to_string(),
         ));
     }
-    if let Some(name) = draft.skill_name.as_deref() {
+    let normalized_skill_name = draft
+        .skill_name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    if let Some(name) = normalized_skill_name.as_deref() {
         crate::content::validate_skill_name(name)?;
     }
     let confidence = draft.confidence.clamp(0.0, 1.0);
@@ -138,10 +142,7 @@ pub fn share_learning(draft: LearningDraft, now: DateTime<Utc>) -> Result<Learni
             .map(|tag| tag.trim().to_string())
             .filter(|tag| !tag.is_empty())
             .collect(),
-        skill_name: draft
-            .skill_name
-            .map(|name| name.trim().to_string())
-            .filter(|name| !name.is_empty()),
+        skill_name: normalized_skill_name,
         confidence,
         created_at: now,
     };

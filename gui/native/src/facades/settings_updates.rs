@@ -38,10 +38,173 @@
 //! `facades/mod.rs` for the whole sandbox lifetime — never a module-private
 //! lock, never `--test-threads=1`.
 
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
+
 use nsh_core::prelude::*;
 use nsh_core::JsonValue;
 
 use nsh_core::element::__private::JsonMap;
+
+type FileStamp = Option<(u64, Option<SystemTime>)>;
+
+struct CachedSkillUpdates {
+    path: PathBuf,
+    stamp: FileStamp,
+    config: ss_core::config::skill_updates::SkillUpdateConfig,
+    pending_writes: u64,
+}
+
+static SKILL_UPDATES_CACHE: OnceLock<Mutex<Option<CachedSkillUpdates>>> = OnceLock::new();
+
+fn skill_updates_cache() -> &'static Mutex<Option<CachedSkillUpdates>> {
+    SKILL_UPDATES_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn file_stamp(path: &Path) -> FileStamp {
+    std::fs::metadata(path)
+        .ok()
+        .map(|meta| (meta.len(), meta.modified().ok()))
+}
+
+fn read_skill_updates_cached() -> ss_core::config::skill_updates::SkillUpdateConfig {
+    let path = ss_core::infra::paths::skill_updates_config_path();
+    let mut guard = skill_updates_cache()
+        .lock()
+        .expect("skill_updates cache lock poisoned");
+    if let Some(cached) = guard.as_ref()
+        && cached.path == path
+        && (cached.pending_writes > 0 || file_stamp(&path) == cached.stamp)
+    {
+        return cached.config.clone();
+    }
+    let stamp = file_stamp(&path);
+    let config = ss_core::config::skill_updates::load_config().unwrap_or_default();
+    *guard = Some(CachedSkillUpdates {
+        path,
+        stamp,
+        config: config.clone(),
+        pending_writes: 0,
+    });
+    config
+}
+
+#[cfg(not(test))]
+fn skill_updates_writer_tx(
+) -> &'static std::sync::mpsc::Sender<(PathBuf, ss_core::config::skill_updates::SkillUpdateConfig)>
+{
+    static TX: OnceLock<
+        std::sync::mpsc::Sender<(PathBuf, ss_core::config::skill_updates::SkillUpdateConfig)>,
+    > = OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<(
+            PathBuf,
+            ss_core::config::skill_updates::SkillUpdateConfig,
+        )>();
+        let _ = std::thread::Builder::new()
+            .name("ss-gui-skill-updates-writer".to_string())
+            .spawn(move || {
+                while let Ok((mut path, mut config)) = rx.recv() {
+                    let mut flushed_count: u64 = 1;
+                    while let Ok((next_path, next_config)) = rx.try_recv() {
+                        if next_path == path {
+                            config = next_config;
+                            flushed_count += 1;
+                        } else {
+                            flush_one_skill_updates_write(&path, &config, flushed_count);
+                            path = next_path;
+                            config = next_config;
+                            flushed_count = 1;
+                        }
+                    }
+                    flush_one_skill_updates_write(&path, &config, flushed_count);
+                }
+            });
+        tx
+    })
+}
+
+#[cfg(not(test))]
+fn flush_one_skill_updates_write(
+    path: &Path,
+    config: &ss_core::config::skill_updates::SkillUpdateConfig,
+    flushed_count: u64,
+) {
+    if let Err(err) = ss_core::config::skill_updates::save_config(config) {
+        eprintln!("settings_updates: failed to persist {}: {err:#}", path.display());
+    }
+    let stamp = file_stamp(path);
+    let mut guard = skill_updates_cache()
+        .lock()
+        .expect("skill_updates cache lock poisoned");
+    if let Some(cached) = guard.as_mut()
+        && cached.path == path
+    {
+        cached.pending_writes = cached.pending_writes.saturating_sub(flushed_count);
+        if cached.pending_writes == 0 {
+            cached.stamp = stamp;
+        }
+    }
+}
+
+fn save_skill_updates_cached(
+    config: ss_core::config::skill_updates::SkillUpdateConfig,
+) -> Result<(), String> {
+    let path = ss_core::infra::paths::skill_updates_config_path();
+    let mut guard = skill_updates_cache()
+        .lock()
+        .expect("skill_updates cache lock poisoned");
+    let entry = guard.get_or_insert_with(|| CachedSkillUpdates {
+        path: path.clone(),
+        stamp: None,
+        config: config.clone(),
+        pending_writes: 0,
+    });
+    entry.path = path.clone();
+    entry.config = config.clone();
+
+    #[cfg(test)]
+    {
+        drop(guard);
+        ss_core::config::skill_updates::save_config(&config).map_err(|err| format!("{err:#}"))?;
+        let stamp = file_stamp(&path);
+        let mut guard = skill_updates_cache()
+            .lock()
+            .expect("skill_updates cache lock poisoned");
+        if let Some(cached) = guard.as_mut()
+            && cached.path == path
+        {
+            cached.stamp = stamp;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    {
+        entry.pending_writes += 1;
+        let send_res = skill_updates_writer_tx().send((path.clone(), config.clone()));
+        drop(guard);
+        if send_res.is_err() {
+            let result =
+                ss_core::config::skill_updates::save_config(&config).map_err(|err| format!("{err:#}"));
+            let stamp = file_stamp(&path);
+            let mut guard = skill_updates_cache()
+                .lock()
+                .expect("skill_updates cache lock poisoned");
+            if let Some(cached) = guard.as_mut()
+                && cached.path == path
+            {
+                cached.pending_writes = cached.pending_writes.saturating_sub(1);
+                if cached.pending_writes == 0 {
+                    cached.stamp = stamp;
+                }
+            }
+            return result;
+        }
+        Ok(())
+    }
+}
 
 /// The skill-updates + translation settings seam (`SettingsUpdates` in TSX).
 #[module]
@@ -50,16 +213,16 @@ pub struct SettingsUpdates;
 #[module]
 impl SettingsUpdates {
     /// `skill_updates::load_config` parity: `{auto_update, interval_minutes}`,
-    /// missing file → manual / hourly. Read-only.
+    /// missing file → manual / hourly. Backed by in-memory cache.
     pub fn load_skill_updates() -> JsonValue {
-        let config = ss_core::config::skill_updates::load_config().unwrap_or_default();
+        let config = read_skill_updates_cached();
         serde_json::to_value(&config).unwrap_or(JsonValue::Null)
     }
 
     /// `save_skill_updates` parity: the picked interval rides
     /// `resolve_interval_minutes` here, so anything off the five grades
     /// stores as the hourly default (the domain load does the same on the
-    /// way in). Atomic write via `ss_core::infra::fs_ops`.
+    /// way in). Atomic write via background writer thread.
     pub fn save_skill_updates(auto_update: bool, interval_minutes: u64) -> Result<(), String> {
         let config = ss_core::config::skill_updates::SkillUpdateConfig {
             auto_update,
@@ -67,7 +230,7 @@ impl SettingsUpdates {
                 interval_minutes,
             ),
         };
-        ss_core::config::skill_updates::save_config(&config).map_err(|err| format!("{err:#}"))
+        save_skill_updates_cached(config)
     }
 
     /// `translation::load_config` parity: the whole

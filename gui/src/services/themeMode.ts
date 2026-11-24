@@ -1,4 +1,5 @@
-import { setColorScheme, signal } from "nsh";
+import { setColorScheme, signal, untracked } from "nsh";
+import { Scrollbar } from "nsh/base";
 
 // Product semantics: the app switches between two in-app looks — `current`
 // (dark canvas) and `paper` (light) — driven by user preference only, never
@@ -20,6 +21,7 @@ export type ThemeMode = "current" | "paper";
 export const themeMode = signal<ThemeMode>("current");
 
 export function setThemeMode(mode: ThemeMode) {
+  if (untracked(themeMode) === mode) return;
   themeMode.set(mode);
   // Engine-native surfaces follow the look (`nsh.json` "appearance" seeds the
   // same value at launch): a paper app must not paint dark syntax on a light
@@ -27,12 +29,41 @@ export function setThemeMode(mode: ThemeMode) {
   setColorScheme(mode === "paper" ? "light" : "dark");
 }
 
-export function toggleThemeMode() {
-  setThemeMode(themeMode() === "current" ? "paper" : "current");
-}
-
 export function isLight(): boolean {
   return themeMode() === "paper";
+}
+
+/**
+ * Installs nsh 0.6's built-in overlay scrollbar theme (`Scrollbar.setTheme`)
+ * once at mount using theme.json's `muted-foreground` token so every `<Scroll>`
+ * and virtualized `<List>` updates automatically on `setColorScheme` without
+ * tearing down and recreating scrollbar views on every theme flip.
+ */
+export function installScrollbarTheme(): void {
+  Scrollbar.setTheme({
+    mode: "scrolling",
+    minThumbLength: 40,
+    motion: {
+      idle: 1400,
+      enter: 120,
+      exit: 220,
+      entrance: "fade",
+    },
+    vertical: {
+      style: { width: 10, padding: 2 },
+      thumbStyle: {
+        borderRadius: 999,
+      },
+      thumbClass: "bg-muted-foreground/35 hover:opacity-95 active:opacity-100",
+    },
+    horizontal: {
+      style: { height: 10, padding: 2 },
+      thumbStyle: {
+        borderRadius: 999,
+      },
+      thumbClass: "bg-muted-foreground/35 hover:opacity-95 active:opacity-100",
+    },
+  });
 }
 
 // Obsidian Event Horizon ("current", default dark) & Stardust Alabaster

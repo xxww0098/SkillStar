@@ -1,19 +1,30 @@
 import { Text, View, effect, mount, signal, type JSX } from "nsh";
 import { paletteToken } from "../../services/themeMode";
-import { groupsChanged } from "../../shell/events";
+import {
+  groupsChanged,
+  requestImportSource,
+  selectPage,
+  type ImportSourceRequest,
+} from "../../shell/events";
+import type { PageId } from "../../shell/nav";
 import { DeckImportHost, openDeckImport } from "./deckImport";
 
 // Test-only entry for the deck-import slice (`nsh test` opens it instead of
 // App.tsx): the deck page that owns the toolbar button is another slice's
 // file, so this harness mounts the one thing the dialog needs from its
-// page — the trigger and the host — plus a marker that flips when the
-// dialog asks the deck page to reload (the groupsChanged contract).
+// page — the trigger and the host — plus markers that flip when the
+// dialog asks the deck page to reload (groupsChanged) or hands off a repo
+// URL to MySkills (selectPage + requestImportSource).
 
 const refreshes = signal(0);
+const handoffPage = signal<PageId | null>(null);
+const handoffSource = signal<ImportSourceRequest | null>(null);
 
 effect(() =>
   groupsChanged.subscribe(() => refreshes.update((count) => count + 1))
 );
+effect(() => selectPage.subscribe((page) => handoffPage.set(page)));
+effect(() => requestImportSource.subscribe((req) => handoffSource.set(req)));
 
 function Harness(): JSX.Element {
   return (
@@ -48,6 +59,11 @@ function Harness(): JSX.Element {
       <If when={refreshes() > 0}>
         <Text testID="deck-import-harness-refreshed" style={{ fontSize: 12 }}>
           refreshes: {refreshes()}
+        </Text>
+      </If>
+      <If when={handoffSource() !== null}>
+        <Text testID="deck-import-harness-handoff" style={{ fontSize: 12 }}>
+          {`${handoffPage() ?? "none"}:${handoffSource()!.input}:${handoffSource()!.autoScan}`}
         </Text>
       </If>
       <DeckImportHost />

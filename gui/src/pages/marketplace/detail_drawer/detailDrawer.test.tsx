@@ -235,10 +235,18 @@ test("source 回退到 GitHub 克隆 URL（extract_github_source_from_url 对位
   expect(explicit.source).toBe("o/r");
 });
 
-test("shownDescription：快照摘要优先，回退卡面 blurb；readme 与描述相同不出按钮", () => {
+test("shownDescription：快照摘要优先，其次卡面原文（不被 localizedDescription 覆盖）", () => {
   const skill = skillFixture("demo", "a/b");
   expect(shownDescription(skill, { kind: "loading" })).toBe("demo blurb");
   expect(shownDescription(skill, { kind: "ready", details: payload().data })).toBe("demo blurb");
+  const cached = parseSkill({
+    name: "cached",
+    description: "English line.",
+    localizedDescription: "中文缓存。",
+    stars: 0,
+    source: "a/b",
+  });
+  expect(shownDescription(cached, { kind: "loading" })).toBe("English line.");
   expect(
     shownDescription(skill, { kind: "ready", details: payload({ summary: "Summary wins" }).data })
   ).toBe("Summary wins");
@@ -319,8 +327,8 @@ test("选了译文且缓存未命中：按钮 pending，fill 只发一次且去�
   const session = createTranslateSession(h.bridge);
   const text = "Build deep modules for agents.";
   expect(session.buttonGate(text, true).pending).toBe(true);
-  session.ensureTranslation(text, true);
-  session.ensureTranslation(text, true); // 在途去重
+  session.ensureTranslation("demo", text, true);
+  session.ensureTranslation("demo", text, true); // 在途去重
   expect(h.fills.length).toBe(1);
   expect(h.fills[0].sources).toEqual([text]);
   // 域语义：成功即写盘，随后 generation bump、lookup 命中。
@@ -338,7 +346,7 @@ test("模型拒绝：钉住的通知带 + 会话内不再发 fill；从原文再
   const h = bridgeHarness({ switchOn: true });
   const session = createTranslateSession(h.bridge);
   const text = "Build deep modules for agents.";
-  session.ensureTranslation(text, true);
+  session.ensureTranslation("demo", text, true);
   h.fills[0].resolve({ done: [], rejection: { model: "demo-model", detail: "refused." } });
   await settle();
   expect(session.rejected()).toBe(true);
@@ -351,7 +359,7 @@ test("模型拒绝：钉住的通知带 + 会话内不再发 fill；从原文再
   expect(toast.message).toContain("demo-model");
   // 拒绝后按钮不再 pending，也不再排引擎调用。
   expect(session.buttonGate(text, true).pending).toBe(false);
-  session.ensureTranslation(text, true);
+  session.ensureTranslation("demo", text, true);
   expect(h.fills.length).toBe(1);
   // 从原文翻过去（showing=false 的按下）清拒绝状态（retry_rejected）。
   session.applyChoice("demo", false);
@@ -372,27 +380,96 @@ test("applyChoice 只写这一技的选择，不动设置开关；generation bum
   expect(session.generation()).toBe(before + 2);
 });
 
-test("传输失败（非模型拒绝）不热循环：本会话静默该行，按钮再按下可重问", async () => {
+test("传输失败不热循环：滚回选择，段落下 Retry 清失败再 fill，按钮再按也可重问", async () => {
   const h = bridgeHarness({ switchOn: true });
   const session = createTranslateSession(h.bridge);
   const text = "Build deep modules for agents.";
-  session.ensureTranslation(text, true);
+  session.ensureTranslation("demo", text, true);
   h.fills[0].reject(new Error("network down"));
   await settle();
   expect(h.fills.length).toBe(1); // bump 后 effect 重跑也不该再排
-  session.ensureTranslation(text, true);
+  session.ensureTranslation("demo", text, true);
   expect(h.fills.length).toBe(1);
   expect(session.buttonGate(text, true).pending).toBe(false);
+  expect(session.transportFailed()).toBe(text);
+  expect(h.choices.get("demo")).toBe(false);
+  session.retryTransport("demo", text);
+  expect(h.fills.length).toBe(2);
+  expect(session.transportFailed()).toBe(null);
+  expect(h.choices.get("demo")).toBe(true);
+  h.fills[1].reject(new Error("still down"));
+  await settle();
+  expect(h.fills.length).toBe(2);
+  session.ensureTranslation("demo", text, true);
+  expect(h.fills.length).toBe(2);
   // 从原文再翻一次清失败标记，可以再问。
   session.applyChoice("demo", false);
-  session.ensureTranslation(text, true);
-  expect(h.fills.length).toBe(2);
+  session.ensureTranslation("demo", text, true);
+  expect(h.fills.length).toBe(3);
+  h.stop();
+});
+
+test("选择写入失败时滚回信号", async () => {
+  const h = bridgeHarness();
+  let rejectSave: (err: unknown) => void = () => {};
+  h.bridge.setChoice = (name, translated) => {
+    h.choices.set(name, translated);
+    return new Promise<void>((_resolve, reject) => {
+      rejectSave = reject;
+    });
+  };
+  const session = createTranslateSession(h.bridge);
+  const before = session.generation();
+  session.applyChoice("demo", false);
+  expect(h.choices.get("demo")).toBe(true);
+  expect(session.generation()).toBe(before + 1);
+  rejectSave(new Error("disk"));
+  await settle();
+  expect(h.choices.get("demo")).toBe(false);
+  expect(session.resolveTranslate("demo")).toBe(false);
+  expect(session.generation()).toBe(before + 2);
   h.stop();
 });
 
 test("rejectionMessage：无细节走短文案，有细节带细节", () => {
   expect(rejectionMessage("demo-model", "")).not.toContain(":");
   expect(rejectionMessage("demo-model", "refused.")).toContain("refused");
+});
+
+test("blocked 显示配置提示；Attempt::Miss 不热循环；onPrefsChanged 清失败与拒绝态", async () => {
+  const h = bridgeHarness({ switchOn: true });
+  let isBlocked = true;
+  h.bridge.blocked = () => isBlocked;
+  const session = createTranslateSession(h.bridge);
+  const text = "Build deep modules for agents.";
+
+  expect(session.buttonGate(text, true).pending).toBe(false);
+  expect(session.failureLine(text)).toContain("设置 → 翻译");
+  session.ensureTranslation("demo", text, true);
+  expect(h.fills.length).toBe(0);
+
+  // 解除阻断并通知变更：可以发起 fill。
+  isBlocked = false;
+  session.onPrefsChanged();
+  expect(session.failureLine(text)).toBe(null);
+  session.ensureTranslation("demo", text, true);
+  expect(h.fills.length).toBe(1);
+
+  // Attempt::Miss（done=[] 且无 rejection）：滚回并记入 transportFailed，不再热循环。
+  h.fills[0].resolve({ done: [], rejection: null });
+  await settle();
+  expect(session.transportFailed()).toBe(text);
+  expect(h.choices.get("demo")).toBe(false);
+  expect(session.failureLine(text)).not.toBe(null);
+  session.ensureTranslation("demo", text, true);
+  expect(h.fills.length).toBe(1);
+
+  // 设置变更清掉失败态后，重新允许 fill。
+  session.onPrefsChanged();
+  expect(session.transportFailed()).toBe(null);
+  session.ensureTranslation("demo", text, true);
+  expect(h.fills.length).toBe(2);
+  h.stop();
 });
 
 // ---- 组件（host 装置）------------------------------------------------------

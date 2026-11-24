@@ -1,12 +1,27 @@
-import { Clipboard, Overlay, Text, View, effect, openUrl, signal, untracked, type JSX, type ViewStyle } from "nsh";
+import {
+  Clipboard,
+  Overlay,
+  Text,
+  View,
+  computed,
+  effect,
+  openUrl,
+  signal,
+  untracked,
+  type Accessor,
+  type JSX,
+  type ViewStyle,
+} from "nsh";
 import { Icon } from "../../chrome/icons";
 import { IconSpin } from "../../chrome/feedback";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
 import { promptVeil, SHEET_SHADOW } from "../../chrome/dialog";
 import { fadeTransition } from "../../chrome/motion";
 import { isLight, paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import { startJob, type JobRun } from "../../services/domainJob";
 import { DomainJob, MySkillsGitHub } from "skillstar-gui/native";
+import { et } from "./extrasStrings";
 import { github } from "./state";
 
 // GitHub 设备授权登录对话框 — my_skills/github_sign_in.rs 对位。波 4 异步
@@ -43,18 +58,29 @@ export interface SignInWaiting {
   expiresAt: string;
 }
 
-/** 登录任务的终态：connected 携带 login；cancelled 是关闭路径。 */
+/** 登录任务的终态：connected 携带 login；cancelled 是显式取消路径。 */
 export interface SignInOutcome {
   connected?: boolean;
   cancelled?: boolean;
-  login?: string;
+  state?: string;
+  login?: string | null;
 }
 
-/** 域桥：登录切片只依赖这一个调用（skillReaderSlot 的 ReaderBridge 同款
+/** Sidebar 与外部入口共享的 GitHub 连接摘要。 */
+export interface GitHubAuthSummary {
+  state: string;
+  login: string | null;
+  polling: boolean;
+  userCode: string | null;
+}
+
+/** 域桥：登录切片只依赖这组调用（skillReaderSlot 的 ReaderBridge 同款
  * 注入位——真桥走 MySkillsGitHub facade，无头测试注入假桥逐分支驱动）。 */
 export interface SignInBridge {
   /** 一次设备授权任务（Rust 侧循环内完成 start→post waiting→轮询）。 */
   signIn(job: DomainJob, onEvent: (event: SignInWaiting) => void): Promise<SignInOutcome>;
+  logout?(): Promise<SignInOutcome>;
+  refresh?(): Promise<SignInOutcome>;
 }
 
 /** 真桥：MySkillsGitHub facade（Callback<JsonValue> 在 TS 是
@@ -64,6 +90,8 @@ export const facadeBridge: SignInBridge = {
     MySkillsGitHub.signIn(job, onEvent as unknown as (event: unknown) => void) as Promise<
       SignInOutcome
     >,
+  logout: () => MySkillsGitHub.logout() as Promise<SignInOutcome>,
+  refresh: () => MySkillsGitHub.refresh() as Promise<SignInOutcome>,
 };
 
 /** 当前生效的桥（Host 挂载时安装一次；测试注入假桥）。 */
@@ -86,33 +114,65 @@ const copied = signal(false);
  * waiting 事件；done 结算比对它丢弃过期任务）。 */
 const activeRun = signal<JobRun<SignInWaiting> | null>(null);
 
-/** 从共享频道空状态打开登录对话框的唯一入口（open_sign_in 对位）。 */
+/** 是否有 GitHub 设备授权正在后台或弹层中轮询（供 Sidebar 底栏展示）。 */
+export const githubAuthPolling: Accessor<boolean> = computed(() => activeRun() !== null);
+
+/** Sidebar 与本页共用的 GitHub 登录状态摘要。 */
+export const githubAuthSummary: Accessor<GitHubAuthSummary> = computed(() => {
+  const session = github();
+  const polling = activeRun() !== null;
+  const current = phase();
+  return {
+    state: session?.state ?? "unknown",
+    login: session?.login ?? null,
+    polling,
+    userCode: polling && current.kind === "waiting" ? current.userCode : null,
+  };
+});
+
+/** 从共享频道空状态或 Sidebar 打开登录对话框的入口（open_sign_in 对位）。 */
 export function openGitHubSignIn(): void {
   signInOpen.set("sign-in");
 }
 
-/** 关闭：Escape/遮罩共用（on_close → cancel；在途取消由模块级 effect
- * 的 run.stop() 执行——先关 epoch 门再 cancel，过期事件不落屏）。 */
+/** 关闭浮层：隐藏对话框但不中止进行中的设备授权，轮询留在后台继续。 */
 export function closeGitHubSignIn(): void {
   signInOpen.set(null);
 }
 
+/** 显式取消授权：停止轮询、清除运行中句柄、重置相位并关闭浮层。 */
+export function cancelGitHubSignIn(): void {
+  activeRun()?.stop();
+  activeRun.set(null);
+  phase.set({ kind: "starting" });
+  copied.set(false);
+  signInOpen.set(null);
+}
+
+/** 退出 GitHub App 登录态并同步页面会话摘要。 */
+export async function logoutGitHub(): Promise<void> {
+  activeRun()?.stop();
+  activeRun.set(null);
+  const outcome = await (bridge.logout ?? facadeBridge.logout)!();
+  github.set({ state: outcome.state ?? "signed_out", login: outcome.login ?? null });
+}
+
+/** 刷新 GitHub App 会话令牌并同步页面会话摘要。 */
+export async function refreshGitHubAuth(): Promise<void> {
+  const outcome = await (bridge.refresh ?? facadeBridge.refresh)!();
+  github.set({ state: outcome.state ?? "connected", login: outcome.login ?? null });
+}
+
 // ---- 打开/关闭/重试驱动（github_sign_in.rs new/start/retry/cancel） ----------
 
-/** 打开信号驱动任务生命周期：开 = 新任务；关 = stop（Drop→cancel 兜底）。 */
+/** 打开信号驱动任务生命周期：关闭浮层保留在跑任务；重开时若已有在跑任务
+ * 直接续显原相位（仅点击「取消授权」才中止）。 */
 effect(() => {
   const open = signInOpen();
-  if (open === null) {
-    untracked(() => {
-      activeRun()?.stop();
-      activeRun.set(null);
-      // 复位：下次打开从 Starting 开始（GPUI 关闭即丢弃实体）。
-      phase.set({ kind: "starting" });
-      copied.set(false);
-    });
-    return;
-  }
-  untracked(() => startFlow());
+  if (open === null) return;
+  untracked(() => {
+    if (activeRun() === null) startFlow();
+  });
 });
 
 /** waiting 事件镜像进 phase（dialog.tsx topEntry 同款：外层 signal 变化
@@ -247,8 +307,7 @@ function SignInCard(): JSX.Element {
           }}
         >
           <Header />
-          {/* Phase 分派必须以 JSX 子表达式调用（组件体只执行一次）。 */}
-          {phaseBody()}
+          <PhaseContent />
         </View>
       </View>
     </Overlay>
@@ -293,16 +352,43 @@ function Header(): JSX.Element {
   );
 }
 
-/** Phase 分派（render_body）。 */
-function phaseBody(): JSX.Element {
+const EMPTY_WAITING_EVENT = {
+  kind: "waiting" as const,
+  userCode: "",
+  verificationUri: "",
+  remainingSecs: 0,
+};
+
+function waitingEvent(): {
+  kind: "waiting";
+  userCode: string;
+  verificationUri: string;
+  remainingSecs: number;
+} {
   const current = phase();
-  if (current.kind === "starting") {
-    return <StartingBody />;
-  }
-  if (current.kind === "waiting") {
-    return <WaitingBody event={current} />;
-  }
-  return <FailedBody message={current.message} />;
+  return current.kind === "waiting" ? current : EMPTY_WAITING_EVENT;
+}
+
+function failedMessage(): string {
+  const current = phase();
+  return current.kind === "failed" ? current.message : "";
+}
+
+/** Phase 分派（render_body）。 */
+function PhaseContent(): JSX.Element {
+  return (
+    <View style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+      <If when={phase().kind === "starting"}>
+        <StartingBody />
+      </If>
+      <If when={phase().kind === "waiting"}>
+        <WaitingBody event={waitingEvent()} />
+      </If>
+      <If when={phase().kind === "failed"}>
+        <FailedBody message={failedMessage()} />
+      </If>
+    </View>
+  );
 }
 
 /** 正文容器样式（body()：px24 py16 gap_3）。 */
@@ -317,16 +403,20 @@ function bodyStyle(): ViewStyle {
   };
 }
 
-/** Starting（render_starting）：Loader 旋转 + 加载文案。 */
+/** Starting（render_starting）：晚 300ms 再出 loader 行 + 显式取消授权钮。 */
 function StartingBody(): JSX.Element {
+  const show = bindDelayedFlag(() => true);
   return (
     <View style={bodyStyle()}>
-      <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <IconSpin name="loader" size={14} color={paletteToken("fg_muted")} spin />
-        <Text style={{ fontSize: 14, color: paletteToken("fg_muted") }}>
-          {t("common.loading")}
-        </Text>
-      </View>
+      <If when={show()}>
+        <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <IconSpin name="loader" size={14} color={paletteToken("fg_muted")} spin defer={false} />
+          <Text style={{ fontSize: 14, color: paletteToken("fg_muted") }}>
+            {t("common.loading")}
+          </Text>
+        </View>
+      </If>
+      <CancelAuthButton />
     </View>
   );
 }
@@ -429,6 +519,34 @@ function WaitingBody(props: {
           {expiryLine(props.event.remainingSecs)}
         </Text>
       </View>
+      <CancelAuthButton />
+    </View>
+  );
+}
+
+function CancelAuthButton(): JSX.Element {
+  return (
+    <View
+      testID="github-sign-in-cancel"
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "100%",
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: paletteToken("border"),
+        backgroundColor: paletteToken("card"),
+        cursor: "pointer",
+      }}
+      hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+      onPress={cancelGitHubSignIn}
+    >
+      <Text style={{ fontSize: 13, color: paletteToken("fg_muted") }}>
+        {et("githubSignIn.cancelAuth")}
+      </Text>
     </View>
   );
 }

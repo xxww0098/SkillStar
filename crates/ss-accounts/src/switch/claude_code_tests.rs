@@ -145,6 +145,34 @@ fn a_written_segment_is_matched_by_its_fingerprint() {
 }
 
 #[test]
+fn read_extracts_subscription_or_rate_limit_tier_into_provider_state_plan() {
+    let fixture = Fixture::new();
+    fixture.seed(
+        br#"{"claudeAiOauth":{"accessToken":"at-max","refreshToken":"rt-max","subscriptionType":"max","rateLimitTier":"default_claude_max_5x"}}"#,
+    );
+    let local = read(&fixture.roots).expect("read").expect("credential");
+    assert_eq!(local.identity.plan.as_deref(), Some("max"));
+    assert_eq!(
+        local.provider_state,
+        Some(serde_json::json!({ "plan": "max" }))
+    );
+
+    let fallback = Fixture::new();
+    fallback.seed(
+        br#"{"claudeAiOauth":{"accessToken":"at-tier","rateLimitTier":"default_claude_pro"}}"#,
+    );
+    let local_fallback = read(&fallback.roots).expect("read").expect("credential");
+    assert_eq!(
+        local_fallback.identity.plan.as_deref(),
+        Some("default_claude_pro")
+    );
+    assert_eq!(
+        local_fallback.provider_state,
+        Some(serde_json::json!({ "plan": "default_claude_pro" }))
+    );
+}
+
+#[test]
 fn read_imports_the_session_and_converts_the_expiry() {
     let fixture = Fixture::new();
     fixture.seed(

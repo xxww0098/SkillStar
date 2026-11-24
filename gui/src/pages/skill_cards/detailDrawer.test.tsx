@@ -223,3 +223,15 @@ test("long decks lay out only the members near the viewport", async () => {
   expect(app.shows("id:deck-member-member-44")).toBe(false);
   expect(app.count("text:member-")).toBeLessThan(50);
 });
+
+test("mixed deck agent shows mixed badge and clicking completes links instead of unlinking", async () => {
+  const app = await open(HOST);
+  await app.setViewport(1280, 900);
+  await app.press("id:host-reset-calls");
+  await app.press("id:host-scene-mixed");
+  await app.waitFor("id:deck-drawer-mixed-g4-claude");
+  await app.press("id:deck-drawer-toggle-g4-claude");
+  await app.waitUntil(() =>
+    app.texts().some((t) => t.includes("set:g4:claude:true"))
+  );
+});

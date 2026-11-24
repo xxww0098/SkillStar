@@ -218,32 +218,23 @@ pub(crate) fn exchange_code(provider: &str, code: &str, state: &str) -> OAuthRes
         }),
         "ZCode OAuth Token",
     )?;
-    let provider_token = pick_string(
-        &envelope,
-        &[
-            &["providerAccessToken"],
-            &["provider_access_token"],
-            &["accessToken"],
-            &["access_token"],
-        ],
-    )
-    .ok_or_else(|| OAuthError::Rejected("ZCode 令牌响应缺少 provider_access_token".to_string()))?;
-    let jwt = pick_string(&envelope, &[&["jwt"], &["token"]]);
-    let expires_at = json_u64(&envelope, &["expiresIn", "expires_in"])
-        .filter(|seconds| *seconds > 0)
-        .map(|seconds| crate::oauth::now_secs() + seconds as i64);
+    check_envelope_ok(&envelope, "ZCode OAuth Token")?;
+    let provider_token = extract_provider_token(&envelope, provider)
+        .ok_or_else(|| OAuthError::Rejected("ZCode 令牌响应缺少 provider_access_token".to_string()))?;
+    let jwt = extract_jwt(&envelope);
+    let mut expires_at = extract_expires_at(&envelope);
     let (access_token, refresh_token) = if provider == "zai" {
         let business = post_json(
             ZAI_BUSINESS_URL,
             &json!({ "token": provider_token }),
             "Z.ai 业务 Token",
         )?;
+        if expires_at.is_none() {
+            expires_at = extract_expires_at(&business);
+        }
         (zai_business_token(&business)?, None)
     } else {
-        (
-            provider_token,
-            pick_string(&envelope, &[&["refreshToken"], &["refresh_token"]]),
-        )
+        (provider_token, extract_refresh_token(&envelope, provider))
     };
     let tokens = TokenSet {
         access_token,
@@ -252,7 +243,16 @@ pub(crate) fn exchange_code(provider: &str, code: &str, state: &str) -> OAuthRes
         expires_at,
         token_type: "Bearer".to_string(),
     };
-    let identity = identity_of(&tokens, envelope.get("userInfo"));
+    let user_info = [
+        envelope.pointer("/data/user"),
+        envelope.pointer("/data/userInfo"),
+        envelope.get("userInfo"),
+        envelope.get("user"),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|value| value.is_object());
+    let identity = identity_of(&tokens, user_info);
     Ok(LoginOutcome {
         agent: AGENT_ID.to_string(),
         tokens,
@@ -261,27 +261,19 @@ pub(crate) fn exchange_code(provider: &str, code: &str, state: &str) -> OAuthRes
     })
 }
 
-/// zai 的业务令牌：返回码必须是 0 或 200，令牌在 data.token 或根上。
+/// zai 的业务令牌：返回码必须是 0 或 200，令牌在 data.access_token / data.token 或根上。
 pub(crate) fn zai_business_token(body: &Value) -> OAuthResult<String> {
-    let code = body.get("code");
-    let ok = match code {
-        None => true,
-        Some(value) => {
-            value.as_i64() == Some(0)
-                || value.as_i64() == Some(200)
-                || value.as_str() == Some("0")
-                || value.as_str() == Some("200")
-        }
-    };
-    if !ok {
-        return Err(OAuthError::Rejected(format!(
-            "Z.ai 业务 Token 被拒绝: {}",
-            code.map(|value| value.to_string()).unwrap_or_default()
-        )));
-    }
+    check_envelope_ok(body, "Z.ai 业务 Token")?;
     pick_string(
         body,
-        &[&["data", "token"], &["token"], &["data", "accessToken"]],
+        &[
+            &["data", "access_token"],
+            &["data", "accessToken"],
+            &["data", "token"],
+            &["access_token"],
+            &["accessToken"],
+            &["token"],
+        ],
     )
     .ok_or_else(|| OAuthError::Rejected("Z.ai 业务 Token 响应缺少令牌".to_string()))
 }
@@ -307,45 +299,184 @@ pub(crate) fn refresh(
         }),
         "ZCode refresh",
     )?;
-    let access_token = pick_string(
-        &envelope,
+    check_envelope_ok(&envelope, "ZCode refresh")?;
+    let access_token = extract_provider_token(&envelope, provider)
+        .ok_or_else(|| OAuthError::AuthRequired("ZCode 刷新响应缺少访问令牌".to_string()))?;
+    let refreshed = TokenSet {
+        access_token,
+        refresh_token: extract_refresh_token(&envelope, provider),
+        id_token: extract_jwt(&envelope),
+        expires_at: extract_expires_at(&envelope),
+        token_type: "Bearer".to_string(),
+    };
+    Ok(token::carry_over(tokens, refreshed))
+}
+
+fn check_envelope_ok(body: &Value, label: &str) -> OAuthResult<()> {
+    let success_false = body.get("success").and_then(Value::as_bool) == Some(false);
+    let code = body.get("code");
+    let code_ok = match code {
+        None => true,
+        Some(value) => {
+            value.as_i64() == Some(0)
+                || value.as_i64() == Some(200)
+                || value.as_str() == Some("0")
+                || value.as_str() == Some("200")
+        }
+    };
+    if code_ok && !success_false {
+        return Ok(());
+    }
+    let msg = pick_string(body, &[&["msg"], &["message"]])
+        .or_else(|| code.map(|value| value.to_string()))
+        .unwrap_or_else(|| "success=false".to_string());
+    let detail = format!("{label} 被拒绝: {msg}");
+    let is_auth_code = code.is_some_and(|value| value.as_i64() == Some(401) || value.as_str() == Some("401"));
+    if is_auth_code {
+        Err(OAuthError::AuthRequired(detail))
+    } else {
+        Err(OAuthError::Rejected(detail))
+    }
+}
+
+fn extract_provider_token(envelope: &Value, provider: &str) -> Option<String> {
+    pick_string(
+        envelope,
         &[
+            &["data", provider, "access_token"],
+            &["data", provider, "accessToken"],
+            &["data", "providerAccessToken"],
+            &["data", "provider_access_token"],
+            &["data", "accessToken"],
+            &["data", "access_token"],
             &["providerAccessToken"],
             &["provider_access_token"],
             &["accessToken"],
             &["access_token"],
         ],
     )
-    .ok_or_else(|| OAuthError::AuthRequired("ZCode 刷新响应缺少访问令牌".to_string()))?;
-    let refreshed = TokenSet {
-        access_token,
-        refresh_token: pick_string(&envelope, &[&["refreshToken"], &["refresh_token"]]),
-        id_token: pick_string(&envelope, &[&["jwt"], &["token"]]),
-        expires_at: json_u64(&envelope, &["expiresIn", "expires_in"])
-            .filter(|seconds| *seconds > 0)
-            .map(|seconds| crate::oauth::now_secs() + seconds as i64),
-        token_type: "Bearer".to_string(),
-    };
-    Ok(token::carry_over(tokens, refreshed))
 }
 
-/// 身份：先看令牌 claim，其次响应里的 userInfo。
+fn extract_jwt(envelope: &Value) -> Option<String> {
+    pick_string(
+        envelope,
+        &[&["data", "token"], &["data", "jwt"], &["jwt"], &["token"]],
+    )
+}
+
+fn extract_refresh_token(envelope: &Value, provider: &str) -> Option<String> {
+    pick_string(
+        envelope,
+        &[
+            &["data", provider, "refresh_token"],
+            &["data", provider, "refreshToken"],
+            &["data", "refresh_token"],
+            &["data", "refreshToken"],
+            &["refreshToken"],
+            &["refresh_token"],
+        ],
+    )
+}
+
+fn extract_expires_at(value: &Value) -> Option<i64> {
+    value
+        .get("data")
+        .and_then(|data| json_u64(data, &["expiresIn", "expires_in"]))
+        .or_else(|| json_u64(value, &["expiresIn", "expires_in"]))
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| crate::oauth::now_secs() + seconds as i64)
+}
+
+/// 身份：优先看 userInfo / getCustomerInfo 与令牌 claim（兼容无邮箱与 BigModel 占位）。
 pub(crate) fn identity_of(tokens: &TokenSet, user_info: Option<&Value>) -> Identity {
+    let info = user_info.map(|value| {
+        value
+            .get("data")
+            .filter(|data| data.is_object())
+            .unwrap_or(value)
+    });
+    let is_placeholder = info
+        .and_then(|v| pick_string(v, &[&["id"]]))
+        .is_some_and(|id| id.eq_ignore_ascii_case("unknown"));
     let jwt = tokens.id_token.as_deref();
     let email = jwt
         .and_then(crate::identity::jwt_email)
         .or_else(|| crate::identity::jwt_email(&tokens.access_token))
-        .or_else(|| user_info.and_then(|info| pick_string(info, &[&["email"]])));
-    let account_id = jwt
-        .and_then(|token| crate::identity::jwt_claim(token, "sub"))
+        .or_else(|| info.and_then(|v| pick_string(v, &[&["email"], &["rawProfile", "email"]])))
+        .map(|value| value.trim().to_string())
+        .filter(|value| value.contains('@'));
+    let account_id = info
+        .and_then(|v| {
+            pick_string(
+                v,
+                &[
+                    &["customerNumber"],
+                    &["userId"],
+                    &["user_id"],
+                    &["rawProfile", "user_id"],
+                    &["id"],
+                    &["sub"],
+                ],
+            )
+        })
+        .filter(|id| !id.eq_ignore_ascii_case("unknown"))
+        .or_else(|| jwt.and_then(|token| crate::identity::jwt_claim(token, "sub")))
+        .or_else(|| crate::identity::jwt_claim(&tokens.access_token, "customer_id"))
         .or_else(|| crate::identity::jwt_claim(&tokens.access_token, "sub"))
-        .or_else(|| user_info.and_then(|info| pick_string(info, &[&["userId"], &["id"]])));
+        .filter(|id| !id.eq_ignore_ascii_case("unknown"));
+    let display_name = info
+        .and_then(|v| {
+            first_valid_name(
+                v,
+                &[
+                    &["customerName"],
+                    &["nickName"],
+                    &["displayName"],
+                    &["display_name"],
+                    &["username"],
+                    &["name"],
+                    &["preferred_username"],
+                    &["rawProfile", "name"],
+                    &["wechatNickName"],
+                    &["phoneNumber"],
+                ],
+                is_placeholder,
+            )
+        })
+        .or_else(|| jwt_display_name(&tokens.access_token))
+        .or_else(|| jwt.and_then(jwt_display_name))
+        .or_else(|| email.clone());
     Identity {
-        display_name: email.clone(),
+        display_name,
         email,
         plan: None,
         account_id,
     }
+}
+
+fn is_valid_display_name(text: &str, reject_user: bool) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("zcode")
+        || trimmed.eq_ignore_ascii_case("unknown")
+    {
+        return false;
+    }
+    !(reject_user && trimmed.eq_ignore_ascii_case("user"))
+}
+
+fn first_valid_name(value: &Value, paths: &[&[&str]], is_placeholder: bool) -> Option<String> {
+    paths.iter().find_map(|path| {
+        pick_string(value, &[path]).filter(|text| is_valid_display_name(text, is_placeholder))
+    })
+}
+
+fn jwt_display_name(token: &str) -> Option<String> {
+    ["username", "name", "preferred_username"]
+        .into_iter()
+        .find_map(|claim| crate::identity::jwt_claim(token, claim))
+        .map(|text| text.trim().to_string())
+        .filter(|text| is_valid_display_name(text, false))
 }
 
 fn pick_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
@@ -396,14 +527,14 @@ fn post_json(url: &str, body: &Value, label: &str) -> OAuthResult<Value> {
             .send()
             .await
             .map_err(|error| {
-                OAuthError::Transient(format!("{label_in_request} 请求失败: {error}"))
+                token::transport_error(&format!("{label_in_request} 请求失败"), error)
             })?;
         let status = response.status().as_u16();
         let text = response
             .text()
             .await
             .map_err(|error| {
-                OAuthError::Transient(format!("{label_in_request} 响应读取失败: {error}"))
+                token::transport_error(&format!("{label_in_request} 响应读取失败"), error)
             })?;
         Ok::<_, OAuthError>((status, text))
     })??;

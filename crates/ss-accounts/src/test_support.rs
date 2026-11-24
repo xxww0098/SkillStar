@@ -45,9 +45,6 @@ impl Sandbox {
             ("SKILLSTAR_ANTIGRAVITY_CLIENT_ID", None),
             ("SKILLSTAR_ANTIGRAVITY_CLIENT_SECRET", None),
             ("SKILLSTAR_ANTIGRAVITY_CLOUD_CODE_URL", None),
-            ("SKILLSTAR_GEMINI_CLI_CLIENT_ID", None),
-            ("SKILLSTAR_GEMINI_CLI_CLIENT_SECRET", None),
-            ("SKILLSTAR_GEMINI_CLI_CLOUD_CODE_URL", None),
             ("ZCODE_CREDENTIAL_SECRET", None),
         ];
         let previous = overrides

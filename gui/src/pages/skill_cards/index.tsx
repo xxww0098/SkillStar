@@ -1,9 +1,21 @@
-import { List, Text, View, computed, effect, signal, type JSX, type ListRef } from "nsh";
+import {
+  List,
+  Text,
+  View,
+  computed,
+  effect,
+  signal,
+  untracked,
+  type Accessor,
+  type JSX,
+  type ListRef,
+} from "nsh";
 import { SkillCards } from "skillstar-gui/native";
 import { paletteToken } from "../../services/themeMode";
 import { t } from "../../services/translation";
 import { Icon } from "../../chrome/icons";
-import { IconSpin } from "../../chrome/feedback";
+import { Pulse } from "../../chrome/feedback";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
 import { cardTrackWidth, gridColumnsForPane, packCardRows } from "../../chrome/cardShell";
 import { BackToTopButton, SHOW_AFTER_PX } from "../../chrome/scrollTop";
 import {
@@ -20,15 +32,19 @@ import {
   DETAIL_COLUMN_W,
   PAGE_PAD,
   SKILL_CARD_H,
+  SKILL_CARD_W,
   SKILL_SCROLL_PB,
   SKILL_SCROLL_PT,
 } from "../../layout";
-import { publishToast, toast, groupsChanged, agentsChanged } from "../../shell/events";
+import { currentPage, createPaneWidth } from "../../shell/nav";
+import { toast, publishToast, groupsChanged, agentsChanged } from "../../shell/events";
 import {
   type AgentRailProfile,
   type DeckRecord,
+  deckAgentLinkState,
   linkReportNotice,
   matchesDeckQuery,
+  nextEnableForAgentState,
   parseLinkReport,
   parseSnapshot,
 } from "./deckQuery";
@@ -60,20 +76,169 @@ import { DeckDetailDrawer } from "./detailDrawer";
 // functions called from JSX so they re-run with the props they read.
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
+const EMPTY_PENDING: Record<string, true> = {};
 
 const decks = signal<DeckRecord[]>([]);
 const installedSkills = signal<ReadonlySet<string>>(EMPTY_SET);
 const railAgents = signal<AgentRailProfile[]>([]);
 const searchQuery = signal("");
 const viewList = signal(false);
-const busy = signal(false);
 const loaded = signal(false);
 const selectedDeckId = signal<string | null>(null);
+/** Deck id whose copy or delete is in flight. Null when idle. */
+const rowBusy = signal<string | null>(null);
+/** `${deckId}:${agentId}` slots that already accepted a toggle. */
+const linkPending = signal<Record<string, true>>({});
+
+const pageActive = () => currentPage() === "skill_cards";
+
+function sameElements<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function gated<T>(source: Accessor<T>, equals?: (a: T, b: T) => boolean): Accessor<T> {
+  let last = untracked(source);
+  return computed(
+    () => {
+      if (!pageActive()) return last;
+      last = source();
+      return last;
+    },
+    equals ? { equals } : undefined,
+  );
+}
+
+function stringArraysEqual(a: readonly string[] | null, b: readonly string[] | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function stringRecordsEqual(
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+): boolean {
+  if (a === b) return true;
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function decksEqual(a: DeckRecord, b: DeckRecord): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.description === b.description &&
+    a.icon === b.icon &&
+    a.defaultAgent === b.defaultAgent &&
+    a.createdAt === b.createdAt &&
+    a.updatedAt === b.updatedAt &&
+    stringArraysEqual(a.skills, b.skills) &&
+    stringArraysEqual(a.agentLinks, b.agentLinks) &&
+    stringRecordsEqual(a.skillSources, b.skillSources) &&
+    stringRecordsEqual(a.agentLinkStates ?? {}, b.agentLinkStates ?? {}) &&
+    memberAgentLinksEqual(a.memberAgentLinks, b.memberAgentLinks)
+  );
+}
+
+function memberAgentLinksEqual(
+  a?: Readonly<Record<string, readonly string[]>>,
+  b?: Readonly<Record<string, readonly string[]>>,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return !a && !b;
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const key of keysA) {
+    if (!stringArraysEqual(a[key] ?? null, b[key] ?? null)) return false;
+  }
+  return true;
+}
+
+function mergeDecks(prev: readonly DeckRecord[], next: readonly DeckRecord[]): DeckRecord[] {
+  const byId = new Map(prev.map((item) => [item.id, item]));
+  let changed = prev.length !== next.length;
+  const merged = next.map((item, idx) => {
+    const existing = byId.get(item.id);
+    if (existing && decksEqual(existing, item)) {
+      if (prev[idx] !== existing) changed = true;
+      return existing;
+    }
+    changed = true;
+    return item;
+  });
+  return changed ? merged : (prev as DeckRecord[]);
+}
+
+function mergeAgents(
+  prev: readonly AgentRailProfile[],
+  next: readonly AgentRailProfile[],
+): AgentRailProfile[] {
+  const byId = new Map(prev.map((item) => [item.id, item]));
+  let changed = prev.length !== next.length;
+  const merged = next.map((item, idx) => {
+    const existing = byId.get(item.id);
+    if (
+      existing &&
+      existing.id === item.id &&
+      existing.displayName === item.displayName &&
+      existing.icon === item.icon
+    ) {
+      if (prev[idx] !== existing) changed = true;
+      return existing;
+    }
+    changed = true;
+    return item;
+  });
+  return changed ? merged : (prev as AgentRailProfile[]);
+}
+
+function setsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
+
+function shallowPendingEqual(
+  a: Readonly<Record<string, true>>,
+  b: Readonly<Record<string, true>>,
+): boolean {
+  if (a === b) return true;
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const k of keysA) {
+    if (b[k] !== true) return false;
+  }
+  return true;
+}
 
 /** The filtered list the count chip and the grid both show (query.rs). */
 function filterDecks(all: DeckRecord[], query: string): DeckRecord[] {
   return all.filter((deck) => matchesDeckQuery(deck, query));
 }
+
+const filteredDecks = computed(() => filterDecks(decks(), searchQuery()));
+const gatedFilteredDecks = gated(filteredDecks, sameElements);
+const gatedInstalled = gated(installedSkills);
+const gatedAgents = gated(railAgents, sameElements);
+const gatedViewList = gated(viewList);
+const gatedSelectedId = gated(selectedDeckId);
+const gatedLoaded = gated(loaded);
+const gatedAllDecksCount = gated(() => decks().length);
+const gatedSelectedDeck = computed(() => findDeck(decks(), gatedSelectedId()));
 
 function findDeck(all: DeckRecord[], id: string | null): DeckRecord | null {
   if (id === null) return null;
@@ -85,63 +250,114 @@ function findDeck(all: DeckRecord[], id: string | null): DeckRecord | null {
 async function refresh(): Promise<void> {
   try {
     const snapshot = parseSnapshot(await SkillCards.snapshot());
-    decks.set(snapshot.decks);
-    installedSkills.set(new Set(snapshot.installedSkills));
-    railAgents.set(snapshot.agents);
+    const mergedDecks = mergeDecks(untracked(decks), snapshot.decks);
+    if (mergedDecks !== untracked(decks)) decks.set(mergedDecks);
+    const nextInstalled = new Set(snapshot.installedSkills);
+    if (!setsEqual(untracked(installedSkills), nextInstalled)) {
+      installedSkills.set(nextInstalled);
+    }
+    const mergedAgents = mergeAgents(untracked(railAgents), snapshot.agents);
+    if (mergedAgents !== untracked(railAgents)) railAgents.set(mergedAgents);
     const id = selectedDeckId();
     if (id !== null && !snapshot.decks.some((deck) => deck.id === id)) {
       selectedDeckId.set(null);
     }
-    loaded.set(true);
   } catch (err) {
     // A read failure is a notice, not a dead page: the stale list stays.
-    publishToast({ tone: "error", message: String(err) });
-  }
-}
-
-/** The link-job tail — run_link_job parity (mod.rs:155-192): one job at a
- * time (busy swallows further clicks), the partial-failure notice goes to
- * the notice band, and the page refreshes whatever happened. */
-async function runLinkJob(job: () => Promise<unknown>): Promise<void> {
-  if (busy()) return;
-  busy.set(true);
-  try {
-    const report = parseLinkReport(await job());
-    const notice = linkReportNotice(report, dtf);
-    if (notice) publishToast({ tone: "warning", message: notice });
-  } catch (err) {
-    publishToast({ tone: "error", message: String(err) });
+    toast(err instanceof Error ? err.message : String(err), "error");
   } finally {
-    busy.set(false);
-    await refresh();
+    loaded.set(true);
   }
 }
 
-/** The group-command tail — run_group_job parity (mod.rs:194-222). */
-async function runGroupJob(job: () => Promise<unknown>): Promise<void> {
-  if (busy()) return;
-  busy.set(true);
+/** Copy or delete one deck. The spinner sits on that card; the list updates
+ * only after the call returns (no optimistic removal). */
+async function runRowJob(deckId: string, job: () => Promise<unknown>): Promise<void> {
+  if (rowBusy() !== null) return;
+  rowBusy.set(deckId);
   try {
     await job();
   } catch (err) {
-    publishToast({ tone: "error", message: String(err) });
+    toast(err instanceof Error ? err.message : String(err), "error");
   } finally {
-    busy.set(false);
     await refresh();
+    rowBusy.set(null);
   }
 }
 
+/** One rail-slot press (the deck card's optimistic toggle). The card face
+ * paints no save-status row: the slot's own flip is the result. A skipped or
+ * failed link rolls back and is explained by the notice band; pressing the
+ * same slot again is the retry — the my-skills SkillCard contract. */
 function toggleAgentForDeck(deck: DeckRecord, agentId: string): void {
-  const linked = (deck.agentLinks ?? []).includes(agentId);
-  void runLinkJob(() => SkillCards.toggleDeckAgent(deck.id, agentId, !linked));
+  const key = `${deck.id}:${agentId}`;
+  if (linkPending()[key]) return;
+  const current = decks().find((item) => item.id === deck.id) ?? deck;
+  const profile = railAgents().find((a) => a.id === agentId) ?? { id: agentId, displayName: agentId };
+  const prevState = deckAgentLinkState(current, profile);
+  const enable = nextEnableForAgentState(prevState);
+  const nextLinks = enable
+    ? [...new Set([...(current.agentLinks ?? []), agentId])]
+    : (current.agentLinks ?? []).filter(
+        (id) =>
+          id.trim().toLowerCase() !== profile.id.trim().toLowerCase() &&
+          id.trim().toLowerCase() !== profile.displayName.trim().toLowerCase()
+      );
+  const nextStates = current.agentLinkStates
+    ? { ...current.agentLinkStates, [agentId]: enable ? ("linked" as const) : ("none" as const) }
+    : undefined;
+  const prevLinks = current.agentLinks;
+  const prevStates = current.agentLinkStates;
+  linkPending.set({ ...linkPending(), [key]: true });
+  decks.set(
+    decks().map((item) =>
+      item.id === current.id
+        ? { ...item, agentLinks: nextLinks, agentLinkStates: nextStates }
+        : item
+    )
+  );
+  const rollback = () => {
+    decks.set(
+      decks().map((item) =>
+        item.id === current.id
+          ? { ...item, agentLinks: prevLinks, agentLinkStates: prevStates }
+          : item
+      )
+    );
+  };
+  void (async () => {
+    try {
+      const report = parseLinkReport(
+        await SkillCards.toggleDeckAgent(current.id, agentId, enable)
+      );
+      const notice = linkReportNotice(report, dtf);
+      if (notice) {
+        rollback();
+        publishToast({ tone: "warning", message: notice });
+        return;
+      }
+    } catch (err: unknown) {
+      rollback();
+      toast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      // A rail click links (or unlinks) the deck's member Skills on disk, so
+      // every page that paints per-Skill agent links has to reload its own
+      // snapshot: the keep-alive skills page never remounts. The deck drawer's
+      // link jobs announce the same change (detailDrawer.tsx finish()).
+      groupsChanged.publish();
+      const next = { ...linkPending() };
+      delete next[key];
+      linkPending.set(next);
+    }
+  })();
 }
 
 function duplicateDeck(deck: DeckRecord): void {
-  void runGroupJob(() => SkillCards.duplicateDeck(deck.id));
+  void runRowJob(deck.id, () => SkillCards.duplicateDeck(deck.id));
 }
 
 function deleteDeck(deck: DeckRecord): void {
-  void runGroupJob(() => SkillCards.deleteDeck(deck.id));
+  void runRowJob(deck.id, () => SkillCards.deleteDeck(deck.id));
 }
 
 /** mod.rs:135-147 — the card press opens the deck's detail column; pressing
@@ -176,14 +392,44 @@ function setViewList(list: boolean): void {
   viewList.set(list);
 }
 
-// First mount loads once (the shell mounts this page exactly once); the
-// keep-alive reload channels Shell subscribes land here the same way
-// shell.rs:79-99 routes GroupsChanged / AgentsChanged to page.refresh().
+let refreshDirty = true;
+let refreshing = false;
+let refreshAgain = false;
+
+async function refreshNow(): Promise<void> {
+  if (refreshing) {
+    refreshAgain = true;
+    return;
+  }
+  refreshing = true;
+  try {
+    do {
+      refreshAgain = false;
+      refreshDirty = false;
+      await refresh();
+    } while (refreshAgain && pageActive());
+  } finally {
+    refreshing = false;
+  }
+}
+
+function requestRefresh(): void {
+  if (!pageActive()) {
+    refreshDirty = true;
+    return;
+  }
+  void refreshNow();
+}
+
+// Keep-alive reload channels defer off-page snapshots until skill_cards is
+// active again; initial mount also waits until the user enters skill_cards.
 effect(() => {
-  void refresh();
+  if (pageActive() && refreshDirty) {
+    void refreshNow();
+  }
 });
-effect(() => groupsChanged.subscribe(() => void refresh()));
-effect(() => agentsChanged.subscribe(() => void refresh()));
+effect(() => groupsChanged.subscribe(requestRefresh));
+effect(() => agentsChanged.subscribe(requestRefresh));
 
 export function SkillCardsPage(): JSX.Element {
   return (
@@ -199,39 +445,25 @@ export function SkillCardsPage(): JSX.Element {
             value={searchQuery()}
             placeholder={dt("skillCards.searchPlaceholder")}
             onChange={(value) => searchQuery.set(value)}
-            width={216}
           />
         }
         filters={[
           <View testID="deck-count-filter">
             {/* The count chip mirrors the filtered list, not the store. */}
-            <BarCount glyph="layers" label={String(filterDecks(decks(), searchQuery()).length)} />
+            <BarCount glyph="layers" label={String(filteredDecks().length)} />
           </View>,
         ]}
         actions={[
-          <If when={busy()}>
-            <View
-              testID="deck-busy"
-              style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}
-            >
-              <IconSpin name="refresh" size={14} color={paletteToken("accent")} spin />
-              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                {dt("skillCards.processing")}
-              </Text>
-            </View>
-          </If>,
           <BarSecondary
             testID="deck-import-btn"
             glyph="download"
             label={dt("common.import")}
-            disabled={busy()}
             onPress={openImport}
           />,
           <BarPrimary
             testID="deck-new-btn"
             glyph="plus"
             label={dt("skillCards.newGroup")}
-            disabled={busy()}
             onPress={openDeckEditor}
           />,
           <BarViewToggle
@@ -257,22 +489,8 @@ export function SkillCardsPage(): JSX.Element {
           width: "100%",
         }}
       >
-        <DeckPane
-          didLoad={loaded()}
-          isBusy={busy()}
-          isList={viewList()}
-          all={decks()}
-          search={searchQuery()}
-          installed={installedSkills()}
-          agents={railAgents()}
-          selectedId={selectedDeckId()}
-        />
-        <DrawerTrack
-          deck={findDeck(decks(), selectedDeckId())}
-          isBusy={busy()}
-          installed={installedSkills()}
-          agents={railAgents()}
-        />
+        <DeckPane />
+        <DrawerTrack />
       </View>
 
       {/* The sibling dialogs float over the page on their own veils; their
@@ -284,73 +502,133 @@ export function SkillCardsPage(): JSX.Element {
   );
 }
 
-interface DeckPaneProps {
-  didLoad: boolean;
-  isBusy: boolean;
-  isList: boolean;
-  all: DeckRecord[];
-  search: string;
-  installed: ReadonlySet<string>;
-  agents: AgentRailProfile[];
-  selectedId: string | null;
-}
-
-/** The scrollable deck pane: empty state / no-match state / the wrapping
- * grid. The deck grid wraps on its own — 卡组卡自己换行，不走 card_grid.
- * Every props read sits in JSX (nsh bindings), so the branch expression
- * re-runs when any of them changes. */
-function DeckPane(props: DeckPaneProps): JSX.Element {
+/** The scrollable deck pane: blank until the first read settles, a pulse
+ * skeleton only if that read is slow, then the empty state, the no-match
+ * state, or the wrapping grid. Local filtering does not add a wait. */
+function DeckPane(): JSX.Element {
+  const showSkeleton = bindDelayedFlag(() => pageActive() && !gatedLoaded());
+  const isEmpty = computed(
+    () => !showSkeleton() && gatedLoaded() && gatedAllDecksCount() === 0,
+  );
+  const isNoMatch = computed(
+    () =>
+      !showSkeleton() &&
+      gatedLoaded() &&
+      gatedAllDecksCount() > 0 &&
+      gatedFilteredDecks().length === 0,
+  );
+  const hasRows = computed(
+    () => !showSkeleton() && gatedLoaded() && gatedFilteredDecks().length > 0,
+  );
   return (
-    <If when={props.didLoad} else={<View style={{ flex: 1, width: "100%" }} />}>
-      <If
-        when={props.all.length === 0}
-        else={
-          <If
-            when={filterDecks(props.all, props.search).length === 0}
-            else={<DeckGrid {...props} filtered={filterDecks(props.all, props.search)} />}
-          >
-            <NoMatchState />
-          </If>
-        }
-      >
-        <DeckEmptyState busy={props.isBusy} />
+    <View style={{ flex: 1, minWidth: 0, minHeight: 0, width: "100%" }}>
+      <If when={showSkeleton()}>
+        <DeckSkeleton list={gatedViewList()} />
       </If>
-    </If>
+      <If when={isEmpty()}>
+        <DeckEmptyState />
+      </If>
+      <If when={isNoMatch()}>
+        <NoMatchState />
+      </If>
+      <If when={hasRows()}>
+        <DeckGrid />
+      </If>
+    </View>
   );
 }
 
 const DECK_LIST_GAP = 8;
+const SKELETON_INDICES = [0, 1, 2, 3, 4, 5];
+
+/** Six pulse cards at the real deck-card size. Lives in this page so it
+ * does not borrow another page's skeleton. */
+function DeckSkeleton(props: { list: boolean }): JSX.Element {
+  return (
+    <View
+      testID="deck-skeleton"
+      accessibilityState={{ busy: true }}
+      style={{
+        display: "flex",
+        flexDirection: props.list ? "column" : "row",
+        flexWrap: "wrap",
+        gap: props.list ? DECK_LIST_GAP : CARD_GAP,
+        alignItems: "flex-start",
+        paddingTop: SKILL_SCROLL_PT,
+        paddingBottom: SKILL_SCROLL_PB,
+        paddingLeft: PAGE_PAD,
+        paddingRight: PAGE_PAD,
+        width: "100%",
+      }}
+    >
+      <Each of={SKELETON_INDICES} key={(index) => String(index)}>
+        {(index: () => number) => (
+          <View
+            style={{
+              width: props.list ? "100%" : SKILL_CARD_W,
+              height: SKILL_CARD_H,
+              flexShrink: 0,
+              padding: 14,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: paletteToken("border"),
+              backgroundColor: paletteToken("card"),
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <Pulse id={`deck-skel-${index()}-title`} style={{ height: 16, width: 140, borderRadius: 6 }} />
+            <Pulse id={`deck-skel-${index()}-line`} secondary style={{ height: 12, borderRadius: 6 }} />
+            <Pulse
+              id={`deck-skel-${index()}-meta`}
+              secondary
+              style={{ height: 12, width: 200, borderRadius: 6 }}
+            />
+          </View>
+        )}
+      </Each>
+    </View>
+  );
+}
 
 /** Virtualized grid/list deck pane wrapped around `List` (nsh). */
-function DeckGrid(props: DeckPaneProps & { filtered: DeckRecord[] }): JSX.Element {
-  const paneWidth = signal(0);
+function DeckGrid(): JSX.Element {
+  const pane = createPaneWidth({
+    active: pageActive,
+    fromShell: (panelW) => panelW - (gatedSelectedId() !== null ? DETAIL_COLUMN_W : 0),
+  });
+  const paneWidth = pane.width;
   const backTopShown = signal(false);
   const listRef = signal<ListRef | null>(null);
 
   effect(() => {
-    void props.isList;
+    void gatedViewList();
     backTopShown.set(false);
     queueMicrotask(() => listRef()?.scrollToOffset({ offset: 0, animated: false }));
   });
 
-  const stride = (): number => SKILL_CARD_H + (props.isList ? DECK_LIST_GAP : CARD_GAP);
-  const trackW = (): number =>
+  const stride = computed(
+    () => SKILL_CARD_H + (gatedViewList() ? DECK_LIST_GAP : CARD_GAP),
+  );
+  const trackW = computed(() =>
     cardTrackWidth(
       paneWidth(),
-      props.isList,
+      gatedViewList(),
       PAGE_PAD,
-      props.selectedId !== null ? CARD_ROW_W - DETAIL_COLUMN_W : CARD_ROW_W
-    );
+      gatedSelectedId() !== null ? CARD_ROW_W - DETAIL_COLUMN_W : CARD_ROW_W,
+    ),
+  );
   const packedRows = computed(() =>
     packCardRows(
-      props.filtered,
+      gatedFilteredDecks(),
       gridColumnsForPane(
         paneWidth(),
-        props.isList,
+        gatedViewList(),
         PAGE_PAD,
-        props.selectedId !== null ? CARD_ROW_W - DETAIL_COLUMN_W : CARD_ROW_W
-      )
-    )
+        gatedSelectedId() !== null ? CARD_ROW_W - DETAIL_COLUMN_W : CARD_ROW_W,
+      ),
+    ),
   );
 
   return (
@@ -363,16 +641,13 @@ function DeckGrid(props: DeckPaneProps & { filtered: DeckRecord[] }): JSX.Elemen
         minWidth: 0,
         width: "100%",
       }}
-      onLayout={(event) => {
-        const w = event.bounds.size.width;
-        if (w > 0 && w !== paneWidth()) paneWidth.set(w);
-      }}
+      onLayout={pane.onLayout}
     >
       <List
         ref={(node) => listRef.set(node)}
         testID="deck-grid"
         each={packedRows()}
-        keyExtractor={(_row, index) => `deck-row-${index}`}
+        keyExtractor={(row) => row.map((d) => d.id).join("\u001e")}
         estimatedItemSize={stride()}
         style={{ width: "100%", height: "100%" }}
         contentStyle={{
@@ -395,38 +670,15 @@ function DeckGrid(props: DeckPaneProps & { filtered: DeckRecord[] }): JSX.Elemen
               flexDirection: "row",
               justifyContent: "flex-start",
               alignItems: "flex-start",
-              gap: props.isList ? 0 : CARD_GAP,
+              gap: gatedViewList() ? 0 : CARD_GAP,
               height: stride(),
-              paddingBottom: props.isList ? DECK_LIST_GAP : CARD_GAP,
+              paddingBottom: gatedViewList() ? DECK_LIST_GAP : CARD_GAP,
               width: "100%",
             }}
           >
-            <Each of={row()} key="index">
+            <Each of={row()} key={(deck) => deck.id}>
               {(deck: () => DeckRecord) => (
-                <View
-                  style={
-                    props.isList
-                      ? { width: "100%", minWidth: 0 }
-                      : {
-                          width: trackW(),
-                          minWidth: trackW(),
-                          maxWidth: trackW(),
-                          flexShrink: 0,
-                          flexGrow: 0,
-                        }
-                  }
-                >
-                  <DeckCard
-                    deck={deck()}
-                    selected={props.selectedId === deck().id}
-                    viewList={props.isList}
-                    cardWidth={trackW()}
-                    busy={props.isBusy}
-                    installedSkills={props.installed}
-                    agents={props.agents}
-                    handle={cardHandle}
-                  />
-                </View>
+                <DeckCardSlot deck={deck} isList={gatedViewList} cardWidth={trackW} />
               )}
             </Each>
           </View>
@@ -443,10 +695,62 @@ function DeckGrid(props: DeckPaneProps & { filtered: DeckRecord[] }): JSX.Elemen
   );
 }
 
+function DeckCardSlot(props: {
+  deck: Accessor<DeckRecord>;
+  isList: Accessor<boolean>;
+  cardWidth: Accessor<number>;
+}): JSX.Element {
+  const deckId = computed(() => props.deck().id);
+  const selected = computed(() => gatedSelectedId() === deckId());
+  const busy = computed(() => rowBusy() === deckId());
+  const cardPending = computed<Record<string, true>>(
+    () => {
+      const prefix = `${deckId()}:`;
+      const all = linkPending();
+      let out: Record<string, true> | null = null;
+      for (const k of Object.keys(all)) {
+        if (k.startsWith(prefix)) {
+          if (out === null) out = {};
+          out[k] = true;
+        }
+      }
+      return out ?? EMPTY_PENDING;
+    },
+    { equals: shallowPendingEqual },
+  );
+  return (
+    <View
+      style={
+        props.isList()
+          ? { width: "100%", minWidth: 0 }
+          : {
+              width: props.cardWidth(),
+              minWidth: props.cardWidth(),
+              maxWidth: props.cardWidth(),
+              flexShrink: 0,
+              flexGrow: 0,
+            }
+      }
+    >
+      <DeckCard
+        deck={props.deck()}
+        selected={selected()}
+        viewList={props.isList()}
+        cardWidth={props.cardWidth()}
+        rowBusy={busy()}
+        linkPending={cardPending()}
+        installedSkills={gatedInstalled()}
+        agents={gatedAgents()}
+        handle={cardHandle}
+      />
+    </View>
+  );
+}
+
 /** 还没有卡组 — the shared empty glyph (the sidebar's deck icon), a 56px
  * accent-soft disc, the two-line pitch, and the create CTA
  * (mod.rs:343-392). */
-function DeckEmptyState(props: { busy: boolean }): JSX.Element {
+function DeckEmptyState(): JSX.Element {
   return (
     <View
       testID="deck-empty"
@@ -492,7 +796,6 @@ function DeckEmptyState(props: { busy: boolean }): JSX.Element {
         testID="deck-empty-create"
         glyph="plus"
         label={dt("skillCards.createFirst")}
-        disabled={props.busy}
         onPress={openDeckEditor}
       />
     </View>
@@ -538,29 +841,23 @@ function NoMatchState(): JSX.Element {
  * is the detail-drawer slice's component (detailDrawer.tsx); this page
  * owns the selection and hands over the same snapshot it renders the grid
  * from, so the card and the column can never disagree. */
-function DrawerTrack(props: {
-  deck: DeckRecord | null;
-  isBusy: boolean;
-  installed: ReadonlySet<string>;
-  agents: AgentRailProfile[];
-}): JSX.Element {
+function DrawerTrack(): JSX.Element {
   return (
-    <If when={props.deck !== null}>
+    <If when={gatedSelectedDeck() !== null}>
       <DeckDetailDrawer
-        deck={props.deck as DeckRecord}
-        installedSkills={props.installed}
-        agents={props.agents}
-        busy={props.isBusy}
+        deck={gatedSelectedDeck() as DeckRecord}
+        installedSkills={gatedInstalled()}
+        agents={gatedAgents()}
         onClose={() => selectedDeckId.set(null)}
         onEdit={(deck) => openEditGroup(deck)}
         onShare={(deck) => {
           // The drawer hands back its narrower shape; the share sheet also
           // wants skillSources, so hand it the page's own record.
           openShareSheet(
-            decks().find((record) => record.id === deck.id) ?? { ...deck, skillSources: {} }
+            decks().find((record) => record.id === deck.id) ?? { ...deck, skillSources: {} },
           );
         }}
-        onMutated={() => void refresh()}
+        onMutated={() => {}}
       />
     </If>
   );

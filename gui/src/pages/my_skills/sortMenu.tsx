@@ -1,8 +1,6 @@
-import { Overlay, Text, View, signal, type JSX, type ViewRef } from "nsh";
-import { paletteToken } from "../../services/themeMode";
+import { Overlay, View, signal, type JSX, type ViewRef } from "nsh";
 import { t } from "../../services/translation";
-import { Icon } from "../../chrome/icons";
-import { Tip } from "../../chrome/tooltip";
+import { BarMenuPanel, BarMenuRow, BarMenuTrigger } from "../../chrome/barMenu";
 import { SORT_OPTIONS, type SortOption } from "./filters";
 import { sortBy } from "./state";
 
@@ -24,57 +22,24 @@ export function SortMenuButton(): JSX.Element {
           triggerRef.set(node);
         }}
       >
-        <View
+        <BarMenuTrigger
           testID="my-skills-sort-trigger"
-          tooltip={<Tip text={`${t("toolbar.sort")}: ${sortLabel(sortBy())}`} />}
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            height: 32,
-            paddingHorizontal: 12,
-            borderRadius: 10,
-            borderWidth: 1,
-            cursor: "pointer",
-            flexShrink: 0,
-            borderColor:
-              sortBy() !== "smart" ? paletteToken("accent_soft_edge") : paletteToken("border"),
-            backgroundColor: sortBy() !== "smart" ? paletteToken("accent_soft") : paletteToken("bg"),
-          }}
-          hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-          onPress={() => menuOpen.set(!menuOpen())}
-        >
-          <Icon
-            name="arrowUpDown"
-            size={14}
-            color={sortBy() !== "smart" ? paletteToken("accent") : paletteToken("fg_muted")}
-          />
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: "500",
-              color: sortBy() !== "smart" ? paletteToken("accent") : paletteToken("fg"),
-            }}
-          >
-            {sortLabel(sortBy())}
-          </Text>
-          <Icon
-            name="chevronDown"
-            size={11}
-            color={sortBy() !== "smart" ? paletteToken("accent") : paletteToken("fg_muted")}
-          />
-        </View>
+          glyph="arrowUpDown"
+          label={() => sortLabel(sortBy())}
+          tip={() => `${t("toolbar.sort")}: ${sortLabel(sortBy())}`}
+          active={() => sortBy() !== "smart"}
+          onPress={() => menuOpen.update((open) => !open)}
+        />
       </View>
       <If when={menuOpen()}>
-        <Overlay style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-          <View
-            testID="selection-menu-dismiss-sort"
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-            onPress={() => menuOpen.set(false)}
-          />
-        </Overlay>
-        <Overlay anchor={triggerRef()} placement="bottom" align="start" offset={6}>
+        <Overlay
+          anchor={triggerRef()}
+          placement="bottom"
+          align="start"
+          offset={6}
+          onPressOutside={() => menuOpen.set(false)}
+          onCancel={() => menuOpen.set(false)}
+        >
           <SortPanel onClose={() => menuOpen.set(false)} />
         </Overlay>
       </If>
@@ -92,67 +57,20 @@ function sortLabel(option: SortOption): string {
 
 function SortPanel(props: { onClose: () => void }): JSX.Element {
   return (
-    <View
-      testID="my-skills-sort-panel"
-      style={{
-        width: 190,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: paletteToken("border"),
-        backgroundColor: paletteToken("card"),
-        boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        padding: 6,
-        gap: 2,
-      }}
-    >
-      {SORT_OPTIONS.map((option) => (
-        <SortRow option={option} active={sortBy() === option} onClose={props.onClose} />
-      ))}
-    </View>
-  );
-}
-
-function SortRow(props: { option: SortOption; active: boolean; onClose: () => void }): JSX.Element {
-  return (
-    <View
-      testID={`sort-row-${props.option}`}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        height: 32,
-        paddingHorizontal: 8,
-        gap: 4,
-        borderRadius: 6,
-        cursor: "pointer",
-        backgroundColor: props.active ? paletteToken("accent_soft") : "transparent",
-      }}
-      hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
-      onPress={() => {
-        sortBy.set(props.option);
-        props.onClose();
-      }}
-    >
-      <View style={{ width: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {props.active ? (
-          <Icon name="check" size={13} color={paletteToken("accent")} />
-        ) : null}
-      </View>
-      <Text
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 12,
-          fontWeight: "500",
-          color: props.active ? paletteToken("accent") : paletteToken("fg"),
-          numberOfLines: 1,
-        }}
-      >
-        {sortLabel(props.option)}
-      </Text>
-    </View>
+    <BarMenuPanel testID="my-skills-sort-panel">
+      <Each of={SORT_OPTIONS} key={(option) => option}>
+        {(option) => (
+          <BarMenuRow
+            testID={`sort-row-${option()}`}
+            label={sortLabel(option())}
+            active={sortBy() === option()}
+            onPress={() => {
+              sortBy.set(option());
+              props.onClose();
+            }}
+          />
+        )}
+      </Each>
+    </BarMenuPanel>
   );
 }

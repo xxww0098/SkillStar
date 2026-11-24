@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use ss_core::infra::error::AppError;
 use ss_core::types::{SkillContent, parse_skill_content};
 
-use crate::{installed_skill, local_skill, skill_lock};
+use crate::{local_skill, skill_lock};
 
 const SNAPSHOT_HASH_DOMAIN: &[u8] = b"skillstar.skill-snapshot.v2\0";
 pub const SNAPSHOT_HASH_VERSION: u32 = 2;
@@ -41,13 +41,6 @@ pub enum SnapshotFileKind {
 }
 
 impl SnapshotFileKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Regular => "regular",
-            Self::Symlink => "symlink",
-        }
-    }
-
     fn hash_tag(self) -> u8 {
         match self {
             Self::Regular => 1,
@@ -69,12 +62,6 @@ pub struct SkillSnapshotFile {
 impl SkillSnapshotFile {
     pub fn size(&self) -> u64 {
         self.content.len() as u64
-    }
-
-    pub fn symlink_target(&self) -> Option<&str> {
-        (self.kind == SnapshotFileKind::Symlink)
-            .then(|| std::str::from_utf8(&self.content).ok())
-            .flatten()
     }
 }
 
@@ -529,41 +516,8 @@ pub fn read_raw(name: &str) -> Result<String, AppError> {
     Ok(std::fs::read_to_string(skill_md)?)
 }
 
-pub fn delete_local(name: &str) -> Result<(), AppError> {
-    validate_skill_name(name)?;
-    let _transaction_guard =
-        crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
-            AppError::Other(format!("Unable to lock local Skill deletion: {error}"))
-        })?;
-    crate::skill_mutation::policy()
-        .ensure_skill_mutation_allowed(name)
-        .map_err(|error| AppError::Other(error.to_string()))?;
-    if !local_skill::is_local_skill(name) {
-        return Err(AppError::Other(format!(
-            "Skill '{name}' is not a local Skill and cannot be deleted through the local authoring flow"
-        )));
-    }
-    local_skill::delete(name).map_err(AppError::Anyhow)?;
-    installed_skill::invalidate_cache();
-    Ok(())
-}
-
 pub fn migrate_local_skills() -> Result<u32, AppError> {
     local_skill::migrate_existing().map_err(AppError::Anyhow)
-}
-
-pub fn list_files(name: &str) -> Result<Vec<String>, AppError> {
-    validate_skill_name(name)?;
-    let skill_dir = ss_core::infra::paths::hub_skills_dir().join(name);
-    if !skill_dir.exists() {
-        return Err(not_found(name));
-    }
-
-    let effective_dir = resolve_content_dir(name).ok_or_else(|| not_found(name))?;
-    let mut files = Vec::new();
-    collect_files_recursive(&effective_dir, &effective_dir, &mut files);
-    files.sort();
-    Ok(files)
 }
 
 pub fn read(name: &str) -> Result<SkillContent, AppError> {
@@ -724,30 +678,6 @@ fn find_nested_skill_dir_by_name(root: &Path, skill_name: &str) -> Option<PathBu
     }
 
     None
-}
-
-fn collect_files_recursive(root: &Path, dir: &Path, files: &mut Vec<String>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let name = file_name.to_string_lossy();
-        if name == ".git" {
-            continue;
-        }
-
-        if ss_core::infra::fs_ops::is_link(&path) {
-            continue;
-        }
-        if path.is_dir() {
-            collect_files_recursive(root, &path, files);
-        } else if let Ok(relative) = path.strip_prefix(root) {
-            files.push(relative.to_string_lossy().replace('\\', "/"));
-        }
-    }
 }
 
 fn not_found(name: &str) -> AppError {

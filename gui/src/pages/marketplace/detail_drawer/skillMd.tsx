@@ -115,23 +115,27 @@ export function SkillMdOverlay(props: { title: string; markdown: string; onClose
 
 /** text_block（column.rs:761-786）对位：按行渲染，空行占一格。 */
 function MdLines(props: { markdown: string }): JSX.Element {
-  const lines = props.markdown.split("\n");
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {lines.map((line, index) =>
-        index === 0 ? (
-          // 首行带 View testID：无头测试按 id: 寻址（Text 不参与命中）。
-          <View testID="mk-skill-md-body">
-            <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg") }}>
-              {line.length === 0 ? " " : line}
-            </Text>
-          </View>
-        ) : (
-          <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg") }}>
-            {line.length === 0 ? " " : line}
-          </Text>
-        )
-      )}
+      <Each of={props.markdown.split("\n")} key="index">
+        {(line: () => string, index: () => number) => (
+          <If
+            when={index() === 0}
+            else={
+              <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg") }}>
+                {line().length === 0 ? " " : line()}
+              </Text>
+            }
+          >
+            {/* 首行带 View testID：无头测试按 id: 寻址（Text 不参与命中）。 */}
+            <View testID="mk-skill-md-body">
+              <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg") }}>
+                {line().length === 0 ? " " : line()}
+              </Text>
+            </View>
+          </If>
+        )}
+      </Each>
     </View>
   );
 }

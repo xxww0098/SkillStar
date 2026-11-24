@@ -182,24 +182,6 @@ fn signed_in_public_probe_uses_the_same_session_without_credential() {
 }
 
 #[test]
-fn recovery_view_retains_auth_without_inheriting_sticky_cancellation() {
-    let session = GitOperationSession::new(
-        "cancelled-update",
-        GitAuthMaterial::available(TOKEN),
-        Arc::new(RecordingSink::default()),
-    );
-    session.cancel();
-
-    let recovery = session.recovery_view();
-
-    assert!(session.is_cancelled());
-    assert!(!recovery.is_cancelled());
-    assert!(recovery.has_credential());
-    assert_eq!(recovery.id(), session.id());
-    assert!(!format!("{recovery:?}").contains(TOKEN));
-}
-
-#[test]
 fn credential_bearing_remote_is_rejected_before_git_can_persist_or_log_it() {
     let session = GitOperationSession::new(
         "unsafe-url",

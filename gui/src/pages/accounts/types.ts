@@ -8,12 +8,30 @@
 /** ss-accounts::Agent::id()：受管 agent 的 ss-skills 注册 id。 */
 export type AgentId = string;
 
+/** 单个受管 agent 支持的多路 OAuth 登录方式元数据（由桥接层下发）。 */
+export interface OAuthModeOption {
+  id: string;
+  label: string;
+  optionKey?: "leg" | "provider";
+  fields?: string[];
+}
+
+/** Accounts.startLogin 可选配置（如 Kiro IdC 或 ZCode 上游）。 */
+export interface StartLoginOptions {
+  leg?: string;
+  provider?: string;
+  idcRegion?: string;
+  idcStartUrl?: string;
+  region?: string;
+}
+
 /** 桥 Accounts.agents() 的一行（能力与本地凭据来源元数据）。 */
 export interface AgentRow {
   id: string;
   displayName: string;
   supportsOauth?: boolean;
   localSource?: string;
+  oauthModes?: OAuthModeOption[];
 }
 
 /** ss-accounts UsageUnit（serde kebab-case）。 */
@@ -47,6 +65,8 @@ export interface UsageSnapshot {
   windows: UsageWindow[];
   plan?: string | null;
   credits?: Credits | null;
+  /** Codex 可用重置卡数量（rate_limit_reset_credits.available_count）。 */
+  resetCredits?: number | null;
   /** 最近一次读取失败的原因（账号本身仍有效）。 */
   error?: string | null;
 }
@@ -58,6 +78,7 @@ export interface AccountView {
   agent: string;
   displayName: string;
   email?: string | null;
+  accountId?: string | null;
   plan?: string | null;
   createdAt: number;
   lastUsedAt?: number | null;
@@ -72,6 +93,7 @@ export interface AccountView {
 export interface AgentLive {
   agent: string;
   identity?: string | null;
+  displayName?: string | null;
   accountId?: string | null;
   source: string;
 }
@@ -100,9 +122,4 @@ export interface LoginStart {
 /** 该 flow 是否接受粘贴回调（remote-poll 只有配对码，immediate 无需动作）。 */
 export function flowTakesPaste(flow: LoginFlow): boolean {
   return flow === "local-callback" || flow === "scheme-paste";
-}
-
-/** 该 flow 是否由页面引导浏览器（remote-poll 也走授权页）。 */
-export function loginUrlOf(start: LoginStart): string {
-  return start.authUrl.startsWith("http") ? start.authUrl : (start.verificationUri ?? "");
 }

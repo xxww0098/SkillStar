@@ -4,21 +4,33 @@
 // （假桥注入，不触文件系统不打网）。真实 git 链路（本地目录扫描→安装回
 // 环、120ms 折叠泵、Rust 侧取消）由 native crate 的 cargo test 覆盖
 //（my_skills_import.rs）；DomainJob 与 epoch 门端到端由 domainJob.test.tsx 覆盖。
+import { effect, signal } from "nsh";
 import { expect, open, test } from "nsh/test";
 import {
+  cancelActive,
   closeImportModal,
   deckNameFromSource,
   gitErrorMessage,
   importModalOpen,
+  importParked,
   installBridges,
+  installSelected,
+  openImportModal,
   openImportModalWithInput,
+  parkImport,
   phase,
   progressKey,
+  resetToInput,
+  scanWith,
   selected,
   shareRemoteLabel,
   urlValue,
+  type GitProgressEvent,
+  type ScanView,
 } from "./importModalState";
+import { setSnapshotLoaderForTest } from "./state";
 import { requestImportSource } from "../../shell/events";
+import { createJobBoard, dropJob, jobList } from "../../shell/jobBoard";
 
 const HOST = "./importModalSlot.test.host.tsx";
 
@@ -289,4 +301,180 @@ test("openImportModalWithInput and requestImportSource prefill input and respect
     closeImportModal();
     installBridges();
   }
+});
+
+test("parkImport continues in background without infinite loop and settles scan/install", async () => {
+  const pending: {
+    scanEvent: ((event: GitProgressEvent) => void) | null;
+    scanResolve: ((value: ScanView) => void) | null;
+    installResolve: ((value: { installed: string[]; short: string }) => void) | null;
+  } = {
+    scanEvent: null,
+    scanResolve: null,
+    installResolve: null,
+  };
+  setSnapshotLoaderForTest(async () => ({
+    skills: [],
+    agents: [],
+    favorites: [],
+    favoritesLocked: false,
+    descriptionChoices: {},
+  }));
+  installBridges({
+    looksLikeShareCode: () => false,
+    parseShareCode: async () => {
+      throw new Error("unused");
+    },
+    installedNames: async () => [],
+    repoHistory: async () => [],
+    scanRepo: (_input, _depth, _refresh, _job, onEvent) =>
+      new Promise<ScanView>((resolve) => {
+        pending.scanEvent = onEvent;
+        pending.scanResolve = resolve;
+      }),
+    installSkills: () =>
+      new Promise<{ installed: string[]; short: string }>((resolve) => {
+        pending.installResolve = resolve;
+      }),
+    installShare: async () => {
+      throw new Error("unused");
+    },
+    adoptFolder: async () => ({ names: [] }),
+    importBundle: async () => ({ installed: [], deckCreated: false }),
+    installAudits: async () => [],
+    pickFolder: async () => null,
+    pickBundleFile: async () => null,
+  });
+  try {
+    openImportModal();
+    scanWith("owner/repo", false, false);
+    expect(phase()).toBe("scanning");
+
+    parkImport();
+    expect(importModalOpen()).toBeNull();
+    expect(importParked()).toBe(true);
+    const parkedScanJob = jobList().find((item) => item.id === "my-skills-import");
+    expect(parkedScanJob?.title).toBe("正在导入");
+
+    pending.scanEvent?.({ phase: "running", stage: "discovering" });
+    expect(jobList().find((item) => item.id === "my-skills-import")?.detail).toBe(
+      "正在扫描仓库里的技能...",
+    );
+
+    pending.scanResolve?.({
+      short: "owner/repo",
+      repoUrl: "https://github.com/owner/repo",
+      plugin: false,
+      cacheHit: false,
+      skills: [
+        {
+          id: "demo-skill",
+          folderPath: "demo-skill",
+          description: "Demo",
+          alreadyInstalled: false,
+          installable: true,
+          internal: false,
+          frontmatterIssues: [],
+        },
+      ],
+    });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    expect(jobList().some((item) => item.id === "my-skills-import")).toBe(false);
+    expect(importModalOpen()).toBe("import");
+    expect(importParked()).toBe(false);
+    expect(phase()).toBe("select");
+
+    installSelected(false);
+    expect(phase()).toBe("installing");
+    parkImport();
+    expect(importParked()).toBe(true);
+    expect(importModalOpen()).toBeNull();
+    expect(jobList().some((item) => item.id === "my-skills-import")).toBe(true);
+
+    pending.installResolve?.({ installed: ["demo-skill"], short: "owner/repo" });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    expect(phase()).toBe("completed");
+    expect(importParked()).toBe(false);
+
+    // 非加载态（completed / input）调用 parkImport 不会把已完成任务挂回右上角。
+    parkImport();
+    expect(importParked()).toBe(false);
+    expect(jobList().some((item) => item.id === "my-skills-import")).toBe(false);
+
+    openImportModal();
+    expect(importModalOpen()).toBe("import");
+    expect(phase()).toBe("input");
+
+    // 即使在 parked 态下复位回 input，也会同步撤掉角标卡片并退出 parked。
+    scanWith("owner/repo", false, false);
+    parkImport();
+    expect(jobList().some((item) => item.id === "my-skills-import")).toBe(true);
+    resetToInput();
+    expect(phase()).toBe("input");
+    expect(importParked()).toBe(false);
+    expect(jobList().some((item) => item.id === "my-skills-import")).toBe(false);
+  } finally {
+    cancelActive();
+    closeImportModal();
+    importParked.set(false);
+    dropJob("my-skills-import");
+    installBridges();
+    setSnapshotLoaderForTest();
+  }
+});
+
+test("createJobBoard mutations are effect-safe and endJob ignores already-done jobs", () => {
+  let currentNow = 1000;
+  let timerSeq = 0;
+  const timers = new Map<number, { fn: () => void; cancelled: boolean }>();
+  const board = createJobBoard({
+    now: () => currentNow,
+    after: (_ms, fn) => {
+      const id = ++timerSeq;
+      timers.set(id, { fn, cancelled: false });
+      return () => {
+        const entry = timers.get(id);
+        if (entry) entry.cancelled = true;
+      };
+    },
+  });
+
+  const stage = signal<"idle" | "running" | "done" | "dropped">("idle");
+  const detail = signal("step-1");
+  let active = true;
+  effect(() => {
+    if (!active) return;
+    const current = stage();
+    if (current === "running") {
+      board.putJob({ id: "job-a", title: "Work", detail: detail() });
+    } else if (current === "done") {
+      board.endJob("job-a", "Finished");
+    } else if (current === "dropped") {
+      board.dropJob("job-a");
+    }
+  });
+
+  stage.set("running");
+  expect(board.jobList().map((j) => `${j.id}:${j.detail}`)).toEqual(["job-a:step-1"]);
+  detail.set("step-2");
+  expect(board.jobList().map((j) => `${j.id}:${j.detail}`)).toEqual(["job-a:step-2"]);
+
+  currentNow = 1500;
+  stage.set("done");
+  expect(board.jobList()[0]?.done).toBe(true);
+  expect(board.jobList()[0]?.title).toBe("Finished");
+  expect(timers.size).toBe(1);
+  expect(timers.get(1)?.cancelled).toBe(false);
+
+  board.endJob("job-a", "Again");
+  expect(timers.get(1)?.cancelled).toBe(false);
+  expect(board.jobList()[0]?.title).toBe("Finished");
+
+  timers.get(1)?.fn();
+  expect(board.jobList()).toEqual([]);
+
+  const before = board.jobList();
+  stage.set("dropped");
+  expect(board.jobList()).toBe(before);
+  active = false;
 });

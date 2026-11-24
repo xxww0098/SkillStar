@@ -202,11 +202,12 @@ fn post_form(pairs: &[(&str, &str)]) -> OAuthResult<Value> {
             .form(&body)
             .send()
             .await
-            .map_err(|error| OAuthError::Transient(format!("Google token 请求失败: {error}")))?;
+            .map_err(|error| token::transport_error("Google token 请求失败", error))?;
         let status = response.status().as_u16();
-        let text = response.text().await.map_err(|error| {
-            OAuthError::Transient(format!("Google token 响应读取失败: {error}"))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|error| token::transport_error("Google token 响应读取失败", error))?;
         Ok::<_, OAuthError>((status, text))
     })??;
     let (status, text) = answer;
@@ -226,7 +227,7 @@ fn tokens_from_response(body: &Value) -> OAuthResult<TokenSet> {
     })
 }
 
-fn read_identity_blocking(access_token: &str) -> OAuthResult<Identity> {
+pub(crate) fn read_identity_blocking(access_token: &str) -> OAuthResult<Identity> {
     let token = access_token.to_string();
     rt::block_on(async move {
         let client = ss_core::infra::http_client::probe_http_client(REQUEST_TIMEOUT)
@@ -243,12 +244,12 @@ async fn read_identity(client: &reqwest::Client, access_token: &str) -> OAuthRes
         .bearer_auth(access_token)
         .send()
         .await
-        .map_err(|error| OAuthError::Transient(format!("Google userinfo 请求失败: {error}")))?;
+        .map_err(|error| token::transport_error("Google userinfo 请求失败", error))?;
     let status = response.status().as_u16();
     let body = response
         .text()
         .await
-        .map_err(|error| OAuthError::Transient(format!("Google userinfo 读取失败: {error}")))?;
+        .map_err(|error| token::transport_error("Google userinfo 读取失败", error))?;
     if !(200..300).contains(&status) {
         return Err(token::classify_status(status, &body));
     }
@@ -404,6 +405,22 @@ mod tests {
         assert!(started.start.expires_at.is_some());
         // Complete the login away so the listener thread does not linger.
         crate::oauth::cancel(&started.start.login_id);
+    }
+
+    #[test]
+    fn default_client_can_start_oauth_without_user_configuration() {
+        let _sandbox = crate::test_support::Sandbox::new();
+        let started = crate::oauth::start(
+            AGENT_ID,
+            &StartOptions {
+                prefer_port: Some(0),
+                ..StartOptions::default()
+            },
+        )
+        .expect("default client starts OAuth");
+        assert_eq!(started.flow, LoginFlow::LocalCallback);
+        assert!(started.auth_url.starts_with(AUTH_ENDPOINT));
+        crate::oauth::cancel(&started.login_id);
     }
 
     #[test]

@@ -158,6 +158,7 @@ pub(crate) fn snapshot_from(root: &Value, status: Option<&Value>, now: i64) -> U
         credits: None,
         error: None,
         gcp_tos: None,
+        reset_credits: None,
     }
 }
 

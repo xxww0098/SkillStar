@@ -70,6 +70,10 @@ pub struct UsageSnapshot {
     /// without asking the provider again. Absent for every other agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcp_tos: Option<bool>,
+    /// Codex only: available banked rate-limit reset cards
+    /// (`rate_limit_reset_credits.available_count`). Absent for every other agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_credits: Option<u64>,
 }
 
 #[cfg(test)]
@@ -82,6 +86,7 @@ mod tests {
         let snapshot: UsageSnapshot = serde_json::from_str(stored).expect("an old snapshot");
         assert_eq!(snapshot.plan.as_deref(), Some("PRO"));
         assert_eq!(snapshot.gcp_tos, None);
+        assert_eq!(snapshot.reset_credits, None);
     }
 
     #[test]
@@ -89,14 +94,18 @@ mod tests {
         let known = UsageSnapshot {
             fetched_at: 1,
             gcp_tos: Some(true),
+            reset_credits: Some(2),
             ..UsageSnapshot::default()
         };
         let json = serde_json::to_string(&known).expect("json");
         assert!(json.contains("\"gcpTos\":true"), "{json}");
+        assert!(json.contains("\"resetCredits\":2"), "{json}");
         let decoded: UsageSnapshot = serde_json::from_str(&json).expect("round trip");
         assert_eq!(decoded.gcp_tos, Some(true));
+        assert_eq!(decoded.reset_credits, Some(2));
 
         let unknown = serde_json::to_string(&UsageSnapshot::default()).expect("json");
         assert!(!unknown.contains("gcpTos"), "{unknown}");
+        assert!(!unknown.contains("resetCredits"), "{unknown}");
     }
 }

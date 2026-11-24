@@ -1,4 +1,4 @@
-import { Image, Text, View, openUrl, type JSX } from "nsh";
+import { Image, Text, View, effect, openUrl, signal, untracked, type JSX } from "nsh";
 import { Settings } from "skillstar-gui/native";
 import {
   isLight,
@@ -21,6 +21,7 @@ import {
   setRailMode,
 } from "./nav";
 import { SkillsNav } from "./skillsNav";
+import { SidebarGitHubEntry } from "./SidebarGitHubEntry";
 import { AccountsProviderMenu } from "../pages/accounts/rail";
 
 // The sidebar rail — shell/sidebar.rs parity.
@@ -35,11 +36,8 @@ import { AccountsProviderMenu } from "../pages/accounts/rail";
 //   - the mode's list: skills pages, or the accounts provider menu
 //     (pages/accounts/rail.tsx, since the accounts wave),
 //   - the footer: expanded = collapse | theme | settings, collapsed stacks
-//     settings, theme, collapse.
-//
-// The GPUI rail is a replayed view kept out of page animation frames
-// (sidebar.rs doc comment); the nsh DOM keeps that property natively — the
-// rail subtree only re-renders when its own signals change.
+//     settings, theme, collapse. Accounts quotas stay reachable from the tray
+//     window and the app menu (⇧⌘U), not from this rail.
 
 /** Public source repository (sidebar.rs REPOSITORY_URL). */
 const REPOSITORY_URL = "https://github.com/xxww0098/SkillStar";
@@ -50,6 +48,12 @@ const MODE_SWITCHER_INSET = 12;
 const MODE_SWITCHER_INSET_COLLAPSED = 6;
 
 export function Sidebar(): JSX.Element {
+  const accountsRailVisited = signal(untracked(railMode) === "accounts");
+  effect(() => {
+    if (railMode() === "accounts" && !untracked(accountsRailVisited)) {
+      accountsRailVisited.set(true);
+    }
+  });
   return (
     <View
       style={{
@@ -76,37 +80,69 @@ export function Sidebar(): JSX.Element {
 
       {/* Skills mode lists pages; accounts mode lists providers in this same
           slot (the accounts wave's provider menu — pages/accounts/rail.tsx,
-          AccountsPage::render_provider_menu parity). */}
+          AccountsPage::render_provider_menu parity). Keep both subtrees
+          mounted so toggling between Skills and Accounts never destroys or
+          re-decodes the navigation/agent SVG rows mid-animation. */}
       <View
         style={{
-          display: "flex",
-          flexDirection: "column",
+          position: "relative",
           flex: 1,
           minHeight: 0,
-          gap: 2,
-          paddingVertical: 8,
-          paddingHorizontal: collapsed() ? 6 : 8,
           overflow: "hidden",
         }}
       >
-        <If
-          when={railMode() === "skills"}
-          else={<AccountsProviderMenu collapsed={collapsed()} />}
+        <View
+          style={{
+            position: "absolute",
+            top: 8,
+            bottom: 8,
+            left: collapsed() ? 6 : 8,
+            right: collapsed() ? 6 : 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            opacity: railMode() === "skills" ? 1 : 0,
+            pointerEvents: railMode() === "skills" ? "auto" : "none",
+            zIndex: railMode() === "skills" ? 1 : 0,
+          }}
         >
           <SkillsNav />
-        </If>
+        </View>
+        <View
+          style={{
+            position: "absolute",
+            top: 8,
+            bottom: 8,
+            left: collapsed() ? 6 : 8,
+            right: collapsed() ? 6 : 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            opacity: railMode() === "accounts" ? 1 : 0,
+            pointerEvents: railMode() === "accounts" ? "auto" : "none",
+            zIndex: railMode() === "accounts" ? 1 : 0,
+          }}
+        >
+          <If when={accountsRailVisited()}>
+            <AccountsProviderMenu collapsed={railMode() === "accounts" ? collapsed() : false} />
+          </If>
+        </View>
       </View>
 
+      <SidebarGitHubEntry collapsed={collapsed()} />
       <SidebarFooter collapsed={collapsed()} />
     </View>
   );
 }
 
-function renderBrandMark(): JSX.Element {
+function BrandMark(): JSX.Element {
+  const hovered = signal(false);
   return (
     <View
       testID="sidebar-brand-mark"
-      tooltip={<Tip text={t("sidebar.openRepository")} />}
+      tooltip={hovered() ? <Tip text={t("sidebar.openRepository")} /> : undefined}
+      onMouseEnter={() => hovered.set(true)}
+      onMouseLeave={() => hovered.set(false)}
       style={{
         width: 32,
         height: 32,
@@ -120,7 +156,6 @@ function renderBrandMark(): JSX.Element {
         display: "flex",
         cursor: "pointer",
       }}
-      // The mark opts out of the drag region around it (occlude parity).
       desktop={{ windowDrag: false }}
       onPress={() => {
         void openUrl(REPOSITORY_URL);
@@ -136,59 +171,64 @@ function renderBrandMark(): JSX.Element {
   );
 }
 
-/** The 32px brand mark + wordmark row (inside sidebar-top-drag in both
- * expanded and collapsed states; the mark itself opts out and opens the repo). */
 function BrandRow(props: { collapsed: boolean }): JSX.Element {
   return (
-    <If
-      when={props.collapsed}
-      else={
-        <View
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            paddingHorizontal: 12,
-            paddingBottom: 10,
-          }}
-        >
-          {renderBrandMark()}
-          <View style={{ display: "flex", flexDirection: "column" }}>
-            <Text style={{ fontSize: 14, fontWeight: "700", color: paletteToken("fg") }}>SkillStar</Text>
-            <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>{t("sidebar.tagline")}</Text>
-          </View>
-        </View>
-      }
+    <View
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: props.collapsed ? 0 : 10,
+        paddingHorizontal: props.collapsed ? 0 : 12,
+        paddingBottom: 10,
+      }}
     >
-      <View style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingBottom: 10 }}>
-        {renderBrandMark()}
+      <BrandMark />
+      <View
+        style={{
+          display: props.collapsed ? "none" : "flex",
+          flexDirection: "column",
+        }}
+      >
+        <Text style={{ fontSize: 14, fontWeight: "700", color: paletteToken("fg") }}>SkillStar</Text>
+        <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>{t("sidebar.tagline")}</Text>
       </View>
-    </If>
+    </View>
   );
 }
 
-function renderModeSwitcher(isCollapsed: boolean): JSX.Element {
-  const inset = isCollapsed ? MODE_SWITCHER_INSET_COLLAPSED : MODE_SWITCHER_INSET;
-  // Slot geometry derives from the rail width minus the wrapper inset and
-  // the track's own chrome (mode_switcher_track parity).
-  const railW = isCollapsed ? RAIL_COLLAPSED_W : RAIL_W;
-  const innerW = railW - 2 * inset - 2 * (4 + 1);
+function ModeSwitcher(props: { collapsed: boolean }): JSX.Element {
+  const inset = () => (props.collapsed ? MODE_SWITCHER_INSET_COLLAPSED : MODE_SWITCHER_INSET);
+  const modeGeo = () => {
+    const isCollapsed = props.collapsed;
+    const padInset = isCollapsed ? MODE_SWITCHER_INSET_COLLAPSED : MODE_SWITCHER_INSET;
+    const railW = isCollapsed ? RAIL_COLLAPSED_W : RAIL_W;
+    const innerW = railW - 2 * padInset - 2 * (4 + 1);
+    return {
+      slotW: isCollapsed ? innerW : (innerW - 2) / 2,
+      slotH: 32,
+      pad: 4,
+      iconSize: isCollapsed ? 16 : 14,
+    };
+  };
   return (
-    <View style={{ paddingHorizontal: inset, display: "flex" }} desktop={{ windowDrag: true }}>
+    <View style={{ paddingHorizontal: inset(), display: "flex" }} desktop={{ windowDrag: true }}>
       <SliderSegmented
-        motionId={isCollapsed ? "mode-switch-motion-collapsed" : "mode-switch-motion"}
-        geo={{
-          slotW: isCollapsed ? innerW : (innerW - 2) / 2,
-          slotH: 32,
-          pad: 4,
-          iconSize: isCollapsed ? 16 : 14,
-        }}
-        vertical={isCollapsed}
+        motionId="mode-switch-motion"
+        geo={modeGeo}
+        vertical={() => props.collapsed}
         options={[
-          { id: "mode-skills", icon: "layoutGrid", label: isCollapsed ? undefined : t("sidebar.modeSkills") },
-          { id: "mode-accounts", icon: "users", label: isCollapsed ? undefined : t("sidebar.modeAccounts") },
+          {
+            id: "mode-skills",
+            icon: "layoutGrid",
+            label: () => (props.collapsed ? "" : t("sidebar.modeSkills")),
+          },
+          {
+            id: "mode-accounts",
+            icon: "users",
+            label: () => (props.collapsed ? "" : t("sidebar.modeAccounts")),
+          },
         ]}
         selected={() => (railMode() === "accounts" ? 1 : 0)}
         onClick={(ix) => setRailMode(ix === 1 ? "accounts" : "skills")}
@@ -197,99 +237,49 @@ function renderModeSwitcher(isCollapsed: boolean): JSX.Element {
   );
 }
 
-/** Skills/Accounts capsule — the shared sliding-thumb segmented control
- * (render_mode_switcher parity). Collapsed: icon-only stacked pills. */
-function ModeSwitcher(props: { collapsed: boolean }): JSX.Element {
-  return (
-    <If when={props.collapsed} else={renderModeSwitcher(false)}>
-      {renderModeSwitcher(true)}
-    </If>
-  );
-}
-
-function renderCollapseBtn(isCollapsed: boolean): JSX.Element {
-  return (
-    <FooterButton
-      id="collapse"
-      icon={isCollapsed ? "panelLeftOpen" : "panelLeftClose"}
-      label={isCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
-      active={false}
-      onClick={() => collapsed.set(!collapsed())}
-    />
-  );
-}
-
-function renderThemeBtn(): JSX.Element {
-  return (
-    <FooterButton
-      id="theme"
-      icon={isLight() ? "sun" : "moon"}
-      label={t("settings.backgroundStyle")}
-      active={false}
-      onClick={() => {
-        const next: ThemeMode = isLight() ? "current" : "paper";
-        setThemeMode(next);
-        requestThemeMode.publish(next);
-      }}
-    />
-  );
-}
-
-function renderSettingsBtn(): JSX.Element {
-  return (
-    <FooterButton
-      id="settings"
-      icon="settings"
-      label={t("sidebar.settings")}
-      active={currentPage() === "settings"}
-      onClick={() => setCurrentPage("settings")}
-    />
-  );
-}
-
-/** Footer row — expanded: collapse | theme | settings (justify-between);
- * collapsed stacks settings, theme, collapse (sidebar.rs footer parity). */
+/** Footer row — expanded: collapse | theme | settings; collapsed stacks
+ * settings, theme, collapse (`column-reverse` keeps one button set mounted). */
 function SidebarFooter(props: { collapsed: boolean }): JSX.Element {
   return (
-    <If
-      when={props.collapsed}
-      else={
-        <View
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 4,
-            paddingHorizontal: 4,
-            paddingVertical: 8,
-            borderTopWidth: 1,
-            borderTopColor: paletteToken("border"),
-          }}
-        >
-          {renderCollapseBtn(false)}
-          {renderThemeBtn()}
-          {renderSettingsBtn()}
-        </View>
-      }
+    <View
+      style={{
+        display: "flex",
+        flexDirection: props.collapsed ? "column-reverse" : "row",
+        alignItems: "center",
+        justifyContent: props.collapsed ? "flex-start" : "space-between",
+        gap: props.collapsed ? 2 : 4,
+        paddingHorizontal: 4,
+        paddingVertical: 8,
+        borderTopWidth: 1,
+        borderTopColor: paletteToken("border"),
+      }}
     >
-      <View
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 2,
-          paddingHorizontal: 4,
-          paddingVertical: 8,
-          borderTopWidth: 1,
-          borderTopColor: paletteToken("border"),
+      <FooterButton
+        id="collapse"
+        icon={props.collapsed ? "panelLeftOpen" : "panelLeftClose"}
+        label={props.collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        active={false}
+        onClick={() => collapsed.update((prev) => !prev)}
+      />
+      <FooterButton
+        id="theme"
+        icon={isLight() ? "sun" : "moon"}
+        label={t("settings.backgroundStyle")}
+        active={false}
+        onClick={() => {
+          const next: ThemeMode = isLight() ? "current" : "paper";
+          setThemeMode(next);
+          requestThemeMode.publish(next);
         }}
-      >
-        {renderSettingsBtn()}
-        {renderThemeBtn()}
-        {renderCollapseBtn(true)}
-      </View>
-    </If>
+      />
+      <FooterButton
+        id="settings"
+        icon="settings"
+        label={t("sidebar.settings")}
+        active={currentPage() === "settings"}
+        onClick={() => setCurrentPage("settings")}
+      />
+    </View>
   );
 }
 
@@ -302,10 +292,13 @@ function FooterButton(props: {
   active: boolean;
   onClick: () => void;
 }): JSX.Element {
+  const hovered = signal(false);
   return (
     <View
       testID={`sidebar-${props.id}`}
-      tooltip={<Tip text={props.label} />}
+      tooltip={hovered() ? <Tip text={props.label} /> : undefined}
+      onMouseEnter={() => hovered.set(true)}
+      onMouseLeave={() => hovered.set(false)}
       role="button"
       accessibilityLabel={props.label}
       style={{
@@ -323,6 +316,11 @@ function FooterButton(props: {
           ? paletteToken("panel_active")
           : paletteToken("panel_hover"),
       }}
+      focusVisibleStyle={{
+        outlineWidth: 2,
+        outlineColor: paletteToken("accent"),
+        outlineOffset: 1,
+      }}
       onPress={props.onClick}
     >
       <Icon
@@ -333,6 +331,3 @@ function FooterButton(props: {
     </View>
   );
 }
-
-// The Shell decides the lane's absolute inset; the rail decides its own
-// width inside it (RAIL_W / RAIL_COLLAPSED_W live in ../layout).

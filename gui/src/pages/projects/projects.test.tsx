@@ -351,3 +351,35 @@ test("a failed registration keeps the dialog with the domain reason", async () =
   expect(readout(app)).toContain("reg:1");
   expect(app.texts().some((text) => text.includes("already registered"))).toBe(true);
 });
+
+// ---- 桌面计划审批（project-skills-mcp README:35-38） ------------------------------
+
+test("pending project skill plan renders above list when present and approve writes without deploying", async () => {
+  const app = await openHost();
+  await app.waitUntil(() => app.shows("id:proj-card-alpha"));
+  // 无计划时不渲染审批卡片。
+  expect(app.shows("id:project-pending-plan")).toBe(false);
+
+  // 注入未过期计划后展示规范路径、是否注册、owner、受影响 Agent 及操作。
+  await app.press("id:host-seed-plan");
+  await app.waitUntil(() => app.shows("id:project-pending-plan"));
+  expect(app.shows("id:project-plan-root")).toBe(true);
+  expect(app.shows("id:project-plan-registered")).toBe(true);
+  expect(app.shows("id:project-plan-owner")).toBe(true);
+  expect(app.shows("id:project-plan-agents")).toBe(true);
+  expect(app.shows("id:project-plan-op-demo")).toBe(true);
+  const allTexts = app.texts().join("\n");
+  expect(allTexts).toContain("/tmp/proj/alpha");
+  expect(allTexts).toContain("已注册到 SkillStar");
+  expect(allTexts).toContain("codex, cursor");
+
+  // 点击「批准计划」：仅写批准（approve:1），不触发部署（save:0）。
+  await app.press("id:project-plan-approve");
+  await app.waitUntil(() => app.shows("id:project-plan-approved-badge"));
+  expect(readout(app)).toContain("approve:1");
+  expect(readout(app)).toContain("save:0");
+
+  // 计划清除后区域隐藏。
+  await app.press("id:host-clear-plan");
+  await app.waitUntil(() => !app.shows("id:project-pending-plan"));
+});

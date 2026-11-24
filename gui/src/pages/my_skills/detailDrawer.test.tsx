@@ -130,11 +130,14 @@ test("upstream_note maps every change kind (removed names the source)", () => {
   );
 });
 
-test("description_source prefers the localized line and drops blank copy", () => {
+test("description_source prefers the raw description and falls back to localized when blank", () => {
   expect(descriptionSource({ ...baseSkill(), description: "Keep it." })).toBe("Keep it.");
   expect(
     descriptionSource({ ...baseSkill(), localizedDescription: "保留它。", description: "Keep it." })
-  ).toBe("保留它。");
+  ).toBe("Keep it.");
+  expect(
+    descriptionSource({ ...baseSkill(), localizedDescription: "仅译文。", description: "   " })
+  ).toBe("仅译文。");
   expect(descriptionSource({ ...baseSkill(), description: "   " })).toBe(null);
 });
 
@@ -182,13 +185,19 @@ test("the batch notice assembles partial lines and the canonical explanation", (
   expect(batchLinkNotice({ total: 2, failed: 0, skipped: 0, canonical: 1 })).toBe(null);
 });
 
-test("toggle_skip_message explains canonical root and names the unmanaged folder", () => {
+test("toggle_skip_message explains canonical root, modified copies, foreign links, and unmanaged folders", () => {
   expect(toggleSkipMessage("drawer-demo", { code: "canonical_root_agent", path: "/x" })).toContain(
     "由规范根直接提供"
   );
   expect(
     toggleSkipMessage("drawer-demo", { code: "unmanaged_real_directory", path: "/tmp/occupied" })
-  ).toContain("/tmp/occupied");
+  ).toContain("真实目录");
+  expect(
+    toggleSkipMessage("drawer-demo", { code: "foreign_link", path: "/tmp/foreign-link" })
+  ).toContain("外部链接");
+  expect(
+    toggleSkipMessage("drawer-demo", { code: "modified_agent_copy", path: "/tmp/edited" })
+  ).toContain("副本修改");
 });
 
 // ---- 翻译会话（drawerTranslate） ----------------------------------------------
@@ -330,6 +339,9 @@ test("the language button translates this opening only, and back", async () => {
   await app.press("id:drawer-translate");
   await app.waitUntil(() => app.shows("id:drawer-translation"));
   expect(app.texts()).toContain("为代理构建深模块。");
+  // 描述语言切换采用静默乐观更新：绝不显示行内 SaveStatus（已保存 / 正在保存）。
+  expect(app.texts()).not.toContain("已保存");
+  expect(app.texts()).not.toContain("正在保存");
   // 选择整表落库（MySkills.setDescriptionChoices 的桥形状）。
   await app.waitUntil(() =>
     app.texts().some((text) => text.includes('"drawer-demo":true'))
@@ -338,6 +350,67 @@ test("the language button translates this opening only, and back", async () => {
   await app.press("id:drawer-translate");
   await app.waitUntil(() => !app.shows("id:drawer-translation"));
   expect(app.texts()).toContain("Build deep modules for agents.");
+});
+
+test("cached localizedDescription keeps the translate button and toggles back to original", async () => {
+  const app = await open(HOST);
+  await app.setViewport(1280, 900);
+  await app.waitUntil(() => app.shows("id:close-detail-drawer"));
+  await app.press("id:host-scene-cached");
+  await app.waitUntil(() => app.shows("id:drawer-translate"));
+  expect(app.texts()).toContain("Cached English description.");
+  await app.press("id:drawer-translate");
+  await app.waitUntil(() => app.shows("id:drawer-translation"));
+  expect(app.texts()).toContain("已缓存的英文描述。");
+  expect(app.shows("id:drawer-translate")).toBe(true);
+  await app.press("id:drawer-translate");
+  await app.waitUntil(() => !app.shows("id:drawer-translation"));
+  expect(app.texts()).toContain("Cached English description.");
+});
+
+test("a blocked engine shows settings guidance without sweeping, and prefs change resumes translation", async () => {
+  const app = await open(HOST);
+  await app.setViewport(1280, 900);
+  await app.waitUntil(() => app.shows("id:close-detail-drawer"));
+  await app.press("id:host-toggle-blocked");
+  await app.press("id:host-hold-fill");
+  await app.press("id:host-scene-fresh");
+  await app.waitUntil(() => app.shows("id:drawer-translate"));
+  await app.press("id:drawer-translate");
+  await app.waitFor("id:drawer-translate-notice");
+  expect(app.texts().some((text) => text.includes("设置 → 翻译"))).toBe(true);
+  expect(app.shows("id:drawer-translate-sweep")).toBe(false);
+  expect(app.texts().some((text) => text.includes("fill:Fresh uncached line."))).toBe(false);
+
+  // 解除阻断并广播设置变更：清掉配置提示，立即起扫并发起翻译。
+  await app.press("id:host-toggle-blocked");
+  await app.press("id:host-prefs-changed");
+  await app.waitFor("id:drawer-translate-sweep");
+  expect(app.shows("id:drawer-translate-notice")).toBe(false);
+  await app.press("id:host-release-fill");
+  await app.waitUntil(() => !app.shows("id:drawer-translate-sweep"));
+  await app.waitUntil(() => app.shows("id:drawer-translation"));
+});
+
+test("an empty fill miss stops sweeping, shows retry, and recovers on retry", async () => {
+  const app = await open(HOST);
+  await app.setViewport(1280, 900);
+  await app.waitUntil(() => app.shows("id:close-detail-drawer"));
+  await app.press("id:host-miss-fill");
+  await app.press("id:host-scene-fresh");
+  await app.waitUntil(() => app.shows("id:drawer-translate"));
+  await app.press("id:drawer-translate");
+  await app.waitFor("id:drawer-translate-retry");
+  expect(app.shows("id:drawer-translate-sweep")).toBe(false);
+  expect(app.shows("id:drawer-translate-notice")).toBe(true);
+
+  await app.press("id:host-hold-fill");
+  await app.press("id:drawer-translate-retry");
+  await app.waitFor("id:drawer-translate-sweep");
+  expect(app.shows("id:drawer-translate-retry")).toBe(false);
+  await app.press("id:host-release-fill");
+  await app.waitUntil(() => !app.shows("id:drawer-translate-sweep"));
+  await app.waitUntil(() => app.shows("id:drawer-translation"));
 });
 
 test("the language button sweeps a laser until the description lands", async () => {
@@ -546,15 +619,62 @@ test("filteredSkills matches the original called name case-insensitively", () =>
   expect(matched.map((s) => s.name)).toEqual(["demo-owner"]);
 });
 
-test("coexisting skill shows from-called badge, modified copy recovery actions, and beside skills", async () => {
+test("an unmanaged-folder skip posts a pinned toast with a Backup & Take Over action", async () => {
+  const app = await open(HOST);
+  await app.setViewport(1280, 900);
+  await app.waitUntil(() => app.shows("id:drawer-toggle-drawer-demo-codex"));
+  await app.press("id:host-reset-calls");
+  await app.press("id:host-toggle-unmanaged");
+  await app.press("id:drawer-toggle-drawer-demo-codex");
+  await app.waitUntil(() => app.shows("id:notice-action"));
+  expect(app.texts()).toContain("备份并接管");
+  await app.press("id:notice-action");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("takeOverUnmanaged:drawer-demo:codex")),
+  );
+});
+
+test("a foreign-link skip posts a pinned toast with a Take Over Link action", async () => {
+  const app = await open(HOST);
+  await app.setViewport(1280, 900);
+  await app.waitUntil(() => app.shows("id:drawer-toggle-drawer-demo-codex"));
+  await app.press("id:host-reset-calls");
+  await app.press("id:host-toggle-foreign-link");
+  await app.press("id:drawer-toggle-drawer-demo-codex");
+  await app.waitUntil(() => app.shows("id:notice-action"));
+  expect(app.texts()).toContain("接管链接");
+  expect(app.texts().some((text) => text.includes("外部链接"))).toBe(true);
+  await app.press("id:notice-action");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("takeOverUnmanaged:drawer-demo:codex")),
+  );
+});
+
+test("coexisting skill shows from-called badge, unmanaged & modified recovery actions, and beside skills", async () => {
   const app = await open(HOST);
   await app.setViewport(1280, 900);
   await app.waitUntil(() => app.shows("id:host-scene-coexist"));
   await app.press("id:host-reset-calls");
   await app.press("id:host-scene-coexist");
   await app.waitUntil(() => app.shows("id:drawer-called-badge-coexist"));
+  await app.waitUntil(() => app.shows("id:drawer-unmanaged-entries-card"));
   await app.waitUntil(() => app.shows("id:drawer-modified-copies-card"));
   expect(app.shows("id:drawer-beside-item-sib-one")).toBe(true);
+
+  await app.press("id:drawer-takeover-unmanaged-antigravity");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("takeOverUnmanaged:coexist:antigravity")),
+  );
+
+  await app.press("id:drawer-adopt-unmanaged-antigravity");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("adoptUnmanaged:coexist:antigravity")),
+  );
+
+  await app.press("id:drawer-open-conflict-dir-antigravity");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("reveal:/Users/test/.gemini/antigravity/skills/coexist")),
+  );
 
   await app.press("id:drawer-adopt-copy-claude");
   await app.waitUntil(() =>

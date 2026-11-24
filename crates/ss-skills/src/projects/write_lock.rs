@@ -334,14 +334,11 @@ mod project_write_lock_tests {
     }
 
     #[test]
-    fn import_can_take_project_lock_while_holding_update_lock() {
+    fn project_lock_can_be_taken_while_holding_update_lock() {
         let env = EnvGuard::new("import");
         let project = env.root.join("project");
         fs::create_dir_all(&project).unwrap();
         let _update = acquire_update_transaction_lock().unwrap();
         with_project_write_lock(|| Ok(())).unwrap();
-        drop(_update);
-
-        crate::projects::import_scanned_skills(project.to_str().unwrap(), "demo", &[]).unwrap();
     }
 }

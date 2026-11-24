@@ -34,11 +34,153 @@
 //! lock, never `--test-threads=1`. `diagnose_network` touches the network —
 //! unit tests must not call it for real; assert the wire shape over a stub.
 
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
+
 use nsh_core::prelude::*;
 use nsh_core::JsonValue;
 
 use ss_core::config::github_mirror::{self, GitHubMirrorConfig};
 use ss_core::config::network_doctor::{self, NetworkDiagnosis};
+
+type FileStamp = Option<(u64, Option<SystemTime>)>;
+
+struct CachedMirror {
+    path: PathBuf,
+    stamp: FileStamp,
+    config: GitHubMirrorConfig,
+    pending_writes: u64,
+}
+
+static MIRROR_CACHE: OnceLock<Mutex<Option<CachedMirror>>> = OnceLock::new();
+
+fn mirror_cache() -> &'static Mutex<Option<CachedMirror>> {
+    MIRROR_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn file_stamp(path: &Path) -> FileStamp {
+    std::fs::metadata(path)
+        .ok()
+        .map(|meta| (meta.len(), meta.modified().ok()))
+}
+
+fn read_mirror_cached() -> GitHubMirrorConfig {
+    let path = ss_core::infra::paths::github_mirror_config_path();
+    let mut guard = mirror_cache().lock().expect("mirror cache lock poisoned");
+    if let Some(cached) = guard.as_ref()
+        && cached.path == path
+        && (cached.pending_writes > 0 || file_stamp(&path) == cached.stamp)
+    {
+        return cached.config.clone();
+    }
+    let stamp = file_stamp(&path);
+    let config = github_mirror::load_config().unwrap_or_default();
+    *guard = Some(CachedMirror {
+        path,
+        stamp,
+        config: config.clone(),
+        pending_writes: 0,
+    });
+    config
+}
+
+#[cfg(not(test))]
+fn mirror_writer_tx() -> &'static std::sync::mpsc::Sender<(PathBuf, GitHubMirrorConfig)> {
+    static TX: OnceLock<std::sync::mpsc::Sender<(PathBuf, GitHubMirrorConfig)>> = OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<(PathBuf, GitHubMirrorConfig)>();
+        let _ = std::thread::Builder::new()
+            .name("ss-gui-mirror-writer".to_string())
+            .spawn(move || {
+                while let Ok((mut path, mut config)) = rx.recv() {
+                    let mut flushed_count: u64 = 1;
+                    while let Ok((next_path, next_config)) = rx.try_recv() {
+                        if next_path == path {
+                            config = next_config;
+                            flushed_count += 1;
+                        } else {
+                            flush_one_mirror_write(&path, &config, flushed_count);
+                            path = next_path;
+                            config = next_config;
+                            flushed_count = 1;
+                        }
+                    }
+                    flush_one_mirror_write(&path, &config, flushed_count);
+                }
+            });
+        tx
+    })
+}
+
+#[cfg(not(test))]
+fn flush_one_mirror_write(path: &Path, config: &GitHubMirrorConfig, flushed_count: u64) {
+    if let Err(err) = github_mirror::save_config(config) {
+        eprintln!("settings_network: failed to persist {}: {err:#}", path.display());
+    }
+    let stamp = file_stamp(path);
+    let mut guard = mirror_cache().lock().expect("mirror cache lock poisoned");
+    if let Some(cached) = guard.as_mut()
+        && cached.path == path
+    {
+        cached.pending_writes = cached.pending_writes.saturating_sub(flushed_count);
+        if cached.pending_writes == 0 {
+            cached.stamp = stamp;
+        }
+    }
+}
+
+fn save_mirror_cached(parsed: GitHubMirrorConfig) -> Result<(), String> {
+    let path = ss_core::infra::paths::github_mirror_config_path();
+    let mut guard = mirror_cache().lock().expect("mirror cache lock poisoned");
+    let entry = guard.get_or_insert_with(|| CachedMirror {
+        path: path.clone(),
+        stamp: None,
+        config: parsed.clone(),
+        pending_writes: 0,
+    });
+    entry.path = path.clone();
+    entry.config = parsed.clone();
+
+    #[cfg(test)]
+    {
+        drop(guard);
+        github_mirror::save_config(&parsed).map_err(|err| format!("{err:#}"))?;
+        let stamp = file_stamp(&path);
+        let loaded = github_mirror::load_config().unwrap_or(parsed);
+        let mut guard = mirror_cache().lock().expect("mirror cache lock poisoned");
+        if let Some(cached) = guard.as_mut()
+            && cached.path == path
+        {
+            cached.stamp = stamp;
+            cached.config = loaded;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    {
+        entry.pending_writes += 1;
+        let send_res = mirror_writer_tx().send((path.clone(), parsed.clone()));
+        drop(guard);
+        ss_core::config::github_health::reset();
+        if send_res.is_err() {
+            let result = github_mirror::save_config(&parsed).map_err(|err| format!("{err:#}"));
+            let stamp = file_stamp(&path);
+            let mut guard = mirror_cache().lock().expect("mirror cache lock poisoned");
+            if let Some(cached) = guard.as_mut()
+                && cached.path == path
+            {
+                cached.pending_writes = cached.pending_writes.saturating_sub(1);
+                if cached.pending_writes == 0 {
+                    cached.stamp = stamp;
+                }
+            }
+            return result;
+        }
+        Ok(())
+    }
+}
 
 /// The GitHub-mirror + network-doctor settings seam (`SettingsNetwork` in TSX).
 #[module]
@@ -62,7 +204,7 @@ impl SettingsNetwork {
     /// a failed read degrades to the defaults so the page always opens.
     /// Read-only.
     pub fn load_mirror_config() -> JsonValue {
-        let config = github_mirror::load_config().unwrap_or_default();
+        let config = read_mirror_cached();
         serde_json::to_value(&config).unwrap_or(JsonValue::Null)
     }
 
@@ -84,7 +226,7 @@ impl SettingsNetwork {
     pub fn save_mirror_config(config: JsonValue) -> Result<(), String> {
         let parsed: GitHubMirrorConfig =
             serde_json::from_value(config).map_err(|err| format!("{err:#}"))?;
-        github_mirror::save_config(&parsed).map_err(|err| format!("{err:#}"))
+        save_mirror_cached(parsed)
     }
 
     /// Probe one mirror through a tiny public raw file

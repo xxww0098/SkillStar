@@ -61,14 +61,14 @@ function cjkGate(cached: Record<string, string> = {}): TranslationGate {
   };
 }
 
-test("description source prefers a non-empty localized line (mod.rs description_source)", () => {
+test("description source prefers the raw description and falls back to localized when blank", () => {
   expect(descriptionSource(skill("a", "Build deep modules."))).toBe("Build deep modules.");
   expect(
-    descriptionSource({ ...skill("a", "Raw text"), localizedDescription: "  " })
+    descriptionSource({ ...skill("a", "Raw text"), localizedDescription: "构建深模块。" })
   ).toBe("Raw text");
   expect(
     descriptionSource({
-      ...skill("a", "Raw text"),
+      ...skill("a", "   "),
       localizedDescription: "构建深模块。",
     })
   ).toBe("构建深模块。");
@@ -277,4 +277,108 @@ test("batch uninstall opens the confirm; cancel keeps the selection (selection_b
   // 清理。
   await app.press("id:selection-clear");
   await app.waitUntil(() => !app.shows("id:selection-bar"));
+});
+
+test("batch translation and viewport queue invoke fillDescriptions and update cards", async () => {
+  const {
+    ensureCardDescriptionTranslation,
+    fillSelectedDescriptions,
+    resetCardTranslateForTest,
+    cardTranslatedText,
+  } = await import("./cardTranslate");
+  const { skills } = await import("./state");
+  resetCardTranslateForTest();
+  const prevSkills = skills();
+  const filled: string[][] = [];
+  const fakeBridge = {
+    descriptionsEnabled: () => true,
+    needsTranslation: (s: string) => /[A-Za-z]/.test(s),
+    lookup: () => null,
+    blocked: () => false,
+    fillDescriptions: async (sources: string[]) => {
+      filled.push(sources);
+      return {
+        done: sources.map((source) => ({ source, text: `中文:${source}` })),
+        rejection: null,
+      };
+    },
+  };
+
+  skills.set([skill("alpha", "Build fast modules")]);
+  await fillSelectedDescriptions(["Build fast modules"], fakeBridge);
+  expect(filled).toEqual([["Build fast modules"]]);
+  expect(cardTranslatedText("Build fast modules")).toBe("中文:Build fast modules");
+  expect(skills()[0]?.localizedDescription).toBe("中文:Build fast modules");
+
+  ensureCardDescriptionTranslation("beta", "Inspect logs", undefined, fakeBridge);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(cardTranslatedText("Inspect logs")).toBe("中文:Inspect logs");
+
+  skills.set(prevSkills);
+  resetCardTranslateForTest();
+});
+
+test("translationPrefsChanged clears sessionRejected, rejectedSources and cardTranslationCache", async () => {
+  const {
+    ensureCardDescriptionTranslation,
+    resetCardTranslateForTest,
+    cardTranslatedText,
+  } = await import("./cardTranslate");
+  const { translationPrefsChanged } = await import("../../shell/events");
+  const { skills } = await import("./state");
+  resetCardTranslateForTest();
+  const prevSkills = skills();
+
+  try {
+    let shouldReject = false;
+    const calls: string[][] = [];
+    const bridge = {
+      descriptionsEnabled: () => true,
+      needsTranslation: (s: string) => /[A-Za-z]/.test(s),
+      lookup: () => null,
+      blocked: () => false,
+      fillDescriptions: async (sources: string[]) => {
+        calls.push(sources);
+        if (shouldReject) {
+          return { done: [], rejection: { model: "bad-model", detail: "bad key" } };
+        }
+        return {
+          done: sources.map((source) => ({
+            source,
+            text: `${shouldReject ? "bad" : "译"}:${source}`,
+          })),
+          rejection: null,
+        };
+      },
+    };
+
+    skills.set([skill("alpha", "Cached source"), skill("beta", "Rejected source")]);
+    ensureCardDescriptionTranslation("alpha", "Cached source", undefined, bridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(cardTranslatedText("Cached source")).toBe("译:Cached source");
+
+    shouldReject = true;
+    ensureCardDescriptionTranslation("beta", "Rejected source", undefined, bridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls.length).toBe(2);
+
+    // 会话级拒绝拦截后续自动排队。
+    ensureCardDescriptionTranslation("beta", "Rejected source", undefined, bridge);
+    ensureCardDescriptionTranslation("gamma", "Fresh source", undefined, bridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls.length).toBe(2);
+
+    // 保存新翻译设置后清空旧内存缓存、rejectedSources 与 sessionRejected。
+    shouldReject = false;
+    translationPrefsChanged.publish();
+    expect(cardTranslatedText("Cached source")).toBe(null);
+
+    ensureCardDescriptionTranslation("beta", "Rejected source", undefined, bridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls.length).toBe(3);
+    expect(cardTranslatedText("Rejected source")).toBe("译:Rejected source");
+  } finally {
+    skills.set(prevSkills);
+    resetCardTranslateForTest();
+  }
 });

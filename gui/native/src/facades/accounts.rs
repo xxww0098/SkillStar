@@ -26,9 +26,9 @@
 use nsh_core::JsonValue;
 use nsh_core::element::__private::JsonMap;
 use nsh_core::prelude::*;
-use ss_accounts::{AccountView, Agent, StartOptions};
+use ss_accounts::{AccountError, AccountResult, AccountView, Agent, StartOptions};
 
-/// 单个受管 agent 元数据行：`{id, displayName, supportsOauth, localSource}`。
+/// 单个受管 agent 的展示信息与登录能力。
 fn agent_row(agent: Agent) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert("id".to_owned(), JsonValue::String(agent.id().to_owned()));
@@ -44,7 +44,116 @@ fn agent_row(agent: Agent) -> JsonValue {
         "localSource".to_owned(),
         JsonValue::String(agent.local_source().to_owned()),
     );
+    if let Some(modes) = oauth_modes(agent) {
+        map.insert("oauthModes".to_owned(), modes);
+    }
     JsonValue::Object(map)
+}
+
+fn oauth_modes(agent: Agent) -> Option<JsonValue> {
+    match agent {
+        Agent::Kiro => Some(serde_json::json!([
+            { "id": "portal", "label": "Kiro Portal", "optionKey": "leg", "fields": [] },
+            { "id": "idc", "label": "AWS IdC", "optionKey": "leg", "fields": ["idcRegion", "idcStartUrl"] }
+        ])),
+        Agent::Zcode => Some(serde_json::json!([
+            { "id": "zai", "label": "Z.ai", "optionKey": "provider", "fields": [] },
+            { "id": "bigmodel", "label": "BigModel", "optionKey": "provider", "fields": [] }
+        ])),
+        _ => None,
+    }
+}
+
+fn option_text(map: &JsonMap<String, JsonValue>, keys: &[&str]) -> AccountResult<Option<String>> {
+    for key in keys {
+        let Some(value) = map.get(*key) else {
+            continue;
+        };
+        if value.is_null() {
+            continue;
+        }
+        let Some(raw) = value.as_str() else {
+            return Err(AccountError::Client(format!(
+                "start_login option `{key}` must be a string"
+            )));
+        };
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_start_options(agent: Agent, options: Option<JsonValue>) -> AccountResult<StartOptions> {
+    let Some(value) = options else {
+        return Ok(StartOptions::default());
+    };
+    if value.is_null() {
+        return Ok(StartOptions::default());
+    }
+    let JsonValue::Object(map) = value else {
+        return Err(AccountError::Client(
+            "start_login options must be a JSON object".to_owned(),
+        ));
+    };
+    let mut parsed = StartOptions::default();
+    if let Some(port_val) = map.get("callbackPort").or_else(|| map.get("port"))
+        && !port_val.is_null()
+    {
+        let Some(raw) = port_val.as_u64().and_then(|n| u16::try_from(n).ok()) else {
+            return Err(AccountError::Client(
+                "start_login option `callbackPort` must be a valid TCP port".to_owned(),
+            ));
+        };
+        parsed.prefer_port = Some(raw);
+    }
+    match agent {
+        Agent::Kiro => {
+            if let Some(leg) = option_text(&map, &["leg", "mode"])? {
+                let normalized = leg.to_ascii_lowercase();
+                match normalized.as_str() {
+                    "portal" | "social" | "builder-id" => {
+                        parsed.leg = Some("portal".to_owned());
+                        return Ok(parsed);
+                    }
+                    "idc" | "aws-idc" | "awsidc" => parsed.leg = Some("idc".to_owned()),
+                    _ => {
+                        return Err(AccountError::Client(format!(
+                            "不支持的 Kiro 登录方式：{leg}（请选择 portal 或 idc）"
+                        )));
+                    }
+                }
+            }
+            parsed.region = option_text(&map, &["idcRegion", "idc_region", "region"])?;
+            if let Some(url) = option_text(&map, &["idcStartUrl", "startUrl", "start_url"])? {
+                if !url.starts_with("https://")
+                    || url.len() <= "https://".len()
+                    || url.contains(char::is_whitespace)
+                {
+                    return Err(AccountError::Client(
+                        "IAM Identity Center Start URL 必须是有效的 https:// 地址".to_owned(),
+                    ));
+                }
+                parsed.start_url = Some(url);
+            }
+        }
+        Agent::Zcode => {
+            if let Some(provider) = option_text(&map, &["provider", "mode", "region"])? {
+                let normalized = provider.to_ascii_lowercase();
+                if normalized != "zai" && normalized != "bigmodel" {
+                    return Err(AccountError::Client(
+                        "不支持的 ZCode 上游，请选择 zai 或 bigmodel".to_owned(),
+                    ));
+                }
+                parsed.region = Some(normalized);
+            }
+        }
+        _ => {
+            parsed.region = option_text(&map, &["region"])?;
+        }
+    }
+    Ok(parsed)
 }
 
 /// `AccountView` straight through (its serde is the UI contract).
@@ -58,7 +167,7 @@ pub struct Accounts;
 
 #[module]
 impl Accounts {
-    /// Every stored account, oldest first (`ss_accounts::list`).
+    /// Every supported stored account, oldest first (`ss_accounts::list`).
     ///
     /// Blocking pool, not inline: the domain's list reads the account index
     /// *and* every client's own credential (a SQLite store for one agent), so
@@ -118,7 +227,7 @@ impl Accounts {
         Ok(JsonValue::Null)
     }
 
-    /// 受管 Agent 元数据列表（`{id, displayName, supportsOauth, localSource}`），
+    /// 受管 Agent 元数据列表，
     /// 顺序与 `ss_accounts::Agent::supported()` 一致。Pure.
     pub fn agents() -> JsonValue {
         JsonValue::Array(
@@ -133,11 +242,19 @@ impl Accounts {
     /// Resolves with the pending session the dialog renders
     /// (`loginId`/`flow`/`authUrl`/`userCode`/`verificationUri`).
     ///
-    /// The agent id is validated first: an unknown one rejects on the first
-    /// poll and never touches the network (test below).
-    pub async fn start_login(agent: String) -> Result<JsonValue, String> {
-        Agent::from_id(&agent).map_err(|err| err.to_string())?;
-        blocking(move || start_login_body(&agent))
+    /// Optional `options`:
+    /// - Kiro: `{ leg: "portal" | "idc", idcRegion?: string, idcStartUrl?: string }`
+    /// - ZCode: `{ provider: "zai" | "bigmodel" }`
+    ///
+    /// Both the agent id and the options object are validated synchronously
+    /// before any pool hop or socket is opened.
+    pub async fn start_login(
+        agent: String,
+        options: Option<JsonValue>,
+    ) -> Result<JsonValue, String> {
+        let parsed_agent = Agent::from_id(&agent).map_err(|err| err.to_string())?;
+        let opts = parse_start_options(parsed_agent, options).map_err(|err| err.to_string())?;
+        blocking(move || start_login_body(&agent, &opts))
             .await
             .map_err(|join| format!("login task failed: {join}"))?
     }
@@ -196,13 +313,13 @@ impl Accounts {
         .await
         .map_err(|join| format!("import task failed: {join}"))?
     }
+
 }
 
 /// The login start's pool body (a plain fn so the pool hop stays in the
 /// method above, where the agent guard is).
-fn start_login_body(agent: &str) -> Result<JsonValue, String> {
-    let started =
-        ss_accounts::start_login(agent, &StartOptions::default()).map_err(|err| err.to_string())?;
+fn start_login_body(agent: &str, opts: &StartOptions) -> Result<JsonValue, String> {
+    let started = ss_accounts::start_login(agent, opts).map_err(|err| err.to_string())?;
     serde_json::to_value(&started).map_err(|err| err.to_string())
 }
 
@@ -226,7 +343,7 @@ mod tests {
     }
 
     /// `Accounts::agents()` 必须按 `ss_accounts::Agent::supported()` 原序完整透传
-    /// `{id, displayName, supportsOauth, localSource}` 四项能力元数据。Pure — no store, no network.
+    /// 每个字段都来自账号域。Pure — no store, no network.
     #[test]
     fn agents_list_the_supported_rows() {
         let rows = Accounts::agents();
@@ -247,8 +364,7 @@ mod tests {
         }
     }
 
-    /// 配方对齐守卫：每个 `ss_accounts::Agent` 都必须在 `assets/agents/` 拥有专属 SVG，
-    /// 并在 `ss-skills` 注册表存在对应的 `AgentProfile`。
+    /// 每个受管客户端都有品牌图标和技能 profile。
     #[test]
     fn every_account_agent_has_dedicated_icon_and_skills_profile() {
         let profiles = ss_skills::agents::list_profiles();
@@ -269,7 +385,7 @@ mod tests {
     /// before the blocking hop, so no socket is ever opened for a typo.
     #[test]
     fn start_login_rejects_unknown_agent_on_the_first_poll() {
-        let mut future = std::pin::pin!(Accounts::start_login("no-such-agent".to_owned()));
+        let mut future = std::pin::pin!(Accounts::start_login("no-such-agent".to_owned(), None));
         let settled = first_poll(future.as_mut());
         let err = match settled {
             Err(err) => err,
@@ -277,6 +393,79 @@ mod tests {
         };
         assert!(err.contains("no-such-agent"), "{err}");
         assert!(err.contains("unsupported agent"), "{err}");
+    }
+
+    #[test]
+    fn start_login_parses_kiro_idc_and_zcode_provider_options() {
+        let kiro_idc = super::parse_start_options(
+            ss_accounts::Agent::Kiro,
+            Some(serde_json::json!({
+                "leg": "idc",
+                "idcRegion": "eu-west-1",
+                "idcStartUrl": "https://d-123.awsapps.com/start"
+            })),
+        )
+        .expect("kiro idc options");
+        assert_eq!(kiro_idc.leg.as_deref(), Some("idc"));
+        assert_eq!(kiro_idc.region.as_deref(), Some("eu-west-1"));
+        assert_eq!(
+            kiro_idc.start_url.as_deref(),
+            Some("https://d-123.awsapps.com/start")
+        );
+
+        let kiro_portal = super::parse_start_options(
+            ss_accounts::Agent::Kiro,
+            Some(serde_json::json!({ "leg": "portal", "idcRegion": "eu-west-1" })),
+        )
+        .expect("kiro portal ignores idc params");
+        assert_eq!(kiro_portal.leg.as_deref(), Some("portal"));
+        assert_eq!(kiro_portal.region, None);
+
+        let zcode_bigmodel = super::parse_start_options(
+            ss_accounts::Agent::Zcode,
+            Some(serde_json::json!({ "provider": "BigModel" })),
+        )
+        .expect("zcode bigmodel options");
+        assert_eq!(zcode_bigmodel.region.as_deref(), Some("bigmodel"));
+
+        let mut bad_leg = std::pin::pin!(Accounts::start_login(
+            "kiro".to_owned(),
+            Some(serde_json::json!({ "leg": "invalid" })),
+        ));
+        assert!(first_poll(bad_leg.as_mut()).is_err());
+
+        let mut bad_url = std::pin::pin!(Accounts::start_login(
+            "kiro".to_owned(),
+            Some(serde_json::json!({ "leg": "idc", "idcStartUrl": "http://insecure.local" })),
+        ));
+        assert!(first_poll(bad_url.as_mut()).is_err());
+
+        let mut bad_provider = std::pin::pin!(Accounts::start_login(
+            "zcode".to_owned(),
+            Some(serde_json::json!({ "provider": "unknown" })),
+        ));
+        assert!(first_poll(bad_provider.as_mut()).is_err());
+    }
+
+    #[test]
+    fn agents_include_oauth_modes_metadata_for_multi_leg_providers() {
+        let rows = Accounts::agents();
+        let rows = rows.as_array().expect("agent rows");
+        let kiro = rows
+            .iter()
+            .find(|row| row["id"].as_str() == Some("kiro"))
+            .expect("kiro row");
+        assert_eq!(kiro["oauthModes"][0]["id"].as_str(), Some("portal"));
+        assert_eq!(kiro["oauthModes"][1]["id"].as_str(), Some("idc"));
+        assert_eq!(kiro["oauthModes"][1]["fields"][0].as_str(), Some("idcRegion"));
+        assert_eq!(kiro["oauthModes"][1]["fields"][1].as_str(), Some("idcStartUrl"));
+
+        let zcode = rows
+            .iter()
+            .find(|row| row["id"].as_str() == Some("zcode"))
+            .expect("zcode row");
+        assert_eq!(zcode["oauthModes"][0]["id"].as_str(), Some("zai"));
+        assert_eq!(zcode["oauthModes"][1]["id"].as_str(), Some("bigmodel"));
     }
 
     /// An unknown pending id rejects instead of resolving: the callback

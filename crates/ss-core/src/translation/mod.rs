@@ -1,9 +1,10 @@
 //! Translate skill copy into the language chosen in Settings.
 //! Simplified Chinese is the default.
 //!
-//! Machine translation uses Google. LLM translation uses an OpenCode Go,
-//! Ollama, or Command Code key already saved in Accounts. The shell asks for
-//! missing strings; it does not call the network itself.
+//! Machine translation uses Google. LLM translation uses the OpenAI-compatible
+//! endpoint (`llm_base_url`), model id (`llm_model`), and manually entered API
+//! key (`secrets/translation/api_key`) configured in Settings → Translation.
+//! The shell asks for missing strings; it does not call the network itself.
 
 mod cache;
 mod config;
@@ -11,10 +12,11 @@ mod engine;
 mod models;
 mod themes;
 
-pub use cache::{cache_key, lookup, remember};
+pub use cache::{lookup, remember};
 pub use config::{
     DEFAULT_LLM_URL, DEFAULT_TARGET, Engine, LlmAuth, TRANSLATION_LANGUAGES, TranslationConfig,
-    TranslationLanguage, canonical_target, load_api_key, load_config, save_api_key, save_config,
+    TranslationLanguage, canonical_target, description_choice, descriptions_blocked,
+    descriptions_enabled, load_api_key, load_config, save_api_key, save_config,
     set_description_choice, set_description_choices, translation_language,
 };
 pub use models::{ModelListError, list_models};
@@ -43,7 +45,7 @@ pub struct ModelRejection {
 
 /// The language Settings currently translates into.
 pub fn active_target() -> &'static str {
-    canonical_target(&load_config().unwrap_or_default().target_lang)
+    config::active_target_code()
 }
 
 /// Text that is not already in `target`. An unknown target is never translated.

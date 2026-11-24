@@ -12,6 +12,7 @@ import { Icon, type IconName } from "../../chrome/icons";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import { isFormError, type AccountsState, type AddStep } from "./state";
+import { OAuthModeConfigPanel, PrimaryActionButton, SecondaryButton } from "./addDialogControls";
 import { flowTakesPaste, type AgentRow, type LoginStart } from "./types";
 
 function currentAgentRow(state: AccountsState): AgentRow | undefined {
@@ -39,7 +40,7 @@ export function AddAccountDialog(props: { state: AccountsState }): JSX.Element {
   const state = props.state;
   return (
     <View style={{ display: state.add.agent() ? "flex" : "none" }}>
-      {state.add.agent() ? (
+      <If when={state.add.agent() !== null}>
         <Overlay
           style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 60 }}
           onCancel={() => state.closeAdd()}
@@ -92,19 +93,23 @@ export function AddAccountDialog(props: { state: AccountsState }): JSX.Element {
               <DialogHeader state={state} />
               <AddMethodTabs state={state} />
 
-              {state.add.error() ? <DialogError text={state.add.error() ?? ""} /> : null}
+              <If when={Boolean(state.add.error())}>
+                <DialogError text={state.add.error() ?? ""} />
+              </If>
 
-              {state.add.step() === "oauth" ? (
+              <If when={state.add.step() === "oauth"}>
                 <OAuthTabBody state={state} />
-              ) : state.add.step() === "token" ? (
+              </If>
+              <If when={state.add.step() === "token"}>
                 <TokenTabBody state={state} />
-              ) : (
+              </If>
+              <If when={state.add.step() === "local"}>
                 <LocalTabBody state={state} />
-              )}
+              </If>
             </View>
           </View>
         </Overlay>
-      ) : null}
+      </If>
     </View>
   );
 }
@@ -307,69 +312,74 @@ function OAuthTabBody(props: { state: AccountsState }): JSX.Element {
   const state = props.state;
   return (
     <View style={{ display: "flex", flexDirection: "column" }}>
-      {state.add.login() ? (
-        <OAuthWaitingPanel state={state} login={state.add.login()!} />
-      ) : (
-        <View style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <View
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              padding: 12,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: paletteToken("border_soft"),
-              backgroundColor: paletteToken("well"),
-            }}
-          >
-            <Text style={{ fontSize: 13, fontWeight: "600", color: paletteToken("fg") }}>
-              {t("accountsPage.oauthEntry")}
-            </Text>
-            <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
-              {t("accountsPage.oauthEntryHint")}
-            </Text>
-          </View>
-
-          {!supportsOauth(state) ? (
+      <If
+        when={state.add.login()}
+        else={
+          <View style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <View
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
-                padding: 10,
-                borderRadius: 10,
+                gap: 6,
+                padding: 12,
+                borderRadius: 12,
                 borderWidth: 1,
-                borderColor: paletteToken("warn_border"),
-                backgroundColor: paletteToken("warn_bg"),
+                borderColor: paletteToken("border_soft"),
+                backgroundColor: paletteToken("well"),
               }}
             >
-              <Text style={{ fontSize: 12, color: paletteToken("fg"), lineHeight: 17 }}>
-                {tf("accountsPage.noOauthHint", { agent: agentDisplayName(state) })}
+              <Text style={{ fontSize: 13, fontWeight: "600", color: paletteToken("fg") }}>
+                {t("accountsPage.oauthEntry")}
               </Text>
-              <View style={{ display: "flex", flexDirection: "row", gap: 8 }}>
-                <SecondaryButton
-                  label={t("accountsPage.tabLocal")}
-                  onPress={() => state.selectAddTab("local")}
-                />
-                <SecondaryButton
-                  label={t("accountsPage.tabToken")}
-                  onPress={() => state.selectAddTab("token")}
-                />
-              </View>
+              <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
+                {t("accountsPage.oauthEntryHint")}
+              </Text>
             </View>
-          ) : null}
 
-          <PrimaryActionButton
-            testID="acct-add-oauth"
-            icon="globe"
-            label={t("accountsPage.startOauthBtn")}
-            loading={state.add.busy() === "start"}
-            disabled={state.add.busy() !== null}
-            onPress={() => void state.startLogin()}
-          />
-        </View>
-      )}
+            <If when={!supportsOauth(state)}>
+              <View
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  padding: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: paletteToken("warn_border"),
+                  backgroundColor: paletteToken("warn_bg"),
+                }}
+              >
+                <Text style={{ fontSize: 12, color: paletteToken("fg"), lineHeight: 17 }}>
+                  {tf("accountsPage.noOauthHint", { agent: agentDisplayName(state) })}
+                </Text>
+                <View style={{ display: "flex", flexDirection: "row", gap: 8 }}>
+                  <SecondaryButton
+                    label={t("accountsPage.tabLocal")}
+                    onPress={() => state.selectAddTab("local")}
+                  />
+                  <SecondaryButton
+                    label={t("accountsPage.tabToken")}
+                    onPress={() => state.selectAddTab("token")}
+                  />
+                </View>
+              </View>
+            </If>
+
+            <OAuthModeConfigPanel state={state} />
+
+            <PrimaryActionButton
+              testID="acct-add-oauth"
+              icon="globe"
+              label={t("accountsPage.startOauthBtn")}
+              loading={state.add.busy() === "start"}
+              disabled={state.add.busy() !== null || !supportsOauth(state)}
+              onPress={() => void state.startLogin()}
+            />
+          </View>
+        }
+      >
+        {(login) => <OAuthWaitingPanel state={state} login={login()} />}
+      </If>
     </View>
   );
 }
@@ -404,7 +414,7 @@ function OAuthWaitingPanel(props: { state: AccountsState; login: LoginStart }): 
         </View>
       </View>
 
-      {props.login.userCode ? (
+      <If when={Boolean(props.login.userCode)}>
         <View
           style={{
             display: "flex",
@@ -432,7 +442,7 @@ function OAuthWaitingPanel(props: { state: AccountsState; login: LoginStart }): 
                 fontVariant: "tabular-nums",
               }}
             >
-              {props.login.userCode}
+              {props.login.userCode ?? ""}
             </Text>
           </View>
           <SecondaryButton
@@ -441,7 +451,7 @@ function OAuthWaitingPanel(props: { state: AccountsState; login: LoginStart }): 
             onPress={() => void state.copyAuthText(props.login.userCode ?? "")}
           />
         </View>
-      ) : null}
+      </If>
 
       <View
         style={{
@@ -484,7 +494,7 @@ function OAuthWaitingPanel(props: { state: AccountsState; login: LoginStart }): 
         </View>
       </View>
 
-      {flowTakesPaste(props.login.flow) ? (
+      <If when={flowTakesPaste(props.login.flow)}>
         <View style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg_muted") }}>
             {t("accountsPage.callbackLabel")}
@@ -556,7 +566,7 @@ function OAuthWaitingPanel(props: { state: AccountsState; login: LoginStart }): 
             </View>
           </View>
         </View>
-      ) : null}
+      </If>
 
       <View style={{ display: "flex", flexDirection: "row", justifyContent: "flex-end" }}>
         <SecondaryButton
@@ -662,11 +672,11 @@ function LocalTabBody(props: { state: AccountsState }): JSX.Element {
         <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
           {t("accountsPage.localEntryHint")}
         </Text>
-        {localSourcePath(state) !== "" ? (
+        <If when={localSourcePath(state) !== ""}>
           <Text style={{ fontSize: 11, color: paletteToken("fg_faint"), lineHeight: 16 }}>
             {tf("accountsPage.localSourcePath", { source: localSourcePath(state) })}
           </Text>
-        ) : null}
+        </If>
       </View>
 
       <PrimaryActionButton
@@ -677,84 +687,6 @@ function LocalTabBody(props: { state: AccountsState }): JSX.Element {
         disabled={state.add.busy() !== null}
         onPress={() => void state.importLocal()}
       />
-    </View>
-  );
-}
-
-function PrimaryActionButton(props: {
-  testID: string;
-  icon: IconName;
-  label: string;
-  loading: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}): JSX.Element {
-  return (
-    <View
-      testID={props.testID}
-      role="button"
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        height: 36,
-        paddingHorizontal: 14,
-        borderRadius: 10,
-        backgroundColor: paletteToken("accent"),
-        opacity: props.disabled ? 0.55 : 1,
-        cursor: props.disabled ? "default" : "pointer",
-      }}
-      hoverStyle={props.disabled ? undefined : { backgroundColor: paletteToken("accent_hover") }}
-      onPress={props.disabled ? undefined : props.onPress}
-    >
-      {props.loading ? (
-        <IconSpin name="loader" size={14} color={paletteToken("on_accent")} spin />
-      ) : (
-        <Icon name={props.icon} size={14} color={paletteToken("on_accent")} />
-      )}
-      <Text style={{ fontSize: 13, fontWeight: "600", color: paletteToken("on_accent") }}>
-        {props.label}
-      </Text>
-    </View>
-  );
-}
-
-function SecondaryButton(props: {
-  testID?: string;
-  icon?: IconName;
-  label: string;
-  onPress: () => void;
-}): JSX.Element {
-  return (
-    <View
-      testID={props.testID}
-      role="button"
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 6,
-        height: 30,
-        paddingHorizontal: 10,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: paletteToken("border"),
-        backgroundColor: paletteToken("panel"),
-        cursor: "pointer",
-      }}
-      hoverStyle={{
-        backgroundColor: paletteToken("panel_hover"),
-        borderColor: paletteToken("edge"),
-      }}
-      onPress={props.onPress}
-    >
-      {props.icon ? <Icon name={props.icon} size={13} color={paletteToken("fg_muted")} /> : null}
-      <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
-        {props.label}
-      </Text>
     </View>
   );
 }

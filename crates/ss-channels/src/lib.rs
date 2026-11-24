@@ -65,7 +65,7 @@ pub use channel_rollback::{
 pub use channel_update::{
     ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelSkillUpdateReceipt,
     ChannelSkillUpdateRequest, ChannelSkillUpdateResolution, ChannelSubscriptionUpdater,
-    ChannelUpdateInspection, RetainedChannelContent,
+    ChannelUpdateInspection, RetainedChannelContent, channel_update_state,
 };
 pub use existing::{
     ExistingChannelExposure, ExistingChannelRegistrationFacade,
@@ -178,6 +178,10 @@ where
 {
     pub fn new(gateway: G, registry: R) -> Self {
         Self { gateway, registry }
+    }
+
+    pub fn list_channels(&self) -> Result<Vec<SharedChannelDescriptor>, SharedChannelError> {
+        list_shared_channels(&self.registry)
     }
 
     pub async fn list_organizations(&self) -> Result<Vec<GitHubOrganization>, SharedChannelError> {
@@ -364,6 +368,18 @@ where
         self.registry.save(&store)?;
         Ok(active)
     }
+}
+
+pub fn list_shared_channels<R: SharedChannelRegistry>(
+    registry: &R,
+) -> Result<Vec<SharedChannelDescriptor>, SharedChannelError> {
+    registry.list_read_only()
+}
+
+pub fn list_channel_subscriptions<S: ChannelSubscriptionRegistry>(
+    subscriptions: &S,
+) -> Result<Vec<ChannelSubscriptionView>, SharedChannelError> {
+    subscriptions.list_views()
 }
 
 pub fn project_role(permissions: &RepositoryPermissions) -> Option<SharedChannelRole> {

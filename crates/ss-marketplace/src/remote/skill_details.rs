@@ -450,7 +450,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn description_page_is_not_ready_until_the_skill_block_closes() {
         let cut = DETAIL_PAGE_LD_JSON.find("Helps users").unwrap();
         assert!(!description_page_ready(&DETAIL_PAGE_LD_JSON[..cut]));
@@ -458,6 +457,7 @@ mod tests {
         assert!(description_page_ready("<html>__next_error__"));
     }
 
+    #[test]
     fn jsonld_description_ignores_empty_and_missing_blocks() {
         assert_eq!(extract_jsonld_description("<html>no ld+json</html>"), None);
         assert_eq!(

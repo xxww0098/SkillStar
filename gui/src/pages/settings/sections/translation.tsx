@@ -1,6 +1,6 @@
 // 「翻译」分区 UI — 状态机与桥接在 ./translationState.ts（保持单文件 < 800 行）。
 
-import { Scroll, Text, View, effect, type JSX } from "nsh";
+import { List, Text, View, cleanup, computed, effect, type JSX } from "nsh";
 import { Input } from "nsh/base";
 import { paletteToken } from "../../../services/themeMode";
 import { t, tf } from "../../../services/translation";
@@ -87,7 +87,7 @@ export function TranslationWorkbench(props: { state: TranslationState }): JSX.El
           title={t("settings.tranTarget")}
           hint={t("settings.tranTargetHint")}
           control={
-            state.languages().length > 0 ? (
+            <If when={state.languages().length > 0} else={<View />}>
               <TextSlider
                 motionId="tran-target-motion"
                 options={state.languages().map((language) => ({
@@ -97,9 +97,7 @@ export function TranslationWorkbench(props: { state: TranslationState }): JSX.El
                 selected={targetSelectedIndex(state.config().target_lang, state.languages())}
                 onClick={(ix) => state.setTargetLang(state.languages()[ix].code)}
               />
-            ) : (
-              <View />
-            )
+            </If>
           }
         />
       </SettingsGroup>
@@ -175,12 +173,43 @@ function LlmBlock(props: { state: TranslationState }): JSX.Element {
           style={{ flex: 1 }}
           trailing={
             <If when={state.llmKeySaved()} else={<View style={{ height: 22 }} />}>
-              <StatusPill
-                testID="tran-llm-key-state"
-                tone="ok"
-                icon="check"
-                text={t("settings.tranLlmKeySaved")}
-              />
+              <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6, height: 22 }}>
+                <StatusPill
+                  testID="tran-llm-key-state"
+                  tone="ok"
+                  icon="check"
+                  text={t("settings.tranLlmKeySaved")}
+                />
+                <View
+                  testID="tran-llm-key-clear"
+                  role="button"
+                  accessibilityLabel={t("common.clear")}
+                  style={{
+                    height: 22,
+                    paddingHorizontal: 7,
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 3,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: paletteToken("border"),
+                    backgroundColor: paletteToken("card"),
+                    cursor: "pointer",
+                  }}
+                  hoverStyle={{
+                    backgroundColor: paletteToken("danger_bg"),
+                    borderColor: paletteToken("danger_border"),
+                  }}
+                  activeStyle={{ backgroundColor: paletteToken("well") }}
+                  onPress={() => state.clearLlmKey()}
+                >
+                  <Icon name="x" size={11} color={paletteToken("fg_muted")} />
+                  <Text style={{ fontSize: 11, fontWeight: "500", color: paletteToken("fg_muted") }}>
+                    {t("common.clear")}
+                  </Text>
+                </View>
+              </View>
             </If>
           }
         >
@@ -336,7 +365,10 @@ function ModelField(props: { state: TranslationState }): JSX.Element {
           <PullButton state={state} />
         </View>
         <If when={state.modelsError() !== null}>
-          <Text style={{ fontSize: 12, color: paletteToken("danger_fg"), lineHeight: 18 }}>
+          <Text
+            testID="tran-llm-model-error"
+            style={{ fontSize: 12, color: paletteToken("danger_fg"), lineHeight: 18 }}
+          >
             {state.modelsError()}
           </Text>
         </If>
@@ -371,7 +403,7 @@ function PullButton(props: { state: TranslationState }): JSX.Element {
         backgroundColor: paletteToken("card"),
         cursor: state.modelsLoading() ? "default" : "pointer",
         flexShrink: 0,
-        opacity: state.modelsLoading() ? 0.65 : 1,
+        opacity: 1,
       }}
       hoverStyle={
         state.modelsLoading()
@@ -392,9 +424,7 @@ function PullButton(props: { state: TranslationState }): JSX.Element {
         spin={state.modelsLoading()}
       />
       <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
-        {state.modelsLoading()
-          ? t("settings.tranLlmModelPulling")
-          : t("settings.tranLlmModelPull")}
+        {t("settings.tranLlmModelPull")}
       </Text>
     </View>
   );
@@ -402,53 +432,97 @@ function PullButton(props: { state: TranslationState }): JSX.Element {
 
 const MODEL_ITEM_H = 32;
 
-/** 模型下拉：36px 触发器 + 可搜索、限高滚动的菜单。 */
+/** 模型下拉：36px 可编辑触发器（支持直接输入自定义模型 id + 回车/失焦/确认）+ 可搜索、限高滚动菜单。 */
 function ModelCombobox(props: { state: TranslationState }): JSX.Element {
   const state = props.state;
+  const dirty = () => {
+    const draft = state.modelDraft().trim();
+    const saved = state.config().llm_model.trim();
+    return draft.length > 0 && (draft !== saved || !state.config().llm_model_pinned);
+  };
   return (
     <View style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
       <View
-        testID="tran-llm-model-button"
-        role="button"
-        accessibilityState={{ expanded: state.modelMenuOpen() }}
         style={{
           height: 36,
-          paddingHorizontal: 12,
+          paddingLeft: 10,
+          paddingRight: 4,
           width: "100%",
           display: "flex",
           flexDirection: "row",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
+          gap: 4,
           borderRadius: 10,
           borderWidth: 1,
           borderColor: state.modelMenuOpen() ? paletteToken("accent") : paletteToken("border"),
           backgroundColor: paletteToken("input"),
-          cursor: "pointer",
         }}
-        hoverStyle={
-          state.modelMenuOpen()
-            ? undefined
-            : { borderColor: paletteToken("edge"), backgroundColor: paletteToken("panel_hover") }
-        }
-        onPress={() => state.setModelMenuOpen(!state.modelMenuOpen())}
+        hoverStyle={{ borderColor: paletteToken("edge") }}
+        focusWithinStyle={{ borderColor: paletteToken("accent") }}
       >
-        <Text
+        <Input
+          testID="tran-llm-model-input"
           style={{
             flex: 1,
             minWidth: 0,
             fontSize: 13,
             fontFamily: MONO_FONT,
-            color:
-              state.config().llm_model.trim().length > 0
-                ? paletteToken("fg")
-                : paletteToken("fg_faint"),
-            numberOfLines: 1,
+            color: paletteToken("fg"),
+            caretColor: paletteToken("accent"),
+            placeholderColor: paletteToken("fg_faint"),
+            padding: 0,
+            backgroundColor: "transparent",
+            borderWidth: 0,
           }}
+          value={state.modelDraft()}
+          placeholder="gpt-4o-mini"
+          submitBehavior="blurAndSubmit"
+          onChange={(event) => state.setModelDraft(event.value)}
+          onBlur={() => state.commitModelDraft()}
+          onSubmit={() => state.commitModelDraft()}
+        />
+        <If when={dirty()}>
+          <View
+            testID="tran-llm-model-confirm"
+            role="button"
+            accessibilityLabel={t("common.done")}
+            style={{
+              height: 26,
+              paddingHorizontal: 8,
+              borderRadius: 7,
+              borderWidth: 1,
+              borderColor: paletteToken("accent_soft_edge"),
+              backgroundColor: paletteToken("accent_soft"),
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+            hoverStyle={{ backgroundColor: paletteToken("card_active") }}
+            onPress={() => state.commitModelDraft()}
+          >
+            <Icon name="check" size={13} color={paletteToken("accent_fg")} />
+          </View>
+        </If>
+        <View
+          testID="tran-llm-model-button"
+          role="button"
+          accessibilityState={{ expanded: state.modelMenuOpen() }}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+          hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
+          onPress={() => state.setModelMenuOpen(!state.modelMenuOpen())}
         >
-          {state.config().llm_model.trim().length > 0 ? state.config().llm_model : "—"}
-        </Text>
-        <CollapseChevron open={state.modelMenuOpen()} />
+          <CollapseChevron open={state.modelMenuOpen()} />
+        </View>
       </View>
       <If when={state.modelMenuOpen()}>{() => <ModelMenu state={state} />}</If>
     </View>
@@ -457,6 +531,22 @@ function ModelCombobox(props: { state: TranslationState }): JSX.Element {
 
 function ModelMenu(props: { state: TranslationState }): JSX.Element {
   const state = props.state;
+  let blurTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelBlur = (): void => {
+    if (blurTimer !== null) {
+      clearTimeout(blurTimer);
+      blurTimer = null;
+    }
+  };
+  const applyCustomQuery = (): void => {
+    cancelBlur();
+    const query = state.modelQuery().trim();
+    if (query.length === 0) return;
+    state.selectModel(query);
+    state.setModelMenuOpen(false);
+  };
+  cleanup(() => cancelBlur());
+
   return (
     <View
       testID="tran-llm-model-menu"
@@ -474,7 +564,8 @@ function ModelMenu(props: { state: TranslationState }): JSX.Element {
       <View
         style={{
           height: 36,
-          paddingHorizontal: 10,
+          paddingLeft: 10,
+          paddingRight: 6,
           borderBottomWidth: 1,
           borderBottomColor: paletteToken("border_soft"),
           backgroundColor: paletteToken("input"),
@@ -500,60 +591,146 @@ function ModelMenu(props: { state: TranslationState }): JSX.Element {
           }}
           value={state.modelQuery()}
           placeholder={t("settings.tranLlmModelSearch")}
+          submitBehavior="blurAndSubmit"
           onChange={(event) => state.setModelQuery(event.value)}
-        />
-      </View>
-      {/* 限高菜单：定像素视口框 + 内层 100% Scroll（nsh 定高滚动契约，空时保留 1 行高）。 */}
-      <View
-        style={{
-          height: Math.min(Math.max(modelMenuRows(state).length, 1) * MODEL_ITEM_H + 8, 280),
-          width: "100%",
-        }}
-      >
-        <Scroll style={{ width: "100%", height: "100%" }}>
-          <View
-            style={{
-              padding: 4,
-              display: "flex",
-              flexDirection: "column",
-              width: "100%",
-            }}
-          >
-            <If
-              when={modelMenuRows(state).length > 0}
-              else={
-                <View
-                  style={{
-                    height: MODEL_ITEM_H,
-                    paddingHorizontal: 8,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "100%",
-                  }}
-                >
-                  <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                    {t("settings.tranLlmModelEmpty")}
-                  </Text>
-                </View>
+          onSubmit={() => applyCustomQuery()}
+          onBlur={() => {
+            cancelBlur();
+            blurTimer = setTimeout(() => {
+              blurTimer = null;
+              if (state.modelMenuOpen() && state.modelQuery().trim().length > 0) {
+                applyCustomQuery();
               }
-            >
-              <Each of={modelMenuRows(state)}>
-                {(model) => (
-                  <ModelMenuItem
-                    model={model()}
-                    selected={model() === state.config().llm_model.trim()}
-                    onSelect={() => {
-                      state.selectModel(model());
-                      state.setModelMenuOpen(false);
+            }, 120);
+          }}
+        />
+        <If when={state.modelQuery().trim().length > 0}>
+          <View
+            testID="tran-llm-model-menu-confirm"
+            role="button"
+            accessibilityLabel={t("common.done")}
+            style={{
+              height: 24,
+              paddingHorizontal: 7,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: paletteToken("accent_soft_edge"),
+              backgroundColor: paletteToken("accent_soft"),
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+            hoverStyle={{ backgroundColor: paletteToken("card_active") }}
+            onPress={() => applyCustomQuery()}
+          >
+            <Icon name="check" size={12} color={paletteToken("accent_fg")} />
+          </View>
+        </If>
+      </View>
+      {/* 限高菜单：定像素视口框 + <List> 虚拟化（nsh 定高滚动契约，空时保留 1 行高）。 */}
+      {(() => {
+        const rows = computed(() => modelMenuRows(state));
+        const customCandidate = computed(() => {
+          const query = state.modelQuery().trim();
+          return query.length > 0 && !modelRows(state).includes(query) ? query : null;
+        });
+        return (
+          <View style={{ width: "100%", display: "flex", flexDirection: "column" }}>
+            <If when={customCandidate() !== null}>
+              {() => (
+                <View
+                  testID="tran-llm-model-custom-option"
+                  role="menuitem"
+                  style={{
+                    width: "100%",
+                    height: MODEL_ITEM_H,
+                    paddingHorizontal: 12,
+                    borderBottomWidth: 1,
+                    borderBottomColor: paletteToken("border_soft"),
+                    backgroundColor: paletteToken("accent_soft"),
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    cursor: "pointer",
+                  }}
+                  hoverStyle={{ backgroundColor: paletteToken("card_active") }}
+                  onPress={() => applyCustomQuery()}
+                >
+                  <Text
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 12,
+                      fontFamily: MONO_FONT,
+                      fontWeight: "600",
+                      color: paletteToken("accent_fg"),
+                      numberOfLines: 1,
                     }}
-                  />
-                )}
-              </Each>
+                  >
+                    {customCandidate() ?? ""}
+                  </Text>
+                  <Icon name="check" size={13} color={paletteToken("accent_fg")} />
+                </View>
+              )}
+            </If>
+            <If when={rows().length > 0 || customCandidate() === null}>
+              <View
+                style={{
+                  height: Math.min(Math.max(rows().length, 1) * MODEL_ITEM_H + 8, 280),
+                  width: "100%",
+                }}
+              >
+                <If
+                  when={rows().length > 0}
+                  else={
+                    <View style={{ padding: 4, width: "100%" }}>
+                      <View
+                        style={{
+                          height: MODEL_ITEM_H,
+                          paddingHorizontal: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: "100%",
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+                          {t("settings.tranLlmModelEmpty")}
+                        </Text>
+                      </View>
+                    </View>
+                  }
+                >
+                  <List
+                    each={rows()}
+                    keyExtractor={(model: string) => model}
+                    estimatedItemSize={MODEL_ITEM_H}
+                    scrollEventThrottle={32}
+                    style={{ width: "100%", height: "100%" }}
+                    contentStyle={{ padding: 4 }}
+                  >
+                    {(model: () => string) => (
+                      <ModelMenuItem
+                        model={model()}
+                        selected={model() === state.config().llm_model.trim()}
+                        onSelect={() => {
+                          cancelBlur();
+                          state.selectModel(model());
+                          state.setModelMenuOpen(false);
+                        }}
+                      />
+                    )}
+                  </List>
+                </If>
+              </View>
             </If>
           </View>
-        </Scroll>
-      </View>
+        );
+      })()}
       {/* footer 报目录规模（fetched 才有）。 */}
       <If when={fetchedCount(state) > 0}>
         <View

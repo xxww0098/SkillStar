@@ -1,50 +1,73 @@
 use super::*;
 
-pub(crate) async fn apply_installed_state(mut skills: Vec<Skill>) -> Vec<Skill> {
-    let installed_skills = match load_installed_skills().await {
-        Ok(skills) => skills,
-        Err(err) => {
-            warn!(target: "marketplace_snapshot", error = %err, "failed to load installed snapshot");
-            return skills;
-        }
-    };
+/// The installed Skills, indexed by how a marketplace row finds the one it
+/// refers to: `(source, folder)` and `(source, called)` first, then folder
+/// alone. A row is installed when this answers for it, and the answer is the
+/// Skill to act on when the row is uninstalled.
+pub(crate) struct InstalledIndex {
+    by_key: HashMap<String, InstalledSkillState>,
+    by_name: HashMap<String, InstalledSkillState>,
+}
 
-    let mut by_key = HashMap::new();
-    let mut by_name = HashMap::new();
-    for skill in installed_skills {
-        let state = InstalledSkillState {
-            installed: true,
-            update_available: skill.update_available,
-            skill_type: skill.skill_type.clone(),
-            tree_hash: skill.tree_hash.clone(),
-            agent_links: skill.agent_links.clone(),
-            called: skill.called.clone(),
-        };
+impl InstalledIndex {
+    fn build(installed: Vec<Skill>) -> Self {
+        let mut by_key = HashMap::new();
+        let mut by_name = HashMap::new();
+        for skill in installed {
+            let state = InstalledSkillState {
+                folder: skill.name.clone(),
+                installed: true,
+                update_available: skill.update_available,
+                skill_type: skill.skill_type.clone(),
+                tree_hash: skill.tree_hash.clone(),
+                agent_links: skill.agent_links.clone(),
+                called: skill.called.clone(),
+            };
 
-        if let Some(source) = skill.source.as_deref() {
-            if let Some(skill_key) = build_skill_key(source, &skill.name) {
-                by_key.insert(skill_key, state.clone());
+            if let Some(source) = skill.source.as_deref() {
+                if let Some(skill_key) = build_skill_key(source, &skill.name) {
+                    by_key.insert(skill_key, state.clone());
+                }
+                // A folder the installer renamed to coexist (`<name>-<owner>`)
+                // still answers to the upstream name it recorded.
+                if let Some(called) = skill.called.as_deref()
+                    && let Some(called_key) = build_skill_key(source, called)
+                {
+                    by_key.insert(called_key, state.clone());
+                }
             }
-            if let Some(called) = skill.called.as_deref()
-                && let Some(called_key) = build_skill_key(source, called)
-            {
-                by_key.insert(called_key, state.clone());
-            }
+            by_name.insert(skill.name.to_ascii_lowercase(), state);
         }
-        by_name.insert(skill.name.to_ascii_lowercase(), state);
+        Self { by_key, by_name }
     }
 
-    for skill in &mut skills {
-        let skill_key = skill
-            .source
-            .as_deref()
-            .and_then(|source| build_skill_key(source, &skill.name));
-        let state = skill_key
-            .as_deref()
-            .and_then(|key| by_key.get(key))
-            .or_else(|| by_name.get(&skill.name.to_ascii_lowercase()));
+    fn get(&self, source: Option<&str>, name: &str) -> Option<&InstalledSkillState> {
+        source
+            .and_then(|source| build_skill_key(source, name))
+            .and_then(|key| self.by_key.get(&key))
+            .or_else(|| self.by_name.get(&name.to_ascii_lowercase()))
+    }
+}
 
-        if let Some(state) = state {
+/// `None` when the installed Skills could not be read: rows then keep the
+/// state the snapshot holds for them.
+async fn load_installed_index() -> Option<InstalledIndex> {
+    match load_installed_skills().await {
+        Ok(skills) => Some(InstalledIndex::build(skills)),
+        Err(err) => {
+            warn!(target: "marketplace_snapshot", error = %err, "failed to load installed snapshot");
+            None
+        }
+    }
+}
+
+pub(crate) async fn apply_installed_state(mut skills: Vec<Skill>) -> Vec<Skill> {
+    let Some(index) = load_installed_index().await else {
+        return skills;
+    };
+
+    for skill in &mut skills {
+        if let Some(state) = index.get(skill.source.as_deref(), &skill.name) {
             skill.installed = state.installed;
             skill.update_available = state.update_available;
             skill.skill_type = state.skill_type.clone();
@@ -57,6 +80,19 @@ pub(crate) async fn apply_installed_state(mut skills: Vec<Skill>) -> Vec<Skill> 
     }
 
     skills
+}
+
+/// The installed folder behind marketplace row `source`/`name`: the Skill
+/// [`apply_installed_state`] marks that row installed with, so acting on the
+/// row acts on what makes it installed. The row's own name is not enough: when
+/// that name was taken the installer puts the Skill in `<name>-<owner>` and
+/// records `name` as `called`, while whoever owns `name` is a different Skill.
+/// `None` when no installed Skill answers for the row.
+pub async fn installed_folder_for(source: &str, name: &str) -> Option<String> {
+    load_installed_index()
+        .await?
+        .get(Some(source), name)
+        .map(|state| state.folder.clone())
 }
 
 /// Round-robin interleave skills across repositories while preserving first-seen
@@ -221,92 +257,6 @@ pub async fn get_leaderboard_local(category: &str) -> Result<LocalFirstResult<Ve
         Err(err) => {
             warn!(target: "marketplace_snapshot", error = %err, "leaderboard local read failed");
             match remote::get_skills_sh_leaderboard_with_meta(category, None, None).await {
-                Ok((skills, meta)) => Ok(error_fallback(
-                    apply_installed_state(skills).await,
-                    &err,
-                    &meta,
-                )),
-                Err(remote_err) => Ok(LocalFirstResult {
-                    data: Vec::new(),
-                    snapshot_status: SnapshotStatus::RemoteError,
-                    snapshot_updated_at: None,
-                    error: Some(local_and_remote_detail(&err, &remote_err)),
-                }),
-            }
-        }
-    }
-}
-
-/// The marketplace "all" tab. Reads the whole local skill table, but answers
-/// freshness from the `leaderboard_all` scope — the same scope the UI refreshes
-/// (`sync_marketplace_scope("leaderboard_all")`) and `schedule_startup_refreshes`
-/// retries.
-///
-/// Judging by rows alone made this the one view outside the freshness
-/// contract: any row left behind by a single search seed made the default tab
-/// report `Fresh` forever, TTL ignored, degraded fallback rows included, and
-/// `Stale` was unreachable — so the auto-refresh, the retry budget and the
-/// retry button were all dead code exactly where users spend most of their
-/// time. Same states, same rules as hot/trending. See `docs/errors.md`.
-pub async fn list_skills_local() -> Result<LocalFirstResult<Vec<Skill>>> {
-    let scope = leaderboard_scope("all");
-    let local = with_conn(|conn| {
-        let (data, rows_updated_at) = load_all_skills_snapshot(conn)?;
-        let seed_state = sync_seed_state(conn, &scope)?;
-        let fresh = is_scope_fresh_conn(conn, &scope)?;
-        // Prefer the scope's own success timestamp; fall back to the newest row
-        // stamp for a table seeded by searches before any leaderboard sync.
-        let updated_at = scope_updated_at(conn, &scope)?.or(rows_updated_at);
-        Ok((data, seed_state, fresh, updated_at))
-    });
-
-    match local {
-        Ok((data, _, fresh, updated_at)) if !data.is_empty() => Ok(LocalFirstResult {
-            data: apply_installed_state(data).await,
-            snapshot_status: if fresh {
-                SnapshotStatus::Fresh
-            } else {
-                SnapshotStatus::Stale
-            },
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Ok((_, ScopeSeedState::Synced, _, updated_at)) => Ok(LocalFirstResult {
-            data: Vec::new(),
-            snapshot_status: SnapshotStatus::Miss,
-            snapshot_updated_at: updated_at,
-            error: None,
-        }),
-        Ok((_, ScopeSeedState::NeverSynced, _, _)) => {
-            if let Err(sync_err) = sync_scope_leaderboard("all").await {
-                return Ok(LocalFirstResult {
-                    data: Vec::new(),
-                    snapshot_status: SnapshotStatus::RemoteError,
-                    snapshot_updated_at: None,
-                    error: Some(error_detail(&sync_err)),
-                });
-            }
-
-            let reseeded = with_conn(|conn| {
-                let (data, _) = load_all_skills_snapshot(conn)?;
-                let updated_at = scope_updated_at(conn, &scope)?;
-                Ok((data, updated_at))
-            })?;
-            Ok(LocalFirstResult {
-                data: apply_installed_state(reseeded.0).await,
-                snapshot_status: SnapshotStatus::Seeding,
-                snapshot_updated_at: reseeded.1,
-                error: None,
-            })
-        }
-        Err(err) => {
-            // A local SQLite failure is not a network failure: reporting
-            // `RemoteError` here sent the UI's "check your network or proxy"
-            // copy out over a `database is locked`. Same shape as every other
-            // reader in this file — try remote, and only then admit both halves
-            // failed.
-            warn!(target: "marketplace_snapshot", error = %err, "full marketplace local read failed");
-            match remote::get_skills_sh_leaderboard_with_meta("all", None, None).await {
                 Ok((skills, meta)) => Ok(error_fallback(
                     apply_installed_state(skills).await,
                     &err,

@@ -1,4 +1,14 @@
-import { List, Text, View, effect, signal, type JSX, type ListRef } from "nsh";
+import {
+  List,
+  Text,
+  View,
+  computed,
+  effect,
+  signal,
+  type Accessor,
+  type JSX,
+  type ListRef,
+} from "nsh";
 import { Menu, MenuItem, MenuSeparator, Switch } from "nsh/base";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
@@ -7,14 +17,15 @@ import { IconSpin } from "../../chrome/feedback";
 import { Sheet } from "../../chrome/sheet";
 import { Tip } from "../../chrome/tooltip";
 import { AgentBadge } from "./agentRail";
+import { deckAgentLinkState, nextEnableForAgentState } from "./deckQuery";
+import { dt } from "./deckStrings";
 import { openConfirm } from "../../chrome/dialog";
 import { publishToast } from "../../shell/events";
-import { motionTransition } from "../../chrome/motion";
+import { settleTransition } from "../../chrome/motion";
 import {
   agentLinkNotice,
   deckGlyph,
   drawerOps,
-  isAgentLinked,
   missingCount,
   notifyDeckListChanged,
   type DeckDrawerOps,
@@ -53,7 +64,7 @@ export interface DeckDetailDrawerProps {
   installedSkills: ReadonlySet<string>;
   /** Targetable agents (`targetable_agent_profiles`: global dir AND enabled). */
   agents: DrawerAgent[];
-  /** Page-level busy (an import running): stacks with the drawer's own jobs. */
+  /** Page-level busy disables commands. It does not add a second spinner. */
   busy?: boolean;
   /** The column's close control (clears the page's selection). Omitted
    * when the host cannot clear the selection yet (the renderDrawer seam
@@ -70,8 +81,8 @@ export interface DeckDetailDrawerProps {
 }
 
 export function DeckDetailDrawer(props: DeckDetailDrawerProps): JSX.Element {
-  // One job at a time, exactly the page's `busy` gate: repeated rail clicks
-  // while a job runs are swallowed, and every control reads the same flag.
+  // One drawer job at a time. Repeat presses are swallowed here. The page's
+  // busy flag only disables controls; it does not paint another spinner.
   const jobBusy = signal(false);
 
   const finish = () => {
@@ -136,6 +147,8 @@ export function DeckDetailDrawer(props: DeckDetailDrawerProps): JSX.Element {
     listRef?.scrollToOffset({ offset: 0, animated: false });
   });
 
+  const missing = computed(() => missingCount(props.deck, props.installedSkills));
+
   return (
     <Sheet>
       {/* Header: the card's own glyph tile and title, then the description
@@ -199,18 +212,18 @@ export function DeckDetailDrawer(props: DeckDetailDrawerProps): JSX.Element {
               fg={paletteToken("fg_muted")}
               label={tf("skillCards.skillsCount", { count: props.deck.skills.length })}
             />
-            {missingCount(props.deck, props.installedSkills) > 0 ? (
+            <If when={missing() > 0}>
               <Badge
                 bg={paletteToken("warn_bg")}
                 fg={paletteToken("warn")}
                 label={tf("skillCards.missingCount", {
-                  count: missingCount(props.deck, props.installedSkills),
+                  count: missing(),
                 })}
               />
-            ) : null}
+            </If>
           </View>
         </View>
-        {props.onClose ? (
+        <If when={props.onClose !== undefined}>
           <GhostIconButton
             glyph="x"
             testID="close-deck-detail-drawer"
@@ -219,7 +232,7 @@ export function DeckDetailDrawer(props: DeckDetailDrawerProps): JSX.Element {
             disabled={jobBusy() || (props.busy ?? false)}
             onPress={props.onClose}
           />
-        ) : null}
+        </If>
       </View>
 
       {/* Body: the scrolling member list. */}
@@ -254,15 +267,19 @@ export function DeckDetailDrawer(props: DeckDetailDrawerProps): JSX.Element {
           }
           footer={
             <View style={{ paddingTop: 16 }}>
-              {/* The slot expression is the reactive context: read BOTH busy
-                  sources here (the drawer's job and the page's busy) so a
-                  change in either recomputes the whole agent section. */}
-              {agentSection(props, jobBusy() || (props.busy ?? false), runLinkJob)}
+              <AgentSection
+                deck={() => props.deck}
+                agents={() => props.agents}
+                ops={() => props.ops ?? drawerOps}
+                jobBusy={jobBusy}
+                pageBusy={() => props.busy ?? false}
+                runLinkJob={runLinkJob}
+              />
             </View>
           }
           style={{ width: "100%", height: "100%" }}
         >
-          {(skill) => memberRow(skill(), props.installedSkills)}
+          {(skill) => <MemberRow skill={skill} installedSkills={() => props.installedSkills} />}
         </List>
       </View>
 
@@ -394,14 +411,18 @@ function Badge(props: { bg: string; fg: string; label: string }): JSX.Element {
 
 /** One member: the install-state glyph, then the name. Missing members dim
  * (the rows the header's warning badge counts). */
-function memberRow(skill: string, installed: ReadonlySet<string>): JSX.Element {
-  const isInstalled = installed.has(skill);
+function MemberRow(props: {
+  skill: Accessor<string>;
+  installedSkills: Accessor<ReadonlySet<string>>;
+}): JSX.Element {
+  const isInstalled = computed(() => props.installedSkills().has(props.skill()));
   return (
     <View
-      testID={`deck-member-${skill}`}
+      testID={`deck-member-${props.skill()}`}
       style={{
         height: 36,
         display: "flex",
+        flexDirection: "row",
         alignItems: "center",
         gap: 8,
         paddingHorizontal: 8,
@@ -409,14 +430,15 @@ function memberRow(skill: string, installed: ReadonlySet<string>): JSX.Element {
         minWidth: 0,
       }}
     >
-      {isInstalled ? (
+      <If
+        when={isInstalled()}
+        else={<Icon name="alertTriangle" size={13} color={paletteToken("warn")} />}
+      >
         <Icon name="checkCircle" size={13} color={paletteToken("ok")} />
-      ) : (
-        <Icon name="alertTriangle" size={13} color={paletteToken("warn")} />
-      )}
+      </If>
       <View style={{ minWidth: 0, overflow: "hidden" }}>
-        <Text style={{ fontSize: 12, color: paletteToken(isInstalled ? "fg" : "fg_muted") }}>
-          {skill}
+        <Text style={{ fontSize: 12, color: paletteToken(isInstalled() ? "fg" : "fg_muted") }}>
+          {props.skill()}
         </Text>
       </View>
     </View>
@@ -424,19 +446,18 @@ function memberRow(skill: string, installed: ReadonlySet<string>): JSX.Element {
 }
 
 // The agent box: one switch per targetable agent, with deploy-all on top.
-// The card footer keeps the same rail as icon slots; this is the named,
-// full-width version of it, plus the batch action the rail cannot express.
-// Called from a tracked footer expression, so every read here follows the
-// page's data.
-function agentSection(
-  props: DeckDetailDrawerProps,
-  busy: boolean,
-  runLinkJob: (job: () => Promise<LinkReport>) => void
-): JSX.Element {
-  const ops = props.ops ?? drawerOps;
-  const deck = props.deck;
-  const links = deck.agentLinks ?? [];
-  const blockRail = busy || deck.skills.length === 0;
+// Keeps every <Switch> stably mounted across jobBusy / agentLinks changes.
+function AgentSection(props: {
+  deck: Accessor<DrawerDeck>;
+  agents: Accessor<DrawerAgent[]>;
+  ops: Accessor<DeckDrawerOps>;
+  jobBusy: Accessor<boolean>;
+  pageBusy: Accessor<boolean>;
+  runLinkJob: (job: () => Promise<LinkReport>) => void;
+}): JSX.Element {
+  const blockRail = computed(
+    () => props.jobBusy() || props.pageBusy() || props.deck().skills.length === 0,
+  );
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {fieldLabel(t("skillCards.agentLinks"))}
@@ -452,94 +473,154 @@ function agentSection(
           borderColor: paletteToken("border"),
         }}
       >
-        {props.agents.length === 0 ? (
+        <If
+          when={props.agents().length === 0}
+          else={
+            <>
+              <DrawerButton
+                testID="deck-drawer-link-all"
+                glyph="link"
+                label={t("skillCards.linkAll")}
+                full
+                loading={props.jobBusy()}
+                disabled={blockRail()}
+                onPress={() =>
+                  props.runLinkJob(() => props.ops().linkDeckToEnabledAgents(props.deck().id))
+                }
+              />
+              <View>
+                <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+                  {t("skillCards.linkAllHint")}
+                </Text>
+              </View>
+            </>
+          }
+        >
           <View style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
             <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
               {t("selectionBar.noAgents")}
             </Text>
           </View>
-        ) : (
-          <>
-            <DrawerButton
-              testID="deck-drawer-link-all"
-              glyph="link"
-              label={t("skillCards.linkAll")}
-              full
-              loading={busy}
-              disabled={blockRail}
-              onPress={() => runLinkJob(() => ops.linkDeckToEnabledAgents(deck.id))}
+        </If>
+        <Each of={props.agents()} key={(agent) => agent.id}>
+          {(agent: () => DrawerAgent) => (
+            <AgentSwitchRow
+              agent={agent}
+              deck={props.deck}
+              blockRail={blockRail}
+              ops={props.ops}
+              runLinkJob={props.runLinkJob}
             />
-            <View>
-              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                {t("skillCards.linkAllHint")}
-              </Text>
-            </View>
-          </>
-        )}
-        {props.agents.map((agent) => {
-          const linked = isAgentLinked(agent, links);
-          return (
-            <View
-              testID={`deck-drawer-agent-${deck.id}-${agent.id}`}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingHorizontal: 8,
-                paddingVertical: 6,
-                borderRadius: 6,
-              }}
-              hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-            >
-              <View style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                <AgentBadge
-                  id={agent.id}
-                  name={agent.displayName}
-                  icon={agent.icon}
-                  active={linked}
-                  size={18}
-                />
-                <View style={{ minWidth: 0, overflow: "hidden" }}>
-                  <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
-                    {agent.displayName}
-                  </Text>
-                </View>
-              </View>
-              <Switch
-                testID={`deck-drawer-toggle-${deck.id}-${agent.id}`}
-                checked={linked}
-                disabled={blockRail}
-                accessibilityLabel={tf(
-                  linked ? "skillCards.unlinkAllFrom" : "skillCards.linkAllTo",
-                  { agent: agent.displayName }
-                )}
-                trackStyle={{
-                  width: 28,
-                  height: 16,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  backgroundColor: linked ? paletteToken("ok") : paletteToken("input"),
-                  borderColor: linked ? paletteToken("ok_border") : paletteToken("edge"),
-                }}
-                thumbStyle={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 6,
-                  backgroundColor: paletteToken("on_accent"),
-                  transform: linked ? "translateX(12px)" : "translateX(0px)",
-                  ...motionTransition(),
-                }}
-                onChange={() => {
-                  // The rail toggle: enable is the opposite of the current
-                  // state (toggle_agent_for_deck parity — the deck's
-                  // recorded links decide).
-                  runLinkJob(() => ops.setDeckAgent(deck.id, agent.id, !linked));
-                }}
-              />
-            </View>
-          );
-        })}
+          )}
+        </Each>
       </View>
+    </View>
+  );
+}
+
+function AgentSwitchRow(props: {
+  agent: Accessor<DrawerAgent>;
+  deck: Accessor<DrawerDeck>;
+  blockRail: Accessor<boolean>;
+  ops: Accessor<DeckDrawerOps>;
+  runLinkJob: (job: () => Promise<LinkReport>) => void;
+}): JSX.Element {
+  const linkState = computed(() => deckAgentLinkState(props.deck(), props.agent()));
+  const linked = computed(() => linkState() === "linked");
+  const mixed = computed(() => linkState() === "mixed");
+  const labelKey = computed(() => {
+    const s = linkState();
+    return s === "linked"
+      ? "skillCards.unlinkAllFrom"
+      : s === "mixed"
+        ? "skillCards.linkRemainingTo"
+        : "skillCards.linkAllTo";
+  });
+  return (
+    <View
+      testID={`deck-drawer-agent-${props.deck().id}-${props.agent().id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderRadius: 6,
+      }}
+      hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+    >
+      <View style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+        <AgentBadge
+          id={props.agent().id}
+          name={props.agent().displayName}
+          icon={props.agent().icon}
+          active={linkState() !== "none"}
+          size={18}
+        />
+        <View style={{ minWidth: 0, overflow: "hidden" }}>
+          <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
+            {props.agent().displayName}
+          </Text>
+        </View>
+        <If when={mixed()}>
+          <View
+            testID={`deck-drawer-mixed-${props.deck().id}-${props.agent().id}`}
+            style={{
+              paddingHorizontal: 5,
+              paddingVertical: 1,
+              borderRadius: 999,
+              backgroundColor: paletteToken("warn_bg"),
+              borderWidth: 1,
+              borderColor: paletteToken("warn_border"),
+              flexShrink: 0,
+            }}
+          >
+            <Text style={{ fontSize: 10, fontWeight: "600", color: paletteToken("warn") }}>
+              {dt("skillCards.mixedLinked")}
+            </Text>
+          </View>
+        </If>
+      </View>
+      <Switch
+        testID={`deck-drawer-toggle-${props.deck().id}-${props.agent().id}`}
+        checked={linked()}
+        disabled={props.blockRail()}
+        accessibilityLabel={tf(labelKey(), { agent: props.agent().displayName })}
+        trackStyle={{
+          width: 28,
+          height: 16,
+          borderRadius: 8,
+          borderWidth: 1,
+          backgroundColor: linked()
+            ? paletteToken("ok")
+            : mixed()
+              ? paletteToken("warn_bg")
+              : paletteToken("input"),
+          borderColor: linked()
+            ? paletteToken("ok_border")
+            : mixed()
+              ? paletteToken("warn_border")
+              : paletteToken("edge"),
+        }}
+        thumbStyle={{
+          width: 12,
+          height: 12,
+          borderRadius: 6,
+          backgroundColor: mixed() ? paletteToken("warn") : paletteToken("on_accent"),
+          transform: linked()
+            ? "translateX(12px)"
+            : mixed()
+              ? "translateX(6px)"
+              : "translateX(0px)",
+          ...settleTransition(),
+        }}
+        onChange={() => {
+          const deckId = props.deck().id;
+          const agentId = props.agent().id;
+          const nextEnabled = nextEnableForAgentState(linkState());
+          props.runLinkJob(() => props.ops().setDeckAgent(deckId, agentId, nextEnabled));
+        }}
+      />
     </View>
   );
 }
@@ -592,11 +673,17 @@ function DrawerButton(props: {
       // `disabled` above already swallows presses; keep the handler bound.
       onPress={props.onPress}
     >
-      {props.loading ?? false ? (
-        <IconSpin name="refresh" size={14} color={paletteToken("accent")} spin />
-      ) : (
-        <Icon name={props.glyph} size={14} color={paletteToken("fg_muted")} />
-      )}
+      <If
+        when={props.loading === true}
+        else={<Icon name={props.glyph} size={14} color={paletteToken("fg_muted")} />}
+      >
+        <IconSpin
+          name={props.glyph}
+          size={14}
+          color={paletteToken("fg_muted")}
+          spin={true}
+        />
+      </If>
       <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{props.label}</Text>
     </View>
   );

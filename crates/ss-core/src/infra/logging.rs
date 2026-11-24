@@ -1,9 +1,8 @@
 //! Console logging for the SkillStar process entry points.
 //!
-//! Both desktop shells (the Tauri `skillstar` binary and the GPUI
-//! `ss-gpui` binary) call [`init`]; the stdio MCP server calls
-//! [`init_stderr`]. Keeping one formatter here means the two shells cannot
-//! drift apart, and the MCP stdout contract stays untouched.
+//! The desktop GUI (`ss-gui-host`) calls [`init`]; the stdio MCP server
+//! calls [`init_stderr`]. Keeping one formatter here ensures console output
+//! stays consistent while leaving the MCP stdout contract untouched.
 //!
 //! The human format is a single line per event:
 //!

@@ -72,13 +72,15 @@ interface Harness {
   stateQueries: { source: string }[];
   syncs: { scope: string; resolve: (v: void) => void; reject: (e: unknown) => void }[];
   installs: { url: string; name: string }[];
+  /** holdInstalls 时的在飞安装调用，测试按需放行或驳回。 */
+  installCalls: { name: string; resolve: (name: string) => void; reject: (reason: unknown) => void }[];
   uninstalls: { name: string }[];
   notices: MarketNotice[];
   confirmations: { name: string; commit: () => void }[];
   leaves: number;
 }
 
-function harness(options: { installFails?: boolean } = {}): Harness {
+function harness(options: { installFails?: boolean; holdInstalls?: boolean } = {}): Harness {
   const clock = manualClock();
   const repos = deferredCalls<[string], unknown>();
   const skills = deferredCalls<[string], unknown>();
@@ -87,6 +89,7 @@ function harness(options: { installFails?: boolean } = {}): Harness {
   const states: Harness["states"] = [];
   const stateQueries: Harness["stateQueries"] = [];
   const installs: Harness["installs"] = [];
+  const installCalls: Harness["installCalls"] = [];
   const uninstalls: Harness["uninstalls"] = [];
   const notices: MarketNotice[] = [];
   const confirmations: Harness["confirmations"] = [];
@@ -106,6 +109,11 @@ function harness(options: { installFails?: boolean } = {}): Harness {
       }),
     installer: (url, name) => {
       installs.push({ url, name });
+      if (options.holdInstalls) {
+        return new Promise<string>((resolve, reject) => {
+          installCalls.push({ name, resolve, reject });
+        });
+      }
       return options.installFails
         ? Promise.reject(new Error("boom"))
         : Promise.resolve(name);
@@ -131,6 +139,7 @@ function harness(options: { installFails?: boolean } = {}): Harness {
     stateQueries,
     syncs,
     installs,
+    installCalls,
     uninstalls,
     notices,
     confirmations,
@@ -455,6 +464,39 @@ test("失败路径：错误进通知带，状态不翻", async () => {
   if (!notice || notice.kind !== "installFailed") throw new Error("expected installFailed");
   expect(notice.error).toContain("boom");
   expect(h.side.skills()[0]?.installed).toBe(false);
+});
+
+// 基座 readSide 的并发安装断言同款（../installBusy.test.tsx）。
+test("并发安装：各卡各自忙碌，先完成的只放开自己；在飞的技能不重复提交", async () => {
+  const h = harness({ holdInstalls: true });
+  h.states.push({ progress: 0, running: false });
+  h.side.open({ name: "nvidia" });
+  h.repos.calls[0].resolve(reposPayload([{ repo: "skills", source: "nvidia/skills" }]));
+  await settle();
+  h.side.openRepo("nvidia/skills");
+  h.skills.calls[0].resolve(skillsPayload([{ name: "alpha" }, { name: "beta" }]));
+  await settle();
+  const [alpha, beta] = h.side.skills();
+  if (!alpha || !beta) throw new Error("fixture rows missing");
+  expect(h.side.busy().size).toBe(0);
+
+  h.side.toggleInstalled(alpha);
+  h.side.toggleInstalled(beta);
+  // 第二张卡不顶掉第一张；在飞的 beta 再点一次不发第二次调用。
+  expect([...h.side.busy()]).toEqual(["alpha", "beta"]);
+  h.side.toggleInstalled(beta);
+  expect(h.installs.map((call) => call.name)).toEqual(["alpha", "beta"]);
+
+  // 先发起的先完成：只放开 alpha。
+  h.installCalls[0]?.resolve("alpha");
+  await settle();
+  expect([...h.side.busy()]).toEqual(["beta"]);
+  expect(h.notices).toEqual([{ kind: "installed", name: "alpha" }]);
+
+  h.installCalls[1]?.reject(new Error("boom"));
+  await settle();
+  expect(h.side.busy().size).toBe(0);
+  expect(h.side.skills().map((row) => row.installed)).toEqual([true, false]);
 });
 
 // ---- 选择（详情列）----------------------------------------------------------

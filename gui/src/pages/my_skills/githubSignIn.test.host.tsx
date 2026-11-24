@@ -9,6 +9,9 @@ import { Button } from "nsh/base";
 import { Text, View, host, mount, signal, type JSX } from "nsh";
 import {
   GitHubSignInHost,
+  cancelGitHubSignIn,
+  githubAuthPolling,
+  githubAuthSummary,
   openGitHubSignIn,
   type SignInBridge,
   type SignInOutcome,
@@ -100,6 +103,7 @@ const harnessActions: Record<string, () => void> = {
   },
   cancelled: () => refreshCancelled(),
   reset: () => {
+    cancelGitHubSignIn();
     queue.length = 0;
     calls = 0;
     callCount.set(0);
@@ -177,10 +181,11 @@ function App(): JSX.Element {
         </Button>
       </View>
       <Text testID="host-counters" style={{ fontSize: 12 }}>
-        {`calls:${callCount()} cancelled:${cancelledText()} late:${lateCount()} session:${
+        {`calls:${callCount()} cancelled:${cancelledText()} polling:${githubAuthPolling()} late:${lateCount()} session:${
           (() => {
             const session = github();
-            return session === null ? "none" : `${session.state}@${session.login ?? ""}`;
+            const sum = githubAuthSummary();
+            return session === null ? `none:${sum.polling}` : `${session.state}@${session.login ?? ""}`;
           })()
         }`}
       </Text>

@@ -16,11 +16,9 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.group.runtimeUpdates": "运行与自动更新",
     "settings.group.translationScope": "翻译范围与目标语言",
     "settings.group.translationEngine": "翻译引擎与模型凭证",
-    "settings.group.storageOverview": "空间总览",
     "settings.group.storageDirectories": "目录明细与维护",
     "settings.group.toolchain": "环境与工具链诊断",
     "settings.mirrorPriorityPrimary": "首选",
-    "settings.storageOther": "配置与历史",
     "settings.storageNoData": "暂无磁盘占用数据",
   },
   en: {
@@ -34,11 +32,9 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.group.runtimeUpdates": "Runtime & Skill Updates",
     "settings.group.translationScope": "Scope & Target Language",
     "settings.group.translationEngine": "Translation Engine & Credentials",
-    "settings.group.storageOverview": "Storage Overview",
     "settings.group.storageDirectories": "Directories & Maintenance",
     "settings.group.toolchain": "Environment & Toolchain",
     "settings.mirrorPriorityPrimary": "Primary",
-    "settings.storageOther": "Config & History",
     "settings.storageNoData": "No disk usage recorded",
   },
 };
@@ -101,6 +97,18 @@ Object.assign(STRINGS.en, {
   "settings.backupReasonCopyConflict": "Copy Conflict",
   "settings.backupFromCalled": "from {{called}}",
   "settings.backupsOpenFolder": "Open Folder",
+});
+
+Object.assign(STRINGS["zh-CN"], {
+  "settings.trayQuota": "状态栏 / 托盘额度下拉窗",
+  "settings.trayQuotaHint":
+    "在 macOS 顶部菜单栏或 Windows 通知区常驻图标（支持全局快捷键 ⌥⇧Q / Alt+Shift+Q 呼出），随时查看受管账号剩余额度并一键切号。",
+});
+
+Object.assign(STRINGS.en, {
+  "settings.trayQuota": "Menu Bar / System Tray Quota Popover",
+  "settings.trayQuotaHint":
+    "Keep an icon in the macOS menu bar or Windows tray (with global shortcut ⌥⇧Q / Alt+Shift+Q) to inspect remaining quotas and switch accounts.",
 });
 
 export function st(key: string): string {

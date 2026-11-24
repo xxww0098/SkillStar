@@ -46,10 +46,12 @@ impl Sandbox {
             ("CLAUDE_CONFIG_DIR", None),
             // Other Agent homes that would otherwise point a sweep or deploy
             // at the developer's real directories.
+            ("APPDATA", None),
             ("AUTOHAND_HOME", None),
             ("DSH_HOME", None),
             ("GROK_HOME", None),
             ("HERMES_HOME", None),
+            ("REASONIX_HOME", None),
             ("VIBE_HOME", None),
         ];
         let previous = overrides

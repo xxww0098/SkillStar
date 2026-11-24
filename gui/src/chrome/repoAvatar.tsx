@@ -120,7 +120,7 @@ export function RepoAvatar(props: {
         when={Boolean(props.local)}
         else={
           <If
-            when={resolveRepoAvatarUri(props.owner) !== null}
+            when={resolveRepoAvatarUri(props.owner)}
             else={
               <Icon
                 name="gitBranch"
@@ -129,15 +129,17 @@ export function RepoAvatar(props: {
               />
             }
           >
-            <Image
-              src={resolveRepoAvatarUri(props.owner) ?? ""}
-              fadeDuration={0}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-              }}
-            />
+            {(uri) => (
+              <Image
+                src={uri()}
+                fadeDuration={0}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+              />
+            )}
           </If>
         }
       >

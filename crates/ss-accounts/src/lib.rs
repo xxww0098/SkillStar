@@ -35,7 +35,6 @@ pub enum Agent {
     ClaudeCode,
     Cursor,
     Antigravity,
-    GeminiCli,
     Grok,
     Kiro,
     Zcode,
@@ -50,7 +49,6 @@ impl Agent {
             Self::ClaudeCode,
             Self::Cursor,
             Self::Antigravity,
-            Self::GeminiCli,
             Self::Grok,
             Self::Kiro,
             Self::Zcode,
@@ -100,6 +98,9 @@ pub struct AccountView {
     pub display_name: String,
     #[serde(default)]
     pub email: Option<String>,
+    /// Provider-side account identifier, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     #[serde(default)]
     pub plan: Option<String>,
     pub created_at: i64,
@@ -113,6 +114,9 @@ pub struct AccountView {
 }
 
 /// The result of switching a client to one account.
+///
+/// Only the stored credential moves; the client process is never touched, so
+/// there is nothing here about restarting it (D-121).
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivateOutcome {
@@ -123,7 +127,7 @@ pub struct ActivateOutcome {
     pub target: String,
 }
 
-/// Every stored account, oldest first.
+/// Supported stored accounts, oldest first.
 pub fn list() -> AccountResult<Vec<AccountView>> {
     service::list()
 }

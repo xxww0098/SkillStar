@@ -7,12 +7,14 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::error::{AccountError, AccountResult};
 
 /// 写 sqlite 时等客户端放开文件锁的默认超时。
 pub(crate) const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// 只读探活时短忙等待，避免客户端持写锁时阻塞 list/reconcile。
+pub(crate) const READ_BUSY_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// 打开已存在的 `state.vscdb`；按需补建 `ItemTable`，但绝不新建库文件。
 pub(crate) fn open_existing<F>(
@@ -39,6 +41,27 @@ where
             )
             .map_err(|error| sqlite_error("初始化 ItemTable", path, error))?;
     }
+    Ok(connection)
+}
+
+/// 以严格只读方式打开已存在的 `state.vscdb`（绝不写库或执行 `CREATE TABLE` DDL）。
+pub(crate) fn open_read_only<F>(
+    path: &Path,
+    busy_timeout: Duration,
+    missing: F,
+) -> AccountResult<Connection>
+where
+    F: FnOnce(&Path) -> AccountError,
+{
+    if !path.is_file() {
+        return Err(missing(path));
+    }
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = Connection::open_with_flags(path, flags)
+        .map_err(|error| sqlite_error("只读打开", path, error))?;
+    connection
+        .busy_timeout(busy_timeout)
+        .map_err(|error| sqlite_error("设置忙等待", path, error))?;
     Ok(connection)
 }
 

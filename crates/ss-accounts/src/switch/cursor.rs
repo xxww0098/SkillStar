@@ -31,6 +31,13 @@ const AUTH_ID_KEY: &str = "cursorAuth/authId";
 const MIRROR_ACCESS_TOKEN_KEY: &str = "cursor.accessToken";
 const MIRROR_EMAIL_KEY: &str = "cursor.email";
 
+/// Cursor 3.29+ 在 `authTokenEncryptionAtRest` 下写入的 safeStorage 密文前缀。
+pub(crate) const SAFE_STORAGE_PREFIX: &str = "cursor-safe-storage:v1:";
+
+pub(crate) fn is_safe_storage_ciphertext(value: &str) -> bool {
+    value.trim().starts_with(SAFE_STORAGE_PREFIX)
+}
+
 /// Every row a switch writes, in the order it writes them.
 const SWITCH_KEYS: [&str; 6] = [
     ACCESS_TOKEN_KEY,
@@ -59,6 +66,12 @@ pub fn write(roots: &PathRoots, request: &SwitchRequest<'_>) -> AccountResult<Sw
             "this account has no access token to write into Cursor".to_string(),
         ));
     }
+    if is_safe_storage_ciphertext(&access_token) {
+        return Err(AccountError::Client(
+            "Cursor 凭据是本地加密密文（cursor-safe-storage:v1:），无法写回；请先刷新或重新授权"
+                .to_string(),
+        ));
+    }
     let mut connection = open(&path)?;
 
     let email = request
@@ -72,7 +85,8 @@ pub fn write(roots: &PathRoots, request: &SwitchRequest<'_>) -> AccountResult<Sw
                 .contains('@')
                 .then(|| request.display_name.trim().to_string())
         })
-        .or(vscdb::read_value(&connection, EMAIL_KEY, "Cursor")?);
+        .or(read_non_empty(&connection, EMAIL_KEY)?)
+        .or(read_non_empty(&connection, MIRROR_EMAIL_KEY)?);
     let auth_id = request
         .account_id
         .map(str::trim)
@@ -83,7 +97,7 @@ pub fn write(roots: &PathRoots, request: &SwitchRequest<'_>) -> AccountResult<Sw
         .refresh_token
         .as_deref()
         .map(str::trim)
-        .filter(|token| !token.is_empty())
+        .filter(|token| !token.is_empty() && !is_safe_storage_ciphertext(token))
         .map(str::to_string);
 
     let transaction = connection
@@ -132,23 +146,45 @@ pub fn read(roots: &PathRoots) -> AccountResult<Option<LocalCredential>> {
     if !path.is_file() {
         return Ok(None);
     }
-    let connection = open(&path)?;
-    let Some(access_token) = vscdb::read_value(&connection, ACCESS_TOKEN_KEY, "Cursor")?
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
+    let connection = open_read_only(&path)?;
+    let primary_raw = read_non_empty(&connection, ACCESS_TOKEN_KEY)?;
+    let mirror_raw = read_non_empty(&connection, MIRROR_ACCESS_TOKEN_KEY)?;
+    let access_token = match (
+        primary_raw
+            .as_deref()
+            .filter(|value| !is_safe_storage_ciphertext(value)),
+        mirror_raw
+            .as_deref()
+            .filter(|value| !is_safe_storage_ciphertext(value)),
+    ) {
+        (Some(token), _) => token.to_string(),
+        (None, Some(token)) => token.to_string(),
+        (None, None) => {
+            if primary_raw
+                .as_deref()
+                .is_some_and(is_safe_storage_ciphertext)
+                || mirror_raw
+                    .as_deref()
+                    .is_some_and(is_safe_storage_ciphertext)
+            {
+                return Err(AccountError::Client(
+                    "Cursor 已启用本地凭据加密且缺少明文镜像令牌，请使用 OAuth 授权登录"
+                        .to_string(),
+                ));
+            }
+            return Ok(None);
+        }
     };
-    let email = vscdb::read_value(&connection, EMAIL_KEY, "Cursor")?
-        .filter(|value| !value.trim().is_empty());
-    let auth_id = vscdb::read_value(&connection, AUTH_ID_KEY, "Cursor")?
-        .filter(|value| !value.trim().is_empty());
+    let email = read_non_empty(&connection, EMAIL_KEY)?
+        .or(read_non_empty(&connection, MIRROR_EMAIL_KEY)?);
+    let auth_id = read_non_empty(&connection, AUTH_ID_KEY)?;
+    let refresh_token = read_non_empty(&connection, REFRESH_TOKEN_KEY)?
+        .filter(|value| !is_safe_storage_ciphertext(value));
     Ok(Some(LocalCredential {
         tokens: crate::oauth::TokenSet {
             expires_at: crate::identity::jwt_exp(&access_token),
             access_token: access_token.clone(),
-            refresh_token: vscdb::read_value(&connection, REFRESH_TOKEN_KEY, "Cursor")?
-                .filter(|value| !value.trim().is_empty()),
+            refresh_token,
             id_token: None,
             token_type: "Bearer".to_string(),
         },
@@ -161,6 +197,12 @@ pub fn read(roots: &PathRoots) -> AccountResult<Option<LocalCredential>> {
         provider_state: None,
         source: path.display().to_string(),
     }))
+}
+
+fn read_non_empty(connection: &Connection, key: &str) -> AccountResult<Option<String>> {
+    Ok(vscdb::read_value(connection, key, "Cursor")?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
 }
 
 /// The identity a live Cursor is serving: the cached email it shows.
@@ -180,7 +222,7 @@ pub fn snapshot(roots: &PathRoots) -> AccountResult<ClientSnapshot> {
                 .collect(),
         });
     }
-    let connection = open(&path)?;
+    let connection = open_read_only(&path)?;
     let rows = vscdb::read_values(&connection, &SWITCH_KEYS, "Cursor")?;
     Ok(ClientSnapshot::Items { path, rows })
 }
@@ -189,9 +231,19 @@ pub fn snapshot(roots: &PathRoots) -> AccountResult<ClientSnapshot> {
 #[path = "cursor_tests.rs"]
 mod cursor_tests;
 
-/// Open the editor's database; the editor owns the file, we only borrow it.
+/// Open the editor's database for writing; the editor owns the file, we only borrow it.
 fn open(path: &Path) -> AccountResult<Connection> {
     vscdb::open_existing(path, BUSY_TIMEOUT, false, |missing| {
+        AccountError::Client(format!(
+            "Cursor's state.vscdb is not at {}: start Cursor once, sign in, then switch",
+            missing.display()
+        ))
+    })
+}
+
+/// Open the editor's database strictly read-only for live checks and snapshots.
+fn open_read_only(path: &Path) -> AccountResult<Connection> {
+    vscdb::open_read_only(path, vscdb::READ_BUSY_TIMEOUT, |missing| {
         AccountError::Client(format!(
             "Cursor's state.vscdb is not at {}: start Cursor once, sign in, then switch",
             missing.display()

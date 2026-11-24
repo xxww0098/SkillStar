@@ -52,7 +52,7 @@ pub fn enable_project_skills_strict(
     if agent_id.is_empty() || skills.is_empty() {
         anyhow::bail!("strict enable needs an agent and at least one skill");
     }
-    let profiles = agents::list_profiles();
+    let profiles = agents::list_profile_specs();
     let skills_list = binding
         .name
         .as_deref()

@@ -17,17 +17,18 @@
 // 【nsh 纪律】组件体只执行一次：派生读取（visibleAgents/canApply…）是
 // 普通 getter，调用点必须在 JSX 表达式里。
 
-import { signal, type Signal } from "nsh";
+import { batch, signal, type Signal } from "nsh";
 import type {
   AgentProfileRecord,
   CopyRecord,
   CopyStateTag,
   DeployMode,
+  PendingProjectSkillPlan,
   ProjectEntry,
   ProjectsBridge,
 } from "./bridge";
-import { publishToast } from "../../shell/events";
-import { agentsChanged } from "../../shell/events";
+import { ptf } from "./projectsStrings";
+import { agentsChanged, publishToast, toast } from "../../shell/events";
 import { tf } from "../../services/translation";
 
 export interface ProjectsState {
@@ -45,20 +46,29 @@ export interface ProjectsState {
   statusIsError: Signal<boolean>;
   detectedRules: Signal<string[]>;
   busy: Signal<boolean>;
+  /** False until the first `refresh` settles (success or failure). */
+  ready: Signal<boolean>;
   copyRecords: Signal<CopyRecord[]>;
   copyLoading: Signal<boolean>;
   copyError: Signal<string | null>;
+  pendingPlan: Signal<PendingProjectSkillPlan | null>;
+  planApproving: Signal<boolean>;
+  planError: Signal<string | null>;
 
   // ---- 生命周期 ------------------------------------------------------------
-  start(): void;
-  refresh(): Promise<void>;
+  start(opts?: { isActive?: () => boolean }): void;
+  onPageActivated(): void;
+  refresh(preferName?: string): Promise<void>;
   reloadAgentProfiles(): void;
+  refreshPendingPlan(): void;
+  approvePendingPlan(): Promise<void>;
 
   // ---- 编辑动作（mod.rs） --------------------------------------------------
   selectProject(entry: ProjectEntry): void;
   toggleAgent(agentId: string): void;
   toggleDeployMode(relPath: string): void;
   addSkillToAgent(agentId: string, skill: string): void;
+  addAllSkillsToAgent(agentId: string, skills: string[]): void;
   removeSkillFromAgent(agentId: string, skill: string): void;
 
   // ---- 看护动作（actions.rs / upkeep.rs） ----------------------------------
@@ -104,42 +114,128 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
   const statusIsError = signal(false);
   const detectedRules = signal<string[]>([]);
   const busy = signal(false);
+  const ready = signal(false);
   const copyRecords = signal<CopyRecord[]>([]);
   const copyLoading = signal(false);
   const copyError = signal<string | null>(null);
+  const pendingPlan = signal<PendingProjectSkillPlan | null>(null);
+  const planApproving = signal(false);
+  const planError = signal<string | null>(null);
 
   // 代际门（GPUI 的 copy_epoch / 激活顺序）：普通变量即可——它们只在内
   // 部比对，不进渲染（自写自读的 signal 会被跟踪成循环，domainJob 教训）。
   let copyEpoch = 0;
+  let planEpoch = 0;
   let activationToken = 0;
   let started = false;
+  let profilesDirty = false;
+  let isActiveCheck: () => boolean = () => true;
 
   /** actions.rs begin_mutation：busy 上弦、清状态、副本门自增。 */
   function beginMutation(): void {
-    busy.set(true);
-    copyEpoch += 1;
-    copyLoading.set(false);
-    statusMessage.set(null);
+    batch(() => {
+      busy.set(true);
+      copyEpoch += 1;
+      copyLoading.set(false);
+      statusMessage.set(null);
+    });
   }
 
   /** mod.rs set_active_project：换项目即整组重置工作态。 */
   async function activate(entry: ProjectEntry, thenStatus: boolean): Promise<void> {
     const token = ++activationToken;
     copyEpoch += 1;
+    planEpoch += 1;
     const list = await bridge.skillsList(entry.name);
     if (token !== activationToken) return; // 更新的激活已发生：丢弃旧项目的清单
-    agentSkills.set(list.agents);
-    deployModes.set(list.deployModes);
-    detectedRules.set([]);
-    copyRecords.set([]);
-    copyError.set(null);
-    copyLoading.set(false);
-    expandedAgent.set(Object.keys(list.agents)[0] ?? null);
-    dirty.set(false);
-    statusMessage.set(null);
-    statusIsError.set(false);
-    selected.set(entry);
+    batch(() => {
+      agentSkills.set(list.agents);
+      deployModes.set(list.deployModes);
+      detectedRules.set([]);
+      copyRecords.set([]);
+      copyError.set(null);
+      copyLoading.set(false);
+      pendingPlan.set(null);
+      planApproving.set(false);
+      planError.set(null);
+      expandedAgent.set(Object.keys(list.agents)[0] ?? null);
+      dirty.set(false);
+      statusMessage.set(null);
+      statusIsError.set(false);
+      selected.set(entry);
+    });
+    refreshPendingPlan();
     if (thenStatus) refreshCopyStatus();
+  }
+
+  function clearSelection(): void {
+    activationToken += 1;
+    copyEpoch += 1;
+    planEpoch += 1;
+    batch(() => {
+      selected.set(null);
+      agentSkills.set({});
+      deployModes.set({});
+      expandedAgent.set(null);
+      detectedRules.set([]);
+      copyRecords.set([]);
+      copyError.set(null);
+      copyLoading.set(false);
+      pendingPlan.set(null);
+      planApproving.set(false);
+      planError.set(null);
+      dirty.set(false);
+    });
+  }
+
+  function refreshPendingPlan(): void {
+    const epoch = ++planEpoch;
+    const current = selected();
+    const loader = bridge.pendingProjectSkillPlan;
+    if (current === null || loader === undefined) {
+      batch(() => {
+        pendingPlan.set(null);
+        planApproving.set(false);
+        planError.set(null);
+      });
+      return;
+    }
+    planError.set(null);
+    void loader(current.path)
+      .then((plan) => {
+        if (epoch !== planEpoch) return;
+        pendingPlan.set(plan);
+      })
+      .catch(() => {
+        if (epoch !== planEpoch) return;
+        // Missing/moved project directories cannot canonicalize cleanly; omit stale plan card.
+        pendingPlan.set(null);
+      });
+  }
+
+  async function approvePendingPlan(): Promise<void> {
+    const plan = pendingPlan();
+    const approveFn = bridge.approveProjectSkillPlan;
+    if (plan === null || approveFn === undefined || planApproving()) return;
+    planApproving.set(true);
+    planError.set(null);
+    try {
+      const record = await approveFn(plan.planId, plan.planHash);
+      if (pendingPlan()?.planId === plan.planId) {
+        pendingPlan.set({
+          ...plan,
+          approved: true,
+          approvalSource: record.source,
+        });
+      }
+      toast(ptf("projects.plan.approveDone", { id: record.planId }), "success");
+      refreshPendingPlan();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      planError.set(`${ptf("projects.plan.approveFailed", {})}: ${message}`);
+    } finally {
+      planApproving.set(false);
+    }
   }
 
   /** upkeep.rs refresh_copy_status：锁下观测的配置与部署事实。 */
@@ -147,66 +243,81 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
     const epoch = ++copyEpoch;
     const current = selected();
     if (current === null) {
-      copyRecords.set([]);
-      copyLoading.set(false);
-      copyError.set(null);
+      batch(() => {
+        copyRecords.set([]);
+        copyLoading.set(false);
+        copyError.set(null);
+      });
       return;
     }
     const name = current.name;
-    copyLoading.set(true);
-    copyError.set(null);
+    batch(() => {
+      copyLoading.set(true);
+      copyError.set(null);
+    });
     void bridge
       .copyStatus(name)
       .then((snapshot) => {
         if (epoch !== copyEpoch) return; // 过期回包：旧项目的事实不落屏
-        copyLoading.set(false);
-        copyRecords.set(snapshot.copies);
-        detectedRules.set(snapshot.rules);
-        if (!dirty() && !busy()) {
-          selected.set(snapshot.project);
-          agentSkills.set(snapshot.agents);
-          deployModes.set(snapshot.deployModes);
-        }
+        batch(() => {
+          copyLoading.set(false);
+          copyRecords.set(snapshot.copies);
+          detectedRules.set(snapshot.rules);
+          if (!dirty() && !busy()) {
+            selected.set(snapshot.project);
+            agentSkills.set(snapshot.agents);
+            deployModes.set(snapshot.deployModes);
+          }
+        });
       })
       .catch((error: unknown) => {
         if (epoch !== copyEpoch) return;
-        copyLoading.set(false);
-        copyError.set(error instanceof Error ? error.message : String(error));
+        batch(() => {
+          copyLoading.set(false);
+          copyError.set(error instanceof Error ? error.message : String(error));
+        });
       });
   }
 
-  /** mod.rs refresh：重读注册表，按名字保选择（不存在则退回首项）。 */
-  async function refresh(): Promise<void> {
-    const snapshot = await bridge.registry();
-    projects.set(snapshot.projects);
-    profiles.set(snapshot.profiles);
-    hubSkills.set(snapshot.hubSkills);
-    const prevName = selected()?.name ?? null;
-    const kept =
-      prevName !== null
-        ? snapshot.projects.find((entry) => entry.name === prevName)
-        : undefined;
-    const next = kept ?? snapshot.projects[0];
-    if (next !== undefined) {
-      await activate(next, false);
-    } else {
-      activationToken += 1;
-      copyEpoch += 1;
-      selected.set(null);
-      agentSkills.set({});
-      deployModes.set({});
-      expandedAgent.set(null);
-      detectedRules.set([]);
-      copyRecords.set([]);
+  /** mod.rs refresh：重读注册表，按名字保选择（不存在则退回首项）。
+   * 失败钉住错误，并在 finally 里把 ready 打开，避免骨架一直占着空列表。 */
+  async function refresh(preferName?: string): Promise<void> {
+    try {
+      const snapshot = await bridge.registry();
+      batch(() => {
+        projects.set(snapshot.projects);
+        profiles.set(snapshot.profiles);
+        hubSkills.set(snapshot.hubSkills);
+      });
+      const targetName = preferName ?? selected()?.name ?? null;
+      const kept =
+        targetName !== null
+          ? snapshot.projects.find((entry) => entry.name === targetName)
+          : undefined;
+      const next = kept ?? snapshot.projects[0];
+      if (next !== undefined) {
+        await activate(next, false);
+      } else {
+        clearSelection();
+      }
+      refreshCopyStatus();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast(message, "error");
+    } finally {
+      ready.set(true);
     }
-    refreshCopyStatus();
   }
 
   /** mod.rs reload_agent_profiles：设置换了启用集，只刷新名册不重载项目
    * （refresh 会重载选中项目并丢掉未保存的编辑）。 */
   function reloadAgentProfiles(): void {
-    void bridge.registry().then((snapshot) => {
-      profiles.set(snapshot.profiles);
+    profilesDirty = false;
+    const loader = bridge.profiles
+      ? bridge.profiles()
+      : bridge.registry().then((snapshot) => snapshot.profiles);
+    void loader.then((loaded) => {
+      profiles.set(loaded);
     });
   }
 
@@ -257,20 +368,46 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
     statusIsError,
     detectedRules,
     busy,
+    ready,
     copyRecords,
     copyLoading,
     copyError,
+    pendingPlan,
+    planApproving,
+    planError,
 
-    start(): void {
+    start(opts): void {
+      if (opts?.isActive) isActiveCheck = opts.isActive;
       if (started) return;
       started = true;
       void refresh();
-      agentsChanged.subscribe(() => reloadAgentProfiles());
+      agentsChanged.subscribe(() => {
+        if (isActiveCheck()) {
+          reloadAgentProfiles();
+        } else {
+          profilesDirty = true;
+        }
+      });
+    },
+
+    onPageActivated(): void {
+      if (!started) {
+        state.start();
+        return;
+      }
+      if (profilesDirty) {
+        reloadAgentProfiles();
+      }
+      refreshPendingPlan();
     },
 
     refresh,
 
     reloadAgentProfiles,
+
+    refreshPendingPlan,
+
+    approvePendingPlan,
 
     selectProject(entry: ProjectEntry): void {
       if (busy()) return;
@@ -306,8 +443,25 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
       if (list === undefined) return;
       if (list.includes(skill)) return;
       current[agentId] = [...list, skill];
-      agentSkills.set(current);
-      dirty.set(true);
+      batch(() => {
+        agentSkills.set(current);
+        dirty.set(true);
+      });
+    },
+
+    addAllSkillsToAgent(agentId: string, skills: string[]): void {
+      if (busy() || skills.length === 0) return;
+      const current = { ...agentSkills() };
+      const list = current[agentId];
+      if (list === undefined) return;
+      const seen = new Set(list);
+      const added = skills.filter((name) => !seen.has(name));
+      if (added.length === 0) return;
+      current[agentId] = [...list, ...added];
+      batch(() => {
+        agentSkills.set(current);
+        dirty.set(true);
+      });
     },
 
     removeSkillFromAgent(agentId: string, skill: string): void {
@@ -316,8 +470,10 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
       const list = current[agentId];
       if (list === undefined) return;
       current[agentId] = list.filter((name) => name !== skill);
-      agentSkills.set(current);
-      dirty.set(true);
+      batch(() => {
+        agentSkills.set(current);
+        dirty.set(true);
+      });
     },
 
     refreshCopyStatus,
@@ -333,20 +489,22 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
       beginMutation();
       void bridge
         .saveAndSync(project.path, agents, modes)
-        .then(async (result) => {
-          busy.set(false);
-          statusIsError.set(false);
+        .then((result) => {
           const message = tf("projects.deploySuccess", { count: result.count });
-          statusMessage.set(message);
-          // defer_recovery_refresh(reload=true)：重载后状态行保住结论。
-          await refresh();
-          statusMessage.set(message);
-          statusIsError.set(false);
+          batch(() => {
+            busy.set(false);
+            dirty.set(false);
+            statusIsError.set(false);
+            statusMessage.set(message);
+          });
+          refreshCopyStatus();
         })
-        .catch(async (error: unknown) => {
-          busy.set(false);
-          statusIsError.set(true);
-          statusMessage.set(failureMessage("projects.deployFailed", error));
+        .catch((error: unknown) => {
+          batch(() => {
+            busy.set(false);
+            statusIsError.set(true);
+            statusMessage.set(failureMessage("projects.deployFailed", error));
+          });
           refreshCopyStatus();
         });
     },
@@ -356,26 +514,30 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
       const project = selected();
       if (project === null) return;
       beginMutation();
+      copyLoading.set(true);
       void bridge
         .retryCopies(project.name)
         .then((records) => {
-          busy.set(false);
-          copyEpoch += 1;
-          copyLoading.set(false);
-          copyError.set(null);
-          copyRecords.set(records);
           const pending = records.some((record) => record.state !== "current");
-          statusIsError.set(false);
-          statusMessage.set(
-            tf(pending ? "projects.copiesNeedAttention" : "projects.copiesCurrent", {})
-          );
+          batch(() => {
+            busy.set(false);
+            copyEpoch += 1;
+            copyError.set(null);
+            copyRecords.set(records);
+            statusIsError.set(false);
+            statusMessage.set(
+              tf(pending ? "projects.copiesNeedAttention" : "projects.copiesCurrent", {})
+            );
+          });
           // defer_recovery_refresh(reload=false)：只重新检查，不重置编辑。
           refreshCopyStatus();
         })
         .catch((error: unknown) => {
-          busy.set(false);
-          statusIsError.set(true);
-          statusMessage.set(failureMessage("projects.retryFailed", error));
+          batch(() => {
+            busy.set(false);
+            statusIsError.set(true);
+            statusMessage.set(failureMessage("projects.retryFailed", error));
+          });
           refreshCopyStatus();
         });
     },
@@ -385,20 +547,23 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
       beginMutation();
       void bridge
         .forgetCopy(projectName, rel, skill)
-        .then(async () => {
-          busy.set(false);
-          statusIsError.set(false);
+        .then(() => {
           const message = tf("projects.copyForgotten", {});
-          statusMessage.set(message);
-          await refresh();
-          statusMessage.set(message);
-          statusIsError.set(false);
+          batch(() => {
+            busy.set(false);
+            dirty.set(false);
+            statusIsError.set(false);
+            statusMessage.set(message);
+          });
+          refreshCopyStatus();
         })
         .catch((error: unknown) => {
-          busy.set(false);
-          statusIsError.set(true);
           const message = failureMessage("projects.forgetFailed", error);
-          statusMessage.set(message);
+          batch(() => {
+            busy.set(false);
+            statusIsError.set(true);
+            statusMessage.set(message);
+          });
           publishToast({ tone: "error", message, pinned: true });
           refreshCopyStatus();
         });
@@ -410,7 +575,10 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
       );
       if (!result.ok) return result;
       const entry = result.value;
-      await refresh();
+      const next = projects().some((item) => item.name === entry.name)
+        ? projects().map((item) => (item.name === entry.name ? entry : item))
+        : [...projects(), entry];
+      projects.set(next);
       await activate(entry, true);
       return { ok: true, entry };
     },
@@ -420,16 +588,22 @@ export function createProjectsState(bridge: ProjectsBridge): ProjectsState {
         bridge.updatePath(name, path)
       );
       if (!result.ok) return result;
-      await refresh();
+      await refresh(name);
       return { ok: true };
     },
 
     async commitRemove(name: string) {
       const result = await runDialogMutation("projects.removeFailed", () => bridge.remove(name));
       if (!result.ok) return result;
-      // dialogs.rs open_remove 的成功回调：选中项若被移除则先清空再刷新。
-      if (selected()?.name === name) selected.set(null);
-      await refresh();
+      const remaining = projects().filter((entry) => entry.name !== name);
+      projects.set(remaining);
+      if (selected()?.name === name) {
+        if (remaining.length > 0) {
+          await activate(remaining[0], true);
+        } else {
+          clearSelection();
+        }
+      }
       return { ok: true };
     },
 

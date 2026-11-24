@@ -14,7 +14,7 @@ use crate::skill_update::{
     SkillIdentityChange, SkillUpdateChannelManaged, SkillUpdateFailure, SkillUpdateReport,
     UpdateResult,
 };
-use crate::{Skill, local_skill, skill_install};
+use crate::{Skill, skill_install};
 use anyhow::Context as _;
 use std::path::Path;
 use std::sync::Arc;
@@ -217,69 +217,6 @@ impl GitSkillFacade {
         let installed = crate::installer::install_units(acquired.dir(), spec, &units)?;
         installed_skill::invalidate_cache();
         Ok(installed)
-    }
-
-    /// Replace a published local Skill with its Git-backed installation while
-    /// preserving the local snapshot if the staged install fails.
-    pub fn graduate_local_skill_from_scan(
-        &self,
-        skill_name: &str,
-        spec: &crate::source_resolver::Source,
-        target: &SkillInstallTarget,
-    ) -> anyhow::Result<()> {
-        // Read and prove the local Skill under the transaction, then drop it
-        // before any remote git. A slow fetch must not pin every other install.
-        let snapshot = {
-            let _guard = crate::skill_update::acquire_update_transaction_lock()
-                .context("Unable to lock Skill graduation")?;
-            crate::skill_mutation::policy().ensure_skill_mutation_allowed(skill_name)?;
-            crate::skill_mutation::policy().ensure_repository_mutation_allowed(&spec.repo_url)?;
-            crate::content::snapshot(skill_name)?
-        };
-        let checkout =
-            crate::fetch::fetch_for_install(spec, &[&target.folder_path], &self.session)?;
-        let _guard = crate::skill_update::acquire_update_transaction_lock()
-            .context("Unable to lock Skill graduation")?;
-        crate::skill_mutation::policy().ensure_skill_mutation_allowed(skill_name)?;
-        crate::skill_mutation::policy().ensure_repository_mutation_allowed(&spec.repo_url)?;
-        let current = crate::content::snapshot(skill_name)?;
-        if current.content_hash != snapshot.content_hash {
-            anyhow::bail!(
-                "Skill '{skill_name}' changed while its published source was being fetched; retry"
-            );
-        }
-        local_skill::graduate(skill_name)?;
-        let install = (|| -> anyhow::Result<Vec<String>> {
-            crate::installer::install_units(
-                checkout.dir(),
-                spec,
-                std::slice::from_ref(&crate::installer::InstallUnit {
-                    id: target.id.clone(),
-                    folder_path: target.folder_path.clone(),
-                }),
-            )
-        })()
-        .and_then(|installed| {
-            let expected = crate::installer::canonical_skill_name(&target.id)?;
-            installed.contains(&expected).then_some(()).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Published repository no longer contains Skill '{}'",
-                    target.id
-                )
-            })
-        });
-        if let Err(error) = install {
-            let content_rollback = local_skill::create_from_snapshot(skill_name, &snapshot).err();
-            installed_skill::invalidate_cache();
-            return Err(match content_rollback {
-                None => error,
-                Some(content) => anyhow::anyhow!(
-                    "Git-backed installation failed ({error:#}); local Skill restore also failed: {content:#}"
-                ),
-            });
-        }
-        installed_skill::invalidate_cache();
-        Ok(())
     }
 
     /// Apply the staged repository installer to an already fetched, immutable
@@ -589,73 +526,5 @@ mod tests {
             .unwrap();
         assert!(canonical.join("scripts/impeccable").is_file());
         assert!(canonical.join("reference/craft.md").is_file());
-    }
-
-    /// Remote git for graduation must run with the transaction released, the
-    /// same way publish records depth around clone/pull/push.
-    #[test]
-    fn graduate_remote_git_runs_with_no_transaction_held() {
-        let sandbox = crate::test_sandbox::Sandbox::new();
-        let probe =
-            crate::fetch::RemoteGitLockProbe::arm(sandbox.root().join("graduate-lock-probe"));
-        let repo = sandbox.root().join("origin");
-        let source = repo.join("skills/demo");
-        std::fs::create_dir_all(&source).unwrap();
-        std::fs::write(
-            source.join("SKILL.md"),
-            "---\nname: demo\ndescription: Published.\n---\n# git\n",
-        )
-        .unwrap();
-        let output = |args: &[&str]| {
-            let output = ss_core::infra::path_env::command_with_path("git")
-                .args(args)
-                .current_dir(&repo)
-                .env("GIT_AUTHOR_NAME", "Test")
-                .env("GIT_COMMITTER_NAME", "Test")
-                .env("GIT_AUTHOR_EMAIL", "t@t")
-                .env("GIT_COMMITTER_EMAIL", "t@t")
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout).unwrap().trim().to_string()
-        };
-        output(&["init", "-q"]);
-        output(&["add", "."]);
-        output(&["commit", "-q", "-m", "publish", "--no-gpg-sign"]);
-        let branch = output(&["branch", "--show-current"]);
-
-        let hub = ss_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::create_dir_all(&hub).unwrap();
-        std::fs::write(
-            hub.join("SKILL.md"),
-            "---\nname: demo\ndescription: Local.\n---\n# local\n",
-        )
-        .unwrap();
-
-        let spec = crate::source_resolver::Source {
-            repo_url: crate::git::ops::local_file_url(&repo),
-            short: "local/demo".into(),
-            git_ref: Some(branch),
-            subpath: None,
-            skill_filter: None,
-            well_known: false,
-        };
-        let target = SkillInstallTarget {
-            id: "demo".into(),
-            folder_path: "skills/demo".into(),
-            pinned: false,
-        };
-        GitSkillFacade::new(GitOperationSession::public())
-            .graduate_local_skill_from_scan("demo", &spec, &target)
-            .unwrap();
-        assert_eq!(
-            probe.recorded_depth().as_deref(),
-            Some("0"),
-            "clone must run after the skill transaction is released"
-        );
     }
 }

@@ -60,8 +60,8 @@ fn refresh_stale_copies_inner(
     let Some(list) = load_skills_list_strict(&entry.name)? else {
         return Ok(RefreshStaleCopiesReport::default());
     };
-    super::store::validate_skills_list(&list)?;
-    let profiles = crate::agents::list_profiles();
+    let profiles = crate::agents::list_profile_specs();
+    super::store::validate_skills_list_with_profiles(&list, &profiles)?;
     let mut report = RefreshStaleCopiesReport::default();
     for plan in build_physical_path_plans(Some(&project), &list, &profiles)? {
         let rel = &plan.profile.project_skills_rel;

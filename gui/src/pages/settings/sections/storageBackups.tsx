@@ -1,6 +1,6 @@
 // 技能历史备份快照卡（data/skills/backups/，最多 25 份）：列表、恢复与确认后清空。
 
-import { Text, View, type JSX } from "nsh";
+import { Text, View, computed, type JSX } from "nsh";
 import { openConfirm } from "../../../chrome/dialog";
 import { paletteToken } from "../../../services/themeMode";
 import {
@@ -28,9 +28,10 @@ function reasonMeta(reason: BackupReason): { tone: StatusTone; labelKey: string 
 
 export function StorageBackupsCard(props: { state: StorageState }): JSX.Element {
   const state = props.state;
-  const totalBytes = (): number =>
-    state.backups().reduce((sum, entry) => sum + entry.sizeBytes, 0);
-  const busy = (): boolean => state.backupBusyId() !== null;
+  const totalBytes = computed(() =>
+    state.backups().reduce((sum, entry) => sum + entry.sizeBytes, 0),
+  );
+  const busy = computed(() => state.backupBusyId() !== null);
 
   const confirmClearAll = (): void => {
     const count = state.backups().length;
@@ -60,7 +61,7 @@ export function StorageBackupsCard(props: { state: StorageState }): JSX.Element 
             mono
             text={`${state.backups().length} · ${formatBytes(totalBytes())}`}
           />
-          {state.backups().length > 0 ? (
+          <If when={state.backups().length > 0}>
             <SettingsButton
               testID="storage-backups-clear"
               label={st("settings.backupsClearAll")}
@@ -71,7 +72,7 @@ export function StorageBackupsCard(props: { state: StorageState }): JSX.Element 
               disabled={busy()}
               onPress={confirmClearAll}
             />
-          ) : null}
+          </If>
         </View>
       }
     >
@@ -89,24 +90,29 @@ export function StorageBackupsCard(props: { state: StorageState }): JSX.Element 
             {st("settings.backupsSubtitle")}
           </Text>
         </View>
-        {state.backups().length === 0 ? (
+        <If
+          when={state.backups().length === 0}
+          else={
+            <Each of={state.backups()} key={(entry) => entry.id}>
+              {(entry, index) => (
+                <BackupRow
+                  entry={entry()}
+                  borderTop={index() > 0}
+                  busy={busy()}
+                  restoring={state.backupBusyId() === entry().id}
+                  onRestore={() => state.restoreBackup(entry().id)}
+                  onReveal={() => state.reveal(entry().path)}
+                />
+              )}
+            </Each>
+          }
+        >
           <View style={{ paddingHorizontal: 18, paddingVertical: 16 }}>
             <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
               {st("settings.backupsEmpty")}
             </Text>
           </View>
-        ) : (
-          state.backups().map((entry, idx) => (
-            <BackupRow
-              entry={entry}
-              borderTop={idx > 0}
-              busy={busy()}
-              restoring={state.backupBusyId() === entry.id}
-              onRestore={() => state.restoreBackup(entry.id)}
-              onReveal={() => state.reveal(entry.path)}
-            />
-          ))
-        )}
+        </If>
       </View>
     </SettingsGroup>
   );
@@ -120,12 +126,11 @@ function BackupRow(props: {
   onRestore: () => void;
   onReveal: () => void;
 }): JSX.Element {
-  const entry = props.entry;
-  const reason = reasonMeta(entry.reason);
-  const slug = entry.id.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  const reason = computed(() => reasonMeta(props.entry.reason));
+  const slug = computed(() => props.entry.id.toLowerCase().replace(/[^a-z0-9]/g, "-"));
   return (
     <View
-      testID={`backup-row-${slug}`}
+      testID={`backup-row-${slug()}`}
       style={{
         paddingHorizontal: 18,
         paddingVertical: 12,
@@ -135,9 +140,8 @@ function BackupRow(props: {
         alignItems: "center",
         justifyContent: "space-between",
         gap: 10,
-        ...(props.borderTop
-          ? { borderTopWidth: 1, borderTopColor: paletteToken("border_soft") }
-          : {}),
+        borderTopWidth: props.borderTop ? 1 : 0,
+        borderTopColor: props.borderTop ? paletteToken("border_soft") : "transparent",
       }}
     >
       <View style={{ flex: 1, minWidth: 220, display: "flex", flexDirection: "column", gap: 5 }}>
@@ -151,15 +155,15 @@ function BackupRow(props: {
           }}
         >
           <Text style={{ fontSize: 13, fontWeight: "600", color: paletteToken("fg") }}>
-            {entry.skillName}
+            {props.entry.skillName}
           </Text>
-          {entry.called && entry.called !== entry.skillName ? (
+          <If when={Boolean(props.entry.called && props.entry.called !== props.entry.skillName)}>
             <MetaChip
               tone="info"
-              text={stf("settings.backupFromCalled", { called: entry.called })}
+              text={stf("settings.backupFromCalled", { called: props.entry.called ?? "" })}
             />
-          ) : null}
-          <StatusPill tone={reason.tone} text={st(reason.labelKey)} />
+          </If>
+          <StatusPill tone={reason().tone} text={st(reason().labelKey)} />
         </View>
         <View
           style={{
@@ -177,7 +181,7 @@ function BackupRow(props: {
               color: paletteToken("fg_muted"),
             }}
           >
-            {entry.createdAt}
+            {props.entry.createdAt}
           </Text>
           <Text
             style={{
@@ -186,18 +190,18 @@ function BackupRow(props: {
               color: paletteToken("fg_muted"),
             }}
           >
-            {formatBytes(entry.sizeBytes)}
+            {formatBytes(props.entry.sizeBytes)}
           </Text>
-          {entry.source ? (
+          <If when={Boolean(props.entry.source)}>
             <Text style={{ fontSize: 11, color: paletteToken("fg_muted"), numberOfLines: 1 }}>
-              {entry.source}
+              {props.entry.source ?? ""}
             </Text>
-          ) : null}
+          </If>
         </View>
       </View>
       <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6 }}>
         <SettingsButton
-          testID={`backup-reveal-${slug}`}
+          testID={`backup-reveal-${slug()}`}
           label={st("settings.backupsOpenFolder")}
           icon="folderOpen"
           size="sm"
@@ -205,7 +209,7 @@ function BackupRow(props: {
           onPress={props.onReveal}
         />
         <SettingsButton
-          testID={`backup-restore-${slug}`}
+          testID={`backup-restore-${slug()}`}
           label={st("settings.backupsRestore")}
           icon="rotateCcw"
           size="sm"

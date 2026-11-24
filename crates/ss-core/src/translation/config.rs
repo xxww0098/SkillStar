@@ -1,7 +1,9 @@
 //! User translation preferences.
 //!
 //! The engine, surface switches, translation style, and LLM endpoint live in
-//! `config/translation.json`. Both switches start off.
+//! `config/translation.json`. Both switches start on, so a fresh install
+//! translates descriptions and SKILL.md prose without a first visit to
+//! Settings (machine engine, Simplified Chinese).
 //! The API key is a credential and lives under `secrets/`, not next to them.
 
 use anyhow::Result;
@@ -86,9 +88,10 @@ pub enum Engine {
 pub struct TranslationConfig {
     pub engine: Engine,
     /// English descriptions on skill cards, the detail column, and the market.
-    /// Off until the user turns it on. Cached lines stay on disk either way.
+    /// On by default; turning it off only hides the lines (cached lines stay
+    /// on disk either way).
     pub translate_descriptions: bool,
-    /// English paragraphs in the SKILL.md reader.
+    /// English paragraphs in the SKILL.md reader. On by default.
     pub translate_skill_md: bool,
     /// Per-skill description-translation choice, keyed by skill name. The
     /// detail column's language button and the selection bar's translate
@@ -102,15 +105,16 @@ pub struct TranslationConfig {
     #[serde(default = "default_target")]
     pub target_lang: String,
     pub llm_base_url: String,
-    /// Model id sent to chat completions. While `llm_model_pinned` is false
-    /// and an account is selected, load rewrites this to that service's
-    /// `model_hint`.
+    /// Model id sent to chat completions (entered manually or picked from the
+    /// fetched `/models` list in Settings → Translation).
     pub llm_model: String,
-    /// The user picked this id from a fetched model list.
+    /// Whether the user picked this model id from a fetched model list.
     pub llm_model_pinned: bool,
-    /// Subscription id whose API key is used. Empty means the typed key.
+    /// Legacy account-binding field retained for config backward compatibility;
+    /// cleared unconditionally by [`TranslationConfig::normalized`].
     pub llm_account_id: String,
-    /// `opencode-go`, `ollama`, or `command-code`. Empty with a manual key.
+    /// Legacy account-catalog field retained for config backward compatibility;
+    /// cleared unconditionally by [`TranslationConfig::normalized`].
     pub llm_account_catalog: String,
 }
 
@@ -118,8 +122,8 @@ impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
             engine: Engine::Machine,
-            translate_descriptions: false,
-            translate_skill_md: false,
+            translate_descriptions: true,
+            translate_skill_md: true,
             description_choices: std::collections::HashMap::new(),
             reader_theme: DEFAULT_READER.to_string(),
             target_lang: DEFAULT_TARGET.to_string(),
@@ -165,6 +169,8 @@ struct CachedConfig {
 }
 
 static CACHED: std::sync::Mutex<Option<CachedConfig>> = std::sync::Mutex::new(None);
+static API_KEY_CACHE: std::sync::Mutex<Option<(std::path::PathBuf, String)>> =
+    std::sync::Mutex::new(None);
 
 fn read_config_file() -> Result<TranslationConfig> {
     let path = crate::infra::paths::translation_config_path();
@@ -176,7 +182,7 @@ fn read_config_file() -> Result<TranslationConfig> {
     Ok(config.normalized())
 }
 
-pub fn load_config() -> Result<TranslationConfig> {
+fn with_cached_config<T>(f: impl FnOnce(&TranslationConfig) -> T) -> Result<T> {
     let root = crate::infra::paths::data_root();
     let mut guard = CACHED
         .lock()
@@ -184,29 +190,106 @@ pub fn load_config() -> Result<TranslationConfig> {
     if let Some(cached) = guard.as_ref()
         && cached.root == root
     {
-        return Ok(cached.config.clone());
+        return Ok(f(&cached.config));
     }
     let config = read_config_file()?;
-    *guard = Some(CachedConfig {
-        root,
-        config: config.clone(),
-    });
-    Ok(config)
+    let out = f(&config);
+    *guard = Some(CachedConfig { root, config });
+    Ok(out)
 }
 
-pub fn save_config(config: &TranslationConfig) -> Result<()> {
-    let config = config.clone().normalized();
+#[cfg(not(test))]
+fn config_writer_tx() -> &'static std::sync::mpsc::Sender<(std::path::PathBuf, Vec<u8>)> {
+    static TX: std::sync::OnceLock<std::sync::mpsc::Sender<(std::path::PathBuf, Vec<u8>)>> =
+        std::sync::OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<(std::path::PathBuf, Vec<u8>)>();
+        let _ = std::thread::Builder::new()
+            .name("ss-translation-config-writer".to_string())
+            .spawn(move || {
+                while let Ok((mut path, mut bytes)) = rx.recv() {
+                    while let Ok((next_path, next_bytes)) = rx.try_recv() {
+                        if next_path == path {
+                            bytes = next_bytes;
+                        } else {
+                            if let Err(err) = crate::infra::fs_ops::atomic_write(&path, &bytes) {
+                                tracing::warn!("failed to write translation config: {err}");
+                            }
+                            path = next_path;
+                            bytes = next_bytes;
+                        }
+                    }
+                    if let Err(err) = crate::infra::fs_ops::atomic_write(&path, &bytes) {
+                        tracing::warn!("failed to write translation config: {err}");
+                    }
+                }
+            });
+        tx
+    })
+}
+
+fn persist_config_locked(root: std::path::PathBuf, config: TranslationConfig) -> Result<()> {
     let content = serde_json::to_string_pretty(&config)?;
-    crate::infra::fs_ops::atomic_write(
-        &crate::infra::paths::translation_config_path(),
-        content.as_bytes(),
-    )?;
-    let root = crate::infra::paths::data_root();
+    let path = crate::infra::paths::translation_config_path();
     let mut guard = CACHED
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *guard = Some(CachedConfig { root, config });
-    Ok(())
+    #[cfg(not(test))]
+    {
+        let bytes = content.into_bytes();
+        if let Err(err) = config_writer_tx().send((path.clone(), bytes)) {
+            let (_, bytes) = err.0;
+            crate::infra::fs_ops::atomic_write(&path, &bytes)?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    {
+        crate::infra::fs_ops::atomic_write(&path, content.as_bytes())?;
+        Ok(())
+    }
+}
+
+pub fn load_config() -> Result<TranslationConfig> {
+    with_cached_config(Clone::clone)
+}
+
+pub(super) fn scope_for_active(target: &str) -> String {
+    with_cached_config(|cfg| cfg.scope(target))
+        .unwrap_or_else(|_| TranslationConfig::default().scope(target))
+}
+
+pub(super) fn active_target_code() -> &'static str {
+    with_cached_config(|cfg| canonical_target(&cfg.target_lang)).unwrap_or(DEFAULT_TARGET)
+}
+
+pub fn descriptions_enabled() -> bool {
+    with_cached_config(|cfg| cfg.translate_descriptions).unwrap_or(false)
+}
+
+pub fn description_choice(skill: &str) -> Option<bool> {
+    with_cached_config(|cfg| cfg.description_choices.get(skill).copied())
+        .ok()
+        .flatten()
+}
+
+pub fn descriptions_blocked() -> bool {
+    let Ok((is_llm, model_empty)) = with_cached_config(|cfg| {
+        (cfg.engine == Engine::Llm, cfg.llm_model.trim().is_empty())
+    }) else {
+        return false;
+    };
+    if !is_llm {
+        return false;
+    }
+    model_empty || load_api_key().trim().is_empty()
+}
+
+pub fn save_config(config: &TranslationConfig) -> Result<()> {
+    let config = config.clone().normalized();
+    let root = crate::infra::paths::data_root();
+    persist_config_locked(root, config)
 }
 
 /// Remember one skill's description-translation choice, so the card and the
@@ -220,7 +303,24 @@ pub fn set_description_choice(skill: &str, translated: bool) -> Result<()> {
 pub fn set_description_choices<'a>(
     choices: impl IntoIterator<Item = (&'a str, bool)>,
 ) -> Result<()> {
-    let mut config = load_config()?;
+    let root = crate::infra::paths::data_root();
+    let mut config = {
+        let mut guard = CACHED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(cached) = guard.as_ref()
+            && cached.root == root
+        {
+            cached.config.clone()
+        } else {
+            let loaded = read_config_file()?;
+            *guard = Some(CachedConfig {
+                root: root.clone(),
+                config: loaded.clone(),
+            });
+            loaded
+        }
+    };
     let mut changed = false;
     for (skill, translated) in choices {
         if skill.is_empty() || config.description_choices.get(skill) == Some(&translated) {
@@ -232,27 +332,44 @@ pub fn set_description_choices<'a>(
         changed = true;
     }
     if changed {
-        save_config(&config)?;
+        persist_config_locked(root, config)?;
     }
     Ok(())
 }
 
 pub fn load_api_key() -> String {
+    let root = crate::infra::paths::data_root();
+    let mut guard = API_KEY_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((cached_root, cached_key)) = guard.as_ref()
+        && *cached_root == root
+    {
+        return cached_key.clone();
+    }
     let path = crate::infra::paths::translation_api_key_path();
-    std::fs::read_to_string(path)
+    let key = std::fs::read_to_string(path)
         .unwrap_or_default()
         .trim()
-        .to_string()
+        .to_string();
+    *guard = Some((root, key.clone()));
+    key
 }
 
 pub fn save_api_key(key: &str) -> Result<()> {
     let path = crate::infra::paths::translation_api_key_path();
-    crate::infra::fs_ops::atomic_write(&path, key.trim().as_bytes())?;
+    let trimmed = key.trim();
+    crate::infra::fs_ops::atomic_write(&path, trimmed.as_bytes())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
+    let root = crate::infra::paths::data_root();
+    let mut guard = API_KEY_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some((root, trimmed.to_string()));
     Ok(())
 }
 
@@ -284,13 +401,28 @@ mod tests {
     }
 
     #[test]
-    fn old_config_without_surface_flags_stays_off() {
+    fn old_config_without_surface_flags_takes_the_on_default() {
         let config: TranslationConfig = serde_json::from_str(r#"{"engine":"machine"}"#).unwrap();
-        assert!(!config.translate_descriptions);
-        assert!(!config.translate_skill_md);
+        assert!(config.translate_descriptions);
+        assert!(config.translate_skill_md);
         assert!(config.description_choices.is_empty());
         assert_eq!(config.engine, Engine::Machine);
         assert_eq!(config.target_lang, "zh-CN");
+    }
+
+    #[test]
+    fn an_explicit_off_survives_a_reload() {
+        let config: TranslationConfig = serde_json::from_str(
+            r#"{"engine":"machine","translate_descriptions":false,"translate_skill_md":false}"#,
+        )
+        .unwrap();
+        assert!(
+            !config.translate_descriptions && !config.translate_skill_md,
+            "the user's own off must win over the on default"
+        );
+        let config = config.normalized();
+        assert!(!config.translate_descriptions);
+        assert!(!config.translate_skill_md);
     }
 
     #[test]
@@ -344,12 +476,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_config_is_machine_translation() {
+    fn missing_config_is_machine_translation_with_both_surfaces_on() {
         let (_guard, _temp) = isolated();
         let config = load_config().unwrap();
         assert_eq!(config.engine, Engine::Machine);
-        assert!(!config.translate_descriptions);
-        assert!(!config.translate_skill_md);
+        assert!(config.translate_descriptions);
+        assert!(config.translate_skill_md);
         assert_eq!(config.reader_theme, "quote");
         assert_eq!(config.target_lang, "zh-CN");
         assert!(load_api_key().is_empty());

@@ -8,10 +8,9 @@ license.workspace = true
 # Bridge crate for `gui/` (folded into the repository root
 # workspace; exports `#[native_module("skillstar-gui/native")]` for TSX).
 [dependencies]
-# Keep the nsh-* crates at the CLI's version; bump them together with the
-# nsh CLI (see the mixed template's README note). nsh-base joins when a
-# wave first uses its base components (the .nsh runners ship their own).
-nsh-core = "0.5.1"
+# Keep the nsh-* crates unified via `[workspace.dependencies]` at the latest
+# crates.io stable release (`=0.6.1`); bump together with the `nsh` CLI.
+nsh-core = { workspace = true }
 
 # SkillStar domain crates, by path: one entry per page domain the bridge
 # exposes. A new domain joins with its facade, not before.
@@ -21,6 +20,7 @@ ss-skills = { path = "../../crates/ss-skills" }
 # Accounts page: the unified accounts domain (`ss-accounts` owns store,
 # switch writers, OAuth login, and quota/usage snapshots).
 ss-accounts = { path = "../../crates/ss-accounts" }
+ss-mcp-hub = { path = "../../crates/ss-mcp-hub" }
 # Wave 7 (settings sections 2): the storage / skill-repair / about slice —
 # `ss_app::storage_maintenance` (overview, two-step force deletes, cache
 # clean, repair preview/apply, agent intake) is that section's domain seam.
@@ -35,4 +35,11 @@ tokio = { version = "1", features = ["sync"] }
 # async entry points) need a runtime to drive; version tracks what the
 # tree already unifies on (the ss-app edge pulls tokio 1.x anyway).
 [dev-dependencies]
+tempfile = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSObject"] }

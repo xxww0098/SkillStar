@@ -10,7 +10,7 @@
 ~/.skillstar/                        # data_root()
 ├── config/                          # 纯人工编辑或明确声明的运行偏好（可跨机备份，不放锁或业务资产）
 │   ├── profiles.toml                # Agent 启用、自定义 Agent、default_deploy_mode 与 agent_deploy_modes
-│   └── ...                          # proxy.json / gh_mirror.json / translation.json / skill_updates.json 等
+│   └── ...                          # proxy.json / gh_mirror.json / translation.json / skill_updates.json / gui_prefs.json 等
 ├── data/                            # 持久业务数据与统一管理树（必须备份，不可自动清理）
 │   ├── skills/                      # Skill 统一管理根
 │   │   ├── library.json             # 统一管理清单（origin/called/baselineHash/desiredAgents/appliedTargets/localId）
@@ -21,10 +21,12 @@
 │   │   ├── favorites.json           # 仓库收藏（由 data/skills/repo-favorites.json 迁入）
 │   │   └── repo_history.json        # 最近导入仓库历史（由 state/ 迁入）
 │   ├── projects/                    # 项目部署注册表（projects.json + <name>/skills-list.json，由 state/ 迁入）
-│   └── channels/                    # 共享频道本地注册与订阅表（shared_channels.json + subscriptions.json，由 config/ 迁入）
+│   ├── channels/                    # 共享频道本地注册与订阅表（shared_channels.json + subscriptions.json，由 config/ 迁入）
+│   └── mcp/                         # 外部 MCP 服务定义、逐 Agent 应用台账（library.json）与写入前滚动备份（backups/）
 ├── secrets/                         # 凭据与含 token 的存储（0700 目录；文件 0600）
 │   ├── accounts/                    # accounts.json + records/<id>.json（D-108）
-│   └── github/auth.json             # GitHub 用户登录凭据（AES-256-GCM sealed）
+│   ├── github/auth.json             # GitHub 用户登录凭据（AES-256-GCM sealed）
+│   └── translation/api_key          # 翻译大模型手动 API Key（0600，独立于 Accounts）
 ├── cache/                           # 可重建的派生数据，一键清理安全
 │   ├── marketplace/                 # marketplace.db{,-wal,-shm} + description_cache.json
 │   ├── skill-imports/               # 按仓库+ref 隔离的 Git 稀疏导入缓存（0700）
@@ -37,7 +39,7 @@
 │   ├── skills/github_api_cooldown.json # GitHub API 限流截止时间
 │   └── app/release_check.json       # 应用版本检查最后结果（D-103）
 ├── runtime/                         # 跨进程互斥与临时协作文件；不参与备份
-│   └── locks/                       # 统一锁目录（skills/、projects/、channels/、accounts/、skill-imports/）
+│   └── locks/                       # 统一锁目录（skills/、projects/、channels/、accounts/、skill-imports/、mcp/）
 └── logs/                            # 日志，按大小/时间轮转
 ```
 
@@ -64,7 +66,9 @@
 
 约束：一条数据只有一个家；锁文件与业务记录永不进 `config/`；核心用户资产永不滞留 `state/`；新持久化位置必须先在 `ss-core::infra::paths` 增加具名函数，调用方不得自行 join 默认路径。
 
-技能描述和 SKILL.md 的译文是可重建缓存：`cache/translations/entries.json`（`translation_cache_path`）。引擎、描述和 SKILL.md 两个开关、主题、所选账户和模型 id 在 `config/translation.json`（`translation_config_path`）。两个开关默认关；关掉只是不再显示、不再新译，缓存文件还在。大模型只用账户里已有的 OpenCode Go、Ollama、Command Code 密钥，不另写一份翻译密钥，密钥也不进缓存键。没手动改过模型时，读出来会写成该服务当前的推荐模型，OpenCode Go 是 `deepseek-v4.1-flash`。手动选定后保持该 id，直到换账户。
+技能描述和 SKILL.md 的译文是可重建缓存：`cache/translations/entries.json`（`translation_cache_path`）。引擎、描述和 SKILL.md 两个开关、主题、大模型端点 `llm_base_url` 与模型 id 在 `config/translation.json`（`translation_config_path`）。两个开关默认开（新装即翻译描述与 SKILL.md）；关掉只是不再显示、不再新译，缓存文件还在。大模型翻译不从 Accounts 读取账户密钥，而在「设置 → 翻译」直接手填并保存到 `secrets/translation/api_key`（`translation_api_key_path`，Unix `0600`），旧配置遗留的 `llm_account_id` / `llm_account_catalog` 字段会在规范化时清空，密钥也不进缓存键。
+
+界面偏好（语言、背景风格、后台运行等）在 `config/gui_prefs.json`，由 `Settings` facade（`gui/native/src/facades/settings.rs`）读写：`background_style` 决定 `current` 深色 / `paper` 浅色，`background_run` 控制关闭主窗口时是否隐藏到后台继续运行（默认 `false`），`accounts_auto_refresh_ms` 是账号页的自动刷新周期（缺键即关闭）。设置页与账号页都写这份文件，两边都是「先读整张表、只替换自己的键」。
 
 导入 Git 缓存位于 `cache/skill-imports/`（`paths::skill_import_cache_dir`），进程锁位于 `runtime/locks/skill-imports/`（`paths::skill_import_locks_dir`）。清理 checkout 不删除锁文件。缓存可含私有仓库内容，Unix 目录权限为 0700。
 

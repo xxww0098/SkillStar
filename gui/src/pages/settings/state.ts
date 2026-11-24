@@ -1,7 +1,8 @@
-import { signal, type Signal } from "nsh";
+import { batch, signal, type Signal } from "nsh";
 import { setLocale, normalizeLocale } from "../../services/locale";
 import { setThemeMode } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
+import { setBackgroundRunEnabled } from "../../shell/residentWindow";
 import type { ProxyDto, ProxyScheme, SettingsBridge } from "./bridge";
 
 // 设置页状态机 — crates/ss-gpui/src/settings/mod.rs + general.rs 的读写
@@ -20,10 +21,11 @@ import type { ProxyDto, ProxyScheme, SettingsBridge } from "./bridge";
 // - 一切动态量都在 signal 里；组件体不重跑（Solid 式语义），signal 消费
 //   必须落在 JSX 响应式绑定或事件回调上。
 
-/** 全局播种钩子：语言/主题落进 shell 级 signal。测试注入 spy。 */
+/** 全局播种钩子：语言/主题/后台运行开关落进 shell 级 signal。测试注入 spy。 */
 export interface SettingsSeedHooks {
   applyLocale(language: string): void;
   applyTheme(style: string): void;
+  applyBackgroundRun?(enabled: boolean): void;
 }
 
 export const defaultSeedHooks: SettingsSeedHooks = {
@@ -35,6 +37,9 @@ export const defaultSeedHooks: SettingsSeedHooks = {
   // （prefs_style_is_light）。
   applyTheme(style) {
     setThemeMode(style === "paper" ? "paper" : "current");
+  },
+  applyBackgroundRun(enabled) {
+    setBackgroundRunEnabled(enabled);
   },
 };
 
@@ -105,16 +110,27 @@ export function activeSectionFromScroll(
   return index;
 }
 
+const DEFAULT_PROXY: ProxyDto = {
+  enabled: false,
+  proxy_type: "http",
+  host: "",
+  port: 7897,
+  username: null,
+  password: null,
+  bypass: null,
+};
+
 export function createSettingsState(
   bridge: SettingsBridge,
   seeds: SettingsSeedHooks = defaultSeedHooks,
+  opts?: { deferLoad?: boolean },
 ): SettingsState {
   const prefs = signal({
     language: "zh-CN",
     background_style: "current",
     background_run: false,
   });
-  const proxy = signal(bridge.loadProxy());
+  const proxy = signal(opts?.deferLoad ? { ...DEFAULT_PROXY } : bridge.loadProxy());
   const initialForm = {
     host: proxy().host,
     port: String(proxy().port),
@@ -153,17 +169,20 @@ export function createSettingsState(
       // 无限循环。
       const loadedPrefs = bridge.loadPrefs();
       const loadedProxy = bridge.loadProxy();
-      prefs.set(loadedPrefs);
-      proxy.set(loadedProxy);
-      proxyForm.set({
-        host: loadedProxy.host,
-        port: String(loadedProxy.port),
-        user: loadedProxy.username ?? "",
-        pass: loadedProxy.password ?? "",
-        bypass: loadedProxy.bypass ?? "",
+      batch(() => {
+        prefs.set(loadedPrefs);
+        proxy.set(loadedProxy);
+        proxyForm.set({
+          host: loadedProxy.host,
+          port: String(loadedProxy.port),
+          user: loadedProxy.username ?? "",
+          pass: loadedProxy.password ?? "",
+          bypass: loadedProxy.bypass ?? "",
+        });
       });
       seeds.applyLocale(loadedPrefs.language);
       seeds.applyTheme(loadedPrefs.background_style);
+      seeds.applyBackgroundRun?.(loadedPrefs.background_run);
     },
     setLanguage(language) {
       const next = { ...prefs(), language };
@@ -177,6 +196,7 @@ export function createSettingsState(
     },
     setBackgroundRun(enabled) {
       savePrefs({ ...prefs(), background_run: enabled });
+      seeds.applyBackgroundRun?.(enabled);
     },
     editProxyField(field, value) {
       proxyForm.set({ ...proxyForm(), [field]: value });

@@ -57,7 +57,7 @@
   - search / AI search 读的是 `marketplace_skill` 全表，没有自己的 TTL（命中可能来自榜单同步，也可能来自刚刚的单次 query seed，后者不因榜单到期而变旧），因此只适用契约中的降级部分：`leaderboard_all` 处于 degraded 期间，search 一律报 `stale` 而非 `fresh`——兜底写入的行同样会被搜出来，不允许以「已是最新」呈现。
 - AI search / 市场搜索是否要为某个关键词回远端补种，**按关键词逐个判定**，判据是该关键词自己的 `search_seed:<keyword>` 同步记录（大小写归一），并在本地 FTS 命中不足（少于 5 条）且超过 10 分钟未补种时自动从远程获取补充结果写入快照后返回（离线/无远程 fetcher 时退回纯本地结果）。
 - 默认 `all` 榜单采用同源仓库交错打散（同一 `source` 连续最多排 2 条），防止单一百技能热门仓库刷屏。
-- 市场搜索框支持直接识别 GitHub URL、`owner/repo` 或 `npx skills add ...` 安装命令字符串，展示直达跳转卡片进入导入扫描；市场卡片已安装状态同时匹配同源重命名并存的本地技能（通过 `library.json` 的 `called` 原名与 `source` 映射）。
+- 市场搜索框支持直接识别 GitHub URL、`owner/repo` 或 `npx skills add ...` 安装命令字符串，展示直达跳转卡片进入导入扫描；市场卡片已安装状态同时匹配同源重命名并存的本地技能（通过 `library.json` 的 `called` 原名与 `source` 映射）。这张映射也是卡片动作的身份：安装或卸载成功后页面就地翻被操作的那一行，不以桥返回的落盘名为准（并存改名后落盘名是 `<name>-<owner>`）；从卡片卸载按行的 `source` + 原名解析落盘目录（`ss_marketplace::snapshot::installed_folder_for`，与已安装判定共用同一张索引），不会卸掉占用原名的另一条技能。
 - 界面因此会在降级数据上显示 stale 标签并触发一次后台自动刷新；用户看到的是「这份数据不完整、正在重取」，而不是一个静默的残缺榜单。
 - 降级写入本身仍是成功路径（数据可用），不把 scope 记成失败态（`degraded_reason` 非空、`last_error` 保持 NULL）。但 `last_success_at` 与 `last_error` 同时非空是**正常可达状态**（任何一次成功之后的刷新失败都会产生它，包括拒绝降级载荷时）：`last_success_at` 回答「数据何时落地」，`last_error` 回答「最近一次刷新为何失败」，「数据可不可信」只由 `degraded_reason` 回答。诊断消费方不得用 `last_error.is_some()` 推断「没有数据」。
 
@@ -85,12 +85,13 @@
 
 - GitHub repo import 分为 scan 和 install 两阶段，扫描本身不改变安装状态。
 - Marketplace 只返回可安装描述；repo cache、root-first discovery 和实际 install 属于 Skills 域。
-- Marketplace 卡片安装直接调用 Skills 域的 `install_skill`，进行中只标记忙碌，不订阅 `skillstar://git-progress`。分阶段文案只在导入对话框的 progress sink 里。
+- Marketplace 卡片安装直接调用 Skills 域的 `install_skill`，进行中标记该卡忙碌，不订阅 `skillstar://git-progress`。忙碌按技能名各记一笔，不是整页一个：多个技能可以同时在装，一个结束只放开它自己，其余照旧在飞；在飞的技能不再接受第二次安装或卸载，卡片和详情列读同一份记录。按钮上的阶段句和能否升到任务卡片见[界面约定的等待](../frontend/README.md#等待)。导入对话框仍用自己的 progress sink。
 - Publisher 与 curated source 的完整清单以 seed/registry 代码和测试为准，文档不复制数量或排序。
 
 ## 界面
 
 - Marketplace 只做技能发现：总排行 / 趋势 / 热门 / 官方技能发布者。
+- 顶栏搜索框与技能页是同一个原语 `BarSearchInput`（`gui/src/pages/marketplace/search.tsx`）：190 宽、32 高、放大镜 + 占位词，有词时才出现清除 X；没有浮层、没有键帽触发器，不再有「点开才能输入」的第二步。键入经 200ms 防抖落到读侧的本地优先搜索（直接来源识别见上），清除 X 回到当前 tab 的全量列表并回顶；⌘F 只把焦点交给这条输入框，且只在市场页是当前页时生效。
 - 技能 Publisher drill-down 复用主市场的 grid/list 和 toolbar 交互，不创建第二套 fetch 逻辑。
 - 官方发布者列表和发布者详情的仓库列表是分类浏览，不是技能卡：两处展示紧凑行（发布者：GitHub 头像、名称、仓库数与技能数；仓库：`owner/repo`、技能数、安装数），不套 160px 技能卡外框。发布者头像是 GitHub 组织头像 `github.com/<name>.png?size=120`，与技能卡头像共用 `chrome/repoAvatar.tsx` + `native/src/repo_avatars.rs` 缓存，未取到时渲染回退图标；发布者列表行和详情页顶部横幅用同一枚。
 - 市场技能卡（榜单和发布者详情里的同一张卡）左上角是来源仓库的 GitHub 头像，不是另一套图标。owner 由 `owner/repo` 解析，复用 `chrome/repoAvatar.tsx` 缓存 `github.com/<owner>.png`。

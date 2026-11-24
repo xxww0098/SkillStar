@@ -1,6 +1,6 @@
 // 「关于」状态机、桥接与 DTO — 从 ./about.tsx 拆出（保持单文件 < 800 行）。
 
-import { Clipboard, signal, type Signal } from "nsh";
+import { Clipboard, batch, signal, type Signal } from "nsh";
 import { SettingsStorage } from "skillstar-gui/native";
 
 // ---- DTO（about_snapshot / run_release_check 的 wire 形状） ------------------
@@ -40,7 +40,7 @@ export interface AboutSnapshotDto {
 
 export interface AboutBridge {
   /** about.rs 构造函数对位：环境快照一次读。 */
-  aboutSnapshot(): AboutSnapshotDto;
+  aboutSnapshot(): Promise<AboutSnapshotDto>;
   /** run_release_check：真网；resolve 新记录（域侧已持久化）。 */
   runReleaseCheck(): Promise<ReleaseRecordDto>;
   /** os_open::open_folder 对位：文件管理器中显示（失败静默）。 */
@@ -104,8 +104,8 @@ function asSnapshot(value: unknown): AboutSnapshotDto {
 
 /** 真桥：SettingsStorage facade 直调（页面默认使用）。 */
 export const realAboutBridge: AboutBridge = {
-  aboutSnapshot() {
-    return asSnapshot(SettingsStorage.aboutSnapshot());
+  async aboutSnapshot() {
+    return asSnapshot(await SettingsStorage.aboutSnapshot());
   },
   async runReleaseCheck() {
     return asSnapshot({ release_check: await SettingsStorage.runReleaseCheck() }).release_check!;
@@ -150,7 +150,7 @@ export interface AboutState {
   releaseChecking: Signal<boolean>;
   /** 复制钮的 check 态（command_row 的 copied；再点别处换 id，无超时）。 */
   copied: Signal<string | null>;
-  start(): void;
+  start(): Promise<void>;
   runReleaseCheck(): void;
   copyCommand(id: string, text: string): void;
   openDataRoot(): void;
@@ -161,17 +161,22 @@ export function createAboutState(bridge: AboutBridge): AboutState {
   const releaseCheck = signal<ReleaseRecordDto | null>(null);
   const releaseChecking = signal(false);
   const copied = signal<string | null>(null);
+  let startSeq = 0;
 
   return {
     snapshot,
     releaseCheck,
     releaseChecking,
     copied,
-    start() {
+    async start() {
       // 读盘先进局部变量再落 signal：effect 追踪面必须为空。
-      const loaded = bridge.aboutSnapshot();
-      snapshot.set(loaded);
-      releaseCheck.set(loaded.release_check);
+      const seq = ++startSeq;
+      const loaded = await bridge.aboutSnapshot();
+      if (seq !== startSeq) return;
+      batch(() => {
+        snapshot.set(loaded);
+        releaseCheck.set(loaded.release_check);
+      });
     },
     runReleaseCheck() {
       if (releaseChecking()) return;
@@ -179,8 +184,10 @@ export function createAboutState(bridge: AboutBridge): AboutState {
       void bridge
         .runReleaseCheck()
         .then((record) => {
-          releaseChecking.set(false);
-          releaseCheck.set(record);
+          batch(() => {
+            releaseChecking.set(false);
+            releaseCheck.set(record);
+          });
         })
         .catch(() => {
           // run_check 的失败也是 failed outcome 记录（域侧）；桥层异常仅

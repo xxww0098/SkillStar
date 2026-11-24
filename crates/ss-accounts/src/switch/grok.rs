@@ -342,6 +342,22 @@ fn read_entry(path: &Path) -> AccountResult<Option<StoredEntry>> {
         (stored, jwt) => stored.or(jwt),
     };
     let email = text_field(entry, "email").or_else(|| crate::identity::jwt_email(&access_token));
+    let first_name = text_field(entry, "first_name");
+    let last_name = text_field(entry, "last_name");
+    // Switching may have synthesised a first name from the email prefix.
+    let display_name = match (first_name, last_name) {
+        (Some(first), Some(last)) => Some(format!("{first} {last}")),
+        (Some(first), None)
+            if !email
+                .as_deref()
+                .and_then(|email| email.split_once('@'))
+                .is_some_and(|(prefix, _)| first.eq_ignore_ascii_case(prefix)) =>
+        {
+            Some(first)
+        }
+        (None, Some(last)) => Some(last),
+        _ => None,
+    };
     let subject = ["user_id", "principal_id", "sub"]
         .into_iter()
         .find_map(|field| text_field(entry, field))
@@ -355,7 +371,7 @@ fn read_entry(path: &Path) -> AccountResult<Option<StoredEntry>> {
             token_type: "Bearer".to_string(),
         },
         identity: Identity {
-            display_name: email.clone(),
+            display_name,
             email,
             plan: None,
             account_id: subject,

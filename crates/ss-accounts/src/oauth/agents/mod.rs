@@ -12,8 +12,6 @@ pub(crate) mod antigravity_config;
 pub(crate) mod claude_code;
 pub(crate) mod codex;
 pub(crate) mod cursor;
-pub(crate) mod gemini_cli;
-pub(crate) mod gemini_cli_config;
 pub(crate) mod grok;
 pub(crate) mod kiro;
 pub(crate) mod zcode;

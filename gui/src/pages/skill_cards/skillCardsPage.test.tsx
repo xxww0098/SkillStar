@@ -8,8 +8,10 @@ import { expect, open, test } from "nsh/test";
 import { WINDOW_H, WINDOW_W } from "../../layout";
 import { SkillCards } from "skillstar-gui/native";
 import {
+  deckAgentLinkState,
   linkReportNotice,
   matchesDeckQuery,
+  nextEnableForAgentState,
   parseDeck,
   parseLinkReport,
   parseSnapshot,
@@ -259,4 +261,26 @@ test("the import entry opens the import slice's dialog", async () => {
   await app.press("id:deck-import-btn");
   // The deck-import slice owns the dialog; this page only opens it.
   await app.waitUntil(() => app.shows("id:deck-import-card"));
+});
+
+test("deckAgentLinkState computes mixed from member links and completes on next click", () => {
+  const claude = { id: "claude", displayName: "Claude Code" };
+  const codex = { id: "codex", displayName: "Codex" };
+  const cursor = { id: "cursor", displayName: "Cursor" };
+  const deck = parseDeck({
+    id: "d1",
+    name: "Mixed Deck",
+    skills: ["a", "b"],
+    agentLinks: ["Claude Code", "codex"],
+    memberAgentLinks: {
+      a: ["Claude Code", "codex", "cursor"],
+      b: ["codex", "cursor"],
+    },
+  });
+  expect(deckAgentLinkState(deck, claude)).toBe("mixed");
+  expect(deckAgentLinkState(deck, codex)).toBe("linked");
+  expect(deckAgentLinkState(deck, cursor)).toBe("none");
+  expect(nextEnableForAgentState("mixed")).toBe(true);
+  expect(nextEnableForAgentState("none")).toBe(true);
+  expect(nextEnableForAgentState("linked")).toBe(false);
 });

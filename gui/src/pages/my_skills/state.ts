@@ -13,12 +13,24 @@
 // 选择条本体（selection_bar.rs）是并行切片，经 selectionBarSlot 挂点
 // 渲染；详情抽屉经 detailDrawerSlot；SKILL.md 阅读器经 skillReaderSlot。
 
-import { computed, signal, effect } from "nsh";
+import { computed, effect, signal, untracked } from "nsh";
 import { MySkills } from "skillstar-gui/native";
-import { publishToast, toast } from "../../shell/events";
-import { agentsChanged, groupsChanged, translationPrefsChanged } from "../../shell/events";
+import {
+  agentsChanged,
+  groupsChanged,
+  publishToast,
+  requestChannelsScope,
+  selectPage,
+  toast,
+  translationPrefsChanged,
+} from "../../shell/events";
+import { currentPage } from "../../shell/nav";
+import { SLOW_MS } from "../../chrome/delayedFlag";
 import { openUninstallConfirm, uninstallTitleCount } from "../../chrome/dialog";
+import { beginSave, failSave, finishSave, saveMark } from "../../chrome/saveStatus";
+import { endJob, putJob } from "../../shell/jobBoard";
 import { t, tf } from "../../services/translation";
+import { rt } from "./readerStrings";
 import {
   type AgentProfileRecord,
   type SkillRecord,
@@ -61,7 +73,11 @@ function parseSkill(raw: unknown): SkillRecord {
                 kind: "identity_changed",
                 upstreamName: typeof change.upstreamName === "string" ? change.upstreamName : "",
               }
-            : { kind: "local_changes" },
+            : {
+                kind: "local_changes",
+                baselineMissing:
+                  typeof change.baselineMissing === "boolean" ? change.baselineMissing : undefined,
+              },
     lastUpdated: typeof rec.lastUpdated === "string" ? rec.lastUpdated : "",
     gitUrl: typeof rec.gitUrl === "string" ? rec.gitUrl : "",
     author: typeof rec.author === "string" ? rec.author : undefined,
@@ -109,6 +125,15 @@ export function setViewList(list: boolean): void {
   viewList.set(list);
 }
 
+/** 切到共享频道 / 切回本地工作台；切回本地且存在脏标记时立即补刷。 */
+export function setScope(next: MySkillsScope): void {
+  scope.set(next);
+  if (next === "local" && refreshDirty && untracked(pageActive)) {
+    refreshDirty = false;
+    void refresh();
+  }
+}
+
 export const searchQuery = signal("");
 export const loading = signal(true);
 export const error = signal<string | null>(null);
@@ -130,6 +155,8 @@ export const linkMenuOpen = signal(false);
 export const busy = signal<string | null>(null);
 export const updatingBatch = signal<ReadonlySet<string>>(new Set());
 export const checkingUpdates = signal(false);
+/** 只有手动「刷新并检查」为真。后台检查不转工具栏图标。 */
+export const manualChecking = signal(false);
 /** Start of the last upstream check; throttles the background check
  * (updates.rs last_update_check)。 */
 let lastUpdateCheckAt: number | null = null;
@@ -141,47 +168,182 @@ export const github = signal<{ state: string; login: string | null } | null>(nul
  * 选择条的翻译动作与抽屉的语言按钮共用，Settings 开关从不写）。 */
 export const descriptionChoices = signal<Record<string, boolean>>({});
 
-// ---- 派生缓存（computed 仅在依赖 signal 变化时重算） -------------------------
+// ---- 派生缓存（computed 仅在依赖 signal 变化且页面活跃时重算） ----------------
 
-export function queryState() {
+export function pageActive(): boolean {
+  return currentPage() === "my_skills";
+}
+
+function sameElements<T>(prev: readonly T[], next: readonly T[]): boolean {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
+}
+
+function gated<T>(
+  read: () => T,
+  fallback: T,
+  equals?: (prev: T, next: T) => boolean,
+) {
+  return computed<T>(
+    (prev) => (!pageActive() ? (prev !== undefined ? prev : fallback) : read()),
+    equals ? { equals } : undefined,
+  );
+}
+
+function stringArraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function upstreamChangeEqual(
+  a: SkillRecord["upstreamChange"],
+  b: SkillRecord["upstreamChange"],
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || a.kind !== b.kind) return false;
+  if (a.kind === "identity_changed" && b.kind === "identity_changed") {
+    return a.upstreamName === b.upstreamName;
+  }
+  if (a.kind === "local_changes" && b.kind === "local_changes") {
+    return a.baselineMissing === b.baselineMissing;
+  }
+  return true;
+}
+
+function skillRecordEqual(a: SkillRecord, b: SkillRecord): boolean {
+  return (
+    a === b ||
+    (a.name === b.name &&
+      a.description === b.description &&
+      a.localizedDescription === b.localizedDescription &&
+      a.skillType === b.skillType &&
+      a.stars === b.stars &&
+      a.installed === b.installed &&
+      a.updateAvailable === b.updateAvailable &&
+      upstreamChangeEqual(a.upstreamChange, b.upstreamChange) &&
+      a.lastUpdated === b.lastUpdated &&
+      a.gitUrl === b.gitUrl &&
+      a.author === b.author &&
+      a.rank === b.rank &&
+      a.source === b.source &&
+      a.called === b.called &&
+      stringArraysEqual(a.agentLinks, b.agentLinks))
+  );
+}
+
+function mergeSkills(prev: readonly SkillRecord[], next: SkillRecord[]): SkillRecord[] {
+  if (prev.length === 0) return next;
+  const byName = new Map<string, SkillRecord>();
+  for (const item of prev) byName.set(item.name, item);
+  return next.map((item) => {
+    const existing = byName.get(item.name);
+    return existing !== undefined && skillRecordEqual(existing, item) ? existing : item;
+  });
+}
+
+function mergeProfiles(
+  prev: readonly AgentProfileRecord[],
+  next: AgentProfileRecord[],
+): AgentProfileRecord[] {
+  if (prev.length === 0) return next;
+  const byId = new Map<string, AgentProfileRecord>();
+  for (const item of prev) byId.set(item.id, item);
+  return next.map((item) => {
+    const existing = byId.get(item.id);
+    return existing !== undefined &&
+      existing.displayName === item.displayName &&
+      existing.icon === item.icon &&
+      existing.enabled === item.enabled &&
+      existing.targetable === item.targetable
+      ? existing
+      : item;
+  });
+}
+
+function setsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
+
+function choicesEqual(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  if (a === b) return true;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function scopedQueryState() {
   return {
     query: searchQuery(),
     sourceFilter: sourceFilter(),
     repoFilter: repoFilter(),
     agentFilterId: agentFilter(),
+  };
+}
+
+export function queryState() {
+  return {
+    ...scopedQueryState(),
     onlyUpdates: onlyUpdates(),
     sortBy: sortBy(),
   };
 }
 
-const filteredMemo = computed<SkillRecord[]>(() =>
-  filteredSkills(skills(), profiles(), queryState()),
+const filteredMemo = gated<SkillRecord[]>(
+  () => filteredSkills(skills(), profiles(), queryState()),
+  [],
+  sameElements,
 );
 
-const scopedMemo = computed<SkillRecord[]>(() =>
-  scopedSkills(skills(), profiles(), queryState()),
+const scopedMemo = gated<SkillRecord[]>(
+  () => scopedSkills(skills(), profiles(), scopedQueryState()),
+  [],
+  sameElements,
 );
 
-const attentionCountMemo = computed<number>(
+const attentionCountMemo = gated<number>(
   () => skills().filter(needsAttention).length,
+  0,
 );
 
-const pendingUpdateMemo = computed<number>(
+const pendingUpdateMemo = gated<number>(
   () => skills().filter((skill) => skill.updateAvailable).length,
+  0,
 );
 
-const localCountMemo = computed<number>(
+const localCountMemo = gated<number>(
   () => skills().filter((skill) => skill.skillType === "local").length,
+  0,
 );
 
-const reposMemo = computed<string[]>(() => repoSources(skills()));
+const reposMemo = gated<string[]>(() => repoSources(skills()), [], sameElements);
 
-export const targetableProfiles = computed<AgentProfileRecord[]>(() =>
-  profiles().filter((profile) => profile.enabled && profile.targetable),
+export const targetableProfiles = gated<AgentProfileRecord[]>(
+  () => profiles().filter((profile) => profile.enabled && profile.targetable),
+  [],
+  sameElements,
 );
 
-export const enabledProfiles = computed<AgentProfileRecord[]>(() =>
-  profiles().filter((profile) => profile.enabled),
+export const enabledProfiles = gated<AgentProfileRecord[]>(
+  () => profiles().filter((profile) => profile.enabled),
+  [],
+  sameElements,
 );
 
 export function currentFiltered(): SkillRecord[] {
@@ -211,46 +373,69 @@ export function currentRepos(): string[] {
 // ---- 装载与刷新 ------------------------------------------------------------
 
 let loadEpoch = 0;
+let snapshotLoader: () => Promise<unknown> = () => MySkills.snapshot();
+
+/** 测试注入位：替换快照读取，避免无头单测读写真实 $HOME。 */
+export function setSnapshotLoaderForTest(loader?: () => Promise<unknown>): void {
+  snapshotLoader = loader ?? (() => MySkills.snapshot());
+}
 
 /** refresh (mod.rs refresh_from)：skills + profiles + favorites 一次换齐。
  * 收藏点击先于本装载落地时（favoritesEpoch 变化）保留点击结果。 */
 export async function refresh(): Promise<void> {
   const epoch = ++loadEpoch;
   try {
-    const snapshot = (await MySkills.snapshot()) as {
+    const snapshot = (await snapshotLoader()) as {
       skills: unknown[];
       agents: unknown;
       favorites: string[];
       favoritesLocked: boolean;
+      descriptionChoices?: Record<string, boolean>;
     };
     if (epoch !== loadEpoch) return;
     const loadedSkills = (snapshot.skills as unknown[]).map(parseSkill);
-    // A Settings toggle may have landed while this listing was in flight:
-    // keep the newer snapshot (mod.rs profiles_epoch discipline) — the nsh
-    // side receives profile reloads through the agentsChanged channel, whose
-    // own refresh supersedes this one by epoch.
-    skills.set(loadedSkills);
-    profiles.set(parseAgents(snapshot.agents));
+    const mergedSkills = mergeSkills(untracked(skills), loadedSkills);
+    if (!sameElements(untracked(skills), mergedSkills)) {
+      skills.set(mergedSkills);
+    }
+    const mergedProfiles = mergeProfiles(untracked(profiles), parseAgents(snapshot.agents));
+    if (!sameElements(untracked(profiles), mergedProfiles)) {
+      profiles.set(mergedProfiles);
+    }
     const clicked = favoritesEpoch !== 0;
     if (snapshot.favoritesLocked === true) {
       favoritesLocked.set(true);
-      if (!clicked) favoriteRepos.set(new Set());
+      if (!clicked && untracked(favoriteRepos).size > 0) favoriteRepos.set(new Set());
     } else {
       favoritesLocked.set(false);
-      if (!clicked) favoriteRepos.set(new Set(snapshot.favorites as string[]));
+      if (!clicked) {
+        const nextFavs = new Set(snapshot.favorites as string[]);
+        if (!setsEqual(untracked(favoriteRepos), nextFavs)) {
+          favoriteRepos.set(nextFavs);
+        }
+      }
     }
     error.set(null);
     loading.set(false);
     // 名字消失的技能不得留在选中态（mod.rs 侧选择保留语义：保留仍存在
     // 的选择；卸载路径在自身动作里清理）。
-    retainExisting(loadedSkills);
-    try {
-      const choices = (await MySkills.descriptionChoices()) as { choices?: Record<string, boolean> };
-      if (epoch === loadEpoch) {
-        descriptionChoices.set(choices.choices ?? {});
+    retainExisting(mergedSkills);
+    if (snapshot.descriptionChoices !== undefined) {
+      if (!choicesEqual(untracked(descriptionChoices), snapshot.descriptionChoices)) {
+        descriptionChoices.set(snapshot.descriptionChoices);
       }
-    } catch {
-      // 读取失败保持现状：卡面按 localizedDescription 兜底。
+    } else {
+      try {
+        const choices = (await MySkills.descriptionChoices()) as { choices?: Record<string, boolean> };
+        if (epoch === loadEpoch) {
+          const nextChoices = choices.choices ?? {};
+          if (!choicesEqual(untracked(descriptionChoices), nextChoices)) {
+            descriptionChoices.set(nextChoices);
+          }
+        }
+      } catch {
+        // 读取失败保持现状：卡面按 localizedDescription 兜底。
+      }
     }
     maybeCheckUpdates();
   } catch (err) {
@@ -283,6 +468,7 @@ function maybeCheckUpdates(): void {
 export async function checkUpdates(manual: boolean): Promise<void> {
   if (checkingUpdates()) return;
   checkingUpdates.set(true);
+  if (manual) manualChecking.set(true);
   lastUpdateCheckAt = Date.now();
   try {
     const result = (await MySkills.checkUpdates()) as { pending: number };
@@ -302,14 +488,17 @@ export async function checkUpdates(manual: boolean): Promise<void> {
     // 静默后台检查失败只留 debug（updates.rs 同款）。
   } finally {
     checkingUpdates.set(false);
-    await refresh();
+    try {
+      await refresh();
+    } finally {
+      if (manual) manualChecking.set(false);
+    }
   }
 }
 
-/** 工具栏刷新：手动检查 → toast → 重载（toolbar.rs bar_refresh_button）。 */
+/** 工具栏刷新：只手动检查转图标，列表留在原地（不亮骨架）。 */
 export function refreshAndCheck(): void {
   if (checkingUpdates() || loading()) return;
-  loading.set(true);
   void checkUpdates(true);
 }
 
@@ -336,8 +525,13 @@ export function updateSkill(name: string): void {
 
 async function runBatchUpdate(names: string[], token: string): Promise<void> {
   if (!canArmBatch(names, busy())) return;
+  const batch = token === "update_all" || token === "batch_update";
+  const single = !batch && names.length === 1 ? names[0] : null;
   updatingBatch.set(new Set(names));
   busy.set(token);
+  // 一批一次 updateSkills，没有逐条进度，也不编完成数。
+  // 更新只在原地转图标（工具栏的更新全部、选择条、卡面上的更新图标），
+  // 不出右上角任务卡片：结果由这一次请求的 toast 说明。
   try {
     const report = (await MySkills.updateSkills(names)) as unknown as UpdateReport;
     const notice = reportNotification(report, { t, tf });
@@ -347,10 +541,21 @@ async function runBatchUpdate(names: string[], token: string): Promise<void> {
         message: notice.message,
         replaceKey: "skill-update",
         pinned: notice.pinned || undefined,
+        action: notice.actionLabelKey
+          ? { label: rt(notice.actionLabelKey), run: () => selectPage.publish("projects") }
+          : undefined,
       });
     }
+    if (single) {
+      const failed = (report.failed ?? []).find((row) => row.name === single);
+      const mark = `update:${single}`;
+      if (failed) failSave(mark, failed.error, () => updateSkill(single));
+      else if (saveMark(mark)) finishSave(mark);
+    }
   } catch (err) {
-    toast(`${t("mySkills.updateFailed")}: ${String(err)}`, "error");
+    const reason = `${t("mySkills.updateFailed")}: ${String(err)}`;
+    if (single) failSave(`update:${single}`, reason, () => updateSkill(single));
+    toast(reason, "error");
   } finally {
     busy.set(null);
     updatingBatch.set(new Set());
@@ -362,11 +567,13 @@ async function runBatchUpdate(names: string[], token: string): Promise<void> {
 
 export async function toggleFavoriteRepo(source: string): Promise<void> {
   if (favoritesLocked() || source.length === 0) return;
+  const id = `fav:${source}`;
   const previous = favoriteRepos();
   const next = new Set(previous);
   if (!next.delete(source)) next.add(source);
   favoritesEpoch += 1;
   favoriteRepos.set(next);
+  beginSave(id);
   try {
     const result = (await MySkills.toggleFavoriteRepo(source)) as {
       favorites: string[];
@@ -377,13 +584,18 @@ export async function toggleFavoriteRepo(source: string): Promise<void> {
       favoritesLocked.set(true);
       favoriteRepos.set(new Set(result.favorites as string[]));
       toast(t("toolbar.favoriteSourceLocked"), "error");
+      failSave(id, t("toolbar.favoriteSourceLocked"));
       return;
     }
     favoriteRepos.set(new Set(result.favorites as string[]));
+    finishSave(id);
   } catch {
     favoritesEpoch += 1;
     favoriteRepos.set(previous);
     toast(t("toolbar.favoriteSourceFailed"), "error");
+    failSave(id, t("toolbar.favoriteSourceFailed"), () => {
+      void toggleFavoriteRepo(source);
+    });
   }
 }
 
@@ -400,13 +612,24 @@ export async function reinstallRepoSource(source: string): Promise<void> {
     return;
   }
   reinstallingRepo.set(source);
+  const jobId = `reinstall:${source}`;
+  const slowTimer = setTimeout(() => {
+    putJob({ id: jobId, title: tf("wait.reinstalling", { source }) });
+  }, SLOW_MS);
   try {
     const result = (await MySkills.reinstallRepoSource(donor.gitUrl)) as number;
     const count = typeof result === "number" ? result : 0;
     toast(tf("mySkills.reinstallRepoSuccess", { count }), "success");
+    if (saveMark(jobId)) finishSave(jobId);
   } catch (err) {
-    toast(`${tf("mySkills.reinstallRepoFailed", { source })}\n${String(err)}`, "error");
+    const reason = `${tf("mySkills.reinstallRepoFailed", { source })}\n${String(err)}`;
+    toast(reason, "error");
+    failSave(jobId, reason, () => {
+      void reinstallRepoSource(source);
+    });
   } finally {
+    clearTimeout(slowTimer);
+    endJob(jobId);
     reinstallingRepo.set(null);
     await refresh();
   }
@@ -425,13 +648,7 @@ export function uninstallRepoSource(source: string): void {
 }
 
 async function runRepoUninstall(source: string, names: string[]): Promise<void> {
-  // repo_source.rs：先清选择/抽屉（这些名字即将消失），busy 带来源 token。
-  const batch = selectedBatch();
-  const kept = new Set([...batch].filter((name) => !names.includes(name)));
-  selectedBatch.set(kept);
-  if (selectedSkill() !== null && names.includes(selectedSkill() as string)) {
-    selectedSkill.set(null);
-  }
+  // 确认后才卸。名单留到 refresh，不在请求前从列表或选择里抠掉。
   busy.set(`repo-remove:${source}`);
   try {
     await MySkills.uninstallRepoSkills(names);
@@ -473,14 +690,49 @@ export function clearFilters(): void {
 
 // ---- keep-alive 频道 ---------------------------------------------------------
 
-// 首挂载装载一次（页面实体构造即 refresh）。
-effect(() => {
+let initialLoaded = false;
+let refreshDirty = false;
+
+export function isRefreshDirtyForTest(): boolean {
+  return refreshDirty;
+}
+
+export function scheduleRefresh(): void {
+  if (!untracked(pageActive) || untracked(scope) !== "local") {
+    refreshDirty = true;
+    return;
+  }
+  refreshDirty = false;
   void refresh();
-  void readGithubStatus();
+}
+
+// 首挂载装载一次；切回本页或切回本地 scope 时若后台有失效信号则补刷一次。
+effect(() => {
+  if (!pageActive()) return;
+  const activeScope = scope();
+  if (!initialLoaded) {
+    initialLoaded = true;
+    refreshDirty = false;
+    untracked(() => {
+      void refresh();
+      void readGithubStatus();
+    });
+    return;
+  }
+  if (refreshDirty && activeScope === "local") {
+    refreshDirty = false;
+    untracked(() => void refresh());
+  }
 });
-effect(() => agentsChanged.subscribe(() => void refresh()));
-effect(() => groupsChanged.subscribe(() => void refresh()));
-effect(() => translationPrefsChanged.subscribe(() => void refresh()));
+effect(() => agentsChanged.subscribe(scheduleRefresh));
+effect(() => groupsChanged.subscribe(scheduleRefresh));
+effect(() => translationPrefsChanged.subscribe(scheduleRefresh));
+effect(() =>
+  requestChannelsScope.subscribe(() => {
+    setScope("channels");
+    if (untracked(github) === null) void readGithubStatus();
+  }),
+);
 
 /** GitHub 会话：失败/未读到保持 Unknown（mod.rs 侧 None 分支）。 */
 async function readGithubStatus(): Promise<void> {

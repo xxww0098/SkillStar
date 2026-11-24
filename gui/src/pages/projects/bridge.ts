@@ -46,6 +46,35 @@ export type CopyStateTag =
 
 export type DeployMode = "symlink" | "copy";
 
+export type PlanAction = "create" | "already";
+export type PlanApprovalSource = "skillstar" | "elicitation";
+
+export interface PendingPlanOperation {
+  name: string;
+  action: PlanAction;
+  skillPath: string;
+}
+
+export interface PendingProjectSkillPlan {
+  planId: string;
+  planHash: string;
+  canonicalRoot: string;
+  isRegistered: boolean;
+  owner: string;
+  affectedAgents: string[];
+  operations: PendingPlanOperation[];
+  expiresAt: string;
+  approved: boolean;
+  approvalSource: PlanApprovalSource | null;
+}
+
+export interface ProjectPlanApprovalRecord {
+  planId: string;
+  planHash: string;
+  source: PlanApprovalSource;
+  recordedAt: string;
+}
+
 /** mod.rs refresh 载荷：注册表 + agent 名册 + Hub 技能名。 */
 export interface RegistrySnapshot {
   projects: ProjectEntry[];
@@ -65,6 +94,8 @@ export interface CopyStatusSnapshot {
 export interface ProjectsBridge {
   /** mod.rs refresh → list_projects + list_profiles + installed_names。 */
   registry(): Promise<RegistrySnapshot>;
+  /** 仅重读 agent 名册（设置页切换启用集时避免重读项目清单与 Hub 技能）。 */
+  profiles?(): Promise<AgentProfileRecord[]>;
   /** mod.rs set_active_project → load_skills_list（缺失降级为空表）。 */
   skillsList(project: string): Promise<{
     agents: Record<string, string[]>;
@@ -88,6 +119,12 @@ export interface ProjectsBridge {
   updatePath(name: string, path: string): Promise<null>;
   /** dialogs.rs open_remove → remove_project。 */
   remove(name: string): Promise<null>;
+  /** dialogs.rs 路径弹窗「选择目录」按钮 → Projects.pick_folder。 */
+  pickFolder?(prompt: string): Promise<string | null>;
+  /** 检验项目根目录是否存在未过期且未应用的 MCP 计划。 */
+  pendingProjectSkillPlan?(projectRoot: string): Promise<PendingProjectSkillPlan | null>;
+  /** 仅写入 SkillStar 桌面批准（不部署、不修改项目文件）。 */
+  approveProjectSkillPlan?(planId: string, planHash: string): Promise<ProjectPlanApprovalRecord>;
 }
 
 // ---- JSON 收窄（桥 crate 的事实源） ------------------------------------------
@@ -140,27 +177,34 @@ function asCopyRecord(value: unknown): CopyRecord {
   };
 }
 
+function asProfiles(raw: unknown): AgentProfileRecord[] {
+  return Array.isArray(raw)
+    ? raw.map((entry) => {
+        const rec = (entry ?? {}) as Record<string, unknown>;
+        return {
+          id: asString(rec.id),
+          displayName: asString(rec.displayName),
+          icon: typeof rec.icon === "string" ? rec.icon : undefined,
+          projectSkillsRel: asString(rec.projectSkillsRel),
+          hasProjectSkills: rec.hasProjectSkills === true,
+          enabled: rec.enabled === true,
+        };
+      })
+    : [];
+}
+
 /** 真桥：native facade 直调（页面默认使用）。 */
 export const realProjectsBridge: ProjectsBridge = {
   async registry(): Promise<RegistrySnapshot> {
     const raw = (await Projects.registry()) as Record<string, unknown>;
     return {
       projects: Array.isArray(raw.projects) ? raw.projects.map(asEntry) : [],
-      profiles: Array.isArray(raw.profiles)
-        ? raw.profiles.map((entry) => {
-            const rec = (entry ?? {}) as Record<string, unknown>;
-            return {
-              id: asString(rec.id),
-              displayName: asString(rec.displayName),
-              icon: typeof rec.icon === "string" ? rec.icon : undefined,
-              projectSkillsRel: asString(rec.projectSkillsRel),
-              hasProjectSkills: rec.hasProjectSkills === true,
-              enabled: rec.enabled === true,
-            };
-          })
-        : [],
+      profiles: asProfiles(raw.profiles),
       hubSkills: asStringArray(raw.hubSkills),
     };
+  },
+  async profiles(): Promise<AgentProfileRecord[]> {
+    return asProfiles(await Projects.profiles());
   },
   async skillsList(project) {
     const raw = (await Projects.skillsList(project)) as Record<string, unknown>;
@@ -202,4 +246,55 @@ export const realProjectsBridge: ProjectsBridge = {
     await Projects.remove(name);
     return null;
   },
+  async pickFolder(prompt) {
+    const picked = await Projects.pickFolder(prompt);
+    return typeof picked === "string" && picked.length > 0 ? picked : null;
+  },
+  async pendingProjectSkillPlan(projectRoot) {
+    const raw = await Projects.pendingProjectSkillPlan(projectRoot);
+    return asPendingPlan(raw);
+  },
+  async approveProjectSkillPlan(planId, planHash) {
+    const raw = (await Projects.approveProjectSkillPlan(planId, planHash)) as Record<
+      string,
+      unknown
+    >;
+    return {
+      planId: asString(raw.planId),
+      planHash: asString(raw.planHash),
+      source: raw.source === "elicitation" ? "elicitation" : "skillstar",
+      recordedAt: asString(raw.recordedAt),
+    };
+  },
 };
+
+function asPendingPlan(value: unknown): PendingProjectSkillPlan | null {
+  if (value === null || value === undefined || typeof value !== "object") return null;
+  const rec = value as Record<string, unknown>;
+  const planId = asString(rec.planId);
+  if (planId === "") return null;
+  const opsRaw = Array.isArray(rec.operations) ? rec.operations : [];
+  const operations: PendingPlanOperation[] = opsRaw.map((item) => {
+    const op = (item ?? {}) as Record<string, unknown>;
+    return {
+      name: asString(op.name),
+      action: op.action === "already" ? "already" : "create",
+      skillPath: asString(op.skillPath),
+    };
+  });
+  return {
+    planId,
+    planHash: asString(rec.planHash),
+    canonicalRoot: asString(rec.canonicalRoot),
+    isRegistered: rec.isRegistered === true,
+    owner: asString(rec.owner),
+    affectedAgents: asStringArray(rec.affectedAgents),
+    operations,
+    expiresAt: asString(rec.expiresAt),
+    approved: rec.approved === true,
+    approvalSource:
+      rec.approvalSource === "elicitation" || rec.approvalSource === "skillstar"
+        ? rec.approvalSource
+        : null,
+  };
+}

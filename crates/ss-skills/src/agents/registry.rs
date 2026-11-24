@@ -1,7 +1,9 @@
 //! The agent registry: the runtime `AgentProfile` and the engine that produces
 //! the enriched profile list from specs + persisted prefs.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -117,30 +119,117 @@ impl AgentRegistry {
     /// New profiles default to inactive. The frozen `installed` IPC field mirrors
     /// `enabled` for compatibility and never probes the host system.
     pub(crate) fn into_profiles(self) -> Vec<AgentProfile> {
+        self.into_profiles_inner(true)
+    }
+
+    /// Produce profiles without scanning each Agent's global skills directory
+    /// for `synced_count` (`synced_count` stays `0`).
+    pub(crate) fn into_profile_specs(self) -> Vec<AgentProfile> {
+        self.into_profiles_inner(false)
+    }
+
+    fn into_profiles_inner(self, count_entries: bool) -> Vec<AgentProfile> {
         let home = ss_core::infra::paths::home_dir();
-        let mut out = Vec::new();
-        for spec in self.specs() {
+        let specs = self.specs();
+        let mut drafts: Vec<(bool, PathBuf, AgentProfile)> = Vec::with_capacity(specs.len());
+        for spec in specs {
             let global_skills_dir = spec.resolve_global_dir(&home);
             let enabled = self.prefs.enabled.get(spec.id()).copied().unwrap_or(false);
-            let synced_count = if spec.supports_global() {
-                count_managed_entries(&global_skills_dir)
-            } else {
-                0
-            };
-            let p = AgentProfile {
+            let supports_global = spec.supports_global();
+            let profile = AgentProfile {
                 id: spec.id().to_string(),
                 display_name: spec.display_name().to_string(),
                 icon: spec.icon().to_string(),
-                global_skills_dir,
+                global_skills_dir: global_skills_dir.clone(),
                 project_skills_rel: spec.project_skills_rel().unwrap_or("").to_string(),
                 installed: enabled,
                 enabled,
-                synced_count,
+                synced_count: 0,
             };
-            out.push(p);
+            drafts.push((supports_global, global_skills_dir, profile));
         }
-        out
+
+        if count_entries {
+            let counts = count_managed_entries_parallel(
+                drafts
+                    .iter()
+                    .filter(|(supports_global, _, _)| *supports_global)
+                    .map(|(_, dir, _)| dir.as_path()),
+            );
+            for (supports_global, dir, profile) in &mut drafts {
+                if *supports_global {
+                    profile.synced_count = counts.get(dir).copied().unwrap_or(0);
+                }
+            }
+        }
+
+        drafts.into_iter().map(|(_, _, profile)| profile).collect()
     }
+}
+
+/// Deduplicate `global_skills_dir` paths across profiles and scan distinct
+/// existing directories in parallel.
+fn count_managed_entries_parallel<'a>(
+    dirs: impl Iterator<Item = &'a std::path::Path>,
+) -> HashMap<PathBuf, u32> {
+    let mut counts = HashMap::new();
+    let mut to_scan = Vec::new();
+    let mut canonical_count: Option<u32> = None;
+
+    for dir in dirs {
+        if counts.contains_key(dir) {
+            continue;
+        }
+        if crate::deployment::targets_canonical_root(dir) {
+            let n = *canonical_count
+                .get_or_insert_with(|| crate::installer::installed_names().len() as u32);
+            counts.insert(dir.to_path_buf(), n);
+            continue;
+        }
+        if !dir.is_dir() {
+            counts.insert(dir.to_path_buf(), 0);
+            continue;
+        }
+        counts.insert(dir.to_path_buf(), 0);
+        to_scan.push(dir.to_path_buf());
+    }
+
+    if to_scan.len() <= 1 {
+        for dir in to_scan {
+            let n = count_managed_entries(&dir);
+            counts.insert(dir, n);
+        }
+        return counts;
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map_or(4, |n| n.get().min(8))
+        .min(to_scan.len());
+    let next_idx = AtomicUsize::new(0);
+    let results: Vec<(PathBuf, u32)> = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            handles.push(scope.spawn(|| {
+                let mut local = Vec::new();
+                loop {
+                    let idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                    let Some(dir) = to_scan.get(idx) else {
+                        break;
+                    };
+                    local.push((dir.clone(), count_managed_entries(dir)));
+                }
+                local
+            }));
+        }
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect()
+    });
+    for (dir, n) in results {
+        counts.insert(dir, n);
+    }
+    counts
 }
 
 fn stored_custom_is_usable(

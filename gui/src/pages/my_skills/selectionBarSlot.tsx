@@ -3,7 +3,9 @@ import {
   Scroll,
   Text,
   View,
+  computed,
   signal,
+  type Accessor,
   type JSX,
   type TextStyle,
   type ViewRef,
@@ -18,9 +20,13 @@ import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import { AgentBadge } from "../../chrome/agentRail";
 import { Icon } from "../../chrome/icons";
+import { IconSpin } from "../../chrome/feedback";
 import { Tip } from "../../chrome/tooltip";
 import { uninstallTitleCount, openUninstallConfirm } from "../../chrome/dialog";
-import { toast } from "../../shell/events";
+import { publishToast, toast } from "../../shell/events";
+import { toggleSkipMessage } from "./detailFacts";
+import { drawerOps, runTakeOverUnmanaged, unmanagedSkipActionLabel } from "./detailDrawerActions";
+import { fillSelectedDescriptions, type TranslationFillBridge } from "./cardTranslate";
 import type { AgentProfileRecord, SkillRecord } from "./filters";
 import {
   batchUpdateSelected,
@@ -32,7 +38,6 @@ import {
   profiles,
   refresh,
   selectedBatch,
-  selectedSkill,
   skills,
 } from "./state";
 
@@ -59,12 +64,12 @@ export const LINK_AGENTS_VIEW_H = 198;
 
 // ---- 纯派生（JSX 表达式里调用；selectionBar.test.tsx 直测） ---------------
 
-/** description_source（mod.rs:449）：非空本地化描述优先，回退描述；空 →
- * null（无可译文本）。 */
+/** 原文描述优先，空白时回退 localizedDescription；都空 → null。 */
 export function descriptionSource(skill: SkillRecord): string | null {
+  const raw = skill.description.trim();
+  if (raw.length > 0) return raw;
   const localized = (skill.localizedDescription ?? "").trim();
-  const text = (localized.length > 0 ? localized : skill.description).trim();
-  return text.length > 0 ? text : null;
+  return localized.length > 0 ? localized : null;
 }
 
 /** 翻译门（translate_batch 的 nsh 视角）：目标语言是否要译 + 缓存译文是否
@@ -167,11 +172,59 @@ export function toggleSelectAll(): void {
 /** 批量链接到一个 agent（commands.rs batch_link_to_agent）：点击时快照名
  * 单；完成清选择并刷新；失败走通知带（nsh 页面的错误通道；GPUI 侧是页
  * error 横幅）。 */
+interface BatchLinkSkippedDto {
+  skill: string;
+  code: string;
+  path: string;
+}
+
 export async function runLinkToAgent(agentId: string): Promise<void> {
   const names = [...selectedBatch()];
   linkMenuOpen.set(false);
   try {
-    await MySkillsSelection.linkToAgent(names, agentId);
+    const raw = (await MySkillsSelection.linkToAgent(names, agentId)) as {
+      linked?: number;
+      skipped?: BatchLinkSkippedDto[];
+    };
+    const skipped = Array.isArray(raw?.skipped) ? raw.skipped : [];
+    const conflicts = skipped.filter((item) => item.code !== "canonical_root_agent");
+    if (conflicts.length === 1) {
+      const item = conflicts[0];
+      const message = toggleSkipMessage(item.skill, item);
+      const takeOverLabel = unmanagedSkipActionLabel(item.code);
+      if (takeOverLabel !== null) {
+        publishToast({
+          tone: "warning",
+          message,
+          pinned: true,
+          replaceKey: "skill-toggle-skip",
+          action: {
+            label: takeOverLabel,
+            run: () =>
+              runTakeOverUnmanaged(drawerOps, item.skill, agentId, "skill-toggle-skip"),
+          },
+        });
+      } else {
+        publishToast({ tone: "warning", message, pinned: true });
+      }
+    } else if (conflicts.length > 1) {
+      publishToast({
+        tone: "warning",
+        message: tf("skillCards.batchTogglePartialSkipped", {
+          skipped: conflicts.length,
+          total: names.length,
+        }),
+      });
+    } else if (
+      skipped.length > 0 &&
+      skipped.length === names.length &&
+      (raw?.linked ?? 0) === 0
+    ) {
+      publishToast({
+        tone: "warning",
+        message: t("skillToggle.servedByCanonicalRoot"),
+      });
+    }
   } catch (err) {
     toast(String(err), "error");
   } finally {
@@ -196,52 +249,64 @@ export async function runUnlinkAll(): Promise<void> {
 }
 
 /** 批量卸载（commands.rs batch_uninstall_selected）：确认后逐名
- * uninstall_skill（失败行收集），busy token "batch_uninstall"，先清选择与
- * 详情（这些名字即将消失）。 */
+ * uninstall_skill（失败行收集），busy token "batch_uninstall"。选择留到
+ * refresh，消失的名字由 retainExisting 丢掉，不在请求前清空。 */
 export function batchUninstallSelected(): void {
   const names = [...selectedBatch()];
-  if (names.length === 0) return;
+  if (names.length === 0 || busy() !== null) return;
   busy.set("batch_uninstall");
-  selectedBatch.set(new Set());
   linkMenuOpen.set(false);
-  selectedSkill.set(null);
   void (async () => {
-    const failed: string[] = [];
-    for (const name of names) {
-      try {
-        await MySkills.uninstallSkill(name);
-      } catch (err) {
-        failed.push(`${name}: ${String(err)}`);
-      }
+    try {
+      await MySkills.uninstallRepoSkills(names);
+    } catch (err) {
+      toast(String(err), "error");
+    } finally {
+      busy.set(null);
+      await refresh();
     }
-    if (failed.length > 0) toast(failed.join("\n"), "error");
-    busy.set(null);
-    await refresh();
   })();
 }
 
 /** 批量翻译（selection_bar.rs batch_translate_selected）：为 idle 集里还
  * 未显式 true 的名字写入选择（与抽屉语言按钮同一存储，Settings 开关从不
- * 写）；随后刷新（note_translation_prefs 的重同步对位）。写失败只保持内存
- * 态（GPUI tracing::warn 对位）。 */
-export function batchTranslateSelected(): void {
-  const idle = translateIdleNow();
+ * 写），并调用 MarketplaceTranslation.fillDescriptions 补齐译文刷新卡片。 */
+export function batchTranslateSelected(
+  fillBridge?: TranslationFillBridge,
+  gate?: TranslationGate
+): void {
+  const idle = gate
+    ? translateIdleNames(
+        skills(),
+        selectedBatch(),
+        descriptionChoices(),
+        MarketplaceTranslation.descriptionsEnabled(),
+        gate
+      )
+    : translateIdleNow();
   if (idle.length === 0) return;
+
   const choices = descriptionChoices();
   const write: Record<string, boolean> = {};
   for (const name of idle) {
     if (choices[name] === true) continue;
     write[name] = true;
   }
-  if (Object.keys(write).length === 0) return;
-  descriptionChoices.set({ ...choices, ...write });
-  void MySkills.setDescriptionChoices(write)
-    .catch(() => {
+  if (Object.keys(write).length > 0) {
+    descriptionChoices.set({ ...choices, ...write });
+    void MySkills.setDescriptionChoices(write).catch(() => {
       // 持久化失败：内存选择保留（卡面即时生效），下次装载重读。
-    })
-    .finally(() => {
-      void refresh();
     });
+  }
+
+  const idleSet = new Set(idle);
+  const sources = skills()
+    .filter((skill) => idleSet.has(skill.name))
+    .map((skill) => descriptionSource(skill))
+    .filter((desc): desc is string => desc !== null);
+  if (sources.length > 0) {
+    void fillSelectedDescriptions(sources, fillBridge);
+  }
 }
 
 // ---- 胶囊 --------------------------------------------------------------------
@@ -323,6 +388,7 @@ function CountCapsule(): JSX.Element {
 
 /** 安静的三态全选开关（render_select_all）：不是动作，是切换。 */
 function SelectAllToggle(): JSX.Element {
+  const face = computed(() => selectAllFace(currentFiltered(), selectedBatch()));
   return (
     <View
       testID="select-all-toggle-btn"
@@ -330,39 +396,34 @@ function SelectAllToggle(): JSX.Element {
       hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
       onPress={toggleSelectAll}
     >
-      {(() => {
-        const face = selectAllFace(currentFiltered(), selectedBatch());
-        return (
-          <>
-            <Icon
-              name={face.icon}
-              size={12}
-              color={face.all ? paletteToken("accent") : paletteToken("fg_muted")}
-            />
-            <Text style={pillLabel()}>
-              {face.all ? t("common.deselectAll") : t("common.selectAll")}
-            </Text>
-          </>
-        );
-      })()}
+      <Icon
+        name={face().icon}
+        size={12}
+        color={face().all ? paletteToken("accent") : paletteToken("fg_muted")}
+      />
+      <Text style={pillLabel()}>
+        {face().all ? t("common.deselectAll") : t("common.selectAll")}
+      </Text>
     </View>
   );
 }
 
 /** 翻译描述（render_translate_button）：idle 集空 → 半透明不可点。 */
 function TranslateButton(): JSX.Element {
+  const enabled = computed(() => translateIdleNow().length > 0);
   return (
     <View
       testID="batch-translate-btn"
-      style={(() => {
-        const enabled = translateIdleNow().length > 0;
-        return { ...pillButton(), opacity: enabled ? 1 : 0.45, cursor: enabled ? "pointer" : "default" };
-      })()}
-      hoverStyle={(() =>
-        translateIdleNow().length > 0
-          ? { backgroundColor: paletteToken("card_hover") }
-          : undefined)()}
-      onPress={batchTranslateSelected}
+      style={{
+        ...pillButton(),
+        opacity: enabled() ? 1 : 0.45,
+        cursor: enabled() ? "pointer" : "default",
+      }}
+      hoverStyle={enabled() ? { backgroundColor: paletteToken("card_hover") } : undefined}
+      onPress={() => {
+        if (busy() !== null) return;
+        batchTranslateSelected();
+      }}
     >
       <Icon name="languages" size={12} color={paletteToken("fg_muted")} />
       <Text style={pillLabel()}>{t("selectionBar.translateDescriptions")}</Text>
@@ -370,59 +431,56 @@ function TranslateButton(): JSX.Element {
   );
 }
 
-/** 批量更新（render_update_button）：busy 或选中无待更新 → 半透明；有待
- * 更新时带计数徽章；点击走 state.batchUpdateSelected（busy token
- * "batch_update"，卡面省略号跟点击时快照）。 */
+/** 批量更新（render_update_button）：选中无待更新才变淡。进行中只转这颗
+ * 图标，不把整条胶囊变灰。点击仍要求没有别的变更在跑。 */
 function UpdateButton(): JSX.Element {
+  const count = computed(() => updatesNow());
+  const hasUpdates = computed(() => count() > 0);
   return (
     <View
       testID="batch-update-btn"
-      style={(() => {
-        const enabled = busy() === null && updatesNow() > 0;
-        return { ...pillButton(), opacity: enabled ? 1 : 0.45 };
-      })()}
-      hoverStyle={(() =>
-        busy() === null && updatesNow() > 0
-          ? { backgroundColor: paletteToken("card_hover") }
-          : undefined)()}
+      style={{
+        ...pillButton(),
+        opacity: hasUpdates() ? 1 : 0.45,
+        cursor: hasUpdates() ? "pointer" : "default",
+      }}
+      hoverStyle={hasUpdates() ? { backgroundColor: paletteToken("card_hover") } : undefined}
       onPress={() => {
-        if (busy() === null && updatesNow() > 0) batchUpdateSelected();
+        if (busy() === null && hasUpdates()) batchUpdateSelected();
       }}
     >
-      <Icon name="refresh" size={12} color={paletteToken("fg_muted")} />
+      <IconSpin
+        name="refresh"
+        size={12}
+        color={paletteToken("fg_muted")}
+        spin={busy() === "batch_update"}
+      />
       <Text style={pillLabel()}>{t("common.update")}</Text>
-      {(() => {
-        const count = updatesNow();
-        if (count === 0) return null;
-        return (
-          <View
-            testID="batch-update-count"
-            style={{
-              paddingHorizontal: 6,
-              borderRadius: 999,
-              backgroundColor: paletteToken("accent_soft"),
-            }}
-          >
-            <Text style={{ fontSize: 12, color: paletteToken("accent_fg") }}>{count}</Text>
-          </View>
-        );
-      })()}
+      <If when={hasUpdates()}>
+        <View
+          testID="batch-update-count"
+          style={{
+            paddingHorizontal: 6,
+            borderRadius: 999,
+            backgroundColor: paletteToken("accent_soft"),
+          }}
+        >
+          <Text style={{ fontSize: 12, color: paletteToken("accent_fg") }}>{count()}</Text>
+        </View>
+      </If>
     </View>
   );
 }
 
 /** 批量卸载（render_uninstall_button）：安静 danger 色；确认弹窗拦在前
- * （openUninstallConfirm + uninstallTitleCount），确认才起批次。 */
+ * （openUninstallConfirm + uninstallTitleCount），确认才起批次。进行中只
+ * 转这颗图标。 */
 function UninstallButton(): JSX.Element {
   return (
     <View
       testID="batch-uninstall-btn"
-      style={(() => {
-        const enabled = busy() === null;
-        return { ...pillButton(), opacity: enabled ? 1 : 0.45 };
-      })()}
-      hoverStyle={(() =>
-        busy() === null ? { backgroundColor: paletteToken("card_hover") } : undefined)()}
+      style={pillButton()}
+      hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
       onPress={() => {
         if (busy() !== null) return;
         openUninstallConfirm(uninstallTitleCount(selectedBatch().size), () => {
@@ -431,7 +489,12 @@ function UninstallButton(): JSX.Element {
         });
       }}
     >
-      <Icon name="trash" size={12} color={paletteToken("danger")} />
+      <IconSpin
+        name="trash"
+        size={12}
+        color={paletteToken("danger")}
+        spin={busy() === "batch_uninstall"}
+      />
       <Text style={{ ...pillLabel(), color: paletteToken("danger") }}>
         {t("common.uninstall")}
       </Text>
@@ -488,7 +551,8 @@ function LinkMenuMount(): JSX.Element {
   );
 }
 
-/** 触发器（batch-link-trigger）：开合翻 accent_soft 底；busy 半透明。 */
+/** 触发器（batch-link-trigger）：开合翻 accent_soft 底。别的变更在跑时
+ * 不打开，但不把整条变灰。 */
 function LinkTrigger(): JSX.Element {
   return (
     <View
@@ -496,10 +560,8 @@ function LinkTrigger(): JSX.Element {
       style={{
         ...pillButton(),
         backgroundColor: linkMenuOpen() ? paletteToken("accent_soft") : "transparent",
-        opacity: busy() === null ? 1 : 0.45,
       }}
-      hoverStyle={(() =>
-        linkMenuOpen() ? undefined : { backgroundColor: paletteToken("card_hover") })()}
+      hoverStyle={linkMenuOpen() ? undefined : { backgroundColor: paletteToken("card_hover") }}
       onPress={() => {
         if (busy() === null) linkMenuOpen.set(!linkMenuOpen());
       }}
@@ -519,6 +581,9 @@ function LinkTrigger(): JSX.Element {
  * （targetable，facade snapshot 已算好）；>6 行固定 198px 视口内滚（标题
  * 与取消链接行不滚）。 */
 function LinkMenuPanel(): JSX.Element {
+  const agents = computed(() => targetableAgents(profiles()));
+  const empty = computed(() => agents().length === 0);
+  const scrollable = computed(() => agents().length > LINK_AGENTS_VISIBLE);
   return (
     <View
       testID="selection-link-menu"
@@ -540,49 +605,55 @@ function LinkMenuPanel(): JSX.Element {
           {t("selectionBar.linkToAgent")}
         </Text>
       </View>
-      {(() => {
-        const agents = targetableAgents(profiles());
-        if (agents.length === 0) {
-          return (
-            <View
-              testID="selection-link-empty"
-              style={{ paddingHorizontal: 8, paddingVertical: 6 }}
-            >
-              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                {t("selectionBar.noAgents")}
-              </Text>
-            </View>
-          );
-        }
-        const list = (
-          <View
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              width: "100%",
-              minWidth: 0,
-            }}
-          >
-            {agents.map((profile) => (
-              <AgentRow id={profile.id} name={profile.displayName} icon={profile.icon} />
-            ))}
-          </View>
-        );
-        if (agents.length <= LINK_AGENTS_VISIBLE) return list;
-        // 高度写在视口框上，滚轮留在列表里（GPUI LINK_AGENTS_VIEW_H 先例）。
-        return (
-          <View
-            testID="selection-link-agents"
-            style={{ height: LINK_AGENTS_VIEW_H, width: "100%", minWidth: 0, flexShrink: 0 }}
-          >
-            <Scroll testID="selection-link-agents-scroll" style={{ width: "100%", height: "100%" }}>
-              {list}
-            </Scroll>
-          </View>
-        );
-      })()}
+      <If when={empty()}>
+        <View
+          testID="selection-link-empty"
+          style={{ paddingHorizontal: 8, paddingVertical: 6 }}
+        >
+          <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+            {t("selectionBar.noAgents")}
+          </Text>
+        </View>
+      </If>
+      <If when={!empty() && !scrollable()}>
+        <LinkAgentRows agents={agents} />
+      </If>
+      <If when={!empty() && scrollable()}>
+        {/* 高度写在视口框上，滚轮留在列表里（GPUI LINK_AGENTS_VIEW_H 先例）。 */}
+        <View
+          testID="selection-link-agents"
+          style={{ height: LINK_AGENTS_VIEW_H, width: "100%", minWidth: 0, flexShrink: 0 }}
+        >
+          <Scroll testID="selection-link-agents-scroll" style={{ width: "100%", height: "100%" }}>
+            <LinkAgentRows agents={agents} />
+          </Scroll>
+        </View>
+      </If>
       <UnlinkRow />
+    </View>
+  );
+}
+
+function LinkAgentRows(props: { agents: Accessor<AgentProfileRecord[]> }): JSX.Element {
+  return (
+    <View
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        width: "100%",
+        minWidth: 0,
+      }}
+    >
+      <Each of={props.agents()} key={(profile) => profile.id}>
+        {(profile: () => AgentProfileRecord) => (
+          <AgentRow
+            id={profile().id}
+            name={profile().displayName}
+            icon={profile().icon}
+          />
+        )}
+      </Each>
     </View>
   );
 }

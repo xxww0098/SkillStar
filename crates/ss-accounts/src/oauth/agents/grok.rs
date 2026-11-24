@@ -385,12 +385,12 @@ fn post_form(url: &str, pairs: &[(&str, &str)]) -> OAuthResult<(u16, String)> {
             .form(&body)
             .send()
             .await
-            .map_err(|error| OAuthError::Transient(format!("Grok 请求失败: {error}")))?;
+            .map_err(|error| token::transport_error("Grok 请求失败", error))?;
         let status = response.status().as_u16();
         let text = response
             .text()
             .await
-            .map_err(|error| OAuthError::Transient(format!("Grok 响应读取失败: {error}")))?;
+            .map_err(|error| token::transport_error("Grok 响应读取失败", error))?;
         Ok::<_, OAuthError>((status, text))
     })?
 }

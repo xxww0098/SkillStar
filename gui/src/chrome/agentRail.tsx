@@ -1,4 +1,4 @@
-import { Image, Scroll, View, effect, signal, type JSX, type ScrollRef } from "nsh";
+import { Image, Scroll, View, computed, effect, signal, type JSX, type ScrollRef } from "nsh";
 import { Settings } from "skillstar-gui/native";
 import { isLight, paletteToken } from "../services/themeMode";
 import { t } from "../services/translation";
@@ -30,54 +30,6 @@ export const RAIL_VIEWPORT_W =
   RAIL_MAX_VISIBLE * RAIL_SLOT_SIZE + (RAIL_MAX_VISIBLE - 1) * RAIL_SLOT_GAP;
 const RAIL_ARROW_W = 16;
 const RAIL_STEP_PX = 2 * (RAIL_SLOT_SIZE + RAIL_SLOT_GAP);
-
-const KNOWN_AGENT_CODES: Record<string, string> = {
-  claude: "CC",
-  "claude-code": "CC",
-  codex: "CX",
-  cursor: "CU",
-  gemini: "GM",
-  "gemini-cli": "GM",
-  windsurf: "WS",
-  copilot: "GH",
-  "github-copilot": "GH",
-  cline: "CL",
-  roo: "RC",
-  "roo-code": "RC",
-  opencode: "OC",
-  antigravity: "AG",
-  trae: "TR",
-  zed: "ZD",
-  goose: "GS",
-  amp: "AM",
-  aider: "AI",
-  continue: "CN",
-  kiro: "KR",
-  augment: "AU",
-  qoder: "QD",
-};
-
-function firstCodePoint(input: string): string {
-  return Array.from(input)[0] ?? "";
-}
-
-/** Distinct 2-letter uppercase monogram retained for text-only helpers. */
-export function agentShortCode(id: string, displayName: string): string {
-  const normalized = id.trim().toLowerCase();
-  const known = KNOWN_AGENT_CODES[normalized];
-  if (known) return known;
-
-  const source = (displayName.trim() || id.trim()).replace(/([a-z])([A-Z])/g, "$1 $2");
-  const words = source.split(/[\s\-_]+/).filter((part) => part.length > 0);
-  if (words.length >= 2) {
-    return `${firstCodePoint(words[0])}${firstCodePoint(words[1])}`.toUpperCase();
-  }
-  const single = words[0] ?? "";
-  if (single.length >= 2 && /^[a-z0-9]+$/i.test(single)) {
-    return single.slice(0, 2).toUpperCase();
-  }
-  return firstCodePoint(single).toUpperCase() || "?";
-}
 
 const iconUriCache = new Map<string, string>();
 
@@ -206,11 +158,12 @@ export function AgentRail(props: {
   const offsetX = signal(0);
   let scrollRef: ScrollRef | null = null;
   let lastScopeKey = props.scopeKey;
+  const compact = computed(() => props.slots.length <= RAIL_MAX_VISIBLE);
+  const maxScrollX = computed(() => railMaxScrollX(props.slots.length));
 
   effect(() => {
     const key = props.scopeKey;
-    const compact = props.slots.length <= RAIL_MAX_VISIBLE;
-    if (compact) {
+    if (compact()) {
       scrollRef = null;
       offsetX.set(0);
       lastScopeKey = key;
@@ -223,11 +176,11 @@ export function AgentRail(props: {
     }
   });
 
-  const clampedOffset = (): number => Math.min(offsetX(), railMaxScrollX(props.slots.length));
+  const clampedOffset = (): number => Math.min(offsetX(), maxScrollX());
   const canPrev = (): boolean => clampedOffset() > 1;
-  const canNext = (): boolean => clampedOffset() < railMaxScrollX(props.slots.length) - 1;
+  const canNext = (): boolean => clampedOffset() < maxScrollX() - 1;
   const stepBy = (dir: -1 | 1): void => {
-    const max = railMaxScrollX(props.slots.length);
+    const max = maxScrollX();
     const next = Math.max(0, Math.min(max, clampedOffset() + dir * RAIL_STEP_PX));
     offsetX.set(next);
     scrollRef?.scrollTo({ x: next, animated: true });
@@ -247,7 +200,7 @@ export function AgentRail(props: {
       }}
     >
       <If
-        when={props.slots.length > RAIL_MAX_VISIBLE}
+        when={!compact()}
         else={
           <View
             style={{
@@ -335,7 +288,7 @@ function RailSlots(props: {
         <RailSlot
           scopeKey={props.scopeKey}
           slotPrefix={props.slotPrefix}
-          slot={slot()}
+          slot={slot}
           pending={props.pending}
           onClick={props.onSlotClick}
         />
@@ -383,15 +336,18 @@ function CarouselArrow(props: {
 function RailSlot(props: {
   scopeKey: string;
   slotPrefix: string;
-  slot: AgentRailSlot;
+  slot: () => AgentRailSlot;
   pending: boolean;
   onClick: (slot: AgentRailSlot) => void;
 }): JSX.Element {
+  const hovered = signal(false);
   return (
     <View
-      testID={`${props.slotPrefix}-${props.scopeKey}-${props.slot.profile.id}`}
-      accessibilityLabel={props.slot.label}
-      tooltip={<Tip text={props.slot.label} />}
+      testID={`${props.slotPrefix}-${props.scopeKey}-${props.slot().profile.id}`}
+      accessibilityLabel={props.slot().label}
+      tooltip={hovered() ? <Tip text={props.slot().label} /> : undefined}
+      onMouseEnter={() => hovered.set(true)}
+      onMouseLeave={() => hovered.set(false)}
       style={{
         display: "flex",
         alignItems: "center",
@@ -401,16 +357,16 @@ function RailSlot(props: {
         flexShrink: 0,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: props.slot.linked ? paletteToken("accent_soft_edge") : "transparent",
-        backgroundColor: props.slot.linked ? paletteToken("accent_soft") : "transparent",
-        opacity:
-          props.slot.pending || props.pending ? (props.slot.linked ? 0.55 : 0.38) : props.slot.linked ? 1 : 0.48,
-        cursor: props.slot.pending || props.pending ? "default" : "pointer",
+        borderColor: props.slot().linked ? paletteToken("accent_soft_edge") : "transparent",
+        backgroundColor: props.slot().linked ? paletteToken("accent_soft") : "transparent",
+        // Pending swallows a second press but does not dim the slot.
+        opacity: props.slot().linked ? 1 : 0.48,
+        cursor: props.slot().pending || props.pending ? "default" : "pointer",
       }}
       hoverStyle={
-        props.slot.pending || props.pending
+        props.slot().pending || props.pending
           ? undefined
-          : props.slot.linked
+          : props.slot().linked
             ? { borderColor: paletteToken("accent") }
             : {
                 backgroundColor: paletteToken("panel_hover"),
@@ -419,14 +375,15 @@ function RailSlot(props: {
               }
       }
       onPress={() => {
-        if (!props.slot.pending && !props.pending) props.onClick(props.slot);
+        const slot = props.slot();
+        if (!slot.pending && !props.pending) props.onClick(slot);
       }}
     >
       <AgentIcon
-        id={props.slot.profile.id}
-        icon={props.slot.profile.icon}
+        id={props.slot().profile.id}
+        icon={props.slot().profile.icon}
         size={16}
-        grayscale={!props.slot.linked}
+        grayscale={!props.slot().linked}
       />
     </View>
   );

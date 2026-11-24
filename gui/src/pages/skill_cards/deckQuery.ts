@@ -4,6 +4,8 @@
 // filtering and notice-shaping rules as plain data (the same split the
 // GPUI side keeps query.rs for).
 
+export type AgentLinkState = "none" | "mixed" | "linked";
+
 /** One skill group (ss_skills::skill_group::SkillGroup, serde field names). */
 export interface DeckRecord {
   id: string;
@@ -15,6 +17,10 @@ export interface DeckRecord {
   defaultAgent: string;
   /** Agent ids this deck is explicitly linked to; null reads as unlinked. */
   agentLinks: string[] | null;
+  /** Actual on-disk links per installed member skill (from snapshot_body). */
+  memberAgentLinks?: Record<string, string[]>;
+  /** Exact per-agent link state computed from installed members ("none" | "mixed" | "linked"). */
+  agentLinkStates?: Record<string, AgentLinkState>;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,6 +61,65 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
 
+function parseMemberAgentLinks(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [member, links] of Object.entries(value as Record<string, unknown>)) {
+    out[member] = asStringArray(links);
+  }
+  return out;
+}
+
+function parseAgentLinkStates(value: unknown): Record<string, AgentLinkState> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const out: Record<string, AgentLinkState> = {};
+  for (const [agentId, state] of Object.entries(value as Record<string, unknown>)) {
+    if (state === "none" || state === "mixed" || state === "linked") {
+      out[agentId] = state;
+    }
+  }
+  return out;
+}
+
+/** Unified case-insensitive match against both agent `id` and `displayName`. */
+export function matchesAgentRef(
+  links: readonly string[],
+  profile: { id: string; displayName: string }
+): boolean {
+  const idLower = profile.id.trim().toLowerCase();
+  const nameLower = profile.displayName.trim().toLowerCase();
+  return links.some((raw) => {
+    const trimmed = raw.trim().toLowerCase();
+    return (idLower.length > 0 && trimmed === idLower) || (nameLower.length > 0 && trimmed === nameLower);
+  });
+}
+
+/** Compute exact deck link state ("none" | "mixed" | "linked") for an agent. */
+export function deckAgentLinkState(
+  deck: Pick<DeckRecord, "agentLinks" | "memberAgentLinks" | "agentLinkStates">,
+  profile: { id: string; displayName: string }
+): AgentLinkState {
+  const precomputed = deck.agentLinkStates?.[profile.id];
+  if (precomputed === "none" || precomputed === "mixed" || precomputed === "linked") {
+    return precomputed;
+  }
+  const declared = matchesAgentRef(deck.agentLinks ?? [], profile);
+  if (!declared) return "none";
+  if (deck.memberAgentLinks) {
+    const memberLists = Object.values(deck.memberAgentLinks);
+    if (memberLists.length > 0) {
+      const linkedCount = memberLists.filter((links) => matchesAgentRef(links, profile)).length;
+      return linkedCount === memberLists.length ? "linked" : "mixed";
+    }
+  }
+  return "linked";
+}
+
+/** Clicking `none` or `mixed` requests enable=true (links missing members); only `linked` unlinks. */
+export function nextEnableForAgentState(state: AgentLinkState): boolean {
+  return state !== "linked";
+}
+
 /** Defensive parse of the facade's JSON into the page's deck record: an
  * unknown shape degrades to defaults instead of crashing the page. */
 export function parseDeck(value: unknown): DeckRecord {
@@ -70,6 +135,8 @@ export function parseDeck(value: unknown): DeckRecord {
     defaultAgent: typeof raw.defaultAgent === "string" ? raw.defaultAgent : "",
     // None and an empty set read the same on the rail (skill_group.rs).
     agentLinks: Array.isArray(links) ? asStringArray(links) : null,
+    memberAgentLinks: parseMemberAgentLinks(raw.memberAgentLinks),
+    agentLinkStates: parseAgentLinkStates(raw.agentLinkStates),
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
   };

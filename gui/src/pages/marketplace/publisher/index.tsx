@@ -1,17 +1,20 @@
-import { Text, View, effect, type JSX } from "nsh";
+import { Text, View, computed, effect, type JSX } from "nsh";
 import { Marketplace, MarketplacePublisher } from "skillstar-gui/native";
 import { paletteToken } from "../../../services/themeMode";
+import { SLOW_MS } from "../../../chrome/delayedFlag";
 import { DETAIL_COLUMN_W, PAGE_PAD, SKILL_SCROLL_PT } from "../../../layout";
 import { Icon } from "../../../chrome/icons";
 import { BarIconButton, BarSearchInput, PageBar } from "../../../chrome/toolbar";
 import { RepoAvatar, sanitizeGithubOwner } from "../../../chrome/repoAvatar";
 import { openUninstallConfirm, uninstallTitleNamed } from "../../../chrome/dialog";
-import { publishToast, selectPage } from "../../../shell/events";
+import { endJob, putJob } from "../../../shell/jobBoard";
+import { publishToast, selectPage, toast } from "../../../shell/events";
 import type { PublisherRef } from "../../../shell/events";
+import { currentPage } from "../../../shell/nav";
 import { MarketDetailColumn } from "../detail_drawer";
 import { mt, mtf } from "../marketStrings";
 import { formatInstalls, type MarketSkill } from "../types";
-import type { MarketNotice } from "../readSide";
+import { NO_BUSY, type MarketNotice } from "../readSide";
 import { PublisherBoardPane } from "./board";
 import {
   createPublisherSide,
@@ -23,10 +26,10 @@ import {
 // 发布者详情页 — marketplace/publisher/（mod.rs + board.rs + card.rs +
 // hero.rs）对位，波 2 发布者切片。
 //
-// 结构：顶栏（返回 + 发布者名 crumb + 当前仓库 mono、搜索框、同步状态文
-// 案、刷新）+ hero 横幅（头像 + 名 + 官方徽章 + 计数）+ 板面（仓库清单的
-// 紧凑行卡，或当前仓库的技能网格——复用市场卡身 MarketCard）+ 右侧详情列
-// 固定轨道（复用 detail_drawer 的 MarketDetailColumn）。
+// 结构：顶栏（返回 + 发布者名 crumb + 当前仓库 mono、搜索框、刷新只转图标）
+// + hero 横幅（头像 + 名 + 官方徽章 + 计数）+ 板面（仓库清单的紧凑行卡，
+// 或当前仓库的技能网格——复用市场卡身 MarketCard）+ 右侧详情列固定轨道
+// （复用 detail_drawer 的 MarketDetailColumn）。同步成功走短通知。
 //
 // 读侧状态机在 ./readSide.ts（本地优先 + epoch 丢弃迟到响应 + 描述回填
 // watch）；页面只持模块级单例（keep-alive 挂载一次 = 页面实体）并把信号绑
@@ -58,6 +61,18 @@ function notifyToast(notice: MarketNotice): void {
   }
 }
 
+const pageActive = (): boolean => currentPage() === "publisher_detail";
+let lastOpenedPublisher: PublisherRef | null = null;
+
+function sameElements<T>(prev: readonly T[], next: readonly T[]): boolean {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
+}
+
 const side: PublisherSide = createPublisherSide({
   reposLoader: (name) => MarketplacePublisher.publisherRepos(name),
   skillsLoader: (source) => MarketplacePublisher.repoSkills(source),
@@ -66,7 +81,7 @@ const side: PublisherSide = createPublisherSide({
     MarketplacePublisher.repoDescriptionState(source) as { progress: number; running: boolean },
   syncer: (scope) => Marketplace.syncScope(scope),
   installer: (url, name) => Marketplace.installSkill(url, name),
-  uninstaller: (name) => Marketplace.uninstallSkill(name),
+  uninstaller: (name, source) => Marketplace.uninstallSkill(source ?? "", name),
   schedule: (fn, ms) => {
     const timer = setTimeout(fn, ms);
     return () => clearTimeout(timer);
@@ -78,31 +93,100 @@ const side: PublisherSide = createPublisherSide({
       return true;
     });
   },
-  leaveMarket: () => selectPage.publish("marketplace"),
+  leaveMarket: () => {
+    lastOpenedPublisher = null;
+    side.open(null);
+    selectPage.publish("marketplace");
+  },
+  isActive: pageActive,
+});
+
+// readSide 同步开始先把 flash 打下，结束再升起。这里只在升起沿发短通知。
+let seenPublisherFlash = false;
+effect(() => {
+  const flash = side.refreshedFlash();
+  const refreshing = side.refreshing();
+  if (flash && !refreshing) {
+    if (!seenPublisherFlash) {
+      seenPublisherFlash = true;
+      toast(mt("marketplace.snapshotRefreshed"), "success");
+    }
+  } else {
+    seenPublisherFlash = false;
+  }
+});
+
+effect(() => {
+  if (!side.refreshing()) return;
+  const timer = setTimeout(() => {
+    putJob({
+      id: "publisher-snapshot",
+      title: mt("marketplace.refreshingSnapshot"),
+    });
+  }, SLOW_MS);
+  return () => {
+    clearTimeout(timer);
+    endJob("publisher-snapshot");
+  };
 });
 
 export function MarketPublisherPage(props: MarketPublisherPageProps): JSX.Element {
-  // 换发布者（或进入）重开读侧：props 读取在 effect 里，publisher 变化即
-  // 重置并重读（set_publisher 对位）。
+  // 换发布者（或进入）重开读侧：只在页面活跃时同步新发布者或恢复轮询。
   effect(() => {
-    side.open(props.publisher);
+    if (!pageActive()) return;
+    if (props.publisher !== lastOpenedPublisher) {
+      lastOpenedPublisher = props.publisher;
+      side.open(props.publisher);
+    } else {
+      side.resumeWatch?.();
+    }
   });
   return <PublisherBody />;
 }
 
 function PublisherBody(): JSX.Element {
+  const gated = <T,>(
+    read: () => T,
+    fallback: T,
+    equals?: (prev: T, next: T) => boolean,
+  ) =>
+    computed<T>(
+      (prev) => (!pageActive() ? (prev !== undefined ? prev : fallback) : read()),
+      equals ? { equals } : undefined,
+    );
+
+  const gName = gated(() => side.publisherName(), null);
+  const gActiveRepo = gated(() => side.activeRepo(), null);
+  const gQuery = gated(() => side.query(), "");
+  const gRefreshing = gated(() => side.refreshing(), false);
+  const gRepos = gated(() => side.repos(), [], sameElements);
+  const gSelected = gated(() => side.selected(), null);
+  const gBusy = gated(() => side.busy(), NO_BUSY);
+  const gSelectedSkill = gated(() => findSkill(side.skills(), side.selected()), null);
+  // 详情列只跟自己这一个技能的安装走：别的技能在飞不钉住这一列。
+  const selectedBusy = (): boolean => {
+    const identity = gSelected();
+    return identity !== null && gBusy().has(identity.name);
+  };
+
   return (
     <View
       testID="pd-page"
-      style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, width: "100%" }}
+      style={{
+        display: pageActive() ? "flex" : "none",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: 0,
+        width: "100%",
+      }}
     >
       <PageBar
         title={mt("sidebar.market")}
         dragId="publisher-toolbar-drag"
         titleExtras={[
           <PublisherBackButton />,
-          <PublisherCrumb name={side.publisherName() ?? ""} inRepo={side.activeRepo() !== null} />,
-          <If when={side.activeRepo() !== null}>
+          <PublisherCrumb name={gName() ?? ""} inRepo={gActiveRepo() !== null} />,
+          <If when={gActiveRepo() !== null}>
             <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
               <Text style={{ fontSize: 14, color: paletteToken("fg_muted") }}>/</Text>
               <View style={{ overflow: "hidden", flexShrink: 1, minWidth: 0 }}>
@@ -114,7 +198,7 @@ function PublisherBody(): JSX.Element {
                     numberOfLines: 1,
                   }}
                 >
-                  {side.activeRepo() ?? ""}
+                  {gActiveRepo() ?? ""}
                 </Text>
               </View>
             </View>
@@ -123,29 +207,18 @@ function PublisherBody(): JSX.Element {
         search={
           <BarSearchInput
             inputTestID="pd-search"
-            value={side.query()}
+            value={gQuery()}
             placeholder={mtf("publisherDetail.searchPlaceholder", {
-              name: side.publisherName() ?? "",
+              name: gName() ?? "",
             })}
             onChange={(value) => side.onSearchInput(value)}
-            width={216}
           />
         }
         actions={[
-          <If when={side.refreshedFlash() && !side.refreshing()}>
-            <Text style={{ fontSize: 12, color: paletteToken("ok"), flexShrink: 0 }}>
-              {mt("marketplace.snapshotRefreshed")}
-            </Text>
-          </If>,
-          <If when={side.refreshing()}>
-            <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), flexShrink: 0 }}>
-              {mt("marketplace.refreshingSnapshot")}
-            </Text>
-          </If>,
           <View testID="pd-sync-btn">
             <BarIconButton
               glyph="refresh"
-              loading={side.refreshing()}
+              loading={gRefreshing()}
               tip={mt("common.refresh")}
               onPress={() => side.syncSnapshot()}
             />
@@ -171,24 +244,24 @@ function PublisherBody(): JSX.Element {
             minWidth: 0,
           }}
         >
-          <If when={side.publisherName() === null}>
+          <If when={gName() === null}>
             <View style={{ padding: PAGE_PAD, flex: 1 }}>
               <NoneSelected />
             </View>
           </If>
-          <If when={side.publisherName() !== null}>
+          <If when={gName() !== null}>
             <View style={{ paddingHorizontal: PAGE_PAD, paddingTop: SKILL_SCROLL_PT, paddingBottom: 12 }}>
-              <PublisherHero name={side.publisherName() ?? ""} repos={side.repos()} />
+              <PublisherHero name={gName() ?? ""} repos={gRepos()} />
             </View>
-            <PublisherBoardPane side={side} />
+            <PublisherBoardPane side={side} active={pageActive} />
           </If>
         </View>
-        <If when={side.selected() !== null}>
+        <If when={gSelected() !== null}>
           <View style={{ width: DETAIL_COLUMN_W, flexShrink: 0, height: "100%" }}>
             <MarketDetailColumn
-              skill={findSkill(side.skills(), side.selected())}
-              identity={side.selected() ?? { source: null, name: "" }}
-              busy={side.busy() !== null && side.busy() === side.selected()?.name}
+              skill={gSelectedSkill()}
+              identity={gSelected() ?? { source: null, name: "" }}
+              busy={selectedBusy()}
               onClose={() => side.clearSelection()}
               onToggleInstall={(skill) => side.toggleInstalled(skill)}
             />
@@ -295,6 +368,7 @@ function NoneSelected(): JSX.Element {
  * 件体只执行一次）；发布者行自身计数仅在仓库表为空时兜底——PublisherRef
  * 只带 id/name，兜底值恒 0（见 gaps：载荷不含 url/repoCount/skillCount）。 */
 function PublisherHero(props: { name: string; repos: PublisherRepoRow[] }): JSX.Element {
+  const counts = computed(() => heroCounts(null, props.repos));
   return (
     <View
       testID="pd-hero"
@@ -365,21 +439,21 @@ function PublisherHero(props: { name: string; repos: PublisherRepoRow[] }): JSX.
             <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 4 }}>
               <Icon name="folder" size={13} color={paletteToken("fg_muted")} />
               <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                {mtf("marketplace.repositoriesCount", { count: heroCounts(null, props.repos).repos })}
+                {mtf("marketplace.repositoriesCount", { count: counts().repos })}
               </Text>
             </View>
             <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 4 }}>
               <Icon name="package" size={13} color={paletteToken("fg_muted")} />
               <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                {mtf("marketplace.skillsTotal", { count: heroCounts(null, props.repos).skills })}
+                {mtf("marketplace.skillsTotal", { count: counts().skills })}
               </Text>
             </View>
-          <If when={heroCounts(null, props.repos).installs > 0}>
+          <If when={counts().installs > 0}>
             <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 4 }}>
               <Icon name="download" size={13} color={paletteToken("fg_muted")} />
               <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
                 {mtf("marketplace.installsCount", {
-                  count: formatInstalls(heroCounts(null, props.repos).installs),
+                  count: formatInstalls(counts().installs),
                 })}
               </Text>
             </View>

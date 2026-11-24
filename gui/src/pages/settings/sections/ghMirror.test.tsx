@@ -67,15 +67,16 @@ const RAW_DEFAULT: MirrorConfigDto = {
 
 // ---- 状态机（gh_mirror.rs 的读写语义） ---------------------------------------
 
-test("a null order (raw missing-file default) falls back to the preset chain", () => {
+test("a null order (raw missing-file default) falls back to the preset chain with custom slot", () => {
   const { state } = harness(RAW_DEFAULT);
-  // gh_mirror_order 对位：回落 preset id 序，与 GPUI 一致不含 custom。
-  expect(state.order()).toEqual(["ghproxy_vip", "gh_proxy_com", "gh_llkk", "ghfast_top"]);
+  // gh_mirror_order 对位：缺文件默认也应包含 custom 槽位。
+  expect(state.order()).toEqual(["ghproxy_vip", "gh_proxy_com", "gh_llkk", "ghfast_top", "custom"]);
   expect(state.entries().map((entry) => entry.id)).toEqual([
     "ghproxy_vip",
     "gh_proxy_com",
     "gh_llkk",
     "ghfast_top",
+    "custom",
   ]);
   expect(state.selectedId()).toBe("ghproxy_vip");
   // 分区头 chip 读内存 order 的生效 URL（不读盘）。
@@ -86,7 +87,7 @@ test("selecting a row moves it to the front; preset_id follows order[0]", () => 
   const { state, saves } = harness(RAW_DEFAULT);
   state.selectEntry("gh_llkk");
   expect(saves).toHaveLength(1);
-  expect(saves[0].order).toEqual(["gh_llkk", "ghproxy_vip", "gh_proxy_com", "ghfast_top"]);
+  expect(saves[0].order).toEqual(["gh_llkk", "ghproxy_vip", "gh_proxy_com", "ghfast_top", "custom"]);
   expect(saves[0].preset_id).toBe("gh_llkk");
   // 选中 custom 槽：preset_id 落 null（save_gh_mirror 的 filter 语义）。
   state.selectEntry(CUSTOM_ENTRY_ID);
@@ -100,11 +101,11 @@ test("reorder arrows swap neighbours and ignore the boundary", () => {
   const { state, saves } = harness(RAW_DEFAULT);
   state.moveEntry("ghproxy_vip", -1); // 已在链首：不动、不写盘。
   expect(saves).toHaveLength(0);
-  state.moveEntry("ghfast_top", 1); // 已在链尾：不动、不写盘。
+  state.moveEntry(CUSTOM_ENTRY_ID, 1); // 已在链尾：不动、不写盘。
   expect(saves).toHaveLength(0);
   state.moveEntry("ghproxy_vip", 1); // 与邻位交换。
   expect(saves).toHaveLength(1);
-  expect(saves[0].order).toEqual(["gh_proxy_com", "ghproxy_vip", "gh_llkk", "ghfast_top"]);
+  expect(saves[0].order).toEqual(["gh_proxy_com", "ghproxy_vip", "gh_llkk", "ghfast_top", "custom"]);
 });
 
 test("collapse-close commits the custom URL from the form, trimmed", () => {

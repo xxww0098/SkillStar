@@ -4,14 +4,17 @@ import {
   computed,
   effect,
   signal,
+  untracked,
   type JSX,
   type ListRef,
 } from "nsh";
 import { paletteToken } from "../../services/themeMode";
 import { t } from "../../services/translation";
 import { Pulse } from "../../chrome/feedback";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
 import { BackToTopButton, SHOW_AFTER_PX } from "../../chrome/scrollTop";
 import { cardTrackWidth, gridColumnsForPane, packCardRows } from "../../chrome/cardShell";
+import { createPaneWidth } from "../../shell/nav";
 import {
   CARD_GAP,
   CARD_ROW_W,
@@ -30,11 +33,13 @@ import {
   ErrorBanner,
 } from "./emptyStates";
 import { SelectionBarSlot } from "./selectionBarSlot";
+import type { SkillRecord } from "./filters";
 import {
   currentFiltered,
   error,
   loading,
   onlyUpdates,
+  pageActive,
   scope,
   searchQuery,
   selectedSkill,
@@ -56,8 +61,12 @@ import {
 
 export const LIST_GAP = 8;
 
-/** 页体内容宽（onLayout 实测；网格列数的唯一输入）。 */
-export const paneWidth = signal(0);
+/** 页体内容宽（优先由 Shell 主面板宽同步推导，独立挂载回退 onLayout 实测）。 */
+const canvasPane = createPaneWidth({
+  active: () => pageActive() && scope() === "local",
+  fromShell: (panelW) => panelW - (selectedSkill() !== null ? DETAIL_COLUMN_W : 0),
+});
+export const paneWidth = canvasPane.width;
 
 /** 回顶可见（onScroll 驱动，render 不读偏移——canvas.rs back_top_shown）。 */
 const backTopShown = signal(false);
@@ -65,20 +74,28 @@ const backTopShown = signal(false);
 /** 画布唯一的列表 ref：回顶按钮与视图切换重置共用。 */
 const boardRef = signal<ListRef | null>(null);
 
-export const packRows = packCardRows;
-
 export function SkillsCanvas(): JSX.Element {
+  // 只在首次空列表时晚 300ms 出骨架。已有数据的刷新不读这个条件。
+  const showSkeleton = bindDelayedFlag(() => pageActive() && loading() && skills().length === 0);
   // 视图切换开新数据集：立即回顶（mod.rs reset_list_scroll——网格与列表
   // 不共享偏移）。
   effect(() => {
     void viewList();
-    boardRef()?.scrollToOffset({ offset: 0, animated: false });
-    backTopShown.set(false);
+    untracked(() => {
+      boardRef()?.scrollToOffset({ offset: 0, animated: false });
+      backTopShown.set(false);
+    });
   });
 
   // 状态分派走 <If>（view.rs render_main_content 的分派对位）：条件在
   // when 表达式里读取信号，分支互斥；卡板常驻挂载不随筛选重建（滚动
   // 位置与虚拟化状态在筛选变化时保持，GPUI uniform_list 同款）。
+  //
+  // 两态 scope 各一态页体（ScopePane），两态都常驻：换 scope 只换可见
+  // 性。回到本地时重建卡板要挂 3600 多个 view（实测一次提交 60ms，其后
+  // 还有三次 ~9ms 的行批），正好压在滑块 200ms 的滑行上，看起来就是掉
+  // 帧；常驻后切换只剩一次可见性变更。
+  const localShown = () => scope() === "local";
   return (
     <View
       testID="skills-body"
@@ -91,57 +108,97 @@ export function SkillsCanvas(): JSX.Element {
         width: "100%",
       }}
     >
-      <If when={loading()}>
-        <Pane>
-          <SkeletonGrid viewList={viewList()} />
-        </Pane>
-      </If>
-      <If when={!loading() && error() !== null}>
-        <Pane>
-          <ErrorBanner error={error() ?? ""} />
-        </Pane>
-      </If>
-      <If when={scope() === "channels"}>
+      <ScopePane shown={localShown}>
+        <If when={showSkeleton() && skills().length === 0}>
+          <Pane>
+            <SkeletonGrid viewList={viewList()} />
+          </Pane>
+        </If>
+        <If when={!loading() && !showSkeleton() && error() !== null}>
+          <Pane>
+            <ErrorBanner error={error() ?? ""} />
+          </Pane>
+        </If>
+        <If
+          when={
+            !loading() &&
+            !showSkeleton() &&
+            error() === null &&
+            skills().length === 0
+          }
+        >
+          <Pane>
+            <EmptyInstalled />
+          </Pane>
+        </If>
+        <If
+          when={
+            !loading() &&
+            !showSkeleton() &&
+            error() === null &&
+            skills().length > 0 &&
+            currentFiltered().length === 0
+          }
+        >
+          <If when={onlyUpdates()} else={<EmptySearch query={searchQuery()} />}>
+            <EmptyUpdates />
+          </If>
+        </If>
+        <If
+          when={
+            error() === null &&
+            skills().length > 0 &&
+            currentFiltered().length > 0
+          }
+        >
+          <CardPane />
+        </If>
+      </ScopePane>
+      <ScopePane shown={() => !localShown()}>
         <Pane>
           <ChannelsScope />
         </Pane>
-      </If>
-      <If when={scope() === "local" && !loading() && error() === null && skills().length === 0}>
-        <Pane>
-          <EmptyInstalled />
-        </Pane>
-      </If>
-      <If
-        when={
-          scope() === "local" &&
-          !loading() &&
-          error() === null &&
-          skills().length > 0 &&
-          currentFiltered().length === 0
-        }
-      >
-        <If when={onlyUpdates()} else={<EmptySearch query={searchQuery()} />}>
-          <EmptyUpdates />
-        </If>
-      </If>
-      <If
-        when={
-          scope() === "local" &&
-          !loading() &&
-          error() === null &&
-          currentFiltered().length > 0
-        }
-      >
-        <CardPane />
-      </If>
-      <If when={backTopShown() && boardRef() !== null}>
+      </ScopePane>
+      <If when={localShown() && backTopShown() && boardRef() !== null}>
         <BackToTopButton
           label={t("mySkills.backToTop")}
           listRef={boardRef()}
           onClick={() => backTopShown.set(false)}
         />
       </If>
-      <SelectionBarSlot />
+      <If when={localShown()}>
+        <SelectionBarSlot />
+      </If>
+    </View>
+  );
+}
+
+/** 一态页体（本地 / 共享频道）：常驻挂载，只切可见性与命中。
+ *
+ * Shell 对页面的保活纪律同款（Shell.tsx「mounted once, switched by
+ * display」：同一位置上叠放，用 opacity + pointerEvents + zIndex 切）：
+ * 切走的那一态保留布局与实例，List 的虚拟化行、滚动偏移和已解码的品牌
+ * 图都留在原地，换回来不重建。 */
+function ScopePane(props: {
+  shown: () => boolean;
+  children: JSX.Element | (JSX.Element | null)[];
+}): JSX.Element {
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: "flex",
+        flexDirection: "column",
+        opacity: props.shown() ? 1 : 0,
+        pointerEvents: props.shown() ? "auto" : "none",
+        zIndex: props.shown() ? 1 : 0,
+      }}
+    >
+      {props.children}
     </View>
   );
 }
@@ -167,7 +224,23 @@ function Pane(props: { children: JSX.Element }): JSX.Element {
 /** 卡板：虚拟化网格/列表（canvas.rs skill_list）。无 props：过滤集、列
  * 数、行距全部在 List 的属性表达式里现读（组件体只执行一次）。 */
 function CardPane(): JSX.Element {
-  const packedRows = computed(() => packCardRows(currentFiltered(), gridColumnsNow()));
+  const localActive = (): boolean => pageActive() && scope() === "local";
+  const listMode = computed<boolean>((prev) =>
+    !localActive() && prev !== undefined ? prev : viewList(),
+  );
+  const trackWidth = computed<number>((prev) =>
+    !localActive() && prev !== undefined ? prev : gridTrackWidthNow(),
+  );
+  const rowStride = computed<number>((prev) =>
+    !localActive() && prev !== undefined
+      ? prev
+      : SKILL_CARD_H + (listMode() ? LIST_GAP : CARD_GAP),
+  );
+  const packedRows = computed<SkillRecord[][]>((prev) =>
+    !localActive() && prev !== undefined
+      ? prev
+      : packCardRows(currentFiltered(), gridColumnsNow()),
+  );
   return (
     <View
       style={{
@@ -178,10 +251,7 @@ function CardPane(): JSX.Element {
         minWidth: 0,
         width: "100%",
       }}
-      onLayout={(event) => {
-        const w = event.bounds.size.width;
-        if (w > 0 && w !== paneWidth()) paneWidth.set(w);
-      }}
+      onLayout={canvasPane.onLayout}
     >
       <List
         ref={(node) => {
@@ -189,8 +259,10 @@ function CardPane(): JSX.Element {
         }}
         testID="skills-scroll"
         each={packedRows()}
-        keyExtractor={(_row, index) => `skills-row-${index}`}
-        estimatedItemSize={stride()}
+        keyExtractor={(row) =>
+          row.map((s) => `${s.name}\u001f${s.skillType}\u001f${s.source ?? s.gitUrl}`).join("\u001e")
+        }
+        estimatedItemSize={rowStride()}
         scrollEventThrottle={32}
         style={{ width: "100%", height: "100%" }}
         contentStyle={{
@@ -211,9 +283,9 @@ function CardPane(): JSX.Element {
               display: "flex",
               flexDirection: "row",
               alignItems: "flex-start",
-              gap: viewList() ? 0 : CARD_GAP,
-              height: stride(),
-              paddingBottom: viewList() ? LIST_GAP : CARD_GAP,
+              gap: listMode() ? 0 : CARD_GAP,
+              height: rowStride(),
+              paddingBottom: listMode() ? LIST_GAP : CARD_GAP,
               width: "100%",
             }}
           >
@@ -221,18 +293,18 @@ function CardPane(): JSX.Element {
               {(skill) => (
                 <View
                   style={
-                    viewList()
+                    listMode()
                       ? { width: "100%", minWidth: 0 }
                       : {
-                          width: gridTrackWidthNow(),
-                          minWidth: gridTrackWidthNow(),
-                          maxWidth: gridTrackWidthNow(),
+                          width: trackWidth(),
+                          minWidth: trackWidth(),
+                          maxWidth: trackWidth(),
                           flexShrink: 0,
                           flexGrow: 0,
                         }
                   }
                 >
-                  <SkillCard skill={skill} listMode={viewList()} cardWidth={gridTrackWidthNow()} />
+                  <SkillCard skill={skill} listMode={listMode()} cardWidth={trackWidth()} />
                 </View>
               )}
             </Each>
@@ -255,17 +327,13 @@ function gridTrackWidthNow(): number {
   return cardTrackWidth(paneWidth(), viewList(), PAGE_PAD, fallbackW);
 }
 
-/** 行距（canvas.rs skill_line：CARD_H + 模式各自的 gap）。 */
-function stride(): number {
-  return SKILL_CARD_H + (viewList() ? LIST_GAP : CARD_GAP);
-}
-
 /** 骨架六片（view.rs render_loading_grid）：与真实卡同轨道的 pulse。 */
 export function SkeletonGrid(props: { viewList: boolean }): JSX.Element {
   const skelW = (): number => cardTrackWidth(paneWidth(), props.viewList, PAGE_PAD, CARD_ROW_W);
   return (
     <View
       testID="skills-skeleton"
+      accessibilityState={{ busy: true }}
       style={
         props.viewList
           ? {
@@ -289,27 +357,29 @@ export function SkeletonGrid(props: { viewList: boolean }): JSX.Element {
             }
       }
     >
-      {[0, 1, 2, 3, 4, 5].map((index) => (
-        <View
-          style={{
-            height: SKILL_CARD_H,
-            width: props.viewList ? "100%" : skelW(),
-            flexShrink: 0,
-            padding: 14,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: paletteToken("border"),
-            backgroundColor: paletteToken("card"),
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
-          <Pulse id={`skills-load-${index}-title`} style={{ height: 16, width: 140 }} />
-          <Pulse id={`skills-load-${index}-line`} secondary style={{ height: 12 }} />
-          <Pulse id={`skills-load-${index}-meta`} secondary style={{ height: 12, width: 200 }} />
-        </View>
-      ))}
+      <Each of={[0, 1, 2, 3, 4, 5]} key={(n) => String(n)}>
+        {(index) => (
+          <View
+            style={{
+              height: SKILL_CARD_H,
+              width: props.viewList ? "100%" : skelW(),
+              flexShrink: 0,
+              padding: 14,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: paletteToken("border"),
+              backgroundColor: paletteToken("card"),
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <Pulse id={`skills-load-${index()}-title`} style={{ height: 16, width: 140 }} />
+            <Pulse id={`skills-load-${index()}-line`} secondary style={{ height: 12 }} />
+            <Pulse id={`skills-load-${index()}-meta`} secondary style={{ height: 12, width: 200 }} />
+          </View>
+        )}
+      </Each>
     </View>
   );
 }

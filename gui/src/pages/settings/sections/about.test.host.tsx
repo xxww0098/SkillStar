@@ -62,7 +62,10 @@ let pendingCheck: { resolve: (record: ReleaseRecordDto) => void } | null = null;
 
 const bridge: AboutBridge = {
   aboutSnapshot() {
-    return snapshotOf(scenario);
+    const snap = snapshotOf(scenario);
+    return new Promise<AboutSnapshotDto>((resolve) => {
+      setTimeout(() => resolve(snap), 0);
+    });
   },
   runReleaseCheck() {
     // 计数按 ":" 之后解析（前缀只是展示），装置重放安全。
@@ -85,7 +88,7 @@ function resetDevice(): void {
   envText.set("env:ok");
   checkText.set("calls:0");
   // 读盘值直接重放（构造函数 load 对位）。
-  state.start();
+  void state.start();
 }
 
 function App(): JSX.Element {
@@ -112,7 +115,7 @@ function App(): JSX.Element {
           onPress={() => {
             scenario = "nogit";
             envText.set("env:nogit");
-            state.start();
+            void state.start();
           }}
         />
         <DeviceButton

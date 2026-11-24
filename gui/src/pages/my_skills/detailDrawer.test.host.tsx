@@ -2,6 +2,7 @@ import { Text, View, effect, mount, signal, untracked, type JSX } from "nsh";
 import { Button } from "nsh/base";
 import { NoticeBand } from "../../shell/notify";
 import { DialogHost } from "../../chrome/dialog";
+import { translationPrefsChanged } from "../../shell/events";
 import { DetailDrawerSlot } from "./detailDrawerSlot";
 import type { DrawerOps } from "./detailDrawerActions";
 import { baselineMissing } from "./detailDrawerActions";
@@ -12,6 +13,7 @@ import {
   loading,
   profiles,
   selectedSkill,
+  setSnapshotLoaderForTest,
   skills,
 } from "./state";
 import type { AgentProfileRecord, SkillRecord } from "./filters";
@@ -32,7 +34,7 @@ import type { AgentProfileRecord, SkillRecord } from "./filters";
 // - 首次真实 refresh（loading→false）落地后再播种夹具并清空描述选择，
 //   之后 ops.refresh 全为假件，夹具不再被真实数据冲掉。
 
-type Scene = "drawer-demo" | "brand" | "moved" | "gone" | "edited" | "fresh" | "zh" | "coexist";
+type Scene = "drawer-demo" | "brand" | "moved" | "gone" | "edited" | "fresh" | "zh" | "coexist" | "cached";
 
 const AGENTS: AgentProfileRecord[] = [
   { id: "claude", displayName: "Claude Code", enabled: true, targetable: true },
@@ -88,31 +90,42 @@ const FIXTURES: SkillRecord[] = [
     source: "other/repo",
     description: "Coexisting alias with modified copy and siblings.",
   }),
+  fixture("cached", {
+    description: "Cached English description.",
+    localizedDescription: "已缓存的英文描述。",
+  }),
 ];
 
 // ---- 翻译假桥 -----------------------------------------------------------------
 
-/** 磁盘缓存：demo 的描述已译；fresh 没有（排一次 fill）。 */
+/** 磁盘缓存：demo 与 cached 的描述已译；fresh 没有（排一次 fill）。 */
 const LOOKUP: Record<string, string> = {
   "Build deep modules for agents.": "为代理构建深模块。",
+  "Cached English description.": "已缓存的英文描述。",
 };
 
 /** 让下一笔 fill 挂起（扫描态的闸）：放行前描述一直未落缓存，按钮停在
  * icon_sweep 的扫描态——GPUI 语言按钮的 pending 门就这样读。 */
 const holdFill = signal(false);
+const blocked = signal(false);
+const missNextFill = signal(false);
 let releaseFill: (() => void) | null = null;
 
 const bridge: DrawerTranslateBridge = {
   descriptionsEnabled: () => false,
   needsTranslation: (text) => !/[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/.test(text),
   lookup: (source) => LOOKUP[source.trim()] ?? null,
-  blocked: () => false,
+  blocked: () => blocked(),
   setChoices: (choices) => {
     record(`choices:${JSON.stringify(choices)}`);
     return Promise.resolve();
   },
   fill: (sources) => {
     record(`fill:${sources[0]}`);
+    if (missNextFill()) {
+      missNextFill.set(false);
+      return Promise.resolve({ done: [], rejection: null });
+    }
     // 真实引擎成功即写盘：假件同样落缓存，会话下一轮 lookup 命中即停。
     const text = `「${sources[0]}」的缓存译文`;
     const land = () => {
@@ -137,8 +150,8 @@ function record(entry: string): void {
   calls.set([...untracked(() => calls()), entry]);
 }
 
-/** toggle 下一次的结局：applied / skip / fail。 */
-const toggleOutcome = signal<"applied" | "skip" | "fail">("applied");
+/** toggle 下一次的结局：applied / skip / skip-unmanaged / skip-foreign-link / fail。 */
+const toggleOutcome = signal<"applied" | "skip" | "skip-unmanaged" | "skip-foreign-link" | "fail">("applied");
 /** master 下一次的报告。 */
 const masterReport = signal({ total: 1, failed: 0, skipped: 0, canonical: 0 });
 /** 让下一次 master 挂起，直到 release（pending 门的闸）。 */
@@ -155,7 +168,9 @@ const OPS: DrawerOps = {
         releaseGate = () => resolve(
           toggleOutcome() === "skip"
             ? { kind: "skipped", code: "canonical_root_agent", path: "/~/.agents/skills", reason: "canonical" }
-            : { kind: "applied" }
+            : toggleOutcome() === "skip-unmanaged"
+              ? { kind: "skipped", code: "unmanaged_real_directory", path: "/Users/test/.gemini/antigravity/skills/drawer-demo", reason: "unmanaged" }
+              : { kind: "applied" }
         );
       });
     }
@@ -165,6 +180,22 @@ const OPS: DrawerOps = {
         code: "canonical_root_agent",
         path: "/~/.agents/skills",
         reason: "canonical",
+      });
+    }
+    if (toggleOutcome() === "skip-unmanaged") {
+      return Promise.resolve({
+        kind: "skipped",
+        code: "unmanaged_real_directory",
+        path: "/Users/test/.gemini/antigravity/skills/drawer-demo",
+        reason: "unmanaged",
+      });
+    }
+    if (toggleOutcome() === "skip-foreign-link") {
+      return Promise.resolve({
+        kind: "skipped",
+        code: "foreign_link",
+        path: "/Users/test/.gemini/antigravity/skills/drawer-demo",
+        reason: "foreign link",
       });
     }
     if (toggleOutcome() === "fail") {
@@ -193,7 +224,7 @@ const OPS: DrawerOps = {
   inspectDrawerExtras: (name) => {
     record(`extras:${name}`);
     if (name !== "coexist") {
-      return Promise.resolve({ called: null, besideSkills: [], modifiedCopies: [] });
+      return Promise.resolve({ called: null, besideSkills: [], modifiedCopies: [], unmanagedEntries: [] });
     }
     return new Promise((resolve) => {
       setTimeout(
@@ -206,6 +237,16 @@ const OPS: DrawerOps = {
                 agentId: "claude",
                 agentDisplayName: "Claude Code",
                 targetDir: "/agents/claude/coexist",
+              },
+            ],
+            unmanagedEntries: [
+              {
+                skillName: "coexist",
+                agentId: "antigravity",
+                agentDisplayName: "Antigravity",
+                targetDir: "/Users/test/.gemini/antigravity/skills/coexist",
+                isSymlink: false,
+                canAdoptToHub: true,
               },
             ],
             besideSkills: [
@@ -228,6 +269,17 @@ const OPS: DrawerOps = {
     record(`overwriteCopy:${skill}:${agentId}`);
     return Promise.resolve({ backupId: "bak-test-1", path: "/backups/bak-test-1" });
   },
+  takeOverUnmanagedAgentEntry: (skill, agentId) => {
+    record(`takeOverUnmanaged:${skill}:${agentId}`);
+    return Promise.resolve({ backupId: "bak-unmanaged-1", path: "/backups/bak-unmanaged-1" });
+  },
+  adoptUnmanagedAgentEntry: (skill, agentId) => {
+    record(`adoptUnmanaged:${skill}:${agentId}`);
+    return Promise.resolve();
+  },
+  revealPath: (path) => {
+    record(`reveal:${path}`);
+  },
   refresh: () => {
     record("refresh");
     return Promise.resolve();
@@ -238,6 +290,14 @@ const OPS: DrawerOps = {
 
 // 挡住装载尾的后台更新检查（busy 非空即不查；见文件头）。
 busy.set("host-hold");
+// 防止后续 translationPrefsChanged 触发 state.ts 读写真实 $HOME 快照冲掉夹具。
+setSnapshotLoaderForTest(async () => ({
+  skills: untracked(skills).length > 0 ? untracked(skills) : FIXTURES,
+  agents: untracked(profiles).length > 0 ? untracked(profiles) : AGENTS,
+  favorites: [],
+  favoritesLocked: false,
+  descriptionChoices: untracked(descriptionChoices),
+}));
 
 const scene = signal<Scene>("drawer-demo");
 const closed = signal(0);
@@ -310,11 +370,29 @@ function App(): JSX.Element {
         <Button testID="host-scene-coexist" onPress={() => setScene("coexist")}>
           <Text>scene-coexist</Text>
         </Button>
+        <Button testID="host-scene-cached" onPress={() => setScene("cached")}>
+          <Text>scene-cached</Text>
+        </Button>
+        <Button testID="host-toggle-blocked" onPress={() => blocked.set(!blocked())}>
+          <Text>toggle-blocked</Text>
+        </Button>
+        <Button testID="host-miss-fill" onPress={() => missNextFill.set(true)}>
+          <Text>miss-fill</Text>
+        </Button>
+        <Button testID="host-prefs-changed" onPress={() => translationPrefsChanged.publish()}>
+          <Text>prefs-changed</Text>
+        </Button>
         <Button testID="host-busy-demo" onPress={() => (busy() === "drawer-demo" ? busy.set("host-hold") : busy.set("drawer-demo"))}>
           <Text>busy-demo</Text>
         </Button>
         <Button testID="host-toggle-skip" onPress={() => toggleOutcome.set("skip")}>
           <Text>toggle-skip</Text>
+        </Button>
+        <Button testID="host-toggle-unmanaged" onPress={() => toggleOutcome.set("skip-unmanaged")}>
+          <Text>toggle-unmanaged</Text>
+        </Button>
+        <Button testID="host-toggle-foreign-link" onPress={() => toggleOutcome.set("skip-foreign-link")}>
+          <Text>toggle-foreign-link</Text>
         </Button>
         <Button testID="host-toggle-fail" onPress={() => toggleOutcome.set("fail")}>
           <Text>toggle-fail</Text>

@@ -115,3 +115,34 @@ fn an_unreadable_client_is_an_empty_identity_not_an_error() {
     assert_eq!(claude.account_id, None);
     assert!(claude.source.ends_with(".credentials.json"));
 }
+
+#[test]
+fn fingerprint_matching_uses_index_without_decrypting_records() {
+    let sandbox = Sandbox::new();
+    let stored = store_account(
+        "claude-code",
+        Identity::default(),
+        tokens("sk-ant-oat01-live", Some("sk-ant-ort01-live")),
+    );
+    // Corrupt the encrypted token field on disk (and clear email/accountId):
+    // if reconcile tried to open and decrypt the record file, matching would fail.
+    let record_path = store::record_path(&stored.id);
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+    raw["tokensEncrypted"] = json!("not-decryptable-ciphertext");
+    std::fs::write(&record_path, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+    sandbox.write_file(
+        &sandbox.tool_path(&[".claude", ".credentials.json"]),
+        json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-live",
+                "refreshToken": "sk-ant-ort01-live"
+            }
+        })
+        .to_string(),
+    );
+
+    let matched = super::live_for_agent("claude-code").expect("claude-code live");
+    assert_eq!(matched.account_id.as_deref(), Some(stored.id.as_str()));
+}

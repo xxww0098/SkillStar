@@ -140,63 +140,6 @@ fn search_handles_hyphenated_query_tokens() {
 }
 
 #[test]
-fn source_resolution_prefers_repo_affinity_before_popularity() {
-    with_temp_data_root(|_| {
-        let conn = create_connection().expect("create marketplace connection");
-        let tx = conn.unchecked_transaction().expect("start tx");
-        let synced_at = now_rfc3339();
-
-        upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &synced_at)
-            .expect("upsert preferred repo");
-        upsert_skill_identity_in_tx(&tx, "vercel/ai", "search", 999, &synced_at)
-            .expect("upsert popular repo");
-        tx.commit().expect("commit source fixtures");
-
-        let requests = vec![ResolveSkillRequest {
-            original_name: "search".to_string(),
-            normalized_name: "search".to_string(),
-        }];
-        let named_sources = HashMap::new();
-        let preferred_repos = HashSet::from(["openai/skills".to_string()]);
-
-        let resolved =
-            resolve_skill_sources_from_snapshot(&conn, &requests, &named_sources, &preferred_repos)
-                .expect("resolve from snapshot");
-
-        assert_eq!(
-            resolved.get("search"),
-            Some(&"https://github.com/openai/skills".to_string())
-        );
-    });
-}
-
-#[test]
-fn source_resolution_requires_unique_top_candidate_when_ambiguous() {
-    with_temp_data_root(|_| {
-        let conn = create_connection().expect("create marketplace connection");
-        let tx = conn.unchecked_transaction().expect("start tx");
-        let synced_at = now_rfc3339();
-
-        upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 100, &synced_at)
-            .expect("upsert first candidate");
-        upsert_skill_identity_in_tx(&tx, "vercel/ai", "search", 100, &synced_at)
-            .expect("upsert second candidate");
-        tx.commit().expect("commit ambiguous fixtures");
-
-        let requests = vec![ResolveSkillRequest {
-            original_name: "search".to_string(),
-            normalized_name: "search".to_string(),
-        }];
-
-        let resolved =
-            resolve_skill_sources_from_snapshot(&conn, &requests, &HashMap::new(), &HashSet::new())
-                .expect("resolve ambiguous snapshot");
-
-        assert!(!resolved.contains_key("search"));
-    });
-}
-
-#[test]
 fn detail_snapshot_reads_cached_payload() {
     with_temp_data_root(|_| {
         let conn = create_connection().expect("create marketplace connection");

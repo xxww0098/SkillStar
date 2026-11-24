@@ -135,8 +135,11 @@ fn write_all(
             credentials.remove(&refresh_key(provider));
         }
     }
-    if let Some(user_info) = user_info_json(request) {
+    if let Some(user_info) = user_info_json(request, existing_user_info(&credentials, provider, key))
+    {
         credentials.insert(user_key(provider), sealed(key, &user_info)?);
+    } else {
+        credentials.remove(&user_key(provider));
     }
     credentials.insert(JWT.to_string(), sealed(key, jwt)?);
     write_json(credentials_path, &Value::Object(credentials))?;
@@ -263,38 +266,22 @@ fn read_stored(path: &Path, key: &[u8; 32]) -> AccountResult<Option<StoredSessio
     let user_info = field(&user_key(&provider))?
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
     let jwt = field(JWT)?;
-    let user_text = |key: &str| {
-        user_info
-            .as_ref()
-            .and_then(|info| info.get(key))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    let email = user_text("email").or_else(|| jwt.as_deref().and_then(crate::identity::jwt_email));
-    let account_id = user_text("userId")
-        .or_else(|| user_text("user_id"))
-        .or_else(|| user_text("id"))
-        .or_else(|| jwt.as_deref().and_then(|token| crate::identity::jwt_claim(token, "sub")));
     let expires_at = jwt
         .as_deref()
-        .and_then(crate::identity::jwt_exp);
+        .and_then(crate::identity::jwt_exp)
+        .or_else(|| crate::identity::jwt_exp(&access_token));
+    let tokens = TokenSet {
+        access_token,
+        refresh_token,
+        id_token: jwt,
+        expires_at,
+        token_type: "Bearer".to_string(),
+    };
+    let identity = zcode::identity_of(&tokens, user_info.as_ref());
     Ok(Some(StoredSession {
         provider,
-        tokens: TokenSet {
-            access_token,
-            refresh_token,
-            id_token: jwt,
-            expires_at,
-            token_type: "Bearer".to_string(),
-        },
-        identity: Identity {
-            display_name: email.clone(),
-            email,
-            plan: None,
-            account_id,
-        },
+        tokens,
+        identity,
     }))
 }
 
@@ -311,36 +298,92 @@ fn open(root: &Value, name: &str, key: &[u8; 32]) -> AccountResult<Option<String
     })
 }
 
-/// 记录侧的身份。
+fn existing_user_info(
+    credentials: &Map<String, Value>,
+    provider: &str,
+    key: &[u8; 32],
+) -> Option<Map<String, Value>> {
+    let raw = credentials.get(&user_key(provider))?.as_str()?;
+    let plain = store::open(key, raw).ok()?;
+    serde_json::from_str::<Value>(&plain)
+        .ok()
+        .and_then(|value| value.as_object().cloned())
+}
+
+/// 记录侧的身份（兼容无邮箱账号，并用令牌 claim 兜底）。
 fn identity_of(request: &SwitchRequest<'_>) -> Identity {
+    let inferred = zcode::identity_of(request.tokens, None);
+    let email = request
+        .email
+        .map(str::trim)
+        .filter(|email| email.contains('@'))
+        .map(str::to_string)
+        .or(inferred.email);
+    let account_id = request
+        .account_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && !id.eq_ignore_ascii_case("unknown"))
+        .map(str::to_string)
+        .or(inferred.account_id);
+    let display_name = Some(request.display_name.trim())
+        .filter(|name| {
+            !name.is_empty()
+                && !name.eq_ignore_ascii_case(zcode::AGENT_ID)
+                && !name.eq_ignore_ascii_case("unknown")
+        })
+        .map(str::to_string)
+        .or(inferred.display_name)
+        .or_else(|| email.clone());
     Identity {
-        email: request
-            .email
-            .map(str::trim)
-            .filter(|email| email.contains('@'))
-            .map(str::to_string)
-            .or_else(|| {
-                request
-                    .tokens
-                    .id_token
-                    .as_deref()
-                    .and_then(crate::identity::jwt_email)
-            }),
-        display_name: None,
+        email,
+        display_name,
         plan: None,
-        account_id: request.account_id.map(str::trim).map(str::to_string),
+        account_id,
     }
 }
 
-/// oauth:{provider}:user_info 的内容：官方客户端读 email / userId。
-fn user_info_json(request: &SwitchRequest<'_>) -> Option<String> {
-    let identity = identity_of(request);
-    let mut map = Map::new();
-    if let Some(email) = identity.email {
-        map.insert("email".to_string(), json!(email));
+fn user_info_conflicts(existing: &Map<String, Value>, target: &Identity) -> bool {
+    let previous = zcode::identity_of(&TokenSet::default(), Some(&Value::Object(existing.clone())));
+    let differs = |left: &Option<String>, right: &Option<String>| match (left, right) {
+        (Some(left), Some(right)) => !crate::identity::same_identity(Some(left), Some(right)),
+        _ => false,
+    };
+    if differs(&previous.account_id, &target.account_id)
+        || differs(&previous.email, &target.email)
+    {
+        return true;
     }
+    previous.account_id.is_some()
+        && target.account_id.is_none()
+        && !crate::identity::same_identity(previous.email.as_deref(), target.email.as_deref())
+}
+
+/// oauth:{provider}:user_info 的内容：写入 id/userId/username/displayName/email，
+/// 同账号时保留已有扩展字段（如 rawProfile、avatarUrl）。
+fn user_info_json(
+    request: &SwitchRequest<'_>,
+    existing: Option<Map<String, Value>>,
+) -> Option<String> {
+    let identity = identity_of(request);
+    let mut map = match existing {
+        Some(prev) if !user_info_conflicts(&prev, &identity) => prev,
+        _ => Map::new(),
+    };
     if let Some(account_id) = identity.account_id {
+        map.insert("id".to_string(), json!(account_id));
         map.insert("userId".to_string(), json!(account_id));
+    }
+    if let Some(name) = identity.display_name {
+        map.insert("username".to_string(), json!(name));
+        map.insert("displayName".to_string(), json!(name));
+    }
+    match identity.email {
+        Some(email) => {
+            map.insert("email".to_string(), json!(email));
+        }
+        None => {
+            map.remove("email");
+        }
     }
     (!map.is_empty()).then(|| Value::Object(map).to_string())
 }

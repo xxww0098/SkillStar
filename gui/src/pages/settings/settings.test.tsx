@@ -9,7 +9,7 @@ import { WINDOW_H, WINDOW_W } from "../../layout";
 import { t } from "../../services/translation";
 import { activeSectionFromScroll, createSettingsState } from "./state";
 import type { PrefsDto, ProxyDto, SettingsBridge } from "./bridge";
-import { SETTINGS_NAV_LABELS_MIN_PANE, SETTINGS_SECTIONS } from "./sections";
+import { SETTINGS_SECTIONS } from "./sections";
 
 const HOST = "./settings.test.host.tsx";
 
@@ -77,6 +77,7 @@ test("language and style writes keep all three prefs fields intact", () => {
   const state = createSettingsState(bridge, {
     applyLocale: (lang) => seeds.push(`locale:${lang}`),
     applyTheme: (style) => seeds.push(`theme:${style}`),
+    applyBackgroundRun: (enabled) => seeds.push(`bgrun:${enabled}`),
   });
   state.setLanguage("en");
   state.setBackgroundStyle("paper");
@@ -86,8 +87,8 @@ test("language and style writes keep all three prefs fields intact", () => {
   expect(saves.prefs[0]).toEqual({ language: "en", background_style: "current", background_run: false });
   expect(saves.prefs[1]).toEqual({ language: "en", background_style: "paper", background_run: false });
   expect(saves.prefs[2]).toEqual({ language: "en", background_style: "paper", background_run: true });
-  // 播种钩子跟随（set_language / set_mode 对位）。
-  expect(seeds).toEqual(["locale:en", "theme:paper"]);
+  // 播种钩子跟随（set_language / set_mode / background_run 对位）。
+  expect(seeds).toEqual(["locale:en", "theme:paper", "bgrun:true"]);
 });
 
 test("start() seeds the globals from the stored prefs once", () => {
@@ -96,9 +97,10 @@ test("start() seeds the globals from the stored prefs once", () => {
   const state = createSettingsState(bridge, {
     applyLocale: (lang) => seeds.push(`locale:${lang}`),
     applyTheme: (style) => seeds.push(`theme:${style}`),
+    applyBackgroundRun: (enabled) => seeds.push(`bgrun:${enabled}`),
   });
   state.start();
-  expect(seeds).toEqual(["locale:zh-CN", "theme:current"]);
+  expect(seeds).toEqual(["locale:zh-CN", "theme:current", "bgrun:false"]);
   expect(state.proxyForm().host).toBe("127.0.0.1");
   expect(state.proxyForm().port).toBe("7897");
 });
@@ -158,6 +160,9 @@ test("sliders and switches persist through the bridge on press", async () => {
   await app.press("id:settings-general");
   await app.waitUntil(() => app.shows("id:ui-lang-en"));
   expect(app.shows("id:skill-update-mode-manual")).toBe(true);
+  expect(app.shows("id:tray-quota-toggle")).toBe(true);
+  await app.press("id:tray-quota-toggle");
+  await app.press("id:tray-quota-toggle");
   await app.press("id:ui-lang-en");
   await app.waitUntil(() => app.texts().some((s) => s.includes("prefs:en|current|false")));
   await app.press("id:appearance-paper");

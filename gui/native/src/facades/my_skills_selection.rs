@@ -78,9 +78,23 @@ impl MySkillsSelection {
 /// runtime (`blocking` is `spawn_blocking` — the repo's facade tests never
 /// spin a blocking-pool future, they test the body).
 fn link_job(names: &[String], agent_id: &str) -> Result<JsonValue, String> {
-    let linked = ss_skills::deployment::batch_link_skills_to_agent(names, agent_id)
+    let outcome = ss_skills::deployment::batch_link_skills_to_agent_with_report(names, agent_id)
         .map_err(|err| format!("{err:#}"))?;
-    Ok(obj(vec![("linked", JsonValue::from(linked as u64))]))
+    let skipped = outcome
+        .skipped
+        .into_iter()
+        .map(|item| {
+            obj(vec![
+                ("skill", JsonValue::String(item.skill_name)),
+                ("code", JsonValue::String(item.code)),
+                ("path", JsonValue::String(item.path)),
+            ])
+        })
+        .collect::<Vec<_>>();
+    Ok(obj(vec![
+        ("linked", JsonValue::from(outcome.linked as u64)),
+        ("skipped", JsonValue::Array(skipped)),
+    ]))
 }
 
 /// The unlink batch body (commands.rs `batch_unlink_selected`): one

@@ -64,7 +64,23 @@ where
         if line.is_empty() {
             continue;
         }
-        let message: Value = serde_json::from_str(&line)?;
+        let message: Value = match serde_json::from_str(&line) {
+            Ok(msg) => msg,
+            Err(err) => {
+                let parse_error = json!({
+                    "jsonrpc": "2.0",
+                    "id": Value::Null,
+                    "error": {
+                        "code": -32700,
+                        "message": format!("Parse error: {err}"),
+                    }
+                });
+                if outbound.send(serde_json::to_string(&parse_error)?).is_err() {
+                    break;
+                }
+                continue;
+            }
+        };
         match message.get("method").and_then(Value::as_str) {
             Some("initialize") => {
                 if let Some(value) = message["params"].get("capabilities") {
@@ -86,6 +102,9 @@ where
                 outbound.send(serde_json::to_string(&reply)?)?;
             }
             Some("notifications/initialized") => {}
+            Some("server/discover") => {
+                write_json(&mut inner_write, &message).await?;
+            }
             Some(_) => {
                 write_json(
                     &mut inner_write,
@@ -128,7 +147,6 @@ fn stamp(mut message: Value, capabilities: &Value, client_info: &Value) -> Value
             target.insert(key.clone(), value.clone());
         }
     }
-    meta["io.modelcontextprotocol/protocolVersion"] = json!(PROTOCOL);
     params["_meta"] = meta;
     message
 }
@@ -234,6 +252,112 @@ mod tests {
         match previous {
             Some(value) => unsafe { std::env::set_var(key, value) },
             None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    #[test]
+    fn stamp_preserves_client_declared_protocol_version() {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2025-11-25"
+                }
+            }
+        });
+        let stamped = super::stamp(
+            msg,
+            &serde_json::json!({}),
+            &serde_json::json!({"name": "legacy", "version": "1"}),
+        );
+        assert_eq!(
+            stamped["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"],
+            "2025-11-25"
+        );
+    }
+
+    #[test]
+    fn gateway_returns_parse_error_and_rejects_legacy_discover_without_crashing() {
+        let _lock = futures::executor::block_on(crate::test_support::ENV_LOCK.lock());
+        let temp = tempfile::tempdir().unwrap();
+        let previous_home = std::env::var_os("HOME");
+        let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe {
+            std::env::set_var("HOME", temp.path().join("home"));
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path().join("data"));
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (client, server) = tokio::io::duplex(64 * 1024);
+            let (client_read, mut client_write) = tokio::io::split(client);
+            let (server_read, server_write) = tokio::io::split(server);
+            let gateway = tokio::spawn(serve_gateway(server_read, server_write));
+
+            // 1. Malformed JSON line must emit -32700 and keep the loop alive.
+            client_write.write_all(b"{bad json\n").await.unwrap();
+            // 2. server/discover declaring legacy protocolVersion must not be rewritten to 2026-07-28.
+            client_write
+                .write_all(
+                    br#"{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-11-25","io.modelcontextprotocol/clientInfo":{"name":"legacy","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+                )
+                .await
+                .unwrap();
+            client_write.write_all(b"\n").await.unwrap();
+            // 3. Subsequent valid request after initialize still succeeds cleanly.
+            client_write
+                .write_all(
+                    br#"{"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"grok","version":"1"}}}"#,
+                )
+                .await
+                .unwrap();
+            client_write.write_all(b"\n").await.unwrap();
+            client_write
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\",\"params\":{}}\n")
+                .await
+                .unwrap();
+            client_write.shutdown().await.unwrap();
+
+            let mut frames = Vec::new();
+            let mut reader = tokio::io::BufReader::new(client_read).lines();
+            while frames.len() < 4 {
+                let line = tokio::time::timeout(std::time::Duration::from_secs(5), reader.next_line())
+                    .await
+                    .expect("timed out waiting for gateway")
+                    .unwrap()
+                    .expect("gateway closed early");
+                if !line.is_empty() {
+                    frames.push(serde_json::from_str::<serde_json::Value>(&line).unwrap());
+                }
+            }
+            assert_eq!(frames[0]["error"]["code"], -32700, "{:?}", frames[0]);
+            let discover_resp = frames
+                .iter()
+                .find(|f| f["id"] == 2)
+                .unwrap_or_else(|| panic!("missing id 2 in {frames:?}"));
+            assert!(
+                discover_resp.get("error").is_some(),
+                "legacy discover must error: {discover_resp:?}"
+            );
+            let init_resp = frames
+                .iter()
+                .find(|f| f["id"] == 3)
+                .unwrap_or_else(|| panic!("missing id 3 in {frames:?}"));
+            assert_eq!(init_resp["result"]["protocolVersion"], "2026-07-28");
+            let tools_resp = frames
+                .iter()
+                .find(|f| f["id"] == 4)
+                .unwrap_or_else(|| panic!("missing id 4 in {frames:?}"));
+            assert_eq!(tools_resp["result"]["tools"].as_array().unwrap().len(), 3);
+            gateway.abort();
+        });
+        unsafe {
+            restore("HOME", previous_home);
+            restore("SKILLSTAR_DATA_DIR", previous_data);
         }
     }
 }

@@ -1,4 +1,4 @@
-import { Text, View, type JSX } from "nsh";
+import { Text, View, computed, effect, type JSX } from "nsh";
 import { paletteToken } from "../../services/themeMode";
 import { CARD_GAP, SKILL_CARD_H, SKILL_CARD_W } from "../../layout";
 import { AgentFooterBar } from "../../chrome/agentRail";
@@ -9,8 +9,10 @@ import {
   skillCardHoverStyle,
 } from "../../chrome/cardShell";
 import { RepoAvatar, githubOwnerForSkill, sanitizeGithubOwner } from "../../chrome/repoAvatar";
+import { bindSlow } from "../../chrome/delayedFlag";
 import { Icon } from "../../chrome/icons";
-import { Pulse } from "../../chrome/feedback";
+import { IconSpin, Pulse } from "../../chrome/feedback";
+import { tf } from "../../services/translation";
 import {
   formatInstalls,
   skillBlurb,
@@ -18,6 +20,7 @@ import {
   type PublisherRecord,
 } from "./types";
 import { mt, mtf } from "./marketStrings";
+import { queueMarketDescription } from "./translateQueue";
 
 // 市场卡与发布者卡 — 与已安装卡/卡组共用 16px 圆角卡壳与 40px well 底栏：
 // 悬停高亮边框为强调色 + card_hover；选中时固定强调色边框 + card_active。
@@ -34,6 +37,10 @@ export interface MarketCardProps {
 }
 
 export function MarketCard(props: MarketCardProps): JSX.Element {
+  effect(() => {
+    queueMarketDescription(props.skill);
+  });
+  const sourceLabel = computed(() => distinctSource(props.skill.source, props.skill.name));
   return (
     <View
       testID={`mk-card-${props.skill.name}`}
@@ -121,9 +128,9 @@ export function MarketCard(props: MarketCardProps): JSX.Element {
             minWidth: 0,
           }}
         >
-          <If when={distinctSource(props.skill.source, props.skill.name) !== null}>
+          <If when={sourceLabel() !== null}>
             <SourceMeta
-              label={distinctSource(props.skill.source, props.skill.name) ?? ""}
+              label={sourceLabel() ?? ""}
               maxWidth={168}
             />
           </If>
@@ -204,59 +211,69 @@ function ExceptionChip(props: { label: string; tone: "danger" | "warn" }): JSX.E
   );
 }
 
-/** 安装/卸载主动作：未装 = accent 实底「安装」；已装 = danger 弱底描边「卸载」；
- * busy = 禁用态显示省略号。 */
+/** 安装超过这个时间，按钮下可以出现阶段句。按钮本身的标签和宽度不变。 */
+const INSTALL_PHASE_MS = 3_000;
+
+/** 安装/卸载主动作：未装 = accent 实底「安装」；已装 = danger 弱底描边「卸载」。
+ * busy 只在固定的 14px 槽里转 loader，不改标签、不把整钮刷灰。卸载确认后同样转。 */
 function InstallAction(props: { skill: MarketSkill; busy: boolean; onPress: () => void }): JSX.Element {
+  const phaseLine = bindSlow(() => props.busy && !props.skill.installed, INSTALL_PHASE_MS);
   return (
-    <View
-      testID={`mk-act-${props.skill.name}`}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        height: 26,
-        paddingHorizontal: 10,
-        borderRadius: 7,
-        cursor: props.busy ? "default" : "pointer",
-        borderWidth: 1,
-        backgroundColor: props.busy
-          ? paletteToken("card_hover")
-          : props.skill.installed
-            ? paletteToken("danger_bg")
-            : paletteToken("accent"),
-        borderColor:
-          !props.busy && props.skill.installed ? paletteToken("danger_border") : "transparent",
-      }}
-      hoverStyle={
-        props.busy
-          ? undefined
-          : {
-              backgroundColor: props.skill.installed
-                ? paletteToken("danger_hover")
-                : paletteToken("accent_hover"),
-            }
-      }
-      onPress={props.busy ? undefined : props.onPress}
-    >
-      <Text
+    <View style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0, gap: 2 }}>
+      <View
+        testID={`mk-act-${props.skill.name}`}
         style={{
-          fontSize: 12,
-          fontWeight: props.busy ? "500" : "600",
-          color: props.busy
-            ? paletteToken("fg_muted")
-            : props.skill.installed
-              ? paletteToken("danger")
-              : paletteToken("on_accent"),
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          gap: 6,
+          height: 26,
+          paddingHorizontal: 10,
+          borderRadius: 7,
+          cursor: props.busy ? "default" : "pointer",
+          borderWidth: 1,
+          backgroundColor: props.skill.installed ? paletteToken("danger_bg") : paletteToken("accent"),
+          borderColor: props.skill.installed ? paletteToken("danger_border") : "transparent",
+        }}
+        hoverStyle={
+          props.busy
+            ? undefined
+            : {
+                backgroundColor: props.skill.installed
+                  ? paletteToken("danger_hover")
+                  : paletteToken("accent_hover"),
+              }
+        }
+        onPress={() => {
+          if (!props.busy) props.onPress();
         }}
       >
-        {props.busy
-          ? "…"
-          : props.skill.installed
-            ? mt("common.uninstall")
-            : mt("common.install")}
-      </Text>
+        <View style={{ width: 14, height: 14, flexShrink: 0 }}>
+          <IconSpin
+            testID={`mk-spin-${props.skill.name}`}
+            name="loader"
+            size={14}
+            color={props.skill.installed ? paletteToken("danger") : paletteToken("on_accent")}
+            spin={props.busy}
+          />
+        </View>
+        <Text
+          style={{
+            fontSize: 12,
+            fontWeight: "600",
+            color: props.skill.installed ? paletteToken("danger") : paletteToken("on_accent"),
+          }}
+        >
+          {props.skill.installed ? mt("common.uninstall") : mt("common.install")}
+        </Text>
+      </View>
+      <If when={phaseLine()}>
+        <Text style={{ fontSize: 10, color: paletteToken("fg_muted"), numberOfLines: 1 }}>
+          {tf("wait.installing", { name: props.skill.name })}
+        </Text>
+      </If>
     </View>
   );
 }
@@ -366,5 +383,3 @@ export function MarketSkeletonTile(props: { index: number; cardWidth?: number })
     </View>
   );
 }
-
-export const MARKET_CARD_GAP = CARD_GAP;

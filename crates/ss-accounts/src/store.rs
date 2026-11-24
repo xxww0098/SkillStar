@@ -173,6 +173,11 @@ pub struct IndexEntry {
     pub requires_reauth: bool,
     #[serde(default)]
     pub usage: Option<UsageSnapshot>,
+    /// Cached non-secret token prefixes so live matching skips record reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_fingerprint: Option<String>,
 }
 
 impl IndexEntry {
@@ -189,6 +194,8 @@ impl IndexEntry {
             last_used_at: account.last_used_at,
             requires_reauth: account.requires_reauth,
             usage: account.usage.clone(),
+            access_fingerprint: account.access_fingerprint(),
+            refresh_fingerprint: account.refresh_fingerprint(),
         }
     }
 
@@ -207,6 +214,21 @@ impl IndexEntry {
 pub fn index() -> AccountResult<Vec<IndexEntry>> {
     let _guard = StorageLock::acquire()?;
     ensure_index_locked()
+}
+
+/// Ensure the index is fresh, purge any retired agent records under the same
+/// lock, and return supported entries (oldest first) without touching records
+/// in steady state.
+pub(crate) fn index_supported() -> AccountResult<Vec<IndexEntry>> {
+    let _guard = StorageLock::acquire()?;
+    let mut entries = ensure_index_locked()?;
+    if entries
+        .iter()
+        .any(|entry| crate::Agent::from_id(&entry.agent).is_err())
+    {
+        purge_unsupported_entries_locked(&mut entries)?;
+    }
+    Ok(entries)
 }
 
 /// Every stored account, oldest first, read from the records (the truth).
@@ -264,8 +286,20 @@ pub fn upsert_replacing_identity(account: Account) -> AccountResult<Account> {
         incoming.id = existing.id.clone();
         incoming.created_at = existing.created_at;
         incoming.last_used_at = existing.last_used_at;
-        if !existing.display_name.trim().is_empty() {
+        let existing_trimmed = existing.display_name.trim();
+        let existing_is_placeholder = existing_trimmed.is_empty()
+            || existing_trimmed.eq_ignore_ascii_case(&existing.agent)
+            || existing.email.as_deref().is_some_and(|email| {
+                existing_trimmed.eq_ignore_ascii_case(email.trim())
+            });
+        let incoming_name = incoming.display_name.trim();
+        let incoming_is_real =
+            !incoming_name.is_empty() && !incoming_name.eq_ignore_ascii_case(&incoming.agent);
+        if (!existing_is_placeholder || !incoming_is_real) && !existing_trimmed.is_empty() {
             incoming.display_name = existing.display_name;
+        }
+        if incoming.email.is_none() {
+            incoming.email = existing.email;
         }
         if incoming.account_id.is_none() {
             incoming.account_id = existing.account_id;
@@ -288,12 +322,6 @@ pub fn remove(id: &str) -> AccountResult<()> {
     sync_index_locked(None)
 }
 
-/// Rewrite the index from the records on disk.
-pub fn rebuild_index() -> AccountResult<Vec<IndexEntry>> {
-    let _guard = StorageLock::acquire()?;
-    rebuild_index_locked()
-}
-
 // ---------------------------------------------------------------------------
 // Locked helpers: no function here takes the lock again.
 // ---------------------------------------------------------------------------
@@ -302,6 +330,7 @@ fn ensure_index_locked() -> AccountResult<Vec<IndexEntry>> {
     match read_index_locked() {
         Some(mut entries) => {
             if same_ids(&entries, &record_ids_locked()) {
+                backfill_fingerprints_locked(&mut entries)?;
                 sort_entries(&mut entries);
                 return Ok(entries);
             }
@@ -309,6 +338,32 @@ fn ensure_index_locked() -> AccountResult<Vec<IndexEntry>> {
         }
         None => rebuild_index_locked(),
     }
+}
+
+fn backfill_fingerprints_locked(entries: &mut [IndexEntry]) -> AccountResult<()> {
+    if entries
+        .iter()
+        .all(|entry| entry.access_fingerprint.is_some())
+    {
+        return Ok(());
+    }
+    let mut changed = false;
+    for entry in entries.iter_mut() {
+        if entry.access_fingerprint.is_some() {
+            continue;
+        }
+        if let Ok(account) = read_record_locked(&entry.id) {
+            let next = IndexEntry::from_account(&account);
+            if next != *entry {
+                *entry = next;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        write_index_locked(entries)?;
+    }
+    Ok(())
 }
 
 fn rebuild_index_locked() -> AccountResult<Vec<IndexEntry>> {
@@ -337,6 +392,36 @@ fn sync_index_locked(touched: Option<&Account>) -> AccountResult<()> {
         return write_index_locked(&entries);
     }
     rebuild_index_locked().map(|_| ())
+}
+
+fn purge_unsupported_entries_locked(entries: &mut Vec<IndexEntry>) -> AccountResult<Vec<String>> {
+    let mut removed = Vec::new();
+    let mut failure = None;
+    for entry in entries.iter() {
+        if crate::Agent::from_id(&entry.agent).is_ok() {
+            continue;
+        }
+        match std::fs::remove_file(record_path(&entry.id)) {
+            Ok(()) => removed.push(entry.id.clone()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+    if !removed.is_empty() {
+        tracing::info!(
+            target: "accounts",
+            removed = removed.len(),
+            "deleted account records of clients this build no longer manages"
+        );
+        entries.retain(|entry| !removed.iter().any(|id| id == &entry.id));
+        write_index_locked(entries)?;
+    }
+    match failure {
+        Some(error) => Err(AccountError::Io(error)),
+        None => Ok(removed),
+    }
 }
 
 fn find_same_identity_locked(incoming: &Account) -> AccountResult<Option<Account>> {

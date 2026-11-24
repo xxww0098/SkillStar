@@ -70,16 +70,16 @@ function harness(profiles: AgentProfileDto[], diskState: Record<string, ManagedS
   let enabled = new Map(profiles.map((item) => [item.id, item.enabled]));
   let names = new Map<string, string[]>();
   const bridge: AgentConnectionsBridge = {
-    listProfiles() {
+    async listProfiles() {
       return profiles.map((item) => ({ ...item, enabled: enabled.get(item.id) === true }));
     },
-    toggleProfile(id) {
+    async toggleProfile(id) {
       calls.toggles.push(id);
       const next = !(enabled.get(id) === true);
       enabled.set(id, next);
       return next;
     },
-    listLinkedSkills(id) {
+    async listLinkedSkills(id) {
       return names.get(id) ?? [];
     },
     async unlinkSkill(skill, agentId) {
@@ -218,23 +218,23 @@ test("codex shows the legacy second path; shared names cross profiles", () => {
 
 // ---- 启用开关 → agentsChanged 定向刷新 --------------------------------------
 
-test("a successful toggle publishes agentsChanged exactly once; a failure never does", () => {
+test("a successful toggle publishes agentsChanged exactly once; a failure never does", async () => {
   const h = harness([
     profile({ id: "codex", global_skills_dir: "/hub/codex/skills", enabled: false }),
   ]);
-  h.state.start();
+  await h.state.start();
   const events: string[] = [];
   const off = agentsChanged.subscribe(() => events.push("changed"));
   // 成功：enabled 跟随 + 定向刷新事件（GPUI cx.emit(AgentsChanged) 对位）。
-  h.state.toggleAgentEnabled("codex");
+  await h.state.toggleAgentEnabled("codex");
   expect(events).toEqual(["changed"]);
   expect(h.state.profiles().find((item) => item.id === "codex")?.enabled).toBe(true);
   expect(h.calls.toggles).toEqual(["codex"]);
   // 失败：本地不动、不发布（toggleFailed 的 toast 走 notice 频道）。
-  h.bridge.toggleProfile = () => {
+  h.bridge.toggleProfile = async () => {
     throw new Error("pref write failed");
   };
-  h.state.toggleAgentEnabled("codex");
+  await h.state.toggleAgentEnabled("codex");
   expect(events).toEqual(["changed"]);
   expect(h.state.profiles().find((item) => item.id === "codex")?.enabled).toBe(true);
   off();
@@ -244,8 +244,8 @@ test("enabling an agent with a global dir refreshes its managed state", async ()
   const h = harness([
     profile({ id: "codex", global_skills_dir: "/hub/codex/skills", enabled: false }),
   ]);
-  h.state.start();
-  h.state.toggleAgentEnabled("codex");
+  await h.state.start();
+  await h.state.toggleAgentEnabled("codex");
   // toggle 后排了一个 refresh 读（pending 门在途时重复 toggle 被拒）。
   expect(h.pendingReads).toHaveLength(1);
   h.pendingReads[0]({ active_skill_names: ["writer"], suspended_skill_names: [] });
@@ -305,7 +305,7 @@ test("pausing and restoring through one profile updates every profile on the dir
     ],
     { "/hub/shared/skills": { active_skill_names: ["writer"], suspended_skill_names: [] } },
   );
-  h.state.start();
+  await h.state.start();
   // preload：一个物理目录只读一次。
   expect(h.pendingReads).toHaveLength(1);
   h.pendingReads[0]({ active_skill_names: ["writer"], suspended_skill_names: [] });
@@ -337,7 +337,7 @@ test("an in-flight directory operation gates the switch to exactly one call", as
     [profile({ id: "alpha", global_skills_dir: "/hub/s/skills", enabled: true })],
     { "/hub/s/skills": { active_skill_names: ["writer"], suspended_skill_names: [] } },
   );
-  h.state.start();
+  await h.state.start();
   // preload 的读先落地，pending 门才关闭。
   h.pendingReads[0]({ active_skill_names: ["writer"], suspended_skill_names: [] });
   await settle();
@@ -366,7 +366,7 @@ test("a stale read after an invalidate never overwrites the newer state", async 
     [profile({ id: "alpha", global_skills_dir: "/hub/s/skills", enabled: true })],
     { "/hub/s/skills": { active_skill_names: ["writer"], suspended_skill_names: [] } },
   );
-  h.state.start();
+  await h.state.start();
   const stale = h.pendingReads[0];
   // 在读落地前发起一次目录操作（invalidate 抬代际）。
   const op = h.state.toggleManagedSkills("alpha");
@@ -409,12 +409,19 @@ test("the toggle report notice decomposes failures, skips and success", () => {
         path: "/hub/occupied",
         reason: "",
       },
+      {
+        skill_name: "linked",
+        code: "foreign_link",
+        path: "/hub/linked",
+        reason: "",
+      },
     ],
     failed: [],
   });
   expect(skipped.tone).toBe("warning");
   expect(skipped.openPath).toBe("/hub/occupied");
   expect(skipped.text).toContain("occupied");
+  expect(skipped.text).toContain("外部链接");
 
   const failed = noticeFromReport("Devin", {
     action: "paused",
@@ -470,7 +477,7 @@ test("deploy mode state loads overrides, switches default & per-agent mode, and 
   const setDefaultCalls: string[] = [];
   const setAgentCalls: { agentId: string; mode: string }[] = [];
 
-  h.bridge.getDeployModes = () => ({
+  h.bridge.getDeployModes = async () => ({
     defaultMode,
     overrides: { ...overrides },
     disallowJunction: ["antigravity"],
@@ -498,7 +505,7 @@ test("deploy mode state loads overrides, switches default & per-agent mode, and 
     changeEvents += 1;
   });
 
-  h.state.start();
+  await h.state.start();
   expect(h.state.deployModeAvailable()).toBe(true);
   expect(h.state.defaultDeployMode()).toBe("symlink");
   expect(h.state.disallowJunctionAgents()).toEqual(["antigravity"]);
@@ -519,5 +526,40 @@ test("deploy mode state loads overrides, switches default & per-agent mode, and 
   await settle();
   expect(setAgentCalls[1]).toEqual({ agentId: "cursor", mode: "inherit" });
   expect(h.state.agentDeployOverrides()).toEqual({});
+  unsub();
+});
+
+test("unlinkLinkedSkill, unlinkAllLinkedSkills, and toggleManagedSkills publish agentsChanged on success only", async () => {
+  const h = harness(
+    [profile({ id: "codex", display_name: "Codex", global_skills_dir: "/hub/codex/skills", enabled: true })],
+    { "/hub/codex/skills": { active_skill_names: ["alpha", "beta"], suspended_skill_names: [] } },
+  );
+  await h.state.start();
+  h.pendingReads[0]({ active_skill_names: ["alpha", "beta"], suspended_skill_names: [] });
+  await settle();
+
+  let events = 0;
+  const unsub = agentsChanged.subscribe(() => {
+    events += 1;
+  });
+
+  h.state.unlinkLinkedSkill("codex", "alpha");
+  await settle();
+  expect(events).toBe(1);
+
+  h.state.unlinkAllLinkedSkills("codex");
+  await settle();
+  expect(events).toBe(2);
+
+  h.state.toggleManagedSkills("codex");
+  await settle();
+  expect(events).toBe(3);
+
+  h.bridge.unlinkSkill = async () => {
+    throw new Error("unlink fail");
+  };
+  h.state.unlinkLinkedSkill("codex", "beta");
+  await settle();
+  expect(events).toBe(3);
   unsub();
 });

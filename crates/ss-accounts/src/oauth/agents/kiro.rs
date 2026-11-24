@@ -155,13 +155,62 @@ pub(crate) fn login_leg(region: Option<&str>) -> LoginLeg {
     }
 }
 
+/// 显式 `leg` 优先于 `region` 猜测；选了 `idc` 但给错 `region` 必须直接拒绝，不回退门户。
+pub(crate) fn resolve_login_leg(leg: Option<&str>, region: Option<&str>) -> OAuthResult<LoginLeg> {
+    let explicit = leg.map(str::trim).filter(|value| !value.is_empty());
+    let region = region
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let Some(explicit) = explicit else {
+        return Ok(login_leg(region.as_deref()));
+    };
+    match explicit.to_ascii_lowercase().as_str() {
+        "portal" | "social" | "builder-id" => Ok(LoginLeg::Portal),
+        "idc" | "aws-idc" | "awsidc" => {
+            let normalized = match region.as_deref() {
+                None => None,
+                Some(raw)
+                    if raw.eq_ignore_ascii_case("idc")
+                        || raw.eq_ignore_ascii_case("aws-idc")
+                        || raw.eq_ignore_ascii_case("awsidc") =>
+                {
+                    None
+                }
+                Some(raw) => Some(normalize_region(Some(raw))?),
+            };
+            Ok(LoginLeg::Idc { region: normalized })
+        }
+        other => Err(OAuthError::Rejected(format!(
+            "不支持的 Kiro 登录方式：{other}（请选择 portal 或 idc）"
+        ))),
+    }
+}
+
+/// 校验并规范化 IAM Identity Center Start URL；留空回退默认 Builder ID 地址。
+pub(crate) fn normalize_start_url(start_url: Option<&str>) -> OAuthResult<String> {
+    let Some(raw) = start_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(BUILDER_ID_START_URL.to_string());
+    };
+    let parsed = Url::parse(raw).map_err(|error| {
+        OAuthError::Rejected(format!("IAM Identity Center Start URL 无效: {error}"))
+    })?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none_or(str::is_empty) {
+        return Err(OAuthError::Rejected(
+            "IAM Identity Center Start URL 必须是有效的 https:// 地址".to_string(),
+        ));
+    }
+    Ok(raw.to_string())
+}
+
 /// 启动一次 Kiro 登录。
 pub(crate) fn start(login_id: &str, opts: &StartOptions) -> OAuthResult<Started> {
-    match login_leg(opts.region.as_deref()) {
+    match resolve_login_leg(opts.leg.as_deref(), opts.region.as_deref())? {
         LoginLeg::Portal => start_portal(login_id, opts),
         LoginLeg::Idc { region } => start_idc(
             login_id,
             region.as_deref().unwrap_or(DEFAULT_REGION),
+            opts.start_url.as_deref(),
         ),
     }
 }
@@ -254,8 +303,9 @@ fn outcome_from_tokens(tokens: TokenSet, state: Option<KiroState>) -> OAuthResul
 
 // --- IdC 设备码 ------------------------------------------------------------
 
-fn start_idc(login_id: &str, region: &str) -> OAuthResult<Started> {
+fn start_idc(login_id: &str, region: &str, start_url: Option<&str>) -> OAuthResult<Started> {
     let region = normalize_region(Some(region))?;
+    let start_url = normalize_start_url(start_url)?;
     let base = oidc_base(&region);
     let registered = post_json(
         &format!("{base}/client/register"),
@@ -264,7 +314,7 @@ fn start_idc(login_id: &str, region: &str) -> OAuthResult<Started> {
             "clientType": "public",
             "scopes": IDC_SCOPES,
             "grantTypes": ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
-            "issuerUrl": BUILDER_ID_START_URL,
+            "issuerUrl": start_url,
         }),
         "Kiro IDC register",
     )?;
@@ -277,7 +327,7 @@ fn start_idc(login_id: &str, region: &str) -> OAuthResult<Started> {
         &serde_json::json!({
             "clientId": client_id,
             "clientSecret": client_secret,
-            "startUrl": BUILDER_ID_START_URL,
+            "startUrl": start_url,
         }),
         "Kiro IDC device",
     )?;
@@ -286,7 +336,7 @@ fn start_idc(login_id: &str, region: &str) -> OAuthResult<Started> {
         client_id: Some(client_id.clone()),
         client_secret: Some(client_secret.clone()),
         region: Some(region.clone()),
-        start_url: Some(BUILDER_ID_START_URL.to_string()),
+        start_url: Some(start_url),
         profile_arn: None,
     };
     let (pending, channel) = PendingLogin::pair(None);
@@ -585,12 +635,12 @@ fn post_json(url: &str, body: &Value, label: &str) -> OAuthResult<Value> {
             .json(&body)
             .send()
             .await
-            .map_err(|error| OAuthError::Transient(format!("{label} 请求失败: {error}")))?;
+            .map_err(|error| token::transport_error(&format!("{label} 请求失败"), error))?;
         let status = response.status().as_u16();
         let text = response
             .text()
             .await
-            .map_err(|error| OAuthError::Transient(format!("{label} 响应读取失败: {error}")))?;
+            .map_err(|error| token::transport_error(&format!("{label} 响应读取失败"), error))?;
         Ok::<_, OAuthError>((status, text))
     })??;
     if !(200..300).contains(&status) {
@@ -619,12 +669,12 @@ fn post_form(url: &str, pairs: &[(&str, &str)]) -> OAuthResult<(u16, String)> {
             .form(&body)
             .send()
             .await
-            .map_err(|error| OAuthError::Transient(format!("Kiro 请求失败: {error}")))?;
+            .map_err(|error| token::transport_error("Kiro 请求失败", error))?;
         let status = response.status().as_u16();
         let text = response
             .text()
             .await
-            .map_err(|error| OAuthError::Transient(format!("Kiro 响应读取失败: {error}")))?;
+            .map_err(|error| token::transport_error("Kiro 响应读取失败", error))?;
         Ok::<_, OAuthError>((status, text))
     })?
 }

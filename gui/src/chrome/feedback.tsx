@@ -1,6 +1,7 @@
-import { Easing, View, createAnimatedValue, effect, type JSX, type ViewStyle } from "nsh";
+import { Easing, View, createAnimatedValue, effect, signal, type JSX, type ViewStyle } from "nsh";
 import { hexAlpha, paletteToken } from "../services/themeMode";
-import { motionEnabled } from "./motion";
+import { createSpinnerGate, realTimer } from "./delayedFlag";
+import { EASE_IN_OUT, motionEnabled } from "./motion";
 import { Icon, type IconName } from "./icons";
 
 // Loading feedback — chrome::Pulse / icon_spin / icon_sweep parity
@@ -9,11 +10,12 @@ import { Icon, type IconName } from "./icons";
 // - Skeleton bars pulse on a stepped cadence (PULSE_FPS 20 in GPUI; the
 //   native `pulse` keyframes here sample below refresh on purpose) and stay
 //   static under Reduce Motion.
-// - Spinners turn 0.8s per revolution (SPIN_MS).
+// - Spinners turn 0.8s per revolution (SPIN_MS) and stop on a turn
+//   boundary. A `loader` glyph waits 300ms and, until then, is an empty
+//   box of the same size so a fast probe does not flash the glyph.
+//   Reduce Motion shows the glyph with the flag and does not spin.
 // - The translate button's laser sweeps a glyph left to right once per
 //   second (SWEEP_PASS_MS) and the glyph dims under it (IconSweep).
-// - Update ellipsis steps ~400ms — `Ellipsis` cycles "…" prefixes on a
-//   timer, and stops under Reduce Motion.
 //
 // nsh 纪律：组件体只执行一次，所以「按 props 换形」一律走 JSX 的 <If>
 // 表达式，不在函数顶部对 props 做一次性判断——那样 prop 之后再变，组件
@@ -30,29 +32,74 @@ export const SWEEP_PASS_MS = 1000;
 const SWEEP_BEAM_W = 10;
 const SWEEP_CORE_W = 2;
 
-/** Ellipsis step cadence (~400ms per step). */
-export const ELLIPSIS_MS = 400;
-
-/** A spinning glyph — icon_spin parity. `spin` false renders it at rest. */
+/**
+ * A spinning glyph. Action icons turn from the press and coast to the next
+ * upright stop (and at least 500ms). `name="loader"` waits 300ms unless
+ * `defer` is false, and paints an empty box until the frame exists.
+ * `spin` false under Reduce Motion drops the frame on that tick.
+ */
 export function IconSpin(props: {
   name: IconName;
   size?: number;
   color: string;
   spin: boolean;
+  /**
+   * When omitted, only `loader` waits 300ms. Pass false to turn a loader
+   * from the first frame (the corner job card already waited).
+   */
+  defer?: boolean;
   /** Test id on the turning frame (the spinning half only). */
   testID?: string;
 }): JSX.Element {
   const size = props.size ?? 16;
+  const frame = signal(false);
+  // 懒分配 SpinnerGate：静止图标在首次 spin 为 true 前不建定时器、不订 reduceMotion、
+  // 卸载也不排 setTimeout(..., 0) 清理，避免大列表滚动回收时堆积空转开销。
+  let gate: ReturnType<typeof createSpinnerGate> | null = null;
+  let kill: ReturnType<typeof setTimeout> | null = null;
+  effect(() => {
+    if (kill) {
+      clearTimeout(kill);
+      kill = null;
+    }
+    const want = props.spin;
+    if (!want && gate === null) {
+      return;
+    }
+    if (gate === null) {
+      gate = createSpinnerGate({
+        timer: realTimer(),
+        onFrame: (visible) => frame.set(visible),
+      });
+    }
+    const defer = props.defer ?? props.name === "loader";
+    gate.setWant(want, defer, !motionEnabled());
+    return () => {
+      kill = setTimeout(() => {
+        kill = null;
+        gate?.dispose();
+        gate = null;
+      }, 0);
+    };
+  });
+  const blankLoader = () => props.name === "loader" && props.defer !== false;
   return (
     <If
-      when={props.spin}
-      else={<Icon name={props.name} size={size} color={props.color} />}
+      when={frame()}
+      else={
+        blankLoader() ? (
+          <View style={{ width: size, height: size, flexShrink: 0 }} />
+        ) : (
+          <Icon name={props.name} size={size} color={props.color} />
+        )
+      }
     >
       <View
         testID={props.testID}
         style={{
           width: size,
           height: size,
+          flexShrink: 0,
           ...spinStyle(),
         }}
       >
@@ -81,26 +128,20 @@ export function IconSweep(props: {
   effect(() => {
     // props.sweep 在 effect 里读取：pending 从无到有、从有到无都重新起停。
     if (!props.sweep || !motionEnabled()) return;
-    let stopped = false;
-    const passes = async () => {
-      beam.set(-SWEEP_BEAM_W);
-      while (!stopped) {
-        const { finished } = await beam.keyframes([-SWEEP_BEAM_W, size], {
-          duration: SWEEP_PASS_MS,
-          easing: Easing.linear,
-        });
-        if (!finished) break;
-      }
-    };
-    void passes();
+    beam.set(-SWEEP_BEAM_W);
+    void beam.keyframes([-SWEEP_BEAM_W, size], {
+      duration: SWEEP_PASS_MS,
+      easing: Easing.linear,
+      iterations: "infinite",
+    });
     return () => {
-      stopped = true;
+      void beam.stop();
       // 停扫并停回画面外：系统降低动态效果或 pending 收走时，光束不会冻
       // 在字形中间（GPUI 的 icon_sweep 同样「收起在看不见的地方」）。
       beam.set(-SWEEP_BEAM_W);
     };
   });
-  const laser = paletteToken("accent");
+  const laser = () => paletteToken("accent");
   return (
     <If
       when={props.sweep}
@@ -136,8 +177,8 @@ export function IconSweep(props: {
               bottom: 0,
               left: 0,
               width: SWEEP_BEAM_W - SWEEP_CORE_W,
-              backgroundImage: `linear-gradient(90deg, ${hexAlpha(laser, 0)}, ${hexAlpha(
-                laser,
+              backgroundImage: `linear-gradient(90deg, ${hexAlpha(laser(), 0)}, ${hexAlpha(
+                laser(),
                 0.65,
               )})`,
             }}
@@ -149,7 +190,7 @@ export function IconSweep(props: {
               bottom: 0,
               right: 0,
               width: SWEEP_CORE_W,
-              backgroundColor: hexAlpha(laser, 0.95),
+              backgroundColor: hexAlpha(laser(), 0.95),
             }}
           />
         </View>
@@ -174,14 +215,13 @@ export function Pulse(props: {
   secondary?: boolean;
   style?: ViewStyle;
 }): JSX.Element {
-  const fill = paletteToken("well");
   return (
     <View
       testID={props.id}
       style={{
         width: "100%",
         height: 16,
-        backgroundColor: fill,
+        backgroundColor: paletteToken("well"),
         opacity: props.secondary ? 0.5 : 1,
         ...pulseStyle(),
         ...props.style,
@@ -196,6 +236,6 @@ function pulseStyle(): ViewStyle {
     animationName: "pulse",
     animationDuration: 2000,
     animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
+    animationTimingFunction: EASE_IN_OUT,
   };
 }

@@ -138,4 +138,81 @@ fn identity_prefers_the_jwt_claims_and_falls_back_to_user_info() {
     );
     assert_eq!(identity.email.as_deref(), Some("info@example.com"));
     assert_eq!(identity.account_id.as_deref(), Some("u2"));
+    assert_eq!(identity.display_name.as_deref(), Some("info@example.com"));
+}
+
+#[test]
+fn zai_business_token_accepts_nested_access_token_and_rejects_success_false() {
+    assert_eq!(
+        zai_business_token(&json!({
+            "code": 200,
+            "data": { "access_token": "biz-at", "expires_in": 3600 }
+        }))
+        .expect("data.access_token"),
+        "biz-at"
+    );
+    assert!(
+        zai_business_token(&json!({
+            "code": 200,
+            "success": false,
+            "data": { "access_token": "biz-at" }
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn identity_extracts_bigmodel_user_info_and_customer_info_without_email() {
+    let tokens = TokenSet {
+        access_token: jwt_with_claims(json!({
+            "customer_id": "27741789126905948",
+            "username": "jwt-name"
+        })),
+        id_token: Some(jwt_with_claims(json!({ "sub": "zcode-jwt-sub" }))),
+        ..TokenSet::default()
+    };
+
+    // 1. 本地 user_info 结构（无邮箱）。
+    let local_info = json!({
+        "id": "27741789126905948",
+        "username": "xxww0098",
+        "displayName": "xxww0098",
+        "rawProfile": { "user_id": "27741789126905948", "email": "", "name": "xxww0098" }
+    });
+    let from_local = identity_of(&tokens, Some(&local_info));
+    assert_eq!(from_local.display_name.as_deref(), Some("xxww0098"));
+    assert_eq!(from_local.account_id.as_deref(), Some("27741789126905948"));
+    assert_eq!(from_local.email, None);
+
+    // 2. getCustomerInfo 响应结构。
+    let customer = json!({
+        "code": 200,
+        "data": {
+            "id": 12130266,
+            "customerNumber": "27741789126905948",
+            "customerName": "xxww0098",
+            "nickName": null,
+            "email": null,
+            "phoneNumber": "188****1685"
+        }
+    });
+    let from_customer = identity_of(&tokens, Some(&customer));
+    assert_eq!(from_customer.display_name.as_deref(), Some("xxww0098"));
+    assert_eq!(from_customer.account_id.as_deref(), Some("27741789126905948"));
+    assert_eq!(from_customer.email, None);
+
+    // 3. BigModel 默认占位（id=unknown, username=user, displayName=User）退回 access_token JWT。
+    let placeholder = json!({
+        "id": "unknown",
+        "username": "user",
+        "displayName": "User"
+    });
+    let fallback_tokens = TokenSet {
+        access_token: tokens.access_token.clone(),
+        id_token: None,
+        ..TokenSet::default()
+    };
+    let from_placeholder = identity_of(&fallback_tokens, Some(&placeholder));
+    assert_eq!(from_placeholder.display_name.as_deref(), Some("jwt-name"));
+    assert_eq!(from_placeholder.account_id.as_deref(), Some("27741789126905948"));
 }

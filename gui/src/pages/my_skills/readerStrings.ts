@@ -7,13 +7,13 @@ import { locale, type Locale } from "../../services/locale";
 const STRINGS: Record<Locale, Record<string, string>> = {
   "zh-CN": {
     "common.retry": "重试",
-    "detailPanel.reading": "阅读中...",
+    "mySkills.handleProjectCopies": "处理项目副本",
     "detailPanel.emptySkillMd": "这份 SKILL.md 是空的。",
     "detailPanel.readFailed": "读不到 SKILL.md。",
     "detailPanel.translate": "翻译",
     "detailPanel.showOriginal": "原文",
-    "detailPanel.translationNeedsAccount":
-      "请先在账户里添加 OpenCode Go、Ollama 或 Command Code 的密钥，再在设置里选一个默认。",
+    "detailPanel.translationNeedsConfig":
+      "请先在「设置 → 翻译」填写接口地址、API Key 并选择模型。",
     "detailPanel.translationRejected": "「{{model}}」拒绝了翻译请求。换一个模型后再试。",
     "detailPanel.translationRejectedDetail":
       "「{{model}}」无法翻译：{{detail}}。换一个模型后再试。",
@@ -40,13 +40,13 @@ const STRINGS: Record<Locale, Record<string, string>> = {
   },
   en: {
     "common.retry": "Retry",
-    "detailPanel.reading": "Reading...",
+    "mySkills.handleProjectCopies": "Manage project copies",
     "detailPanel.emptySkillMd": "This SKILL.md is empty.",
     "detailPanel.readFailed": "Couldn't read SKILL.md.",
     "detailPanel.translate": "Translate",
     "detailPanel.showOriginal": "Original",
-    "detailPanel.translationNeedsAccount":
-      "Add an OpenCode Go, Ollama, or Command Code key in Accounts, then pick a default in Settings.",
+    "detailPanel.translationNeedsConfig":
+      "Configure the base URL, API key, and model in Settings → Translation first.",
     "detailPanel.translationRejected": '"{{model}}" rejected the translation. Pick another model and try again.',
     "detailPanel.translationRejectedDetail":
       '"{{model}}" can\'t translate this: {{detail}}. Pick another model and try again.',

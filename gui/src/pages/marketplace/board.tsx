@@ -18,14 +18,22 @@ import {
   SKILL_SCROLL_PB,
   SKILL_SCROLL_PT,
 } from "../../layout";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
 import { Icon } from "../../chrome/icons";
 import { IconSpin } from "../../chrome/feedback";
 import { cardTrackWidth, gridColumnsForPane, packCardRows } from "../../chrome/cardShell";
 import { BackToTopButton, SHOW_AFTER_PX } from "../../chrome/scrollTop";
+import { createPaneWidth } from "../../shell/nav";
 import { t } from "../../services/translation";
 import { MarketCard, MarketSkeletonTile, PublisherCard } from "./card";
 import { mt, mtf } from "./marketStrings";
-import type { MarketSkill, MarketTabId, PublisherRecord } from "./types";
+import type {
+  MarketSkill,
+  MarketTabId,
+  PublisherRecord,
+  SnapshotErrorInfo,
+  SnapshotStatusTag,
+} from "./types";
 
 // 市场板面 — board.rs + view.rs 的板区对位。
 //
@@ -37,32 +45,64 @@ const LIST_GAP = 8;
 const PUBLISHER_ROW_H = 76;
 
 export interface BoardProps {
+  active?: () => boolean;
   loading: boolean;
+  snapshotStatus?: SnapshotStatusTag;
+  refreshing?: boolean;
   tab: MarketTabId;
   skills: MarketSkill[];
   publishers: PublisherRecord[];
   query: string;
   viewList: boolean;
-  busy: string | null;
+  /** 在飞的安装/卸载（技能名）；每张卡只认自己的名字。 */
+  busy: ReadonlySet<string>;
   selectedName: string | null;
   onOpenSkill: (skill: MarketSkill) => void;
   onToggleInstall: (skill: MarketSkill) => void;
   onOpenPublisher: (publisher: PublisherRecord) => void;
   onClearSearch: () => void;
+  onSyncSnapshot?: () => void;
 }
 
 export function MarketBoard(props: BoardProps): JSX.Element {
-  const paneWidth = signal(0);
+  const pane = createPaneWidth({
+    active: props.active,
+    fromShell: (panelW) => panelW - (props.selectedName !== null ? DETAIL_COLUMN_W : 0),
+  });
+  const paneWidth = pane.width;
   const backTopShown = signal(false);
-  const listRef = signal<ListRef | null>(null);
+  const officialListRef = signal<ListRef | null>(null);
+  const skillListRef = signal<ListRef | null>(null);
+  const visitedOfficial = signal(props.tab === "official");
+  const visitedSkills = signal(props.tab !== "official");
 
-  // tab/视图切换开新数据集：立即回顶（骨架档由 loading 上升标记）。
+  const isEmptyData = (): boolean =>
+    props.skills.length === 0 && props.publishers.length === 0;
+  const isSeedingEmpty = (): boolean =>
+    props.snapshotStatus === "seeding" && isEmptyData();
+
+  // 两边都空的加载晚 300ms 出骨架；seeding 且无数据时始终保持骨架而不闪空态。
+  const skeletonReady = bindDelayedFlag(
+    () => props.loading && isEmptyData(),
+  );
+
+  effect(() => {
+    if (props.tab === "official") {
+      if (!visitedOfficial()) visitedOfficial.set(true);
+    } else if (!visitedSkills()) {
+      visitedSkills.set(true);
+    }
+  });
+
+  const activeListRef = (): ListRef | null =>
+    props.tab === "official" ? officialListRef() : skillListRef();
+
+  // tab/视图切换开新数据集：立即回顶。已有行的刷新不升 loading，不回顶。
   effect(() => {
     void props.tab;
     void props.viewList;
-    void props.loading;
     backTopShown.set(false);
-    queueMicrotask(() => listRef()?.scrollToOffset({ offset: 0, animated: false }));
+    queueMicrotask(() => activeListRef()?.scrollToOffset({ offset: 0, animated: false }));
   });
 
   const handleScroll = (offsetY: number): void => {
@@ -72,6 +112,18 @@ export function MarketBoard(props: BoardProps): JSX.Element {
 
   const fallbackW = (): number =>
     props.selectedName !== null ? CARD_ROW_W - DETAIL_COLUMN_W : CARD_ROW_W;
+
+  const showSkeleton = (): boolean =>
+    isSeedingEmpty() || (skeletonReady() && props.loading && isEmptyData());
+  const showOfficial = (): boolean =>
+    props.tab === "official" &&
+    (props.publishers.length > 0 || (!props.loading && props.snapshotStatus !== "seeding"));
+  const showEmptySkills = (): boolean =>
+    !props.loading &&
+    props.snapshotStatus !== "seeding" &&
+    props.tab !== "official" &&
+    props.skills.length === 0;
+  const showSkills = (): boolean => props.tab !== "official" && props.skills.length > 0;
 
   return (
     <View
@@ -83,46 +135,74 @@ export function MarketBoard(props: BoardProps): JSX.Element {
         minWidth: 0,
         width: "100%",
       }}
-      onLayout={(event) => {
-        const w = event.bounds.size.width;
-        if (w > 0 && w !== paneWidth()) paneWidth.set(w);
-      }}
+      onLayout={pane.onLayout}
     >
-      <If when={props.loading}>
+      <If when={showSkeleton()}>
         <View testID="mk-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
           <SkeletonBoard cardWidth={cardTrackWidth(paneWidth(), false, PAGE_PAD, fallbackW())} />
         </View>
       </If>
-      <If when={!props.loading && props.tab === "official"}>
-        <OfficialBoard
-          publishers={props.publishers}
-          onOpenPublisher={props.onOpenPublisher}
-          onRef={(node) => listRef.set(node)}
-          onScroll={handleScroll}
-        />
-      </If>
-      <If when={!props.loading && props.tab !== "official" && props.skills.length === 0}>
-        <View testID="mk-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
-          <EmptyBoard query={props.query} onClearSearch={props.onClearSearch} />
+      <If when={visitedOfficial()}>
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: showOfficial() ? "flex" : "none",
+          }}
+        >
+          <OfficialBoard
+            publishers={props.publishers}
+            snapshotStatus={props.snapshotStatus ?? "fresh"}
+            refreshing={props.refreshing ?? false}
+            onSyncSnapshot={props.onSyncSnapshot ?? (() => {})}
+            onOpenPublisher={props.onOpenPublisher}
+            onRef={(node) => officialListRef.set(node)}
+            onScroll={handleScroll}
+          />
         </View>
       </If>
-      <If when={!props.loading && props.tab !== "official" && props.skills.length > 0}>
-        <SkillBoard
-          skills={props.skills}
-          viewList={props.viewList}
-          busy={props.busy}
-          selectedName={props.selectedName}
-          paneWidth={paneWidth()}
-          onOpenSkill={props.onOpenSkill}
-          onToggleInstall={props.onToggleInstall}
-          onRef={(node) => listRef.set(node)}
-          onScroll={handleScroll}
-        />
+      <If when={showEmptySkills()}>
+        <View testID="mk-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
+          <EmptyBoard
+            query={props.query}
+            snapshotStatus={props.snapshotStatus ?? "fresh"}
+            refreshing={props.refreshing ?? false}
+            onClearSearch={props.onClearSearch}
+            onSync={props.onSyncSnapshot ?? (() => {})}
+          />
+        </View>
       </If>
-      <If when={backTopShown() && listRef() !== null}>
+      <If when={visitedSkills()}>
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: showSkills() ? "flex" : "none",
+          }}
+        >
+          <SkillBoard
+            skills={props.skills}
+            viewList={props.viewList}
+            busy={props.busy}
+            selectedName={props.selectedName}
+            paneWidth={paneWidth()}
+            onOpenSkill={props.onOpenSkill}
+            onToggleInstall={props.onToggleInstall}
+            onRef={(node) => skillListRef.set(node)}
+            onScroll={handleScroll}
+          />
+        </View>
+      </If>
+      <If when={backTopShown() && activeListRef() !== null}>
         <BackToTopButton
           label={t("mySkills.backToTop")}
-          listRef={listRef()}
+          listRef={activeListRef()}
           onClick={() => backTopShown.set(false)}
         />
       </If>
@@ -135,6 +215,7 @@ function SkeletonBoard(props: { cardWidth: number }): JSX.Element {
   return (
     <View
       testID="mk-skeletons"
+      accessibilityState={{ busy: true }}
       style={{
         display: "flex",
         flexDirection: "row",
@@ -157,6 +238,9 @@ function SkeletonBoard(props: { cardWidth: number }): JSX.Element {
 /** 官方发布者板（card.rs publisher_list）：虚拟化行列表 + 标题行计数 pill。 */
 function OfficialBoard(props: {
   publishers: PublisherRecord[];
+  snapshotStatus: SnapshotStatusTag;
+  refreshing: boolean;
+  onSyncSnapshot: () => void;
   onOpenPublisher: (publisher: PublisherRecord) => void;
   onRef: (node: ListRef | null) => void;
   onScroll: (offsetY: number) => void;
@@ -211,7 +295,15 @@ function OfficialBoard(props: {
           </View>
         </View>
       }
-      empty={<EmptyBoard query="" onClearSearch={() => {}} />}
+      empty={
+        <EmptyBoard
+          query=""
+          snapshotStatus={props.snapshotStatus}
+          refreshing={props.refreshing}
+          onClearSearch={() => {}}
+          onSync={props.onSyncSnapshot}
+        />
+      }
     >
       {(publisher) => (
         <View style={{ paddingBottom: CARD_GAP, width: "100%" }}>
@@ -225,8 +317,17 @@ function OfficialBoard(props: {
   );
 }
 
-/** 空态（view.rs render_empty）：搜索空态带清除按钮；分栏空态提示网络。 */
-function EmptyBoard(props: { query: string; onClearSearch: () => void }): JSX.Element {
+/** 空态（view.rs render_empty）：搜索空态带清除按钮；miss / remote_error 给立即同步/重试。 */
+export function EmptyBoard(props: {
+  query: string;
+  snapshotStatus: SnapshotStatusTag;
+  refreshing: boolean;
+  onClearSearch: () => void;
+  onSync: () => void;
+}): JSX.Element {
+  const showSyncAction = (): boolean =>
+    props.query.trim().length === 0 &&
+    (props.snapshotStatus === "miss" || props.snapshotStatus === "remote_error");
   return (
     <View
       testID="mk-empty"
@@ -256,7 +357,9 @@ function EmptyBoard(props: { query: string; onClearSearch: () => void }): JSX.El
       >
         {props.query.trim().length > 0
           ? mt("marketplace.emptySearchDescription")
-          : mt("marketplace.emptySectionDescription")}
+          : props.snapshotStatus === "miss"
+            ? mt("marketplace.snapshotMiss")
+            : mt("marketplace.emptySectionDescription")}
       </Text>
       <If when={props.query.trim().length > 0}>
         <View
@@ -280,6 +383,41 @@ function EmptyBoard(props: { query: string; onClearSearch: () => void }): JSX.El
           </Text>
         </View>
       </If>
+      <If when={showSyncAction()}>
+        <View
+          testID="mk-empty-sync"
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            height: 28,
+            paddingHorizontal: 12,
+            borderRadius: 6,
+            cursor: props.refreshing ? "default" : "pointer",
+            backgroundColor: paletteToken("accent"),
+            opacity: props.refreshing ? 0.7 : 1,
+          }}
+          hoverStyle={props.refreshing ? undefined : { backgroundColor: paletteToken("accent_hover") }}
+          onPress={() => {
+            if (!props.refreshing) props.onSync();
+          }}
+        >
+          <IconSpin
+            name="refresh"
+            size={12}
+            color={paletteToken("on_accent")}
+            spin={props.refreshing}
+          />
+          <Text style={{ fontSize: 12, color: paletteToken("on_accent"), fontWeight: "500" }}>
+            {props.refreshing
+              ? mt("marketplace.retrying")
+              : props.snapshotStatus === "miss"
+                ? mt("marketplace.syncNow")
+                : mt("common.retry")}
+          </Text>
+        </View>
+      </If>
     </View>
   );
 }
@@ -288,7 +426,8 @@ function EmptyBoard(props: { query: string; onClearSearch: () => void }): JSX.El
 function SkillBoard(props: {
   skills: MarketSkill[];
   viewList: boolean;
-  busy: string | null;
+  /** 在飞的安装/卸载（技能名）；每张卡只认自己的名字。 */
+  busy: ReadonlySet<string>;
   selectedName: string | null;
   paneWidth: number;
   onOpenSkill: (skill: MarketSkill) => void;
@@ -312,7 +451,7 @@ function SkillBoard(props: {
       ref={(node) => props.onRef(node)}
       testID="mk-scroll"
       each={packedRows()}
-      keyExtractor={(_row, idx) => `mk-row-${idx}`}
+      keyExtractor={(row) => row.map((s) => `${s.source ?? s.gitUrl}\u001f${s.name}`).join("\u001e")}
       estimatedItemSize={stride()}
       style={{ width: "100%", height: "100%" }}
       contentStyle={{
@@ -339,28 +478,15 @@ function SkillBoard(props: {
         >
           <Each of={row()} key="index">
             {(skill) => (
-              <View
-                style={
-                  props.viewList
-                    ? { width: "100%", minWidth: 0 }
-                    : {
-                        width: trackW(),
-                        minWidth: trackW(),
-                        maxWidth: trackW(),
-                        flexShrink: 0,
-                      }
-                }
-              >
-                <MarketCard
-                  skill={skill()}
-                  selected={props.selectedName === skill().name}
-                  busy={props.busy === skill().name}
-                  listMode={props.viewList}
-                  cardWidth={trackW()}
-                  onPress={() => props.onOpenSkill(skill())}
-                  onToggleInstall={() => props.onToggleInstall(skill())}
-                />
-              </View>
+              <MarketCardSlot
+                skill={skill}
+                viewList={() => props.viewList}
+                trackW={trackW}
+                selectedName={() => props.selectedName}
+                busyNames={() => props.busy}
+                onOpenSkill={props.onOpenSkill}
+                onToggleInstall={props.onToggleInstall}
+              />
             )}
           </Each>
         </View>
@@ -369,65 +495,164 @@ function SkillBoard(props: {
   );
 }
 
-/** 快照错误横幅（view.rs render_snapshot_banner）：danger 弱底 + 重试
- * 按钮（刷新中转圈文案）。只在 snapshot_error 非空时渲染。 */
+function MarketCardSlot(props: {
+  skill: () => MarketSkill;
+  viewList: () => boolean;
+  trackW: () => number;
+  selectedName: () => string | null;
+  busyNames: () => ReadonlySet<string>;
+  onOpenSkill: (skill: MarketSkill) => void;
+  onToggleInstall: (skill: MarketSkill) => void;
+}): JSX.Element {
+  const selected = computed(() => props.selectedName() === props.skill().name);
+  const busy = computed(() => props.busyNames().has(props.skill().name));
+  return (
+    <View
+      style={
+        props.viewList()
+          ? { width: "100%", minWidth: 0 }
+          : {
+              width: props.trackW(),
+              minWidth: props.trackW(),
+              maxWidth: props.trackW(),
+              flexShrink: 0,
+            }
+      }
+    >
+      <MarketCard
+        skill={props.skill()}
+        selected={selected()}
+        busy={busy()}
+        listMode={props.viewList()}
+        cardWidth={props.trackW()}
+        onPress={() => props.onOpenSkill(props.skill())}
+        onToggleInstall={() => props.onToggleInstall(props.skill())}
+      />
+    </View>
+  );
+}
+
+/** 快照状态横幅：error_fallback 用警告样式（warn），remote_error 用 danger，
+ * 支持可折叠 detail 详情查看。 */
 export function SnapshotBanner(props: {
-  error: string;
+  error: SnapshotErrorInfo;
   refreshing: boolean;
   onRetry: () => void;
 }): JSX.Element {
+  const detailOpen = signal(false);
+  const isWarn = (): boolean => props.error.kind === "error_fallback";
+  const headline = (): string =>
+    isWarn()
+      ? mt("marketplace.snapshotErrorFallback")
+      : mtf("marketplace.snapshotWarning", { err: props.error.detail });
+
   return (
     <View
       testID="mk-snapshot-banner"
       style={{
         display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
+        flexDirection: "column",
+        gap: 8,
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 10,
-        backgroundColor: paletteToken("danger_bg"),
+        backgroundColor: isWarn() ? paletteToken("warn_bg") : paletteToken("danger_bg"),
         borderWidth: 1,
-        borderColor: paletteToken("danger_border"),
+        borderColor: isWarn() ? paletteToken("warn_border") : paletteToken("danger_border"),
       }}
     >
-      <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
-        <Icon name="alertTriangle" size={14} color={paletteToken("danger")} />
-        <Text style={{ fontSize: 12, color: paletteToken("danger_fg"), numberOfLines: 1 }}>
-          {mtf("marketplace.snapshotWarning", { err: props.error })}
-        </Text>
-      </View>
       <View
-        testID="mk-banner-retry"
         style={{
           display: "flex",
           flexDirection: "row",
           alignItems: "center",
-          gap: 4,
-          paddingHorizontal: 8,
-          paddingVertical: 4,
-          borderRadius: 8,
-          cursor: "pointer",
-          backgroundColor: paletteToken("card"),
-          borderWidth: 1,
-          borderColor: paletteToken("border"),
-          flexShrink: 0,
+          justifyContent: "space-between",
+          gap: 12,
         }}
-        hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-        onPress={props.onRetry}
       >
-        <IconSpin
-          name="refresh"
-          size={11}
-          color={paletteToken("fg")}
-          spin={props.refreshing}
-        />
-        <Text style={{ fontSize: 12, color: paletteToken("fg") }}>
-          {props.refreshing ? mt("marketplace.retrying") : mt("common.retry")}
-        </Text>
+        <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+          <Icon
+            name="alertTriangle"
+            size={14}
+            color={isWarn() ? paletteToken("warn") : paletteToken("danger")}
+          />
+          <Text
+            style={{
+              fontSize: 12,
+              color: isWarn() ? paletteToken("warn") : paletteToken("danger_fg"),
+              numberOfLines: 1,
+            }}
+          >
+            {headline()}
+          </Text>
+        </View>
+        <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <If when={props.error.detail.trim().length > 0}>
+            <View
+              testID="mk-banner-detail-toggle"
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 8,
+                cursor: "pointer",
+                borderWidth: 1,
+                borderColor: paletteToken("border"),
+                backgroundColor: paletteToken("card"),
+              }}
+              hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+              onPress={() => detailOpen.set(!detailOpen())}
+            >
+              <Text style={{ fontSize: 11, color: paletteToken("fg_muted") }}>
+                {detailOpen() ? mt("marketplace.hideErrorDetails") : mt("marketplace.viewErrorDetails")}
+              </Text>
+            </View>
+          </If>
+          <View
+            testID="mk-banner-retry"
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 8,
+              cursor: "pointer",
+              backgroundColor: paletteToken("card"),
+              borderWidth: 1,
+              borderColor: paletteToken("border"),
+              flexShrink: 0,
+            }}
+            hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+            onPress={props.onRetry}
+          >
+            <IconSpin
+              name="refresh"
+              size={11}
+              color={paletteToken("fg")}
+              spin={props.refreshing}
+            />
+            <Text style={{ fontSize: 12, color: paletteToken("fg") }}>
+              {props.refreshing ? mt("marketplace.retrying") : mt("common.retry")}
+            </Text>
+          </View>
+        </View>
       </View>
+      <If when={detailOpen()}>
+        <View
+          testID="mk-banner-detail"
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 6,
+            backgroundColor: paletteToken("well"),
+          }}
+        >
+          <Text style={{ fontSize: 11, fontFamily: "monospace", color: paletteToken("fg_muted") }}>
+            {props.error.scope ? `[${props.error.scope}] ${props.error.detail}` : props.error.detail}
+          </Text>
+        </View>
+      </If>
     </View>
   );
 }

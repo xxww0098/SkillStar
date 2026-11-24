@@ -10,12 +10,6 @@ pub enum AppError {
     #[error("Lockfile error: {0}")]
     Lockfile(String),
 
-    #[error("Git operation failed: {0}")]
-    Git(String),
-
-    #[error("Project error: {0}")]
-    Project(String),
-
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

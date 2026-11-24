@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 
 use nsh_core::JsonValue;
+use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use ss_skills::projects::{ProjectCopyState, ProjectDeployMode, ProjectEntry};
 
@@ -162,6 +163,51 @@ fn parse_skills_list(
 // the plain bodies instead (the repo's facade-test precedent: test the seam's
 // body, never spin a blocking-pool future).
 
+fn profiles_array_json() -> JsonValue {
+    let profiles = ss_skills::agents::list_profile_specs();
+    JsonValue::Array(
+        profiles
+            .iter()
+            .map(|profile| {
+                obj(vec![
+                    ("id", str(&profile.id)),
+                    ("displayName", str(&profile.display_name)),
+                    ("icon", str(&profile.icon)),
+                    ("projectSkillsRel", str(&profile.project_skills_rel)),
+                    (
+                        "hasProjectSkills",
+                        JsonValue::Bool(profile.has_project_skills()),
+                    ),
+                    ("enabled", JsonValue::Bool(profile.enabled)),
+                ])
+            })
+            .collect(),
+    )
+}
+
+fn registry_job() -> Result<JsonValue, String> {
+    let projects = ss_skills::projects::list_projects();
+    let mut hub = ss_skills::installer::installed_names();
+    hub.sort();
+    Ok(obj(vec![
+        (
+            "projects",
+            JsonValue::Array(projects.iter().map(entry_json).collect()),
+        ),
+        ("profiles", profiles_array_json()),
+        ("hubSkills", JsonValue::Array(hub.iter().map(|n| str(n)).collect())),
+    ]))
+}
+
+fn profiles_job() -> JsonValue {
+    profiles_array_json()
+}
+
+fn skills_list_job(project: &str) -> JsonValue {
+    let list = ss_skills::projects::load_skills_list(project).unwrap_or_default();
+    skills_list_json(&list)
+}
+
 /// `refresh_copy_status` body: `inspect_project_copy_status` under the
 /// project lock — config and deployment facts observed together.
 fn copy_status_job(project: &str) -> Result<JsonValue, String> {
@@ -228,54 +274,98 @@ fn remove_job(name: &str) -> Result<(), String> {
     ss_skills::projects::remove_project(name).map_err(|err| format!("{err:#}"))
 }
 
+fn approval_source_tag(source: ss_app::project_skill_approval::ApprovalSource) -> &'static str {
+    match source {
+        ss_app::project_skill_approval::ApprovalSource::Elicitation => "elicitation",
+        ss_app::project_skill_approval::ApprovalSource::Skillstar => "skillstar",
+    }
+}
+
+fn pending_plan_json(plan: &ss_app::project_skill_approval::PendingProjectSkillPlan) -> JsonValue {
+    let ops = plan
+        .operations
+        .iter()
+        .map(|op| {
+            let action = match op.action {
+                ss_app::project_skill_approval::PlanAction::Create => "create",
+                ss_app::project_skill_approval::PlanAction::Already => "already",
+            };
+            obj(vec![
+                ("name", str(&op.name)),
+                ("action", str(action)),
+                ("skillPath", str(&op.skill_path)),
+            ])
+        })
+        .collect();
+    let agents = plan.affected_agents.iter().map(|a| str(a)).collect();
+    let approval_source = plan
+        .approval_source
+        .map(|s| str(approval_source_tag(s)))
+        .unwrap_or(JsonValue::Null);
+    obj(vec![
+        ("planId", str(&plan.plan_id)),
+        ("planHash", str(&plan.plan_hash)),
+        ("canonicalRoot", str(&plan.canonical_root)),
+        ("isRegistered", JsonValue::Bool(plan.is_registered)),
+        ("owner", str(&plan.owner)),
+        ("affectedAgents", JsonValue::Array(agents)),
+        ("operations", JsonValue::Array(ops)),
+        ("expiresAt", str(&plan.expires_at.to_rfc3339())),
+        ("approved", JsonValue::Bool(plan.approved)),
+        ("approvalSource", approval_source),
+    ])
+}
+
+fn pending_project_skill_plan_job(project_root: &str) -> Result<JsonValue, String> {
+    ss_app::project_skill_approval::pending_project_skill_plan(std::path::Path::new(project_root))
+        .map(|maybe| match maybe {
+            Some(plan) => pending_plan_json(&plan),
+            None => JsonValue::Null,
+        })
+        .map_err(|err| format!("{err:#}"))
+}
+
+fn approve_project_skill_plan_job(plan_id: &str, plan_hash: &str) -> Result<JsonValue, String> {
+    ss_app::project_skill_approval::approve_project_skill_plan(plan_id, plan_hash)
+        .map(|record| {
+            obj(vec![
+                ("planId", str(&record.plan_id)),
+                ("planHash", str(&record.plan_hash)),
+                ("source", str(approval_source_tag(record.source))),
+                ("recordedAt", str(&record.recorded_at.to_rfc3339())),
+            ])
+        })
+        .map_err(|err| format!("{err:#}"))
+}
+
 #[module]
 impl Projects {
     /// The page's one refresh payload (mod.rs `refresh`): the registry
-    /// (`list_projects`), the agent profiles (`list_profiles` — the page
+    /// (`list_projects`), the agent profiles (`list_profile_specs` — the page
     /// filters `has_project_skills() && enabled` itself, detail.rs:190), and
     /// the hub skill names (`installer::installed_names`, sorted —
-    /// mod.rs `load_hub_skill_names`). Read-only, cheap local reads.
+    /// mod.rs `load_hub_skill_names`). Runs on the blocking pool.
     pub async fn registry() -> Result<JsonValue, String> {
-        let projects = ss_skills::projects::list_projects();
-        let profiles = ss_skills::agents::list_profiles();
-        let mut hub = ss_skills::installer::installed_names();
-        hub.sort();
-        Ok(obj(vec![
-            (
-                "projects",
-                JsonValue::Array(projects.iter().map(entry_json).collect()),
-            ),
-            (
-                "profiles",
-                JsonValue::Array(
-                    profiles
-                        .iter()
-                        .map(|profile| {
-                            obj(vec![
-                                ("id", str(&profile.id)),
-                                ("displayName", str(&profile.display_name)),
-                                ("icon", str(&profile.icon)),
-                                ("projectSkillsRel", str(&profile.project_skills_rel)),
-                                (
-                                    "hasProjectSkills",
-                                    JsonValue::Bool(profile.has_project_skills()),
-                                ),
-                                ("enabled", JsonValue::Bool(profile.enabled)),
-                            ])
-                        })
-                        .collect(),
-                ),
-            ),
-            ("hubSkills", JsonValue::Array(hub.iter().map(|n| str(n)).collect())),
-        ]))
+        blocking(registry_job)
+            .await
+            .map_err(|join| format!("registry task failed: {join}"))?
+    }
+
+    /// Lightweight profile roster reload (after Settings toggles an agent).
+    /// Avoids re-reading `projects.json` or scanning Hub skills.
+    pub async fn profiles() -> Result<JsonValue, String> {
+        blocking(profiles_job)
+            .await
+            .map_err(|join| format!("profiles task failed: {join}"))
     }
 
     /// `set_active_project` (mod.rs:138): the project's saved skills list
     /// (`load_skills_list` — `None` degrades to the empty list like the
-    /// GPUI `unwrap_or_default`). Read-only, cheap.
+    /// GPUI `unwrap_or_default`). Runs on the blocking pool.
     pub async fn skills_list(project: String) -> Result<JsonValue, String> {
-        let list = ss_skills::projects::load_skills_list(&project).unwrap_or_default();
-        Ok(skills_list_json(&list))
+        blocking(move || skills_list_job(&project))
+            .await
+            .map_err(|join| format!("skills list task failed: {join}"))
     }
 
     /// `refresh_copy_status` (upkeep.rs:13): config and deployment facts
@@ -350,6 +440,39 @@ impl Projects {
             .await
             .map_err(|join| format!("remove task failed: {join}"))?
     }
+
+    /// System folder picker for registering or re-pointing a project root
+    /// (`dialogs.rs` `PathAction`). Resolves with the picked directory path,
+    /// or `None` when cancelled / unavailable on the platform.
+    pub async fn pick_folder(prompt: String) -> Option<String> {
+        let dialog = OpenDialog::folders().title(prompt);
+        match pick_paths(dialog).await {
+            Ok(Some(paths)) => paths
+                .into_iter()
+                .next()
+                .map(|path| path.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
+
+    /// Inspect whether `project_root` has an unexpired, unapplied project-skill
+    /// MCP plan waiting for desktop review. Runs on the blocking pool.
+    pub async fn pending_project_skill_plan(project_root: String) -> Result<JsonValue, String> {
+        blocking(move || pending_project_skill_plan_job(&project_root))
+            .await
+            .map_err(|join| format!("pending plan lookup failed: {join}"))?
+    }
+
+    /// Verify `plan_id` matches `plan_hash` and write a SkillStar desktop
+    /// approval record without deploying skills or registering the project.
+    pub async fn approve_project_skill_plan(
+        plan_id: String,
+        plan_hash: String,
+    ) -> Result<JsonValue, String> {
+        blocking(move || approve_project_skill_plan_job(&plan_id, &plan_hash))
+            .await
+            .map_err(|join| format!("approve plan task failed: {join}"))?
+    }
 }
 
 #[cfg(test)]
@@ -400,16 +523,6 @@ mod tests {
         }
     }
 
-    fn spin<T>(future: impl std::future::Future<Output = T>) -> T {
-        let mut future = std::pin::pin!(future);
-        let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(waker);
-        match future.as_mut().poll(&mut cx) {
-            std::task::Poll::Ready(value) => value,
-            std::task::Poll::Pending => unreachable!("inline reads finish on first poll"),
-        }
-    }
-
     /// One registered project with a copy-deployed hub skill — the GPUI
     /// `ProjectSandbox::project` fixture (test_support.rs:78-89) with the
     /// hub source rooted at the isolated data dir. Returns the entry name.
@@ -442,7 +555,7 @@ mod tests {
     #[test]
     fn registry_starts_empty_but_carries_the_builtin_roster() {
         let _iso = IsolatedDataDir::new();
-        let registry = spin(super::Projects::registry()).expect("registry");
+        let registry = super::registry_job().expect("registry");
         assert_eq!(
             registry["projects"].as_array().map(Vec::len),
             Some(0),
@@ -461,7 +574,7 @@ mod tests {
     #[test]
     fn skills_list_degrades_to_empty_for_an_unregistered_name() {
         let _iso = IsolatedDataDir::new();
-        let list = spin(super::Projects::skills_list("ghost".to_owned())).expect("skills list");
+        let list = super::skills_list_job("ghost");
         assert_eq!(list["agents"].as_object().map(JsonMap::len), Some(0));
         assert_eq!(list["deployModes"].as_object().map(JsonMap::len), Some(0));
     }
@@ -561,7 +674,7 @@ mod tests {
         let iso = IsolatedDataDir::new();
         let name = sandbox_project(&iso, "bye");
         super::remove_job(&name).expect("remove");
-        let registry = spin(super::Projects::registry()).expect("registry");
+        let registry = super::registry_job().expect("registry");
         assert_eq!(registry["projects"].as_array().map(Vec::len), Some(0));
         assert!(
             iso.root.join("bye/.agents/skills/demo/SKILL.md").exists(),
@@ -609,5 +722,19 @@ mod tests {
         let _ = HashMap::<String, ProjectDeployMode>::new();
         let modes = ss_skills::projects::load_skills_list("ghost").unwrap_or_default();
         assert!(modes.deploy_modes.is_empty());
+    }
+
+    #[test]
+    fn pending_plan_returns_null_when_absent_and_approve_rejects_unknown_plan() {
+        let iso = IsolatedDataDir::new();
+        let project_dir = iso.root.join("clean-project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let pending =
+            super::pending_project_skill_plan_job(project_dir.to_str().unwrap()).unwrap();
+        assert_eq!(pending, JsonValue::Null);
+
+        let err = super::approve_project_skill_plan_job("missing-plan", "sha256:bad")
+            .expect_err("unknown plan must fail");
+        assert!(!err.is_empty());
     }
 }

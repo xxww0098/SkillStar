@@ -210,6 +210,7 @@ fn reads_back_the_login_and_its_identity() {
     assert_eq!(local.tokens.expires_at, Some(1_800_000_000));
     assert_eq!(local.identity.account_id.as_deref(), Some("user-1"));
     assert_eq!(local.identity.email.as_deref(), Some("dev@example.com"));
+    assert_eq!(local.identity.display_name, None);
 
     let live = switch::live_with(&fixture.roots, "grok").expect("live");
     assert_eq!(live.identity.as_deref(), Some("user-1"));
@@ -217,6 +218,92 @@ fn reads_back_the_login_and_its_identity() {
         live.access_fingerprint,
         Some(crate::identity::fingerprint(&tokens.access_token))
     );
+}
+
+#[test]
+fn reads_real_name_parts_but_not_the_synthesised_email_prefix() {
+    let fixture = Fixture::new();
+    let path = fixture.auth_path();
+    std::fs::create_dir_all(path.parent().expect("dir")).expect("dir");
+    for (first, last, expected) in [
+        (" Ada ", " Lovelace ", Some("Ada Lovelace")),
+        ("Ada", "", Some("Ada")),
+        ("", "Lovelace", Some("Lovelace")),
+        ("Dev", "", None),
+        ("", "", None),
+    ] {
+        std::fs::write(
+            &path,
+            json!({"fixture": {
+                "key": "token", "email": "dev@example.com",
+                "first_name": first, "last_name": last
+            }})
+            .to_string(),
+        )
+        .expect("seed");
+        let local = read(&fixture.roots).expect("read").expect("login");
+        assert_eq!(local.identity.display_name.as_deref(), expected);
+        let live = switch::live_with(&fixture.roots, "grok").expect("live");
+        assert_eq!(live.display_name.as_deref(), expected);
+    }
+}
+
+#[test]
+fn grok_current_name_is_shown_and_saved_only_for_the_matching_account() {
+    use crate::{oauth::Identity, record::Account, service, store, usage::UsageError};
+
+    let sandbox = Sandbox::new();
+    let make_account = |id: &str, email: &str, token: &str| {
+        let identity = Identity {
+            account_id: Some(id.to_string()),
+            display_name: Some(email.to_string()),
+            email: Some(email.to_string()),
+            ..Identity::default()
+        };
+        let tokens = TokenSet { access_token: token.to_string(), ..TokenSet::default() };
+        let account = Account::from_login("grok", &identity, &tokens, None, 1).expect("record");
+        store::upsert(&account).expect("store");
+        account
+    };
+    let first = make_account("user-1", "first@example.com", "at-first");
+    let second = make_account("user-2", "second@example.com", "at-second");
+    sandbox.write_file(
+        &sandbox.tool_path(&[".grok", "auth.json"]),
+        json!({"fixture": {
+            "key": "at-first", "user_id": "user-1", "email": "first@example.com",
+            "first_name": "Ada", "last_name": "Lovelace"
+        }})
+        .to_string(),
+    );
+
+    let views = service::list().expect("list");
+    let first_view = views.iter().find(|view| view.id == first.id).expect("first");
+    let second_view = views.iter().find(|view| view.id == second.id).expect("second");
+    assert!(first_view.is_active);
+    assert_eq!(first_view.display_name, "Ada Lovelace");
+    assert!(!second_view.is_active);
+    assert_eq!(second_view.display_name, "second@example.com");
+
+    let refresh = |id: &str| {
+        service::refresh_with(
+            id,
+            |_, _, _| panic!("a token without an expiry should not be refreshed"),
+            |_, _| Err(UsageError::Transient("offline".to_string())),
+        )
+        .expect("refresh");
+    };
+    refresh(&second.id);
+    assert_eq!(store::get(&second.id).expect("second").display_name, "second@example.com");
+    refresh(&first.id);
+    assert_eq!(store::get(&first.id).expect("first").display_name, "Ada Lovelace");
+
+    store::update(&first.id, |account| {
+        account.display_name = "My account".to_string();
+        Ok(())
+    })
+    .expect("rename");
+    refresh(&first.id);
+    assert_eq!(store::get(&first.id).expect("first").display_name, "My account");
 }
 
 #[test]

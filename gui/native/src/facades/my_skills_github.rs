@@ -62,12 +62,15 @@ use nsh_core::prelude::*;
 
 use ss_skills::github_auth::{
     Clock, CredentialStore, DeviceFlowPoll, FileCredentialStore, GitHubAuthFacade,
-    GitHubGateway, ProductionGitHubGateway, SystemClock,
+    GitHubConnectionStatus, GitHubGateway, ProductionGitHubGateway, SystemClock,
 };
 
 use nsh_core::element::__private::JsonMap;
 
 use crate::facades::bridge_task::{DomainJob, JobFlag, job_flag};
+
+#[path = "my_skills_github_publish.rs"]
+mod publish;
 
 fn obj(pairs: Vec<(&str, JsonValue)>) -> JsonValue {
     let mut map = JsonMap::<String, JsonValue>::new();
@@ -129,6 +132,52 @@ impl MySkillsGitHub {
             &|secs| timer(Duration::from_secs(secs)),
         )
         .await
+    }
+
+    /// Clear the stored SkillStar GitHub credential and any in-flight device
+    /// flow session (`GitHubAuthFacade::logout`). Runs on the blocking pool.
+    pub async fn logout() -> Result<JsonValue, String> {
+        blocking(|| {
+            shared_facade().logout().map_err(|error| error.message)?;
+            ss_app::channel_ops::clear_sessions();
+            Ok(connection_json(&GitHubConnectionStatus::SignedOut))
+        })
+        .await
+        .map_err(|join| format!("logout task failed: {join}"))?
+    }
+
+    /// Refresh the stored GitHub App access token via `GitHubAuthFacade::refresh`
+    /// and return `{ connected, state, login }`.
+    pub async fn refresh() -> Result<JsonValue, String> {
+        let status = shared_facade()
+            .refresh()
+            .await
+            .map_err(|error| error.message)?;
+        Ok(connection_json(&status))
+    }
+
+    /// Preflight local-skill publication readiness: git binary check,
+    /// SkillStar GitHub App authentication status (`GhStatus`), local skill
+    /// metadata summary, and suggested repository name. Runs on the blocking
+    /// pool because `gh_manager::check_status` drives synchronous HTTP inside
+    /// a short-lived runtime.
+    pub async fn publish_preflight(skill_name: String) -> Result<JsonValue, String> {
+        blocking(move || publish::publish_preflight_sync(&skill_name))
+            .await
+            .map_err(|join| format!("publish preflight task failed: {join}"))?
+    }
+
+    /// Publish a local skill to a GitHub repository via `gh_manager::publish_skill`
+    /// without mutating `.skill-lock.json` provenance (D-081).
+    pub async fn publish_skill(
+        skill_name: String,
+        repo_name: String,
+        is_private: bool,
+        description: String,
+    ) -> Result<JsonValue, String> {
+        blocking(move || publish::publish_skill_sync(&skill_name, &repo_name, is_private, &description))
+            .await
+            .map_err(|join| format!("publish task failed: {join}"))?
     }
 }
 
@@ -210,15 +259,26 @@ where
 /// What the page keeps after a successful sign-in: the connection state
 /// and login the channels-scope gate reads (`page.github = Some(connection)`
 /// + `revise`, github_sign_in.rs:160-166).
-fn connection_json(connection: &ss_skills::github_auth::GitHubConnectionStatus) -> JsonValue {
+fn connection_json(connection: &GitHubConnectionStatus) -> JsonValue {
     match connection {
-        ss_skills::github_auth::GitHubConnectionStatus::Connected { identity, .. } => obj(vec![
+        GitHubConnectionStatus::Connected { identity, .. } => obj(vec![
             ("connected", JsonValue::Bool(true)),
             ("state", str("connected")),
             ("login", str(&identity.login)),
         ]),
-        _ => obj(vec![
-            ("connected", JsonValue::Bool(true)),
+        GitHubConnectionStatus::Expired { identity } => obj(vec![
+            ("connected", JsonValue::Bool(false)),
+            ("state", str("expired")),
+            (
+                "login",
+                match identity {
+                    Some(item) => str(&item.login),
+                    None => JsonValue::Null,
+                },
+            ),
+        ]),
+        GitHubConnectionStatus::SignedOut => obj(vec![
+            ("connected", JsonValue::Bool(false)),
             ("state", str("signed_out")),
             ("login", JsonValue::Null),
         ]),
@@ -689,5 +749,41 @@ mod tests {
         assert_eq!(json["connected"].as_bool(), Some(true));
         assert_eq!(json["state"].as_str(), Some("connected"));
         assert_eq!(json["login"].as_str(), Some("octocat"));
+
+        let expired = GitHubConnectionStatus::Expired {
+            identity: Some(ss_skills::github_auth::GitHubIdentity {
+                id: 7,
+                login: "octocat".to_owned(),
+                avatar_url: None,
+            }),
+        };
+        let exp_json = connection_json(&expired);
+        assert_eq!(exp_json["connected"].as_bool(), Some(false));
+        assert_eq!(exp_json["state"].as_str(), Some("expired"));
+        assert_eq!(exp_json["login"].as_str(), Some("octocat"));
+
+        let out_json = connection_json(&GitHubConnectionStatus::SignedOut);
+        assert_eq!(out_json["connected"].as_bool(), Some(false));
+        assert_eq!(out_json["state"].as_str(), Some("signed_out"));
+        assert!(out_json["login"].is_null());
+    }
+
+    #[test]
+    fn refresh_and_logout_round_trip_through_auth_facade() {
+        let fixture = Fixture::build(vec![
+            current_user(),
+            ok("{\"access_token\":\"ghu_new\",\"refresh_token\":\"ghr_new\",\"expires_in\":28800}"),
+            current_user(),
+            authorized(),
+            device_code("ABCD-1234", 1),
+        ]);
+        let live = live_job("login");
+        let signed_in = fixture.run(&live.flag).expect("device sign-in stores credential");
+        assert_eq!(signed_in["state"].as_str(), Some("connected"));
+        let refreshed = spin(fixture.facade.refresh()).expect("refresh succeeds");
+        assert_eq!(connection_json(&refreshed)["login"].as_str(), Some("octocat"));
+        fixture.facade.logout().expect("logout clears store");
+        let after = spin(fixture.facade.status()).expect("status after logout");
+        assert_eq!(connection_json(&after)["state"].as_str(), Some("signed_out"));
     }
 }

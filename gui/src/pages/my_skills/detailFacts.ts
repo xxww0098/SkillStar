@@ -211,7 +211,7 @@ export type ToggleOutcome =
   | { kind: "skipped"; code: string; path: string; reason: string };
 
 /** skill_card/mod.rs toggle_skip_message：规范根 agent 是说明不是错误；
- * 未管理目录点名路径。 */
+ * 副本修改与未管理目录分别点名路径。 */
 export function toggleSkipMessage(
   name: string,
   outcome: { code: string; path: string }
@@ -219,15 +219,23 @@ export function toggleSkipMessage(
   if (outcome.code === "canonical_root_agent") {
     return t("skillToggle.servedByCanonicalRoot");
   }
+  if (outcome.code === "modified_agent_copy") {
+    return tf("skillToggle.skipModifiedCopyItem", { name, path: outcome.path });
+  }
+  if (outcome.code === "foreign_link") {
+    return tf("skillToggle.skipForeignLinkItem", { name, path: outcome.path });
+  }
   return tf("skillToggle.skipUnmanagedDirItem", { name, path: outcome.path });
 }
 
 // ---- 描述翻译面（detail_drawer.rs description_source） ----------------------
 
-/** mod.rs description_source：本地化描述优先，回退原描述；空白 → null。 */
+/** 原文描述优先（卡片缓存或快照填充的 localizedDescription 不可反压原文，
+ * 否则已译技能会丢失翻译按钮且无法切回原文）；仅原文为空时回退。 */
 export function descriptionSource(skill: SkillRecord): string | null {
+  const raw = nonempty(skill.description);
+  if (raw !== null) return raw;
   const localized =
     typeof skill.localizedDescription === "string" ? skill.localizedDescription : "";
-  const text = (nonempty(localized) ?? skill.description).trim();
-  return text.length === 0 ? null : text;
+  return nonempty(localized);
 }

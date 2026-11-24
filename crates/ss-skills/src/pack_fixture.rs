@@ -31,7 +31,9 @@ impl Sandbox {
             ("USERPROFILE", Some(temp.path().join("home"))),
             ("GIT_CONFIG_GLOBAL", Some(temp.path().join("gitconfig"))),
             ("GIT_CONFIG_NOSYSTEM", Some(PathBuf::from("1"))),
+            ("APPDATA", None),
             ("DSH_HOME", None),
+            ("REASONIX_HOME", None),
         ];
         let previous = overrides
             .iter()

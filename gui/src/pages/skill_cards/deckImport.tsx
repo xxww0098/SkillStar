@@ -1,11 +1,13 @@
 import { Overlay, Text, View, signal, type JSX, type Signal } from "nsh";
 import { Input } from "nsh/base";
 import { SkillCardsImport } from "skillstar-gui/native";
+import { bindSlow } from "../../chrome/delayedFlag";
 import { SHEET_SHADOW, promptVeil } from "../../chrome/dialog";
 import { IconSpin } from "../../chrome/feedback";
 import { Icon, type IconName } from "../../chrome/icons";
 import { fadeTransition } from "../../chrome/motion";
-import { groupsChanged } from "../../shell/events";
+import { endJob, putJob } from "../../shell/jobBoard";
+import { groupsChanged, requestImportSource, selectPage } from "../../shell/events";
 import { isLight, paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 
@@ -109,13 +111,13 @@ function close(seq: number): void {
  * churn.
  */
 export function DeckImportHost(): JSX.Element {
+  // Every entry stays mounted, including one parked into the corner job.
+  // Rendering only the top entry would unmount that card and drop its UI.
   return (
     <View>
-      {entries().length > 0 ? (
-        <DeckImportCard entry={entries()[entries().length - 1]} />
-      ) : (
-        <View />
-      )}
+      <Each of={entries()} key={(entry: DeckImportEntry) => String(entry.seq)}>
+        {(entry) => <DeckImportCard entry={entry()} />}
+      </Each>
     </View>
   );
 }
@@ -124,7 +126,10 @@ export function DeckImportHost(): JSX.Element {
 
 function DeckImportCard(props: { entry: DeckImportEntry }): JSX.Element {
   const seq = props.entry.seq;
+  const jobId = `deck-import-${seq}`;
   // Per-instance state (the body runs once per opened dialog).
+  // on open the card is not parked; background only hides the veil.
+  const parked = signal(false);
   const value = signal("");
   const phase = signal<Phase>("input");
   const progress = signal("");
@@ -133,8 +138,10 @@ function DeckImportCard(props: { entry: DeckImportEntry }): JSX.Element {
 
   // ── Domain actions (read the signals at call time) ────────────
 
-  /// Read the field and route by what it holds: a parseable share code
-  /// installs from the code, anything else is treated as a bundle path.
+  /// Read the field and route by what it holds: share code → remote repo
+  /// source / CLI command (handoff to MySkills import modal) → local bundle
+  /// path. A recognized share code that fails decoding surfaces its own
+  /// error instead of falling through to file open.
   function submit(): void {
     if (phase() !== "input") return;
     const text = value().trim();
@@ -142,13 +149,24 @@ function DeckImportCard(props: { entry: DeckImportEntry }): JSX.Element {
     let parsed: ParsedShareCode | null = null;
     try {
       parsed = SkillCardsImport.parseShareCode(text);
-    } catch {
-      // Not a code — the same text is the bundle path (deck_import.rs
-      // routes by parse failure, not by pattern).
+    } catch (reason) {
+      if (SkillCardsImport.looksLikeShareCode(text) && !hasBundleExtension(text)) {
+        fail(errorText(reason));
+        return;
+      }
       parsed = null;
     }
-    if (parsed) runShare(parsed);
-    else runBundle(text);
+    if (parsed) {
+      runShare(parsed);
+      return;
+    }
+    if (SkillCardsImport.looksLikeRepoSource(text)) {
+      close(seq);
+      selectPage.publish("my_skills");
+      requestImportSource.publish({ input: text, autoScan: true });
+      return;
+    }
+    runBundle(text);
   }
 
   function runShare(parsed: ParsedShareCode): void {
@@ -200,11 +218,27 @@ function DeckImportCard(props: { entry: DeckImportEntry }): JSX.Element {
     done.set(outcome);
     phase.set("completed");
     groupsChanged.publish();
+    if (parked()) {
+      endJob(jobId);
+      close(seq);
+    }
   }
 
   function fail(message: string): void {
     error.set(message);
     phase.set("failed");
+    if (parked()) {
+      endJob(jobId);
+      parked.set(false);
+    }
+  }
+
+  // The import promise cannot be cancelled. Parking hides this card's veil
+  // and leaves the component mounted so the result can still land.
+  function park(): void {
+    if (parked()) return;
+    parked.set(true);
+    putJob({ id: jobId, title: t("wait.importing") });
   }
 
   function retry(): void {
@@ -213,10 +247,9 @@ function DeckImportCard(props: { entry: DeckImportEntry }): JSX.Element {
   }
 
   return (
-    // The floating layer: an Overlay without anchor is a fixed box of the
-    // root view — the sanctioned nsh surface for dialogs. It also carries
-    // the kit-dialog dismissal semantics: Escape (onCancel) and a press
-    // outside the card close (the veil below is the visual half).
+    // Parked: the veil unmounts, this component does not. close(seq) is not
+    // the background action — that would drop the card before the promise ends.
+    <If when={!parked()}>
     <Overlay
       style={{
         position: "fixed",
@@ -267,19 +300,21 @@ function DeckImportCard(props: { entry: DeckImportEntry }): JSX.Element {
         }}
       >
         <Header />
-        {/* The phase swap reads only phase(): the branch re-builds when the
-            phase flips, never on keystrokes (GPUI swaps whole phase views). */}
-        {phase() === "input" ? (
+        <If when={phase() === "input"}>
           <InputPhase value={value} onSubmit={submit} onPickFile={pickFile} />
-        ) : phase() === "installing" ? (
-          <LoadingPhase label={progress()} />
-        ) : phase() === "completed" ? (
+        </If>
+        <If when={phase() === "installing"}>
+          <LoadingPhase label={progress()} onBackground={park} />
+        </If>
+        <If when={phase() === "completed"}>
           <CompletedPhase done={done()} onDone={() => close(seq)} />
-        ) : (
+        </If>
+        <If when={phase() === "failed"}>
           <FailedPhase message={error()} onRetry={retry} />
-        )}
+        </If>
       </View>
     </Overlay>
+    </If>
   );
 }
 
@@ -357,27 +392,26 @@ function InputPhase(props: {
         <Text style={{ fontSize: 14, color: paletteToken("fg_muted") }}>
           {t("skillCards.importHint")}
         </Text>
-        {/* Any edit can flip the detected banner (the facade is the same
-            looks_like_share_code the GPUI field called per Change). */}
+        {/* Any edit can flip the detected banner (the facade sniffs share
+            codes and remote repo sources per Change). */}
         <If when={SkillCardsImport.looksLikeShareCode(value())}>
-          <View
-            testID="deck-import-detected"
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: withAlpha(paletteToken("accent"), 0.2),
-              backgroundColor: withAlpha(paletteToken("accent"), 0.05),
-            }}
-          >
+          <View testID="deck-import-detected" style={detectedBannerStyle()}>
             <Icon name="share" size={14} color={paletteToken("accent")} />
             <Text style={{ fontSize: 12, color: paletteToken("accent") }}>
               {t("skillCards.shareCodeDetected")}
+            </Text>
+          </View>
+        </If>
+        <If
+          when={
+            !SkillCardsImport.looksLikeShareCode(value()) &&
+            SkillCardsImport.looksLikeRepoSource(value())
+          }
+        >
+          <View testID="deck-import-repo-detected" style={detectedBannerStyle()}>
+            <Icon name="gitBranch" size={14} color={paletteToken("accent")} />
+            <Text style={{ fontSize: 12, color: paletteToken("accent") }}>
+              {t("skillCards.repoSourceDetected")}
             </Text>
           </View>
         </If>
@@ -471,8 +505,9 @@ function InputPhase(props: {
 }
 
 /// Spinner well + message. The import is not cancellable (no facade
-/// session), so there is no Cancel row.
-function LoadingPhase(props: { label: string }): JSX.Element {
+/// session). After 10s the card may move to the corner job.
+function LoadingPhase(props: { label: string; onBackground: () => void }): JSX.Element {
+  const slow = bindSlow(() => true);
   return (
     <View
       style={{
@@ -500,6 +535,17 @@ function LoadingPhase(props: { label: string }): JSX.Element {
       <Text style={{ fontSize: 14, color: paletteToken("fg_muted") }}>
         {props.label}
       </Text>
+      <If when={slow()}>
+        <View
+          testID="deck-import-background"
+          onPress={props.onBackground}
+          style={{ cursor: "pointer", paddingHorizontal: 12, paddingVertical: 6 }}
+        >
+          <Text style={{ fontSize: 12, color: paletteToken("accent") }}>
+            {t("wait.continueInBackground")}
+          </Text>
+        </View>
+      </If>
     </View>
   );
 }
@@ -567,15 +613,15 @@ function CompletedPhase(props: { done: ImportDone; onDone: () => void }): JSX.El
         </Text>
       </View>
 
-      {done.existing.length > 0 ? (
+      <If when={done.existing.length > 0}>
         <ChipGroup
           title={tf("shareCodeImport.alreadyHadTitle", { count: done.existing.length })}
           names={done.existing}
           fg={paletteToken("fg")}
           bg={paletteToken("well")}
         />
-      ) : null}
-      {done.installed.length > 0 ? (
+      </If>
+      <If when={done.installed.length > 0}>
         <ChipGroup
           title={tf("shareCodeImport.installedNowTitle", {
             count: done.installed.length,
@@ -584,8 +630,8 @@ function CompletedPhase(props: { done: ImportDone; onDone: () => void }): JSX.El
           fg={paletteToken("ok")}
           bg={paletteToken("ok_bg")}
         />
-      ) : null}
-      {done.skipped.length > 0 ? (
+      </If>
+      <If when={done.skipped.length > 0}>
         <View
           style={{
             display: "flex",
@@ -603,16 +649,16 @@ function CompletedPhase(props: { done: ImportDone; onDone: () => void }): JSX.El
           >
             {tf("shareCodeImport.skippedTitle", { count: done.skipped.length })}
           </Text>
-          {done.skipped.map((entry) => (
-            <SkippedRow entry={entry} />
-          ))}
+          <Each of={done.skipped} key={(entry) => entry.name}>
+            {(entry: () => ImportDone["skipped"][number]) => <SkippedRow entry={entry()} />}
+          </Each>
         </View>
-      ) : null}
-      {done.nameTaken ? (
+      </If>
+      <If when={done.nameTaken}>
         <Text style={{ width: "100%", fontSize: 12, color: paletteToken("warn") }}>
           {t("skillCards.importNameTaken")}
         </Text>
-      ) : null}
+      </If>
 
       <View style={{ display: "flex", flexDirection: "row", gap: 8, marginTop: 8 }}>
         <PrimaryAction
@@ -777,18 +823,20 @@ function ChipGroup(props: {
           gap: 6,
         }}
       >
-        {props.names.map((name) => (
-          <View
-            style={{
-              paddingHorizontal: 6,
-              paddingVertical: 2,
-              borderRadius: 6,
-              backgroundColor: props.bg,
-            }}
-          >
-            <Text style={{ fontSize: 12, color: props.fg }}>{name}</Text>
-          </View>
-        ))}
+        <Each of={props.names} key={(name) => name}>
+          {(name: () => string) => (
+            <View
+              style={{
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 6,
+                backgroundColor: props.bg,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: props.fg }}>{name()}</Text>
+            </View>
+          )}
+        </Each>
       </View>
     </View>
   );
@@ -868,6 +916,26 @@ function OutlineAction(props: {
       </Text>
     </View>
   );
+}
+
+function detectedBannerStyle() {
+  return {
+    display: "flex" as const,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: withAlpha(paletteToken("accent"), 0.2),
+    backgroundColor: withAlpha(paletteToken("accent"), 0.05),
+  };
+}
+
+function hasBundleExtension(text: string): boolean {
+  const clean = text.trim().replace(/^["']|["']$/g, "").toLowerCase();
+  return clean.endsWith(".ags") || clean.endsWith(".agd");
 }
 
 /// Facade rejections arrive as Error objects carrying the domain message.

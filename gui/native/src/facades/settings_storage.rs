@@ -113,6 +113,43 @@ fn intake_preview_wire(preview: &storage_maintenance::AgentIntakePreview) -> Jso
     JsonValue::Object(map)
 }
 
+fn about_snapshot_job() -> JsonValue {
+    let (gh_installed, git_status) = std::thread::scope(|scope| {
+        let gh_handle = scope.spawn(ss_skills::git::gh_manager::is_gh_installed);
+        let git_handle = scope.spawn(ss_skills::git::gh_manager::check_git_status);
+        (
+            gh_handle.join().unwrap_or(false),
+            git_handle.join().unwrap_or_else(|_| {
+                ss_skills::git::gh_manager::check_git_status()
+            }),
+        )
+    });
+    let mut map = JsonMap::new();
+    map.insert(
+        "version".to_owned(),
+        JsonValue::String(product_version().to_owned()),
+    );
+    map.insert(
+        "data_root".to_owned(),
+        JsonValue::String(
+            ss_core::infra::paths::data_root().display().to_string(),
+        ),
+    );
+    map.insert("gh_installed".to_owned(), JsonValue::Bool(gh_installed));
+    map.insert(
+        "git_status".to_owned(),
+        serde_json::to_value(git_status).unwrap_or(JsonValue::Null),
+    );
+    map.insert(
+        "release_check".to_owned(),
+        ss_core::infra::release_check::last_record()
+            .and_then(|record| serde_json::to_value(&record).ok())
+            .unwrap_or(JsonValue::Null),
+    );
+    map.insert("gh_install_command".to_owned(), gh_install_command());
+    JsonValue::Object(map)
+}
+
 #[module]
 impl SettingsStorage {
     /// Aggregated storage usage (`get_storage_overview` parity,
@@ -214,36 +251,12 @@ impl SettingsStorage {
     /// `{version, data_root, gh_installed, git_status, release_check}`.
     /// `git_status` is the serde shape of `GitStatus` (tag = "status"),
     /// `release_check` the last persisted `ReleaseCheckRecord` or null.
-    /// Read-only; `check_git_status` shells out to `git --version`.
-    pub fn about_snapshot() -> JsonValue {
-        let mut map = JsonMap::new();
-        map.insert(
-            "version".to_owned(),
-            JsonValue::String(product_version().to_owned()),
-        );
-        map.insert(
-            "data_root".to_owned(),
-            JsonValue::String(
-                ss_core::infra::paths::data_root().display().to_string(),
-            ),
-        );
-        map.insert(
-            "gh_installed".to_owned(),
-            JsonValue::Bool(ss_skills::git::gh_manager::is_gh_installed()),
-        );
-        map.insert(
-            "git_status".to_owned(),
-            serde_json::to_value(ss_skills::git::gh_manager::check_git_status())
-                .unwrap_or(JsonValue::Null),
-        );
-        map.insert(
-            "release_check".to_owned(),
-            ss_core::infra::release_check::last_record()
-                .and_then(|record| serde_json::to_value(&record).ok())
-                .unwrap_or(JsonValue::Null),
-        );
-        map.insert("gh_install_command".to_owned(), gh_install_command());
-        JsonValue::Object(map)
+    /// Blocking pool (`check_git_status` / `is_gh_installed` shell out to
+    /// `git --version` and `gh --version`).
+    pub async fn about_snapshot() -> Result<JsonValue, String> {
+        blocking(about_snapshot_job)
+            .await
+            .map_err(|join| format!("about-snapshot task failed: {join}"))
     }
 
     /// The manual update check (about.rs `run_release_check` parity).
@@ -609,7 +622,7 @@ mod tests {
             record.get("current_version").and_then(|v| v.as_str()),
             Some(crate::ROOT_VERSION)
         );
-        let snapshot = SettingsStorage::about_snapshot();
+        let snapshot = super::about_snapshot_job();
         let persisted = snapshot.get("release_check").unwrap();
         assert_eq!(
             persisted
@@ -644,7 +657,7 @@ mod tests {
     #[test]
     fn about_snapshot_carries_version_paths_and_git_status() {
         let sandbox = StorageSandbox::new();
-        let snapshot = SettingsStorage::about_snapshot();
+        let snapshot = super::about_snapshot_job();
         let version = snapshot.get("version").and_then(|v| v.as_str()).unwrap();
         assert_eq!(version, crate::ROOT_VERSION, "build.rs's root [package] version");
         assert_ne!(version, "0.1.0", "never the bridge crate's own version");

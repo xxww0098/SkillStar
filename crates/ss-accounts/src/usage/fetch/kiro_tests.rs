@@ -41,7 +41,9 @@ fn the_usage_url_names_the_agentic_request_and_the_profile() {
 fn a_read_without_a_token_asks_for_a_new_login() {
     let creds = Credentials {
         tokens: TokenSet::default(),
+        account_id: None,
         provider_state: None,
+        needs_identity: false,
     };
     let error = fetch(&creds).expect_err("no token");
     assert!(matches!(error, UsageError::AuthRequired(_)), "got {error:?}");

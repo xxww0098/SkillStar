@@ -6,12 +6,16 @@
 // 这里在假桥上锁定 UI 状态机。
 import { expect, open, test } from "nsh/test";
 import { t } from "../../../services/translation";
+import { agentsChanged } from "../../../shell/events";
 import {
+  breakdownByteCounts,
   confirmKeyOf,
   createStorageState,
+  directorySpecs,
   hubDeleteConfirm,
   hubDeleteStatus,
   hubRelative,
+  totalStorageBytes,
   type BackupEntryDto,
   type ForceDeleteReportDto,
   type StorageBridge,
@@ -46,6 +50,7 @@ function overviewFixture(): StorageOverviewDto {
     is_hub_under_data: true,
     config_bytes: 10,
     config_path: "/data/config",
+    skills_data_path: "/data/data/skills",
     hub_bytes: 20,
     hub_path: "/data/agents/data/skills/installed",
     hub_count: 2,
@@ -355,4 +360,70 @@ test("backups state lists snapshots, restores a backup with agentsChanged, and c
   h.resolveOverview(overviewFixture());
   await settle();
   expect(h.state.backups().length).toBe(0);
+});
+
+test("storage totals do not double-count local_bytes included in hub_bytes and history points to skills_data_path", () => {
+  const overview: StorageOverviewDto = {
+    ...overviewFixture(),
+    config_bytes: 10,
+    hub_bytes: 100,
+    local_bytes: 40,
+    cache_bytes: 25,
+    skills_data_path: "/data/data/skills",
+  };
+  expect(totalStorageBytes(overview)).toBe(135);
+  expect(breakdownByteCounts(overview)).toEqual({
+    hub: 60,
+    cache: 25,
+    local: 40,
+    config: 10,
+  });
+
+  const rows = directorySpecs(overview);
+  const historyRow = rows.find((row) => row.folderId === "history");
+  expect(historyRow?.path).toBe("/data/data/skills");
+});
+
+test("forceDeleteHub, repairSkills, and adoptAgentSkills publish agentsChanged on success only", async () => {
+  const h = harness();
+  h.state.start();
+  h.resolveOverview(overviewFixture());
+  await settle();
+
+  let events = 0;
+  const unsub = agentsChanged.subscribe(() => {
+    events += 1;
+  });
+
+  h.state.armDelete("hub");
+  h.resolvePreview(["owned-skill"]);
+  await settle();
+  h.state.armDelete("hub");
+  h.resolveForceHub({ removed: ["owned-skill"], failed: [], kept: [] });
+  await settle();
+  h.resolveOverview(overviewFixture());
+  await settle();
+  expect(events).toBe(1);
+
+  h.state.repairSkills();
+  await settle();
+  h.resolveOverview(overviewFixture());
+  await settle();
+  expect(events).toBe(2);
+
+  h.state.adoptAgentSkills();
+  await settle();
+  h.resolveOverview(overviewFixture());
+  await settle();
+  expect(events).toBe(3);
+
+  h.bridge.applyRepair = async () => {
+    throw new Error("boom");
+  };
+  h.state.repairSkills();
+  await settle();
+  h.resolveOverview(overviewFixture());
+  await settle();
+  expect(events).toBe(3);
+  unsub();
 });

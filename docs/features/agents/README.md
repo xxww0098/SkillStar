@@ -23,8 +23,17 @@ Kilo 全局目录为 `~/.kilo/skills`，`~/.kilocode` 仅上游用于安装检�
 目录（`.grok`、`.kilo`、`.kimchi`、`.minimax`、`.posit/assistant`、`.zcode`）
 随同步补齐。
 
-**Gemini 的两轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已随上游
-进入同步区（全局目录 `~/.gemini/skills`，项目级共享 `.agents/skills`）。
+2026-11 上游对齐要点（`vercel-labs/skills` `v1.8.1`）：内置覆盖全部上游目标
+（`antigravity-cli` 折叠进 `antigravity` 单行，外加 `omp`、`deepseek`、`workbuddy`
+三个扩展）；`fx` 改为共享 `~/.agents/skills` 与 `.agents/skills`；`reasonix` 全局
+目录支持 `$REASONIX_HOME/skills` 及 Windows `%APPDATA%/reasonix/skills`（空白
+或未设置回退 `~/AppData/Roaming/reasonix/skills`，非 Windows 保持 `~/.reasonix/skills`）；
+`discovery::PRIORITY_SKILL_DIRS` 补齐全部已注册 Agent 的 `project_skills_rel` 与
+历史容器目录（含 `.fx/skills`），由测试双向守卫。
+
+**Gemini 的各轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已随上游
+进入同步区（全局目录 `~/.gemini/skills`，项目级共享 `.agents/skills`），但**不进账号工作台也不纳入外部 MCP 管理**
+——它的账号支持已移除（[D-119](../../decisions.md#d-119移除-gemini-cli-账号支持)），外部 MCP 支持亦已移除（[D-122](../../decisions.md#d-122移除-gemini-cli-mcp-支持)）。
 Antigravity 同样落在 `~/.gemini/` 下，但它是 Google Antigravity，与 Gemini CLI 是不同
 产品，两个 profile 互不顶替。Antigravity 自己有三种安装状态（app / CLI / IDE），只有
 **一个** Agent profile，部署时再扇出到三份 `builtin/skills`，见下面的[镜像目录](#镜像目录一个-profile多份技能目录)。Usage/Cloud Code 中的 Gemini **模型名**
@@ -125,10 +134,9 @@ Agent 卡片展开后的已链接面板列出该物理 Global skills 目录当�
 `batch_toggle_skills_for_agent`，而不是由界面循环调用单项命令。后端 tracing 以
 `operation_id` 关联整批操作，并在开始、单项失败和汇总结束事件中记录 Agent、方向、总数、
 成功数、失败数与耗时；批次报告保留每个失败 Skill 的完整 error chain。遇到目标位置已有
-非 SkillStar 管理的真实目录时必须 fail closed、保留该目录：该项记为 `skipped`（code
-`unmanaged_real_directory` + 冲突路径），不得记为 `failed`，也不得覆盖。UI 用界面语言说明
-原因，并提供「打开该目录」；关闭该通知即表示接受跳过。单项 `toggle_skill_for_agent` 仍把
-同一种碰撞映射为错误，避免用户以为已经链上。
+非 SkillStar 管理的真实目录或外部符号链接时必须 fail closed、保留原条目：真实目录记为 `skipped`（code
+`unmanaged_real_directory` + 冲突路径），外部链接记为 `skipped`（code `foreign_link` + 冲突路径），不得记为 `failed`，也不得覆盖。UI 用钉住通知以界面语言说明
+原因，在设置页提供「打开该目录」，在「我的技能」单项切换通知与详情抽屉提供「备份并接管」（真实目录先归档至 `backups/` 再切换为受管部署）或「接管链接」（外部链接直接切换为受管部署）、「吸收回 Hub」（仅真实目录）与「打开该目录」显式恢复入口；关闭通知即表示接受跳过。
 
 Settings 的「当前受管技能」主开关不是 Agent 的启用开关，也不是 Hub 同步。它通过
 `get_agent_managed_skills_state` / `toggle_agent_managed_skills` 调用

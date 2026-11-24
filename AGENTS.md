@@ -10,7 +10,7 @@ SkillStar 的界面在 `gui`（基于 **`nsh`** 应用框架），域逻辑在 R
 
 ## 应用框架（nsh）
 
-- **唯一 GUI 与应用框架是 `nsh`**（位于 `gui`，当前锁定 `0.5.x`）。本项目**不使用** React、Tauri、Electron 或已移除的 GPUI（D-110）。
+- **唯一 GUI 与应用框架是 `nsh`**（位于 `gui`，当前锁定 `0.6.x`）。本项目**不使用** React、Tauri、Electron 或已移除的 GPUI（D-110）。
 - **三层架构与单向依赖**：
   1. **TSX 视图与状态层（`gui/App.tsx` + `src/`）**：采用 `nsh` 细粒度信号响应式模型（`signal` / `effect` / `<If>` / `<Each>`）构建页面与 `src/chrome/` 共用控件。
   2. **原生桥接层（`gui/native`，crate `ss-gui-bridge`）**：通过 `#[native_module]` 将 `crates/ss-*` 域 facade 暴露给 TSX；除纯同步判定外一律走 blocking 池。
@@ -88,6 +88,7 @@ bash scripts/internal/check_dep_graph_doc.sh
 - [界面](./docs/features/frontend/README.md)
 - [Skills](./docs/features/skills/README.md)
 - [Marketplace](./docs/features/marketplace/README.md)
+- [MCP](./docs/features/mcp/README.md)
 - [Project skills MCP](./docs/features/project-skills-mcp/README.md)
 - [Accounts](./docs/features/accounts/README.md)
 - [Usage](./docs/features/usage/README.md)

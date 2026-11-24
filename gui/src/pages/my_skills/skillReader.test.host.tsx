@@ -6,13 +6,14 @@
 //
 // 样本为真实 SKILL.md 的逐字节内嵌（波 3 spike 同款四类形态；来源见各
 // 常量注释），测试不触文件系统、不写 $HOME。
-// nsh 0.5 起 test 的 press 会做命中测试：模态遮罩（skillReaderSlot 的
+// nsh 0.6 test 的 press 会做命中测试：模态遮罩（skillReaderSlot 的
 // position:fixed 覆盖层）之下的装置按钮会以 ERR_NSH_TEST_COVERED 拒绝，
 // 因此同一批装置动作也挂在 host 事件通道上（见下方的装置动作表）。
 
 import { Button } from "nsh/base";
 import { Text, View, host, mount, signal, type JSX } from "nsh";
 import { setThemeMode } from "../../services/themeMode";
+import { translationPrefsChanged } from "../../shell/events";
 import { SkillReaderHost, openSkillReader, type ReaderBridge } from "./skillReaderSlot";
 import { READER_SAMPLES, type ReaderSampleId } from "./skillReader.samples";
 import { splitMarkdown } from "./readerBlocks";
@@ -112,6 +113,24 @@ function resolveFill(): void {
   call.resolve({ done, rejection: null });
 }
 
+function rejectFill(): void {
+  const call = fillCalls.shift();
+  if (call === undefined) return;
+  call.resolve({ done: [], rejection: { model: "bad-model", detail: "bad key" } });
+}
+
+function failFill(): void {
+  const call = fillCalls.shift();
+  if (call === undefined) return;
+  call.reject(new Error("network down"));
+}
+
+function missFill(): void {
+  const call = fillCalls.shift();
+  if (call === undefined) return;
+  call.resolve({ done: [], rejection: null });
+}
+
 function openSample(id: ReaderSampleId): void {
   script.set(id);
   opened.set(id);
@@ -148,6 +167,10 @@ const harnessActions: Record<string, () => void> = {
   blocked: () => blockedOn.set(!blockedOn()),
   prefill,
   "resolve-fill": resolveFill,
+  "reject-fill": rejectFill,
+  "fail-fill": failFill,
+  "miss-fill": missFill,
+  "prefs-changed": () => translationPrefsChanged.publish(),
   "theme-line": () => {
     currentTheme = "line";
   },

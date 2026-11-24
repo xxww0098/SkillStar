@@ -64,40 +64,9 @@ impl MySkills {
         let skills = ss_skills::installed_skill::list_installed_skills()
             .await
             .map_err(|err| format!("{err:#}"))?;
-        let profiles = ss_skills::agents::list_profiles();
-        let (favorites, locked) = match ss_skills::repo_favorites::load() {
-            ss_skills::repo_favorites::LoadedFavorites::NewerVersion => {
-                (BTreeSet::new(), true)
-            }
-            ss_skills::repo_favorites::LoadedFavorites::Ready(sources) => (sources, false),
-        };
-        let agents = profiles
-            .iter()
-            .map(|profile| {
-                obj(vec![
-                    ("id", str(&profile.id)),
-                    ("displayName", str(&profile.display_name)),
-                    ("icon", str(&profile.icon)),
-                    ("enabled", JsonValue::Bool(profile.enabled)),
-                    (
-                        "targetable",
-                        JsonValue::Bool(profile.enabled && profile.has_global_skills()),
-                    ),
-                ])
-            })
-            .collect::<Vec<_>>();
-        Ok(obj(vec![
-            (
-                "skills",
-                JsonValue::Array(skills.iter().map(skill_json).collect()),
-            ),
-            ("agents", JsonValue::Array(agents)),
-            (
-                "favorites",
-                JsonValue::Array(favorites.iter().map(|s| str(s)).collect()),
-            ),
-            ("favoritesLocked", JsonValue::Bool(locked)),
-        ]))
+        blocking(move || snapshot_payload(&skills))
+            .await
+            .map_err(|join| format!("snapshot task failed: {join}"))
     }
 
     /// The GitHub session the channels-scope empty state gates on
@@ -108,27 +77,7 @@ impl MySkills {
     pub async fn github_status() -> Result<JsonValue, String> {
         let facade = auth_facade();
         let status = facade.status().await.map_err(|err| format!("{err:#}"))?;
-        let (state, login) = match &status {
-            ss_skills::github_auth::GitHubConnectionStatus::SignedOut => {
-                ("signed_out".to_owned(), None)
-            }
-            ss_skills::github_auth::GitHubConnectionStatus::Expired { .. } => {
-                ("signed_out".to_owned(), None)
-            }
-            ss_skills::github_auth::GitHubConnectionStatus::Connected { identity, .. } => {
-                ("connected".to_owned(), Some(identity.login.clone()))
-            }
-        };
-        Ok(obj(vec![
-            ("state", str(&state)),
-            (
-                "login",
-                match login {
-                    Some(name) => str(&name),
-                    None => JsonValue::Null,
-                },
-            ),
-        ]))
+        Ok(github_status_json(&status))
     }
 
     /// Toggle one repository favorite and persist the set (mod.rs
@@ -139,52 +88,9 @@ impl MySkills {
     /// the page can toast `toolbar.favoriteSourceLocked` /
     /// `toolbar.favoriteSourceFailed` exactly like the GPUI callback.
     pub async fn toggle_favorite_repo(source: String) -> Result<JsonValue, String> {
-        if source.is_empty() {
-            return Err("empty source".to_owned());
-        }
-        let (previous, locked) = match ss_skills::repo_favorites::load() {
-            ss_skills::repo_favorites::LoadedFavorites::NewerVersion => (BTreeSet::new(), true),
-            ss_skills::repo_favorites::LoadedFavorites::Ready(sources) => (sources, false),
-        };
-        if locked {
-            return Ok(obj(vec![
-                (
-                    "favorites",
-                    JsonValue::Array(previous.iter().map(|s| str(s)).collect()),
-                ),
-                ("locked", JsonValue::Bool(true)),
-                ("stored", JsonValue::Bool(false)),
-                ("error", JsonValue::Null),
-            ]));
-        }
-        let mut next = previous.clone();
-        if !next.remove(&source) {
-            next.insert(source.clone());
-        }
-        let generation =
-            FAVORITES_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        let write = ss_skills::repo_favorites::save(generation, next.clone())
-            .map_err(|err| err.to_string())?;
-        let (kept, locked_now) = match write {
-            ss_skills::repo_favorites::FavoriteWrite::Stored
-            | ss_skills::repo_favorites::FavoriteWrite::Stale => (next, false),
-            ss_skills::repo_favorites::FavoriteWrite::NewerVersion => (previous, true),
-        };
-        Ok(obj(vec![
-            (
-                "favorites",
-                JsonValue::Array(kept.iter().map(|s| str(s)).collect()),
-            ),
-            ("locked", JsonValue::Bool(locked_now)),
-            (
-                "stored",
-                JsonValue::Bool(matches!(
-                    write,
-                    ss_skills::repo_favorites::FavoriteWrite::Stored
-                )),
-            ),
-            ("error", JsonValue::Null),
-        ]))
+        blocking(move || toggle_favorite_repo_sync(&source))
+            .await
+            .map_err(|join| format!("toggle favorite task failed: {join}"))?
     }
 
     /// Compare installed skills with upstream (updates.rs `check_updates`):
@@ -285,19 +191,18 @@ impl MySkills {
     /// badge click, skill_card/mod.rs `SkillCardCommand::OpenFolder`:
     /// `content::open_skill_folder`).
     pub async fn open_skill_folder(name: String) -> Result<(), String> {
-        ss_skills::content::open_skill_folder(&name).map_err(|err| format!("{err:#}"))
+        blocking(move || ss_skills::content::open_skill_folder(&name).map_err(|err| format!("{err:#}")))
+            .await
+            .map_err(|join| format!("open folder task failed: {join}"))?
     }
 
     /// The stored per-skill description-translation choices
     /// (`ss_core::translation::load_config().description_choices`) the cards
     /// and the selection bar's translate action read (mod.rs:132).
     pub async fn description_choices() -> Result<JsonValue, String> {
-        let config = ss_core::translation::load_config().map_err(|err| format!("{err:#}"))?;
-        let mut map = JsonMap::new();
-        for (skill, on) in config.description_choices {
-            map.insert(skill, JsonValue::Bool(on));
-        }
-        Ok(obj(vec![("choices", JsonValue::Object(map))]))
+        blocking(description_choices_sync)
+            .await
+            .map_err(|join| format!("description choices task failed: {join}"))?
     }
 
     /// Persist per-skill description-translation choices
@@ -307,21 +212,142 @@ impl MySkills {
     pub async fn set_description_choices(
         choices: JsonValue,
     ) -> Result<(), String> {
-        let entries = choices
-            .as_object()
-            .ok_or_else(|| "choices must be an object".to_owned())?;
-        let mut pairs: Vec<(String, bool)> = Vec::new();
-        for (skill, value) in entries {
-            let Some(on) = value.as_bool() else {
-                return Err(format!("choice for {skill} must be a boolean"));
-            };
-            pairs.push((skill.clone(), on));
-        }
-        ss_core::translation::set_description_choices(
-            pairs.iter().map(|(skill, on)| (skill.as_str(), *on)),
-        )
-        .map_err(|err| format!("{err:#}"))
+        let pairs = parse_description_choices(&choices)?;
+        blocking(move || set_description_choices_sync(&pairs))
+            .await
+            .map_err(|join| format!("set description choices task failed: {join}"))?
     }
+}
+
+fn parse_description_choices(choices: &JsonValue) -> Result<Vec<(String, bool)>, String> {
+    let entries = choices
+        .as_object()
+        .ok_or_else(|| "choices must be an object".to_owned())?;
+    let mut pairs: Vec<(String, bool)> = Vec::new();
+    for (skill, value) in entries {
+        let Some(on) = value.as_bool() else {
+            return Err(format!("choice for {skill} must be a boolean"));
+        };
+        pairs.push((skill.clone(), on));
+    }
+    Ok(pairs)
+}
+
+fn set_description_choices_sync(pairs: &[(String, bool)]) -> Result<(), String> {
+    ss_core::translation::set_description_choices(
+        pairs.iter().map(|(skill, on)| (skill.as_str(), *on)),
+    )
+    .map_err(|err| format!("{err:#}"))
+}
+
+fn snapshot_payload(skills: &[Skill]) -> JsonValue {
+    let profiles = ss_skills::agents::list_profiles();
+    let (favorites, locked) = match ss_skills::repo_favorites::load() {
+        ss_skills::repo_favorites::LoadedFavorites::NewerVersion => (BTreeSet::new(), true),
+        ss_skills::repo_favorites::LoadedFavorites::Ready(sources) => (sources, false),
+    };
+    let agents = profiles
+        .iter()
+        .map(|profile| {
+            obj(vec![
+                ("id", str(&profile.id)),
+                ("displayName", str(&profile.display_name)),
+                ("icon", str(&profile.icon)),
+                ("enabled", JsonValue::Bool(profile.enabled)),
+                (
+                    "targetable",
+                    JsonValue::Bool(profile.enabled && profile.has_global_skills()),
+                ),
+            ])
+        })
+        .collect::<Vec<_>>();
+    let translation_config = ss_core::translation::load_config().ok();
+    let choices_map = translation_config
+        .as_ref()
+        .map(|config| {
+            let mut map = JsonMap::new();
+            for (skill, on) in &config.description_choices {
+                map.insert(skill.clone(), JsonValue::Bool(*on));
+            }
+            map
+        })
+        .unwrap_or_default();
+    obj(vec![
+        (
+            "skills",
+            JsonValue::Array(
+                skills
+                    .iter()
+                    .map(|skill| skill_json_with_config(skill, translation_config.as_ref()))
+                    .collect(),
+            ),
+        ),
+        ("agents", JsonValue::Array(agents)),
+        (
+            "favorites",
+            JsonValue::Array(favorites.iter().map(|s| str(s)).collect()),
+        ),
+        ("favoritesLocked", JsonValue::Bool(locked)),
+        ("descriptionChoices", JsonValue::Object(choices_map)),
+    ])
+}
+
+fn toggle_favorite_repo_sync(source: &str) -> Result<JsonValue, String> {
+    if source.is_empty() {
+        return Err("empty source".to_owned());
+    }
+    let (previous, locked) = match ss_skills::repo_favorites::load() {
+        ss_skills::repo_favorites::LoadedFavorites::NewerVersion => (BTreeSet::new(), true),
+        ss_skills::repo_favorites::LoadedFavorites::Ready(sources) => (sources, false),
+    };
+    if locked {
+        return Ok(obj(vec![
+            (
+                "favorites",
+                JsonValue::Array(previous.iter().map(|s| str(s)).collect()),
+            ),
+            ("locked", JsonValue::Bool(true)),
+            ("stored", JsonValue::Bool(false)),
+            ("error", JsonValue::Null),
+        ]));
+    }
+    let mut next = previous.clone();
+    if !next.remove(source) {
+        next.insert(source.to_owned());
+    }
+    let generation =
+        FAVORITES_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let write = ss_skills::repo_favorites::save(generation, next.clone())
+        .map_err(|err| err.to_string())?;
+    let (kept, locked_now) = match write {
+        ss_skills::repo_favorites::FavoriteWrite::Stored
+        | ss_skills::repo_favorites::FavoriteWrite::Stale => (next, false),
+        ss_skills::repo_favorites::FavoriteWrite::NewerVersion => (previous, true),
+    };
+    Ok(obj(vec![
+        (
+            "favorites",
+            JsonValue::Array(kept.iter().map(|s| str(s)).collect()),
+        ),
+        ("locked", JsonValue::Bool(locked_now)),
+        (
+            "stored",
+            JsonValue::Bool(matches!(
+                write,
+                ss_skills::repo_favorites::FavoriteWrite::Stored
+            )),
+        ),
+        ("error", JsonValue::Null),
+    ]))
+}
+
+fn description_choices_sync() -> Result<JsonValue, String> {
+    let config = ss_core::translation::load_config().map_err(|err| format!("{err:#}"))?;
+    let mut map = JsonMap::new();
+    for (skill, on) in config.description_choices {
+        map.insert(skill, JsonValue::Bool(on));
+    }
+    Ok(obj(vec![("choices", JsonValue::Object(map))]))
 }
 
 /// One `GitHubAuthFacade` for the process — the GPUI side caches identity
@@ -340,17 +366,74 @@ fn auth_facade(
     )
 }
 
+fn github_status_json(status: &ss_skills::github_auth::GitHubConnectionStatus) -> JsonValue {
+    let (state, login) = match status {
+        ss_skills::github_auth::GitHubConnectionStatus::SignedOut => {
+            ("signed_out".to_owned(), None)
+        }
+        ss_skills::github_auth::GitHubConnectionStatus::Expired { identity } => (
+            "expired".to_owned(),
+            identity.as_ref().map(|item| item.login.clone()),
+        ),
+        ss_skills::github_auth::GitHubConnectionStatus::Connected { identity, .. } => {
+            ("connected".to_owned(), Some(identity.login.clone()))
+        }
+    };
+    obj(vec![
+        ("state", str(&state)),
+        (
+            "login",
+            match login {
+                Some(name) => str(&name),
+                None => JsonValue::Null,
+            },
+        ),
+    ])
+}
+
+fn lookup_localized_description(
+    skill: &Skill,
+    config: Option<&ss_core::translation::TranslationConfig>,
+) -> Option<String> {
+    if let Some(text) = &skill.localized_description {
+        return Some(text.clone());
+    }
+    let cfg = config?;
+    let enabled = cfg
+        .description_choices
+        .get(&skill.name)
+        .copied()
+        .unwrap_or(cfg.translate_descriptions);
+    if !enabled {
+        return None;
+    }
+    let target = ss_core::translation::canonical_target(&cfg.target_lang);
+    if !ss_core::translation::needs_translation(&skill.description, target) {
+        return None;
+    }
+    ss_core::translation::lookup(&skill.description, target)
+}
+
 /// One skill as the page's TS record: every field `filters.rs` (name,
 /// description, localizedDescription, source, author, agentLinks,
 /// skillType, lastUpdated, updateAvailable, upstreamChange) and the compact
 /// card body (gitUrl, stars, rank) read. `upstreamChange` keeps the GPUI
 /// kinds the status pill branches on (render.rs:352-383).
+#[cfg_attr(not(test), allow(dead_code))]
 fn skill_json(skill: &Skill) -> JsonValue {
+    let config = ss_core::translation::load_config().ok();
+    skill_json_with_config(skill, config.as_ref())
+}
+
+fn skill_json_with_config(
+    skill: &Skill,
+    config: Option<&ss_core::translation::TranslationConfig>,
+) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert("name".to_owned(), str(&skill.name));
     map.insert("description".to_owned(), str(&skill.description));
-    if let Some(text) = &skill.localized_description {
-        map.insert("localizedDescription".to_owned(), str(text));
+    if let Some(text) = lookup_localized_description(skill, config) {
+        map.insert("localizedDescription".to_owned(), str(&text));
     }
     map.insert(
         "skillType".to_owned(),
@@ -378,9 +461,10 @@ fn skill_json(skill: &Skill) -> JsonValue {
                 ("kind", str("identity_changed")),
                 ("upstreamName", str(upstream_name)),
             ]),
-            Some(UpstreamChange::LocalChanges { .. }) => {
-                obj(vec![("kind", str("local_changes"))])
-            }
+            Some(UpstreamChange::LocalChanges { baseline_missing }) => obj(vec![
+                ("kind", str("local_changes")),
+                ("baselineMissing", JsonValue::Bool(*baseline_missing)),
+            ]),
         },
     );
     map.insert("lastUpdated".to_owned(), str(&skill.last_updated));
@@ -490,7 +574,6 @@ fn update_report_json(report: &SkillUpdateReport) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-    use super::MySkills;
     use ss_core::types::skill::{Skill, SkillType};
 
     /// The shared sandbox guard (facades/mod.rs TEST_ENV_LOCK): every facade
@@ -537,7 +620,8 @@ mod tests {
     #[test]
     fn iso_probe_snapshot() {
         let _iso = IsolatedDataDir::new();
-        let snap = spin(MySkills::snapshot()).expect("snapshot");
+        let skills = spin(ss_skills::installed_skill::list_installed_skills()).expect("list");
+        let snap = super::snapshot_payload(&skills);
         assert!(snap["skills"].as_array().map(Vec::len) == Some(0));
     }
 
@@ -554,7 +638,8 @@ mod tests {
     #[test]
     fn snapshot_shapes_skills_agents_and_favorites() {
         let _iso = IsolatedDataDir::new();
-        let snap = spin(MySkills::snapshot()).expect("snapshot over an isolated data dir");
+        let skills = spin(ss_skills::installed_skill::list_installed_skills()).expect("list");
+        let snap = super::snapshot_payload(&skills);
         assert_eq!(
             snap["skills"].as_array().map(Vec::len),
             Some(0),
@@ -576,12 +661,13 @@ mod tests {
             Some(false),
             "a missing favorites file is editable, not locked"
         );
+        assert!(snap["descriptionChoices"].is_object());
     }
 
     #[test]
     fn toggle_favorite_round_trips_and_rejects_empty_sources() {
         let _iso = IsolatedDataDir::new();
-        let first = spin(MySkills::toggle_favorite_repo("acme/skills".to_owned()))
+        let first = super::toggle_favorite_repo_sync("acme/skills")
             .expect("first favorite write");
         assert_eq!(first["stored"].as_bool(), Some(true));
         assert_eq!(first["locked"].as_bool(), Some(false));
@@ -590,7 +676,7 @@ mod tests {
             Some(Some("acme/skills"))
         );
 
-        let second = spin(MySkills::toggle_favorite_repo("acme/skills".to_owned()))
+        let second = super::toggle_favorite_repo_sync("acme/skills")
             .expect("second write toggles the star off");
         assert_eq!(
             second["favorites"].as_array().map(Vec::len),
@@ -598,7 +684,7 @@ mod tests {
             "toggling the only favorite empties the set"
         );
 
-        let err = spin(MySkills::toggle_favorite_repo(String::new()))
+        let err = super::toggle_favorite_repo_sync("")
             .expect_err("an empty source is not a favorite");
         assert!(!err.is_empty());
     }
@@ -613,7 +699,7 @@ mod tests {
         }
         std::fs::write(&path, r#"{"version":99,"sources":["kept/repo"]}"#).unwrap();
 
-        let result = spin(MySkills::toggle_favorite_repo("acme/skills".to_owned()))
+        let result = super::toggle_favorite_repo_sync("acme/skills")
             .expect("a locked file is not an error");
         assert_eq!(result["locked"].as_bool(), Some(true));
         assert_eq!(result["stored"].as_bool(), Some(false));
@@ -682,6 +768,19 @@ mod tests {
         assert_eq!(super::skill_json(&local)["skillType"].as_str(), Some("local"));
         assert_eq!(super::skill_json(&local)["called"].as_str(), Some("原始名"));
         assert!(super::skill_json(&local)["upstreamChange"].is_null());
+
+        let mut edited = skill("edited-card");
+        edited.upstream_change = Some(ss_core::types::skill::UpstreamChange::LocalChanges {
+            baseline_missing: true,
+        });
+        assert_eq!(
+            super::skill_json(&edited)["upstreamChange"]["kind"].as_str(),
+            Some("local_changes")
+        );
+        assert_eq!(
+            super::skill_json(&edited)["upstreamChange"]["baselineMissing"].as_bool(),
+            Some(true)
+        );
     }
 
     #[test]
@@ -692,12 +791,65 @@ mod tests {
             map.insert("demo".to_owned(), nsh_core::JsonValue::Bool(true));
             map
         });
-        spin(MySkills::set_description_choices(payload)).expect("choices persist");
-        let read = spin(MySkills::description_choices()).expect("choices read back");
+        let pairs = super::parse_description_choices(&payload).expect("valid payload");
+        super::set_description_choices_sync(&pairs).expect("choices persist");
+        let read = super::description_choices_sync().expect("choices read back");
         assert_eq!(
             read["choices"]["demo"].as_bool(),
             Some(true),
             "the stored choice survives the round trip"
+        );
+    }
+
+    #[test]
+    fn github_status_distinguishes_expired_from_signed_out() {
+        use ss_skills::github_auth::{GitHubConnectionStatus, GitHubIdentity};
+        let expired = GitHubConnectionStatus::Expired {
+            identity: Some(GitHubIdentity {
+                id: 1,
+                login: "octocat".to_owned(),
+                avatar_url: None,
+            }),
+        };
+        let json = super::github_status_json(&expired);
+        assert_eq!(json["state"].as_str(), Some("expired"));
+        assert_eq!(json["login"].as_str(), Some("octocat"));
+
+        let expired_anon = GitHubConnectionStatus::Expired { identity: None };
+        let anon_json = super::github_status_json(&expired_anon);
+        assert_eq!(anon_json["state"].as_str(), Some("expired"));
+        assert!(anon_json["login"].is_null());
+
+        let out_json = super::github_status_json(&GitHubConnectionStatus::SignedOut);
+        assert_eq!(out_json["state"].as_str(), Some("signed_out"));
+        assert!(out_json["login"].is_null());
+    }
+
+    #[test]
+    fn skill_json_backfills_cached_translation_when_enabled() {
+        let _iso = IsolatedDataDir::new();
+        let mut cfg = ss_core::translation::TranslationConfig {
+            translate_descriptions: true,
+            target_lang: "zh-CN".to_owned(),
+            ..Default::default()
+        };
+        ss_core::translation::save_config(&cfg).expect("save config");
+        ss_core::translation::remember("Review pull requests", "zh-CN", "审查拉取请求");
+
+        let mut s = skill("pr-review");
+        s.description = "Review pull requests".to_owned();
+        let json = super::skill_json_with_config(&s, Some(&cfg));
+        assert_eq!(json["localizedDescription"].as_str(), Some("审查拉取请求"));
+
+        cfg.translate_descriptions = false;
+        let off_json = super::skill_json_with_config(&s, Some(&cfg));
+        assert!(off_json.get("localizedDescription").is_none());
+
+        cfg.description_choices.insert("pr-review".to_owned(), true);
+        let override_json = super::skill_json_with_config(&s, Some(&cfg));
+        assert_eq!(
+            override_json["localizedDescription"].as_str(),
+            Some("审查拉取请求")
         );
     }
 

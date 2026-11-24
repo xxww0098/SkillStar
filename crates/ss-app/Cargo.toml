@@ -29,6 +29,7 @@ ss-core = { path = "../ss-core" }
 ss-git = { path = "../ss-git" }
 ss-marketplace = { path = "../ss-marketplace" }
 ss-mcp = { path = "../ss-mcp" }
+ss-mcp-hub = { path = "../ss-mcp-hub" }
 ss-skills = { path = "../ss-skills" }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }

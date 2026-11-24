@@ -14,11 +14,14 @@
 // 【nsh 纪律】组件体只执行一次：PageBar 的 filters/actions 数组一次性
 // 构建，动态量都在各元素自己的 JSX 表达式里（条件成员用 <If>）。
 
-import { Scroll, Text, View, effect, type JSX } from "nsh";
+import { List, Text, View, computed, effect, type JSX } from "nsh";
 import { paletteToken } from "../../services/themeMode";
 import { t } from "../../services/translation";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
+import { Pulse } from "../../chrome/feedback";
 import { Icon } from "../../chrome/icons";
 import { BarCount, BarPrimary, BarSearchInput, PageBar } from "../../chrome/toolbar";
+import { currentPage } from "../../shell/nav";
 import { realProjectsBridge } from "./bridge";
 import { createProjectsState, type ProjectsState } from "./state";
 import { ProjectDetail, SelectProjectHint } from "./detail";
@@ -29,13 +32,22 @@ import type { ProjectEntry } from "./bridge";
 const pageState = createProjectsState(realProjectsBridge);
 
 export function ProjectsPage(): JSX.Element {
-  return <ProjectsWorkbench state={pageState} />;
+  return <ProjectsWorkbench state={pageState} lazy />;
 }
 
 /** 工作台本体（页面与测试装置共用；state 注入）。 */
-export function ProjectsWorkbench(props: { state: ProjectsState }): JSX.Element {
+export function ProjectsWorkbench(props: { state: ProjectsState; lazy?: boolean }): JSX.Element {
   const state = props.state;
-  effect(() => state.start());
+  const pageActive = (): boolean => props.lazy !== true || currentPage() === "projects";
+  effect(() => {
+    if (props.lazy === true) {
+      if (currentPage() !== "projects") return;
+      state.start({ isActive: pageActive });
+      state.onPageActivated();
+      return;
+    }
+    state.start();
+  });
   return (
     <View
       style={{
@@ -81,7 +93,6 @@ function ProjectsSearch(props: { state: ProjectsState }): JSX.Element {
       value={props.state.searchQuery()}
       placeholder={t("projects.searchPlaceholder")}
       onChange={(value) => props.state.searchQuery.set(value)}
-      width={216}
     />
   );
 }
@@ -104,9 +115,11 @@ function RegisterButton(props: { state: ProjectsState }): JSX.Element {
   );
 }
 
-/** mod.rs render_project_list：288px 固定 rail。 */
+/** mod.rs render_project_list：288px 固定 rail。
+ * 首次刷新完成前不画空态；慢于 300ms 才出与项目卡同高的骨架。 */
 function ProjectRail(props: { state: ProjectsState }): JSX.Element {
   const state = props.state;
+  const showSkeleton = bindDelayedFlag(() => !state.ready());
   return (
     <View
       testID="projects-rail"
@@ -123,12 +136,61 @@ function ProjectRail(props: { state: ProjectsState }): JSX.Element {
         borderRightColor: paletteToken("border"),
       }}
     >
-      <If
-        when={state.projects().length === 0}
-        else={<ProjectRailList state={state} />}
-      >
+      <If when={showSkeleton()}>
+        <ProjectRailSkeleton />
+      </If>
+      <If when={!showSkeleton() && state.ready() && state.projects().length === 0}>
         <RailEmpty />
       </If>
+      <If when={!showSkeleton() && state.projects().length > 0}>
+        <ProjectRailList state={state} />
+      </If>
+    </View>
+  );
+}
+
+/** 与项目卡同高的脉冲行。慢加载才挂上，快刷新不闪空态。 */
+function ProjectRailSkeleton(): JSX.Element {
+  return (
+    <View
+      testID="projects-rail-skeleton"
+      accessibilityState={{ busy: true }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: 8,
+        width: "100%",
+      }}
+    >
+      {[0, 1, 2, 3, 4, 5].map((index) => (
+        <View
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            gap: 6,
+            width: "100%",
+            height: 58,
+            paddingHorizontal: 12,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: paletteToken("border"),
+            backgroundColor: paletteToken("card"),
+            flexShrink: 0,
+          }}
+        >
+          <Pulse
+            id={`proj-skel-${index}-name`}
+            style={{ width: "48%", height: 14, borderRadius: 6 }}
+          />
+          <Pulse
+            id={`proj-skel-${index}-path`}
+            secondary
+            style={{ width: "72%", height: 12, borderRadius: 6 }}
+          />
+        </View>
+      ))}
     </View>
   );
 }
@@ -179,30 +241,29 @@ function RailEmpty(): JSX.Element {
   );
 }
 
-/** rail 列表：过滤无果的居中提示，或项目卡（Scroll 视口框内滚动）。 */
+/** rail 列表：过滤无果的居中提示，或项目卡（<List> 虚拟滚动）。 */
 function ProjectRailList(props: { state: ProjectsState }): JSX.Element {
   const state = props.state;
+  const filtered = computed(() => state.filteredProjects());
   return (
     <If
-      when={state.filteredProjects().length === 0}
+      when={filtered().length === 0}
       else={
-        <Scroll
+        <List
           testID="projects-rail-scroll"
+          each={filtered()}
+          keyExtractor={(entry: ProjectEntry) => entry.name}
+          estimatedItemSize={62}
+          scrollEventThrottle={32}
           style={{ flex: 1, minHeight: 0, width: "100%" }}
-          contentStyle={{
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "flex-start",
-            alignItems: "stretch",
-            gap: 4,
-            padding: 8,
-            width: "100%",
-          }}
+          contentStyle={{ padding: 8, paddingBottom: 4 }}
         >
-          <Each of={state.filteredProjects()} key={(entry: ProjectEntry) => entry.name}>
-            {(entry: () => ProjectEntry) => <ProjectCard state={state} entry={entry()} />}
-          </Each>
-        </Scroll>
+          {(entry: () => ProjectEntry) => (
+            <View style={{ paddingBottom: 4, width: "100%" }}>
+              <ProjectCard state={state} entry={entry()} />
+            </View>
+          )}
+        </List>
       }
     >
       <View
@@ -225,13 +286,13 @@ function ProjectRailList(props: { state: ProjectsState }): JSX.Element {
 }
 
 /** 单张项目卡（mod.rs:340-428）：选中 accent 边/accent_soft 底 + FolderOpen。
- * 选中态经 state 在 JSX 里读（换选中卡时旧卡即时退高亮）。 */
+ * 选中态经每卡 computed 窄化（换选中卡时仅新旧两张卡局部刷新）。 */
 function ProjectCard(props: { state: ProjectsState; entry: ProjectEntry }): JSX.Element {
   const state = props.state;
-  const entry = props.entry;
+  const isSelected = computed(() => state.selected()?.name === props.entry.name);
   return (
     <View
-      testID={`proj-card-${entry.name}`}
+      testID={`proj-card-${props.entry.name}`}
       style={{
         display: "flex",
         flexDirection: "row",
@@ -243,22 +304,17 @@ function ProjectCard(props: { state: ProjectsState; entry: ProjectEntry }): JSX.
         borderRadius: 12,
         cursor: "pointer",
         borderWidth: 1,
-        borderColor:
-          state.selected()?.name === entry.name ? paletteToken("accent") : paletteToken("border"),
-        backgroundColor:
-          state.selected()?.name === entry.name
-            ? paletteToken("card_active")
-            : paletteToken("card"),
+        borderColor: isSelected() ? paletteToken("accent") : paletteToken("border"),
+        backgroundColor: isSelected() ? paletteToken("card_active") : paletteToken("card"),
         flexShrink: 0,
       }}
       hoverStyle={{
         borderColor: paletteToken("accent"),
-        backgroundColor:
-          state.selected()?.name === entry.name
-            ? paletteToken("card_active_hover")
-            : paletteToken("card_hover"),
+        backgroundColor: isSelected()
+          ? paletteToken("card_active_hover")
+          : paletteToken("card_hover"),
       }}
-      onPress={() => state.selectProject(entry)}
+      onPress={() => state.selectProject(props.entry)}
     >
       <View
         style={{
@@ -270,24 +326,20 @@ function ProjectCard(props: { state: ProjectsState; entry: ProjectEntry }): JSX.
         }}
       >
         <Icon
-          name={state.selected()?.name === entry.name ? "folderOpen" : "folder"}
+          name={isSelected() ? "folderOpen" : "folder"}
           size={16}
-          color={
-            state.selected()?.name === entry.name
-              ? paletteToken("accent_fg")
-              : paletteToken("fg_muted")
-          }
+          color={isSelected() ? paletteToken("accent_fg") : paletteToken("fg_muted")}
         />
         <View style={{ display: "flex", flex: 1, minWidth: 0 }}>
           <Text
             style={{
               fontSize: 14,
-              fontWeight: state.selected()?.name === entry.name ? "600" : "400",
+              fontWeight: isSelected() ? "600" : "400",
               color: paletteToken("fg"),
               numberOfLines: 1,
             }}
           >
-            {entry.name}
+            {props.entry.name}
           </Text>
           <Text
             style={{
@@ -296,7 +348,7 @@ function ProjectCard(props: { state: ProjectsState; entry: ProjectEntry }): JSX.
               numberOfLines: 1,
             }}
           >
-            {entry.path}
+            {props.entry.path}
           </Text>
         </View>
       </View>

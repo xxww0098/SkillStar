@@ -289,3 +289,51 @@ fn the_env_sandbox_keeps_a_real_switch_out_of_the_real_home() {
     assert_eq!(live.identity.as_deref(), Some("dev@example.com"));
     assert_eq!(live.source, path.display().to_string());
 }
+
+#[test]
+fn encrypted_primary_tokens_fall_back_to_plaintext_mirror_and_reject_missing_mirror() {
+    let fixture = Fixture::with_database();
+    let jwt = access_token("auth-enc");
+    {
+        let conn = fixture.connection();
+        for (key, value) in [
+            ("cursorAuth/accessToken", "cursor-safe-storage:v1:encryptedAt"),
+            ("cursorAuth/refreshToken", "cursor-safe-storage:v1:encryptedRt"),
+            ("cursorAuth/authId", "auth-enc"),
+            ("cursor.accessToken", jwt.as_str()),
+            ("cursor.email", "mirror@example.com"),
+        ] {
+            conn.execute(
+                "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
+                [key, value],
+            )
+            .expect("seed");
+        }
+    }
+
+    let local = read(&fixture.roots).expect("read").expect("session");
+    assert_eq!(local.tokens.access_token, jwt);
+    assert_eq!(local.tokens.refresh_token, None);
+    assert_eq!(local.tokens.expires_at, Some(1_800_000_000));
+    assert_eq!(local.identity.email.as_deref(), Some("mirror@example.com"));
+    assert_eq!(local.identity.account_id.as_deref(), Some("auth-enc"));
+
+    let live = switch::live_with(&fixture.roots, "cursor").expect("live");
+    assert_eq!(live.identity.as_deref(), Some("mirror@example.com"));
+
+    // 缺少明文镜像时给出明确错误而非把密文当成有效凭据返回。
+    fixture
+        .connection()
+        .execute("DELETE FROM ItemTable WHERE key = 'cursor.accessToken'", [])
+        .expect("drop mirror");
+    let missing_err = read(&fixture.roots).expect_err("encrypted without mirror must error");
+    assert!(matches!(missing_err, crate::AccountError::Client(_)));
+
+    // write 也禁止把密文写回客户端。
+    let bad_tokens = TokenSet {
+        access_token: "cursor-safe-storage:v1:bad".to_string(),
+        ..TokenSet::default()
+    };
+    let write_err = write(&fixture.roots, &request(&bad_tokens)).expect_err("refuse ciphertext write");
+    assert!(matches!(write_err, crate::AccountError::Client(_)));
+}

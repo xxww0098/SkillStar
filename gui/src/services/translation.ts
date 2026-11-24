@@ -10,12 +10,12 @@ import { locale, type Locale } from "./locale";
 // Deploy=部署, Link=链接.
 const messages: Record<Locale, Record<string, unknown>> = {
   "zh-CN": {
-    app: { name: "SkillStar" },
     sidebar: {
       skills: "技能",
       market: "市场",
       groups: "卡组",
       projects: "项目",
+      mcp: "MCP",
       accounts: "账号",
       settings: "设置",
       modeSkills: "技能",
@@ -30,7 +30,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       done: "完成",
       close: "关闭",
       copy: "复制",
-      save: "保存",
       delete: "删除",
       uninstall: "卸载",
       retry: "重试",
@@ -53,20 +52,18 @@ const messages: Record<Locale, Record<string, unknown>> = {
       uninstalling: "卸载中...",
       failed: "失败",
       clear: "清除",
-      // 账号页：添加格动词与页头扫荡完成状态（common.add/common.refreshed）。
-      add: "添加",
-      refreshed: "数据已刷新",
       // 设置基座（settings/general.rs 的保存状态与可选占位；值取自
       // assets/locales zh-CN.json common 段，两目录同步）。
       optional: "可选",
       saved: "已保存",
       // 存储分区的路径结构收起钮（storage/parts.rs common.hide）。
       hide: "隐藏",
+      previous: "上一页",
+      next: "下一页",
     },
     uninstallDialog: {
       title_one: "卸载 {{count}} 个技能？",
       title_other: "卸载 {{count}} 个技能？",
-      titleSingle: "卸载这个技能？",
       titleNamed: "卸载「{{name}}」？",
       description:
         "会从本机库中删除该技能，并移除已同步到各智能体的链接。之后可从市场或原来源重新安装。",
@@ -103,7 +100,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       favoriteSource: "收藏此仓库",
       unfavoriteSource: "取消收藏",
     },
-    notice: { dismiss: "关闭" },
     // 我的技能页（my_skills/{mod,updates,empty_state}.rs；值取自 zh-CN.json
     // mySkills/emptyState/skillCard 段的本页子集，两目录同步）。
     mySkills: {
@@ -166,6 +162,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       servedByCanonicalRoot:
         "由规范根直接提供：该 Agent 直接读取 ~/.agents/skills，已安装的技能都已可用，无需单独链接或取消链接。",
       skipUnmanagedDirItem: "{{name}}：{{path}} 是未经 SkillStar 管理的真实目录，已保留原内容",
+      skipForeignLinkItem: "{{name}}：{{path}} 是未经 SkillStar 管理的外部链接，已保留原链接",
+      skipModifiedCopyItem: "{{name}}：{{path}} 存在未同步的副本修改，已保留当前文件",
+      backupAndTakeOver: "备份并接管",
+      takeOverLink: "接管链接",
+      resolveInDrawer: "处理冲突",
       // 受管技能跳过项的 toast 行动钮（managed_skills/notice.rs）。
       openOccupiedFolder: "打开该目录",
     },
@@ -179,8 +180,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
     settings: {
       clearAgentFilters: "清除筛选",
       connectionFailed: "连接失败：{{error}}",
-      // 账号卡退出钮与删除状态文案（mod.rs run 的 Delete 臂 label）。
-      githubAuthLogout: "退出",
       // GitHub 设备授权对话框（my_skills/github_sign_in.rs render_waiting/
       // render_failed 引用的 settings.githubAuth* 子集，值取自 assets/
       // locales zh-CN.json，两目录同步）。
@@ -196,7 +195,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // 设置基座（settings/{mod,general}.rs；值取自 assets/locales
       // zh-CN.json settings 段，两目录同步）。分区标签 + 通用页四分区
       // （语言/背景样式/后台运行/代理）的标题、字段与提示。
-      title: "设置",
       general: "常规",
       network: "网络",
       searchAgentsPlaceholder: "搜索智能体...",
@@ -220,7 +218,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       backgroundRun: "后台运行",
       backgroundRunHint:
         "关闭主窗口时进程留在后台；技能更新策略见「技能更新」（默认仅检查、手动应用）。",
-      proxyConfigTitle: "代理配置",
       proxyType: "类型",
       proxyHost: "主机",
       proxyPort: "端口",
@@ -231,7 +228,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       proxySocks5hHint: "SOCKS5H 由代理侧解析 DNS，可避开本地 DNS 污染。无特殊需要时建议选择。",
       // 子分区 A（settings/skill_updates.rs）：模式滑块与频率 pills；值取
       // 自 assets/locales zh-CN.json settings 段，两目录同步。
-      skillUpdatesMode: "更新模式",
       skillUpdatesManual: "手动",
       skillUpdatesAuto: "自动",
       skillUpdatesInterval: "检查频率",
@@ -260,14 +256,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       tranLlmBaseUrl: "接口地址",
       tranLlmBaseUrlHint: "OpenAI 兼容的 chat completions 根地址，例如 https://api.example.com/v1。",
       tranLlmKey: "密钥",
-      tranLlmKeyHint: "粘贴接口密钥，回车或点保存写盘；页面只回显「已保存」，不回显密钥。",
       tranLlmKeySaved: "已保存",
-      tranLlmKeyClear: "清除",
       tranLlmModel: "模型",
       tranLlmModelSearch: "搜索模型…",
       tranLlmModelEmpty: "还没有列表，先点「拉取」。",
       tranLlmModelPull: "拉取",
-      tranLlmModelPulling: "拉取中",
       tranLlmModelTotal: "共 {{count}} 个",
       tranLlmModelNoKey: "还没有密钥，先在上面填写。",
       tranLlmModelNone: "接口没有返回模型。",
@@ -298,15 +291,12 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // 子分区 C（settings/agent_connections.rs + settings/managed_skills/）：
       // 智能体连接卡与受管技能暂停/恢复；值取自 assets/locales zh-CN.json
       // settings 段，两目录同步。
-      registeredAgents: "已注册的智能体",
       activeCount: "{{enabled}} / {{total}} 已启用",
       noAgentsRegistered: "尚未注册智能体。",
       filterAgentsAll: "全部",
       filterAgentsEnabled: "已启用",
       filterAgentsDisabled: "未启用",
       noAgentsMatchFilter: "没有匹配当前筛选的智能体。",
-      agentEnabled: "已启用",
-      agentDisabled: "未启用",
       linked: "已链接",
       showRemainingAgents: "展开其余 {{count}} 个智能体",
       collapseAgentList: "收起智能体列表",
@@ -366,7 +356,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       cacheRepos: "{{count}} 个仓库",
       cacheUnused: "{{count}} 个未使用",
       cleanAllCaches: "清理缓存",
-      cleaning: "清理中...",
       cacheCleanDone: "已清理 {{count}} 项缓存",
       cacheCleanFailed: "无法清理缓存，请重试。",
       cacheEmpty: "没有可清理的缓存",
@@ -385,13 +374,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       healthSummary: "{{count}} 个问题，其中 {{repairable}} 项可以修复",
       healthBroken: "{{count}} 个失效",
       repairPreview: "预览",
-      repairPreviewing: "预览中...",
       repairPreviewBody:
         "{{issues}} 个问题。{{steps}} 项可以修复，{{untouched}} 项只报告、不改动。\n{{details}}",
       repairAll: "修复",
       repairHint:
         "只修复 SkillStar 能证明归自己所有的链接和副本。你自己的文件夹只报告，不会被移动或删除。",
-      repairing: "修复中...",
       repairDone: "已修复 {{count}} 个问题",
       repairNone: "没有需要修复的问题",
       repairPartial: "已修复 {{count}} 项；以下冲突或失败需要处理，相关内容已保留：\n{{details}}",
@@ -399,7 +386,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       intakeSummary: "{{actionable}} 个可纳管，{{reported}} 个只报告",
       intakeHint:
         "Agent 已装好的技能。纳管会复制技能并改为指向规范副本的链接；冲突目录与含 .git 的目录只列出，不改动。",
-      intakeLine: "{{agent}} / {{skill}} — {{note}}",
       intakeMore: "还有 {{count}} 项，预览可看全部",
       intakeAdopt: "复制进本地技能，再改成链接",
       intakeRelink: "内容和规范副本一致，改成链接",
@@ -408,10 +394,8 @@ const messages: Record<Locale, Record<string, unknown>> = {
       intakeForeign: "外部链接，不改动",
       intakeOccupied: "规范根已占用，不覆盖",
       intakePreview: "预览纳管",
-      intakePreviewing: "预览中...",
       intakePreviewBody: "将纳管 {{steps}} 项，{{reported}} 项只报告、不改动。\n{{details}}",
       intakeApply: "纳管",
-      intakeApplying: "纳管中...",
       intakeDone: "已纳管 {{count}} 个技能",
       intakeNone: "没有需要纳管的技能",
       intakePartial: "已纳管 {{count}} 项；以下留在原处：\n{{details}}",
@@ -427,7 +411,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       ghInstallPlatform_linux: "Linux",
       ghInstallPlatform_unknown: "当前系统",
       ghInstallCommandUnavailable: "未识别当前系统，请使用上方按钮打开官方安装页。",
-      version: "SkillStar 版本",
       checkUpdate: "检查更新",
       checkingUpdate: "正在检查更新...",
       upToDate: "已经是最新版本",
@@ -461,9 +444,10 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // 导入卡组对话框（deck_import.rs；值取自 assets/locales zh-CN.json
       // skillCards 段的 import* 子集，两目录同步）。
       importTitle: "导入卡组",
-      importHint: "从分享码或 .ags / .agd 卡组文件导入",
-      importPlaceholder: "粘贴 agd-… / ags-… 分享码或文件路径",
+      importHint: "从分享码、GitHub 仓库链接或 .ags / .agd 卡组文件导入",
+      importPlaceholder: "粘贴分享码、GitHub 仓库链接或 .ags / .agd 文件路径",
       shareCodeDetected: "已识别分享码",
+      repoSourceDetected: "已识别仓库地址，点击导入将扫描技能并可「快速打包」为卡组",
       importPickFile: "选择 .ags / .agd 文件",
       importRunning: "正在导入卡组…",
       importDone: "卡组已导入",
@@ -499,7 +483,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       shareBundleHint:
         "导出 .agd 安装包：远程成员以来源链接打包，导入后与直接用链接安装完全一致；仅本地成员打包完整内容；未安装成员不含在内。",
       shareBundleExport: "导出 .agd",
-      shareBundleExporting: "正在导出…",
       shareBundleOpenFolder: "打开所在文件夹",
     },
     // 安装技能详情列（my_skills/detail_drawer.rs；值取自 assets/locales
@@ -530,6 +513,8 @@ const messages: Record<Locale, Record<string, unknown>> = {
       upstreamRemovedTitle: "来源仓库已移除该技能",
       upstreamRemovedDesc:
         "{{source}} 的最新版本不再包含 {{folder}}。本地内容仍可用，但不会再收到更新；可从来源重新安装或直接卸载。",
+      translationNeedsConfig: "请先在「设置 → 翻译」填写接口地址、API Key 并选择模型，或切回 Google 机翻。",
+      translationFailed: "翻译失败，请检查网络或代理设置后重试。",
       translationRejected: "「{{model}}」拒绝了翻译请求。换一个模型后再试。",
       translationRejectedDetail: "「{{model}}」无法翻译：{{detail}}。换一个模型后再试。",
     },
@@ -573,7 +558,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
     // 导入对话框全段（githubImportModal，import_modal/{phases,select}.rs；
     // 值取自 assets/locales zh-CN.json，两目录同步）。
     githubImportModal: {
-      title: "从 GitHub 导入",
       placeholder: "owner/repo/技能目录 或 GitHub URL",
       scan: "扫描",
       fullDepthLabel: "全深度扫描",
@@ -644,62 +628,18 @@ const messages: Record<Locale, Record<string, unknown>> = {
       copied: "分享码已复制到剪贴板",
       pasteToImportHint: "复制整段消息直接粘贴导入",
     },
-    // 添加账号对话框（accounts/dialog.rs + dialog_chrome.rs +
-    // opencode_add.rs；值取自 assets/locales zh-CN.json accounts 段原文，
-    // 两目录同步）。
-    accounts: {
-      panelSubtitle: "切换、添加和管理各平台账号",
-      addAccount: "添加账号",
-      needSecret: "请先填写内容",
-      needCallback: "请先粘贴回调链接",
-      callbackPlaceholder: "回调链接或授权 code",
-      callbackHint: "没自动返回时，粘贴回调链接或授权 code",
-      callbackLabel: "回调",
-      submitCallback: "提交回调",
-      submitting: "正在提交",
-      signIn: "登录",
-      signInHint: "打开浏览器完成登录",
-      signingIn: "正在登录",
-      importSession: "导入本机会话",
-      importSessionHint: "复制本机已有登录，原来的凭证保持不动",
-      checkingQuota: "正在核对额度",
-      added: "已添加账号",
-      importedLocal: "已从本机导入",
-      importedCredential: "已导入凭证",
-      actionFailed: "失败: {{err}}",
-      signOutTitle: "退出账号",
-      signOutBody: "退出后这个账号会从列表里删除，需要重新登录才能再读取额度。",
-      signOut: "退出",
-      orPaste: "或粘贴",
-      regionBigmodel: "智谱",
-      apiKeyHint: "粘贴服务商控制台里的密钥",
-      cookieHint: "粘贴浏览器里复制的 Cookie",
-      opencodeCookieHint:
-        "可选。从已登录的 opencode.ai/console 复制 Cookie 请求头（含 console_session 或 __Host-console_session），用来显示登录邮箱。不填则账号名保持 OpenCode Go。",
-      credentialLabel: "凭证",
-      credentialHint: "卡密、会话 JSON 或 refresh token",
-      credentialPlaceholder: "卡密 / JSON / refresh token",
-      displayName: "显示名称",
-      displayNameHint: "只在列表里显示，不会登录",
-      displayNamePlaceholder: "显示名称",
-      saveKey: "保存密钥",
-      saveCookie: "保存 Cookie",
-      importCredential: "导入凭证",
-      continue: "继续",
-      checkingCredential: "正在核对凭证",
-    },
     // 账号页（对齐 cockpit-tools 卡语言与工具栏）：页头智能体胶囊、悬浮工具栏、
     // 批量选择条、三态视图（紧凑/列表/网格）、双列配额卡片与三 Tab 添加弹窗。
     accountsPage: {
-      subtitle: "受管 agent 的账号与额度",
       current: "当前",
       switch: "切换",
       quotaFailed: "额度读取失败",
       reauthNeeded: "登录已失效，需重新授权",
       reauthorize: "重新授权",
+      noUsername: "暂无用户名",
+      noEmail: "暂无邮箱",
       noQuota: "暂无额度数据",
       unlimited: "无限",
-      resetIn: "剩余 {{span}} · {{when}}",
       resetDone: "已重置",
       addAccount: "添加账号",
       emptyTitle: "添加 {{agent}} 账号",
@@ -709,7 +649,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       viewList: "列表视图",
       viewGrid: "卡片视图",
       filterAll: "全部 ({{count}})",
-      filterPlan: "套餐筛选",
       filterReauth: "需重新授权",
       filterQuotaError: "额度异常",
       clearFilters: "清除筛选",
@@ -723,6 +662,13 @@ const messages: Record<Locale, Record<string, unknown>> = {
       sortAsc: "升序",
       refreshAll: "刷新全部配额",
       refreshingAll: "正在刷新…",
+      autoRefreshOff: "自动: 关",
+      autoRefreshLabel: "自动: {{label}}",
+      autoRefreshMenuOff: "关闭自动刷新",
+      autoRefreshSec: "{{n}} 秒",
+      autoRefreshMin: "{{n}} 分钟",
+      autoRefreshPreview: "{{count}} 个可用 · 约每 {{step}} 秒轮询 1 个",
+      autoRefreshNoneEligible: "暂无可用账号",
       privacyHide: "隐藏邮箱与名称",
       privacyShow: "显示完整邮箱",
       selectAll: "全选",
@@ -738,6 +684,8 @@ const messages: Record<Locale, Record<string, unknown>> = {
       batchRefreshPartial: "已刷新 {{ok}} 个账号，{{fail}} 个失败",
       switchedBanner: "已切换至 {{name}}",
       availableCredits: "可用积分",
+      resetCards: "重置卡",
+      resetCardsCount: "{{count}} 张",
       neverUsed: "未使用",
       colAccount: "账号",
       colQuota: "配额状态",
@@ -770,93 +718,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       tokenPlaceholder: "refresh token / 卡密 / JSON",
       tokenHint: "令牌在本机核验后写入账号库，不会发到别处。",
       needToken: "请先粘贴令牌",
-      importToken: "导入",
       added: "已添加账号",
       importedLocal: "已从本机导入",
       importedToken: "已导入令牌",
       deleteTitle: "删除账号",
       deleteBody: "删除「{{name}}」后需要重新登录才能再读取额度；客户端当前的凭证不受影响。",
-      actionFailed: "失败: {{err}}",
-    },
-    // 账号工作台（accounts/{mod,card,meters,rail,dialog,dialog_chrome,
-    // opencode_add}.rs 引用的 usage 段子集；值取自 assets/locales zh-CN.json
-    // usage 段原文，两目录同步）。
-    usage: {
-      setActive: "切换",
-      resetQuota: "重置额度",
-      requiresReauth: "需要重新登录",
-      reauthRequiredHint: "请重新登录以刷新此账号。",
-      cardActive: "当前",
-      cardActiveTitle: "CLI 当前实际使用的就是这个账号",
-      cardCliDiverged: "CLI 非此账号",
-      cardCliDivergedTitle: "这张卡是你选定的账号，但 CLI 现在实际用的是别的凭证",
-      cardCliMissing: "CLI 未登录",
-      cardCliMissingTitle: "CLI 里没有任何凭证，当前没有登录",
-      creditsUnlimited: "无限",
-      creditPoints: "额度点数",
-      cardBalance: "余额",
-      manualQuota: "手动用量（可选）",
-      meterResetSoon: "即将重置",
-      meterDays: "{{n}}天",
-      meterHours: "{{n}}时",
-      meterMinutes: "{{n}}分",
-      remainingPercent: "剩余 {{percent}}%",
-      windowModelQuota: "模型额度",
-      windowWeeklyCredits: "每周额度",
-      windowMonthlyCredits: "每月额度",
-      glmMcp: "ZCode MCP",
-      includedQuota: "包含额度",
-      categoryAutoComposer: "补全 & Composer",
-      categoryApi: "API 调用",
-      antigravityFiveHourLimit: "5 小时额度",
-      antigravityWeeklyLimit: "周额度",
-      sidebarNav: "供应商",
-      allProviders: "全部",
-      oauthWaiting: "等待授权中",
-      oauthListening: "正在监听",
-      oauthWaitingHint:
-        "SkillStar 正在监听授权回调，完成后会自动刷新当前订阅。",
-      oauthDeviceHint: "在浏览器中确认这个配对码。确认后账号会自动添加。",
-      userCode: "配对码",
-      oauthOpenLink: "打开授权页面",
-      authManual: "手动",
-      window5h: "5 小时窗口",
-      windowWeekly: "每周窗口",
-      resetCards: "重置卡",
-      resetCardRefresh: "刷新以读取重置卡",
-      // 重置银行（accounts/reset_bank/{mod,schedule,view}.rs 引用的 usage 段；
-      // 值取自 assets/locales zh-CN.json usage 段原文，两目录同步）。
-      resetCardSeconds: "秒",
-      resetCardUnit: "张",
-      resetCardBusy: "重置中…",
-      resetLabelShort: "重置",
-      resetCardSpendTitle: "消耗重置卡",
-      resetCardOneDated: "一张 {{when}} 过期的重置卡",
-      resetCardOne: "一张重置卡",
-      resetCardConfirmBody: "{{window}}将立即清空，并消耗{{card}}。此操作无法撤销。",
-      resetCardAck: "我确认消耗这张重置卡",
-      resetCardConfirm: "确认重置",
-      resetCardStamp: "{{month}}月{{day}}日 {{hour}}:{{minute}}",
-      resetCardNoExpiry: "未注明过期时间",
-      resetCardExpiresAt: "{{when}} 过期",
-      resetCardsEmpty: "暂无可用",
-      resetCardExpiresIn: "最早 {{time}} 后过期",
-      resetCardEarliest: "最早 {{when}} 过期",
-    },
-    page: {
-      placeholder: "迁移脚手架占位页——本页随对应波次逐页实装。",
-      my_skills_desc: "我的技能：顶栏（scope 滑块、搜索、agent 筛选条带）与本地技能网格。",
-      marketplace_desc: "市场：四 tab、搜索、快照状态横幅与市场卡网格。",
-      skill_cards_desc: "卡组：卡组卡网格、新建卡组与卡组导入。",
-      projects_desc: "项目：按智能体管理技能的 master-detail。",
-      accounts_desc: "账号：按供应商分组的额度卡工作台。",
-      settings_desc: "设置：外观、界面语言、后台运行、网络与存储分区。",
-    },
-    bridge: {
-      title: "域桥接自检",
-      desc: "调用 ss_marketplace::may_query_install_audits（纯 URL 判定，只读、无 IO 副作用）。",
-      audit_ok: "可查询安装审计",
-      audit_no: "不查询",
     },
     // 项目页（crates/ss-gpui/src/projects/ 全域；文案逐条取自
     // assets/locales zh-CN.json projects 段，两目录同步）。
@@ -868,7 +734,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       registerProject: "注册项目",
       registerDialogTitle: "注册本地项目",
       registerEmptyPath: "请输入或选择项目目录。",
-      browseFolder: "选择目录…",
       chooseDir: "选择项目根目录",
       chooseNewDir: "选择新的项目根目录",
       changePathTitle: "更改项目路径",
@@ -928,18 +793,31 @@ const messages: Record<Locale, Record<string, unknown>> = {
       forgetCopyConfirm: "清理记录",
       copyForgotten: "复制记录已清理，项目文件和 Hub 技能已保留",
       forgetFailed: "清理记录失败：{{err}}",
-      // 设置页跨域引用的两条（settings 波次先行收录，并入本段）。
-      resolveCopies: "处理项目副本",
+      // 设置页跨域引用（settings 波次先行收录，并入本段）。
       copiesUpdated: "已同步项目副本：{{names}}",
+    },
+    wait: {
+      saving: "正在保存",
+      saved: "已保存",
+      couldntSave: "未能保存",
+      takingLonger: "比平时更久",
+      continueInBackground: "继续在后台",
+      refreshingAccounts: "正在刷新 {{done}} / {{total}}",
+      importing: "正在导入",
+      installing: "正在安装 {{name}}",
+      reinstalling: "正在重新安装 {{source}}",
+    },
+    notify: {
+      restored: "已恢复",
     },
   },
   en: {
-    app: { name: "SkillStar" },
     sidebar: {
       skills: "Cards",
       market: "Marketplace",
       groups: "Decks",
       projects: "Projects",
+      mcp: "MCP",
       accounts: "Accounts",
       settings: "Settings",
       modeSkills: "Skills",
@@ -954,7 +832,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       done: "Done",
       close: "Close",
       copy: "Copy",
-      save: "Save",
       delete: "Delete",
       uninstall: "Uninstall",
       retry: "Retry",
@@ -977,20 +854,18 @@ const messages: Record<Locale, Record<string, unknown>> = {
       uninstalling: "Uninstalling...",
       failed: "Failed",
       clear: "Clear",
-      // Accounts page: the add-cell verb and the sweep-done status.
-      add: "Add",
-      refreshed: "Data refreshed",
       // Settings base (general.rs save status and the optional placeholder;
       // values from assets/locales en.json's common section, in sync).
       optional: "Optional",
       saved: "Saved",
       // The storage section's path-structure collapse toggle.
       hide: "Hide",
+      previous: "Previous",
+      next: "Next",
     },
     uninstallDialog: {
       title_one: "Uninstall {{count}} skills?",
       title_other: "Uninstall {{count}} skills?",
-      titleSingle: "Uninstall this skill?",
       titleNamed: "Uninstall \"{{name}}\"?",
       description:
         "Removes the skill from the local library and unlinks every copy synced to agents. You can reinstall it from the marketplace or its source.",
@@ -1027,7 +902,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       favoriteSource: "Favorite this repository",
       unfavoriteSource: "Unfavorite",
     },
-    notice: { dismiss: "Dismiss" },
     // My-skills page (my_skills/{mod,updates,empty_state}.rs; values from
     // en.json's mySkills/emptyState/skillCard subsets, both in sync).
     mySkills: {
@@ -1094,6 +968,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       servedByCanonicalRoot:
         "Served directly by the canonical root: this Agent reads ~/.agents/skills itself, so every installed skill is already available and there is nothing to link or unlink.",
       skipUnmanagedDirItem: "{{name}}: {{path}} is an unmanaged folder and was left in place",
+      skipForeignLinkItem: "{{name}}: {{path}} is an unmanaged symlink and was left in place",
+      skipModifiedCopyItem: "{{name}}: {{path}} has local copy edits and was left in place",
+      backupAndTakeOver: "Take over",
+      takeOverLink: "Take Over Link",
+      resolveInDrawer: "Resolve",
       // The managed-skills skip toast's inline action (managed_skills/notice.rs).
       openOccupiedFolder: "Open folder",
     },
@@ -1107,8 +986,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
     settings: {
       clearAgentFilters: "Clear filters",
       connectionFailed: "Connection failed: {{error}}",
-      // The account card's sign-out verb (mod.rs run's Delete-arm label).
-      githubAuthLogout: "Sign out",
       // GitHub device-authorization dialog (the settings.githubAuth* subset
       // my_skills/github_sign_in.rs render_waiting/render_failed reads;
       // values from assets/locales en.json, both catalogs in sync).
@@ -1125,7 +1002,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // locales en.json's settings section, synced with the zh-CN catalog).
       // Section labels plus the four base sections (language / background
       // style / background run / proxy): titles, fields and hints.
-      title: "Settings",
       general: "General",
       network: "Network",
       searchAgentsPlaceholder: "Search agents...",
@@ -1149,7 +1025,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       backgroundRun: "Background Running",
       backgroundRunHint:
         "Keep the process running after the window closes. Update behavior lives in Skill updates (check-only and manual by default).",
-      proxyConfigTitle: "Proxy Configuration",
       proxyType: "Type",
       proxyHost: "Host",
       proxyPort: "Port",
@@ -1162,7 +1037,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // Slice A (settings/skill_updates.rs): the mode slider and interval
       // pills; values from assets/locales en.json's settings section, synced
       // with the zh-CN catalog.
-      skillUpdatesMode: "Update mode",
       skillUpdatesManual: "Manual",
       skillUpdatesAuto: "Automatic",
       skillUpdatesInterval: "Check frequency",
@@ -1193,14 +1067,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       tranLlmBaseUrl: "Base URL",
       tranLlmBaseUrlHint: "An OpenAI-compatible chat completions root, e.g. https://api.example.com/v1.",
       tranLlmKey: "API key",
-      tranLlmKeyHint: "Paste the key; Enter or Save writes it. The page only says saved — it never shows the key again.",
       tranLlmKeySaved: "Saved",
-      tranLlmKeyClear: "Clear",
       tranLlmModel: "Model",
       tranLlmModelSearch: "Search models…",
       tranLlmModelEmpty: "No list yet. Click Fetch first.",
       tranLlmModelPull: "Fetch",
-      tranLlmModelPulling: "Fetching",
       tranLlmModelTotal: "{{count}} models",
       tranLlmModelNoKey: "No key yet — type one above.",
       tranLlmModelNone: "The endpoint returned no models.",
@@ -1237,15 +1108,12 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // managed_skills/, storage/ + skill_repair.rs + about.rs); values
       // from assets/locales en.json's settings section, both catalogs in
       // sync.
-      registeredAgents: "Registered agents",
       activeCount: "{{enabled}} / {{total}} active",
       noAgentsRegistered: "No agents are registered yet.",
       filterAgentsAll: "All",
       filterAgentsEnabled: "Enabled",
       filterAgentsDisabled: "Not enabled",
       noAgentsMatchFilter: "No agents match the current filter.",
-      agentEnabled: "Enabled",
-      agentDisabled: "Not enabled",
       linked: "linked",
       showRemainingAgents: "Show {{count}} more Agents",
       collapseAgentList: "Show fewer Agents",
@@ -1305,7 +1173,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       cacheRepos: "{{count}} repo",
       cacheUnused: "{{count}} unused",
       cleanAllCaches: "Clean Caches",
-      cleaning: "Cleaning...",
       cacheCleanDone: "Cleaned {{count}} cached item(s)",
       cacheCleanFailed: "Couldn't clean the cache. Try again.",
       cacheEmpty: "No cleanable cache",
@@ -1325,13 +1192,11 @@ const messages: Record<Locale, Record<string, unknown>> = {
       healthSummary: "{{count}} issues, {{repairable}} can be repaired",
       healthBroken: "{{count}} broken",
       repairPreview: "Preview",
-      repairPreviewing: "Previewing...",
       repairPreviewBody:
         "{{issues}} issues. {{steps}} can be repaired, {{untouched}} left untouched.\n{{details}}",
       repairAll: "Repair",
       repairHint:
         "Repairs only links and copies SkillStar can prove it owns. Your own folders are reported and left in place.",
-      repairing: "Repairing...",
       repairDone: "Repaired {{count}} issues",
       repairNone: "No issues to repair",
       repairPartial:
@@ -1340,7 +1205,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       intakeSummary: "{{actionable}} can be adopted, {{reported}} reported only",
       intakeHint:
         "Skills an Agent already installed. Adopting copies the skill and links it to the canonical copy; conflicts and .git directories are listed but left alone.",
-      intakeLine: "{{agent}} / {{skill}} — {{note}}",
       intakeMore: "{{count}} more; preview lists all of them",
       intakeAdopt: "Copy into local skills, then link",
       intakeRelink: "Matches the canonical skill; replace with a link",
@@ -1349,10 +1213,8 @@ const messages: Record<Locale, Record<string, unknown>> = {
       intakeForeign: "External link; leave it",
       intakeOccupied: "Canonical name is taken; leave it",
       intakePreview: "Preview adoption",
-      intakePreviewing: "Previewing...",
       intakePreviewBody: "{{steps}} would be adopted, {{reported}} reported only.\n{{details}}",
       intakeApply: "Adopt",
-      intakeApplying: "Adopting...",
       intakeDone: "Adopted {{count}} skill(s)",
       intakeNone: "Nothing to adopt",
       intakePartial: "Adopted {{count}}. These were left in place:\n{{details}}",
@@ -1369,7 +1231,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       ghInstallPlatform_unknown: "this system",
       ghInstallCommandUnavailable:
         "Could not detect this platform. Open the official install guide with the button above.",
-      version: "SkillStar Version",
       checkUpdate: "Check for Updates",
       checkingUpdate: "Checking...",
       upToDate: "SkillStar is up to date",
@@ -1402,9 +1263,10 @@ const messages: Record<Locale, Record<string, unknown>> = {
       // Two strings the my-skills empty-search state reuses.
       tryDifferent: "Try a different search term.",
       importTitle: "Import deck",
-      importHint: "Import from a share code or an .ags / .agd deck file",
-      importPlaceholder: "Paste an agd-… / ags-… share code or a file path",
+      importHint: "Import from a share code, GitHub repository URL, or .ags / .agd deck file",
+      importPlaceholder: "Paste a share code, GitHub URL, or .ags / .agd file path",
       shareCodeDetected: "Share code recognized",
+      repoSourceDetected: "Repository detected — Import will scan skills for Quick Pack into a deck",
       importPickFile: "Choose .ags / .agd file",
       importRunning: "Importing deck…",
       importDone: "Deck imported",
@@ -1441,7 +1303,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       shareBundleHint:
         "An .agd installer: remote members ship as their source links and import exactly like installing from the URL; only local members pack their content. Missing members are not included.",
       shareBundleExport: "Export .agd",
-      shareBundleExporting: "Exporting…",
       shareBundleOpenFolder: "Show in Folder",
     },
     // Installed-skill detail column (my_skills/detail_drawer.rs; values from
@@ -1473,6 +1334,9 @@ const messages: Record<Locale, Record<string, unknown>> = {
       upstreamRemovedTitle: "Removed by its source repository",
       upstreamRemovedDesc:
         "The latest {{source}} no longer contains {{folder}}. Your copy still works, but it no longer receives updates — reinstall it from the source or uninstall it.",
+      translationNeedsConfig:
+        "Configure the base URL, API key, and model in Settings → Translation, or switch back to Google Translate.",
+      translationFailed: "Translation failed. Check your network or proxy settings and try again.",
       translationRejected: "\"{{model}}\" rejected the translation. Pick another model and try again.",
       translationRejectedDetail:
         "\"{{model}}\" can't translate this: {{detail}}. Pick another model and try again.",
@@ -1516,7 +1380,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
     // The import dialog (githubImportModal, import_modal/{phases,select}.rs;
     // values from assets/locales en.json, both catalogs in sync).
     githubImportModal: {
-      title: "Import from GitHub",
       placeholder: "owner/repo/skill-dir or a GitHub URL",
       scan: "Scan",
       fullDepthLabel: "Full-depth scan",
@@ -1589,62 +1452,19 @@ const messages: Record<Locale, Record<string, unknown>> = {
       copied: "Share code copied to clipboard",
       pasteToImportHint: "Copy this entire message to import",
     },
-    // The add-account dialog (accounts/dialog.rs + dialog_chrome.rs +
-    // opencode_add.rs; values from en.json's accounts section, in sync).
-    accounts: {
-      panelSubtitle: "Switch, add, and manage provider accounts",
-      addAccount: "Add account",
-      needSecret: "Enter something first",
-      needCallback: "Paste the callback link first",
-      callbackPlaceholder: "Callback link or auth code",
-      callbackHint: "If the browser does not return here, paste the callback link or auth code",
-      callbackLabel: "Callback",
-      submitCallback: "Submit callback",
-      submitting: "Submitting",
-      signIn: "Sign in",
-      signInHint: "Finish signing in in the browser",
-      signingIn: "Signing in",
-      importSession: "Import this device's session",
-      importSessionHint: "Copy the sign-in already on this device. The original credentials stay put.",
-      checkingQuota: "Checking quota",
-      added: "Account added",
-      importedLocal: "Imported from this device",
-      importedCredential: "Credential imported",
-      actionFailed: "Failed: {{err}}",
-      signOutTitle: "Sign out of this account",
-      signOutBody: "This account leaves the list. Sign in again to read its quota.",
-      signOut: "Sign out",
-      orPaste: "or paste",
-      regionBigmodel: "Zhipu",
-      apiKeyHint: "Paste the key from the provider console",
-      cookieHint: "Paste the cookie copied from the browser",
-      opencodeCookieHint:
-        "Optional. Copy the Cookie header from a signed-in opencode.ai/console page (console_session or __Host-console_session) to show the login email. Leave it blank to keep the name OpenCode Go.",
-      credentialLabel: "Credential",
-      credentialHint: "Card code, session JSON, or a refresh token",
-      credentialPlaceholder: "Card code / JSON / refresh token",
-      displayName: "Display name",
-      displayNameHint: "Shown in the list only. This does not sign in.",
-      displayNamePlaceholder: "Display name",
-      saveKey: "Save key",
-      saveCookie: "Save cookie",
-      importCredential: "Import credential",
-      continue: "Continue",
-      checkingCredential: "Checking the credential",
-    },
     // The rewritten accounts page (cockpit-tools card language & toolbar):
     // header agent pills, floating toolbar, selection bar, compact/list/grid
     // views, two-column quota cards, and tabbed add-account dialog.
     accountsPage: {
-      subtitle: "Accounts and quota for managed agents",
       current: "Active",
       switch: "Switch",
       quotaFailed: "Quota read failed",
       reauthNeeded: "This login expired — authorize again",
       reauthorize: "Re-authorize",
+      noUsername: "No username",
+      noEmail: "No email",
       noQuota: "No quota data yet",
       unlimited: "Unlimited",
-      resetIn: "{{span}} left · {{when}}",
       resetDone: "Reset",
       addAccount: "Add account",
       emptyTitle: "Add a {{agent}} account",
@@ -1654,7 +1474,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       viewList: "List view",
       viewGrid: "Grid view",
       filterAll: "All ({{count}})",
-      filterPlan: "Plan filter",
       filterReauth: "Needs re-auth",
       filterQuotaError: "Quota error",
       clearFilters: "Clear filters",
@@ -1668,6 +1487,13 @@ const messages: Record<Locale, Record<string, unknown>> = {
       sortAsc: "Ascending",
       refreshAll: "Refresh all quotas",
       refreshingAll: "Refreshing…",
+      autoRefreshOff: "Auto: Off",
+      autoRefreshLabel: "Auto: {{label}}",
+      autoRefreshMenuOff: "Off",
+      autoRefreshSec: "{{n}}s",
+      autoRefreshMin: "{{n}}m",
+      autoRefreshPreview: "{{count}} eligible · ~1 every {{step}}s",
+      autoRefreshNoneEligible: "No eligible accounts",
       privacyHide: "Mask emails & names",
       privacyShow: "Show full emails",
       selectAll: "Select all",
@@ -1684,6 +1510,8 @@ const messages: Record<Locale, Record<string, unknown>> = {
       batchRefreshPartial: "Refreshed {{ok}} accounts, {{fail}} failed",
       switchedBanner: "Switched to {{name}}",
       availableCredits: "Available Credits",
+      resetCards: "Reset Cards",
+      resetCardsCount: "{{count}}",
       neverUsed: "Never",
       colAccount: "Account",
       colQuota: "Quota",
@@ -1717,92 +1545,12 @@ const messages: Record<Locale, Record<string, unknown>> = {
       tokenPlaceholder: "refresh token / card code / JSON",
       tokenHint: "The token is verified locally and stored in the account library; it is never sent anywhere else.",
       needToken: "Paste the token first",
-      importToken: "Import",
       added: "Account added",
       importedLocal: "Imported from this device",
       importedToken: "Token imported",
       deleteTitle: "Delete account",
       deleteBody:
         "After deleting “{{name}}” you must sign in again to read its quota. The client's current credentials stay untouched.",
-      actionFailed: "Failed: {{err}}",
-    },
-    // The accounts workbench (the usage-section subset the accounts sources
-    // quote; values from en.json's usage section, in sync).
-    usage: {
-      setActive: "Switch",
-      resetQuota: "Reset quota",
-      requiresReauth: "Re-authentication required",
-      reauthRequiredHint: "Sign in again to refresh this account.",
-      cardActive: "Active",
-      cardActiveTitle: "The CLI is serving this account right now",
-      cardCliDiverged: "CLI mismatch",
-      cardCliDivergedTitle: "This account is pinned, but the CLI is serving different credentials",
-      cardCliMissing: "CLI signed out",
-      cardCliMissingTitle: "The CLI has no credentials at all — nobody is signed in",
-      creditsUnlimited: "Unlimited",
-      creditPoints: "Credits",
-      cardBalance: "Balance",
-      manualQuota: "Manual Quota (Optional)",
-      meterResetSoon: "Resetting soon",
-      meterDays: "{{n}}d",
-      meterHours: "{{n}}h",
-      meterMinutes: "{{n}}m",
-      remainingPercent: "{{percent}}% left",
-      windowModelQuota: "Model quota",
-      windowWeeklyCredits: "Weekly credits",
-      windowMonthlyCredits: "Monthly credits",
-      glmMcp: "ZCode MCP",
-      includedQuota: "Included",
-      categoryAutoComposer: "Tab & Composer",
-      categoryApi: "API calls",
-      antigravityFiveHourLimit: "5-hour quota",
-      antigravityWeeklyLimit: "Weekly quota",
-      sidebarNav: "Providers",
-      allProviders: "All",
-      oauthWaiting: "Waiting for authorization",
-      oauthListening: "Listening",
-      oauthWaitingHint:
-        "SkillStar is listening for the auth callback and will refresh this subscription automatically.",
-      oauthDeviceHint: "Confirm this pairing code in the browser. The account is added after you approve it.",
-      userCode: "Pairing code",
-      oauthOpenLink: "Open authorization page",
-      authManual: "Manual",
-      window5h: "5-hour window",
-      windowWeekly: "Weekly window",
-      resetCards: "Reset cards",
-      resetCardRefresh: "Refresh to load reset cards",
-      // Reset bank (accounts/reset_bank; values mirror assets/locales en.json).
-      resetCardSeconds: "sec",
-      resetCardUnit: "cards",
-      resetCardBusy: "Resetting…",
-      resetLabelShort: "Reset",
-      resetCardSpendTitle: "Use a reset card",
-      resetCardOneDated: "one reset card expiring {{when}}",
-      resetCardOne: "one reset card",
-      resetCardConfirmBody: "{{window}} will be cleared now, using {{card}}. This cannot be undone.",
-      resetCardAck: "I confirm using this reset card",
-      resetCardConfirm: "Confirm reset",
-      resetCardStamp: "{{month}}/{{day}} {{hour}}:{{minute}}",
-      resetCardNoExpiry: "No expiry time",
-      resetCardExpiresAt: "Expires {{when}}",
-      resetCardsEmpty: "None available",
-      resetCardExpiresIn: "Earliest in {{time}}",
-      resetCardEarliest: "Earliest {{when}}",
-    },
-    page: {
-      placeholder: "Migration scaffold placeholder — filled in by its wave.",
-      my_skills_desc: "My skills: toolbar (scope slider, search, agent filter strip) and the local skill grid.",
-      marketplace_desc: "Marketplace: four tabs, search, snapshot banner and market cards.",
-      skill_cards_desc: "Decks: deck card grid, create deck and deck import.",
-      projects_desc: "Projects: manage skills per agent, master-detail.",
-      accounts_desc: "Accounts: quota cards grouped by provider.",
-      settings_desc: "Settings: appearance, language, background run, network and storage.",
-    },
-    bridge: {
-      title: "Domain bridge self-check",
-      desc: "Calls ss_marketplace::may_query_install_audits (pure URL gate, read-only, no IO side effects).",
-      audit_ok: "audits queryable",
-      audit_no: "no queries",
     },
     // Projects page (crates/ss-gpui/src/projects/; copy lifted verbatim
     // from assets/locales en.json projects — both catalogs stay in sync).
@@ -1814,7 +1562,6 @@ const messages: Record<Locale, Record<string, unknown>> = {
       registerProject: "Register Project",
       registerDialogTitle: "Register Local Project",
       registerEmptyPath: "Enter or choose a project folder.",
-      browseFolder: "Browse…",
       chooseDir: "Choose project root directory",
       chooseNewDir: "Choose new project root directory",
       changePathTitle: "Change Project Path",
@@ -1874,31 +1621,55 @@ const messages: Record<Locale, Record<string, unknown>> = {
       forgetCopyConfirm: "Clear record",
       copyForgotten: "Copy record cleared; project files and the Hub skill were preserved",
       forgetFailed: "Couldn't clear the record: {{err}}",
-      // Two keys the settings page cross-references (folded in from its
-      // stub section).
-      resolveCopies: "Resolve copies",
+      // Cross-referenced by the settings page (folded in from its stub section).
       copiesUpdated: "Synced project copies: {{names}}",
+    },
+    wait: {
+      saving: "Saving",
+      saved: "Saved",
+      couldntSave: "Couldn't save",
+      takingLonger: "Taking longer than usual",
+      continueInBackground: "Continue in background",
+      refreshingAccounts: "Refreshing {{done}} / {{total}}",
+      importing: "Importing",
+      installing: "Installing {{name}}",
+      reinstalling: "Reinstalling {{source}}",
+    },
+    notify: {
+      restored: "Restored",
     },
   },
 };
 
-function lookup(table: Record<string, unknown>, key: string): unknown {
-  let node: unknown = table;
-  for (const part of key.split(".")) {
-    if (node === null || typeof node !== "object") return undefined;
-    node = (node as Record<string, unknown>)[part];
+function flattenMessages(
+  node: Record<string, unknown>,
+  prefix: string,
+  out: Map<string, string>,
+): void {
+  for (const [key, value] of Object.entries(node)) {
+    const full = prefix.length > 0 ? `${prefix}.${key}` : key;
+    if (typeof value === "string") {
+      out.set(full, value);
+    } else if (value !== null && typeof value === "object") {
+      flattenMessages(value as Record<string, unknown>, full, out);
+    }
   }
-  return node;
 }
+
+const FLAT_MESSAGES: Record<Locale, Map<string, string>> = {
+  "zh-CN": new Map(),
+  en: new Map(),
+};
+flattenMessages(messages["zh-CN"], "", FLAT_MESSAGES["zh-CN"]);
+flattenMessages(messages.en, "", FLAT_MESSAGES.en);
 
 // Dotted-key lookup, i18n.rs t() parity: current catalog, then the other
 // catalog, then the key itself. Reactive through the locale signal.
 export function t(key: string): string {
-  const zh = locale();
-  const first = messages[zh];
-  const other = messages[zh === "zh-CN" ? "en" : "zh-CN"];
-  const hit = lookup(first, key) ?? lookup(other, key);
-  return typeof hit === "string" ? hit : key;
+  const current = locale();
+  const primary = FLAT_MESSAGES[current];
+  const fallback = FLAT_MESSAGES[current === "zh-CN" ? "en" : "zh-CN"];
+  return primary.get(key) ?? fallback.get(key) ?? key;
 }
 
 // `{{name}}` placeholder interpolation, i18n.rs tf() parity.

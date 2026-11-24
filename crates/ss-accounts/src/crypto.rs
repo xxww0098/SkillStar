@@ -4,6 +4,8 @@
 //! base64(nonce || ciphertext). The same scheme the deleted account code used,
 //! kept because it is the one this machine can actually decrypt.
 
+use std::sync::{Mutex, OnceLock};
+
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
@@ -35,13 +37,45 @@ pub enum CryptoError {
     NotUtf8(String),
 }
 
-/// The 32-byte key this machine encrypts with.
-fn encryption_key() -> [u8; 32] {
-    let uid = machine_uid::get().unwrap_or_default();
+static CACHED_KEY: OnceLock<[u8; 32]> = OnceLock::new();
+static KEY_INIT_LOCK: Mutex<()> = Mutex::new(());
+
+fn derive_key(uid: &str) -> [u8; 32] {
     let digest = Sha256::digest(uid.as_bytes());
-    let mut key = [0u8; 32];
+    let mut key = [0_u8; 32];
     key.copy_from_slice(&digest);
     key
+}
+
+/// The 32-byte key this machine encrypts with.
+///
+/// Caches successful `machine_uid` lookups per process so macOS `ioreg` is not
+/// spawned on every encrypt/decrypt; transient lookup errors stay uncached.
+fn encryption_key() -> [u8; 32] {
+    if let Some(key) = CACHED_KEY.get() {
+        return *key;
+    }
+    let _guard = KEY_INIT_LOCK
+        .lock()
+        .expect("encryption key init lock poisoned");
+    if let Some(key) = CACHED_KEY.get() {
+        return *key;
+    }
+    match machine_uid::get() {
+        Ok(uid) => {
+            let key = derive_key(&uid);
+            let _ = CACHED_KEY.set(key);
+            key
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: "accounts",
+                error = %error,
+                "machine_uid lookup failed; using uncached fallback key"
+            );
+            derive_key("")
+        }
+    }
 }
 
 /// Encrypt a plaintext secret; an empty input stays empty.

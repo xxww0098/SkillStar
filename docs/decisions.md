@@ -320,7 +320,7 @@
 
 - 日期：2026-11-15（整合 D-108 / D-109 核心设计）
 - 状态：accepted
-- 决策：彻底淘汰历史多家族复杂模型（含独立消耗记账与遗留多开表），以极简索引 + 每账号独立 AES-256-GCM 加密文件重构账号存储，仅向界面暴露脱敏 `AccountView`；UI 在 `gui/src/pages/accounts/` 采用三段式高密度卡片与三态视图，严格遵循 `paletteToken()` 配色与零过渡状态切换，Agent 菜单由左侧边栏与注册表交集统一驱动。
+- 决策：彻底淘汰历史多家族复杂模型（含独立消耗记账与遗留多开表），以极简索引 + 每账号独立 AES-256-GCM 加密文件重构账号存储，仅向界面暴露脱敏 `AccountView`；UI 在 `gui/src/pages/accounts/` 采用三段式高密度卡片与三态视图，严格遵循 `paletteToken()` 配色与零过渡状态切换，客户端菜单由左侧边栏与账号域注册表统一驱动。
 - 后果：账号模型、OAuth、额度窗口刷新与切换适配器彻底脱离历史包袱。
 - 证据：`crates/ss-accounts/src/store.rs`、`gui/src/pages/accounts/`、[Accounts 文档](./features/accounts/README.md)。
 
@@ -328,7 +328,7 @@
 
 - 日期：2026-11-15（结合 D-111 / D-116 最终形态）
 - 状态：accepted
-- 决策：全面统一为 `nsh`（当前锁定 `0.5.x`）桌面应用（TSX 信号层 + `ss-gui-bridge` + `ss-gui-host`），移除早期 WebView 方案、旧即时模式桌面壳以及与新运行时依赖冲突且缺少界面消费者的 SSH 远端同步模块；同时清理 `deny.toml` 冗余忽略项并将前端目录拍平至仓库顶层 `gui/`。
+- 决策：全面统一为 `nsh`（当前锁定 `0.6.x`）桌面应用（TSX 信号层 + `ss-gui-bridge` + `ss-gui-host`），移除早期 WebView 方案、旧即时模式桌面壳以及与新运行时依赖冲突且缺少界面消费者的 SSH 远端同步模块；同时清理 `deny.toml` 冗余忽略项并将前端目录拍平至仓库顶层 `gui/`。
 - 后果：全仓库统一为单锁文件、单产品二进制与单一套 GUI 页面实现，日常检查与编译链路收敛为 `nsh check/test gui` 与 `cargo check/test --workspace`。
 - 证据：`Cargo.toml`、`gui/nsh.json`、`deny.toml`、`src/main.rs`。
 
@@ -357,6 +357,7 @@
 - 日期：2026-11-16
 - 状态：accepted
 - 决策：对 Antigravity 客户端凭据定点放宽 D-072 限制：macOS 非沙箱环境下写入 `gemini/antigravity` 钥匙串条目（值带 `go-keyring-base64:` 前缀，不加全局宽放 `-A`/`-T`），同步写入 `~/.gemini/jetski-standalone-oauth-token`、按需写入 `antigravity-oauth-token` 与本地 `state.vscdb`，任一环节失败按快照整体回滚；SkillStar 自有账号库仍仅存本地加密 JSON。
+- 补充（2.x 客户端）：桌面端 2.x 只读系统凭据，既不创建 `state.vscdb` 也不再整条重写钥匙串载荷。因此 `state.vscdb` 投影降为「文件在场才写」，缺它不构成切换失败；钥匙串写入按客户端原载荷合并（保留 `writer_id` / `token.expires_in` 等客户端自有字段，只覆盖 token 与 `id_token_email`），提交校验以钥匙串回读为准。
 - 后果：macOS 切号后客户端状态真实同步且可回到 `LinkedTo`；同时须在设置与文档中明示该系统钥匙串副本在删除账号后不会由应用主动撤销。
 - 证据：`crates/ss-accounts/src/switch/antigravity.rs`、[Accounts 文档](./features/accounts/README.md)。
 
@@ -367,6 +368,61 @@
 - 决策：`ss-gui-host` 同时支持 macOS（AppKit）与 Windows（Win32）；`gui/nsh.json` 声明 `closeOnPress: false`，由应用层 `gui/src/shell/residentWindow.ts` 在点关闭按钮时 `hide()` 主窗口实现两平台一致的后台常驻；macOS 通过 Dock 图标重新点击拉起，Windows 通过通知区托盘菜单与 `singleInstance: true` 拉起；顶部沉浸式隐藏标题栏按 `titleBar()` 动态安全区避让两侧红绿灯/Win32 caption 按钮（`gui/src/shell/caption.ts`）。
 - 后果：macOS 与 Windows 共享统一壳交互、内嵌多尺寸图标及一致的常驻语义。
 - 证据：`gui/host/src/lib.rs`、`gui/src/shell/{residentWindow,caption}.ts`、`gui/nsh.json`、`gui/App.test.tsx`、[Platform 文档](./features/platform/README.md)。
+
+## D-120：Antigravity 切号后优雅重启客户端（macOS / Windows，不强杀）
+
+- 日期：2026-11-17
+- 状态：superseded by [D-121](#d-121切号不再自动重启客户端)
+- 背景：Antigravity 桌面端只在启动时读凭据（会话在常驻 sidecar `language_server` 的内存里），外部改写钥匙串不热加载，运行中还会把内存里的旧会话写回钥匙串。切号后不重启客户端，用户看到的就还是旧账号。
+- 反面实验：用 `kill -TERM` 退出再 `open -a` 拉起（本机 macOS + 2.32.1）会让客户端起不来——新实例约 20ms 就以 `termination reported by launchd (0, 0, 0)` 结束，之后 `open -a` 全失效（签名/公证、自动更新、端口、`SingletonLock` 都已排除，见 [errors.md](./errors.md)）。结论：**强杀这条路不用**。
+- 决策：切号校验通过后按平台「请客户端自己退出」再拉起——macOS 用 `osascript` 发 Quit Apple Event（首次要一次性「自动化」授权），Windows 用 `taskkill /PID <pid> /T`（WM_CLOSE，不加 `/F`）；拉起位置先从正在运行的进程问出来（`ps -o comm=` / `Get-Process`），再退到常见路径与 App Paths。退出被拒或客户端不肯退就放弃重启，只把原因作为 `ActivateOutcome.clientRestart.warning` 交给 UI。Linux 没有受支持的桌面端，不处理；测试沙箱不动进程。
+- 后果：切换后用户不必自己退出/打开客户端；代价是客户端里正在跑的 agent 任务会中断，且失败时只剩一条提示。Windows 的切号写回本身还没实现（D-114 只覆盖 macOS），重启通路先按平台写好并测过。
+- 真机验证（macOS）：`osascript` 退出旧进程 + 拉起新进程成功，`ClientRestart { restarted: true, warning: None }`，新进程稳定存活；受限宿主里 `open -a` 会被拦掉，靠最后一级 Finder 代劳拉起（因此该级保留）。Windows 只有注入式测试。
+- 证据：`crates/ss-accounts/src/switch/antigravity_client.rs`（含 8 条注入式测试）、`crates/ss-accounts/src/service.rs`（`restart_client_after_switch`）、[Accounts 文档](./features/accounts/README.md)。该通路已按 [D-121](#d-121切号不再自动重启客户端) 删除。
+
+## D-121：切号不再自动重启客户端（撤销 D-120）
+
+- 日期：2026-11-18
+- 状态：accepted（撤销 [D-120](#d-120antigravity-切号后优雅重启客户端macos--windows不强杀)）
+- 决策：切号只写凭据，不再探测、退出或拉起任何客户端进程。`ActivateOutcome` 去掉 `clientRestart`，账号页 toast 只报「已切换至 <账号名>」。D-120 的整条重启通路连同 `switch/antigravity_client.rs` 与它的 8 条注入式测试一起删除，不保留开关。
+- 原因：代管用户桌面进程的代价高于收益——优雅退出会打断客户端里正在跑的任务，macOS 首次切号还要一次性「自动化」授权，受限宿主里 `open -a` 起不来时只剩 Finder 兜底；而重启失败本来就只能退化成一句提示。
+- 后果：Antigravity 切号后客户端里仍显示旧账号，直到用户自己重启它；由 [Accounts 文档](./features/accounts/README.md) 明写。切号结论继续由磁盘回读决定，与客户端进程无关。
+- 证据：`crates/ss-accounts/src/{lib.rs,service.rs}`（`ActivateOutcome` 无 `clientRestart`，`activate_with` 第 5 步只记 `last_used_at`）、`gui/src/pages/accounts/{state.ts,types.ts}`、[Accounts 文档](./features/accounts/README.md)。
+
+## D-117：Gemini CLI OAuth 客户端配置
+
+- 日期：2026-11-16
+- 状态：superseded by [D-119](#d-119移除-gemini-cli-账号支持)
+- 决策：Gemini CLI 的浏览器 OAuth 默认使用 Google 在开源 CLI 中公开的安装型客户端配置与 PKCE，保留用户配置覆盖。
+- 后果：CLI 不再因缺少手工配置而无法开始 OAuth；其公开客户端配置可能由 Google 轮换，覆盖配置可用于适配。
+- 证据：[Google 的 Gemini CLI OAuth 实现](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/oauth2.ts)、[Google 桌面应用 OAuth 文档](https://developers.google.com/identity/protocols/oauth2/native-app)、[Accounts 文档](./features/accounts/README.md)。
+
+## D-118：外部 MCP 管理域拆分到 `ss-mcp-hub`，实施三层无损入侵并与 magpie 对齐 35 个 MCP Agent
+
+- 日期：2026-11-16（Gemini CLI 于 [D-122](#d-122移除-gemini-cli-mcp-支持) 移除）
+- 状态：accepted
+- 决策：
+  1. 在 `crates/ss-mcp-hub` 独立承载外部 MCP 服务管理、内置商店与内置 MCP Agent 配置同步（原对齐 magpie 的 36 个目标在 D-122 移除 `gemini` 后收敛为 35 个）；保留 `crates/ss-mcp` 独占 `rmcp` 与项目技能 stdio 热路径（`skillstar mcp serve --stdio`），二者不耦合。
+  2. 支持的 MCP Agent 以 magpie `targets.go`（`t.MCP != nil`）为基线并排除 `gemini`（Gemini CLI，[D-122](#d-122移除-gemini-cli-mcp-支持)），同时将历史别名 `agy` 统一收敛到 `antigravity`（共用 `~/.gemini/config/mcp_config.json`），排除 magpie 内部代理路由 `claude-magpie-3p` 与全部仅限 Skills 而无 MCP 适配的客户端。
+  3. 外部配置编辑统一实施三层无损入侵：byte/span 级文本保留（JSONC 注释与尾逗号、TOML 表区间、YAML/DSH patch 区块、BOM/CRLF/symlink/hardlink/滚动备份）、条目级字段所有权合并（不抹除用户手工附加字段，并阻断覆盖 Zed 扩展 `context_servers` 条目）、账本级所有权追踪（`data/mcp/library.json` 仅修改与回收自身曾写入的条目）。
+- 后果：用户已调优的 Agent 配置文件格式与第三方扩展字段在批量开关、暂停与纳管过程中完整保留；在线 MCP 商店复用 `ss-core::infra::http_client::probe_http_client`，离线时自动退化至内置精选与嵌入式快照（已剔除 magpie 专有网关自工具）。
+- 证据：`crates/ss-mcp-hub/`、[boundaries.md](./boundaries.md)、[architecture.md](./architecture.md)、[MCP 文档](./features/mcp/README.md)。
+
+## D-119：移除 Gemini CLI 账号支持
+
+- 日期：2026-11-17
+- 状态：accepted
+- 决策：从账号工作台移除 Gemini CLI 的全部账号能力：`ss_accounts::Agent` 不再有 `GeminiCli` 变体，账号域的登录腿（`oauth/agents/gemini_cli*`）、额度抓取（`usage/fetch/gemini_cli*`）、切号写回与路径（`switch/gemini_cli*`、`switch/paths.rs`）及其测试一并删除；可替换配置项 `SKILLSTAR_GEMINI_CLI_*` 与 `config/gemini_cli_oauth.json` 随之失效。
+- 后果：账号工作台只剩 8 家受管客户端；`gemini-cli` 的存量账号记录不留存——`ss_accounts::list()` 在存储锁内删除这些记录文件并重建索引，旧令牌不再躺在新版本读不懂的目录里（`gemini-cli` 客户端自己的 `~/.gemini` 文件不属于 SkillStar，保持原样）。技能分发（`gemini-cli` Agent profile）与 Antigravity（同名 `~/.gemini` 前缀下的另一个产品）均不受影响；MCP 配置目标随后亦已于 [D-122](#d-122移除-gemini-cli-mcp-支持) 移除。
+- 证据：`crates/ss-accounts/src/{lib,agents,service}.rs`、`docs/features/accounts/README.md`、`docs/features/usage/README.md`。
+
+## D-122：移除 Gemini CLI MCP 支持
+
+- 日期：2026-11-18
+- 状态：accepted（修订 [D-118](#d-118外部-mcp-管理域拆分到-ss-mcp-hub实施三层无损入侵并与-magpie-对齐-35-个-mcp-agent)）
+- 决策：从外部 MCP 管理域（`ss-mcp-hub`）、项目级 MCP 配置片段与 GUI MCP 页面移除 Gemini CLI 支持：删除 `McpFormat::Gemini` 编码格式、`builtin_targets` 中的 `gemini` 目标（`~/.gemini/settings.json`）、`canonical_agent_id` 中的 `gemini-cli -> gemini` 别名以及 `PROJECT_TARGET_LIST` 中的 `gemini`（`.gemini/settings.json`）项目片段目标；读取 `data/mcp/library.json` 时清理存量 `gemini` / `gemini-cli` 的期望或台账条目（不改写客户端自己的 `~/.gemini/settings.json`）。
+- 后果：内置外部 MCP Agent 收敛为 35 家（24 种 `McpFormat`，10 种项目级配置片段），`gemini` / `gemini-cli` 均视为未知 MCP 目标；`ss-skills` 中的 `gemini-cli` 技能分发 profile 与共享 `~/.gemini` 前缀下的 `antigravity`（`~/.gemini/config/mcp_config.json`）不受影响。
+- 证据：`crates/ss-mcp-hub/src/{model,targets/paths,targets/project_targets,formats/json_formats,library/mod}.rs`、[MCP 文档](./features/mcp/README.md)。
 
 ## 新增记录格式
 

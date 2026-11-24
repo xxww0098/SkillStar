@@ -1,8 +1,8 @@
 //! Store round-trip, self-healing index, and narrow-update tests.
 
 use super::{
-    StorageLock, get, index, list, record_path, records_dir, rebuild_index, remove, update, upsert,
-    upsert_replacing_identity,
+    StorageLock, get, index, index_supported, list, record_path, records_dir, remove, update,
+    upsert, upsert_replacing_identity,
 };
 use crate::record::Account;
 use crate::test_support::Sandbox;
@@ -101,7 +101,7 @@ fn index_rebuilds_from_records_when_it_is_missing_or_stale() {
 
     // A garbage index is rebuilt, not trusted.
     std::fs::write(super::index_path(), b"{ not json").unwrap();
-    let entries = rebuild_index().unwrap();
+    let entries = index().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(index().unwrap().len(), 1);
 }
@@ -232,6 +232,31 @@ fn records_with_a_wrong_or_traversing_id_are_rejected() {
     assert_eq!(list().unwrap().len(), 1);
 }
 #[test]
+fn purge_deletes_only_the_rows_of_retired_agents() {
+    let _sandbox = Sandbox::new();
+    let kept = account("codex", "dev@example.com", 100);
+    let retired = account("gemini-cli", "old@example.com", 200);
+    upsert(&kept).unwrap();
+    upsert(&retired).unwrap();
+    assert_eq!(index().unwrap().len(), 2);
+
+    let remaining = index_supported().unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, kept.id);
+    assert!(!record_path(&retired.id).exists());
+    assert!(record_path(&kept.id).is_file());
+
+    // The index is rebuilt in the same pass, so the page never sees the ghost.
+    let entries = index().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, kept.id);
+
+    // Nothing left to delete is not an error, and a second pass is a no-op.
+    assert_eq!(index_supported().unwrap(), entries);
+    assert_eq!(index().unwrap(), entries);
+}
+
+#[test]
 fn the_per_agent_refresh_lock_is_exclusive_but_per_agent() {
     let _sandbox = Sandbox::new();
     {
@@ -245,4 +270,69 @@ fn the_per_agent_refresh_lock_is_exclusive_but_per_agent() {
     // Released on drop: taking it again from the same process must not block.
     super::AgentRefreshLock::acquire("codex").expect("second turn");
     assert!(super::refresh_lock_path("codex").ends_with("catalog-codex.lock"));
+}
+
+#[test]
+fn legacy_index_without_fingerprints_backfills_non_secret_prefixes() {
+    let _sandbox = Sandbox::new();
+    let stored = account("claude-code", "dev@example.com", 100);
+    upsert(&stored).unwrap();
+
+    // Simulate a legacy accounts.json written before fingerprint fields existed.
+    let mut legacy: Vec<serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(super::index_path()).unwrap()).unwrap();
+    let obj = legacy[0].as_object_mut().unwrap();
+    obj.remove("accessFingerprint");
+    obj.remove("refreshFingerprint");
+    std::fs::write(super::index_path(), serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+
+    let entries = super::index_supported().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].access_fingerprint, stored.access_fingerprint());
+    assert_eq!(entries[0].refresh_fingerprint, stored.refresh_fingerprint());
+
+    let text = std::fs::read_to_string(super::index_path()).unwrap();
+    assert!(text.contains("accessFingerprint"));
+    assert!(!text.contains("at-dev@example.com"));
+}
+
+#[test]
+fn backfill_skips_index_rewrite_when_record_decryption_fails() {
+    let _sandbox = Sandbox::new();
+    let stored = account("claude-code", "corrupt@example.com", 100);
+    upsert(&stored).unwrap();
+
+    // Corrupt ciphertext and drop cached prefixes on the record so `tokens()` fails to decrypt.
+    let mut raw_rec: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(super::record_path(&stored.id)).unwrap()).unwrap();
+    let rec_obj = raw_rec.as_object_mut().unwrap();
+    rec_obj.insert(
+        "tokensEncrypted".to_string(),
+        serde_json::Value::String("v1:corrupted-ciphertext".to_string()),
+    );
+    rec_obj.remove("accessFingerprint");
+    rec_obj.remove("refreshFingerprint");
+    std::fs::write(
+        super::record_path(&stored.id),
+        serde_json::to_vec_pretty(&raw_rec).unwrap(),
+    )
+    .unwrap();
+
+    // Write compact JSON (distinct from `write_index_locked`'s pretty JSON) so any rewrite shows up.
+    let mut legacy: Vec<serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(super::index_path()).unwrap()).unwrap();
+    let idx_obj = legacy[0].as_object_mut().unwrap();
+    idx_obj.remove("accessFingerprint");
+    idx_obj.remove("refreshFingerprint");
+    let compact_bytes = serde_json::to_vec(&legacy).unwrap();
+    std::fs::write(super::index_path(), &compact_bytes).unwrap();
+
+    let first = super::index_supported().unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].access_fingerprint, None);
+    assert_eq!(std::fs::read(super::index_path()).unwrap(), compact_bytes);
+
+    let second = super::index().unwrap();
+    assert_eq!(second, first);
+    assert_eq!(std::fs::read(super::index_path()).unwrap(), compact_bytes);
 }

@@ -10,11 +10,11 @@
 pub mod antigravity;
 pub(crate) mod antigravity_credential;
 pub(crate) mod antigravity_protobuf;
+pub(crate) mod antigravity_wincred;
 pub mod claude_code;
 pub mod codex;
 pub mod cursor;
 pub mod devin_desktop;
-pub mod gemini_cli;
 pub mod grok;
 pub mod kiro;
 pub(crate) mod kiro_store;
@@ -39,6 +39,8 @@ pub use paths::{DesktopOs, PathRoots};
 pub struct LiveCredential {
     /// A stable identity we can compare (an email, a provider account id).
     pub identity: Option<String>,
+    /// User-visible name the client carries locally, when present.
+    pub display_name: Option<String>,
     /// Fingerprint of the access token the client holds, when it has one.
     pub access_fingerprint: Option<String>,
     /// Fingerprint of the refresh token the client holds, when it has one.
@@ -115,8 +117,8 @@ pub enum ClientSnapshot {
         path: PathBuf,
         rows: Vec<(String, Option<String>)>,
     },
-    /// A client that reads more than one plain file (Gemini CLI keeps the
-    /// tokens in one and the account binding in another): every file this
+    /// A client that reads more than one plain file (Kiro and ZCode keep the
+    /// tokens and the account binding in separate files): every file this
     /// switch writes, with its previous bytes (None: it did not exist).
     Files {
         entries: Vec<(PathBuf, Option<Vec<u8>>)>,
@@ -217,14 +219,23 @@ pub fn live_with(roots: &PathRoots, agent: &str) -> AccountResult<LiveCredential
     let Some(local) = (spec.switch.read)(roots)? else {
         return Ok(LiveCredential {
             identity: None,
+            display_name: None,
             access_fingerprint: None,
             refresh_fingerprint: None,
             source: source.display().to_string(),
         });
     };
     let identity = (spec.switch.live_identity)(&local.identity);
+    let display_name = local
+        .identity
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
     Ok(LiveCredential {
         identity,
+        display_name,
         access_fingerprint: Some(crate::identity::fingerprint(&local.tokens.access_token)),
         refresh_fingerprint: local
             .tokens

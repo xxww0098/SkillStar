@@ -1,10 +1,11 @@
-import { Scroll, Text, View, effect, openUrl, signal, type JSX } from "nsh";
+import { Scroll, Text, View, computed, effect, openUrl, signal, type JSX, type Signal } from "nsh";
 import { Marketplace, MarketplaceDrawer } from "skillstar-gui/native";
 import { paletteToken } from "../../../services/themeMode";
+import { bindDelayedFlag } from "../../../chrome/delayedFlag";
 import { Icon } from "../../../chrome/icons";
 import { Tip } from "../../../chrome/tooltip";
 import { Sheet } from "../../../chrome/sheet";
-import { IconSpin, IconSweep } from "../../../chrome/feedback";
+import { IconSpin, IconSweep, Pulse } from "../../../chrome/feedback";
 import { translationPrefsChanged } from "../../../shell/events";
 import { mt } from "../marketStrings";
 import { formatInstalls, type MarketSkill } from "../types";
@@ -59,12 +60,14 @@ export interface MarketDetailColumnProps {
 export function MarketDetailColumn(props: MarketDetailColumnProps): JSX.Element {
   const drawer = props.reader ?? detail;
   const session = props.session ?? translateSession;
+  const detailLoading = bindDelayedFlag(() => drawer.phase().kind === "loading");
 
-  // 组件体只执行一次（keep-alive 单挂载）：设置保存后 bump 会话代数，
-  // keep-alive 页面从缓存重绘（shell/events 的频道契约）。
-  translationPrefsChanged.subscribe(() => {
-    session.generation.set(session.generation() + 1);
-  });
+  // 组件体只执行一次：设置保存后清失败/拒绝态并 bump 会话代数，随组件卸载退订。
+  effect(() =>
+    translationPrefsChanged.subscribe(() => {
+      session.onPrefsChanged();
+    }),
+  );
 
   // 打开身份跟随页面选择（props.skill 由页面在 JSX 里重算，effect 跟踪
   // 它驱动读取状态机的 open/close/换卡——mod.rs toggle 的相位半）。
@@ -85,12 +88,19 @@ export function MarketDetailColumn(props: MarketDetailColumnProps): JSX.Element 
     if (skill === null) return;
     const text = shownDescription(skill, phaseValue);
     if (text !== null) {
-      session.ensureTranslation(text, session.resolveTranslate(name));
+      session.ensureTranslation(name, text, session.resolveTranslate(name));
     }
   });
 
   // 「查看 SKILL.md…」悬浮窗（skill_reader 的市场侧最小对位）。
   const md = signal<{ title: string; markdown: string } | null>(null);
+  const readmeText = computed(() => {
+    const skill = props.skill;
+    if (skill === null) return null;
+    const phaseValue = drawer.phase();
+    const description = shownDescription(skill, phaseValue);
+    return shownReadme(phaseValue, description);
+  });
 
   return (
     <Sheet style={{ width: "100%", height: "100%" }}>
@@ -114,45 +124,44 @@ export function MarketDetailColumn(props: MarketDetailColumnProps): JSX.Element 
             skill={props.skill}
             phase={drawer.phase()}
             session={session}
+            delayedLoading={detailLoading}
             onRetry={() => drawer.retry()}
             onToggleTranslate={(showing) => session.applyChoice(props.identity.name, showing)}
           />
           <MetadataCard skill={props.skill} phase={drawer.phase()} />
           <AuditSection phase={drawer.phase()} />
-          {(() => {
-            const phaseValue = drawer.phase();
-            const skill = props.skill;
-            if (skill === null) return null;
-            const description = shownDescription(skill, phaseValue);
-            const readme = shownReadme(phaseValue, description);
-            if (readme === null) return null;
-            return (
-              <View
-                testID="mk-view-skill-md"
-                style={{
-                  display: "flex",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  width: "100%",
-                  paddingVertical: 8,
-                  borderRadius: 10,
-                  borderWidth: 1,
-                  borderColor: paletteToken("border"),
-                  backgroundColor: paletteToken("card"),
-                  cursor: "pointer",
-                }}
-                hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-                onPress={() => md.set({ title: skill.name, markdown: readme })}
-              >
-                <Icon name="fileText" size={14} color={paletteToken("fg")} />
-                <Text style={{ fontSize: 12, fontWeight: "600", color: paletteToken("fg") }}>
-                  {mt("detailPanel.viewSkillMd")}
-                </Text>
-              </View>
-            );
-          })()}
+          <If when={readmeText() !== null}>
+            <View
+              testID="mk-view-skill-md"
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                width: "100%",
+                paddingVertical: 8,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: paletteToken("border"),
+                backgroundColor: paletteToken("card"),
+                cursor: "pointer",
+              }}
+              hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+              onPress={() => {
+                const skill = props.skill;
+                const readme = readmeText();
+                if (skill !== null && readme !== null) {
+                  md.set({ title: skill.name, markdown: readme });
+                }
+              }}
+            >
+              <Icon name="fileText" size={14} color={paletteToken("fg")} />
+              <Text style={{ fontSize: 12, fontWeight: "600", color: paletteToken("fg") }}>
+                {mt("detailPanel.viewSkillMd")}
+              </Text>
+            </View>
+          </If>
         </Scroll>
         <DetailActions
           skill={props.skill}
@@ -162,18 +171,11 @@ export function MarketDetailColumn(props: MarketDetailColumnProps): JSX.Element 
         />
       </View>
       <If when={md() !== null}>
-        {() => {
-          const doc = md();
-          return doc === null ? (
-            <View />
-          ) : (
-            <SkillMdOverlay
-              title={doc.title}
-              markdown={doc.markdown}
-              onClose={() => md.set(null)}
-            />
-          );
-        }}
+        <SkillMdOverlay
+          title={md()?.title ?? ""}
+          markdown={md()?.markdown ?? ""}
+          onClose={() => md.set(null)}
+        />
       </If>
     </Sheet>
   );
@@ -182,6 +184,12 @@ export function MarketDetailColumn(props: MarketDetailColumnProps): JSX.Element 
 // ---- 头部（detail_header 对位）---------------------------------------------
 
 function DetailHeader(props: { skill: MarketSkill | null; onClose(): void }): JSX.Element {
+  const showRank = () =>
+    props.skill !== null && props.skill.rank !== null && props.skill.rank > 0 && props.skill.rank <= 100;
+  const showHot = () => props.skill?.category === "hot";
+  const showInstalled = () => props.skill?.installed === true;
+  const showBadges = () => props.skill !== null && (showInstalled() || showHot() || showRank());
+
   return (
     <View
       style={{
@@ -211,31 +219,24 @@ function DetailHeader(props: { skill: MarketSkill | null; onClose(): void }): JS
           </Text>
         </View>
         {/* 徽章行只在有内容时占位（badge_row 的 show_badges）。 */}
-        {(() => {
-          const skill = props.skill;
-          if (skill === null) return null;
-          const showRank = skill.rank !== null && skill.rank > 0 && skill.rank <= 100;
-          const showBadges = skill.installed || skill.category === "hot" || showRank;
-          if (!showBadges) return null;
-          return (
-            <View style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
-              {showRank ? (
-                <Chip bg={paletteToken("warn_bg")} fg={paletteToken("warn")} label={`#${skill.rank ?? 0}`} />
-              ) : null}
-              {skill.category === "hot" ? (
-                <Chip bg={paletteToken("danger_bg")} fg={paletteToken("danger")} label={mt("marketplace.hot")} />
-              ) : null}
-              {skill.installed ? (
-                <Chip
-                  bg={paletteToken("ok_bg")}
-                  fg={paletteToken("ok")}
-                  label={mt("marketplace.detailInstalled")}
-                  testID="mk-detail-installed-chip"
-                />
-              ) : null}
-            </View>
-          );
-        })()}
+        <If when={showBadges()}>
+          <View style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+            <If when={showRank()}>
+              <Chip bg={paletteToken("warn_bg")} fg={paletteToken("warn")} label={`#${props.skill?.rank ?? 0}`} />
+            </If>
+            <If when={showHot()}>
+              <Chip bg={paletteToken("danger_bg")} fg={paletteToken("danger")} label={mt("marketplace.hot")} />
+            </If>
+            <If when={showInstalled()}>
+              <Chip
+                bg={paletteToken("ok_bg")}
+                fg={paletteToken("ok")}
+                label={mt("marketplace.detailInstalled")}
+                testID="mk-detail-installed-chip"
+              />
+            </If>
+          </View>
+        </If>
       </View>
       <View
         testID="close-market-detail-drawer"
@@ -282,75 +283,149 @@ function DescriptionSection(props: {
   skill: MarketSkill | null;
   phase: DetailPhase;
   session: TranslateSession;
+  delayedLoading: Signal<boolean>;
   onRetry(): void;
   onToggleTranslate(showing: boolean): void;
 }): JSX.Element {
+  const description = computed(() => {
+    const skill = props.skill;
+    if (skill === null) return null;
+    return shownDescription(skill, props.phase);
+  });
+  const showing = computed(() => {
+    void props.session.generation();
+    const skill = props.skill;
+    return skill === null ? false : props.session.resolveTranslate(skill.name);
+  });
+  const gate = computed(() => {
+    void props.session.generation();
+    const desc = description();
+    return desc === null ? null : props.session.buttonGate(desc, showing());
+  });
+  const showRetry = () => {
+    const desc = description();
+    const transport = props.session.transportFailed();
+    return desc !== null && transport !== null && transport === desc.trim();
+  };
+  const failure = computed(() => {
+    void props.session.generation();
+    const desc = description();
+    if (desc === null) return null;
+    return showing() || showRetry() ? props.session.failureLine(desc) : null;
+  });
+  const isLoading = () => props.phase.kind === "loading";
+  const showPulses = () => isLoading() && props.delayedLoading();
+  const failedError = () => (props.phase.kind === "failed" ? props.phase.error : null);
+  const shownText = computed(() => {
+    void props.session.generation();
+    const desc = description();
+    if (desc === null) return "";
+    return props.session.descriptionLine(desc, showing());
+  });
+  const isTranslated = () => {
+    const desc = description();
+    return desc !== null && shownText() !== desc;
+  };
+
   return (
-    <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {(() => {
-        // 派生读取落在本表达式：phase/skill/generation 变化都重算。
-        void props.session.generation();
-        const skill = props.skill;
-        const phaseValue = props.phase;
-        if (skill === null) return null;
-        const name = skill.name;
-        const description = shownDescription(skill, phaseValue);
-        const showing = props.session.resolveTranslate(name);
-        const gate = description === null ? null : props.session.buttonGate(description, showing);
-        const failure = showing ? props.session.failureLine() : null;
-        const loading = phaseValue.kind === "loading";
-        const failed = phaseValue.kind === "failed" ? phaseValue.error : null;
-        return (
-          <View testID="mk-detail-description" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <View style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <Text style={{ fontSize: 12, fontWeight: "600", color: paletteToken("fg_muted") }}>
-                {mt("detailPanel.description")}
-              </Text>
-              {gate !== null && gate.visible ? (
-                <TranslateButton
-                  pending={gate.pending}
-                  tip={showing ? mt("detailPanel.showOriginal") : mt("detailPanel.translate")}
-                  onPress={() => props.onToggleTranslate(showing)}
-                />
-              ) : null}
+    <If when={props.skill !== null}>
+      <View testID="mk-detail-description" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <View style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <Text style={{ fontSize: 12, fontWeight: "600", color: paletteToken("fg_muted") }}>
+            {mt("detailPanel.description")}
+          </Text>
+          <If when={gate()?.visible === true}>
+            <TranslateButton
+              pending={gate()?.pending === true}
+              tip={showing() ? mt("detailPanel.showOriginal") : mt("detailPanel.translate")}
+              onPress={() => props.onToggleTranslate(showing())}
+            />
+          </If>
+        </View>
+        <If
+          when={description() !== null}
+          else={
+            <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <If when={showPulses()}>
+                <DetailPulses />
+              </If>
+              <If when={!isLoading() && failedError() === null}>
+                <MutedLine text={mt("detailPanel.noDescription")} />
+              </If>
             </View>
-            {(() => {
-              if (description === null) {
-                if (loading) {
-                  return <MutedLine testID="mk-detail-loading" text={mt("marketplace.detailLoading")} />;
-                }
-                if (failed === null) {
-                  return <MutedLine text={mt("detailPanel.noDescription")} />;
-                }
-                return null;
-              }
-              // display_when：开着译文显示缓存行；这行未落地前显示原文。
-              const shown = props.session.descriptionLine(description, showing);
-              const translated = shown !== description;
-              const body = (
-                <View testID={translated ? "mk-drawer-translation" : "mk-drawer-original"}>
-                  <TextBlock text={shown} />
-                </View>
-              );
-              // failure_line：开着译文且会话记录了模型拒绝时，描述下方一
-              // 行弱化提示（translation.rs failure_line）。
-              if (showing && failure !== null) {
-                return (
-                  <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {body}
-                    <MutedLine text={failure} />
-                  </View>
-                );
-              }
-              return body;
-            })()}
-            {description !== null && loading ? (
-              <MutedLine testID="mk-detail-loading" text={mt("marketplace.detailLoading")} />
-            ) : null}
-            {failed !== null ? <FailureRow error={failed} onRetry={props.onRetry} /> : null}
+          }
+        >
+          <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <View testID={isTranslated() ? "mk-drawer-translation" : "mk-drawer-original"}>
+              <TextBlock text={shownText()} />
+            </View>
+            <If when={failure() !== null}>
+              <MutedLine text={failure() ?? ""} />
+            </If>
+            <If when={showRetry()}>
+              <TranslateRetry
+                onPress={() => {
+                  const skill = props.skill;
+                  const desc = description();
+                  if (skill !== null && desc !== null) {
+                    props.session.retryTransport(skill.name, desc);
+                  }
+                }}
+              />
+            </If>
+            <If when={showPulses()}>
+              <DetailPulses />
+            </If>
           </View>
-        );
-      })()}
+        </If>
+        <If when={failedError() !== null}>
+          <FailureRow error={failedError() ?? ""} onRetry={props.onRetry} />
+        </If>
+      </View>
+    </If>
+  );
+}
+
+/** 详情读取的占位：晚 300ms 才出现，替换「正在读取」文字行。 */
+function DetailPulses(): JSX.Element {
+  return (
+    <View
+      testID="mk-detail-loading"
+      accessibilityState={{ busy: true }}
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <Pulse id="mk-detail-pulse-1" style={{ width: 220, height: 12 }} />
+      <Pulse id="mk-detail-pulse-2" style={{ width: 180, height: 12 }} secondary />
+      <Pulse id="mk-detail-pulse-3" style={{ width: 140, height: 12 }} secondary />
+    </View>
+  );
+}
+
+/** 传输失败后的段落重试：清失败再 fill。 */
+function TranslateRetry(props: { onPress(): void }): JSX.Element {
+  return (
+    <View
+      testID="mk-translate-retry"
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        alignSelf: "flex-start",
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: paletteToken("border"),
+        backgroundColor: paletteToken("card"),
+        cursor: "pointer",
+      }}
+      hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+      onPress={props.onPress}
+    >
+      <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
+        {mt("common.retry")}
+      </Text>
     </View>
   );
 }
@@ -392,13 +467,13 @@ function FailureRow(props: { error: string; onRetry(): void }): JSX.Element {
       <Text style={{ fontSize: 12, color: paletteToken("danger") }}>
         {mt("marketplace.detailFailed")}
       </Text>
-      {props.error.trim().length > 0 ? (
+      <If when={props.error.trim().length > 0}>
         <View testID="mk-detail-error" tooltip={<Tip text={props.error} />}>
           <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), numberOfLines: 2 }}>
             {props.error}
           </Text>
         </View>
-      ) : null}
+      </If>
       <View
         testID="mk-detail-retry"
         style={{
@@ -453,80 +528,70 @@ function metaText(text: string | null): string | null {
 }
 
 function MetadataCard(props: { skill: MarketSkill | null; phase: DetailPhase }): JSX.Element {
+  const meta = computed(() => {
+    const skill = props.skill;
+    if (skill === null) return null;
+    const identity = resolveIdentity(skill, { source: null, name: skill.name });
+    const details = props.phase.kind === "ready" ? props.phase.details : null;
+    const weekly = details === null ? null : metaText(details.weeklyInstalls);
+    const stars = details === null ? null : details.githubStars;
+    const firstSeen = details === null ? null : metaText(details.firstSeen);
+    if (!hasMetadata(skill, identity.source, weekly, stars, firstSeen)) return null;
+    const author = skill.author !== null && skill.author.length > 0 ? skill.author : null;
+    const gitUrl = skill.gitUrl.trim();
+    return {
+      source: identity.source,
+      author,
+      installs: skill.stars > 0 ? formatInstalls(skill.stars) : null,
+      weekly,
+      githubStars: stars !== null ? formatInstalls(stars) : null,
+      firstSeen,
+      lastUpdated: skill.lastUpdated.length > 0 ? skill.lastUpdated : null,
+      gitUrl: gitUrl.length > 0 ? gitUrl : null,
+    };
+  });
+
   return (
-    <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {(() => {
-        const skill = props.skill;
-        const phaseValue = props.phase;
-        if (skill === null) return null;
-        const identity = resolveIdentity(skill, { source: null, name: skill.name });
-        const details = phaseValue.kind === "ready" ? phaseValue.details : null;
-        const weekly = details === null ? null : metaText(details.weeklyInstalls);
-        const stars = details === null ? null : details.githubStars;
-        const firstSeen = details === null ? null : metaText(details.firstSeen);
-        if (!hasMetadata(skill, identity.source, weekly, stars, firstSeen)) return null;
-        const author = skill.author !== null && skill.author.length > 0 ? skill.author : null;
-        const gitUrl = skill.gitUrl.trim();
-        return (
-          <View
-            testID="mk-detail-metadata"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              padding: 12,
-              borderRadius: 12,
-              backgroundColor: paletteToken("card"),
-              borderWidth: 1,
-              borderColor: paletteToken("border"),
-            }}
-          >
-            {identity.source !== null ? (
-              <MetaRow label={mt("marketplace.detailSource")} value={identity.source} testID="mk-detail-meta-source" />
-            ) : null}
-            {author !== null ? (
-              <MetaRow label={mt("detailPanel.author")} value={`@${author}`} testID="mk-detail-meta-author" />
-            ) : null}
-            {skill.stars > 0 ? (
-              <MetaRow
-                label={mt("marketplace.detailInstalls")}
-                value={formatInstalls(skill.stars)}
-                testID="mk-detail-meta-installs"
-              />
-            ) : null}
-            {weekly !== null ? (
-              <MetaRow
-                label={mt("marketplace.detailWeeklyInstalls")}
-                value={weekly}
-                testID="mk-detail-meta-weekly"
-              />
-            ) : null}
-            {stars !== null ? (
-              <MetaRow
-                label={mt("marketplace.detailGithubStars")}
-                value={formatInstalls(stars)}
-                testID="mk-detail-meta-stars"
-              />
-            ) : null}
-            {firstSeen !== null ? (
-              <MetaRow
-                label={mt("marketplace.detailFirstSeen")}
-                value={firstSeen}
-                testID="mk-detail-meta-seen"
-              />
-            ) : null}
-            {skill.lastUpdated.length > 0 ? (
-              <MetaRow
-                label={mt("detailPanel.lastUpdated")}
-                value={skill.lastUpdated}
-                testID="mk-detail-meta-updated"
-              />
-            ) : null}
-            {gitUrl.length > 0 ? <LinkRow url={gitUrl} /> : null}
-          </View>
-        );
-      })()}
-    </View>
+    <If when={meta() !== null}>
+      <View
+        testID="mk-detail-metadata"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          padding: 12,
+          borderRadius: 12,
+          backgroundColor: paletteToken("card"),
+          borderWidth: 1,
+          borderColor: paletteToken("border"),
+        }}
+      >
+        <If when={meta()?.source !== null}>
+          <MetaRow label={mt("marketplace.detailSource")} value={meta()?.source ?? ""} testID="mk-detail-meta-source" />
+        </If>
+        <If when={meta()?.author !== null}>
+          <MetaRow label={mt("detailPanel.author")} value={`@${meta()?.author ?? ""}`} testID="mk-detail-meta-author" />
+        </If>
+        <If when={meta()?.installs !== null}>
+          <MetaRow label={mt("marketplace.detailInstalls")} value={meta()?.installs ?? ""} testID="mk-detail-meta-installs" />
+        </If>
+        <If when={meta()?.weekly !== null}>
+          <MetaRow label={mt("marketplace.detailWeeklyInstalls")} value={meta()?.weekly ?? ""} testID="mk-detail-meta-weekly" />
+        </If>
+        <If when={meta()?.githubStars !== null}>
+          <MetaRow label={mt("marketplace.detailGithubStars")} value={meta()?.githubStars ?? ""} testID="mk-detail-meta-stars" />
+        </If>
+        <If when={meta()?.firstSeen !== null}>
+          <MetaRow label={mt("marketplace.detailFirstSeen")} value={meta()?.firstSeen ?? ""} testID="mk-detail-meta-seen" />
+        </If>
+        <If when={meta()?.lastUpdated !== null}>
+          <MetaRow label={mt("detailPanel.lastUpdated")} value={meta()?.lastUpdated ?? ""} testID="mk-detail-meta-updated" />
+        </If>
+        <If when={meta()?.gitUrl !== null}>
+          <LinkRow url={meta()?.gitUrl ?? ""} />
+        </If>
+      </View>
+    </If>
   );
 }
 
@@ -595,53 +660,48 @@ function auditTone(result: string): { fg: string; bg: string } {
 }
 
 function AuditSection(props: { phase: DetailPhase }): JSX.Element {
+  const audits = computed(() =>
+    props.phase.kind === "ready" ? props.phase.details.securityAudits : [],
+  );
   return (
-    <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {(() => {
-        const phaseValue = props.phase;
-        if (phaseValue.kind !== "ready") return null;
-        const audits = phaseValue.details.securityAudits;
-        if (audits.length === 0) return null;
-        return (
-          <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Text style={{ fontSize: 12, fontWeight: "600", color: paletteToken("fg_muted") }}>
-              {mt("marketplace.detailAudits")}
-            </Text>
-            <View
-              testID="mk-detail-audits"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                padding: 12,
-                borderRadius: 12,
-                backgroundColor: paletteToken("card"),
-                borderWidth: 1,
-                borderColor: paletteToken("border"),
-              }}
-            >
-              <Each of={audits} key={(audit) => `${audit.name}:${audit.result}`}>
-                {(audit: () => { name: string; result: string }) => {
-                  const tone = auditTone(audit().result);
-                  return (
-                    <View
-                      style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}
-                    >
-                      <View style={{ minWidth: 0 }}>
-                        <Text style={{ fontSize: 12, color: paletteToken("fg"), numberOfLines: 1 }}>
-                          {audit().name}
-                        </Text>
-                      </View>
-                      <Chip bg={tone.bg} fg={tone.fg} label={audit().result} />
-                    </View>
-                  );
-                }}
-              </Each>
-            </View>
-          </View>
-        );
-      })()}
-    </View>
+    <If when={audits().length > 0}>
+      <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <Text style={{ fontSize: 12, fontWeight: "600", color: paletteToken("fg_muted") }}>
+          {mt("marketplace.detailAudits")}
+        </Text>
+        <View
+          testID="mk-detail-audits"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: 12,
+            borderRadius: 12,
+            backgroundColor: paletteToken("card"),
+            borderWidth: 1,
+            borderColor: paletteToken("border"),
+          }}
+        >
+          <Each of={audits()} key={(audit) => `${audit.name}:${audit.result}`}>
+            {(audit: () => { name: string; result: string }) => {
+              const tone = () => auditTone(audit().result);
+              return (
+                <View
+                  style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}
+                >
+                  <View style={{ minWidth: 0 }}>
+                    <Text style={{ fontSize: 12, color: paletteToken("fg"), numberOfLines: 1 }}>
+                      {audit().name}
+                    </Text>
+                  </View>
+                  <Chip bg={tone().bg} fg={tone().fg} label={audit().result} />
+                </View>
+              );
+            }}
+          </Each>
+        </View>
+      </View>
+    </If>
   );
 }
 
@@ -653,6 +713,18 @@ function DetailActions(props: {
   busy: boolean;
   onToggleInstall(skill: MarketSkill): void;
 }): JSX.Element {
+  const installed = () => props.skill?.installed === true;
+  const label = () => (installed() ? mt("common.uninstall") : mt("common.install"));
+  const bg = () => (installed() ? paletteToken("danger_bg") : paletteToken("accent"));
+  const fg = () => (installed() ? paletteToken("danger") : paletteToken("on_accent"));
+  const hoverBg = () => (installed() ? paletteToken("danger_hover") : paletteToken("accent_hover"));
+  const sourceUrl = computed(() => {
+    const skill = props.skill;
+    if (skill === null) return null;
+    const source = resolveIdentity(skill, props.identity).source;
+    return source === null ? null : `https://skills.sh/${source}/${skill.name}`;
+  });
+
   return (
     <View
       style={{
@@ -666,86 +738,58 @@ function DetailActions(props: {
         borderTopColor: paletteToken("border"),
       }}
     >
-      {(() => {
-        const skill = props.skill;
-        if (skill === null) return null;
-        const installed = skill.installed;
-        const busy = props.busy;
-        const label = installed ? mt("common.uninstall") : mt("common.install");
-        const bg = busy
-          ? paletteToken("card_hover")
-          : installed
-            ? paletteToken("danger_bg")
-            : paletteToken("accent");
-        const fg = busy ? paletteToken("fg_muted") : installed ? paletteToken("danger") : paletteToken("on_accent");
-        const hoverBg = busy
-          ? paletteToken("card_hover")
-          : installed
-            ? paletteToken("danger_hover")
-            : paletteToken("accent_hover");
-        return (
-          <View
-            testID={`mk-detail-install-${skill.name}`}
-            accessibilityLabel={label}
-            disabled={busy}
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              width: "100%",
-              paddingVertical: 8,
-              borderRadius: 10,
-              backgroundColor: bg,
-              cursor: busy ? "default" : "pointer",
-            }}
-            hoverStyle={busy ? undefined : { backgroundColor: hoverBg }}
-            onPress={() => {
-              if (!busy) props.onToggleInstall(skill);
-            }}
+      <If when={props.skill !== null}>
+        <View
+          testID={`mk-detail-install-${props.skill?.name ?? ""}`}
+          accessibilityLabel={label()}
+          disabled={props.busy}
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            width: "100%",
+            paddingVertical: 8,
+            borderRadius: 10,
+            backgroundColor: bg(),
+            cursor: props.busy ? "default" : "pointer",
+          }}
+          hoverStyle={props.busy ? undefined : { backgroundColor: hoverBg() }}
+          onPress={() => {
+            if (!props.busy && props.skill !== null) props.onToggleInstall(props.skill);
+          }}
+        >
+          <IconSpin name={installed() ? "trash" : "download"} size={14} color={fg()} spin={props.busy} />
+          <Text style={{ fontSize: 12, fontWeight: "600", color: fg() }}>{label()}</Text>
+        </View>
+      </If>
+      <If when={sourceUrl() !== null}>
+        <View
+          testID="mk-detail-source"
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+            width: "100%",
+            paddingVertical: 4,
+            cursor: "pointer",
+          }}
+          onPress={() => {
+            const url = sourceUrl();
+            if (url !== null) openUrl(url);
+          }}
+        >
+          <Icon name="externalLink" size={12} color={paletteToken("accent")} />
+          <Text
+            style={{ fontSize: 12, color: paletteToken("accent"), textDecorationLine: "underline" }}
           >
-            {busy ? (
-              <IconSpin name={installed ? "trash" : "download"} size={14} color={fg} spin />
-            ) : (
-              <Icon name={installed ? "trash" : "download"} size={14} color={fg} />
-            )}
-            <Text style={{ fontSize: 12, fontWeight: "600", color: fg }}>{label}</Text>
-          </View>
-        );
-      })()}
-      {(() => {
-        const skill = props.skill;
-        if (skill === null) return null;
-        const source = resolveIdentity(skill, props.identity).source;
-        if (source === null) return null;
-        const url = `https://skills.sh/${source}/${skill.name}`;
-        return (
-          <View
-            testID="mk-detail-source"
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              width: "100%",
-              paddingVertical: 4,
-              cursor: "pointer",
-            }}
-            onPress={() => {
-              openUrl(url);
-            }}
-          >
-            <Icon name="externalLink" size={12} color={paletteToken("accent")} />
-            <Text
-              style={{ fontSize: 12, color: paletteToken("accent"), textDecorationLine: "underline" }}
-            >
-              {mt("detailPanel.viewOnSkillsSh")}
-            </Text>
-          </View>
-        );
-      })()}
+            {mt("detailPanel.viewOnSkillsSh")}
+          </Text>
+        </View>
+      </If>
     </View>
   );
 }
@@ -754,14 +798,15 @@ function DetailActions(props: {
 
 /** text_block（column.rs:761-786）：按行渲染，空行占一格。 */
 function TextBlock(props: { text: string }): JSX.Element {
-  const lines = props.text.split("\n");
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {lines.map((line) => (
-        <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg") }}>
-          {line.length === 0 ? " " : line}
-        </Text>
-      ))}
+      <Each of={props.text.split("\n")} key="index">
+        {(line: () => string) => (
+          <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg") }}>
+            {line().length === 0 ? " " : line()}
+          </Text>
+        )}
+      </Each>
     </View>
   );
 }

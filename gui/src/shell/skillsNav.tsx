@@ -18,11 +18,12 @@ import {
 // Skills-mode destinations — shell/nav.rs parity.
 //
 // ONE selection box is shared by the four rows: it is absolutely positioned
-// and springs to the active row (~80ms transform transition), and the rows
-// themselves stay transparent, so the box can travel without each item
-// painting its own highlight. Opening settings fades the box out in place
-// (nothing selected); publisher detail keeps the box on the market row.
-// Reduce Motion drops the transition — the box lands on its end state.
+// and glides to the active row (on-screen move, --ease-in-out,
+// --duration-sm), and the rows themselves stay transparent, so the box can
+// travel without each item painting its own highlight. Opening settings
+// fades the box out in place (nothing selected); publisher detail keeps the
+// box on the market row. Reduce Motion drops the travel — the box lands on
+// its end state. The opacity change is not transitioned.
 //
 // Row emphasis ink crossfades by the same slot position (nav_emphasis):
 // rows near the box wear accent ink, far rows stay muted.
@@ -58,12 +59,7 @@ export function SkillsNav(): JSX.Element {
         }}
       >
         {SKILLS_NAV.map((item, index) => (
-          <SkillsNavRow
-            item={item}
-            index={index}
-            selected={item.id === railPage(currentPage())}
-            emphasis={navEmphasis(index, navSlot(), navBoxShown(currentPage()) ? 1 : 0)}
-          />
+          <SkillsNavRow item={item} index={index} />
         ))}
       </View>
     </View>
@@ -79,10 +75,11 @@ export function navEmphasis(index: number, slot: number, opacity: number): numbe
 function SkillsNavRow(props: {
   item: NavItem;
   index: number;
-  selected: boolean;
-  emphasis: number;
 }): JSX.Element {
-  const ink = () => mixHsl(paletteToken("fg_muted"), paletteToken("accent_fg"), props.emphasis);
+  const selected = () => props.item.id === railPage(currentPage());
+  const emphasis = () =>
+    navEmphasis(props.index, navSlot(), navBoxShown(currentPage()) ? 1 : 0);
+  const ink = () => mixHsl(paletteToken("fg_muted"), paletteToken("accent_fg"), emphasis());
   return (
     <View
       testID={props.item.domId}
@@ -103,7 +100,7 @@ function SkillsNavRow(props: {
       // Hover fill only on unselected rows — the traveling box owns the
       // selected fill (skills_nav_row). Zero-frame color channel.
       hoverStyle={
-        props.selected
+        selected()
           ? undefined
           : {
               backgroundColor: paletteToken("panel_hover"),
@@ -112,17 +109,16 @@ function SkillsNavRow(props: {
       onPress={() => setCurrentPage(props.item.id)}
     >
       <Icon name={props.item.icon} size={collapsed() ? 18 : 16} color={ink()} />
-      <If when={!collapsed()}>
-        <Text
-          style={{
-            fontSize: 14,
-            color: ink(),
-            fontWeight: props.selected ? "600" : "400",
-          }}
-        >
-          {t(props.item.labelKey)}
-        </Text>
-      </If>
+      <Text
+        style={{
+          display: collapsed() ? "none" : "flex",
+          fontSize: 14,
+          color: ink(),
+          fontWeight: selected() ? "600" : "400",
+        }}
+      >
+        {t(props.item.labelKey)}
+      </Text>
     </View>
   );
 }

@@ -28,6 +28,13 @@ pub fn list_profiles() -> Vec<AgentProfile> {
     registry::AgentRegistry::load(&TomlPrefsStore).into_profiles()
 }
 
+/// List all agent profiles without scanning global skills directories for
+/// `synced_count` (`synced_count` is `0`). Use on paths that only inspect
+/// profile capabilities, ids, or paths.
+pub fn list_profile_specs() -> Vec<AgentProfile> {
+    registry::AgentRegistry::load(&TomlPrefsStore).into_profile_specs()
+}
+
 /// Extra directories that must receive the same global deployments as the
 /// profile's `global_skills_dir`.
 ///
@@ -222,6 +229,7 @@ mod tests {
             "codex",
             "cursor",
             "droid",
+            "fx",
             "gemini-cli",
             "kilo",
             "pi",

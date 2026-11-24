@@ -244,3 +244,83 @@ fn the_env_sandbox_keeps_a_real_switch_out_of_the_real_home() {
         outcome.target
     );
 }
+
+#[test]
+fn local_idc_import_retains_client_secret_from_registration_file() {
+    let fixture = Fixture::new();
+    let custom_url = "https://corp.awsapps.com/start";
+    let state = KiroState {
+        client_id: Some("cid-custom".to_string()),
+        client_secret: Some("csec-custom".to_string()),
+        region: Some("eu-west-1".to_string()),
+        start_url: Some(custom_url.to_string()),
+        profile_arn: Some("arn:aws:codewhisperer:eu-west-1:1:profile/CUSTOM".to_string()),
+    }
+    .to_value()
+    .expect("state");
+    let tokens = tokens("idc");
+    write(&fixture.roots, &request(&tokens, Some(&state))).expect("write");
+
+    let local = read(&fixture.roots).expect("read").expect("local login");
+    let imported = KiroState::parse(local.provider_state.as_ref());
+    assert_eq!(imported.client_id.as_deref(), Some("cid-custom"));
+    assert_eq!(imported.client_secret.as_deref(), Some("csec-custom"));
+    assert_eq!(imported.region.as_deref(), Some("eu-west-1"));
+    assert_eq!(imported.start_url.as_deref(), Some(custom_url));
+    assert_eq!(
+        imported.profile_arn.as_deref(),
+        Some("arn:aws:codewhisperer:eu-west-1:1:profile/CUSTOM")
+    );
+}
+
+#[test]
+fn snapshot_captures_and_restores_existing_and_newly_created_registration_files() {
+    let fixture = Fixture::new();
+    let old_state = KiroState {
+        client_id: Some("cid-old".to_string()),
+        client_secret: Some("csec-old".to_string()),
+        region: Some("us-east-1".to_string()),
+        start_url: Some(BUILDER_ID_START_URL.to_string()),
+        profile_arn: None,
+    }
+    .to_value()
+    .expect("old state");
+    let old_tokens = tokens("old");
+    write(&fixture.roots, &request(&old_tokens, Some(&old_state))).expect("write old");
+
+    let reg_path = super::registration_path(&fixture.roots, BUILDER_ID_START_URL).expect("reg");
+    assert!(reg_path.exists());
+
+    let snap = super::snapshot(&fixture.roots).expect("snapshot");
+    let new_state = KiroState {
+        client_id: Some("cid-new".to_string()),
+        client_secret: Some("csec-new".to_string()),
+        region: Some("us-east-1".to_string()),
+        start_url: Some(BUILDER_ID_START_URL.to_string()),
+        profile_arn: None,
+    }
+    .to_value()
+    .expect("new state");
+    let new_tokens = tokens("new");
+    write(&fixture.roots, &request(&new_tokens, Some(&new_state))).expect("write new");
+
+    let reg_after_write: Value =
+        serde_json::from_slice(&std::fs::read(&reg_path).expect("read reg")).expect("json");
+    assert_eq!(reg_after_write["clientSecret"], "csec-new");
+
+    switch::restore(&snap).expect("restore");
+    let reg_restored: Value =
+        serde_json::from_slice(&std::fs::read(&reg_path).expect("read reg")).expect("json");
+    assert_eq!(reg_restored["clientId"], "cid-old");
+    assert_eq!(reg_restored["clientSecret"], "csec-old");
+    let local = read(&fixture.roots).expect("read").expect("local");
+    assert_eq!(local.tokens.access_token, "at-old");
+
+    // When no registration existed initially, restore removes a newly written BuilderId registration.
+    std::fs::remove_file(&reg_path).expect("remove reg");
+    let snap_without_reg = super::snapshot(&fixture.roots).expect("snapshot without reg");
+    write(&fixture.roots, &request(&new_tokens, Some(&new_state))).expect("re-write idc");
+    assert!(reg_path.exists());
+    switch::restore(&snap_without_reg).expect("restore deletes reg");
+    assert!(!reg_path.exists());
+}

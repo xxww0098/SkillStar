@@ -249,14 +249,76 @@ test("an uncached opening schedules one fill of every prose block, capped at 24"
   expect(lines.length).toBeLessThanOrEqual(24);
 });
 
-test("a blocked engine shows the account hint and stays quiet", async () => {
+test("a blocked engine shows the settings hint and stays quiet", async () => {
   const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
   await app.host.send("harness", { action: "blocked" });
   await app.host.send("harness", { action: "switch" });
   await app.host.send("harness", { action: "open-askMatt" });
   await app.waitFor("id:skill-md-column");
-  expect(app.texts().some((t) => t.includes("请先在账户里添加"))).toBe(true);
+  expect(app.texts().some((t) => t.includes("设置 → 翻译"))).toBe(true);
+  expect(app.texts().some((t) => t.includes("账户"))).toBe(false);
   expect(app.texts().some((t) => t.includes("fill:0"))).toBe(true);
+
+  // 设置保存（解除阻断 + 发布 translationPrefsChanged）后清掉提示并重新发起翻译。
+  await app.host.send("harness", { action: "blocked" });
+  await app.host.send("harness", { action: "prefs-changed" });
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:1")));
+  await app.host.send("harness", { action: "resolve-fill" });
+  await app.waitFor("id:skill-md-translation");
+  expect(app.texts().some((t) => t.includes("设置 → 翻译"))).toBe(false);
+});
+
+test("translationPrefsChanged clears rejectionLine and failed marks so reader translates again", async () => {
+  const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
+  await app.host.send("harness", { action: "switch" });
+  await app.host.send("harness", { action: "open-askMatt" });
+  await app.waitFor("id:skill-md-body");
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:1")));
+
+  await app.host.send("harness", { action: "reject-fill" });
+  await app.waitUntil(() => app.texts().some((t) => t.includes("bad-model")));
+  expect(app.shows("id:skill-md-translation")).toBe(false);
+
+  // 保存新翻译设置后清除会话拒绝行与失败段落标记，立刻补发新批次翻译。
+  await app.host.send("harness", { action: "prefs-changed" });
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:2")));
+  await app.host.send("harness", { action: "resolve-fill" });
+  await app.waitFor("id:skill-md-translation");
+  expect(app.texts().some((t) => t.includes("bad-model"))).toBe(false);
+});
+
+test("translationPrefsChanged clears transport failures so reader retries", async () => {
+  const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
+  await app.host.send("harness", { action: "switch" });
+  await app.host.send("harness", { action: "open-askMatt" });
+  await app.waitFor("id:skill-md-body");
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:1")));
+
+  await app.host.send("harness", { action: "fail-fill" });
+  await app.waitFor("id:skill-md-paragraph-retry");
+
+  await app.host.send("harness", { action: "prefs-changed" });
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:2")));
+  await app.host.send("harness", { action: "resolve-fill" });
+  await app.waitFor("id:skill-md-translation");
+  expect(app.shows("id:skill-md-paragraph-retry")).toBe(false);
+});
+
+test("empty fill miss marks paragraphs failed for retry without looping", async () => {
+  const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
+  await app.host.send("harness", { action: "switch" });
+  await app.host.send("harness", { action: "open-askMatt" });
+  await app.waitFor("id:skill-md-body");
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:1")));
+
+  await app.host.send("harness", { action: "miss-fill" });
+  await app.waitFor("id:skill-md-paragraph-retry >> nth=0");
+  expect(app.texts().some((t) => t.includes("fill:1"))).toBe(true);
+
+  await app.press("id:skill-md-paragraph-retry >> nth=0");
+  await app.waitUntil(() => app.texts().some((t) => t.includes("fill:2")));
+  await app.host.send("harness", { action: "resolve-fill" });
+  await app.waitFor("id:skill-md-translation");
 });
 
 // ---- 译文样式菜单（reader_style.rs） ----------------------------------------

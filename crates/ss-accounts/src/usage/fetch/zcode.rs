@@ -56,20 +56,36 @@ pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
     let jwt = reading.tokens.id_token.as_deref().map(str::trim).filter(|token| !token.is_empty());
 
     let profile = fetch_profile(provider, access_token)?;
-    // 余额是加分项：JWT 缺失或端点抖动时，配额的其它部分照样出卡。
+    let identity = crate::oauth::agents::zcode::identity_of(&reading.tokens, Some(&profile));
+    // 余额是加分项（仅 Start Plan 有内容）：JWT 缺失或端点抖动时，照样读 quota/limit。
     let billing = jwt.and_then(|jwt| fetch_billing(jwt).ok());
-    let limits = fetch_limits(provider, access_token).ok();
+    let has_billing_windows = billing
+        .as_ref()
+        .is_some_and(|value| !zcode_parse::billing_windows(value).is_empty());
+    let (limits, limits_err) = match fetch_limits(provider, access_token) {
+        Ok(value) => (Some(value), None),
+        Err(error) => (None, Some(error)),
+    };
 
     let snapshot = zcode_parse::snapshot_from(&profile, billing.as_ref(), limits.as_ref(), now);
-    if snapshot.windows.is_empty() && snapshot.plan.is_none() {
-        return Err(UsageError::Unreadable(format!(
-            "{PROFILE_LABEL}: the reply carries no quota field"
-        )));
+    if let Some(error) = limits_err
+        && snapshot.windows.is_empty()
+        && snapshot.plan.is_none()
+    {
+        if !has_billing_windows
+            && matches!(error, UsageError::AuthRequired(_) | UsageError::Transient(_))
+        {
+            return Err(error);
+        }
+        if billing.is_none() {
+            return Err(error);
+        }
     }
     Ok(UsageOutcome {
         snapshot,
         tokens: reading.tokens,
         provider_state: reading.provider_state,
+        identity: Some(identity),
     })
 }
 
@@ -124,12 +140,41 @@ fn fetch_limits(provider: &str, access_token: &str) -> UsageResult<Value> {
 }
 
 fn parse_body(label: &str, body: &str) -> UsageResult<Value> {
-    serde_json::from_str(body).map_err(|error| {
+    let value: Value = serde_json::from_str(body).map_err(|error| {
         UsageError::Unreadable(format!(
             "{label}: cannot parse the response: {error}: {}",
             parse::snippet(body)
         ))
-    })
+    })?;
+    check_envelope(label, &value)?;
+    Ok(value)
+}
+
+fn check_envelope(label: &str, value: &Value) -> UsageResult<()> {
+    let code = value.get("code");
+    let is_auth = code.is_some_and(|c| c.as_i64() == Some(401) || c.as_str() == Some("401"));
+    let code_ok = match code {
+        None => true,
+        Some(c) => {
+            c.as_i64() == Some(0)
+                || c.as_i64() == Some(200)
+                || c.as_str() == Some("0")
+                || c.as_str() == Some("200")
+        }
+    };
+    let success_false = value.get("success").and_then(Value::as_bool) == Some(false);
+    if !is_auth && code_ok && !success_false {
+        return Ok(());
+    }
+    let msg = parse::text_in(value, &["msg", "message"])
+        .or_else(|| code.map(|c| c.to_string()))
+        .unwrap_or_else(|| "success=false".to_string());
+    let detail = format!("{label}: {msg}");
+    if is_auth {
+        Err(UsageError::AuthRequired(detail))
+    } else {
+        Err(UsageError::Unreadable(detail))
+    }
 }
 
 /// X-Device-Mid：先读官方客户端自己写在 telemetry-state.json 里的 deviceMid，
@@ -159,7 +204,9 @@ mod tests {
     fn a_read_without_a_token_asks_for_a_new_login() {
         let creds = Credentials {
             tokens: TokenSet::default(),
+            account_id: None,
             provider_state: None,
+            needs_identity: false,
         };
         let error = fetch(&creds).expect_err("no token");
         assert!(matches!(error, UsageError::AuthRequired(_)), "got {error:?}");
@@ -167,9 +214,22 @@ mod tests {
 
     #[test]
     fn the_device_mid_is_always_a_uuid() {
+        let _sandbox = crate::test_support::Sandbox::new();
         let mid = device_mid();
         assert!(uuid::Uuid::parse_str(&mid).is_ok(), "{mid}");
         // 同一进程内稳定复用。
         assert_eq!(mid, device_mid());
+    }
+
+    #[test]
+    fn parse_body_checks_business_envelope_codes() {
+        assert!(parse_body("test", r#"{"code":200,"success":true,"data":{}}"#).is_ok());
+        assert!(parse_body("test", r#"{"sub":"u1","name":"alice"}"#).is_ok());
+        let auth = parse_body("test", r#"{"code":401,"msg":"expired","success":false}"#)
+            .expect_err("401");
+        assert!(matches!(auth, UsageError::AuthRequired(_)), "got {auth:?}");
+        let fail = parse_body("test", r#"{"code":200,"success":false,"msg":"denied"}"#)
+            .expect_err("success=false");
+        assert!(matches!(fail, UsageError::Unreadable(_)), "got {fail:?}");
     }
 }

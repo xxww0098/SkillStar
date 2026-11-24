@@ -377,8 +377,10 @@ pub(crate) fn spawn_repo_description_backfill(source: String) {
     );
 }
 
+#[cfg(not(test))]
 struct RepoRoundDone(String);
 
+#[cfg(not(test))]
 impl Drop for RepoRoundDone {
     fn drop(&mut self) {
         finish_repo_description_round(&self.0);

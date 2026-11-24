@@ -1,4 +1,5 @@
 import { Text, View, mount, type JSX } from "nsh";
+import { beginSave } from "../../chrome/saveStatus";
 import { SkillCard } from "./skillCard";
 import { busy, selectedSkill } from "./state";
 import type { SkillRecord } from "./filters";
@@ -25,6 +26,11 @@ const LINKED: SkillRecord = {
 };
 
 busy.set("card-fixture-hold");
+
+// 卡面不放保存状态行（界面约定）：卡会用到的那两个保存 id 都置成进行中，
+// 卡身不该因此多出「正在保存」，翻转成功后也不该多出「已保存」。
+beginSave(`update:${LINKED.name}`);
+beginSave(`link:${LINKED.name}:claude`);
 
 function App(): JSX.Element {
   return (

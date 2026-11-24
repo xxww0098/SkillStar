@@ -18,6 +18,8 @@ use super::parse;
 /// What the account layer sees when a read of this endpoint fails.
 const ENDPOINT_LABEL: &str = "codex wham/usage";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+const RESET_CREDITS_LABEL: &str = "codex wham/rate-limit-reset-credits";
+const RESET_CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 
 /// Credits are points, not money; the label is the caller's to localise.
 pub(crate) const CREDITS_LABEL: &str = "Credits";
@@ -31,28 +33,51 @@ const SECONDS_PER_DAY: i64 = 86_400;
 /// Read the Codex quota for one account.
 pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
     let reading = super::tokens_for_read("codex", creds)?;
-    let mut headers = vec![
-        ("Accept", "application/json".to_string()),
-        (
-            "Authorization",
-            format!("Bearer {}", reading.tokens.access_token),
-        ),
-    ];
-    if let Some(account_id) = parse::text_at(creds.provider_state.as_ref(), "/account_id") {
-        headers.push(("ChatGPT-Account-Id", account_id));
-    }
+    let headers = request_headers(
+        creds,
+        &reading.tokens,
+        reading.provider_state.as_ref().or(creds.provider_state.as_ref()),
+    );
     let answer = super::http_get(ENDPOINT_LABEL, USAGE_URL, &headers)?;
-    let snapshot = interpret(
-        answer.status,
-        &answer.body,
-        super::unix_now(),
-        CREDITS_LABEL,
-    )?;
+    let now = super::unix_now();
+    let mut snapshot = interpret(answer.status, &answer.body, now, CREDITS_LABEL)?;
+    if snapshot.reset_credits.is_none() {
+        snapshot.reset_credits = fetch_reset_credits(&headers, now);
+    }
     Ok(UsageOutcome {
         snapshot,
         tokens: reading.tokens,
         provider_state: reading.provider_state,
+        identity: None,
     })
+}
+
+fn request_headers(
+    creds: &Credentials,
+    tokens: &crate::oauth::TokenSet,
+    provider_state: Option<&Value>,
+) -> Vec<(&'static str, String)> {
+    let mut headers = vec![
+        ("Accept", "application/json".to_string()),
+        ("Authorization", format!("Bearer {}", tokens.access_token)),
+    ];
+    let account_id = creds
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .or_else(|| parse::text_at(provider_state, "/account_id"))
+        .or_else(|| {
+            (crate::agents::spec(crate::Agent::Codex).provider_account_id)(
+                &tokens.access_token,
+                tokens.id_token.as_deref(),
+            )
+        });
+    if let Some(account_id) = account_id {
+        headers.push(("ChatGPT-Account-Id", account_id));
+    }
+    headers
 }
 
 /// What one usage reply means: status and body in, snapshot out.
@@ -73,7 +98,8 @@ pub(crate) fn parse_usage(body: &str, now: i64, credits_label: &str) -> UsageRes
     })?;
     let windows = rate_limit_windows(&root);
     let credits = credit_balance(&root, credits_label);
-    if windows.is_empty() && credits.is_none() {
+    let reset_credits = inline_reset_credits(&root);
+    if windows.is_empty() && credits.is_none() && reset_credits.is_none() {
         return Err(UsageError::Unreadable(format!(
             "{ENDPOINT_LABEL}: the response carries no quota window: {}",
             parse::snippet(body)
@@ -86,6 +112,7 @@ pub(crate) fn parse_usage(body: &str, now: i64, credits_label: &str) -> UsageRes
         credits,
         error: None,
         gcp_tos: None,
+        reset_credits,
     })
 }
 
@@ -165,6 +192,83 @@ fn credit_balance(root: &Value, label: &str) -> Option<Credits> {
         unlimited,
         unit: UsageUnit::Count,
     })
+}
+
+/// Inline banked reset-card count from `/backend-api/wham/usage`.
+fn inline_reset_credits(root: &Value) -> Option<u64> {
+    let block = root
+        .get("rate_limit_reset_credits")
+        .or_else(|| root.get("rateLimitResetCredits"))
+        .filter(|value| value.is_object())?;
+    let count = block
+        .get("available_count")
+        .or_else(|| block.get("availableCount"));
+    parse::integer(count).and_then(|value| u64::try_from(value).ok())
+}
+
+/// Best-effort fallback to `/backend-api/wham/rate-limit-reset-credits` when
+/// `/wham/usage` omits `rate_limit_reset_credits`. Never fails the quota read.
+fn fetch_reset_credits(headers: &[(&str, String)], now: i64) -> Option<u64> {
+    let answer = super::http_get(RESET_CREDITS_LABEL, RESET_CREDITS_URL, headers)
+        .map_err(|error| {
+            tracing::debug!(target: "accounts", error = %error, "codex reset-credits fallback failed");
+            error
+        })
+        .ok()?;
+    if !(200..300).contains(&answer.status) {
+        tracing::debug!(
+            target: "accounts",
+            status = answer.status,
+            "codex reset-credits fallback returned non-2xx"
+        );
+        return None;
+    }
+    parse_reset_credits(&answer.body, now)
+}
+
+/// Pure parser for `/backend-api/wham/rate-limit-reset-credits`.
+pub(crate) fn parse_reset_credits(body: &str, now: i64) -> Option<u64> {
+    let root: Value = serde_json::from_str(body).ok()?;
+    let data = root.get("data").filter(|value| value.is_object());
+    let direct = [Some(&root), data].into_iter().flatten().find_map(|node| {
+        let count = node
+            .get("available_count")
+            .or_else(|| node.get("availableCount"));
+        parse::integer(count).and_then(|value| u64::try_from(value).ok())
+    });
+    if direct.is_some() {
+        return direct;
+    }
+    let credits = [Some(&root), data]
+        .into_iter()
+        .flatten()
+        .find_map(|node| node.get("credits").and_then(Value::as_array))?;
+    let available = credits
+        .iter()
+        .filter(|item| is_available_reset_credit(item, now))
+        .count();
+    u64::try_from(available).ok()
+}
+
+fn is_available_reset_credit(item: &Value, now: i64) -> bool {
+    let Some(obj) = item.as_object() else {
+        return false;
+    };
+    let status = parse::text_in(item, &["status", "state"])
+        .unwrap_or_else(|| "available".to_string())
+        .to_ascii_lowercase();
+    if matches!(
+        status.as_str(),
+        "redeemed" | "used" | "consumed" | "expired"
+    ) {
+        return false;
+    }
+    if let Some(expires_at) = parse::epoch_seconds(
+        obj.get("expires_at").or_else(|| obj.get("expiresAt")),
+    ) {
+        return expires_at > now;
+    }
+    true
 }
 
 #[cfg(test)]
@@ -268,5 +372,80 @@ mod tests {
         let empty =
             interpret(200, "{}", NOW, CREDITS_LABEL).expect_err("no windows is a shape change");
         assert!(matches!(empty, UsageError::Unreadable(_)));
+    }
+
+    #[test]
+    fn parses_inline_reset_credits_from_wham_usage() {
+        let with_cards = r#"{
+            "plan_type": "pro",
+            "rate_limit": {
+                "primary_window": { "used_percent": 47, "limit_window_seconds": 604800 }
+            },
+            "rate_limit_reset_credits": { "available_count": 2 }
+        }"#;
+        let snapshot = parse_usage(with_cards, NOW, CREDITS_LABEL).expect("parse with reset cards");
+        assert_eq!(snapshot.reset_credits, Some(2));
+
+        let with_zero = r#"{
+            "rate_limit_reset_credits": { "available_count": 0 }
+        }"#;
+        let zero_snapshot =
+            parse_usage(with_zero, NOW, CREDITS_LABEL).expect("zero count still valid");
+        assert_eq!(zero_snapshot.reset_credits, Some(0));
+
+        let absent = parse_usage(USAGE_FULL, NOW, CREDITS_LABEL).expect("fixture");
+        assert_eq!(absent.reset_credits, None);
+    }
+
+    #[test]
+    fn parses_reset_credits_endpoint_direct_count_and_credit_rows() {
+        assert_eq!(
+            parse_reset_credits(r#"{"available_count": 3}"#, NOW),
+            Some(3)
+        );
+        assert_eq!(
+            parse_reset_credits(r#"{"data": {"availableCount": 0}}"#, NOW),
+            Some(0)
+        );
+        let rows = r#"{
+            "credits": [
+                { "status": "available", "expires_at": 1760000100 },
+                { "status": "redeemed", "expires_at": 1760000100 },
+                { "status": "available", "expires_at": 1759999900 },
+                { "state": "available" }
+            ]
+        }"#;
+        assert_eq!(parse_reset_credits(rows, NOW), Some(2));
+        assert_eq!(parse_reset_credits("not json", NOW), None);
+        assert_eq!(parse_reset_credits("{}", NOW), None);
+    }
+
+    #[test]
+    fn codex_request_headers_include_chatgpt_account_id_from_account_or_state() {
+        let mut creds = Credentials {
+            tokens: crate::oauth::TokenSet {
+                access_token: "at-1".to_string(),
+                ..Default::default()
+            },
+            account_id: Some("ws-from-account".to_string()),
+            provider_state: Some(serde_json::json!({ "account_id": "ws-from-state" })),
+            needs_identity: false,
+        };
+        let headers = request_headers(&creds, &creds.tokens, creds.provider_state.as_ref());
+        assert!(
+            headers.contains(&("ChatGPT-Account-Id", "ws-from-account".to_string())),
+            "{headers:?}"
+        );
+
+        creds.account_id = None;
+        let headers_state = request_headers(&creds, &creds.tokens, creds.provider_state.as_ref());
+        assert!(
+            headers_state.contains(&("ChatGPT-Account-Id", "ws-from-state".to_string())),
+            "{headers_state:?}"
+        );
+
+        creds.provider_state = None;
+        let headers_none = request_headers(&creds, &creds.tokens, None);
+        assert!(!headers_none.iter().any(|(k, _)| *k == "ChatGPT-Account-Id"));
     }
 }

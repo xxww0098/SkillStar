@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use super::config::{self, TranslationConfig};
+use super::config;
 
 #[derive(Default, Serialize, Deserialize)]
 struct File {
@@ -63,19 +63,17 @@ impl Store {
     }
 }
 
-pub fn cache_key(source: &str, target: &str, config: &TranslationConfig) -> String {
-    format!("{}\u{1e}{source}", config.scope(target))
+fn active_cache_key(source: &str, target: &str) -> String {
+    format!("{}\u{1e}{source}", config::scope_for_active(target))
 }
 
 pub fn lookup(source: &str, target: &str) -> Option<String> {
-    let config = config::load_config().unwrap_or_default();
-    let key = cache_key(source, target, &config);
+    let key = active_cache_key(source, target);
     with_store(|store| store.entries.get(&key).cloned())
 }
 
 pub fn remember(source: &str, target: &str, translated: &str) {
-    let config = config::load_config().unwrap_or_default();
-    let key = cache_key(source, target, &config);
+    let key = active_cache_key(source, target);
     with_store(|store| {
         store.entries.insert(key, translated.to_string());
         store.save();

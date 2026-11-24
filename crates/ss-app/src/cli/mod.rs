@@ -12,12 +12,13 @@ mod install_preview;
 mod list_json;
 mod manage;
 mod mcp_approve;
+mod mcp_hub;
 mod package_skills;
 mod team;
 mod update;
 mod use_skill;
 
-pub use channel::cmd_channel;
+pub use channel::{ChannelCommand, cmd_channel};
 pub use commands::*;
 pub use install::cmd_install;
 pub use manage::{cmd_publish, cmd_remove};
@@ -276,53 +277,6 @@ pub enum TeamCommand {
     },
 }
 
-/// Subcommands of `skillstar channel`.
-#[derive(Subcommand)]
-pub enum ChannelCommand {
-    /// List subscribed channels (repository id, release, Skills)
-    List,
-    /// Check subscribed channels for a newer release (all when omitted)
-    Check {
-        repository_id: Option<u64>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Check a channel and apply its latest release
-    Apply {
-        repository_id: u64,
-        /// Blocked Skill(s) whose local edits are kept as a `.local` copy before upgrading
-        #[arg(long = "keep-local", value_delimiter = ',')]
-        keep_local: Vec<String>,
-        /// Blocked Skill(s) whose local edits are discarded by the upgrade
-        #[arg(long = "discard-local", value_delimiter = ',')]
-        discard_local: Vec<String>,
-    },
-    /// Roll one Skill back to an earlier release and pin it there
-    /// (lists the releases when --revision is omitted)
-    Rollback {
-        repository_id: u64,
-        skill: String,
-        #[arg(long)]
-        revision: Option<u64>,
-        /// Keep local edits as a `.local` copy before rolling back
-        #[arg(long, conflicts_with = "discard_local")]
-        keep_local: bool,
-        /// Discard local edits
-        #[arg(long)]
-        discard_local: bool,
-    },
-    /// Export the channel's installed Skills as a Claude Code plugin
-    /// marketplace directory (local-only: no GitHub sign-in, no network)
-    ExportMarketplace {
-        repository_id: u64,
-        /// Directory to create; must not exist or be empty
-        #[arg(long = "out")]
-        out: std::path::PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
 /// Subcommands of `skillstar mcp` that a person runs in a terminal.
 /// `mcp serve` is dispatched before Clap.
 #[derive(Subcommand)]
@@ -331,6 +285,178 @@ pub enum McpCliCommand {
     Approve {
         /// Plan id from `recommend_project_skills`
         plan_id: String,
+    },
+    /// List managed external MCP servers and discovered unmanaged entries
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the 35 supported external MCP agents and detection status
+    Agents {
+        #[arg(long)]
+        installed: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search the built-in MCP store (featured, offline snapshot, and optional online Registry)
+    Store {
+        query: Option<String>,
+        #[arg(long)]
+        online: bool,
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add or update an external MCP server in the library and sync selected agents
+    Add {
+        name: String,
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long = "arg")]
+        args: Vec<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long = "env")]
+        envs: Vec<String>,
+        #[arg(long = "header")]
+        headers: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        agent: Vec<String>,
+        #[arg(long)]
+        replace: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Losslessly adopt discovered unmanaged MCP server(s) into SkillStar management
+    Import {
+        agent: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        replace: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a managed MCP server and withdraw ledger-owned entries from agents
+    Remove {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reconcile all managed external MCP servers across configured agent files
+    Sync {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Probe live connectivity and list tools exposed by a managed MCP server
+    Check {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search and install an MCP server from the built-in store
+    StoreInstall {
+        /// Store item id or search query
+        item: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long = "input")]
+        inputs: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        agent: Vec<String>,
+        #[arg(long)]
+        online: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pause a managed MCP server without removing it from the library
+    Pause {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume a paused MCP server and re-sync configured agents
+    Resume {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove an unmanaged discovered MCP server directly from an agent config
+    RemoveFound {
+        agent: String,
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Import MCP servers from pasted JSON/TOML/YAML/CLI text (`-` reads stdin)
+    Paste {
+        raw: String,
+        #[arg(long, value_delimiter = ',')]
+        agent: Vec<String>,
+        #[arg(long)]
+        replace: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate project-level MCP configuration snippets for active servers
+    Snippets {
+        #[arg(long = "project")]
+        project_root: Option<std::path::PathBuf>,
+        #[arg(long, value_delimiter = ',')]
+        agent: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// View or update disabled tools on a managed MCP server
+    Tools {
+        name: String,
+        #[arg(long, value_delimiter = ',')]
+        disable: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        enable: Vec<String>,
+        #[arg(long)]
+        enable_all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rename a managed MCP server and re-sync configured agents
+    Rename {
+        old_name: String,
+        new_name: String,
+        #[arg(long)]
+        replace: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect or restore rolling MCP config backups
+    Backups {
+        #[command(subcommand)]
+        command: McpBackupsCommand,
+    },
+}
+
+/// Subcommands of `skillstar mcp backups`.
+#[derive(Subcommand)]
+pub enum McpBackupsCommand {
+    /// List rolling MCP config backups newest first
+    List {
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore a rolling MCP config backup by id
+    Restore {
+        backup_id: String,
+        #[arg(long = "target")]
+        target_path: Option<std::path::PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -439,6 +565,7 @@ pub fn run(args: Vec<String>, migrate_and_run: fn()) {
         Commands::Gui => println!("Launching SkillStar GUI..."),
         Commands::Mcp { command } => match command {
             McpCliCommand::Approve { plan_id } => mcp_approve::cmd_approve(&plan_id),
+            other => mcp_hub::cmd_mcp_hub(other),
         },
         Commands::Team { command } => match command {
             TeamCommand::Recall { query, limit, json } => team::cmd_recall(&query, limit, json),
@@ -485,13 +612,17 @@ pub fn is_cli_subcommand(first_arg: &str) -> bool {
             | "search"
             | "install"
             | "add"
+            | "use"
             | "update"
+            | "doctor"
             | "remove"
             | "rm"
             | "uninstall"
             | "init"
             | "create"
             | "publish"
+            | "package-skills"
+            | "skills-field"
             | "channel"
             | "mcp"
             | "team"
@@ -582,13 +713,17 @@ mod mode_tests {
             "search",
             "install",
             "add",
+            "use",
             "update",
+            "doctor",
             "remove",
             "rm",
             "uninstall",
             "init",
             "create",
             "publish",
+            "package-skills",
+            "skills-field",
             "channel",
             "mcp",
             "team",

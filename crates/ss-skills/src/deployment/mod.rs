@@ -3,22 +3,21 @@ mod mirror;
 pub mod ownership;
 mod recovery;
 pub(crate) mod shared_coord;
-mod status;
 
 pub(crate) use batch::swap_in_fresh_deploy;
 pub use batch::{
-    ResyncReport, batch_deploy_skills_to_agents, batch_link_skills_to_agent, resync_existing_links,
+    BatchLinkOutcome, BatchLinkSkippedItem, ResyncReport, batch_deploy_skills_to_agents,
+    batch_link_skills_to_agent, batch_link_skills_to_agent_with_report, resync_existing_links,
 };
 pub(crate) use mirror::{drift as mirror_drift, sync as sync_mirrors};
 pub use ownership::{Ownership, owned_deployment, targets_canonical_root};
 pub use recovery::{
-    ModifiedAgentCopyInfo, ReconcileModeReport, inspect_modified_agent_copies,
-    overwrite_agent_copy_with_backup, reconcile_deployments_for_mode_change, take_agent_copy_edits,
+    ModifiedAgentCopyInfo, ReconcileModeReport, UnmanagedAgentEntryInfo,
+    adopt_unmanaged_agent_entry, inspect_modified_agent_copies, inspect_unmanaged_agent_entries,
+    overwrite_agent_copy_with_backup, reconcile_deployments_for_mode_change,
+    take_agent_copy_edits, take_over_unmanaged_agent_entry,
 };
 pub use shared_coord::reconcile_shared_agents_on_profile_toggle;
-pub use status::{
-    AgentDeployStatus, DeployKind, developer_mode_available, get_skill_deploy_status,
-};
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -105,6 +104,9 @@ fn require_enabled_global_profile<'a>(
 /// Stable skip code for an unmanaged real directory occupying the skill name.
 pub const SKIP_UNMANAGED_REAL_DIRECTORY: &str = "unmanaged_real_directory";
 
+/// Stable skip code for a foreign symlink occupying the skill name.
+pub const SKIP_FOREIGN_LINK: &str = "foreign_link";
+
 /// Stable skip code for an Agent whose Global skills directory is the
 /// canonical root itself: every installed Skill is already visible to it.
 pub const SKIP_CANONICAL_ROOT_AGENT: &str = "canonical_root_agent";
@@ -130,14 +132,26 @@ pub enum ToggleSkillOutcome {
     },
 }
 
-fn skip_unmanaged_real_directory(path: &Path) -> ToggleSkillOutcome {
+pub(crate) fn foreign_skip_code(path: &Path) -> &'static str {
+    if ss_core::infra::fs_ops::is_link(path) {
+        SKIP_FOREIGN_LINK
+    } else {
+        SKIP_UNMANAGED_REAL_DIRECTORY
+    }
+}
+
+fn skip_foreign_entry(path: &Path) -> ToggleSkillOutcome {
+    let code = foreign_skip_code(path);
     let path = path.display().to_string();
+    let reason = if code == SKIP_FOREIGN_LINK {
+        format!("name collision: symlink '{path}' is not managed by SkillStar (left in place)")
+    } else {
+        format!("name collision: target '{path}' is not managed by SkillStar (left in place)")
+    };
     ToggleSkillOutcome::Skipped {
-        code: SKIP_UNMANAGED_REAL_DIRECTORY.to_string(),
-        reason: format!(
-            "name collision: target '{path}' is not managed by SkillStar (left in place)"
-        ),
+        code: code.to_string(),
         path,
+        reason,
     }
 }
 
@@ -216,7 +230,7 @@ pub fn toggle_skill_for_agent(
             target = %target.display(),
             "skipping — an entry SkillStar does not own occupies the skill name"
         );
-        return Ok(skip_unmanaged_real_directory(&target));
+        return Ok(skip_foreign_entry(&target));
     }
 
     if current == Ownership::SkillStarModifiedCopy {
@@ -290,7 +304,7 @@ pub fn toggle_skill_for_agent(
                     "· nothing at target — already unlinked"
                 );
             }
-            Removal::Foreign => return Ok(skip_unmanaged_real_directory(&target)),
+            Removal::Foreign => return Ok(skip_foreign_entry(&target)),
         }
     }
 

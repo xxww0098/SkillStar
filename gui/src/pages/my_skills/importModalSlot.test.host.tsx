@@ -5,7 +5,7 @@
 // app.texts() 断言。真实 120ms 折叠泵与真 git 链路由 native crate 的
 // cargo test（my_skills_import.rs 本地目录回环）覆盖；本装置不触文件系
 // 统、不打真网、不写 $HOME。
-// nsh 0.5 起 test 的 press 会做命中测试：模态遮罩（importModalSlot 的
+// nsh 0.6 test 的 press 会做命中测试：模态遮罩（importModalSlot 的
 // position:fixed 覆盖层）之下的装置按钮会以 ERR_NSH_TEST_COVERED 拒绝，
 // 因此同一批装置动作也挂在 host 事件通道上（见下方的装置动作表）。
 

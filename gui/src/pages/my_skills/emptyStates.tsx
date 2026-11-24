@@ -3,8 +3,8 @@ import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import { Icon } from "../../chrome/icons";
 import { selectPage } from "../../shell/events";
-import { clearFilters, github, onlyUpdates } from "./state";
-import { openGitHubSignIn } from "./githubSignInSlot";
+import { clearFilters, onlyUpdates } from "./state";
+import { ChannelsWorkspace } from "./channelsView";
 
 // 四套空状态 + 错误横幅 — my_skills/empty_state.rs + view.rs 对位：
 // 1. 空库（render_empty_installed）：🧩 媒面 + 去市场 CTA；
@@ -102,7 +102,9 @@ function PrimaryButton(props: {
       hoverStyle={{ backgroundColor: paletteToken("accent_hover") }}
       onPress={props.onPress}
     >
-      {props.glyph ? <Icon name={props.glyph} size={14} color={paletteToken("on_accent")} /> : null}
+      <If when={props.glyph !== undefined}>
+        <Icon name={props.glyph!} size={14} color={paletteToken("on_accent")} />
+      </If>
       <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("on_accent") }}>
         {props.label}
       </Text>
@@ -197,42 +199,9 @@ export function EmptyUpdates(): JSX.Element {
   );
 }
 
-/** 频道三态门（empty_state.rs channels_gate）：Unknown 静态；SignedOut
- * 提示+登录按钮（打开 github_sign_in.rs 对位的设备授权对话框）；
- * Connected 已登录行。 */
+/** 共享频道完整工作区入口（已登录 / 离线只读共用）。 */
 export function ChannelsScope(): JSX.Element {
-  return (
-    <CenteredFill>
-      <MediaChip>
-        <Icon name="layers" size={28} color={paletteToken("violet")} />
-      </MediaChip>
-      <Title>{t("emptyState.channelsTitle")}</Title>
-      <Desc>{t("emptyState.channelsDesc")}</Desc>
-      {(() => {
-        // 派生读取落在 JSX 表达式里（github signal 的响应式绑定）。
-        const status = github();
-        if (status === null) return null;
-        if (status.state === "connected") {
-          return (
-            <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-              {tf("sharedChannels.signedInAs", { login: status.login ?? "" })}
-            </Text>
-          );
-        }
-        return (
-          <View style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-            <Desc>{t("sharedChannels.signInHint")}</Desc>
-            <PrimaryButton
-              testID="channels-github-sign-in"
-              glyph="gitBranch"
-              label={t("sharedChannels.signInButton")}
-              onPress={openGitHubSignIn}
-            />
-          </View>
-        );
-      })()}
-    </CenteredFill>
-  );
+  return <ChannelsWorkspace />;
 }
 
 /** 列表读取失败横幅（view.rs error 分支：danger 弱底卡居中）。 */

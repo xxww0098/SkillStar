@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use super::gh_manager::{GhStatus, PublishIdentity, map_publish_status};
 use super::gh_rest::{
-    GhRestClient, GhRestError, GhRestErrorCode, GhRestResponse, GhRestTransport, REPO_AFFILIATION,
+    GhRestClient, GhRestError, GhRestErrorCode, GhRestResponse, GhRestTransport,
     block_on_blocking_context,
 };
 
@@ -97,22 +97,6 @@ impl GhRestTransport for FakeTransport {
     }
 }
 
-fn repo_page(count: usize, prefix: &str) -> serde_json::Value {
-    serde_json::Value::Array(
-        (0..count)
-            .map(|index| {
-                serde_json::json!({
-                    "full_name": format!("{prefix}/repo-{index}"),
-                    "html_url": format!("https://github.com/{prefix}/repo-{index}"),
-                    "clone_url": format!("https://github.com/{prefix}/repo-{index}.git"),
-                    "description": serde_json::Value::Null,
-                    "private": false,
-                })
-            })
-            .collect(),
-    )
-}
-
 // ── Readiness contract ──────────────────────────────────────────────
 
 /// The three states survived the move off `gh`, with new meanings: the binary
@@ -146,125 +130,6 @@ fn publish_readiness_maps_git_and_app_identity_onto_the_three_frontend_states() 
     let encoded = serde_json::to_value(map_publish_status(true, PublishIdentity::SignedOut))
         .expect("status serializes");
     assert_eq!(encoded["status"], "NotAuthenticated");
-}
-
-// ── Repository listing ──────────────────────────────────────────────
-
-/// The unlock: `gh repo list <login>` could only ever return personal repos,
-/// so an organization repository was unreachable as a publish target.
-#[test]
-fn repository_listing_requests_organization_affiliation_and_pages_up_to_the_limit() {
-    let transport = FakeTransport::with(vec![
-        (200, repo_page(100, "octocat")),
-        (200, repo_page(100, "acme-org")),
-    ]);
-    let client = GhRestClient::with_transport(TOKEN, transport);
-
-    let repos = client.list_repositories(150).expect("listing succeeds");
-
-    assert_eq!(repos.len(), 150, "limit truncates the last page");
-    assert!(
-        repos
-            .iter()
-            .any(|repo| repo.full_name.starts_with("acme-org/")),
-        "organization repositories must reach the publish picker"
-    );
-}
-
-#[test]
-fn repository_listing_sends_affiliation_and_paging_query_parameters() {
-    let transport = FakeTransport::with(vec![
-        (200, repo_page(100, "octocat")),
-        (200, repo_page(100, "acme-org")),
-    ]);
-    let client = GhRestClient::with_transport(TOKEN, transport.clone());
-    client.list_repositories(150).expect("listing succeeds");
-
-    let calls = transport.calls();
-    assert_eq!(calls.len(), 2, "a full page must be followed by the next");
-    assert_eq!(REPO_AFFILIATION, "owner,collaborator,organization_member");
-    for (index, call) in calls.iter().enumerate() {
-        assert_eq!(call.method, "GET");
-        assert!(
-            call.url
-                .contains("affiliation=owner,collaborator,organization_member"),
-            "every page must keep the affiliation filter: {}",
-            call.url
-        );
-        assert!(call.url.contains("per_page=100"), "url: {}", call.url);
-        assert!(
-            call.url.contains(&format!("&page={}&", index + 1)),
-            "pages must advance: {}",
-            call.url
-        );
-    }
-}
-
-/// A short page means GitHub has nothing more; asking for another one would
-/// burn a request (and rate-limit budget) on every publish dialog.
-#[test]
-fn repository_listing_stops_at_a_short_page_instead_of_paging_to_the_limit() {
-    let transport = FakeTransport::with(vec![(200, repo_page(3, "octocat"))]);
-    let client = GhRestClient::with_transport(TOKEN, transport.clone());
-
-    let repos = client.list_repositories(200).expect("listing succeeds");
-
-    assert_eq!(repos.len(), 3);
-    assert_eq!(transport.calls().len(), 1);
-}
-
-// ── Repository contents ─────────────────────────────────────────────
-
-#[test]
-fn skill_folder_inspection_keeps_only_sorted_visible_directories() {
-    let transport = FakeTransport::with(vec![(
-        200,
-        serde_json::json!([
-            {"name": "zeta", "type": "dir"},
-            {"name": "README.md", "type": "file"},
-            {"name": ".hidden", "type": "dir"},
-            {"name": "alpha", "type": "dir"},
-        ]),
-    )]);
-    let client = GhRestClient::with_transport(TOKEN, transport.clone());
-
-    let folders = client
-        .list_skill_folders("acme-org/skills")
-        .expect("inspection succeeds");
-
-    assert_eq!(folders, vec!["alpha".to_string(), "zeta".to_string()]);
-    assert_eq!(
-        transport.calls()[0].url,
-        "https://api.github.com/repos/acme-org/skills/contents/skills"
-    );
-}
-
-/// A repository with no `skills/` directory — including a brand new empty one —
-/// is a normal publish target, not a failure.
-#[test]
-fn skill_folder_inspection_treats_missing_and_empty_repositories_as_no_folders() {
-    for status in [404, 409] {
-        let transport = FakeTransport::with(vec![(
-            status,
-            serde_json::json!({"message": "This repository is empty."}),
-        )]);
-        let client = GhRestClient::with_transport(TOKEN, transport);
-        assert_eq!(
-            client.list_skill_folders("octocat/fresh").unwrap(),
-            Vec::<String>::new()
-        );
-    }
-}
-
-#[test]
-fn repository_names_that_could_escape_the_api_path_are_rejected() {
-    let client = GhRestClient::with_transport(TOKEN, FakeTransport::default());
-    for candidate in ["octocat", "octocat/../../secrets", "octocat/repo?x=1"] {
-        let error = client
-            .list_skill_folders(candidate)
-            .expect_err("malformed repository names must not reach a URL");
-        assert_eq!(error.code, GhRestErrorCode::Protocol);
-    }
 }
 
 // ── Repository creation ─────────────────────────────────────────────
@@ -371,14 +236,19 @@ fn github_rejections_and_throttling_stay_distinguishable_and_actionable() {
 fn the_rest_credential_never_leaves_the_authorization_header() {
     let transport = FakeTransport::with(vec![
         (200, serde_json::json!({"login": "octocat"})),
-        (200, repo_page(2, "acme-org")),
-        (200, serde_json::json!([])),
+        (
+            201,
+            serde_json::json!({
+                "full_name": "octocat/my-skills",
+                "html_url": "https://github.com/octocat/my-skills",
+                "clone_url": "https://github.com/octocat/my-skills.git",
+            }),
+        ),
     ]);
     let client = GhRestClient::with_transport(TOKEN, transport.clone());
 
     client.current_login().unwrap();
-    client.list_repositories(10).unwrap();
-    client.list_skill_folders("acme-org/skills").unwrap();
+    client.create_repository("my-skills", "desc", true).unwrap();
 
     for call in transport.calls() {
         assert!(

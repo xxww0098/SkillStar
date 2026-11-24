@@ -217,7 +217,7 @@ pub(crate) fn mark_scope_success_with_meta_in_tx(
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn mark_scope_success_in_tx(tx: &Transaction<'_>, scope: &str) -> Result<()> {
     let now = Utc::now();
     tx.execute(
@@ -383,42 +383,6 @@ pub(crate) fn sync_seed_state(conn: &Connection, scope: &str) -> Result<ScopeSee
     Ok(match scope_sync_state(conn, scope)? {
         Some(state) if state.last_success_at.is_some() => ScopeSeedState::Synced,
         _ => ScopeSeedState::NeverSynced,
-    })
-}
-
-pub fn get_marketplace_sync_states() -> Result<Vec<SyncStateEntry>> {
-    with_conn(|conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT scope, last_success_at, last_attempt_at, last_error, next_refresh_at, schema_version,
-                        source_host, payload_sha256, etag, degraded_reason
-                 FROM marketplace_sync_state
-                 ORDER BY scope ASC",
-            )
-            .context("Failed to prepare marketplace sync-state query")?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(SyncStateEntry {
-                    scope: row.get(0)?,
-                    last_success_at: row.get(1)?,
-                    last_attempt_at: row.get(2)?,
-                    last_error: row.get(3)?,
-                    next_refresh_at: row.get(4)?,
-                    schema_version: row.get(5)?,
-                    source_host: row.get(6)?,
-                    payload_sha256: row.get(7)?,
-                    etag: row.get(8)?,
-                    degraded_reason: row.get(9)?,
-                })
-            })
-            .context("Failed to read marketplace sync-state rows")?;
-
-        let mut entries = Vec::new();
-        for row in rows {
-            entries.push(row.context("Failed to decode marketplace sync-state row")?);
-        }
-        Ok(entries)
     })
 }
 

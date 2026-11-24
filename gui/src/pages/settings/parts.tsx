@@ -1,6 +1,6 @@
 import { Text, View, type JSX, type ViewStyle } from "nsh";
 import { paletteToken, type PaletteToken } from "../../services/themeMode";
-import { motionTransition } from "../../chrome/motion";
+import { settleTransition } from "../../chrome/motion";
 import { Icon, type IconName } from "../../chrome/icons";
 import { IconSpin } from "../../chrome/feedback";
 import { st } from "./settingsStrings";
@@ -142,9 +142,9 @@ export function StatusPill(props: {
         flexShrink: 0,
       }}
     >
-      {props.icon ? (
-        <Icon name={props.icon} size={11} color={paletteToken(tokens().icon)} />
-      ) : null}
+      <If when={Boolean(props.icon)}>
+        <Icon name={props.icon!} size={11} color={paletteToken(tokens().icon)} />
+      </If>
       <Text
         style={{
           fontSize: 11,
@@ -235,7 +235,7 @@ export function FieldLabel(props: {
   );
 }
 
-/** 统一设置开关（开启 ok 绿，关闭 edge，滑块 on_accent 白 + 80ms 平滑位移）。 */
+/** 统一设置开关（开启 ok 绿，关闭 edge，滑块 on_accent 白，回弹落位）。 */
 export function SettingsSwitch(props: {
   id?: string;
   testID?: string;
@@ -277,7 +277,7 @@ export function SettingsSwitch(props: {
           borderRadius: thumb / 2,
           backgroundColor: paletteToken("on_accent"),
           transform: [{ translateX: props.checked ? trackW - thumb - pad * 2 : 0 }],
-          ...motionTransition(),
+          ...settleTransition(),
         }}
       />
     </View>
@@ -297,13 +297,17 @@ export function SettingsButton(props: {
   onPress: () => void;
 }): JSX.Element {
   const tokens = () => BUTTON_MAP[props.variant ?? "secondary"];
-  const inactive = () => props.disabled === true || props.busy === true;
+  const blocked = () => props.disabled === true || props.busy === true;
+  const turning = () => props.spinning === true || (props.busy === true && props.spinning !== false);
   const h = () => (props.size === "sm" ? 30 : 34);
   return (
     <View
       testID={props.testID}
       role="button"
-      accessibilityState={{ disabled: props.disabled === true, busy: props.busy === true }}
+      accessibilityState={{
+        disabled: props.disabled === true,
+        busy: props.busy === true || props.spinning === true,
+      }}
       style={{
         height: h(),
         paddingHorizontal: props.size === "sm" ? 11 : 13,
@@ -316,29 +320,23 @@ export function SettingsButton(props: {
         borderWidth: 1,
         borderColor: paletteToken(tokens().border),
         backgroundColor: paletteToken(tokens().bg),
-        opacity: inactive() ? 0.6 : 1,
-        cursor: inactive() ? "default" : "pointer",
+        opacity: props.disabled === true ? 0.6 : 1,
+        cursor: blocked() ? "default" : "pointer",
       }}
-      hoverStyle={inactive() ? undefined : { backgroundColor: paletteToken(tokens().hoverBg) }}
-      activeStyle={inactive() ? undefined : { backgroundColor: paletteToken(tokens().activeBg) }}
+      hoverStyle={blocked() ? undefined : { backgroundColor: paletteToken(tokens().hoverBg) }}
+      activeStyle={blocked() ? undefined : { backgroundColor: paletteToken(tokens().activeBg) }}
       onPress={() => {
-        if (!inactive()) props.onPress();
+        if (!blocked()) props.onPress();
       }}
     >
-      {props.spinning ? (
+      <If when={props.icon !== undefined || turning()}>
         <IconSpin
           name={props.icon ?? "loader"}
           size={props.size === "sm" ? 12 : 14}
           color={paletteToken(tokens().icon)}
-          spin
+          spin={turning()}
         />
-      ) : props.icon ? (
-        <Icon
-          name={props.icon}
-          size={props.size === "sm" ? 12 : 14}
-          color={paletteToken(tokens().icon)}
-        />
-      ) : null}
+      </If>
       <Text
         style={{
           fontSize: 12,
@@ -362,7 +360,7 @@ export function SettingsGroup(props: {
 }): JSX.Element {
   return (
     <View style={card(props.style)}>
-      {props.title ? (
+      <If when={Boolean(props.title)}>
         <View
           style={{
             paddingHorizontal: 18,
@@ -390,7 +388,7 @@ export function SettingsGroup(props: {
           </Text>
           {props.trailing ?? null}
         </View>
-      ) : null}
+      </If>
       {props.children}
     </View>
   );
@@ -440,7 +438,7 @@ export function SettingRow(props: {
             minWidth: 0,
           }}
         >
-          {props.icon ? (
+          <If when={Boolean(props.icon)}>
             <View
               style={{
                 width: 32,
@@ -455,9 +453,9 @@ export function SettingRow(props: {
                 justifyContent: "center",
               }}
             >
-              <Icon name={props.icon} size={15} color={paletteToken(toneTokens().icon)} />
+              <Icon name={props.icon!} size={15} color={paletteToken(toneTokens().icon)} />
             </View>
-          ) : null}
+          </If>
           <View
             style={{
               display: "flex",
@@ -470,11 +468,11 @@ export function SettingRow(props: {
             <Text style={{ fontSize: 14, fontWeight: "500", color: paletteToken("fg") }}>
               {props.title}
             </Text>
-            {props.hint ? (
+            <If when={Boolean(props.hint)}>
               <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
                 {props.hint}
               </Text>
-            ) : null}
+            </If>
           </View>
         </View>
         <View style={{ flexShrink: 0 }}>{props.control}</View>

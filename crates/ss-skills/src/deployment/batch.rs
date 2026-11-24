@@ -29,11 +29,36 @@ fn link_already_has_hub_payload(target: &Path, hub: &Path) -> bool {
     canonical_path(&resolved) == canonical_path(hub)
 }
 
+/// Skipped skill item returned by [`batch_link_skills_to_agent_with_report`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchLinkSkippedItem {
+    pub skill_name: String,
+    pub code: String,
+    pub path: String,
+}
+
+/// Detailed outcome of [`batch_link_skills_to_agent_with_report`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BatchLinkOutcome {
+    pub linked: u32,
+    pub skipped: Vec<BatchLinkSkippedItem>,
+}
+
 /// Batch-link a list of skills to a specific agent.
 ///
 /// Skips skills that are already linked, and entries SkillStar does not own.
 /// Returns the number of new links created.
 pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Result<u32> {
+    Ok(batch_link_skills_to_agent_with_report(skill_names, agent_id)?.linked)
+}
+
+/// Batch-link a list of skills to a specific agent, returning both new link
+/// count and any collision-skipped items (`unmanaged_real_directory`,
+/// `foreign_link`, or `modified_agent_copy`).
+pub fn batch_link_skills_to_agent_with_report(
+    skill_names: &[String],
+    agent_id: &str,
+) -> Result<BatchLinkOutcome> {
     tracing::info!(
         target: "sync",
         agent_id,
@@ -48,7 +73,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
     let target_dir = &profile.global_skills_dir;
     if ownership::targets_canonical_root(target_dir) {
         tracing::info!(target: "sync", agent_id, "· Agent reads the canonical root directly — nothing to link");
-        return Ok(0);
+        return Ok(BatchLinkOutcome::default());
     }
 
     let mode = effective_deploy_mode(&profile.id);
@@ -57,7 +82,8 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
     let is_secondary = agent_reads_shared_agents_skills(&profile.id);
 
     let mut linked = 0u32;
-    let mut skipped = 0u32;
+    let mut skipped_missing = 0u32;
+    let mut skipped_items: Vec<BatchLinkSkippedItem> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     let mut created_target_dir = false;
     for name in skill_names {
@@ -75,7 +101,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
                 skill_path = %skill_path.display(),
                 "Skill not found in hub directory — skipping"
             );
-            skipped += 1;
+            skipped_missing += 1;
             continue;
         }
 
@@ -83,14 +109,22 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             let lib = crate::library::load();
             if shared_coord::shared_agents_entry_is_active(name, &lib, &profiles) {
                 match ownership::owned_deployment(&target, name) {
-                    Ownership::Foreign | Ownership::SkillStarModifiedCopy => {
+                    owned @ (Ownership::Foreign | Ownership::SkillStarModifiedCopy) => {
                         tracing::warn!(
                             target: "sync",
                             skill = %name,
                             target = %target.display(),
                             "Entry SkillStar does not own or edited copy exists at target — skipping"
                         );
-                        skipped += 1;
+                        skipped_items.push(BatchLinkSkippedItem {
+                            skill_name: name.clone(),
+                            code: if owned == Ownership::SkillStarModifiedCopy {
+                                super::SKIP_MODIFIED_AGENT_COPY.to_string()
+                            } else {
+                                super::foreign_skip_code(&target).to_string()
+                            },
+                            path: target.display().to_string(),
+                        });
                         continue;
                     }
                     Ownership::Link { .. } | Ownership::Copy => {
@@ -126,14 +160,22 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
                 }
                 continue;
             }
-            Ownership::Foreign | Ownership::SkillStarModifiedCopy => {
+            owned @ (Ownership::Foreign | Ownership::SkillStarModifiedCopy) => {
                 tracing::warn!(
                     target: "sync",
                     skill = %name,
                     target = %target.display(),
                     "Entry SkillStar does not own or edited copy exists at target — skipping"
                 );
-                skipped += 1;
+                skipped_items.push(BatchLinkSkippedItem {
+                    skill_name: name.clone(),
+                    code: if owned == Ownership::SkillStarModifiedCopy {
+                        super::SKIP_MODIFIED_AGENT_COPY.to_string()
+                    } else {
+                        super::foreign_skip_code(&target).to_string()
+                    },
+                    path: target.display().to_string(),
+                });
                 continue;
             }
             Ownership::Missing => {}
@@ -206,12 +248,15 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
         target: "sync",
         agent_id,
         linked,
-        skipped,
+        skipped = skipped_missing + skipped_items.len() as u32,
         total = skill_names.len(),
         "✓ batch_link_skills_to_agent completed"
     );
 
-    Ok(linked)
+    Ok(BatchLinkOutcome {
+        linked,
+        skipped: skipped_items,
+    })
 }
 
 /// Deploy skills to one or more Agent global directories using an explicit

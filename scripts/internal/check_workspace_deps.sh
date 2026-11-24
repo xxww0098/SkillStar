@@ -33,8 +33,9 @@ ALLOWED = {
     "ss-skills": {"ss-core", "ss-git"},
     "ss-channels": {"ss-core", "ss-git", "ss-skills"},
     "ss-mcp": {"ss-core", "ss-git", "ss-skills"},
-    "ss-app": {"ss-core", "ss-git", "ss-skills", "ss-channels", "ss-mcp", "ss-marketplace"},
-    "ss-gui-bridge": {"ss-core", "ss-marketplace", "ss-skills", "ss-accounts", "ss-app"},
+    "ss-mcp-hub": {"ss-core"},
+    "ss-app": {"ss-core", "ss-git", "ss-skills", "ss-channels", "ss-mcp", "ss-mcp-hub", "ss-marketplace"},
+    "ss-gui-bridge": {"ss-core", "ss-marketplace", "ss-skills", "ss-accounts", "ss-mcp-hub", "ss-app"},
     "ss-gui-host": {"ss-core", "ss-app", "ss-gui-bridge"},
     "ss-bin": {"ss-git", "ss-mcp", "ss-app", "ss-gui-host"},
 }

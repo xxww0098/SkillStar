@@ -194,7 +194,7 @@ fn validate_project_plan(
 /// Source/copy failures are reconciled by full_sync and may leave retryable
 /// deployments at the new root, but a known foreign conflict writes nothing.
 pub(super) fn preflight_project_targets(project: &Path, list: &SkillsList) -> Result<()> {
-    let profiles = agent_profile::list_profiles();
+    let profiles = agent_profile::list_profile_specs();
     validate_project_plan(list, &profiles, None)?;
     let mut failures = Vec::new();
     for plan in build_path_plans(list, &profiles) {
@@ -337,7 +337,7 @@ fn remove_deselected_project_skills(
 pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
     crate::content::validate_skill_name(skill_name)?;
     let _guard = super::write_lock::lock_project_write()?;
-    let profiles = agent_profile::list_profiles();
+    let profiles = agent_profile::list_profile_specs();
     let mut touched_projects = Vec::new();
 
     for entry in load_index_strict()?.projects {
@@ -448,7 +448,7 @@ fn reconcile_project_locked(
     remove_deselected: bool,
 ) -> Result<u32> {
     let hub_dir = fs_paths::hub_skills_dir();
-    let profiles = agent_profile::list_profiles();
+    let profiles = agent_profile::list_profile_specs();
     let project = ensure_project_root_exists(project_path)?;
     validate_project_plan(skills_list, &profiles, cleanup_agents)?;
     let mut plans = build_path_plans(skills_list, &profiles);
@@ -555,7 +555,7 @@ pub fn save_and_sync(
     for relative in deploy_modes.keys() {
         validate_project_relative_path(relative)?;
     }
-    let profiles = agent_profile::list_profiles();
+    let profiles = agent_profile::list_profile_specs();
     for profile in profiles
         .iter()
         .filter(|profile| profile.has_project_skills() && agents.contains_key(&profile.id))
@@ -604,47 +604,6 @@ pub fn save_and_sync(
     Ok((entry.name, count))
 }
 
-/// Register and persist skills-list.json for metadata-only updates such as
-/// shared-path ownership changes, preserving all project deployments.
-pub fn save_skills_list_only(
-    project_path: &str,
-    agents: HashMap<String, Vec<String>>,
-) -> Result<SkillsList> {
-    let _guard = super::write_lock::lock_project_write()?;
-    let agents = normalize_project_agents(agents)?;
-    let entry = register_project(project_path)?;
-
-    let profiles = agent_profile::list_profiles();
-    let mut skills_list = load_skills_list_strict(&entry.name)?.unwrap_or_default();
-    skills_list.agents = agents;
-    skills_list.updated_at = chrono::Utc::now().to_rfc3339();
-    prune_deploy_modes_for_agents(
-        &mut skills_list.deploy_modes,
-        &skills_list.agents,
-        &profiles,
-    );
-
-    save_skills_list(&entry.name, &skills_list)?;
-
-    Ok(skills_list)
-}
-
-/// Merge CLI/quick-deploy membership and deploy the requested skills without
-/// cleaning other deployments. Empty agent selection prefers `.agents/skills`,
-/// then the first available project-capable profile.
-pub fn add_skills_to_project(
-    project_path: &str,
-    skill_names: &[String],
-    agent_ids: &[String],
-) -> Result<u32> {
-    add_skills_to_project_with_mode(
-        project_path,
-        skill_names,
-        agent_ids,
-        ProjectDeployMode::Symlink,
-    )
-}
-
 pub fn add_skills_to_project_with_mode(
     project_path: &str,
     skill_names: &[String],
@@ -679,7 +638,7 @@ pub fn add_skills_to_project_with_mode(
     }
 
     let entry = register_project(project_path)?;
-    let profiles = agent_profile::list_profiles();
+    let profiles = agent_profile::list_profile_specs();
     let project = ensure_project_root_exists(project_path)?;
 
     // Resolve which agents to target

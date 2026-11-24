@@ -1,4 +1,14 @@
-import { List, Scroll, Text, View, effect, signal, type JSX } from "nsh";
+import {
+  List,
+  Scroll,
+  Text,
+  View,
+  computed,
+  effect,
+  signal,
+  type Accessor,
+  type JSX,
+} from "nsh";
 import { Button, Checkbox, Input } from "nsh/base";
 import { SkillCardsCreateGroup } from "skillstar-gui/native";
 import { SHEET_SHADOW, promptVeil } from "../../chrome/dialog";
@@ -108,10 +118,11 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
     .then((names) => existingNames.set(names))
     .catch(() => existingNames.set([]));
 
-  const duplicate = () => isDuplicateName(name(), existingNames());
-  const filtered = () => filterRows(all(), filter());
-  const createEnabled = () => canCreate(name(), members(), duplicate(), busy());
-  const installedSet = () => new Set(all().map((row) => row.name));
+  const duplicate = computed(() => isDuplicateName(name(), existingNames()));
+  const filtered = computed(() => filterRows(all(), filter()));
+  const createEnabled = computed(() => canCreate(name(), members(), duplicate(), busy()));
+  const installedSet = computed<ReadonlySet<string>>(() => new Set(all().map((row) => row.name)));
+  const isAllMarked = computed(() => allMarked(filtered(), members()));
 
   const toggle = (skill: string) => {
     if (busy()) return;
@@ -147,14 +158,14 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
 
   return (
     <View style={{ position: "relative", display: "flex", flexDirection: "column" }}>
-      {emojiOpen() ? (
-        // emoji 网格打开时铺满内容列的一层透明幕：点外收起网格
-        // （on_action Cancel 对位的可点击部分）。
+      <If when={emojiOpen()}>
+        {/* emoji 网格打开时铺满内容列的一层透明幕：点外收起网格
+            （on_action Cancel 对位的可点击部分）。 */}
         <View
           style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 5 }}
           onPress={() => emojiOpen.set(false)}
         />
-      ) : null}
+      </If>
 
       <View style={{ display: "flex", flexDirection: "column", padding: 16, paddingHorizontal: 24, gap: 12 }}>
         {/* ── Icon 按钮 + 名称 ─────────────────────────────────── */}
@@ -197,7 +208,7 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
               onSubmit={create}
             />
           </View>
-          {duplicate() ? (
+          <If when={duplicate()}>
             <View
               style={{
                 display: "flex",
@@ -214,7 +225,7 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
                 {t("createGroupModal.nameExists")}
               </Text>
             </View>
-          ) : null}
+          </If>
         </View>
 
         <DialogInput
@@ -227,7 +238,7 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
         />
 
         {/* ── 已选成员 pill 条 ─────────────────────────────────── */}
-        {members().length > 0 ? (
+        <If when={members().length > 0}>
           <PillStrip
             members={members}
             installedSet={installedSet}
@@ -236,7 +247,7 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
               if (!busy()) members.set(members().filter((m) => m !== member));
             }}
           />
-        ) : null}
+        </If>
 
         {/* ── 搜索 + 全选 ──────────────────────────────────────── */}
         <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -252,7 +263,7 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
               onChange={(next) => filter.set(next)}
             />
           </View>
-          {filtered().length > 0 ? (
+          <If when={filtered().length > 0}>
             <View
               testID="pack-select-all"
               style={{
@@ -269,33 +280,30 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
               hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
               onPress={() => {
                 if (busy()) return;
-                const rows = filtered();
-                members.set(toggleAll(rows, members(), allMarked(rows, members())));
+                members.set(toggleAll(filtered(), members(), isAllMarked()));
               }}
             >
               <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
-                {allMarked(filtered(), members())
-                  ? t("common.deselectAll")
-                  : t("common.selectAll")}
+                {isAllMarked() ? t("common.deselectAll") : t("common.selectAll")}
               </Text>
             </View>
-          ) : null}
+          </If>
         </View>
 
         {/* ── 成员列表 ─────────────────────────────────────────── */}
         <MemberPicker
-          all={all}
-          filter={filter}
+          rows={filtered}
+          allCount={() => all().length}
           members={members}
           busy={busy}
           onToggle={toggle}
         />
 
-        {error() ? (
+        <If when={error() !== null}>
           <Text testID="pack-error" style={{ fontSize: 14, color: paletteToken("danger") }}>
-            {error()}
+            {error() ?? ""}
           </Text>
-        ) : null}
+        </If>
       </View>
 
       {/* ── 取消/创建栏 ───────────────────────────────────────── */}
@@ -351,9 +359,23 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
           hoverStyle={{ backgroundColor: paletteToken("accent_hover") }}
           disabledStyle={{ backgroundColor: paletteToken("well") }}
         >
-          {busy() ? (
-            <IconSpin name="refresh" size={12} color={paletteToken("on_accent")} spin />
-          ) : null}
+          <If
+            when={busy()}
+            else={
+              <Icon
+                name="loader"
+                size={12}
+                color={createEnabled() ? paletteToken("on_accent") : paletteToken("fg_muted")}
+              />
+            }
+          >
+            <IconSpin
+              name="loader"
+              size={12}
+              color={createEnabled() ? paletteToken("on_accent") : paletteToken("fg_muted")}
+              spin={true}
+            />
+          </If>
           <Text
             style={{
               fontSize: 12,
@@ -366,7 +388,7 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
       </View>
 
       {/* ── emoji 浮层（浮在名称输入上方）───────────────────── */}
-      {emojiOpen() ? (
+      <If when={emojiOpen()}>
         <View
           style={{
             position: "absolute",
@@ -391,28 +413,30 @@ export function CreateGroupDialog(props: CreateGroupDialogProps): JSX.Element {
               boxShadow: SHEET_SHADOW,
             }}
           >
-            {EMOJI_OPTIONS.map((emoji, ix) => (
-              <Button
-                testID={`pack-emoji-${ix}`}
-                selected={icon() === emoji}
-                onPress={() => pickEmoji(emoji)}
-                style={{
-                  width: 36,
-                  height: 36,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 8,
-                  backgroundColor: icon() === emoji ? paletteToken("accent") + "1a" : "transparent",
-                }}
-                hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
-              >
-                <Text style={{ fontSize: 18 }}>{emoji}</Text>
-              </Button>
-            ))}
+            <Each of={INDEXED_EMOJIS} key={(item) => item.emoji}>
+              {(item: () => { emoji: string; ix: number }) => (
+                <Button
+                  testID={`pack-emoji-${item().ix}`}
+                  selected={icon() === item().emoji}
+                  onPress={() => pickEmoji(item().emoji)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 8,
+                    backgroundColor: icon() === item().emoji ? paletteToken("accent") + "1a" : "transparent",
+                  }}
+                  hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
+                >
+                  <Text style={{ fontSize: 18 }}>{item().emoji}</Text>
+                </Button>
+              )}
+            </Each>
           </View>
         </View>
-      ) : null}
+      </If>
     </View>
   );
 }
@@ -455,66 +479,91 @@ function DialogInput(props: {
   );
 }
 
+const INDEXED_EMOJIS = EMOJI_OPTIONS.map((emoji, ix) => ({ emoji, ix }));
+
 /** 已选成员 pill 条：已安装在前、orphan（删除线 + danger）垫后；超过阈值才滚动。 */
 function PillStrip(props: {
-  members: () => string[];
-  installedSet: () => ReadonlySet<string>;
-  busy: () => boolean;
+  members: Accessor<string[]>;
+  installedSet: Accessor<ReadonlySet<string>>;
+  busy: Accessor<boolean>;
   onRemove: (name: string) => void;
 }): JSX.Element {
-  const pills = () => sortedPillMembers(props.members(), props.installedSet());
-  const rows = () => (
-    <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6, paddingRight: 4 }}>
-      {pills().map((member) => {
-        const orphan = !props.installedSet().has(member);
-        const tone = orphan ? paletteToken("danger") : paletteToken("accent");
-        return (
-          <Button
-            testID={`pack-pill-${member}`}
-            disabled={props.busy()}
-            accessibilityLabel={tf("createGroupModal.removeMember", { name: member })}
-            onPress={() => props.onRemove(member)}
-            style={{
-              height: 24,
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 4,
-              paddingHorizontal: 8,
-              borderRadius: 6,
-              backgroundColor: tone + "1a",
-            }}
-            hoverStyle={{ backgroundColor: tone + "33" }}
-          >
-            <Text
-              style={{
-                fontSize: 12,
-                fontWeight: "500",
-                color: tone,
-                textDecorationLine: orphan ? "line-through" : "none",
-              }}
-            >
-              {member}
-            </Text>
-            <Icon name="x" size={12} color={tone} />
-          </Button>
-        );
-      })}
-    </View>
-  );
-  // 分支读 members() 只在 JSX 表达式里（挂载后的数量变化也要切分支）。
+  const pills = computed(() => sortedPillMembers(props.members(), props.installedSet()));
+  const scrollable = computed(() => props.members().length > PILLS_VISIBLE);
   return (
     <View>
-      {props.members().length > PILLS_VISIBLE ? (
-        // 明确像素高度视口框，不给滚动包装写 max_h（滚动盒契约）。
+      <If
+        when={scrollable()}
+        else={
+          <PillRows
+            pills={pills}
+            installedSet={props.installedSet}
+            busy={props.busy}
+            onRemove={props.onRemove}
+          />
+        }
+      >
+        {/* 明确像素高度视口框，不给滚动包装写 max_h（滚动盒契约）。 */}
         <View testID="pack-pills-viewport" style={{ height: PILLS_VIEW_H, width: "100%", flexShrink: 0 }}>
           <Scroll testID="pack-pills" style={{ width: "100%", height: "100%" }}>
-            {rows()}
+            <PillRows
+              pills={pills}
+              installedSet={props.installedSet}
+              busy={props.busy}
+              onRemove={props.onRemove}
+            />
           </Scroll>
         </View>
-      ) : (
-        rows()
-      )}
+      </If>
+    </View>
+  );
+}
+
+function PillRows(props: {
+  pills: Accessor<string[]>;
+  installedSet: Accessor<ReadonlySet<string>>;
+  busy: Accessor<boolean>;
+  onRemove: (name: string) => void;
+}): JSX.Element {
+  return (
+    <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6, paddingRight: 4 }}>
+      <Each of={props.pills()} key={(member) => member}>
+        {(member: () => string) => {
+          const orphan = computed(() => !props.installedSet().has(member()));
+          const tone = computed(() => (orphan() ? paletteToken("danger") : paletteToken("accent")));
+          return (
+            <Button
+              testID={`pack-pill-${member()}`}
+              disabled={props.busy()}
+              accessibilityLabel={tf("createGroupModal.removeMember", { name: member() })}
+              onPress={() => props.onRemove(member())}
+              style={{
+                height: 24,
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                paddingHorizontal: 8,
+                borderRadius: 6,
+                backgroundColor: tone() + "1a",
+              }}
+              hoverStyle={{ backgroundColor: tone() + "33" }}
+            >
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "500",
+                  color: tone(),
+                  textDecorationLine: orphan() ? "line-through" : "none",
+                }}
+              >
+                {member()}
+              </Text>
+              <Icon name="x" size={12} color={tone()} />
+            </Button>
+          );
+        }}
+      </Each>
     </View>
   );
 }
@@ -526,91 +575,118 @@ function PillStrip(props: {
  * 命中模型保证，测试覆盖）。
  */
 function MemberPicker(props: {
-  all: () => DeckSkillRow[];
-  filter: () => string;
-  members: () => string[];
-  busy: () => boolean;
+  rows: Accessor<DeckSkillRow[]>;
+  allCount: Accessor<number>;
+  members: Accessor<string[]>;
+  busy: Accessor<boolean>;
   onToggle: (skill: string) => void;
 }): JSX.Element {
-  const rows = () => filterRows(props.all(), props.filter());
+  const membersSet = computed<ReadonlySet<string>>(() => new Set(props.members()));
+  const scrollable = computed(() => props.rows().length > PICKER_VISIBLE);
+  const inlineList = computed(
+    () => props.allCount() > 0 && props.rows().length > 0 && !scrollable(),
+  );
 
-  const renderRow = (name: () => string) => {
-    const picked = () => props.members().includes(name());
-    return (
-      <View
-        testID={`pack-row-${name()}`}
-        style={{
-          height: ROW_H,
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-          paddingHorizontal: 10,
-          borderRadius: 8,
-          backgroundColor: picked() ? paletteToken("accent") + "0d" : "transparent",
-          cursor: "pointer",
-        }}
-        hoverStyle={{ backgroundColor: picked() ? paletteToken("accent") + "1a" : paletteToken("panel_hover") }}
-        onPress={() => props.onToggle(name())}
-      >
-        <Checkbox
-          checked={picked()}
-          disabled={props.busy()}
-          accessibilityLabel={name()}
-          onChange={(event) => {
-            if (!props.busy()) props.onToggle(name());
-          }}
-          style={{ width: 16, height: 16, borderRadius: 4, borderWidth: 1, borderColor: picked() ? paletteToken("accent") : paletteToken("edge") }}
-          checkedStyle={{ backgroundColor: paletteToken("accent"), borderColor: paletteToken("accent") }}
-          indicator={
-            <View style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Icon name="check" size={12} color={paletteToken("on_accent")} />
-            </View>
-          }
-        />
-        <Text
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 14,
-            fontWeight: picked() ? "500" : "normal",
-            color: picked() ? paletteToken("accent") : paletteToken("fg"),
-            textOverflow: "ellipsis",
-            numberOfLines: 1,
-          }}
-        >
-          {name()}
-        </Text>
-      </View>
-    );
-  };
-
-  // 三分支都读 signal，全部放 JSX 表达式里：空候选、筛后为空、自然高度、
-  // 固定视口虚拟化（滚动盒契约：> PICKER_VISIBLE 行才出现 PICKER_VIEW_H 视口）。
+  // 四互斥 <If> 分支：List 只在超出阈值时挂载一次，连续键入筛选不重挂 List。
   return (
     <View>
-      {props.all().length === 0 ? (
+      <If when={props.allCount() === 0}>
         <EmptyHint text={t("skillCards.noSkillsInstalled")} />
-      ) : rows().length === 0 ? (
+      </If>
+      <If when={props.allCount() > 0 && props.rows().length === 0}>
         <EmptyHint text={t("createGroupModal.noSkillsFound")} />
-      ) : rows().length > PICKER_VISIBLE ? (
+      </If>
+      <If when={scrollable()}>
         <View testID="pack-picker-viewport" style={{ height: PICKER_VIEW_H, width: "100%", flexShrink: 0 }}>
           <List
             testID="pack-picker"
-            each={rows()}
+            each={props.rows()}
             keyExtractor={(row) => row.name}
             estimatedItemSize={ROW_H}
             style={{ width: "100%", height: "100%", borderRadius: 8 }}
             contentClass="py-1"
           >
-            {(item) => renderRow(() => item().name)}
+            {(item) => (
+              <PickerRow
+                name={() => item().name}
+                membersSet={membersSet}
+                busy={props.busy}
+                onToggle={props.onToggle}
+              />
+            )}
           </List>
         </View>
-      ) : (
+      </If>
+      <If when={inlineList()}>
         <View style={{ display: "flex", flexDirection: "column", gap: 2, borderRadius: 8 }}>
-          {rows().map((row) => renderRow(() => row.name))}
+          <Each of={props.rows()} key={(row) => row.name}>
+            {(item: () => DeckSkillRow) => (
+              <PickerRow
+                name={() => item().name}
+                membersSet={membersSet}
+                busy={props.busy}
+                onToggle={props.onToggle}
+              />
+            )}
+          </Each>
         </View>
-      )}
+      </If>
+    </View>
+  );
+}
+
+function PickerRow(props: {
+  name: Accessor<string>;
+  membersSet: Accessor<ReadonlySet<string>>;
+  busy: Accessor<boolean>;
+  onToggle: (skill: string) => void;
+}): JSX.Element {
+  const picked = computed(() => props.membersSet().has(props.name()));
+  return (
+    <View
+      testID={`pack-row-${props.name()}`}
+      style={{
+        height: ROW_H,
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        backgroundColor: picked() ? paletteToken("accent") + "0d" : "transparent",
+        cursor: "pointer",
+      }}
+      hoverStyle={{ backgroundColor: picked() ? paletteToken("accent") + "1a" : paletteToken("panel_hover") }}
+      onPress={() => props.onToggle(props.name())}
+    >
+      <Checkbox
+        checked={picked()}
+        disabled={props.busy()}
+        accessibilityLabel={props.name()}
+        onChange={() => {
+          if (!props.busy()) props.onToggle(props.name());
+        }}
+        style={{ width: 16, height: 16, borderRadius: 4, borderWidth: 1, borderColor: picked() ? paletteToken("accent") : paletteToken("edge") }}
+        checkedStyle={{ backgroundColor: paletteToken("accent"), borderColor: paletteToken("accent") }}
+        indicator={
+          <View style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="check" size={12} color={paletteToken("on_accent")} />
+          </View>
+        }
+      />
+      <Text
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 14,
+          fontWeight: picked() ? "500" : "normal",
+          color: picked() ? paletteToken("accent") : paletteToken("fg"),
+          textOverflow: "ellipsis",
+          numberOfLines: 1,
+        }}
+      >
+        {props.name()}
+      </Text>
     </View>
   );
 }

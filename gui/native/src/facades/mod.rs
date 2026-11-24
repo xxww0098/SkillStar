@@ -20,6 +20,7 @@ pub mod accounts;
 // slices that remain (import modal, GitHub sign-in), mirroring how waves
 // (D-111): the page's remote scope never had a real domain.
 pub mod bridge_task;
+pub mod my_skills_channels;
 pub mod my_skills_github;
 pub mod my_skills_import;
 // Wave 3 (my-skills base) registration: the page base's own facade plus
@@ -51,6 +52,7 @@ pub mod settings_updates;
 // for the agent-connections/managed-skills slice, one for the
 // storage/skill-repair/about slice — same rule as the earlier waves: the
 // slices only ever add methods inside their own file here.
+pub mod mcp_hub;
 pub mod settings_agent_connections;
 pub mod settings_storage;
 

@@ -55,10 +55,6 @@ fn content_facade_reads_lists_and_updates_a_skill() {
         read_raw("demo").unwrap(),
         "---\ndescription: old\n---\n\nBody"
     );
-    assert_eq!(
-        list_files("demo").unwrap(),
-        vec!["SKILL.md", "scripts/run.sh"]
-    );
 
     update("demo", "---\ndescription: new\n---\n\nUpdated").unwrap();
     let parsed = read("demo").unwrap();
@@ -162,7 +158,7 @@ fn snapshot_records_internal_symlinks_without_following_them() {
         .unwrap();
 
     assert_eq!(link.kind, SnapshotFileKind::Symlink);
-    assert_eq!(link.symlink_target(), outside.to_str());
+    assert_eq!(std::str::from_utf8(&link.content).ok(), outside.to_str());
     assert!(
         captured
             .files
@@ -192,13 +188,11 @@ fn content_facades_reject_traversal_before_read_write_or_delete() {
     std::fs::write(outside.join("SKILL.md"), "# Must stay\n").unwrap();
 
     assert!(matches!(read_raw("../victim"), Err(AppError::Other(_))));
-    assert!(matches!(list_files("../victim"), Err(AppError::Other(_))));
     assert!(matches!(read("../victim"), Err(AppError::Other(_))));
     assert!(matches!(
         update("../victim", "destroyed"),
         Err(AppError::Other(_))
     ));
-    assert!(matches!(delete_local("../victim"), Err(AppError::Other(_))));
     assert!(resolve_skill_folder("../victim").is_none());
     assert_eq!(
         std::fs::read_to_string(outside.join("SKILL.md")).unwrap(),

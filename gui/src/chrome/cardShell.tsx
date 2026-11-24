@@ -79,31 +79,6 @@ export function skillCardHoverStyle(selected: boolean): ViewStyle {
   };
 }
 
-export function skillRowFrameStyle(selected: boolean): ViewStyle {
-  return {
-    width: "100%",
-    minHeight: 56,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: selected ? paletteToken("accent") : paletteToken("border"),
-    backgroundColor: selected ? paletteToken("card_active") : paletteToken("card"),
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    cursor: "pointer",
-  };
-}
-
-export function skillRowHoverStyle(selected: boolean): ViewStyle {
-  return {
-    backgroundColor: selected ? paletteToken("card_active_hover") : paletteToken("card_hover"),
-    borderColor: selected ? paletteToken("accent") : paletteToken("edge"),
-  };
-}
-
 /** Omit redundant source strings that duplicate the skill's own name. */
 export function distinctSource(
   source: string | null | undefined,

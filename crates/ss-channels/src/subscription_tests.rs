@@ -654,6 +654,42 @@ fn hash(character: char) -> String {
     format!("sha256:{}", character.to_string().repeat(64))
 }
 
+#[test]
+fn local_channel_and_subscription_reads_work_without_remote_gateway() {
+    let channels = FakeChannels(Arc::new(Mutex::new(SharedChannelStore {
+        schema_version: SHARED_CHANNEL_STORE_VERSION,
+        channels: vec![channel()],
+    })));
+    let subscriptions = FakeSubscriptions::default();
+    let request = ChannelInstallRequest {
+        repository: repository(),
+        manifest: manifest(),
+        selected_skill_ids: vec!["writer".into()],
+    };
+    subscriptions.store.lock().unwrap().subscriptions.push(ChannelSubscription {
+        descriptor_version: CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION,
+        repository_id: 42,
+        organization_id: 7,
+        repository_url_aliases: Vec::new(),
+        target: release_target(),
+        skills: vec![installed_skill(&request, &manifest().skills[1])],
+        known_skill_ids: vec!["writer".into()],
+        pins: Vec::new(),
+        last_update: None,
+        auto_update: ChannelAutoUpdateState::default(),
+        remote_state: ChannelSubscriptionRemoteState::default(),
+        created_at: "now".into(),
+        updated_at: "now".into(),
+    });
+
+    assert_eq!(list_shared_channels(&channels).unwrap().len(), 1);
+    let views = list_channel_subscriptions(&subscriptions).unwrap();
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].repository_id, 42);
+    assert_eq!(channel_update_state(&subscriptions, 42).unwrap(), None);
+    assert!(!channel_auto_update_state(&subscriptions, 42).unwrap().enabled);
+}
+
 fn release_target() -> ChannelReleaseTarget {
     ChannelReleaseTarget {
         revision: 1,

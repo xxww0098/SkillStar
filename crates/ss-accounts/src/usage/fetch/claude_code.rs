@@ -53,6 +53,7 @@ pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
         snapshot,
         tokens: reading.tokens,
         provider_state: reading.provider_state,
+        identity: None,
     })
 }
 
@@ -108,6 +109,7 @@ pub(crate) fn parse_usage(body: &str, now: i64, plan: Option<&str>) -> UsageResu
         credits: None,
         error: None,
         gcp_tos: None,
+        reset_credits: None,
     })
 }
 

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::Command;
 
 /// Git variables that pin commands to the *calling* repository.
@@ -20,10 +19,8 @@ const HOST_GIT_ENV_VARS: &[&str] = &[
 
 /// Build an enriched PATH that includes common binary directories.
 ///
-/// GUI-launched desktop apps (Tauri) often inherit a minimal login PATH that
-/// omits Homebrew, user-local bins, and agent self-install directories. Every
-/// binary presence probe in SkillStar must search this enriched PATH via
-/// [`which_in_enriched`] rather than the raw process `PATH`.
+/// GUI-launched desktop apps often inherit a minimal login PATH that
+/// omits Homebrew, user-local bins, and agent self-install directories.
 pub fn enriched_path() -> String {
     #[cfg(unix)]
     {
@@ -33,18 +30,6 @@ pub fn enriched_path() -> String {
     {
         enriched_path_windows()
     }
-}
-
-/// Resolve a CLI binary on the [`enriched_path`].
-///
-/// Returns the first matching absolute path, or `None` if the binary is not
-/// reachable. Prefer this over `which::which` anywhere SkillStar decides
-/// "is this agent/tool installed on this machine?".
-pub fn which_in_enriched(binary: &str) -> Option<PathBuf> {
-    let path_str = enriched_path();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    // `which_in` takes the PATH as a single OsStr (colon/semicolon-joined).
-    which::which_in(binary, Some(path_str.as_str()), &cwd).ok()
 }
 
 #[cfg(unix)]
@@ -207,20 +192,6 @@ mod tests {
                 "enriched PATH must include .opencode\\bin; got {path}"
             );
         }
-    }
-
-    #[test]
-    fn which_in_enriched_finds_cargo() {
-        // cargo is present in this repo's toolchain; acts as a stable positive.
-        assert!(
-            which_in_enriched("cargo").is_some(),
-            "cargo must resolve via enriched PATH in the Rust toolchain"
-        );
-    }
-
-    #[test]
-    fn which_in_enriched_missing_binary_returns_none() {
-        assert!(which_in_enriched("skillstar-definitely-not-a-real-bin-xyz-99").is_none());
     }
 
     #[test]

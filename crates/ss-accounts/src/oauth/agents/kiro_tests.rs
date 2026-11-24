@@ -215,3 +215,43 @@ use super::*;
         assert!(DeviceSession::parse(&insecure).is_err());
         assert!(DeviceSession::parse(&json!({ "userCode": "X" })).is_err());
     }
+
+    #[test]
+    fn resolve_login_leg_handles_explicit_leg_and_rejects_bad_idc_region() {
+        assert_eq!(resolve_login_leg(None, None).expect("default"), LoginLeg::Portal);
+        assert_eq!(
+            resolve_login_leg(Some("portal"), Some("us-east-1")).expect("explicit portal"),
+            LoginLeg::Portal
+        );
+        assert_eq!(
+            resolve_login_leg(Some("idc"), None).expect("explicit idc default region"),
+            LoginLeg::Idc { region: None }
+        );
+        assert_eq!(
+            resolve_login_leg(Some("idc"), Some(" eu-west-1 ")).expect("explicit idc region"),
+            LoginLeg::Idc {
+                region: Some("eu-west-1".to_string())
+            }
+        );
+        assert!(resolve_login_leg(Some("idc"), Some("not-a-region")).is_err());
+        assert!(resolve_login_leg(Some("enterprise"), None).is_err());
+    }
+
+    #[test]
+    fn normalize_start_url_defaults_to_builder_id_and_requires_https() {
+        assert_eq!(
+            normalize_start_url(None).expect("default"),
+            BUILDER_ID_START_URL
+        );
+        assert_eq!(
+            normalize_start_url(Some("   ")).expect("blank"),
+            BUILDER_ID_START_URL
+        );
+        assert_eq!(
+            normalize_start_url(Some(" https://d-123456.awsapps.com/start ")).expect("custom"),
+            "https://d-123456.awsapps.com/start"
+        );
+        assert!(normalize_start_url(Some("http://d-123456.awsapps.com/start")).is_err());
+        assert!(normalize_start_url(Some("not-a-url")).is_err());
+        assert!(normalize_start_url(Some("https://")).is_err());
+    }

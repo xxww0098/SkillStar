@@ -34,7 +34,7 @@ Grok 1.0.40 仍先发 `initialize`，请求版本是 `2025-11-25`。stdio 入口
 
 ## 桌面批准
 
-Projects 页在选中项目且存在未过期计划时，在列表上方展示规范路径、是否注册、owner、受影响 Agent 和每一项操作。批准按钮调用 `approve_project_skill_plan`，只写 SkillStar 批准，不部署。没有计划时不显示这块区域。
+`Projects` 页通过 `ss_app::project_skill_approval` 与桥接 `gui/native/src/facades/projects.rs` 查询当前选中项目的待批准计划；存在未过期计划时，在详情列表上方由 [`PendingSkillPlanSection`](../../../gui/src/pages/projects/pendingPlanCard.tsx)（`project-pending-plan`）展示规范根路径、是否注册、shared path owner、受影响 Agent 与每一项计划操作。「批准计划」按钮（`project-plan-approve`）调用 `approve_project_skill_plan`，只写入 SkillStar 批准并在卡片右上角切为已批准徽标，不触发实际部署；无未过期计划时不渲染该区域。
 
 ## 重排
 

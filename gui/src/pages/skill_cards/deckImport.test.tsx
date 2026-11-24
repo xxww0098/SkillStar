@@ -19,9 +19,13 @@ function leF64(n: number): number[] {
 
 /// An uncompressed share code around `payload` (share_install.rs wire
 /// layout: version, compression flag 0, LE-f64 milliseconds, raw JSON).
-function shareCode(prefix: "ags-" | "agd-", payload: unknown): string {
+function shareCode(
+  prefix: "ags-" | "agd-",
+  payload: unknown,
+  timestamp = Date.now(),
+): string {
   const json = Array.from(new TextEncoder().encode(JSON.stringify(payload)));
-  const bytes = [1, 0, ...leF64(Date.now()), ...json];
+  const bytes = [1, 0, ...leF64(timestamp), ...json];
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return prefix + btoa(binary);
@@ -44,7 +48,7 @@ test("the dialog opens with the deck-scoped import chrome", async () => {
   await app.waitFor("deck-import-input");
   // Header well + deck title, hint, or-divider, both file-side controls.
   expect(app.texts()).toContain("导入卡组");
-  expect(app.texts()).toContain("从分享码或 .ags / .agd 卡组文件导入");
+  expect(app.texts()).toContain("从分享码、GitHub 仓库链接或 .ags / .agd 卡组文件导入");
   expect(app.texts()).toContain("或");
   expect(app.texts()).toContain("选择 .ags / .agd 文件");
   expect(app.texts()).toContain("导入");
@@ -113,4 +117,49 @@ test("a bundle path that is no file fails, and retry keeps the text", async () =
   await app.waitFor("deck-import-input");
   expect(app.value("deck-import-input")).toBe(bogus);
   expect(app.texts()).toContain("导入卡组");
+});
+
+test("a pasted repository URL shows the repo banner live and clears on bundle path", async () => {
+  const app = await open(HARNESS);
+  await app.press("deck-import-harness-open");
+  await app.waitFor("deck-import-input");
+  await app.type("deck-import-input", "https://github.com/vuejs-ai/skills");
+  await app.waitFor("deck-import-repo-detected");
+  expect(app.shows("deck-import-detected")).toBe(false);
+  expect(app.texts()).toContain("已识别仓库地址，点击导入将扫描技能并可「快速打包」为卡组");
+
+  await app.clear("deck-import-input");
+  await app.type("deck-import-input", "/tmp/pack.agd");
+  expect(app.shows("deck-import-repo-detected")).toBe(false);
+  expect(app.shows("deck-import-detected")).toBe(false);
+});
+
+test("submitting a repository URL hands off to MySkills import instead of opening a bundle file", async () => {
+  const app = await open(HARNESS);
+  await app.press("deck-import-harness-open");
+  await app.waitFor("deck-import-input");
+  await app.type("deck-import-input", "https://github.com/vuejs-ai/skills");
+  await app.press("deck-import-submit");
+  await app.waitFor("deck-import-harness-handoff");
+  expect(app.count("deck-import-card")).toBe(0);
+  expect(app.texts()).not.toContain("导入失败");
+  expect(app.texts()).toContain("my_skills:https://github.com/vuejs-ai/skills:true");
+});
+
+test("an expired share code reports its share error without falling back to file open", async () => {
+  const app = await open(HARNESS);
+  await app.press("deck-import-harness-open");
+  await app.waitFor("deck-import-input");
+  const expired = shareCode(
+    "agd-",
+    { n: "Pack", d: "", i: "", s: [] },
+    0,
+  );
+  await app.type("deck-import-input", expired);
+  await app.press("deck-import-submit");
+  await app.waitFor("deck-import-retry");
+  const texts = app.texts();
+  expect(texts).toContain("导入失败");
+  expect(texts.some((text) => text.includes("expired"))).toBe(true);
+  expect(texts.some((text) => text.includes("Cannot open bundle"))).toBe(false);
 });

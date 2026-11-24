@@ -247,31 +247,6 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
     anyhow::bail!("Not a symlink or junction: {:?}", path);
 }
 
-pub fn check_developer_mode() -> bool {
-    #[cfg(unix)]
-    {
-        true
-    }
-
-    #[cfg(windows)]
-    {
-        let tmp = std::env::temp_dir();
-        let test_src = tmp.join(".skillstar_devmode_test_src");
-        let test_dst = tmp.join(".skillstar_devmode_test_dst");
-
-        let _ = std::fs::remove_dir(&test_dst);
-        let _ = std::fs::remove_dir(&test_src);
-
-        let _ = std::fs::create_dir_all(&test_src);
-        let result = std::os::windows::fs::symlink_dir(&test_src, &test_dst).is_ok();
-
-        let _ = std::fs::remove_dir(&test_dst);
-        let _ = std::fs::remove_dir(&test_src);
-
-        result
-    }
-}
-
 #[cfg(windows)]
 fn same_drive(a: &Path, b: &Path) -> bool {
     a.components()

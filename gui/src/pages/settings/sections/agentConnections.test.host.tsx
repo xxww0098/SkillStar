@@ -51,16 +51,27 @@ const profiles: AgentProfileDto[] = [
 
 const fakeBridge: AgentConnectionsBridge = {
   listProfiles() {
-    return profiles.map((item) => ({ ...item }));
+    return new Promise<AgentProfileDto[]>((resolve) => {
+      setTimeout(() => resolve(profiles.map((item) => ({ ...item }))), 0);
+    });
   },
   toggleProfile(id) {
-    const found = profiles.find((item) => item.id === id);
-    if (found === undefined) throw new Error("unknown agent");
-    found.enabled = !found.enabled;
-    return found.enabled;
+    return new Promise<boolean>((resolve, reject) => {
+      setTimeout(() => {
+        const found = profiles.find((item) => item.id === id);
+        if (found === undefined) {
+          reject(new Error("unknown agent"));
+          return;
+        }
+        found.enabled = !found.enabled;
+        resolve(found.enabled);
+      }, 0);
+    });
   },
   listLinkedSkills() {
-    return [];
+    return new Promise<string[]>((resolve) => {
+      setTimeout(() => resolve([]), 0);
+    });
   },
   async unlinkSkill() {
     /* the host suite never unlinks */

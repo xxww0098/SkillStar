@@ -67,8 +67,6 @@ export type IconName =
   | "square"
   | "squareCheck"
   | "squareMinus"
-  | "arrowLeftRight"
-  | "logOut"
   | "externalLink"
   // Settings-section glyphs (settings/mod.rs SettingsSection::icon — the
   // Lucide names the GPUI rail uses; `link` already exists above), added
@@ -105,7 +103,8 @@ export type IconName =
   | "rows3"
   | "clock"
   | "bot"
-  | "sliders";
+  | "sliders"
+  | "gauge";
 
 const PATHS: Record<IconName, string[]> = {
   // Four-point star with two sparks — “one skill”.
@@ -153,7 +152,10 @@ const PATHS: Record<IconName, string[]> = {
   search: ["M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z", "M21 21l-5.2-5.2"],
   refresh: ["M20 5v5h-5", "M19.4 10a8 8 0 1 0 .6 4"],
   arrowUp: ["M12 19V5", "M5 12l7-7 7 7"],
-  plus: ["M12 5v14", "M5 12h14"],
+  // Lucide's plus spans 14 of the 24 grid; widened to 16 (y/x 4..20) so its ink
+  // matches refresh (4..20) — at BAR_ICON 14 the two glyphs then read the same
+  // optical size beside each other in a toolbar row.
+  plus: ["M12 4v16", "M4 12h16"],
   check: ["M20 6L9 17l-5-5"],
   x: ["M18 6L6 18", "M6 6l12 12"],
   info: ["M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z", "M12 16v-4", "M12 8h.01"],
@@ -276,10 +278,7 @@ const PATHS: Record<IconName, string[]> = {
   square: ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"],
   squareCheck: ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "m9 12 2 2 4-4"],
   squareMinus: ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M9 12h6"],
-  // 账号卡三枚（card.rs ArrowLeftRight / LogOut，dialog_chrome.rs
-  // ExternalLink；Lucide 24×24 stroke 形）。
-  arrowLeftRight: ["M8 3 4 7l4 4", "M4 7h16", "m16 21 4-4-4-4", "M20 17H4"],
-  logOut: ["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", "m16 17 5-5-5-5", "M21 12H9"],
+  // dialog_chrome.rs ExternalLink；Lucide 24×24 stroke 形。
   externalLink: ["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"],
   // Settings-section glyphs — Lucide paths, same conventions as above
   // (settings/mod.rs SettingsSection::icon parity; `link` reuses the glyph
@@ -400,6 +399,11 @@ const PATHS: Record<IconName, string[]> = {
     "M14 2v4",
     "M8 10v4",
     "M16 18v4",
+  ],
+  // Lucide gauge: 仪表盘半圆弧与指针，用于侧栏底栏与设置页额度快捷入口。
+  gauge: [
+    "m12 14 4-4",
+    "M3.34 19a10 10 0 1 1 17.32 0",
   ],
 };
 

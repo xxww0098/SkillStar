@@ -303,36 +303,15 @@ pub fn antigravity_gemini_dir(roots: &PathRoots) -> PathBuf {
     roots.tool_home().join(".gemini")
 }
 
-/// Gemini CLI's config directory: sandbox, then ~/.gemini.
-///
-/// It shares the `~/.gemini` prefix with Antigravity but nothing else: Antigravity
-/// writes its own token files there (`jetski-standalone-oauth-token`, the agy CLI
-/// session), while the Gemini CLI reads exactly the two files below. Keeping the
-/// two products' paths apart is what stops a switch of one from silently
-/// rewriting the other's credential.
-pub fn gemini_cli_dir(roots: &PathRoots) -> PathBuf {
-    roots.tool_home().join(".gemini")
-}
-
-/// The OAuth tokens the Gemini CLI serves (the file it refreshes and re-reads).
-pub fn gemini_cli_oauth_creds_path(roots: &PathRoots) -> PathBuf {
-    gemini_cli_dir(roots).join("oauth_creds.json")
-}
-
-/// Which Google account the Gemini CLI believes its cached tokens belong to.
-pub fn gemini_cli_accounts_path(roots: &PathRoots) -> PathBuf {
-    gemini_cli_dir(roots).join("google_accounts.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         DesktopOs, PathRoots, antigravity_gemini_dir, antigravity_state_db_path,
-        antigravity_user_data_dir, claude_config_dir, claude_credentials_path, codex_auth_path,
-        codex_home, cursor_state_db_path, cursor_user_data_dir, gemini_cli_accounts_path,
-        aws_sso_cache_dir, gemini_cli_oauth_creds_path, grok_auth_path, grok_home,
-        devin_desktop_state_db_path, kiro_auth_token_path, kiro_profile_path, kiro_state_db_path,
-        zcode_credentials_path, zcode_home, zcode_settings_path,
+        antigravity_user_data_dir, aws_sso_cache_dir, claude_config_dir, claude_credentials_path,
+        codex_auth_path, codex_home, cursor_state_db_path, cursor_user_data_dir,
+        devin_desktop_state_db_path, grok_auth_path, grok_home, kiro_auth_token_path,
+        kiro_profile_path, kiro_state_db_path, zcode_credentials_path, zcode_home,
+        zcode_settings_path,
     };
     use std::path::PathBuf;
 
@@ -568,31 +547,6 @@ mod tests {
     }
 
     #[test]
-    fn gemini_cli_keeps_its_two_files_under_the_gemini_home() {
-        // 同一前缀，不同产品：Gemini CLI 只认下面这两个文件。
-        let macos = roots(DesktopOs::Macos);
-        assert_eq!(
-            gemini_cli_oauth_creds_path(&macos),
-            PathBuf::from("/home/dev/.gemini/oauth_creds.json")
-        );
-        assert_eq!(
-            gemini_cli_accounts_path(&macos),
-            PathBuf::from("/home/dev/.gemini/google_accounts.json")
-        );
-        assert_eq!(
-            gemini_cli_oauth_creds_path(&macos).parent(),
-            Some(antigravity_gemini_dir(&macos).as_path())
-        );
-
-        let mut sandboxed = roots(DesktopOs::Linux);
-        sandboxed.sandbox_home = Some(PathBuf::from("/sandbox"));
-        assert_eq!(
-            gemini_cli_oauth_creds_path(&sandboxed),
-            PathBuf::from("/sandbox/.gemini/oauth_creds.json")
-        );
-    }
-
-    #[test]
     fn the_sandbox_root_wins_on_every_platform() {
         for os in [DesktopOs::Macos, DesktopOs::Windows, DesktopOs::Linux] {
             let mut sandboxed = roots(os);
@@ -609,7 +563,6 @@ mod tests {
                 antigravity_state_db_path(&sandboxed),
                 antigravity_gemini_dir(&sandboxed),
                 grok_auth_path(&sandboxed),
-                gemini_cli_oauth_creds_path(&sandboxed),
                 kiro_auth_token_path(&sandboxed),
                 kiro_profile_path(&sandboxed),
                 zcode_credentials_path(&sandboxed),

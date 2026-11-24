@@ -202,3 +202,80 @@ fn the_env_sandbox_keeps_a_real_switch_out_of_the_real_home() {
         outcome.target
     );
 }
+
+#[test]
+fn bigmodel_session_without_email_round_trips_username_and_preserves_extensions() {
+    let fixture = Fixture::new();
+    let cred_path = fixture.credentials();
+    std::fs::create_dir_all(cred_path.parent().expect("dir")).expect("dir");
+    let key = super::store::credential_key(&fixture.roots.home, &super::store::current_username());
+    let existing_user_info = json!({
+        "id": "27741789126905948",
+        "username": "old-name",
+        "displayName": "old-name",
+        "email": "stale@example.com",
+        "rawProfile": {
+            "user_id": "27741789126905948",
+            "email": "",
+            "name": "xxww0098",
+            "zcodeProfileSchemaVersion": 2
+        },
+        "avatarUrl": "https://example.com/avatar.png"
+    })
+    .to_string();
+    let seed = json!({
+        "oauth:active_provider": super::store::seal(&key, "bigmodel").expect("seal"),
+        "oauth:bigmodel:access_token": super::store::seal(&key, "at-old").expect("seal"),
+        "oauth:bigmodel:user_info": super::store::seal(&key, &existing_user_info).expect("seal"),
+        "zcodejwttoken": super::store::seal(&key, "jwt-old").expect("seal"),
+    });
+    std::fs::write(&cred_path, serde_json::to_vec(&seed).expect("json")).expect("seed");
+
+    // 1. 直接读取本机无邮箱凭据：拿到真实 username 与 account_id。
+    let initial = read(&fixture.roots).expect("read").expect("session");
+    assert_eq!(initial.identity.display_name.as_deref(), Some("old-name"));
+    assert_eq!(initial.identity.account_id.as_deref(), Some("27741789126905948"));
+
+    // 2. 切回同一账号（无邮箱）：保留 rawProfile/avatarUrl，更新 username/displayName，清掉旧 email。
+    let tokens = TokenSet {
+        access_token: jwt_with_claims(json!({
+            "customer_id": "27741789126905948",
+            "username": "xxww0098"
+        })),
+        refresh_token: None,
+        id_token: Some(jwt_with_claims(json!({ "sub": "zcode-sub" }))),
+        expires_at: None,
+        token_type: "Bearer".to_string(),
+    };
+    let bigmodel = json!({ "provider": "bigmodel" });
+    let req = SwitchRequest {
+        agent: "zcode",
+        tokens: &tokens,
+        provider_state: Some(&bigmodel),
+        display_name: "xxww0098",
+        account_id: Some("27741789126905948"),
+        email: None,
+    };
+    write(&fixture.roots, &req).expect("write");
+
+    let body: Value =
+        serde_json::from_slice(&std::fs::read(&cred_path).expect("read")).expect("json");
+    let written_raw = super::store::open(
+        &key,
+        body["oauth:bigmodel:user_info"].as_str().expect("sealed"),
+    )
+    .expect("open");
+    let written: Value = serde_json::from_str(&written_raw).expect("json");
+    assert_eq!(written["id"], "27741789126905948");
+    assert_eq!(written["userId"], "27741789126905948");
+    assert_eq!(written["username"], "xxww0098");
+    assert_eq!(written["displayName"], "xxww0098");
+    assert!(written.get("email").is_none(), "stale email must be removed");
+    assert_eq!(written["avatarUrl"], "https://example.com/avatar.png");
+    assert_eq!(written["rawProfile"]["zcodeProfileSchemaVersion"], 2);
+
+    let after = read(&fixture.roots).expect("read").expect("session");
+    assert_eq!(after.identity.display_name.as_deref(), Some("xxww0098"));
+    assert_eq!(after.identity.account_id.as_deref(), Some("27741789126905948"));
+    assert_eq!(after.identity.email, None);
+}

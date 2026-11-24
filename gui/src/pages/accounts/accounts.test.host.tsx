@@ -3,17 +3,19 @@
 // OAuth 的 finish ok/err、本机导入、令牌导入），读数 signal 在假桥调用点
 // 直接 set（波 1 教训：普通计数变量不触发重渲染）。
 //
-// nsh 0.5 起 press 做命中测试：添加对话框是 position:fixed 覆盖层，遮罩之下
+// nsh 0.6 test 的 press 做命中测试：添加对话框是 position:fixed 覆盖层，遮罩之下
 // 的装置按钮会以 ERR_NSH_TEST_COVERED 拒绝——装置动作因此挂在 host 事件
 // 通道上（host.on("harness")），测试用 app.host.send("harness", {action})
 // 驱动。不触文件系统、不打真网、不写 $HOME。
 
-import { Text, View, host, mount, signal, type JSX } from "nsh";
+import { Text, View, effect, host, mount, signal, type JSX } from "nsh";
 import { DialogHost } from "../../chrome/dialog";
+import { subscribeNotify } from "../../shell/events";
 import { AccountsWorkbench } from "./index";
 import { AccountsProviderMenu } from "./rail";
 import { createAccountsState } from "./state";
 import type { AccountsBridge } from "./bridge";
+import type { AutoRefreshPrefs } from "./prefs";
 import type {
   AccountView,
   ActivateOutcome,
@@ -44,6 +46,31 @@ const AGENTS: AgentRow[] = [
     displayName: "Kiro",
     supportsOauth: true,
     localSource: "~/.aws/sso/cache/kiro-auth-token.json",
+    oauthModes: [
+      { id: "portal", label: "Kiro Portal", optionKey: "leg", fields: [] },
+      {
+        id: "idc",
+        label: "AWS IdC",
+        optionKey: "leg",
+        fields: ["idcRegion", "idcStartUrl"],
+      },
+    ],
+  },
+  {
+    id: "zcode",
+    displayName: "ZCode",
+    supportsOauth: true,
+    localSource: "~/.zcode/v2/credentials.json",
+    oauthModes: [
+      { id: "zai", label: "Z.ai", optionKey: "provider", fields: [] },
+      { id: "bigmodel", label: "BigModel", optionKey: "provider", fields: [] },
+    ],
+  },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    supportsOauth: true,
+    localSource: "Antigravity Keychain / state.vscdb",
   },
 ];
 
@@ -96,6 +123,7 @@ function seed(): FakeDomain {
             { key: "week", label: "Weekly", remainingPercent: 75, unit: "percent" },
           ],
           credits: { label: "Credits", remaining: 12.5, unlimited: false, unit: "count" },
+          resetCredits: 2,
         },
       }),
       account({
@@ -114,6 +142,7 @@ function seed(): FakeDomain {
             { key: "five_hour", label: "5h", remainingPercent: 64, unit: "percent" },
             { key: "week", label: "Weekly", remainingPercent: 25, unit: "percent" },
           ],
+          resetCredits: 0,
         },
       }),
       account({
@@ -149,6 +178,50 @@ function seed(): FakeDomain {
           credits: { label: "Credits", remaining: 12.5, unlimited: false, unit: "count" },
         },
       }),
+      account({
+        id: "ag-ultra",
+        agent: "antigravity",
+        displayName: "Example User",
+        email: "user@example.com",
+        plan: "G1-ULTRA-TIER",
+        createdAt: 5,
+        lastUsedAt: NOW - 60,
+        isActive: true,
+        usage: {
+          fetchedAt: NOW,
+          plan: "G1-ULTRA-TIER",
+          windows: [
+            {
+              key: "gemini-weekly",
+              label: "Gemini Models · Weekly Limit",
+              remainingPercent: 63,
+              unit: "percent",
+              resetsAt: NOW + 6 * 86400 + 7 * 3600,
+            },
+            {
+              key: "gemini-5h",
+              label: "Gemini Models · Five Hour Limit",
+              remainingPercent: 84,
+              unit: "percent",
+              resetsAt: NOW + 2 * 3600 + 40 * 60,
+            },
+            {
+              key: "claude-weekly",
+              label: "Claude and GPT models · Weekly Limit",
+              remainingPercent: 99,
+              unit: "percent",
+              resetsAt: NOW + 6 * 86400 + 11 * 3600,
+            },
+            {
+              key: "claude-5h",
+              label: "Claude and GPT models · Five Hour Limit",
+              remainingPercent: 100,
+              unit: "percent",
+              resetsAt: NOW + 5 * 3600,
+            },
+          ],
+        },
+      }),
     ],
     live: [
       { agent: "codex", identity: "primary@example.com", accountId: "codex-main", source: "cli" },
@@ -156,6 +229,7 @@ function seed(): FakeDomain {
       { agent: "cursor", identity: null, accountId: null, source: "cli" },
       { agent: "devin-desktop", identity: null, accountId: null, source: "cli" },
       { agent: "kiro", identity: null, accountId: null, source: "cli" },
+      { agent: "antigravity", identity: null, accountId: "ag-ultra", source: "keychain" },
     ],
   };
 }
@@ -187,6 +261,8 @@ let finishQueued: ((ok: boolean) => void) | null = null;
 let pendingLogin: LoginStart | null = null;
 let lastCallback = "";
 let lastToken = "";
+let lastStartLogin = "";
+let nextRefreshError: string | null = null;
 
 function bump(): void {
   pulse.set(pulse() + 1);
@@ -222,6 +298,11 @@ const fakeBridge: AccountsBridge = {
   async refresh(id) {
     calls.refresh += 1;
     bump();
+    if (nextRefreshError !== null) {
+      const err = nextRefreshError;
+      nextRefreshError = null;
+      throw err;
+    }
     const row = domain.rows.find((entry) => entry.id === id);
     return clone(row ?? domain.rows[0]);
   },
@@ -245,7 +326,11 @@ const fakeBridge: AccountsBridge = {
           entry.agent === agent ? { ...entry, accountId: id } : entry,
         );
         const target = domain.rows.find((entry) => entry.id === id)!;
-        resolve({ account: clone(target), previous, target: agent });
+        resolve({
+          account: clone(target),
+          previous,
+          target: agent,
+        });
       };
     });
   },
@@ -258,10 +343,10 @@ const fakeBridge: AccountsBridge = {
   agents() {
     return AGENTS.map((row) => ({ ...row }));
   },
-  startLogin(agent) {
+  startLogin(agent, options) {
     calls.start += 1;
     bump();
-    void agent;
+    lastStartLogin = `${agent}|${JSON.stringify(options ?? null)}`;
     pendingLogin = startInfo();
     return Promise.resolve(clone(pendingLogin));
   },
@@ -339,11 +424,22 @@ const harnessActions: Record<string, () => void> = {
   "loading-off": () => {
     state.loading.set(false);
   },
+  "set-error": () => {
+    state.error.set("list load failed from domain");
+  },
+  "refresh-err-401": () => {
+    nextRefreshError = "login required: credential rejected: HTTP 401";
+  },
+  "refresh-err-403": () => {
+    nextRefreshError = "usage unavailable: HTTP 403 Forbidden";
+  },
   "last-call": () => {
     lastCall.set(
       `callback=${lastCallback === "" ? "none" : lastCallback} token=${
         lastToken === "" ? "none" : lastToken
-      } pending=${pendingLogin?.loginId ?? "none"}`,
+      } pending=${pendingLogin?.loginId ?? "none"} start=${
+        lastStartLogin === "" ? "none" : lastStartLogin
+      }`,
     );
   },
   reset: () => {
@@ -353,6 +449,8 @@ const harnessActions: Record<string, () => void> = {
     for (const key of Object.keys(calls)) calls[key] = 0;
     lastCallback = "";
     lastToken = "";
+    lastStartLogin = "";
+    nextRefreshError = null;
     pendingLogin = null;
     activateQueued = null;
     finishQueued = null;
@@ -368,7 +466,15 @@ host.on("harness", (data) => {
 
 // ---- 装置 ---------------------------------------------------------------------
 
-const state = createAccountsState(fakeBridge);
+// 自动刷新周期的持久化在装置里走内存：测试不碰真实 gui_prefs.json（不写
+// $HOME），只留「本次会话最后一次保存的值」，由 prefs 读数行断言。
+const savedAutoRefreshMs = signal<number | null>(null);
+const autoRefreshPrefs: AutoRefreshPrefs = {
+  load: () => savedAutoRefreshMs(),
+  save: (ms) => savedAutoRefreshMs.set(ms),
+};
+
+const state = createAccountsState(fakeBridge, autoRefreshPrefs);
 
 /** 读数行：计数（借 pulse 重算）+ 对话框切面（直接读 state 的 signal）。 */
 function Readout(): JSX.Element {
@@ -381,10 +487,27 @@ function Readout(): JSX.Element {
   );
 }
 
+/** 添加/导入的成功反馈走 notify 频道的 toast（页面横幅只留切换与错误）。
+ * 装置把它镜像成文本供 texts() 断言：不挂 NoticeBand——它的卡片盖在页面
+ * 顶部，会挡住工具栏按钮的命中测试。 */
+function NoticeMirror(): JSX.Element {
+  const message = signal("none");
+  effect(() => subscribeNotify((request) => message.set(request.message)));
+  return (
+    <Text testID="host-notice" style={{ fontSize: 10 }}>
+      {message()}
+    </Text>
+  );
+}
+
 function App(): JSX.Element {
   return (
     <View style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%" }}>
       <Readout />
+      <Text testID="host-auto-refresh-pref" style={{ fontSize: 10 }}>
+        {`prefs:${savedAutoRefreshMs() ?? "off"}`}
+      </Text>
+      <NoticeMirror />
       <Text testID="host-last" style={{ fontSize: 10 }}>
         {lastCall()}
       </Text>

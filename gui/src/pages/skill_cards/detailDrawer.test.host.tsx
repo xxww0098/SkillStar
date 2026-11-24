@@ -1,4 +1,4 @@
-import { Text, View, mount, signal, type JSX } from "nsh";
+import { Text, View, mount, signal } from "nsh";
 import { Button } from "nsh/base";
 import { NoticeBand } from "../../shell/notify";
 import { DialogHost } from "../../chrome/dialog";
@@ -11,7 +11,7 @@ import type { DeckDrawerOps, DrawerDeck, LinkReport } from "./detailDrawerAction
 // 事件计数渲染成文本供 app.texts() 断言）。真实域写入由 native crate 的
 // cargo test 用隔离数据目录覆盖；这里验证的是抽屉的数据流与交互编排。
 
-type Scene = "rich" | "fifty" | "empty" | "noagents";
+type Scene = "rich" | "fifty" | "empty" | "noagents" | "mixed";
 
 /** 2 成员（1 已安装 1 缺装）、2 个可链接 agent、claude 已上链。 */
 const RICH: DrawerDeck = {
@@ -40,6 +40,19 @@ const EMPTY: DrawerDeck = {
   icon: "⭐",
   skills: [],
   agentLinks: [],
+};
+
+const MIXED: DrawerDeck = {
+  id: "g4",
+  name: "漂移卡组",
+  description: "",
+  icon: "⚡",
+  skills: ["alpha", "beta"],
+  agentLinks: ["claude"],
+  memberAgentLinks: {
+    alpha: ["Claude Code"],
+    beta: [],
+  },
 };
 
 const INSTALLED = new Set(["alpha"]);
@@ -96,6 +109,8 @@ function deckFor(scene: Scene): DrawerDeck {
       return FIFTY;
     case "empty":
       return EMPTY;
+    case "mixed":
+      return MIXED;
     default:
       return RICH;
   }
@@ -126,6 +141,9 @@ function App() {
         </Button>
         <Button testID="host-scene-noagents" onPress={() => scene.set("noagents")}>
           <Text>scene-noagents</Text>
+        </Button>
+        <Button testID="host-scene-mixed" onPress={() => scene.set("mixed")}>
+          <Text>scene-mixed</Text>
         </Button>
         <Button testID="host-page-busy" onPress={() => pageBusy.set(!pageBusy())}>
           <Text>page-busy</Text>

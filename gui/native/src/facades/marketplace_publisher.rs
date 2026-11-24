@@ -41,7 +41,34 @@ fn opt_str(value: &Option<String>) -> JsonValue {
     }
 }
 
-fn repos_result(result: LocalFirstResult<Vec<PublisherRepo>>) -> JsonValue {
+fn status_tag(status: SnapshotStatus) -> &'static str {
+    match status {
+        SnapshotStatus::Fresh => "fresh",
+        SnapshotStatus::Stale => "stale",
+        SnapshotStatus::Seeding => "seeding",
+        SnapshotStatus::Miss => "miss",
+        SnapshotStatus::ErrorFallback => "error_fallback",
+        SnapshotStatus::RemoteError => "remote_error",
+    }
+}
+
+fn error_json(status: SnapshotStatus, scope: &str, error: Option<String>) -> JsonValue {
+    match error {
+        Some(detail) => {
+            let mut err = JsonMap::new();
+            err.insert(
+                "kind".to_owned(),
+                JsonValue::String(status_tag(status).to_owned()),
+            );
+            err.insert("scope".to_owned(), JsonValue::String(scope.to_owned()));
+            err.insert("detail".to_owned(), JsonValue::String(detail));
+            JsonValue::Object(err)
+        }
+        None => JsonValue::Null,
+    }
+}
+
+fn repos_result(scope: &str, result: LocalFirstResult<Vec<PublisherRepo>>) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert(
         "data".to_owned(),
@@ -69,42 +96,64 @@ fn repos_result(result: LocalFirstResult<Vec<PublisherRepo>>) -> JsonValue {
     );
     map.insert(
         "snapshotStatus".to_owned(),
-        JsonValue::String(
-            match result.snapshot_status {
-                SnapshotStatus::Fresh => "fresh",
-                SnapshotStatus::Stale => "stale",
-                SnapshotStatus::Seeding => "seeding",
-                SnapshotStatus::Miss => "miss",
-                SnapshotStatus::ErrorFallback => "error_fallback",
-                SnapshotStatus::RemoteError => "remote_error",
-            }
-            .to_owned(),
-        ),
+        JsonValue::String(status_tag(result.snapshot_status).to_owned()),
     );
     map.insert(
         "snapshotUpdatedAt".to_owned(),
         opt_str(&result.snapshot_updated_at),
     );
-    map.insert("error".to_owned(), opt_str(&result.error));
+    map.insert(
+        "error".to_owned(),
+        error_json(result.snapshot_status, scope, result.error),
+    );
     JsonValue::Object(map)
+}
+
+fn lookup_localized_description(
+    skill: &Skill,
+    config: Option<&ss_core::translation::TranslationConfig>,
+) -> Option<String> {
+    if let Some(text) = &skill.localized_description {
+        return Some(text.clone());
+    }
+    let cfg = config?;
+    let enabled = cfg
+        .description_choices
+        .get(&skill.name)
+        .copied()
+        .unwrap_or(cfg.translate_descriptions);
+    if !enabled {
+        return None;
+    }
+    let target = ss_core::translation::canonical_target(&cfg.target_lang);
+    if !ss_core::translation::needs_translation(&skill.description, target) {
+        return None;
+    }
+    ss_core::translation::lookup(&skill.description, target)
 }
 
 /// One repo-skill row, the same wire shape `Marketplace.leaderboard`
 /// resolves with (marketplace.rs `skill_json`, repeated here because the
 /// slices never share private helpers — the page's `parseSkill` accepts
 /// either producer).
+#[cfg_attr(not(test), allow(dead_code))]
 fn skill_json(skill: &Skill) -> JsonValue {
+    let config = ss_core::translation::load_config().ok();
+    skill_json_with_config(skill, config.as_ref())
+}
+
+fn skill_json_with_config(
+    skill: &Skill,
+    config: Option<&ss_core::translation::TranslationConfig>,
+) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert("name".to_owned(), JsonValue::String(skill.name.clone()));
     map.insert(
         "description".to_owned(),
         JsonValue::String(skill.description.clone()),
     );
-    if let Some(text) = &skill.localized_description {
-        map.insert(
-            "localizedDescription".to_owned(),
-            JsonValue::String(text.clone()),
-        );
+    if let Some(text) = lookup_localized_description(skill, config) {
+        map.insert("localizedDescription".to_owned(), JsonValue::String(text));
     }
     map.insert(
         "skillType".to_owned(),
@@ -157,50 +206,77 @@ fn skill_json(skill: &Skill) -> JsonValue {
     JsonValue::Object(map)
 }
 
-fn skills_result(result: LocalFirstResult<Vec<Skill>>) -> JsonValue {
+fn skills_result(scope: &str, result: LocalFirstResult<Vec<Skill>>) -> JsonValue {
+    let config = ss_core::translation::load_config().ok();
     let mut map = JsonMap::new();
     map.insert(
         "data".to_owned(),
-        JsonValue::Array(result.data.iter().map(skill_json).collect()),
+        JsonValue::Array(
+            result
+                .data
+                .iter()
+                .map(|skill| skill_json_with_config(skill, config.as_ref()))
+                .collect(),
+        ),
     );
     map.insert(
         "snapshotStatus".to_owned(),
-        JsonValue::String(
-            match result.snapshot_status {
-                SnapshotStatus::Fresh => "fresh",
-                SnapshotStatus::Stale => "stale",
-                SnapshotStatus::Seeding => "seeding",
-                SnapshotStatus::Miss => "miss",
-                SnapshotStatus::ErrorFallback => "error_fallback",
-                SnapshotStatus::RemoteError => "remote_error",
-            }
-            .to_owned(),
-        ),
+        JsonValue::String(status_tag(result.snapshot_status).to_owned()),
     );
     map.insert(
         "snapshotUpdatedAt".to_owned(),
         opt_str(&result.snapshot_updated_at),
     );
-    map.insert("error".to_owned(), opt_str(&result.error));
+    map.insert(
+        "error".to_owned(),
+        error_json(result.snapshot_status, scope, result.error),
+    );
     JsonValue::Object(map)
 }
 
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+static RUNTIME_READY_PATHS: OnceLock<Mutex<Option<(PathBuf, PathBuf)>>> = OnceLock::new();
+
 /// The snapshot runtime wiring bootstrap.rs owns on the GPUI side, repeated
-/// from marketplace.rs (the slices never share private helpers): the real
-/// data dir, the installed-skill markers, and the installed-skill loader.
-/// `configure_runtime` is a cheap RwLock write; `initialize` runs migrations
-/// once per db path.
-fn ensure_runtime() -> Result<(), String> {
-    let config = SnapshotRuntimeConfig::new(
-        ss_core::infra::paths::marketplace_db_path(),
-        ss_core::infra::paths::data_root(),
-        ss_skills::installed_skill::installed_snapshot_markers,
-        || -> InstalledSkillsFuture {
-            Box::pin(ss_skills::installed_skill::list_installed_skills())
-        },
-    );
-    market_snapshot::configure_runtime(config);
-    market_snapshot::initialize().map_err(|err| format!("{err:#}"))
+/// from marketplace.rs (the slices never share private helpers), cached per
+/// `(db_path, data_root)` and initialized on the blocking pool.
+async fn ensure_runtime() -> Result<(), String> {
+    let db_path = ss_core::infra::paths::marketplace_db_path();
+    let data_root = ss_core::infra::paths::data_root();
+    {
+        let guard = RUNTIME_READY_PATHS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if guard.as_ref() == Some(&(db_path.clone(), data_root.clone())) {
+            return Ok(());
+        }
+    }
+    let db_for_init = db_path.clone();
+    let root_for_init = data_root.clone();
+    blocking(move || {
+        let config = SnapshotRuntimeConfig::new(
+            db_for_init,
+            root_for_init,
+            ss_skills::installed_skill::installed_snapshot_markers,
+            || -> InstalledSkillsFuture {
+                Box::pin(ss_skills::installed_skill::list_installed_skills())
+            },
+        );
+        market_snapshot::configure_runtime(config);
+        market_snapshot::initialize().map_err(|err| format!("{err:#}"))
+    })
+    .await
+    .map_err(|join| format!("runtime init task failed: {join}"))??;
+
+    let mut guard = RUNTIME_READY_PATHS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    *guard = Some((db_path, data_root));
+    Ok(())
 }
 
 #[module]
@@ -211,9 +287,11 @@ impl MarketplacePublisher {
     /// installsLabel, installs}…], snapshotStatus, snapshotUpdatedAt,
     /// error}`.
     pub async fn publisher_repos(publisher_name: String) -> Result<JsonValue, String> {
+        ensure_runtime().await?;
+        let scope = format!("publisher_repos:{publisher_name}");
         get_publisher_repos_local(&publisher_name)
             .await
-            .map(repos_result)
+            .map(|result| repos_result(&scope, result))
             .map_err(|err| format!("{err:#}"))
     }
 
@@ -224,10 +302,11 @@ impl MarketplacePublisher {
     /// Same wire shape as `Marketplace.leaderboard`; drop the answer when the
     /// open repo changed while it was in flight.
     pub async fn repo_skills(source: String) -> Result<JsonValue, String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
+        let scope = format!("repo_skills:{source}");
         get_repo_skills_local(&source)
             .await
-            .map(skills_result)
+            .map(|result| skills_result(&scope, result))
             .map_err(|err| format!("{err:#}"))
     }
 
@@ -235,10 +314,11 @@ impl MarketplacePublisher {
     /// in-flight description round has already written. Does not flip the
     /// grid back to a skeleton and does not start another round.
     pub async fn reread_repo_skills(source: String) -> Result<JsonValue, String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
+        let scope = format!("repo_skills:{source}");
         reread_repo_skills_local(&source)
             .await
-            .map(skills_result)
+            .map(|result| skills_result(&scope, result))
             .map_err(|err| format!("{err:#}"))
     }
 

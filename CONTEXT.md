@@ -39,8 +39,8 @@ _Avoid_: 备份、共享副本
 ## 账号与用量
 
 **账号（Account）**：
-账号库里的一条记录——某个 agent 的一个登录身份及其加密凭证。同一 agent 可有多个账号；Accounts 工作台管理它们。
-账号身份以 `ss-skills` 注册表的 agent id 表示，覆盖 `ss_accounts::Agent::supported()` 定义的九个受管 agent。
+账号库里的一条记录——某个 agent 的一个登录身份及其加密凭证或客户端本机引用。同一 agent 可有多个账号；Accounts 工作台管理它们。
+账号所属客户端以 `ss_accounts::Agent::supported()` 中的 id 表示；只支持账号管理的客户端不要求是技能同步目标。
 _Avoid_: 登录条目、Subscription、catalog 行
 
 **当前生效（Active）**：
@@ -54,5 +54,5 @@ _Avoid_: 激活状态、pin
 _Avoid_: 用量归因、今日消耗
 
 **切号（Switch）**：
-把账号库里的令牌写进该 agent 的客户端凭据，然后读回校验。写回失败不改索引，并把旧凭据写回。
+让客户端使用账号库中选择的登录身份，然后读回校验；可以写令牌，也可以选择客户端已保存的身份。写回失败不改索引，并恢复旧状态。
 _Avoid_: 注入、挂载

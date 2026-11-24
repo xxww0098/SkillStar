@@ -19,9 +19,9 @@ name: Windows CI
 #
 # 4. Do not re-add `--exclude skillstar`. The old src-tauri test exe died
 #    on GitHub Windows runners with 0xc0000139 because it linked WebView2.
-#    The current skillstar binary is GPUI and does not link WebView2, so the
-#    workspace test includes it. Re-excluding it would hide Windows GUI
-#    compile failures.
+#    The current skillstar binary uses the native nsh Win32 AppView host
+#    (ss-gui-host) and does not link WebView2, so the workspace test includes
+#    it. Re-excluding it would hide Windows GUI compile failures.
 #
 # 5. Channel content-hash fixtures must pin `core.autocrlf=false` and
 #    `core.eol=lf` (and treat files as `-text`). Windows runners default
@@ -102,6 +102,31 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install nsh CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $match = Select-String -Path Cargo.toml -Pattern '^\s*nsh-core\s*=.*?"?=?([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+          if (-not $match) {
+            throw "Cargo.toml: cannot read nsh-core version"
+          }
+          $nshVer = $match.Matches[0].Groups[1].Value
+          $env:NSH_VERSION = "v$nshVer"
+          irm https://nsh.dev/install.ps1 | iex
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:LOCALAPPDATA\nsh"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:LOCALAPPDATA\nsh\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nsh\bin"
+
+      - name: Check, test, and build nsh GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh --version
+          nsh check gui
+          nsh test gui
+          nsh build -o gui/host/gen gui
+          test -s gui/host/gen/bundle.js || { echo "::error::gui/host/gen/bundle.js is missing or empty"; exit 1; }
 
       - name: Rust tests (workspace)
         run: cargo test --workspace --locked

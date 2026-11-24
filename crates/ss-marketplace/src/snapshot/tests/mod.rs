@@ -11,6 +11,7 @@ mod part4;
 mod part5;
 mod part6;
 mod part8;
+mod part9;
 
 pub(crate) fn test_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

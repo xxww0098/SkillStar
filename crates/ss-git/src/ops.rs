@@ -1,15 +1,12 @@
 use anyhow::{Context, Result, anyhow};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ss_core::config::{github_health, github_mirror};
 use ss_core::infra::path_env::command_with_path;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::transport::{self, GitOperationSession};
-pub use crate::tree::{
-    GitTreeEntry, list_tree_entries_at, list_tree_entries_with_trees, list_tree_paths,
-    list_tree_paths_at, revision_contains_path,
-};
+pub use crate::tree::{GitTreeEntry, list_tree_entries_at, list_tree_paths};
 
 /// Git `file://` URL for a local path.
 ///
@@ -26,90 +23,6 @@ pub fn local_file_url(path: &Path) -> String {
         normalized.insert(0, '/');
     }
     format!("file://{normalized}")
-}
-
-/// Compute the tree-hash of a local Git repository.
-///
-/// Tries the in-process `gix` library first (fastest, no process spawn).
-/// Falls back to `git rev-parse HEAD^{tree}` via CLI when `gix` fails —
-pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
-    match compute_tree_hash_gix(repo_path) {
-        Ok(hash) => Ok(hash),
-        Err(gix_err) => {
-            let is_repo_discovery_miss = gix_err
-                .to_string()
-                .contains("Failed to discover git repository");
-
-            // Non-git paths are common for local/copy-based skills; avoid
-            // noisy warnings and skip CLI fallback when no `.git` ancestor exists.
-            if is_repo_discovery_miss && !has_git_ancestor(repo_path) {
-                debug!(
-                    target: "git_ops",
-                    path = %repo_path.display(),
-                    "tree hash skipped: path is not inside a git repository"
-                );
-                return Err(gix_err);
-            }
-
-            if is_repo_discovery_miss {
-                debug!(
-                    target: "git_ops",
-                    path = %repo_path.display(),
-                    error = %gix_err,
-                    "gix could not discover git repository, falling back to git CLI"
-                );
-            } else {
-                warn!(
-                    target: "git_ops",
-                    path = %repo_path.display(),
-                    error = %gix_err,
-                    "gix failed to read HEAD tree hash, falling back to git CLI"
-                );
-            }
-            compute_tree_hash_cli(repo_path).with_context(|| {
-                format!(
-                    "Both gix and git CLI failed to compute tree hash for {:?}. gix error: {}",
-                    repo_path, gix_err
-                )
-            })
-        }
-    }
-}
-
-/// In-process tree hash via `gix` (no subprocess).
-///
-/// Uses `gix::discover` instead of `gix::open` so that subdirectory paths
-/// (common for symlinked skills pointing into repo subdirs) correctly walk
-/// up to find the `.git` root.
-fn compute_tree_hash_gix(repo_path: &Path) -> Result<String> {
-    let repo = gix::discover(repo_path).context("Failed to discover git repository")?;
-    let head = repo.head_commit().context("Failed to get HEAD commit")?;
-    let tree_id = head.tree_id().context("Failed to get tree ID")?;
-    Ok(tree_id.to_string())
-}
-
-/// CLI fallback: `git rev-parse HEAD^{tree}`.
-fn compute_tree_hash_cli(repo_path: &Path) -> Result<String> {
-    run_git(repo_path, &["rev-parse", "HEAD^{tree}"])
-}
-
-/// Walk up from `path` to the directory containing `.git`.
-///
-/// `path` may be a file or directory; parents are visited until the root.
-pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
-    let mut current = path.to_path_buf();
-    loop {
-        if current.join(".git").exists() {
-            return Some(current);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-fn has_git_ancestor(path: &Path) -> bool {
-    find_repo_root(path).is_some()
 }
 
 /// Resolve a revision to its object id (`git rev-parse <rev>`).
@@ -398,56 +311,19 @@ pub fn head_revision(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["rev-parse", "HEAD"])
 }
 
-/// Marker error: the worktree gained uncommitted modifications during a
-/// fetch, so the subsequent `reset --hard` must NOT run — doing so would
-/// destroy the user's edits. Callers that roll back failed updates on error
-/// must downcast for this type and skip the reset (and any snapshot restore
-/// that would overwrite the edited files).
-#[derive(Debug)]
-pub struct WorktreeDirty;
-
-impl std::fmt::Display for WorktreeDirty {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Skill checkout changed during the update; edits were preserved — retry to keep them or discard them explicitly"
-        )
-    }
-}
-
-impl std::error::Error for WorktreeDirty {}
-
 /// Read the configured origin URL without mutating the repository.
-pub fn remote_origin_url(repo_path: &Path) -> Result<String> {
+fn remote_origin_url(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["remote", "get-url", "origin"])
 }
 
 /// Run a checkout that may lazily download blobs from a promisor remote.
-pub fn checkout_in_session(
+fn checkout_in_session(
     repo_path: &Path,
     args: &[&str],
     session: &GitOperationSession,
 ) -> Result<String> {
     let remote = remote_origin_url(repo_path)?;
     run_remote_git(repo_path, args, &remote, session)
-}
-
-/// Git failed because the recorded remote ref no longer exists.
-///
-/// Typical stderr: `fatal: couldn't find remote ref <name>`. Callers with a
-/// usable local checkout must not treat this as a hard install/update failure.
-pub fn is_missing_remote_ref(error: &dyn std::error::Error) -> bool {
-    let mut current = Some(error);
-    while let Some(err) = current {
-        let text = err.to_string();
-        if text.contains("couldn't find remote ref")
-            || text.contains("Could not find remote branch")
-        {
-            return true;
-        }
-        current = err.source();
-    }
-    false
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {

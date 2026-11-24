@@ -2,16 +2,12 @@
 //! `skillstar-gui/native`. TypeScript declarations for everything registered
 //! here are generated into `.nsh/types/skillstar-gui/native.d.ts`.
 //!
-//! Wave-1 scope: one read-only domain call as the bridge proof
-//! (`Marketplace.mayQueryInstallAudits`), plus five pre-registered empty
-//! deck-slice facades (`SkillCards`, `SkillCardsCreateGroup`,
-//! `SkillCardsImport`, `SkillCardsShare`, `SkillCardsDrawer`) so the
-//! parallel slice workers never edit this registry — they only add methods
-//! inside their own file in `facades/`. The remaining domains (skills,
-//! accounts, settings, sync, storage) land with their waves.
+//! Domain facades are registered into `skillstar-gui/native` below, one
+//! module per domain/slice inside `facades/`.
 
 mod agent_icons;
 mod facades;
+mod popover_dismiss;
 mod repo_avatars;
 
 use nsh_core::prelude::*;
@@ -44,6 +40,7 @@ fn native(registry: &mut Registry) {
     registry.module::<facades::projects::Projects>();
     registry.module::<facades::my_skills_import::MySkillsImport>();
     registry.module::<facades::my_skills_github::MySkillsGitHub>();
+    registry.module::<facades::my_skills_channels::MySkillsChannels>();
     // Settings base wave: the settings page's own seam (prefs + proxy
     // read/write through ss-core) plus pre-registered empty slots for the
     // two parallel section slices (skill-updates/translation and
@@ -54,6 +51,7 @@ fn native(registry: &mut Registry) {
     // Wave 7 (settings sections 2): pre-registered empty slots for the
     // agent-connections/managed-skills and storage/skill-repair/about
     // section slices.
+    registry.module::<facades::mcp_hub::McpHub>();
     registry.module::<facades::settings_agent_connections::SettingsAgentConnections>();
     registry.module::<facades::settings_storage::SettingsStorage>();
 }
@@ -66,12 +64,24 @@ pub const ROOT_VERSION: &str = env!("SKILLSTAR_ROOT_VERSION");
 /// Shared with `ss-gui-host` (macOS Dock icon) and the sidebar brand mark.
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icon.png");
 
+/// Monochrome vector template icon (`gui/assets/tray-icon.svg`) for the macOS
+/// menu bar and Linux status notifier item.
+pub const TRAY_ICON_SVG: &[u8] = include_bytes!("../../assets/tray-icon.svg");
+
 /// `data:image/png;base64,…` URI of [`APP_ICON_PNG`], encoded once per process
 /// so `<Image>` renders in `nsh run`, `nsh test`, and the single-file binary
 /// without an external `assets/` directory on disk.
 pub fn brand_icon_data_uri() -> &'static str {
     static URI: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     URI.get_or_init(|| encode_data_uri("data:image/png;base64,", APP_ICON_PNG))
+        .as_str()
+}
+
+/// `data:image/svg+xml;base64,…` URI of [`TRAY_ICON_SVG`], rendered as an
+/// automatic monochrome template image in the macOS menu bar.
+pub fn tray_icon_data_uri() -> &'static str {
+    static URI: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URI.get_or_init(|| encode_data_uri("data:image/svg+xml;base64,", TRAY_ICON_SVG))
         .as_str()
 }
 
@@ -94,7 +104,9 @@ pub(crate) fn encode_data_uri(prefix: &str, bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{APP_ICON_PNG, ROOT_VERSION, brand_icon_data_uri};
+    use super::{
+        APP_ICON_PNG, ROOT_VERSION, TRAY_ICON_SVG, brand_icon_data_uri, tray_icon_data_uri,
+    };
 
     /// Compile-level proof that the bridge links `ss-core`, the infra base
     /// crate. `canonical_target` is pure: a table lookup with a default, no
@@ -130,5 +142,14 @@ mod tests {
             nsh_core::image::decode_data_uri(brand_icon_data_uri()).expect("valid data URI");
         assert_eq!(mime, "image/png");
         assert_eq!(decoded.as_slice(), APP_ICON_PNG);
+    }
+
+    #[test]
+    fn tray_icon_svg_round_trips_through_nsh_data_uri_decoder() {
+        assert!(TRAY_ICON_SVG.starts_with(b"<svg "));
+        let (mime, decoded) =
+            nsh_core::image::decode_data_uri(tray_icon_data_uri()).expect("valid SVG data URI");
+        assert_eq!(mime, "image/svg+xml");
+        assert_eq!(decoded.as_slice(), TRAY_ICON_SVG);
     }
 }

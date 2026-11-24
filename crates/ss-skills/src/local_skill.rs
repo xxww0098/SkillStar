@@ -315,7 +315,7 @@ fn create_locked(name: &str, content: Option<&str>) -> Result<Skill> {
 
 /// Preserve a bounded content snapshot as a new independently-owned local
 /// Skill directly in `installed/<name>/`.
-pub(crate) fn create_from_snapshot(
+fn create_from_snapshot(
     name: &str,
     snapshot: &crate::content::SkillSnapshot,
 ) -> Result<Skill> {
@@ -436,46 +436,6 @@ fn installed_local_skill(name: &str, description: String) -> Result<Skill> {
     })
 }
 
-/// Adopt an existing skill directory into `skills-local/` and expose it via
-/// the hub symlink in `skills/`.
-///
-/// This is used when SkillStar discovers a new unmanaged skill inside a
-/// project-level agent folder and needs to normalize it into local-skill
-/// storage without leaving a real directory behind in the hub.
-pub(crate) fn adopt_existing_dir_locked(name: &str, source_dir: &Path) -> Result<PathBuf> {
-    if !source_dir.is_dir() {
-        anyhow::bail!(
-            "Source skill directory '{}' does not exist or is not a directory",
-            source_dir.display()
-        );
-    }
-
-    let skill_path = prepare_new_local_skill_path(name)?;
-
-    move_dir(source_dir, &skill_path).with_context(|| {
-        format!(
-            "Failed to move discovered skill '{}' into installed skills",
-            name
-        )
-    })?;
-
-    if let Err(err) = crate::local_identity::replace_untrusted_sidecar(&skill_path)
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("Failed to mint local Skill identity for '{name}'"))
-    {
-        let _ = move_dir(&skill_path, source_dir);
-        return Err(err);
-    }
-    if let Err(err) = crate::library::record_local_skill(name)
-        .with_context(|| format!("Failed to record local skill '{name}' in library.json"))
-    {
-        let _ = move_dir(&skill_path, source_dir);
-        return Err(err);
-    }
-
-    Ok(skill_path)
-}
-
 /// Reconcile v3 local skills into the unified v4 `installed/` directory and
 /// refresh `library.json`.
 pub fn reconcile_hub_symlinks() {
@@ -516,30 +476,6 @@ pub fn delete(name: &str) -> Result<()> {
     }
     crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)?;
     crate::skill_install::remove_local_skill(name)
-}
-
-/// Graduate a local skill after publishing to GitHub.
-///
-/// Removes the local skill files and hub/library records so the caller can
-/// re-clone from GitHub as a proper remote skill.
-pub(crate) fn graduate(name: &str) -> Result<()> {
-    let hub_path = ss_core::infra::paths::hub_skills_dir().join(name);
-    if ss_core::infra::fs_ops::is_link(&hub_path) {
-        ss_core::infra::fs_ops::remove_symlink(&hub_path)
-            .with_context(|| format!("Failed to remove hub symlink for '{}'", name))?;
-    } else if hub_path.is_dir() {
-        ss_core::infra::fs_ops::remove_dir_all_retry(&hub_path)
-            .with_context(|| format!("Failed to delete graduated skill directory '{}'", name))?;
-    }
-
-    let legacy_path = ss_core::infra::paths::legacy_local_skills_dir().join(name);
-    if legacy_path != hub_path && legacy_path.is_dir() {
-        ss_core::infra::fs_ops::remove_dir_all_retry(&legacy_path)
-            .with_context(|| format!("Failed to delete legacy local skill '{}'", name))?;
-    }
-    let _ = crate::library::forget_skill(name);
-
-    Ok(())
 }
 
 /// Mark existing non-git skills in `data/skills/installed/` as local skills

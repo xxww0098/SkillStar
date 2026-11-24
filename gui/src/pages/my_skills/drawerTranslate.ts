@@ -20,7 +20,8 @@
 import { signal, type Signal } from "nsh";
 import { MarketplaceTranslation, MySkills } from "skillstar-gui/native";
 import { publishToast } from "../../shell/events";
-import { tf } from "../../services/translation";
+import { t, tf } from "../../services/translation";
+import { recordCardTranslations } from "./cardTranslate";
 import { descriptionChoices } from "./state";
 
 /** 模型拒绝（fill 报告的桥形状）。 */
@@ -86,13 +87,19 @@ export interface DrawerTranslateSession {
   /** 语言按钮门：visible=needs_translation；pending=正显示译文、引擎可用
    * 且这行还没落地（icon_sweep 的扫描态）。 */
   buttonGate(text: string, showing: boolean): { visible: boolean; pending: boolean };
-  /** 描述下方的一行弱化提示：会话内的模型拒绝文案（failure_line）。 */
-  failureLine(): string | null;
+  /** 描述下方的一行弱化提示：blocked 配置提示 / 模型拒绝 / 传输失败文案。 */
+  failureLine(text?: string): string | null;
+  /** 传输或空返回失败的原文。段落下 Retry 读它。 */
+  transportFailed: Signal<string | null>;
   /** 一次按钮按下：showing=当前是否译文；从原文翻过去时清拒绝状态
    * （retry_rejected），并整表记住选择 + 同步页面信号。 */
   applyChoice(name: string, showing: boolean): void;
   /** 为当前显示行排一次引擎调用（schedule_when 的单片版）。 */
   ensureTranslation(text: string, showing: boolean): void;
+  /** 清掉传输失败后再 fill 一次。 */
+  retryTransport(text: string): void;
+  /** 设置页保存后清掉失败态/拒绝态，并递增代数让打开的抽屉重问引擎。 */
+  onPrefsChanged(): void;
   /** 会话内是否已有模型拒绝。 */
   rejected(): boolean;
 }
@@ -101,8 +108,10 @@ export function createDrawerTranslateSession(
   bridge: DrawerTranslateBridge
 ): DrawerTranslateSession {
   const generation = signal(0);
+  const transportFailed = signal<string | null>(null);
   // 会话级簿记（页面 keep-alive 单实体）。
   let rejection: ModelRejection | null = null;
+  let prefsEpoch = 0;
   const inflight = new Set<string>();
   const failed = new Set<string>();
 
@@ -111,24 +120,85 @@ export function createDrawerTranslateSession(
   }
 
   function persistChoice(name: string, translated: boolean): void {
-    // 本页约定：整表写入（MySkills.setDescriptionChoices）+ 信号同步，卡
-    // 面与抽屉一起换行。存盘失败不影响本次显示，只留痕。
+    const prior = descriptionChoices()[name];
     const next = { ...descriptionChoices(), [name]: translated };
     descriptionChoices.set(next);
+    const rollback = () => {
+      if (descriptionChoices()[name] !== translated) return;
+      const rolled = { ...descriptionChoices() };
+      if (prior === undefined) delete rolled[name];
+      else rolled[name] = prior;
+      descriptionChoices.set(rolled);
+      bump();
+    };
+    const fail = (err: unknown) => {
+      rollback();
+      console.warn("failed to save the description choice:", String(err));
+    };
     try {
       const out = bridge.setChoices(next);
-      if (out !== null && typeof out === "object" && typeof (out as Promise<void>).catch === "function") {
-        (out as Promise<void>).catch((err: unknown) => {
-          console.warn("failed to save the description choice:", String(err));
-        });
+      if (
+        out !== null &&
+        typeof out === "object" &&
+        typeof (out as Promise<void>).then === "function"
+      ) {
+        (out as Promise<void>).then(undefined, (err: unknown) => fail(err));
       }
     } catch (err) {
-      console.warn("failed to save the description choice:", String(err));
+      fail(err);
     }
+  }
+
+  function ensureTranslation(text: string, showing: boolean): void {
+    if (!showing || rejection !== null || bridge.blocked()) return;
+    const trimmed = text.trim();
+    if (trimmed.length === 0 || !bridge.needsTranslation(trimmed)) return;
+    if (bridge.lookup(trimmed) !== null || inflight.has(trimmed) || failed.has(trimmed)) {
+      return;
+    }
+    const runEpoch = prefsEpoch;
+    inflight.add(trimmed);
+    bridge
+      .fill([trimmed])
+      .then((report) => {
+        if (runEpoch !== prefsEpoch) return;
+        inflight.delete(trimmed);
+        if (report.rejection !== null) {
+          // 每会话只播报一次；同 replaceKey 的旧通知被顶替。
+          rejection = report.rejection;
+          publishToast({
+            tone: "error",
+            message: rejectionMessage(report.rejection.model, report.rejection.detail),
+            pinned: true,
+            replaceKey: "translation-model-rejected",
+          });
+        } else if (
+          report.done.some((item) => item.source === trimmed) ||
+          bridge.lookup(trimmed) !== null
+        ) {
+          failed.delete(trimmed);
+          if (transportFailed() === trimmed) transportFailed.set(null);
+          recordCardTranslations(report.done);
+        } else {
+          // 非-400 空返回（Attempt::Miss）：记入失败避免 effect 热循环，并给用户重试出口。
+          failed.add(trimmed);
+          transportFailed.set(trimmed);
+        }
+        bump();
+      })
+      .catch(() => {
+        if (runEpoch !== prefsEpoch) return;
+        // 传输失败：本会话静默自动排程，交由段落下的 Retry 重问。
+        inflight.delete(trimmed);
+        failed.add(trimmed);
+        transportFailed.set(trimmed);
+        bump();
+      });
   }
 
   return {
     generation,
+    transportFailed,
     resolveTranslate(name: string, choices: Record<string, boolean>): boolean {
       const choice = choices[name];
       return choice === undefined ? bridge.descriptionsEnabled() : choice;
@@ -148,9 +218,18 @@ export function createDrawerTranslateSession(
         !failed.has(text.trim());
       return { visible, pending };
     },
-    failureLine(): string | null {
-      if (rejection === null) return null;
-      return rejectionMessage(rejection.model, rejection.detail);
+    failureLine(text?: string): string | null {
+      if (text !== undefined && bridge.lookup(text) !== null) return null;
+      if (bridge.blocked() && (text === undefined || bridge.needsTranslation(text))) {
+        return t("detailPanel.translationNeedsConfig");
+      }
+      if (rejection !== null) {
+        return rejectionMessage(rejection.model, rejection.detail);
+      }
+      if (text !== undefined && transportFailed() === text.trim()) {
+        return t("detailPanel.translationFailed");
+      }
+      return null;
     },
     rejected(): boolean {
       return rejection !== null;
@@ -161,41 +240,27 @@ export function createDrawerTranslateSession(
         rejection = null;
         failed.clear();
       }
+      transportFailed.set(null);
       persistChoice(name, !showing);
       bump();
     },
-    ensureTranslation(text: string, showing: boolean): void {
-      if (!showing || rejection !== null || bridge.blocked()) return;
+    ensureTranslation,
+    retryTransport(text: string): void {
       const trimmed = text.trim();
-      if (trimmed.length === 0 || !bridge.needsTranslation(trimmed)) return;
-      if (bridge.lookup(trimmed) !== null || inflight.has(trimmed) || failed.has(trimmed)) {
-        return;
-      }
-      inflight.add(trimmed);
-      bridge
-        .fill([trimmed])
-        .then((report) => {
-          inflight.delete(trimmed);
-          if (report.rejection !== null) {
-            // 每会话只播报一次；同 replaceKey 的旧通知被顶替。
-            rejection = report.rejection;
-            publishToast({
-              tone: "error",
-              message: rejectionMessage(report.rejection.model, report.rejection.detail),
-              pinned: true,
-              replaceKey: "translation-model-rejected",
-            });
-          } else if (report.done.some((item) => item.source === trimmed)) {
-            failed.delete(trimmed);
-          }
-          bump();
-        })
-        .catch(() => {
-          // 传输失败：本会话静默这一行，不写缓存。
-          inflight.delete(trimmed);
-          failed.add(trimmed);
-          bump();
-        });
+      if (trimmed.length === 0) return;
+      failed.delete(trimmed);
+      if (transportFailed() === trimmed) transportFailed.set(null);
+      rejection = null;
+      bump();
+      ensureTranslation(trimmed, true);
+    },
+    onPrefsChanged(): void {
+      prefsEpoch += 1;
+      inflight.clear();
+      failed.clear();
+      rejection = null;
+      transportFailed.set(null);
+      bump();
     },
   };
 }

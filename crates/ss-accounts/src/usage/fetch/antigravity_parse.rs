@@ -228,14 +228,15 @@ pub(crate) fn summary_windows(summary: &Value) -> Vec<BucketWindow> {
     windows
 }
 
-/// 桶名去掉"还剩多少"的后缀：`Gemini Models remaining` → `Gemini Models`。
+/// 桶名去掉末尾冗余状态词并归一常见周期短名：`Gemini Models remaining` → `Gemini Models`、
+/// `Five Hour Limit` → `5h`、`Weekly Limit` → `Weekly`。
 fn bucket_label(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
     }
     let lower = trimmed.to_ascii_lowercase();
-    let stripped = [" remaining", " left", " available"]
+    let stripped = [" remaining", " left", " available", " limit"]
         .into_iter()
         .find_map(|suffix| {
             lower
@@ -243,7 +244,14 @@ fn bucket_label(value: &str) -> Option<String> {
                 .then(|| trimmed[..trimmed.len() - suffix.len()].trim())
         })
         .unwrap_or(trimmed);
-    (!stripped.is_empty()).then(|| stripped.to_string())
+    if stripped.is_empty() {
+        return None;
+    }
+    Some(match stripped.to_ascii_lowercase().as_str() {
+        "five hour" | "five-hour" | "5 hour" | "5-hour" | "5 hours" => "5h".to_string(),
+        "weekly" | "week" | "7 day" | "7-day" | "7 days" => "Weekly".to_string(),
+        _ => stripped.to_string(),
+    })
 }
 
 // ---------------------------------------------------------------------------

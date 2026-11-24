@@ -51,6 +51,7 @@ members = [
   "crates/ss-git",
   "crates/ss-marketplace",
   "crates/ss-mcp",
+  "crates/ss-mcp-hub",
   "crates/ss-skills",
   # The nsh GUI: the bridge crate (`ss-gui-bridge`) the TSX imports, and the
   # AppView host (`ss-gui-host`) the product binary launches (wave-7 收编, D-110).
@@ -90,10 +91,20 @@ clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6.0.0"
 flate2 = "1"
 futures = "0.3"
-gix = { version = "0.80", default-features = false, features = ["max-control", "blocking-http-transport-reqwest-rust-tls", "revision", "credentials"] }
 htmd = "0.5.5"
 junction = "2.0.0"
 machine-uid = "0.5"
+# Native Shell (`nsh`) crates — unified across `gui/native` and `gui/host` at
+# the latest crates.io stable release (`0.6.1`). Bump together with the `nsh`
+# CLI (`nsh update`).
+# Trim unused default features (nsh-core/updater, websocket, shader/wgpu,
+# math/ratex, editor, plot, rich-editor, term, emoji-picker, webview, media)
+# so only the primitives and TextView highlight SkillStar actually uses are
+# linked (nsh-engine still pulls nsh-updater/zip unconditionally on desktop).
+nsh-base = { version = "=0.6.1", default-features = false, features = ["highlight"] }
+nsh-core = "=0.6.1"
+nsh-platform-macos = { version = "=0.6.1", default-features = false, features = ["js", "highlight", "svg", "zlib", "crypto"] }
+nsh-platform-windows = { version = "=0.6.1", default-features = false, features = ["js", "highlight", "svg", "net", "zlib", "crypto"] }
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.34.0"
 rand = "0.10.0"

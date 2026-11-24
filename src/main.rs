@@ -2,9 +2,7 @@
 //!
 //! MCP serve runs before askpass and before any GUI or marketplace init.
 //! Unknown arguments fall through to the GUI so OS launchers can still
-//! start the app. gui opens the product shell (the nsh AppView host); the
-//! gui-gpui alias opens the retiring GPUI shell for parity checks.
-//! There is no Tauri path.
+//! start the app. `gui` opens the product shell (the nsh AppView host).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

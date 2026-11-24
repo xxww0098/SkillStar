@@ -1,6 +1,6 @@
 // 「存储」状态机与 DTO — 从 storage.tsx 拆出（保持单文件 < 800 行）。
 
-import { signal, type Signal } from "nsh";
+import { batch, signal, type Signal } from "nsh";
 import { SettingsStorage } from "skillstar-gui/native";
 import { t, tf } from "../../../services/translation";
 import { agentsChanged, publishToast } from "../../../shell/events";
@@ -20,6 +20,7 @@ export interface StorageOverviewDto {
   is_hub_under_data: boolean;
   config_bytes: number;
   config_path: string;
+  skills_data_path: string;
   hub_bytes: number;
   hub_path: string;
   hub_count: number;
@@ -133,6 +134,7 @@ export function asStorageOverview(value: unknown): StorageOverviewDto {
     is_hub_under_data: raw.is_hub_under_data === true,
     config_bytes: num(raw.config_bytes),
     config_path: str(raw.config_path),
+    skills_data_path: str(raw.skills_data_path),
     hub_bytes: num(raw.hub_bytes),
     hub_path: str(raw.hub_path),
     hub_count: num(raw.hub_count),
@@ -164,7 +166,8 @@ export function asStorageOverview(value: unknown): StorageOverviewDto {
 }
 
 function asBackupReason(value: unknown): BackupReason {
-  if (value === "UpdateOverwrite" || value === "CopyConflict") return value;
+  if (value === "UpdateOverwrite" || value === "update-overwrite") return "UpdateOverwrite";
+  if (value === "CopyConflict" || value === "copy-conflict") return "CopyConflict";
   return "Uninstall";
 }
 
@@ -288,6 +291,31 @@ export function hubRelative(parent: string, child: string): string {
   return ".agents";
 }
 
+/**
+ * 磁盘总占用（bytes）：`hub_bytes` 已含同目录内的 `local_bytes`（D-113），
+ * 不重复把 `local_bytes` 叠加上去；若历史遗留目录存在导致 `local_bytes > hub_bytes`，
+ * 取二者较大值确保无漏计。
+ */
+export function totalStorageBytes(overview: StorageOverviewDto): number {
+  const skillsBytes = Math.max(overview.hub_bytes, overview.local_bytes);
+  return Math.max(0, overview.config_bytes) + Math.max(0, skillsBytes) + Math.max(0, overview.cache_bytes);
+}
+
+/** 占比条各分段字节数：从 `hub_bytes` 扣除已含的 `local_bytes`，与 `totalStorageBytes` 口径一致。 */
+export function breakdownByteCounts(overview: StorageOverviewDto): {
+  hub: number;
+  cache: number;
+  local: number;
+  config: number;
+} {
+  return {
+    hub: Math.max(0, overview.hub_bytes - overview.local_bytes),
+    cache: Math.max(0, overview.cache_bytes),
+    local: Math.max(0, overview.local_bytes),
+    config: Math.max(0, overview.config_bytes),
+  };
+}
+
 // ---- 状态机（storage/mod.rs + skill_repair.rs 的方法半边） -------------------
 
 function fmtBytes(bytes: number): string {
@@ -358,15 +386,19 @@ export function createStorageState(bridge: StorageBridge): StorageState {
       backupsAvailable.set(false);
       return;
     }
-    backupsAvailable.set(true);
-    backupsLoading.set(true);
+    batch(() => {
+      backupsAvailable.set(true);
+      backupsLoading.set(true);
+    });
     const req = (backupSeq += 1);
     void bridge
       .listBackups()
       .then((list) => {
         if (req !== backupSeq) return;
-        backupsLoading.set(false);
-        backups.set(list);
+        batch(() => {
+          backupsLoading.set(false);
+          backups.set(list);
+        });
       })
       .catch(() => {
         if (req !== backupSeq) return;
@@ -380,12 +412,16 @@ export function createStorageState(bridge: StorageBridge): StorageState {
     void bridge
       .storageOverview()
       .then((overview) => {
-        storageLoading.set(false);
-        storage.set(overview);
+        batch(() => {
+          storageLoading.set(false);
+          storage.set(overview);
+        });
       })
       .catch((error: unknown) => {
-        storageLoading.set(false);
-        storageStatus.set(tf("settings.connectionFailed", { error: String(error) }));
+        batch(() => {
+          storageLoading.set(false);
+          storageStatus.set(tf("settings.connectionFailed", { error: String(error) }));
+        });
       });
   };
 
@@ -402,6 +438,7 @@ export function createStorageState(bridge: StorageBridge): StorageState {
         .forceDeleteHub()
         .then((report) => {
           storageStatus.set(hubDeleteStatus(report));
+          agentsChanged.publish();
           finish();
         })
         .catch(() => {
@@ -417,6 +454,9 @@ export function createStorageState(bridge: StorageBridge): StorageState {
               ? t("settings.forceDeleteCacheEmpty")
               : tf("settings.forceDeleteCacheDone", { count: String(count) }),
           );
+          if (count > 0) {
+            agentsChanged.publish();
+          }
           finish();
         })
         .catch(() => {
@@ -512,22 +552,24 @@ export function createStorageState(bridge: StorageBridge): StorageState {
       void bridge
         .previewRepair()
         .then((preview) => {
-          previewing.set(false);
           const details = [...preview.steps, ...preview.untouched].join("\n");
-          storageStatus.set(
-            tf("settings.repairPreviewBody", {
-              issues: String(preview.issues),
-              steps: String(preview.steps.length),
-              untouched: String(preview.untouched.length),
-              details,
-            }),
-          );
-          loadStorage();
+          batch(() => {
+            previewing.set(false);
+            storageStatus.set(
+              tf("settings.repairPreviewBody", {
+                issues: String(preview.issues),
+                steps: String(preview.steps.length),
+                untouched: String(preview.untouched.length),
+                details,
+              }),
+            );
+          });
         })
         .catch((error: unknown) => {
-          previewing.set(false);
-          storageStatus.set(tf("settings.repairFailed", { error: String(error) }));
-          loadStorage();
+          batch(() => {
+            previewing.set(false);
+            storageStatus.set(tf("settings.repairFailed", { error: String(error) }));
+          });
         });
     },
     repairSkills() {
@@ -536,22 +578,27 @@ export function createStorageState(bridge: StorageBridge): StorageState {
       void bridge
         .applyRepair()
         .then((report) => {
-          repairing.set(false);
-          storageStatus.set(
-            report.failed.length > 0
-              ? tf("settings.repairPartial", {
-                  count: String(report.applied),
-                  details: report.failed.join("\n"),
-                })
-              : report.applied === 0
-                ? t("settings.repairNone")
-                : tf("settings.repairDone", { count: String(report.applied) }),
-          );
+          batch(() => {
+            repairing.set(false);
+            storageStatus.set(
+              report.failed.length > 0
+                ? tf("settings.repairPartial", {
+                    count: String(report.applied),
+                    details: report.failed.join("\n"),
+                  })
+                : report.applied === 0
+                  ? t("settings.repairNone")
+                  : tf("settings.repairDone", { count: String(report.applied) }),
+            );
+          });
+          agentsChanged.publish();
           loadStorage();
         })
         .catch((error: unknown) => {
-          repairing.set(false);
-          storageStatus.set(tf("settings.repairFailed", { error: String(error) }));
+          batch(() => {
+            repairing.set(false);
+            storageStatus.set(tf("settings.repairFailed", { error: String(error) }));
+          });
           loadStorage();
         });
     },
@@ -561,21 +608,23 @@ export function createStorageState(bridge: StorageBridge): StorageState {
       void bridge
         .previewIntake()
         .then((preview) => {
-          previewingIntake.set(false);
           const details = [...preview.steps, ...preview.reported].join("\n");
-          storageStatus.set(
-            tf("settings.intakePreviewBody", {
-              steps: String(preview.would_apply),
-              reported: String(preview.reported.length),
-              details,
-            }),
-          );
-          loadStorage();
+          batch(() => {
+            previewingIntake.set(false);
+            storageStatus.set(
+              tf("settings.intakePreviewBody", {
+                steps: String(preview.would_apply),
+                reported: String(preview.reported.length),
+                details,
+              }),
+            );
+          });
         })
         .catch((error: unknown) => {
-          previewingIntake.set(false);
-          storageStatus.set(tf("settings.intakeFailed", { error: String(error) }));
-          loadStorage();
+          batch(() => {
+            previewingIntake.set(false);
+            storageStatus.set(tf("settings.intakeFailed", { error: String(error) }));
+          });
         });
     },
     adoptAgentSkills() {
@@ -595,6 +644,7 @@ export function createStorageState(bridge: StorageBridge): StorageState {
                 ? t("settings.intakeNone")
                 : tf("settings.intakeDone", { count: String(report.applied) }),
           );
+          agentsChanged.publish();
           loadStorage();
         })
         .catch((error: unknown) => {

@@ -10,11 +10,11 @@ GUARD = SCRIPT.read_text().split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
 
 
 def metadata():
-    # The 11-package ss-* workspace after consolidation (D-112).
+    # The 12-package ss-* workspace after D-118 (`ss-mcp-hub` addition).
     names = [
         "ss-core", "ss-git", "ss-accounts",
         "ss-marketplace", "ss-skills", "ss-channels",
-        "ss-mcp", "ss-app", "ss-gui-bridge", "ss-gui-host", "ss-bin",
+        "ss-mcp", "ss-mcp-hub", "ss-app", "ss-gui-bridge", "ss-gui-host", "ss-bin",
     ]
     return {
         "workspace_members": names,
@@ -43,11 +43,14 @@ class WorkspaceBoundaries(unittest.TestCase):
             ("ss-channels", "ss-skills"),
             ("ss-mcp", "ss-skills"),
             ("ss-mcp", "ss-git"),
+            ("ss-mcp-hub", "ss-core"),
             ("ss-app", "ss-skills"),
             ("ss-app", "ss-channels"),
             ("ss-app", "ss-mcp"),
+            ("ss-app", "ss-mcp-hub"),
             ("ss-app", "ss-marketplace"),
             ("ss-gui-bridge", "ss-accounts"),
+            ("ss-gui-bridge", "ss-mcp-hub"),
             ("ss-gui-host", "ss-gui-bridge"),
             ("ss-bin", "ss-mcp"),
             ("ss-bin", "ss-gui-host"),
@@ -59,6 +62,7 @@ class WorkspaceBoundaries(unittest.TestCase):
         for source, target in [
             ("ss-core", "ss-accounts"), ("ss-skills", "ss-marketplace"),
             ("ss-skills", "ss-channels"), ("ss-mcp", "ss-app"),
+            ("ss-mcp-hub", "ss-skills"), ("ss-mcp-hub", "ss-mcp"),
             ("ss-accounts", "ss-app"), ("ss-app", "ss-accounts"),
             ("ss-gui-bridge", "ss-gui-host"),
         ]:

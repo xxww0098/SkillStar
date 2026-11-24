@@ -114,6 +114,15 @@ test("model_list_message maps every pull failure kind", () => {
 
 // ---- 状态机（假桥；save_translation / 手填密钥 / pull 的读写语义） -----------
 
+test("the fallback config takes the domain defaults (both surfaces on)", () => {
+  const state = createTranslationState(fakeBridge().bridge);
+  // ss_core::translation::TranslationConfig::default：机翻、双开关开、简体中文。
+  expect(state.config().engine).toBe("machine");
+  expect(state.config().translate_descriptions).toBe(true);
+  expect(state.config().translate_skill_md).toBe(true);
+  expect(state.config().target_lang).toBe("zh-CN");
+});
+
 test("surface switches and language saves publish translationPrefsChanged", () => {
   const { bridge } = fakeBridge();
   const state = createTranslationState(bridge);
@@ -138,6 +147,10 @@ test("surface switches and language saves publish translationPrefsChanged", () =
 test("the typed key is written on commit and only its presence is echoed", () => {
   const { bridge, keyFile } = fakeBridge();
   const state = createTranslationState(bridge);
+  let events = 0;
+  const unsubscribe = translationPrefsChanged.subscribe(() => {
+    events += 1;
+  });
   state.start();
   expect(state.llmKeySaved()).toBe(false);
   expect(state.llmKeyDraft()).toBe("");
@@ -146,13 +159,22 @@ test("the typed key is written on commit and only its presence is echoed", () =>
   state.commitLlmKey();
   expect(keyFile()).toBe("sk-typed-9");
   expect(state.llmKeySaved()).toBe(true);
+  expect(events).toBe(1);
   // 提交后草稿清空：页面不回显密钥本身。
   expect(state.llmKeyDraft()).toBe("");
-  // 空串提交即清除。
+  // 空串提交禁止覆盖已存密钥，也不发布 prefs 变更；必须走显式 clearLlmKey() 才清除。
   state.setLlmKeyDraft("   ");
   state.commitLlmKey();
+  expect(keyFile()).toBe("sk-typed-9");
+  expect(state.llmKeySaved()).toBe(true);
+  expect(state.llmKeyDraft()).toBe("");
+  expect(events).toBe(1);
+
+  state.clearLlmKey();
   expect(keyFile()).toBe("");
   expect(state.llmKeySaved()).toBe(false);
+  expect(events).toBe(2);
+  unsubscribe();
 });
 
 test("selectModel ignores empty picks and pinned duplicates", () => {
@@ -184,9 +206,10 @@ test("pulls gate on the typed endpoint and drop stale results", async () => {
   const state = createTranslationState(bridge);
   state.start();
 
-  // 没填地址：按钮静默，不发起拉取。
+  // 没填地址：展示校验错误，不发起拉取。
   state.pullModels();
   expect(state.modelsLoading()).toBe(false);
+  expect(state.modelsError()).toBe(t("settings.tranLlmBaseUrlHint"));
 
   state.setLlmBaseUrl("https://api.test/v1");
   expect(state.config().llm_base_url).toBe("https://api.test/v1");
@@ -299,7 +322,7 @@ test("the model combobox syncs in render: fetch fills it and picks pin", async (
   await app.waitUntil(() => app.texts().some((s) => s.includes("model=kimi-k2.6|pin=true")));
 });
 
-test("the key field writes on commit and echoes only that it saved", async () => {
+test("the key field writes on commit, keeps saved key on empty blur, and clears on explicit clear button", async () => {
   const app = await openSection();
   await app.waitUntil(() => app.shows("id:tran-engine-machine"), { timeout: 2000 });
   await app.press("id:tran-engine-llm");
@@ -311,6 +334,68 @@ test("the key field writes on commit and echoes only that it saved", async () =>
   await app.host.send("harness", { action: "commit-key" });
   await app.waitUntil(() => app.texts().some((s) => s.includes("key:7 chars")));
   await app.waitUntil(() => app.texts().includes(t("settings.tranLlmKeySaved")));
+  expect(app.shows("id:tran-llm-key-clear")).toBe(true);
+
+  // 空草稿或纯空白失焦/回车不得清空已保存密钥。
+  await app.submit("id:tran-llm-key");
+  await app.type("id:tran-llm-key", "   ");
+  await app.submit("id:tran-llm-key");
+  await app.host.send("harness", { action: "commit-key" });
+  await app.wait(40);
+  expect(app.texts()).toContain(t("settings.tranLlmKeySaved"));
+  expect(app.texts()).toContain("key:7 chars");
+
+  // 显式点击清除按钮才会清空密钥。
+  await app.press("id:tran-llm-key-clear");
+  await app.waitUntil(() => app.texts().includes("key:0 chars"));
+  expect(app.shows("id:tran-llm-key-clear")).toBe(false);
+  expect(app.texts()).not.toContain(t("settings.tranLlmKeySaved"));
+});
+
+test("pull with empty base url shows validation error and custom model id saves before and after fetch", async () => {
+  const app = await openSection();
+  await app.waitUntil(() => app.shows("id:tran-engine-machine"), { timeout: 2000 });
+  await app.press("id:tran-engine-llm");
+  await app.waitUntil(() => app.shows("id:tran-llm-pull"));
+
+  // 未填接口地址点拉取：展示校验错误提示，不静默返回。
+  await app.press("id:tran-llm-pull");
+  await app.waitUntil(() => app.shows("id:tran-llm-model-error"));
+  expect(app.texts()).toContain(t("settings.tranLlmBaseUrlHint"));
+
+  // 未拉取模型列表时直接输入自定义模型 id 并点击确认按钮保存。
+  await app.clear("id:tran-llm-model-input");
+  await app.type("id:tran-llm-model-input", "custom-before-fetch");
+  await app.waitUntil(() => app.shows("id:tran-llm-model-confirm"));
+  await app.press("id:tran-llm-model-confirm");
+  await app.waitUntil(() =>
+    app.texts().some((s) => s.includes("model=custom-before-fetch|pin=true")),
+  );
+
+  // 填写接口地址并拉取模型列表后，仍可经下拉搜索输入自定义模型 id 并点击确认保存。
+  await app.host.send("harness", { action: "set-base" });
+  await app.press("id:tran-llm-pull");
+  await app.host.send("harness", { action: "pull-ok" });
+  await app.waitUntil(() =>
+    app.texts().some((s) => s.includes(tf("settings.tranLlmModelCount", { count: 2 }))),
+  );
+  await app.press("id:tran-llm-model-button");
+  await app.waitUntil(() => app.shows("id:tran-llm-model-search"));
+  await app.type("id:tran-llm-model-search", "custom-after-fetch");
+  await app.waitUntil(() => app.shows("id:tran-llm-model-custom-option"));
+  await app.press("id:tran-llm-model-menu-confirm");
+  await app.waitUntil(() =>
+    app.texts().some((s) => s.includes("model=custom-after-fetch|pin=true")),
+  );
+  expect(app.shows("id:tran-llm-model-menu")).toBe(false);
+
+  // 直接在输入框输入后失焦提交自定义模型 id。
+  await app.clear("id:tran-llm-model-input");
+  await app.type("id:tran-llm-model-input", "custom-on-blur");
+  await app.host.send("harness", { action: "commit-model" });
+  await app.waitUntil(() =>
+    app.texts().some((s) => s.includes("model=custom-on-blur|pin=true")),
+  );
 });
 
 test("switching back to machine unmounts the llm block", async () => {

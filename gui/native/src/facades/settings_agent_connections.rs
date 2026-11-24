@@ -50,6 +50,21 @@ pub struct SettingsAgentConnections;
 // The `#[module]` methods wrap these in `blocking`; the suite drives the
 // plain bodies instead (a blocking-pool future needs a runtime the
 // unit-test host does not start).
+fn list_profiles_job() -> JsonValue {
+    serde_json::to_value(agents::list_profiles()).unwrap_or(JsonValue::Array(Vec::new()))
+}
+
+fn toggle_profile_job(id: &str) -> Result<bool, String> {
+    agents::toggle_profile(id).map_err(|err| format!("{err:#}"))
+}
+
+fn list_linked_skills_job(agent_id: &str) -> Result<JsonValue, String> {
+    let names = deployment::list_linked_skills(agent_id).map_err(|err| format!("{err:#}"))?;
+    Ok(JsonValue::Array(
+        names.into_iter().map(JsonValue::String).collect(),
+    ))
+}
+
 fn unlink_skill_job(skill: &str, agent_id: &str) -> Result<(), String> {
     deployment::unlink_skill_from_agent(skill, agent_id).map_err(|err| format!("{err:#}"))
 }
@@ -91,7 +106,7 @@ fn deploy_modes_wire() -> JsonValue {
     for (id, mode) in agents::get_agent_deploy_mode_overrides() {
         overrides.insert(id, JsonValue::String(deploy_mode_label(mode).to_owned()));
     }
-    let disallow_junction: Vec<JsonValue> = agents::list_profiles()
+    let disallow_junction: Vec<JsonValue> = agents::list_profile_specs()
         .into_iter()
         .filter(|profile| agents::agent_disallows_junction(&profile.id))
         .map(|profile| JsonValue::String(profile.id))
@@ -155,26 +170,29 @@ impl SettingsAgentConnections {
     /// call the GPUI page makes at construction). Each profile serializes
     /// with the FROZEN 8-field `AgentProfile` shape (`id`, `display_name`,
     /// `icon`, `global_skills_dir`, `project_skills_rel`, `installed`,
-    /// `enabled`, `synced_count`). Read-only.
-    pub fn list_profiles() -> JsonValue {
-        serde_json::to_value(agents::list_profiles()).unwrap_or(JsonValue::Array(Vec::new()))
+    /// `enabled`, `synced_count`). Blocking pool.
+    pub async fn list_profiles() -> Result<JsonValue, String> {
+        blocking(list_profiles_job)
+            .await
+            .map_err(|join| format!("list-profiles task failed: {join}"))
     }
 
     /// Flip one agent's enabled flag (`agents::toggle_profile` parity,
     /// managed_skills/mod.rs `toggle_agent_enabled`) and resolve the new
-    /// value. Persisting to the profile store is the domain's job; the
-    /// TSX side publishes `agentsChanged` after a success.
-    pub fn toggle_profile(id: String) -> Result<bool, String> {
-        agents::toggle_profile(&id).map_err(|err| format!("{err:#}"))
+    /// value. Blocking pool (also reconciles shared `~/.agents/skills`).
+    pub async fn toggle_profile(id: String) -> Result<bool, String> {
+        blocking(move || toggle_profile_job(&id))
+            .await
+            .map_err(|join| format!("toggle-profile task failed: {join}"))?
     }
 
     /// Linked card names for one agent (`deployment::list_linked_skills`
     /// parity, managed_skills/mod.rs `toggle_agent_expand` fallback branch).
-    pub fn list_linked_skills(agent_id: String) -> Result<JsonValue, String> {
-        let names = deployment::list_linked_skills(&agent_id).map_err(|err| format!("{err:#}"))?;
-        Ok(JsonValue::Array(
-            names.into_iter().map(JsonValue::String).collect(),
-        ))
+    /// Blocking pool.
+    pub async fn list_linked_skills(agent_id: String) -> Result<JsonValue, String> {
+        blocking(move || list_linked_skills_job(&agent_id))
+            .await
+            .map_err(|join| format!("list-linked-skills task failed: {join}"))?
     }
 
     /// Unlink one card (`deployment::unlink_skill_from_agent` parity,
@@ -222,9 +240,11 @@ impl SettingsAgentConnections {
     }
 
     /// Global default deploy mode, per-agent overrides, and agents that disallow
-    /// Windows junctions / links (`antigravity`, `crush`). Read-only.
-    pub fn get_deploy_modes() -> JsonValue {
-        deploy_modes_wire()
+    /// Windows junctions / links (`antigravity`, `crush`). Blocking pool.
+    pub async fn get_deploy_modes() -> Result<JsonValue, String> {
+        blocking(deploy_modes_wire)
+            .await
+            .map_err(|join| format!("get-deploy-modes task failed: {join}"))
     }
 
     /// Persist global default deploy mode (`symlink` / `copy`) in `profiles.toml`
@@ -250,8 +270,9 @@ impl SettingsAgentConnections {
 #[cfg(test)]
 mod tests {
     use super::{
-        SettingsAgentConnections, managed_state_job, set_agent_deploy_mode_job,
-        set_default_deploy_mode_job, toggle_managed_job, unlink_all_job,
+        deploy_modes_wire, list_linked_skills_job, list_profiles_job, managed_state_job,
+        set_agent_deploy_mode_job, set_default_deploy_mode_job, toggle_managed_job,
+        toggle_profile_job, unlink_all_job,
     };
     use nsh_core::JsonValue;
 
@@ -373,7 +394,7 @@ mod tests {
     fn profiles_wire_the_frozen_eight_field_shape() {
         let sandbox = AgentSandbox::new();
         sandbox.profile("custom_wire", true);
-        let profiles = SettingsAgentConnections::list_profiles();
+        let profiles = list_profiles_job();
         let rows = profiles.as_array().expect("profiles serialize as array");
         let custom = rows
             .iter()
@@ -405,9 +426,9 @@ mod tests {
     fn toggle_profile_round_trips_the_enabled_flag() {
         let sandbox = AgentSandbox::new();
         sandbox.profile("custom_flip", false);
-        let flipped = SettingsAgentConnections::toggle_profile("custom_flip".into());
+        let flipped = toggle_profile_job("custom_flip");
         assert_eq!(flipped.unwrap(), true);
-        let profiles = SettingsAgentConnections::list_profiles();
+        let profiles = list_profiles_job();
         let row = profiles
             .as_array()
             .unwrap()
@@ -416,7 +437,7 @@ mod tests {
             .unwrap();
         assert_eq!(row.get("enabled").and_then(|v| v.as_bool()), Some(true));
         // An unknown id rejects instead of flipping anything.
-        assert!(SettingsAgentConnections::toggle_profile("no-such-agent".into()).is_err());
+        assert!(toggle_profile_job("no-such-agent").is_err());
     }
 
     /// The shared-directory journal, driven through the facade bodies: two
@@ -489,7 +510,7 @@ mod tests {
     fn linked_skills_reject_an_unknown_profile() {
         let _sandbox = AgentSandbox::new();
         assert!(managed_state_job("no-such-agent").is_err());
-        let names = SettingsAgentConnections::list_linked_skills("no-such-agent".into());
+        let names = list_linked_skills_job("no-such-agent");
         assert!(names.is_err());
     }
 
@@ -539,7 +560,7 @@ mod tests {
         )
         .unwrap();
 
-        let initial = SettingsAgentConnections::get_deploy_modes();
+        let initial = deploy_modes_wire();
         assert_eq!(initial["defaultMode"].as_str(), Some("symlink"));
         assert!(
             initial["disallowJunction"]

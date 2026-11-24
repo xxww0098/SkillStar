@@ -221,11 +221,9 @@ pub(crate) fn live_identity(identity: &Identity) -> Option<String> {
     identity.account_id.clone().or_else(|| identity.email.clone())
 }
 
-/// Capture the login file, the registration and the profile so any failure can
-/// put the client's previous session back.
+/// Capture the login file, any IdC registration files, and the profile so any
+/// failure (including outer `service::activate_with` rollbacks) restores them.
 pub fn snapshot(roots: &PathRoots) -> AccountResult<ClientSnapshot> {
-    // 快照不知道这次会写哪一份注册文件，所以按默认 BuilderId 的哈希取一份；
-    // 真正的写入路径会在 write 里按 provider_state 重新算，并在此之前重拍一次。
     snapshot_with(roots, None)
 }
 
@@ -237,10 +235,48 @@ fn snapshot_with(roots: &PathRoots, registration: Option<&Path>) -> AccountResul
             read_bytes(&paths::kiro_profile_path(roots))?,
         ),
     ];
+    let mut push_entry = |path: PathBuf| -> AccountResult<()> {
+        if entries.iter().all(|(existing, _)| existing != &path) {
+            let bytes = read_bytes(&path)?;
+            entries.push((path, bytes));
+        }
+        Ok(())
+    };
     if let Some(registration) = registration {
-        entries.push((registration.to_path_buf(), read_bytes(registration)?));
+        push_entry(registration.to_path_buf())?;
+    }
+    push_entry(registration_path(
+        roots,
+        crate::oauth::agents::kiro::BUILDER_ID_START_URL,
+    )?)?;
+    for reg_path in existing_registration_paths(&paths::aws_sso_cache_dir(roots))? {
+        push_entry(reg_path)?;
     }
     Ok(ClientSnapshot::Files { entries })
+}
+
+fn existing_registration_paths(dir: &Path) -> AccountResult<Vec<PathBuf>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(AccountError::Io(error)),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        if store::is_client_hash(stem) {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
 }
 
 fn read_bytes(path: &Path) -> AccountResult<Option<Vec<u8>>> {
@@ -272,53 +308,110 @@ struct StoredLogin {
     state: KiroState,
 }
 
-/// 导入时该存进 provider_state 的 IdC 注册信息。clientSecret 不在这里：它只在
-/// 注册文件里，导入时读不回（读它需要 clientIdHash 与客户端自己的约定）。
+/// 导入时该存进 provider_state 的 IdC 注册信息，包含从 `<sha1>.json` 读回的 `clientSecret`。
 fn kiro_provider_state(login: &StoredLogin) -> Option<Value> {
-    let mut state = login.state.clone();
-    state.client_secret = None;
-    state.to_value()
+    login.state.to_value()
+}
+
+fn json_text(root: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        root.get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn read_registration_secret(
+    sso_dir: &Path,
+    token_root: &Value,
+    start_url: Option<&str>,
+    client_id: Option<&str>,
+) -> AccountResult<(Option<String>, Option<String>)> {
+    let mut candidate_hashes = Vec::new();
+    if let Some(hash) = json_text(token_root, &["clientIdHash", "client_id_hash"])
+        .filter(|value| store::is_client_hash(value))
+    {
+        candidate_hashes.push(hash);
+    }
+    if let Some(url) = start_url {
+        let hash = store::client_id_hash(url);
+        if store::is_client_hash(&hash) && !candidate_hashes.contains(&hash) {
+            candidate_hashes.push(hash);
+        }
+    }
+    if candidate_hashes.is_empty() && client_id.is_some() {
+        candidate_hashes.push(store::client_id_hash(
+            crate::oauth::agents::kiro::BUILDER_ID_START_URL,
+        ));
+    }
+    for hash in candidate_hashes {
+        let reg_path = sso_dir.join(format!("{hash}.json"));
+        let Some(reg) = read_json_file(&reg_path)? else {
+            continue;
+        };
+        let reg_client_id = json_text(&reg, &["clientId", "client_id"]);
+        let reg_client_secret = json_text(&reg, &["clientSecret", "client_secret"]);
+        let matches_client = match (client_id, reg_client_id.as_deref()) {
+            (Some(expected), Some(actual)) => expected == actual,
+            (Some(_), None) => false,
+            (None, _) => true,
+        };
+        if matches_client && reg_client_secret.is_some() {
+            return Ok((reg_client_id, reg_client_secret));
+        }
+    }
+    Ok((None, None))
 }
 
 fn read_stored(path: &Path) -> AccountResult<Option<StoredLogin>> {
     let Some(root) = read_json_file(path)? else {
         return Ok(None);
     };
-    let field = |keys: &[&str]| {
-        keys.iter().find_map(|key| {
-            root.get(*key)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        })
-    };
-    let Some(access_token) = field(&["accessToken", "access_token"]) else {
+    let Some(access_token) = json_text(&root, &["accessToken", "access_token"]) else {
         return Ok(None);
     };
-    let refresh_token = field(&["refreshToken", "refresh_token"]);
-    let email = field(&["email", "loginHint"]);
-    let user_id = field(&["userId", "user_id", "sub", "profileArn"]);
+    let refresh_token = json_text(&root, &["refreshToken", "refresh_token"]);
+    let email = json_text(&root, &["email", "loginHint"]);
+    let user_id = json_text(&root, &["userId", "user_id", "sub", "profileArn"]);
     let expires_at = root
         .get("expiresAt")
         .or_else(|| root.get("expires_at"))
         .and_then(store::parse_expires)
         .or_else(|| crate::identity::jwt_exp(&access_token));
+    let mut client_id = json_text(&root, &["clientId", "client_id"]);
+    let mut client_secret = json_text(&root, &["clientSecret", "client_secret"]);
+    let region = json_text(&root, &["region", "idcRegion", "idc_region"]);
+    let start_url = json_text(&root, &["issuerUrl", "issuer_url", "startUrl", "start_url"]);
+    if client_secret.is_none()
+        && let Some(sso_dir) = path.parent()
+    {
+        let (reg_client_id, reg_client_secret) = read_registration_secret(
+            sso_dir,
+            &root,
+            start_url.as_deref(),
+            client_id.as_deref(),
+        )?;
+        client_id = client_id.or(reg_client_id);
+        client_secret = client_secret.or(reg_client_secret);
+    }
     let state = KiroState {
-        client_id: field(&["clientId", "client_id"]),
-        client_secret: None,
-        region: field(&["region", "idcRegion", "idc_region"]),
-        start_url: field(&["issuerUrl", "issuer_url", "startUrl", "start_url"]),
-        profile_arn: field(&["profileArn", "profile_arn"]),
+        client_id,
+        client_secret,
+        region,
+        start_url,
+        profile_arn: json_text(&root, &["profileArn", "profile_arn"]),
     };
     Ok(Some(StoredLogin {
         state,
         tokens: TokenSet {
             access_token,
             refresh_token,
-            id_token: field(&["idToken", "id_token"]),
+            id_token: json_text(&root, &["idToken", "id_token"]),
             expires_at,
-            token_type: field(&["tokenType", "token_type"]).unwrap_or_else(|| "Bearer".to_string()),
+            token_type: json_text(&root, &["tokenType", "token_type"])
+                .unwrap_or_else(|| "Bearer".to_string()),
         },
         identity: Identity {
             display_name: email.clone(),

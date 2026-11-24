@@ -1,15 +1,13 @@
 //! Grok（xAI）计费响应的纯解析（夹具直接驱动，不碰网络）。
 //!
-//! 两个视图、两种语义，别弄反：
+//! Grok 订阅统一采用按周滚动重置的共享额度池，没有套餐月额度：
 //!
-//! * 默认视图（/v1/billing）给**月度数字额度**：monthlyLimit / usage.totalUsed
-//!   都是**美元分**，重置点看 billingCycle.billingPeriodEnd。
-//! * credits 视图（?format=credits）给**周进度**：creditUsagePercent 是**已用**
-//!   百分比（proto3 在 0 时省略），周期看 currentPeriod.{type,end}。
+//! * credits 视图（`?format=credits`）给**周进度**：`creditUsagePercent` 是**已用**
+//!   百分比（proto3 在 0 时省略），周期看 `currentPeriod.{type,end}`。
+//! * 若开启了 `onDemandCap`（大于 0 美元分），作为底部 Credits 显示；不生成月度进度条。
 //!
-//! 快照里的窗口一律记"剩余"，所以周进度要换算成 100 - 已用；月度额度按分/分
-//! 算剩余比例。金额字段可能挂在根上（xAI 自己的形状），也可能裹在 config 里
-//! （镜像/旧夹具），两处都读。
+//! 快照里的窗口一律记"剩余"，所以周进度要换算成 `100 - 已用`。字段可能挂在根上
+//! （xAI 自己的形状），也可能裹在 `config` 里（镜像/旧夹具），两处都读。
 
 use serde_json::Value;
 
@@ -142,42 +140,6 @@ pub(crate) fn current_period(payload: &Value) -> Option<CurrentPeriod> {
     })
 }
 
-/// 月度数字额度窗口。没有上限（monthlyLimit 缺失）时不画窗口：快照的
-/// remaining_percent 是必填项，编一个 0 或 100 都是假话。
-pub(crate) fn monthly_window(payload: &Value, period: Option<&CurrentPeriod>) -> Option<UsageWindow> {
-    let roots = candidate_roots(payload);
-    let limit = pick_cent_multi(&roots, &[&["monthlyLimit"], &["monthly_limit"]])?;
-    let used = pick_cent_multi(
-        &roots,
-        &[&["usage", "totalUsed"], &["usage", "total_used"], &["used"]],
-    )
-    .unwrap_or(0.0);
-    let resets_at = pick_value_multi(
-        &roots,
-        &[
-            &["billingCycle", "billingPeriodEnd"],
-            &["billing_cycle", "billing_period_end"],
-            &["billingPeriodEnd"],
-            &["billing_period_end"],
-        ],
-    )
-    .and_then(parse_timestamp)
-    .or_else(|| match period {
-        Some(period) if period.weekly == Some(false) => period.end,
-        _ => None,
-    });
-    let used = used.max(0.0);
-    Some(UsageWindow {
-        key: "month".to_string(),
-        label: "Monthly credits".to_string(),
-        remaining_percent: parse::remaining_from_amounts(used, limit),
-        used: Some(used),
-        total: Some(limit),
-        unit: UsageUnit::UsdCents,
-        resets_at,
-    })
-}
-
 /// 周进度窗口：只有周计划的账号才有，且只有百分比（provider 不给绝对数）。
 pub(crate) fn weekly_window(period: Option<&CurrentPeriod>) -> Option<UsageWindow> {
     let period = period.filter(|period| period.weekly == Some(true))?;
@@ -249,17 +211,14 @@ pub(crate) fn plan_from_access_token(access_token: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// 一次读取的完整快照：月度数字 + 周进度 + 按需上限。
+/// 一次读取的完整快照：仅周进度窗口 + 可选按需上限（不生成月度窗口）。
 pub(crate) fn snapshot_from(
-    billing: &Value,
+    credits: &Value,
     period: Option<&CurrentPeriod>,
     plan: Option<String>,
     now: i64,
 ) -> UsageSnapshot {
     let mut windows = Vec::new();
-    if let Some(monthly) = monthly_window(billing, period) {
-        windows.push(monthly);
-    }
     if let Some(weekly) = weekly_window(period) {
         windows.push(weekly);
     }
@@ -267,15 +226,16 @@ pub(crate) fn snapshot_from(
         fetched_at: now,
         windows,
         plan,
-        credits: on_demand_credits(billing),
+        credits: on_demand_credits(credits),
         error: None,
         gcp_tos: None,
+        reset_credits: None,
     }
 }
 
-/// 一次读取是否读到了可展示的东西：两个视图都空时不要给一张空白卡。
-pub(crate) fn has_numbers(billing: &Value, period: Option<&CurrentPeriod>) -> bool {
-    monthly_window(billing, period).is_some() || weekly_window(period).is_some()
+/// 一次读取是否读到了可展示的东西：既无周进度又无按需上限时不要给一张空白卡。
+pub(crate) fn has_numbers(credits: &Value, period: Option<&CurrentPeriod>) -> bool {
+    weekly_window(period).is_some() || on_demand_credits(credits).is_some()
 }
 
 #[cfg(test)]
@@ -283,48 +243,25 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// xAI 默认视图的真实形状。
-    fn billing() -> Value {
-        json!({
-            "billingCycle": { "billingPeriodEnd": "2026-12-01T00:00:00Z" },
-            "monthlyLimit": { "val": 99900 },
-            "onDemandCap": { "val": 2500 },
-            "usage": { "totalUsed": { "val": 12345 } }
-        })
-    }
-
-    #[test]
-    fn the_monthly_window_reads_remaining_from_used_and_limit() {
-        let window = monthly_window(&billing(), None).expect("monthly");
-        assert_eq!(window.key, "month");
-        assert_eq!(window.unit, UsageUnit::UsdCents);
-        assert_eq!(window.used, Some(12345.0));
-        assert_eq!(window.total, Some(99900.0));
-        // 12345/99900 已用 → 剩余约 87.64%
-        assert!(
-            (f64::from(window.remaining_percent) - 87.644).abs() < 0.5,
-            "{}",
-            window.remaining_percent
-        );
-        assert_eq!(window.resets_at, Some(1_796_083_200));
-    }
-
     #[test]
     fn a_config_wrapped_payload_reads_the_same_numbers() {
-        let wrapped = json!({ "config": billing() });
-        let window = monthly_window(&wrapped, None).expect("monthly");
-        assert_eq!(window.total, Some(99900.0));
+        let wrapped = json!({
+            "config": {
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "end": "2026-11-16T00:00:00Z"
+                },
+                "creditUsagePercent": 20,
+                "onDemandCap": { "val": 2500 }
+            }
+        });
+        let period = current_period(&wrapped).expect("period");
+        let window = weekly_window(Some(&period)).expect("weekly");
+        assert_eq!(window.remaining_percent, 80.0);
         assert_eq!(
             on_demand_credits(&wrapped).and_then(|credits| credits.remaining),
             Some(2500.0)
         );
-    }
-
-    #[test]
-    fn a_limit_less_account_gets_no_monthly_bar_instead_of_a_fake_one() {
-        let no_limit = json!({ "usage": { "totalUsed": { "val": 500 } } });
-        assert!(monthly_window(&no_limit, None).is_none());
-        assert!(!has_numbers(&no_limit, None));
     }
 
     #[test]
@@ -359,11 +296,8 @@ mod tests {
         let period = current_period(&payload).expect("period");
         assert_eq!(period.weekly, Some(false));
         assert!(weekly_window(Some(&period)).is_none());
-        // 月重置时间可以给月度窗口用（billingCycle 缺失时）。
-        let no_cycle = json!({ "monthlyLimit": { "val": 1000 }, "usage": { "totalUsed": { "val": 250 } } });
-        let window = monthly_window(&no_cycle, Some(&period)).expect("monthly");
-        assert_eq!(window.resets_at, Some(1_796_083_200));
-        assert_eq!(window.remaining_percent, 75.0);
+        assert!(!has_numbers(&payload, Some(&period)));
+        assert!(snapshot_from(&payload, Some(&period), None, 7).windows.is_empty());
     }
 
     #[test]
@@ -393,18 +327,20 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_keeps_the_two_windows_and_the_cap_apart() {
+    fn a_snapshot_only_keeps_the_weekly_window_and_on_demand_cap() {
         let credits_view = json!({
             "currentPeriod": { "type": "USAGE_PERIOD_TYPE_WEEKLY", "end": "2026-11-16T00:00:00Z" },
-            "creditUsagePercent": 10
+            "creditUsagePercent": 10,
+            "monthlyLimit": { "val": 0 },
+            "onDemandCap": { "val": 2500 },
+            "usage": { "totalUsed": { "val": 138 } }
         });
         let period = current_period(&credits_view);
-        let snapshot = snapshot_from(&billing(), period.as_ref(), Some("SuperGrok".to_string()), 7);
+        let snapshot = snapshot_from(&credits_view, period.as_ref(), Some("SuperGrok".to_string()), 7);
         assert_eq!(snapshot.fetched_at, 7);
         assert_eq!(snapshot.plan.as_deref(), Some("SuperGrok"));
-        assert_eq!(snapshot.windows.len(), 2);
-        assert_eq!(snapshot.windows[0].key, "month");
-        assert_eq!(snapshot.windows[1].key, "week");
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].key, "week");
         assert_eq!(snapshot.credits.expect("cap").remaining, Some(2500.0));
         assert_eq!(snapshot.gcp_tos, None);
     }

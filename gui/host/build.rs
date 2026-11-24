@@ -13,7 +13,7 @@
 //!
 //! States:
 //! 1. Bundle fresh → nothing to do.
-//! 2. Stale or missing, and `nsh` is on PATH (or at ~/.nsh/bin/nsh) → run the
+//! 2. Stale or missing, and `nsh` is on PATH (or a default install location) → run the
 //!    documented prep step here. `nsh build` writes to `-o`, never into
 //!    tracked files.
 //! 3. Stale or missing and no `nsh` → empty stub (first build) or keep the
@@ -65,8 +65,9 @@ fn main() {
         return;
     }
 
-    let rebuilt = which_nsh().is_some_and(|nsh| {
-        let status = Command::new(&nsh)
+    let nsh = which_nsh();
+    let rebuilt = nsh.as_ref().is_some_and(|nsh| {
+        let status = Command::new(nsh)
             .arg("build")
             .arg("-o")
             .arg(&gen_dir)
@@ -81,9 +82,14 @@ fn main() {
 
     let _ = fs::create_dir_all(&gen_dir);
     let has_bundle = fs::metadata(&bundle).map(|m| m.len() > 0).unwrap_or(false);
+    let reason = if nsh.is_some() {
+        "nsh build failed"
+    } else {
+        "no nsh CLI"
+    };
     if has_bundle {
         println!(
-            "cargo:warning=gen/bundle.js is stale and was NOT rebuilt (no nsh CLI). \
+            "cargo:warning=gen/bundle.js is stale and was NOT rebuilt ({reason}). \
              The embedded UI may reference exports that no longer exist. Rebuild it with: \
              nsh build -o {} {}",
             gen_dir.display(),
@@ -93,7 +99,7 @@ fn main() {
     }
     match fs::write(&bundle, "") {
         Ok(()) => println!(
-            "cargo:warning=gen/bundle.js is an empty stub (no nsh CLI found or build failed). \
+            "cargo:warning=gen/bundle.js is an empty stub ({reason}). \
              cargo check passes, but the host refuses to run. Build the real bundle with: \
              nsh build -o {} {}",
             gen_dir.display(),
@@ -141,18 +147,48 @@ fn newest_mtime(path: &Path) -> Option<SystemTime> {
 
 /// `nsh` on PATH, else the installer's default location.
 fn which_nsh() -> Option<PathBuf> {
-    if let Ok(path) = env::var("PATH") {
-        for dir in path.split(':') {
-            if dir.is_empty() {
+    let exe = if cfg!(windows) { "nsh.exe" } else { "nsh" };
+    if let Some(path) = env::var_os("PATH") {
+        for dir in env::split_paths(&path) {
+            if dir.as_os_str().is_empty() {
                 continue;
             }
-            let candidate = PathBuf::from(dir).join("nsh");
+            let candidate = dir.join(exe);
             if candidate.is_file() {
                 return Some(candidate);
             }
         }
     }
-    let home = env::var_os("HOME").map(PathBuf::from)?;
-    let fallback = home.join(".nsh/bin/nsh");
-    fallback.is_file().then_some(fallback)
+    fallback_nsh_candidates()
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+fn fallback_nsh_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    #[cfg(not(windows))]
+    if let Some(home) = env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+    {
+        candidates.push(home.join(".local/bin/nsh"));
+        candidates.push(home.join(".nsh/bin/nsh"));
+    }
+    #[cfg(windows)]
+    {
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+        {
+            candidates.push(local_app_data.join("nsh").join("nsh.exe"));
+            candidates.push(local_app_data.join("nsh").join("bin").join("nsh.exe"));
+        }
+        if let Some(user_profile) = env::var_os("USERPROFILE")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+        {
+            candidates.push(user_profile.join(".nsh").join("bin").join("nsh.exe"));
+        }
+    }
+    candidates
 }

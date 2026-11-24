@@ -1,6 +1,6 @@
 // 「关于」分区 UI — 状态机与桥接在 ./aboutState.ts（保持单文件 < 800 行）。
 
-import { Image, Text, View, effect, openUrl, type JSX } from "nsh";
+import { Image, Text, View, computed, effect, openUrl, platform, type JSX } from "nsh";
 import os from "os";
 import { Settings } from "skillstar-gui/native";
 import { paletteToken, type PaletteToken } from "../../../services/themeMode";
@@ -41,7 +41,13 @@ export {
   type ReleaseRecordDto,
 } from "./aboutState";
 
-const BRAND_ICON_URI = Settings.brandIconDataUri();
+let cachedBrandIconUri: string | null = null;
+function brandIconUri(): string {
+  if (cachedBrandIconUri === null) {
+    cachedBrandIconUri = Settings.brandIconDataUri();
+  }
+  return cachedBrandIconUri;
+}
 
 // ---- 页面（SectionShell grouped 双卡栈） -------------------------------------
 
@@ -53,7 +59,9 @@ export function AboutSection(): JSX.Element {
 
 export function AboutWorkbench(props: { state: AboutState }): JSX.Element {
   const state = props.state;
-  effect(() => state.start());
+  effect(() => {
+    void state.start();
+  });
   return (
     <SectionShell
       section={SETTINGS_SECTIONS.find((section) => section.id === "about")!}
@@ -116,7 +124,7 @@ function VersionRow(props: { state: AboutState }): JSX.Element {
           }}
         >
           <Image
-            src={BRAND_ICON_URI}
+            src={brandIconUri()}
             fadeDuration={0}
             style={{
               width: 38,
@@ -182,8 +190,8 @@ function VersionRow(props: { state: AboutState }): JSX.Element {
         </View>
         <SettingsButton
           testID="about-check-update"
-          label={state.releaseChecking() ? t("settings.checkingUpdate") : t("settings.checkUpdate")}
-          icon={state.releaseChecking() ? "loader" : "refresh"}
+          label={t("settings.checkUpdate")}
+          icon="refresh"
           spinning={state.releaseChecking()}
           variant="secondary"
           size="sm"
@@ -200,56 +208,55 @@ function VersionRow(props: { state: AboutState }): JSX.Element {
  * 组件体内直接 return 三元会把信号读取冻在首渲染。
  */
 function ReleaseChip(props: { state: AboutState }): JSX.Element {
-  const state = props.state;
-  return <>{releaseChipContent(state)}</>;
-}
-
-function releaseChipContent(state: AboutState): JSX.Element | null {
-  const outcome = state.releaseCheck()?.outcome ?? null;
-  if (state.releaseChecking()) {
-    return <StatusPill text={t("settings.checkingUpdate")} tone="neutral" />;
-  }
-  if (outcome?.kind === "up_to_date") {
-    return <StatusPill text={t("settings.upToDate")} tone="ok" icon="check" />;
-  }
-  if (outcome?.kind === "no_published_release") {
-    return <StatusPill text={t("settings.noPublishedRelease")} tone="neutral" />;
-  }
-  if (outcome?.kind === "failed") {
-    return <StatusPill text={t("settings.updateCheckFailed")} tone="danger" />;
-  }
-  if (outcome?.kind === "available") {
-    return (
-      <View
-        testID="about-update-available"
-        role="button"
-        style={{
-          height: 24,
-          paddingHorizontal: 9,
-          borderRadius: 999,
-          borderWidth: 1,
-          borderColor: paletteToken("accent_soft_edge"),
-          backgroundColor: paletteToken("accent_soft"),
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 5,
-          cursor: "pointer",
-        }}
-        hoverStyle={{ backgroundColor: paletteToken("card_active_hover") }}
-        activeStyle={{ backgroundColor: paletteToken("panel_active") }}
-        onPress={() => {
-          if (outcome.kind === "available") void openUrl(outcome.url);
-        }}
-      >
-        <Icon name="download" size={12} color={paletteToken("accent_fg")} />
-        <Text style={{ fontSize: 11, fontWeight: "600", color: paletteToken("accent_fg") }}>
-          {tf("settings.updateFoundDesc", { version: outcome.tag })}
-        </Text>
-      </View>
-    );
-  }
-  return null;
+  const outcome = computed(() => props.state.releaseCheck()?.outcome ?? null);
+  return (
+    <>
+      <If when={outcome()?.kind === "up_to_date"}>
+        <StatusPill text={t("settings.upToDate")} tone="ok" icon="check" />
+      </If>
+      <If when={outcome()?.kind === "no_published_release"}>
+        <StatusPill text={t("settings.noPublishedRelease")} tone="neutral" />
+      </If>
+      <If when={outcome()?.kind === "failed"}>
+        <StatusPill text={t("settings.updateCheckFailed")} tone="danger" />
+      </If>
+      <If when={outcome()?.kind === "available"}>
+        <View
+          testID="about-update-available"
+          role="button"
+          style={{
+            height: 24,
+            paddingHorizontal: 9,
+            borderRadius: 999,
+            borderWidth: 1,
+            borderColor: paletteToken("accent_soft_edge"),
+            backgroundColor: paletteToken("accent_soft"),
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            cursor: "pointer",
+          }}
+          hoverStyle={{ backgroundColor: paletteToken("card_active_hover") }}
+          activeStyle={{ backgroundColor: paletteToken("panel_active") }}
+          onPress={() => {
+            const current = outcome();
+            if (current?.kind === "available") void openUrl(current.url);
+          }}
+        >
+          <Icon name="download" size={12} color={paletteToken("accent_fg")} />
+          <Text style={{ fontSize: 11, fontWeight: "600", color: paletteToken("accent_fg") }}>
+            {(() => {
+              const current = outcome();
+              return current?.kind === "available"
+                ? tf("settings.updateFoundDesc", { version: current.tag })
+                : "";
+            })()}
+          </Text>
+        </View>
+      </If>
+    </>
+  );
 }
 
 // ---- 卡 2：环境与工具链诊断 --------------------------------------------------
@@ -290,23 +297,29 @@ function ToolIconBox(props: { icon: IconName; stateTone: ToolStateTone }): JSX.E
 /** git_row：整个内容块在 JSX 表达式里求值（snapshot 变化即重算）。 */
 function GitRow(props: { state: AboutState }): JSX.Element {
   const state = props.state;
-  return (
-    <View style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-      {gitRowContent(state)}
-    </View>
-  );
-}
-
-function gitRowContent(state: AboutState): JSX.Element {
-  const status = state.snapshot()?.git_status ?? null;
-  const tone: ToolStateTone =
-    status?.status === "Installed"
+  const status = computed(() => state.snapshot()?.git_status ?? null);
+  const tone = computed<ToolStateTone>(() => {
+    const s = status();
+    return s?.status === "Installed"
       ? "ok"
-      : status?.status === "NotInstalled"
+      : s?.status === "NotInstalled"
         ? "danger"
         : "neutral";
+  });
+  const installedVersion = computed(() => {
+    const s = status();
+    return s?.status === "Installed" ? s.version : "";
+  });
+  const installInstructions = computed(() => {
+    const s = status();
+    return s?.status === "NotInstalled" ? s.install_instructions : [];
+  });
+  const installOs = computed(() => {
+    const s = status();
+    return s?.status === "NotInstalled" ? s.os : "";
+  });
   return (
-    <>
+    <View style={{ display: "flex", flexDirection: "column", width: "100%" }}>
       <View
         style={{
           paddingHorizontal: 18,
@@ -319,12 +332,12 @@ function gitRowContent(state: AboutState): JSX.Element {
         }}
       >
         <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <ToolIconBox icon="gitBranch" stateTone={tone} />
+          <ToolIconBox icon="gitBranch" stateTone={tone()} />
           <Text style={{ fontSize: 14, fontWeight: "500", color: paletteToken("fg") }}>Git</Text>
         </View>
-        {status?.status === "Installed" ? (
+        <If when={status()?.status === "Installed"}>
           <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {status.version ? (
+            <If when={installedVersion() !== ""}>
               <Text
                 style={{
                   fontSize: 12,
@@ -333,12 +346,13 @@ function gitRowContent(state: AboutState): JSX.Element {
                   color: paletteToken("fg_muted"),
                 }}
               >
-                {status.version}
+                {installedVersion()}
               </Text>
-            ) : null}
+            </If>
             <StatusPill text={t("settings.gitInstalled")} tone="ok" icon="check" />
           </View>
-        ) : status?.status === "NotInstalled" ? (
+        </If>
+        <If when={status()?.status === "NotInstalled"}>
           <SettingsButton
             testID="git-install"
             label={t("settings.gitInstall")}
@@ -346,12 +360,13 @@ function gitRowContent(state: AboutState): JSX.Element {
             variant="secondary"
             size="sm"
             onPress={() => {
-              void openUrl(status.download_url);
+              const s = status();
+              if (s?.status === "NotInstalled") void openUrl(s.download_url);
             }}
           />
-        ) : null}
+        </If>
       </View>
-      {status?.status === "NotInstalled" && status.install_instructions.length > 0 ? (
+      <If when={installInstructions().length > 0}>
         <View
           style={{
             paddingHorizontal: 18,
@@ -367,26 +382,32 @@ function gitRowContent(state: AboutState): JSX.Element {
           <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Icon name="terminal" size={14} color={paletteToken("fg_muted")} />
             <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-              {tf("settings.gitInstallCommandLabel", { os: status.os })}
+              {tf("settings.gitInstallCommandLabel", { os: installOs() })}
             </Text>
           </View>
-          {status.install_instructions.map((instruction) => (
-            <CommandRow
-              state={state}
-              id={`git-${instruction.label}`}
-              label={instruction.label}
-              command={instruction.command}
-            />
-          ))}
+          <Each of={installInstructions()} key={(instruction) => instruction.label}>
+            {(instruction) => (
+              <CommandRow
+                state={state}
+                id={`git-${instruction().label}`}
+                label={instruction().label}
+                command={instruction().command}
+              />
+            )}
+          </Each>
         </View>
-      ) : null}
-    </>
+      </If>
+    </View>
   );
 }
 
 /** gh_row：安装命令取 facade 快照的 gh_install_command。 */
 function GhRow(props: { state: AboutState }): JSX.Element {
   const state = props.state;
+  const installed = computed(() => state.snapshot()?.gh_installed === true);
+  const key = platformKey(platform.os);
+  const command = computed(() => state.snapshot()?.gh_install_command ?? null);
+  const tone = computed<ToolStateTone>(() => (installed() ? "ok" : "danger"));
   return (
     <View
       style={{
@@ -397,19 +418,6 @@ function GhRow(props: { state: AboutState }): JSX.Element {
         borderTopColor: paletteToken("border_soft"),
       }}
     >
-      {ghRowContent(state)}
-    </View>
-  );
-}
-
-function ghRowContent(state: AboutState): JSX.Element {
-  const snapshot = state.snapshot();
-  const installed = snapshot?.gh_installed === true;
-  const key = platformKey(os.platform());
-  const command = snapshot?.gh_install_command ?? null;
-  const tone: ToolStateTone = installed ? "ok" : "danger";
-  return (
-    <>
       <View
         style={{
           paddingHorizontal: 18,
@@ -422,27 +430,30 @@ function ghRowContent(state: AboutState): JSX.Element {
         }}
       >
         <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <ToolIconBox icon="terminal" stateTone={tone} />
+          <ToolIconBox icon="terminal" stateTone={tone()} />
           <Text style={{ fontSize: 14, fontWeight: "500", color: paletteToken("fg") }}>
             GitHub CLI
           </Text>
         </View>
-        {installed ? (
+        <If
+          when={installed()}
+          else={
+            <SettingsButton
+              testID="gh-install"
+              label={t("settings.ghInstall")}
+              icon="externalLink"
+              variant="secondary"
+              size="sm"
+              onPress={() => {
+                void openUrl(GH_INSTALL_PAGE_URL);
+              }}
+            />
+          }
+        >
           <StatusPill text={t("settings.ghInstalled")} tone="ok" icon="check" />
-        ) : (
-          <SettingsButton
-            testID="gh-install"
-            label={t("settings.ghInstall")}
-            icon="externalLink"
-            variant="secondary"
-            size="sm"
-            onPress={() => {
-              void openUrl(GH_INSTALL_PAGE_URL);
-            }}
-          />
-        )}
+        </If>
       </View>
-      {!installed ? (
+      <If when={!installed()}>
         <View
           style={{
             paddingHorizontal: 18,
@@ -463,16 +474,19 @@ function ghRowContent(state: AboutState): JSX.Element {
               })}
             </Text>
           </View>
-          {command !== null ? (
-            <CommandRow state={state} id="gh" label="" command={command} />
-          ) : (
-            <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-              {t("settings.ghInstallCommandUnavailable")}
-            </Text>
-          )}
+          <If
+            when={command() !== null}
+            else={
+              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+                {t("settings.ghInstallCommandUnavailable")}
+              </Text>
+            }
+          >
+            <CommandRow state={state} id="gh" label="" command={command() ?? ""} />
+          </If>
         </View>
-      ) : null}
-    </>
+      </If>
+    </View>
   );
 }
 
@@ -500,11 +514,11 @@ function CommandRow(props: {
       }}
     >
       <View style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
-        {props.label !== "" ? (
+        <If when={props.label !== ""}>
           <Text style={{ fontSize: 11, fontWeight: "500", color: paletteToken("fg_muted") }}>
             {props.label}
           </Text>
-        ) : null}
+        </If>
         <View
           style={{
             display: "flex",
@@ -591,7 +605,7 @@ function DataPathRow(props: { state: AboutState }): JSX.Element {
           gap: 8,
         }}
       >
-        <StatusPill text={platformLabel(os.platform())} tone="neutral" />
+        <StatusPill text={platformLabel(platform.os)} tone="neutral" />
         <Text
           style={{
             flex: 1,

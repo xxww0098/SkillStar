@@ -1,4 +1,4 @@
-import { Text, View, openUrl, type JSX } from "nsh";
+import { Text, View, computed, effect, openUrl, untracked, type Accessor, type JSX } from "nsh";
 import { isLight, paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import { AgentFooterBar, AgentRail, type AgentRailSlot } from "../../chrome/agentRail";
@@ -14,6 +14,9 @@ import { IconSpin } from "../../chrome/feedback";
 import { SKILL_CARD_W } from "../../layout";
 import { type SkillRecord } from "./filters";
 import { etf } from "./extrasStrings";
+import { cardTranslatedText, ensureCardDescriptionTranslation } from "./cardTranslate";
+import { openPublishSkill } from "./publishModal";
+import { pt } from "./publishStrings";
 import {
   busy,
   descriptionChoices,
@@ -27,7 +30,6 @@ import {
   updatingBatch,
 } from "./state";
 import { drawerOps, pendingAgents, runToggle } from "./detailDrawerActions";
-import { profileIsLinked } from "./detailFacts";
 
 // 我的技能工作台卡身：
 // 统一使用 16px 圆角 `skillCardFrameStyle` 与 38px `AgentFooterBar` 底栏。
@@ -37,6 +39,9 @@ import { profileIsLinked } from "./detailFacts";
 // - 底栏 `AgentRail` 品牌 SVG 轮播开关 → 直接切换该技能与智能体的链接；
 // - 状态胶囊 → 单卡更新或上游状态提示；
 // - 本地创建徽章 → 打开技能目录。
+//
+// 卡面不放保存状态行（保存中/已保存/失败）：底栏开关乐观翻转本身就是
+// 结果，失败仍由通知带说明，重试就是再点一次同一个图标。
 //
 // nsh 组件体只执行一次：一切信号与 `props.skill()` 派生读取全部落在 JSX 表达式内。
 
@@ -59,16 +64,20 @@ export function SkillCard(props: {
   listMode: boolean;
   cardWidth?: number;
 }): JSX.Element {
+  const skillName = computed(() => props.skill().name);
+  const batchSelected = computed(() => selectedBatch().has(skillName()));
+  const drawerSelected = computed(() => selectedSkill() === skillName());
+  const cardSelected = computed(() => batchSelected() || drawerSelected());
   return (
     <View
-      testID={`skill-card-${props.skill().name}`}
+      testID={`skill-card-${skillName()}`}
       style={{
-        ...skillCardFrameStyle(selectedFace(props.skill().name)),
+        ...skillCardFrameStyle(cardSelected()),
         width: props.listMode ? "100%" : (props.cardWidth ?? SKILL_CARD_W),
         justifyContent: "space-between",
       }}
-      hoverStyle={skillCardHoverStyle(selectedFace(props.skill().name))}
-      onPress={() => cardHandle.onOpen(props.skill().name)}
+      hoverStyle={skillCardHoverStyle(cardSelected())}
+      onPress={() => cardHandle.onOpen(skillName())}
     >
       <View
         style={{
@@ -83,10 +92,10 @@ export function SkillCard(props: {
           paddingBottom: 8,
         }}
       >
-        <CardHeader skill={props.skill} />
-        <Description skill={props.skill} />
+        <CardHeader skill={props.skill} skillName={skillName} batchSelected={batchSelected} />
+        <Description skill={props.skill} skillName={skillName} />
       </View>
-      <CardFooter skill={props.skill} />
+      <CardFooter skill={props.skill} skillName={skillName} />
     </View>
   );
 }
@@ -147,11 +156,12 @@ export function skillSubtitle(skill: SkillRecord): string | null {
   return skillSource(skill)?.label ?? null;
 }
 
-function selectedFace(name: string): boolean {
-  return selectedBatch().has(name) || selectedSkill() === name;
-}
-
-function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
+function CardHeader(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+  batchSelected: Accessor<boolean>;
+}): JSX.Element {
+  const sourceInfo = computed(() => skillSource(props.skill()));
   return (
     <View
       style={{
@@ -163,7 +173,11 @@ function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
         minHeight: 32,
       }}
     >
-      <SkillRepoAvatar skill={props.skill} />
+      <SkillRepoAvatar
+        skill={props.skill}
+        skillName={props.skillName}
+        batchSelected={props.batchSelected}
+      />
       <View
         style={{
           display: "flex",
@@ -183,7 +197,7 @@ function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
           }}
         >
           <Text
-            testID={`skill-card-name-${props.skill().name}`}
+            testID={`skill-card-name-${props.skillName()}`}
             style={{
               fontSize: 14,
               lineHeight: 18,
@@ -193,17 +207,17 @@ function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
               flexShrink: 1,
             }}
           >
-            {props.skill().name}
+            {props.skillName()}
           </Text>
           <If
             when={
               typeof props.skill().called === "string" &&
               props.skill().called !== "" &&
-              props.skill().called !== props.skill().name
+              props.skill().called !== props.skillName()
             }
           >
             <View
-              testID={`skill-card-called-${props.skill().name}`}
+              testID={`skill-card-called-${props.skillName()}`}
               style={{
                 paddingHorizontal: 6,
                 paddingVertical: 1,
@@ -227,8 +241,8 @@ function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
             </View>
           </If>
         </View>
-        <If when={skillSubtitle(props.skill()) !== null}>
-          <SourceSubtitle skill={props.skill} />
+        <If when={sourceInfo() !== null}>
+          <SourceSubtitle skillName={props.skillName} sourceInfo={sourceInfo} />
         </If>
       </View>
       <View
@@ -240,8 +254,9 @@ function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
           flexShrink: 0,
         }}
       >
-        <LocalBadge skill={props.skill} />
-        <StatusPill skill={props.skill} />
+        <LocalPublishPill skill={props.skill} skillName={props.skillName} />
+        <LocalBadge skill={props.skill} skillName={props.skillName} />
+        <StatusPill skill={props.skill} skillName={props.skillName} />
       </View>
     </View>
   );
@@ -250,12 +265,15 @@ function CardHeader(props: { skill: () => SkillRecord }): JSX.Element {
 /** 卡面副标题（来源 chip）：有可跳转页面时是外链——手型光标、悬停转
  * accent 并加下划线，点击经系统浏览器打开；没有可点目标时是纯文字。
  * 点击不再冒泡到卡身，详情抽屉不会被顺带打开。 */
-function SourceSubtitle(props: { skill: () => SkillRecord }): JSX.Element {
-  const label = () => skillSource(props.skill())?.label ?? "";
-  const url = () => skillSource(props.skill())?.url ?? null;
+function SourceSubtitle(props: {
+  skillName: Accessor<string>;
+  sourceInfo: Accessor<SkillSource | null>;
+}): JSX.Element {
+  const label = () => props.sourceInfo()?.label ?? "";
+  const url = () => props.sourceInfo()?.url ?? null;
   return (
     <Text
-      testID={`skill-card-source-${props.skill().name}`}
+      testID={`skill-card-source-${props.skillName()}`}
       role={url() === null ? undefined : "link"}
       style={{
         fontSize: 11,
@@ -284,12 +302,16 @@ function SourceSubtitle(props: { skill: () => SkillRecord }): JSX.Element {
   );
 }
 
-function SkillRepoAvatar(props: { skill: () => SkillRecord }): JSX.Element {
+function SkillRepoAvatar(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+  batchSelected: Accessor<boolean>;
+}): JSX.Element {
   return (
     <View
-      testID={`skill-card-check-${props.skill().name}`}
+      testID={`skill-card-check-${props.skillName()}`}
       role="checkbox"
-      accessibilityLabel={props.skill().name}
+      accessibilityLabel={props.skillName()}
       style={{
         position: "relative",
         width: 32,
@@ -299,12 +321,12 @@ function SkillRepoAvatar(props: { skill: () => SkillRecord }): JSX.Element {
         flexShrink: 0,
         cursor: "pointer",
       }}
-      onPress={() => cardHandle.onSelect(props.skill().name)}
+      onPress={() => cardHandle.onSelect(props.skillName())}
     >
       <RepoAvatar
         owner={githubOwnerForSkill(props.skill())}
         local={props.skill().skillType === "local"}
-        selected={selectedBatch().has(props.skill().name)}
+        selected={props.batchSelected()}
         size={32}
         radius={9}
       />
@@ -319,8 +341,8 @@ function SkillRepoAvatar(props: { skill: () => SkillRecord }): JSX.Element {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          opacity: selectedBatch().has(props.skill().name) ? 1 : 0,
-          backgroundColor: selectedBatch().has(props.skill().name)
+          opacity: props.batchSelected() ? 1 : 0,
+          backgroundColor: props.batchSelected()
             ? paletteToken("accent")
             : isLight()
               ? "rgba(22, 32, 47, 0.45)"
@@ -328,38 +350,48 @@ function SkillRepoAvatar(props: { skill: () => SkillRecord }): JSX.Element {
         }}
         hoverStyle={{ opacity: 1 }}
       >
-        {selectedBatch().has(props.skill().name) ? (
+        <If
+          when={props.batchSelected()}
+          else={
+            <View
+              style={{
+                width: 16,
+                height: 16,
+                borderRadius: 4,
+                borderWidth: 1,
+                borderColor: paletteToken("edge"),
+                backgroundColor: paletteToken("card"),
+              }}
+            />
+          }
+        >
           <Icon name="check" size={16} color={paletteToken("on_accent")} />
-        ) : (
-          <View
-            style={{
-              width: 16,
-              height: 16,
-              borderRadius: 4,
-              borderWidth: 1,
-              borderColor: paletteToken("edge"),
-              backgroundColor: paletteToken("card"),
-            }}
-          />
-        )}
+        </If>
       </View>
     </View>
   );
 }
 
-function skillDescriptionText(skill: SkillRecord): string {
-  const choice = descriptionChoices()[skill.name];
-  const localized = skill.localizedDescription;
-  const useLocalized = choice !== false && typeof localized === "string";
-  const text = (useLocalized ? (localized as string) : skill.description).trim();
-  return text.length > 0 ? text : t("skillCard.noDescription");
-}
-
-function Description(props: { skill: () => SkillRecord }): JSX.Element {
+function Description(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+}): JSX.Element {
+  effect(() => {
+    const s = props.skill();
+    ensureCardDescriptionTranslation(s.name, s.description, s.localizedDescription);
+  });
+  const descChoice = computed(() => descriptionChoices()[props.skillName()]);
+  const descText = computed(() => {
+    const s = props.skill();
+    const localized = s.localizedDescription ?? cardTranslatedText(s.description);
+    const useLocalized = descChoice() !== false && typeof localized === "string";
+    const text = (useLocalized ? (localized as string) : s.description).trim();
+    return text.length > 0 ? text : t("skillCard.noDescription");
+  });
   return (
     <View style={{ minWidth: 0 }}>
       <Text
-        testID={`skill-card-desc-${props.skill().name}`}
+        testID={`skill-card-desc-${props.skillName()}`}
         style={{
           fontSize: 12,
           lineHeight: 17,
@@ -367,17 +399,53 @@ function Description(props: { skill: () => SkillRecord }): JSX.Element {
           numberOfLines: 2,
         }}
       >
-        {skillDescriptionText(props.skill())}
+        {descText()}
       </Text>
     </View>
   );
 }
 
-function LocalBadge(props: { skill: () => SkillRecord }): JSX.Element {
+function LocalPublishPill(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+}): JSX.Element {
   return (
     <If when={props.skill().skillType === "local"}>
       <View
-        testID={`skill-card-local-${props.skill().name}`}
+        testID={`skill-card-publish-${props.skillName()}`}
+        role="button"
+        accessibilityLabel={pt("publish.action")}
+        tooltip={<Tip text={pt("publish.action")} />}
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 22,
+          height: 22,
+          borderRadius: 999,
+          backgroundColor: paletteToken("accent_soft"),
+          borderWidth: 1,
+          borderColor: paletteToken("border"),
+          cursor: "pointer",
+        }}
+        hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
+        onPress={() => openPublishSkill(props.skillName())}
+      >
+        <Icon name="gitBranch" size={11} color={paletteToken("accent")} />
+      </View>
+    </If>
+  );
+}
+
+function LocalBadge(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+}): JSX.Element {
+  return (
+    <If when={props.skill().skillType === "local"}>
+      <View
+        testID={`skill-card-local-${props.skillName()}`}
         style={{
           display: "flex",
           flexDirection: "row",
@@ -392,7 +460,7 @@ function LocalBadge(props: { skill: () => SkillRecord }): JSX.Element {
           cursor: "pointer",
         }}
         hoverStyle={{ backgroundColor: paletteToken("ok_hover") }}
-        onPress={() => cardHandle.onOpenFolder(props.skill().name)}
+        onPress={() => cardHandle.onOpenFolder(props.skillName())}
       >
         <Icon name="hardDrive" size={10} color={paletteToken("ok")} />
         <Text style={{ fontSize: 10, fontWeight: "600", color: paletteToken("ok") }}>
@@ -413,20 +481,33 @@ function overwritesLocalChanges(skill: SkillRecord): boolean {
   return skill.upstreamChange?.kind === "local_changes";
 }
 
-function StatusPill(props: { skill: () => SkillRecord }): JSX.Element {
+function StatusPill(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+}): JSX.Element {
+  const problem = computed(() => upstreamProblemKind(props.skill()));
+  const updating = computed(() => {
+    const token = busy();
+    if (token === null) return false;
+    const name = props.skillName();
+    if (token === "update_all" || token === "batch_update") {
+      return updatingBatch().has(name);
+    }
+    return token === name;
+  });
   return (
     <If
-      when={upstreamProblemKind(props.skill()) !== null}
+      when={problem() !== null}
       else={
         <If
           when={
             props.skill().skillType !== "local" &&
-            upstreamProblemKind(props.skill()) === null &&
+            problem() === null &&
             props.skill().updateAvailable
           }
         >
           <View
-            testID={`skill-card-update-${props.skill().name}`}
+            testID={`skill-card-update-${props.skillName()}`}
             style={{
               display: "flex",
               flexDirection: "row",
@@ -439,41 +520,36 @@ function StatusPill(props: { skill: () => SkillRecord }): JSX.Element {
               backgroundColor: paletteToken("warn_bg"),
               borderWidth: 1,
               borderColor: paletteToken("warn_border"),
-              opacity: updatingInFlight(props.skill()) ? 0.75 : 1,
-              cursor: updatingInFlight(props.skill()) ? "default" : "pointer",
+              cursor: updating() ? "default" : "pointer",
             }}
             hoverStyle={
-              updatingInFlight(props.skill())
+              updating()
                 ? undefined
                 : { backgroundColor: paletteToken("warn_hover") }
             }
             onPress={() => {
-              if (!updatingInFlight(props.skill())) cardHandle.onUpdate(props.skill().name);
+              if (!updating()) cardHandle.onUpdate(props.skillName());
             }}
           >
-            <If
-              when={updatingInFlight(props.skill())}
-              else={
-                <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <IconSpin name="circleArrowUp" size={12} color={paletteToken("warn")} spin={false} />
-                  <Text style={{ fontSize: 11, fontWeight: "600", color: paletteToken("warn") }}>
-                    {overwritesLocalChanges(props.skill())
-                      ? t("skillCard.updateOverwritesLocal")
-                      : t("common.update")}
-                  </Text>
-                </View>
-              }
-            >
-              <Text style={{ fontSize: 11, fontWeight: "600", color: paletteToken("warn") }}>
-                {t("common.updating")}
-              </Text>
-            </If>
+            <IconSpin
+              name="circleArrowUp"
+              size={12}
+              color={paletteToken("warn")}
+              spin={updating()}
+            />
+            <Text style={{ fontSize: 11, fontWeight: "600", color: paletteToken("warn") }}>
+              {updating()
+                ? t("common.updating")
+                : overwritesLocalChanges(props.skill())
+                  ? t("skillCard.updateOverwritesLocal")
+                  : t("common.update")}
+            </Text>
           </View>
         </If>
       }
     >
       <View
-        testID={`skill-card-upstream-${props.skill().name}`}
+        testID={`skill-card-upstream-${props.skillName()}`}
         style={{
           display: "flex",
           flexDirection: "row",
@@ -490,7 +566,7 @@ function StatusPill(props: { skill: () => SkillRecord }): JSX.Element {
       >
         <Icon name="alertTriangle" size={12} color={paletteToken("danger_fg")} />
         <Text style={{ fontSize: 11, fontWeight: "600", color: paletteToken("danger_fg") }}>
-          {upstreamProblemKind(props.skill()) === "removed"
+          {problem() === "removed"
             ? t("skillCard.upstreamRemoved")
             : t("skillCard.upstreamRenamed")}
         </Text>
@@ -499,43 +575,50 @@ function StatusPill(props: { skill: () => SkillRecord }): JSX.Element {
   );
 }
 
-function updatingInFlight(skill: SkillRecord): boolean {
-  const token = busy();
-  if (token === null) return false;
-  if (token === "update_all" || token === "batch_update") {
-    return updatingBatch().has(skill.name);
-  }
-  return token === skill.name;
-}
-
-function cardRailSlots(skill: SkillRecord): AgentRailSlot[] {
-  const pendingSet = pendingAgents();
-  return targetableProfiles().map((profile) => {
-    const linked = profileIsLinked(profile, skill.agentLinks);
-    const pending = pendingSet.has(`${skill.name}::${profile.id}`);
-    return {
-      profile: { id: profile.id, displayName: profile.displayName, icon: profile.icon },
-      linked,
-      pending,
-      label: tf(linked ? "skillCard.unlinkAgent" : "skillCard.linkAgent", {
-        agent: profile.displayName,
-      }),
-    };
+function CardFooter(props: {
+  skill: () => SkillRecord;
+  skillName: Accessor<string>;
+}): JSX.Element {
+  const cardPendingKey = computed(() => {
+    const prefix = `${props.skillName()}::`;
+    const set = pendingAgents();
+    if (set.size === 0) return "";
+    let hits = "";
+    for (const key of set) {
+      if (key.startsWith(prefix)) hits += `${key}|`;
+    }
+    return hits;
   });
-}
-
-function CardFooter(props: { skill: () => SkillRecord }): JSX.Element {
+  const railSlots = computed<AgentRailSlot[]>(() => {
+    const s = props.skill();
+    const pendingKey = cardPendingKey();
+    const pendingSet = pendingKey.length > 0 ? untracked(pendingAgents) : null;
+    const prefix = `${s.name}::`;
+    const links = new Set(s.agentLinks);
+    return targetableProfiles().map((profile) => {
+      const linked = links.has(profile.id) || links.has(profile.displayName);
+      const pending = pendingSet !== null && pendingSet.has(`${prefix}${profile.id}`);
+      return {
+        profile: { id: profile.id, displayName: profile.displayName, icon: profile.icon },
+        linked,
+        pending,
+        label: tf(linked ? "skillCard.unlinkAgent" : "skillCard.linkAgent", {
+          agent: profile.displayName,
+        }),
+      };
+    });
+  });
   return (
     <If when={targetableProfiles().length > 0}>
       <AgentFooterBar>
         <AgentRail
-          scopeKey={props.skill().name}
+          scopeKey={props.skillName()}
           railPrefix="skill-rail"
           slotPrefix="skill-slot"
-          slots={cardRailSlots(props.skill())}
-          pending={busy() !== null}
+          slots={railSlots()}
+          pending={false}
           onSlotClick={(slot) =>
-            runToggle(drawerOps, props.skill().name, slot.profile.id, !slot.linked)
+            runToggle(drawerOps, props.skillName(), slot.profile.id, !slot.linked)
           }
         />
       </AgentFooterBar>

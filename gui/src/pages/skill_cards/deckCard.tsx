@@ -1,13 +1,18 @@
-import { Text, View, type JSX } from "nsh";
+import { Text, View, computed, type JSX } from "nsh";
 import { Menu, MenuItem, MenuSeparator } from "nsh/base";
 import { paletteToken } from "../../services/themeMode";
 import { Icon } from "../../chrome/icons";
+import { IconSpin } from "../../chrome/feedback";
 import { Tip } from "../../chrome/tooltip";
 import { skillCardFrameStyle, skillCardHoverStyle } from "../../chrome/cardShell";
 import { openConfirm } from "../../chrome/dialog";
 import { SKILL_CARD_W } from "../../layout";
 import { dt, dtf } from "./deckStrings";
-import type { AgentRailProfile, DeckRecord } from "./deckQuery";
+import {
+  deckAgentLinkState,
+  type AgentRailProfile,
+  type DeckRecord,
+} from "./deckQuery";
 import { AgentFooterBar, AgentRail, DeckCountBadge, type AgentRailSlot } from "./agentRail";
 import { deckGlyph } from "./detailDrawerActions";
 
@@ -41,7 +46,10 @@ export interface DeckCardProps {
   selected: boolean;
   viewList: boolean;
   cardWidth?: number;
-  busy: boolean;
+  /** This card's copy or delete is in flight. */
+  rowBusy: boolean;
+  /** In-flight agent toggles, keyed `${deckId}:${agentId}`. */
+  linkPending: Readonly<Record<string, true>>;
   installedSkills: ReadonlySet<string>;
   agents: AgentRailProfile[];
   handle: DeckCardHandle;
@@ -54,19 +62,36 @@ function missingCount(deck: DeckRecord, installed: ReadonlySet<string>): number 
   );
 }
 
-function railSlots(deck: DeckRecord, agents: AgentRailProfile[], busy: boolean): AgentRailSlot[] {
-  const links = new Set(deck.agentLinks ?? []);
-  return agents.map((profile) => ({
-    profile,
-    linked: links.has(profile.id),
-    pending: busy,
-    label: dtf(links.has(profile.id) ? "skillCards.unlinkAllFrom" : "skillCards.linkAllTo", {
-      agent: profile.displayName,
-    }),
-  }));
+function railSlots(
+  deck: DeckRecord,
+  agents: AgentRailProfile[],
+  pending: Readonly<Record<string, true>>
+): AgentRailSlot[] {
+  return agents.map((profile) => {
+    const state = deckAgentLinkState(deck, profile);
+    const labelKey =
+      state === "linked"
+        ? "skillCards.unlinkAllFrom"
+        : state === "mixed"
+          ? "skillCards.linkRemainingTo"
+          : "skillCards.linkAllTo";
+    return {
+      profile,
+      linked: state === "linked",
+      state,
+      pending: pending[`${deck.id}:${profile.id}`] === true,
+      label: dtf(labelKey, {
+        agent: profile.displayName,
+      }),
+    };
+  });
 }
 
 export function DeckCard(props: DeckCardProps): JSX.Element {
+  const missing = computed(() => missingCount(props.deck, props.installedSkills));
+  const chips = computed(() => props.deck.skills.slice(0, 4));
+  const slots = computed(() => railSlots(props.deck, props.agents, props.linkPending));
+  const trimmedDesc = computed(() => props.deck.description.trim());
   return (
     <View
       testID={`deck-card-${props.deck.id}`}
@@ -124,7 +149,7 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
             {props.deck.name}
           </Text>
           <If
-            when={props.deck.description.trim().length > 0}
+            when={trimmedDesc().length > 0}
             else={
               <Text
                 style={{
@@ -148,7 +173,7 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
                 numberOfLines: 1,
               }}
             >
-              {props.deck.description.trim()}
+              {trimmedDesc()}
             </Text>
           </If>
         </View>
@@ -157,7 +182,7 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
           <ShareButton deckId={props.deck.id} onPress={() => props.handle.onShare(props.deck)} />
           <DeckActionsMenu
             deck={props.deck}
-            busy={props.busy}
+            rowBusy={props.rowBusy}
             onDuplicate={() => props.handle.onDuplicate(props.deck)}
             onDelete={() => props.handle.onDelete(props.deck)}
           />
@@ -181,7 +206,7 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
           paddingBottom: 4,
         }}
       >
-        <If when={missingCount(props.deck, props.installedSkills) > 0}>
+        <If when={missing() > 0}>
             <View
               style={{
                 display: "flex",
@@ -194,7 +219,7 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
               <Icon name="alertTriangle" size={12} color={paletteToken("warn")} />
               <Text style={{ fontSize: 12, lineHeight: 16, color: paletteToken("warn") }}>
                 {dtf("skillCards.missingCount", {
-                  count: missingCount(props.deck, props.installedSkills),
+                  count: missing(),
                 })}
               </Text>
             </View>
@@ -209,34 +234,35 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
               paddingVertical: 2,
             }}
           >
-            <Each of={props.deck.skills.slice(0, 4)} key="index">
-              {(skill: () => string) => (
-                <View
-                  style={{
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 6,
-                    borderWidth: 1,
-                    borderColor: props.installedSkills.has(skill())
-                      ? paletteToken("border")
-                      : paletteToken("warn_border"),
-                    backgroundColor: props.installedSkills.has(skill())
-                      ? paletteToken("card_hover")
-                      : paletteToken("warn_bg"),
-                  }}
-                >
-                  <Text
+            <Each of={chips()} key={(skill) => skill}>
+              {(skill: () => string) => {
+                const isInstalled = computed(() => props.installedSkills.has(skill()));
+                return (
+                  <View
                     style={{
-                      fontSize: 12,
-                      color: props.installedSkills.has(skill())
-                        ? paletteToken("fg")
-                        : paletteToken("warn"),
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: isInstalled()
+                        ? paletteToken("border")
+                        : paletteToken("warn_border"),
+                      backgroundColor: isInstalled()
+                        ? paletteToken("card_hover")
+                        : paletteToken("warn_bg"),
                     }}
                   >
-                    {skill()}
-                  </Text>
-                </View>
-              )}
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: isInstalled() ? paletteToken("fg") : paletteToken("warn"),
+                      }}
+                    >
+                      {skill()}
+                    </Text>
+                  </View>
+                );
+              }}
             </Each>
             <If when={props.deck.skills.length > 4}>
               <Text
@@ -255,12 +281,18 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
 
       {/* Footer: the same carousel the skill card rides — one slot per
           targetable agent, linked slots highlighted, a click toggles the
-          deck's link (批量链接语义). */}
+          deck's link (批量链接语义). The in-flight slot swallows a second
+          press; the card itself does not dim.
+
+          No save-status row on the card face (saving / saved / failed): the
+          slot's optimistic flip is already the result, a failure rides the
+          pinned notice band (owned by index.tsx), and pressing the same slot
+          again is the retry. Same contract as the my-skills SkillCard. */}
       <AgentFooterBar>
         <AgentRail
           scopeKey={props.deck.id}
-          slots={railSlots(props.deck, props.agents, props.busy)}
-          pending={props.busy}
+          slots={slots()}
+          pending={false}
           onSlotClick={(slot) => props.handle.onToggleAgent(props.deck, slot.profile.id)}
         />
       </AgentFooterBar>
@@ -271,9 +303,10 @@ export function DeckCard(props: DeckCardProps): JSX.Element {
 /** Ghost icon command (Button ghost small parity): 28px, quiet, tooltip. */
 function GhostIconButton(props: {
   testID: string;
-  glyph: "share" | "ellipsis";
+  glyph: "share" | "ellipsis" | "loader";
   label: string;
   disabled?: boolean;
+  spin?: boolean;
   onPress: () => void;
 }): JSX.Element {
   return (
@@ -290,12 +323,22 @@ function GhostIconButton(props: {
         height: 28,
         borderRadius: 6,
         cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.55 : 1,
+        opacity: 1,
       }}
       hoverStyle={props.disabled ? undefined : { backgroundColor: paletteToken("panel_hover") }}
       onPress={props.disabled ? undefined : props.onPress}
     >
-      <Icon name={props.glyph} size={14} color={paletteToken("fg_muted")} />
+      <If
+        when={props.spin === true}
+        else={<Icon name={props.glyph} size={14} color={paletteToken("fg_muted")} />}
+      >
+        <IconSpin
+          name={props.glyph}
+          size={14}
+          color={paletteToken("fg_muted")}
+          spin={true}
+        />
+      </If>
     </View>
   );
 }
@@ -316,7 +359,7 @@ function ShareButton(props: { deckId: string; onPress: () => void }): JSX.Elemen
  * with the Hub-skills-stay note before the job runs. */
 function DeckActionsMenu(props: {
   deck: DeckRecord;
-  busy: boolean;
+  rowBusy: boolean;
   onDuplicate: () => void;
   onDelete: () => void;
 }): JSX.Element {
@@ -337,9 +380,10 @@ function DeckActionsMenu(props: {
       trigger={
         <GhostIconButton
           testID={`deck-more-${props.deck.id}`}
-          glyph="ellipsis"
+          glyph={props.rowBusy ? "loader" : "ellipsis"}
+          spin={props.rowBusy}
           label={dt("common.moreActions")}
-          disabled={props.busy}
+          disabled={props.rowBusy}
           onPress={() => {}}
         />
       }

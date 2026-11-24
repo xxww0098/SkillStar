@@ -1,11 +1,15 @@
-import { Text, View, effect, mount, signal, type JSX } from "nsh";
+import { Text, View, effect, mount, signal, untracked, type JSX } from "nsh";
 import { Button } from "nsh/base";
 import { OriginMenuButton } from "./originMenu";
 import {
+  busy,
+  descriptionChoices,
   favoriteRepos,
   favoritesLocked,
   loading,
+  profiles,
   repoFilter,
+  setSnapshotLoaderForTest,
   skills,
   sourceFilter,
 } from "./state";
@@ -19,7 +23,22 @@ import type { SkillRecord } from "./filters";
 //
 // 装置纪律：state.ts 在导入时挂了一次真实装载（模块级 effect → refresh），
 // 夹具必须等这次装载落地（loading→false）再播种，否则被真实快照冲掉
-// （detailDrawer.test.host.tsx 同款）；之后没有第二次刷新，夹具稳定。
+// （detailDrawer.test.host.tsx 同款）。
+//
+// 装置状态先置 busy hold，快照读取换成回当前名单的假件
+// （detailDrawer.test.host.tsx 同款）。装载尾的 maybeCheckUpdates 读的是刚播种
+// 的 hub 夹具：全新安装（空库）上真实装载没有上游、节流窗口从未开过，后台
+// 检查立即放行，其 finally 的 refresh 把夹具冲回真实快照（干净 $HOME 下两条
+// 用例稳定超时，2026-11-24）；开发机上真实检查走网络，冲掉的时刻晚于用例
+// 结束，只是碰巧没暴露。
+busy.set("host-hold");
+setSnapshotLoaderForTest(async () => ({
+  skills: untracked(skills),
+  agents: untracked(profiles),
+  favorites: [],
+  favoritesLocked: false,
+  descriptionChoices: untracked(descriptionChoices),
+}));
 
 function fixture(name: string, source: string): SkillRecord {
   return {

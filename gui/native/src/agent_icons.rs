@@ -20,10 +20,20 @@ static ICON_URI_CACHE: OnceLock<Mutex<HashMap<(String, bool), String>>> = OnceLo
 /// Normalize an incoming agent id or alias onto the canonical SVG asset key.
 pub fn normalize_agent_icon_id(agent_id: &str) -> &str {
     let trimmed = agent_id.trim();
-    match ss_skills::agents::compatible_profile_id(trimmed) {
+    let compat = ss_skills::agents::compatible_profile_id(trimmed);
+    match compat {
+        "agy" | "antigravity" => "antigravity",
+        "claude-desktop" => "claude",
+        "commandcode" => "command-code",
         "copilot" => "github-copilot",
+        "dsh" => "deepseek",
         "gemini" => "gemini-cli",
+        "grok-app" => "grok",
+        "kimi" => "kimi-code-cli",
+        "kiro-cli" => "kiro",
+        "oh-my-pi" => "omp",
         "roo-code" => "roo",
+        "workbuddy-ai" => "workbuddy",
         canonical => canonical,
     }
 }
@@ -34,9 +44,11 @@ pub fn agent_icon_svg(agent_id: &str) -> &'static [u8] {
     match normalize_agent_icon_id(agent_id) {
         "adal" => include_bytes!("../../assets/agents/adal.svg"),
         "aider-desk" => include_bytes!("../../assets/agents/aider-desk.svg"),
+        "alma" => include_bytes!("../../assets/agents/alma.svg"),
         "amp" => include_bytes!("../../assets/agents/amp.svg"),
         "antigravity" => include_bytes!("../../assets/agents/antigravity.svg"),
         "astrbot" => include_bytes!("../../assets/agents/astrbot.svg"),
+        "atomcode" => include_bytes!("../../assets/agents/atomcode.svg"),
         "augment" => include_bytes!("../../assets/agents/augment.svg"),
         "autohand-code" => include_bytes!("../../assets/agents/autohand-code.svg"),
         "bob" => include_bytes!("../../assets/agents/bob.svg"),
@@ -55,6 +67,7 @@ pub fn agent_icon_svg(agent_id: &str) -> &'static [u8] {
         "cursor" => include_bytes!("../../assets/agents/cursor.svg"),
         "deepagents" => include_bytes!("../../assets/agents/deepagents.svg"),
         "deepseek" => include_bytes!("../../assets/agents/deepseek.svg"),
+        "deveco" => include_bytes!("../../assets/agents/deveco.svg"),
         "devin" => include_bytes!("../../assets/agents/devin.svg"),
         "devin-desktop" => include_bytes!("../../assets/agents/devin-desktop.svg"),
         "dexto" => include_bytes!("../../assets/agents/dexto.svg"),
@@ -64,6 +77,7 @@ pub fn agent_icon_svg(agent_id: &str) -> &'static [u8] {
         "forgecode" => include_bytes!("../../assets/agents/forgecode.svg"),
         "fx" => include_bytes!("../../assets/agents/fx.svg"),
         "gemini-cli" => include_bytes!("../../assets/agents/gemini-cli.svg"),
+        // Google Gemini icon: https://commons.wikimedia.org/wiki/File:Google_Gemini_icon_2025.svg
         "github-copilot" => include_bytes!("../../assets/agents/github-copilot.svg"),
         "goose" => include_bytes!("../../assets/agents/goose.svg"),
         "grok" => include_bytes!("../../assets/agents/grok.svg"),
@@ -78,13 +92,17 @@ pub fn agent_icon_svg(agent_id: &str) -> &'static [u8] {
         "kiro" => include_bytes!("../../assets/agents/kiro.svg"),
         "kode" => include_bytes!("../../assets/agents/kode.svg"),
         "lingma" => include_bytes!("../../assets/agents/lingma.svg"),
+        "liveagent" => include_bytes!("../../assets/agents/liveagent.svg"),
         "loaf" => include_bytes!("../../assets/agents/loaf.svg"),
         "mcpjam" => include_bytes!("../../assets/agents/mcpjam.svg"),
+        "mimocode" => include_bytes!("../../assets/agents/mimocode.svg"),
         "minimax-code" => include_bytes!("../../assets/agents/minimax-code.svg"),
         "mistral-vibe" => include_bytes!("../../assets/agents/mistral-vibe.svg"),
         "moxby" => include_bytes!("../../assets/agents/moxby.svg"),
+        "mu" => include_bytes!("../../assets/agents/mu.svg"),
         "mux" => include_bytes!("../../assets/agents/mux.svg"),
         "neovate" => include_bytes!("../../assets/agents/neovate.svg"),
+        "omo" => include_bytes!("../../assets/agents/omo.svg"),
         "omp" => include_bytes!("../../assets/agents/omp.svg"),
         "ona" => include_bytes!("../../assets/agents/ona.svg"),
         "openclaw" => include_bytes!("../../assets/agents/openclaw.svg"),
@@ -241,5 +259,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_mcp_agent_has_dedicated_svg_asset() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let roots = ss_mcp_hub::McpPathRoots::from_sandbox(temp.path().to_path_buf());
+        for target in ss_mcp_hub::builtin_targets(&roots) {
+            assert!(
+                has_dedicated_svg(&target.id),
+                "MCP agent '{}' should have a dedicated SVG asset",
+                target.id
+            );
+            for light in [false, true] {
+                let svg = decode_svg(&agent_icon_data_uri(&target.id, light));
+                assert!(svg.contains("<svg"), "invalid SVG for {}", target.id);
+            }
+        }
+        assert!(has_dedicated_svg("agy"));
     }
 }

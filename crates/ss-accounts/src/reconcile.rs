@@ -20,6 +20,9 @@ pub struct AgentLive {
     pub agent: String,
     /// The identity the client serves, when it can be read.
     pub identity: Option<String>,
+    /// User-visible name the client carries locally, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// The account id, when the live identity matches a stored account.
     pub account_id: Option<String>,
     /// Where the client keeps its credential.
@@ -43,13 +46,39 @@ pub fn live_all() -> crate::AccountResult<Vec<AgentLive>> {
     Ok(live_all_with(&entries))
 }
 
-/// Read every agent's live state against an already-read index.
+/// Read every agent's live state against an already-read index in parallel,
+/// preserving `Agent::supported()` order.
 pub(crate) fn live_all_with(entries: &[IndexEntry]) -> Vec<AgentLive> {
     let roots = PathRoots::from_env();
-    Agent::supported()
-        .iter()
-        .map(|agent| live_one(&roots, entries, agent.id()))
-        .collect()
+    let agents = Agent::supported();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = agents
+            .iter()
+            .map(|agent| scope.spawn(|| live_one(&roots, entries, agent.id())))
+            .collect();
+        handles
+            .into_iter()
+            .zip(agents.iter())
+            .map(|(handle, agent)| {
+                handle.join().unwrap_or_else(|_| AgentLive {
+                    agent: agent.id().to_string(),
+                    identity: None,
+                    display_name: None,
+                    account_id: None,
+                    source: switch::credential_path_with(&roots, agent.id())
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default(),
+                })
+            })
+            .collect()
+    })
+}
+
+/// Read a single agent's live state without probing the other agents.
+pub(crate) fn live_for_agent(agent: &str) -> Option<AgentLive> {
+    let entries = crate::store::index().ok()?;
+    let roots = PathRoots::from_env();
+    Some(live_one(&roots, &entries, agent))
 }
 
 fn live_one(roots: &PathRoots, entries: &[IndexEntry], agent: &str) -> AgentLive {
@@ -58,6 +87,7 @@ fn live_one(roots: &PathRoots, entries: &[IndexEntry], agent: &str) -> AgentLive
             agent: agent.to_string(),
             account_id: match_live(entries, agent, &live),
             identity: live.identity,
+            display_name: live.display_name,
             source: live.source,
         },
         Err(error) => {
@@ -70,6 +100,7 @@ fn live_one(roots: &PathRoots, entries: &[IndexEntry], agent: &str) -> AgentLive
             AgentLive {
                 agent: agent.to_string(),
                 identity: None,
+                display_name: None,
                 account_id: None,
                 source: switch::credential_path_with(roots, agent)
                     .map(|path| path.display().to_string())
@@ -104,22 +135,32 @@ pub(crate) fn match_live(
     {
         return Some(entry.id.clone());
     }
-    let by_fingerprint = |fingerprint: Option<&str>,
-                          of: fn(&Account) -> Option<String>|
+    let by_fingerprint = |target: Option<&str>,
+                          of_entry: fn(&IndexEntry) -> Option<&str>,
+                          of_account: fn(&Account) -> Option<String>|
      -> Option<String> {
-        let fingerprint = fingerprint?;
+        let target = target?;
         candidates.iter().find_map(|entry| {
+            if let Some(fp) = of_entry(entry) {
+                return (fp == target).then(|| entry.id.clone());
+            }
+            if entry.access_fingerprint.is_some() {
+                // Fingerprints are already indexed; missing refresh_fingerprint means no refresh token.
+                return None;
+            }
             let account = crate::store::get(&entry.id).ok()?;
-            (of(&account).as_deref() == Some(fingerprint)).then(|| entry.id.clone())
+            (of_account(&account).as_deref() == Some(target)).then(|| entry.id.clone())
         })
     };
     by_fingerprint(
         live.refresh_fingerprint.as_deref(),
+        |entry| entry.refresh_fingerprint.as_deref(),
         Account::refresh_fingerprint,
     )
     .or_else(|| {
         by_fingerprint(
             live.access_fingerprint.as_deref(),
+            |entry| entry.access_fingerprint.as_deref(),
             Account::access_fingerprint,
         )
     })

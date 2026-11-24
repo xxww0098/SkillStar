@@ -130,6 +130,35 @@ fn progress_events_map_to_the_raw_phase_stage_shape() {
 }
 
 #[test]
+fn progress_channel_closes_after_worker_finishes() {
+    use ss_skills::git::transport::{GitAuthMaterial, GitOperationSession};
+
+    let (tx, rx) = mpsc::channel();
+    let tx = Arc::new(tx);
+    let sink = Arc::new(DialogProgressSink {
+        tx: Arc::downgrade(&tx),
+    });
+    let facade = GitSkillFacade::new(GitOperationSession::new(
+        "test",
+        GitAuthMaterial::missing(),
+        sink,
+    ));
+    let worker = facade.clone();
+    worker
+        .session()
+        .emit_stage(InstallStage::Discovering, "test/repo", None);
+    let drained = drain_latest(&rx);
+    assert!(drained.latest.is_some());
+    assert!(!drained.disconnected);
+
+    facade.cancel();
+    assert!(worker.session().is_cancelled());
+    drop(worker);
+    drop(tx);
+    assert!(drain_latest(&rx).disconnected);
+}
+
+#[test]
 fn local_scan_to_install_round_trip() {
     let _sandbox = IsolatedDataDir::new();
     let parent = std::env::temp_dir().join(format!(

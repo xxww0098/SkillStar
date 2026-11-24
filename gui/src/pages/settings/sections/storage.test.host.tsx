@@ -15,6 +15,7 @@ const fakeBridge: StorageBridge = {
       is_hub_under_data: true,
       config_bytes: 10,
       config_path: "/data/config",
+      skills_data_path: "/data/data/skills",
       hub_bytes: 20,
       hub_path: "/data/agents/skills",
       hub_count: 2,

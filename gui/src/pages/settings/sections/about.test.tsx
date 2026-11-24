@@ -20,7 +20,7 @@ function harness(checkResult: Promise<ReleaseRecordDto> | Error = Promise.resolv
   outcome: { kind: "up_to_date" as const },
 })): { bridge: AboutBridge; state: ReturnType<typeof createAboutState> } {
   const bridge: AboutBridge = {
-    aboutSnapshot() {
+    async aboutSnapshot() {
       return {
         version: "1.2.3",
         data_root: "/data",
@@ -41,9 +41,9 @@ function harness(checkResult: Promise<ReleaseRecordDto> | Error = Promise.resolv
   return { bridge, state: createAboutState(bridge) };
 }
 
-test("start() seeds the snapshot and the persisted release record", () => {
+test("start() seeds the snapshot and the persisted release record", async () => {
   const { state } = harness();
-  state.start();
+  await state.start();
   expect(state.snapshot()?.version).toBe("1.2.3");
   expect(state.snapshot()?.git_status).toEqual({ status: "Installed", version: "2.44" });
   // 沙箱里没有上一轮记录：chip 相是 null（首次检查前不显示）。
@@ -62,7 +62,7 @@ test("the manual check is single-flight and records the fresh outcome", async ()
     gate.release = () => resolve(record);
   });
   const h = harness(pending);
-  h.state.start();
+  await h.state.start();
   h.state.runReleaseCheck();
   expect(h.state.releaseChecking()).toBe(true);
   // 在途再点：吞掉（about.rs run_release_check 的 return 分支）。
@@ -120,7 +120,11 @@ const HOST = "./about.test.host.tsx";
 test("the about card paints tool badges, version chip and the update chip", async () => {
   const app = await open(HOST);
   await app.press("id:device-reset");
-  await app.waitUntil(() => app.texts().some((s) => s.includes("v1.2.3")));
+  await app.waitUntil(
+    () =>
+      app.texts().some((s) => s.includes("v1.2.3")) &&
+      app.texts().includes(t("settings.gitInstalled")),
+  );
   // Git/GitHub CLI 双装：两枚 installed 徽章。
   expect(app.texts()).toContain(t("settings.gitInstalled"));
   expect(app.texts()).toContain(t("settings.ghInstalled"));
@@ -132,9 +136,13 @@ test("the about card paints tool badges, version chip and the update chip", asyn
 });
 
 test("missing git and gh show install links plus platform commands", async () => {
-  const app = await open(HOST);
+  const app = await open(HOST, { platform: "macos" });
   await app.press("id:device-nogit");
-  await app.waitUntil(() => app.texts().some((s) => s === "env:nogit"));
+  await app.waitUntil(
+    () =>
+      app.texts().some((s) => s === "env:nogit") &&
+      app.texts().includes(t("settings.gitInstall")),
+  );
   // git 未装：安装外链按钮 + 两条平台安装命令（复制行）。
   expect(app.texts()).toContain(t("settings.gitInstall"));
   expect(app.texts()).toContain("brew install git");
@@ -150,8 +158,9 @@ test("the manual check is single-flight in the UI and lands the fresh chip", asy
   await app.press("id:device-reset");
   await app.waitUntil(() => app.texts().some((s) => s === "calls:0"));
   await app.press("id:about-check-update");
-  // 检查中：chip 与按钮文案都进入 checking 态。
-  await app.waitUntil(() => app.texts().filter((s) => s === t("settings.checkingUpdate")).length >= 2);
+  // 检查中只转图标：没有 checking 文案，按钮仍是空闲标签。
+  expect(app.texts().filter((s) => s === t("settings.checkingUpdate")).length).toBe(0);
+  expect(app.texts()).toContain(t("settings.checkUpdate"));
   // 在途再点：吞掉（仍 1 笔）。
   await app.press("id:about-check-update");
   await app.press("id:device-check-ok");

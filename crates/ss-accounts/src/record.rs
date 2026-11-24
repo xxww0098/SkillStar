@@ -30,6 +30,12 @@ pub struct Account {
     /// AES-256-GCM ciphertext of the provider-private state, when there is one.
     #[serde(default)]
     pub provider_state_encrypted: Option<String>,
+    /// Non-reversible SHA-256 prefix of the stored access token, for cheap live matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_fingerprint: Option<String>,
+    /// Non-reversible SHA-256 prefix of the stored refresh token, for cheap live matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_fingerprint: Option<String>,
     /// Unix seconds.
     pub created_at: i64,
     #[serde(default)]
@@ -65,11 +71,14 @@ impl Account {
             account_id: identity.account_id.clone(),
             tokens_encrypted: crate::crypto::encrypt(&tokens_json),
             provider_state_encrypted: None,
+            access_fingerprint: None,
+            refresh_fingerprint: None,
             created_at: now,
             last_used_at: None,
             requires_reauth: false,
             usage: None,
         };
+        record.sync_fingerprints(tokens);
         record.set_provider_state(provider_state)?;
         Ok(record)
     }
@@ -84,8 +93,12 @@ impl Account {
     }
 
     /// Fingerprint of the stored refresh token, for matching a client that
-    /// exposes no identity. Decrypts, so callers keep it off the cheap path.
+    /// exposes no identity. Uses the cached non-secret digest when present,
+    /// falling back to decryption only for legacy records.
     pub fn refresh_fingerprint(&self) -> Option<String> {
+        if self.access_fingerprint.is_some() {
+            return self.refresh_fingerprint.clone();
+        }
         let tokens = self.tokens().ok()?;
         tokens
             .refresh_token
@@ -96,6 +109,9 @@ impl Account {
     /// Fingerprint of the stored access token: a client may have rotated the
     /// refresh token, but a switch wrote this access token a moment ago.
     pub fn access_fingerprint(&self) -> Option<String> {
+        if let Some(fp) = &self.access_fingerprint {
+            return Some(fp.clone());
+        }
         let tokens = self.tokens().ok()?;
         Some(crate::identity::fingerprint(&tokens.access_token))
     }
@@ -134,6 +150,15 @@ impl Account {
     /// Replace the token set.
     pub(crate) fn set_tokens(&mut self, tokens: &TokenSet) -> crate::AccountResult<()> {
         self.tokens_encrypted = crate::crypto::encrypt(&serde_json::to_string(tokens)?);
+        self.sync_fingerprints(tokens);
         Ok(())
+    }
+
+    fn sync_fingerprints(&mut self, tokens: &TokenSet) {
+        self.access_fingerprint = Some(crate::identity::fingerprint(&tokens.access_token));
+        self.refresh_fingerprint = tokens
+            .refresh_token
+            .as_deref()
+            .map(crate::identity::fingerprint);
     }
 }

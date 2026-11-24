@@ -11,7 +11,7 @@ use super::config::{Engine, LlmAuth, TranslationConfig, translation_language};
 
 const CHUNK: usize = 1400;
 
-pub fn parse_gtx(body: &str) -> Option<String> {
+pub(super) fn parse_gtx(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let segments = value.get(0)?.as_array()?;
     let mut out = String::new();
@@ -27,7 +27,7 @@ pub fn parse_gtx(body: &str) -> Option<String> {
     }
 }
 
-pub fn parse_chat(body: &str) -> Option<String> {
+pub(super) fn parse_chat(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let text = value
         .pointer("/choices/0/message/content")?
@@ -40,7 +40,7 @@ pub fn parse_chat(body: &str) -> Option<String> {
     }
 }
 
-pub async fn translate_text(
+pub(super) async fn translate_text(
     source: &str,
     target: &str,
     config: &TranslationConfig,

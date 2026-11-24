@@ -42,6 +42,11 @@ const PERCENT_POOLS: [(&str, &str, &str, &str); 2] = [
 
 /// Read the Cursor quota for one account.
 pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
+    if crate::switch::cursor::is_safe_storage_ciphertext(&creds.tokens.access_token) {
+        return Err(UsageError::AuthRequired(
+            "Cursor 凭据是客户端加密密文，请切回该账号刷新或重新授权".to_string(),
+        ));
+    }
     let reading = super::tokens_for_read("cursor", creds)?;
     let access_token = reading.tokens.access_token.as_str();
     let user_id = user_id_from_access_token(access_token).ok_or_else(|| {
@@ -65,10 +70,16 @@ pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
         super::unix_now(),
         plan.as_deref(),
     )?;
+    let identity = if creds.needs_identity {
+        crate::oauth::agents::cursor::read_identity_blocking(&reading.tokens)
+    } else {
+        None
+    };
     Ok(UsageOutcome {
         snapshot,
         tokens: reading.tokens,
         provider_state: reading.provider_state,
+        identity,
     })
 }
 
@@ -88,8 +99,23 @@ pub(crate) fn parse_usage(body: &str, now: i64, plan: Option<&str>) -> UsageResu
             parse::snippet(body)
         ))
     })?;
+    let plan = plan.map(str::to_string).or_else(|| {
+        parse::text_in(&root, &["membershipType", "membership_type"])
+            .map(|value| value.to_ascii_uppercase())
+    });
     let windows = windows(&root);
-    if windows.is_empty() {
+    let is_unlimited = root.get("isUnlimited").and_then(Value::as_bool) == Some(true);
+    let credits = if windows.is_empty() && is_unlimited {
+        Some(crate::usage::snapshot::Credits {
+            label: "Credits".to_string(),
+            remaining: None,
+            unlimited: true,
+            unit: UsageUnit::Percent,
+        })
+    } else {
+        None
+    };
+    if windows.is_empty() && credits.is_none() {
         return Err(UsageError::Unreadable(format!(
             "{ENDPOINT_LABEL}: the response carries no quota window: {}",
             parse::snippet(body)
@@ -98,20 +124,26 @@ pub(crate) fn parse_usage(body: &str, now: i64, plan: Option<&str>) -> UsageResu
     Ok(UsageSnapshot {
         fetched_at: now,
         windows,
-        plan: plan.map(str::to_string),
-        credits: None,
+        plan,
+        credits,
         error: None,
         gcp_tos: None,
+        reset_credits: None,
     })
 }
 
 /// Resolve the plan node across the shapes Cursor ships, newest first.
 fn plan_node(root: &Value) -> Option<&Value> {
-    ["/individualUsage/plan", "/individual_usage/plan"]
-        .into_iter()
-        .find_map(|pointer| root.pointer(pointer))
-        .or_else(|| root.get("planUsage"))
-        .or_else(|| root.get("plan_usage"))
+    [
+        "/individualUsage/plan",
+        "/individual_usage/plan",
+        "/teamUsage/plan",
+        "/team_usage/plan",
+    ]
+    .into_iter()
+    .find_map(|pointer| root.pointer(pointer).filter(|value| value.is_object()))
+    .or_else(|| root.get("planUsage").filter(|value| value.is_object()))
+    .or_else(|| root.get("plan_usage").filter(|value| value.is_object()))
 }
 
 /// The percent pools, then the total allowance (money when the payload says so).
@@ -152,6 +184,19 @@ fn total_window(node: &Value, resets_at: Option<i64>) -> Option<UsageWindow> {
     )
     .filter(|value| *value >= 0.0);
     let limit = parse::number_in(node, &["limit"]).filter(|value| *value > 0.0);
+    let bonus = parse::number_at(node, "/breakdown/bonus").unwrap_or(0.0);
+    let bonus_covers_included = bonus > 0.0
+        || matches!((spent, limit, percent_used), (Some(s), Some(l), Some(p)) if s >= l && p < 100.0);
+    if bonus_covers_included
+        && let Some(used_percent) = percent_used
+    {
+        return Some(percent_window(
+            TOTAL_KEY,
+            TOTAL_LABEL,
+            used_percent,
+            resets_at,
+        ));
+    }
     if let (Some(spent), Some(limit)) = (spent, limit) {
         return Some(UsageWindow {
             key: TOTAL_KEY.to_string(),
@@ -219,21 +264,23 @@ fn plan_from_profile(access_token: &str) -> Option<String> {
 /// Profile JSON to a plan name. Pure.
 pub(crate) fn parse_profile(body: &str) -> Option<String> {
     let profile: Value = serde_json::from_str(body).ok()?;
-    if profile
-        .get("is_enterprise")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    let bool_in = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| profile.get(*key).and_then(Value::as_bool))
+            .unwrap_or(false)
+    };
+    if bool_in(&["is_enterprise", "isEnterprise"]) {
         return Some("ENTERPRISE".to_string());
     }
-    if profile
-        .get("is_team_member")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if bool_in(&["is_team_member", "isTeamMember"]) {
         return Some("TEAM".to_string());
     }
-    for key in ["individualMembershipType", "membershipType"] {
+    for key in [
+        "individualMembershipType",
+        "membershipType",
+        "individual_membership_type",
+        "membership_type",
+    ] {
         if let Some(name) = parse::text(profile.get(key)) {
             return Some(name.to_ascii_uppercase());
         }
@@ -386,5 +433,58 @@ mod tests {
 
         let empty = interpret(200, "{}", NOW, None).expect_err("no plan node is a shape change");
         assert!(matches!(empty, UsageError::Unreadable(_)));
+    }
+
+    #[test]
+    fn ultra_bonus_uses_total_percent_used_and_falls_back_to_summary_membership_type() {
+        let ultra = r#"{
+            "billingCycleEnd": "2026-11-16T17:43:37.000Z",
+            "membershipType": "ultra",
+            "individualUsage": {
+                "plan": {
+                    "used": 40000,
+                    "limit": 40000,
+                    "remaining": 0,
+                    "breakdown": { "included": 40000, "bonus": 225206, "total": 265206 },
+                    "autoPercentUsed": 85.0,
+                    "apiPercentUsed": 100.0,
+                    "totalPercentUsed": 85.5
+                }
+            }
+        }"#;
+        let snapshot = parse_usage(ultra, NOW, None).expect("ultra summary");
+        assert_eq!(snapshot.plan.as_deref(), Some("ULTRA"));
+        assert_eq!(snapshot.windows.len(), 3);
+        let total = &snapshot.windows[2];
+        assert_eq!(total.key, "total");
+        assert_eq!(total.unit, UsageUnit::Percent);
+        assert_close(total.remaining_percent, 14.5);
+
+        assert_eq!(
+            parse_profile(r#"{"isTeamMember":true,"membershipType":"pro"}"#).as_deref(),
+            Some("TEAM")
+        );
+        assert_eq!(
+            parse_profile(r#"{"isTeamMember":false,"individualMembershipType":"ultra","membershipType":"pro"}"#).as_deref(),
+            Some("ULTRA")
+        );
+
+        let unlimited = parse_usage(r#"{"isUnlimited":true,"membershipType":"enterprise"}"#, NOW, None)
+            .expect("unlimited credits");
+        assert_eq!(unlimited.plan.as_deref(), Some("ENTERPRISE"));
+        assert!(unlimited.windows.is_empty());
+        assert_eq!(unlimited.credits.as_ref().map(|c| c.unlimited), Some(true));
+
+        let ciphertext = Credentials {
+            tokens: crate::oauth::TokenSet {
+                access_token: "cursor-safe-storage:v1:encrypted".to_string(),
+                ..Default::default()
+            },
+            account_id: None,
+            provider_state: None,
+            needs_identity: false,
+        };
+        let err = fetch(&ciphertext).expect_err("ciphertext rejected");
+        assert!(matches!(err, UsageError::AuthRequired(_)), "got {err:?}");
     }
 }

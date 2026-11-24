@@ -12,7 +12,16 @@ import {
   type ImportBridge,
   type PackBridge,
 } from "./importModalState";
-import { headerTitle, phaseBody } from "./importModalPhases";
+import {
+  CompletedBody,
+  FailedBody,
+  InputBody,
+  LoadingBody,
+  headerTitle,
+} from "./importModalPhases";
+import { SelectBody } from "./importModalSelect";
+import { SharePreviewBody } from "./importModalShare";
+import { PackBody } from "./importModalPack";
 
 // 导入对话框槽位 — my_skills/import_modal.rs（+ import_modal/
 // {phases,select,share,progress,helpers}）对位。波 4 异步桥基座预注册的
@@ -21,8 +30,9 @@ import { headerTitle, phaseBody } from "./importModalPhases";
 //
 // 【桥规矩（bridge_task.rs + services/domainJob.ts + my_skills_import.rs）】
 // 扫描/安装是 blocking 池 worker + 120ms 最新值进度泵（节流在 Rust 桥层）；
-// 关闭（Escape/遮罩）一律 run.stop()——Rust 侧 facade.cancel()（git 会话
-// 自身的取消标志）+ epoch 门双保险，过期进度与迟到结算不落屏。
+// 未收进后台时，关闭（Escape/遮罩）一律 run.stop()——Rust 侧 facade.cancel()
+// （git 会话自身的取消标志）+ epoch 门双保险，过期进度与迟到结算不落屏。
+// parked 的关闭留着任务，重新打开后再关才取消。
 //
 // 【浮层】chrome::open_centered（toolbar.rs open_import）：512 宽、量高后
 // 窗口正中；Escape/遮罩 = X = close（on_close → cancel_active）。
@@ -120,8 +130,27 @@ function ImportModalCard(): JSX.Element {
         >
           <Header />
           <View style={{ display: "flex", flexDirection: "column" }}>
-            {/* Phase 分派以 JSX 子表达式调用（组件体只执行一次）。 */}
-            {phaseBody(phase())}
+            <If when={phase() === "input"}>
+              <InputBody />
+            </If>
+            <If when={phase() === "scanning" || phase() === "installing" || phase() === "shareInstalling"}>
+              <LoadingBody />
+            </If>
+            <If when={phase() === "select"}>
+              <SelectBody />
+            </If>
+            <If when={phase() === "completed"}>
+              <CompletedBody />
+            </If>
+            <If when={phase() === "failed"}>
+              <FailedBody />
+            </If>
+            <If when={phase() === "sharePreview"}>
+              <SharePreviewBody />
+            </If>
+            <If when={phase() === "pack"}>
+              <PackBody />
+            </If>
           </View>
         </View>
       </View>

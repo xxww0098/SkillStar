@@ -2,7 +2,7 @@
 // 与 cockpit-tools 的「顶部选择+账号+当前+套餐 / 副标题或重授权 / well 配额双栏 / 底部时间+操作」对齐；
 // 颜色全走 paletteToken()，组件体内不预读 props/signal 以保持 nsh getter 响应式。
 
-import { Text, View, type JSX } from "nsh";
+import { Text, View, computed, type JSX } from "nsh";
 import { IconSpin } from "../../chrome/feedback";
 import { Icon, type IconName } from "../../chrome/icons";
 import { Tip } from "../../chrome/tooltip";
@@ -10,14 +10,16 @@ import { SKILL_CARD_W } from "../../layout";
 import { paletteToken } from "../../services/themeMode";
 import { t } from "../../services/translation";
 import {
+  accountName,
   lastUsedStamp,
-  loginLine,
   maskAccountText,
   planKind,
+  planLabel,
   planOf,
   withAlpha,
   type PlanKind,
 } from "./logic";
+import { openAccountContextMenu } from "./accountContextMenu";
 import { QuotaArea } from "./meters";
 import type { AccountView } from "./types";
 
@@ -30,16 +32,38 @@ export function planColors(kind: PlanKind): { bg: string; fg: string; border?: s
         fg: paletteToken("amber_fg"),
         border: paletteToken("amber_border"),
       };
+    // Ultra Lite（5X）比满档 Ultra（20X）低一档：同属琥珀家族之外另起冷色，
+    // 与 plus 的绿、team 的紫、enterprise 的暖黄都能在卡面上分开。
+    case "ultra_lite":
+      return {
+        bg: paletteToken("info_bg"),
+        fg: paletteToken("info"),
+        border: paletteToken("info_border"),
+      };
     case "pro":
       return {
         bg: paletteToken("accent"),
         fg: paletteToken("on_accent"),
+      };
+    // Pro 的降配（Pro Lite / pro 5x）：同色系软底 + 描边，跟实底 Pro 一眼分开。
+    case "pro_lite":
+      return {
+        bg: paletteToken("accent_soft"),
+        fg: paletteToken("accent_fg"),
+        border: paletteToken("accent_soft_edge"),
       };
     case "plus":
       return {
         bg: paletteToken("ok_bg"),
         fg: paletteToken("ok"),
         border: paletteToken("ok_border"),
+      };
+    // 入门付费档（Lite / Basic / Standard）：青，与 plus 的绿、pro 的主色分开。
+    case "lite":
+      return {
+        bg: paletteToken("cyan_bg"),
+        fg: paletteToken("cyan"),
+        border: paletteToken("cyan_border"),
       };
     case "team":
       return {
@@ -69,8 +93,10 @@ export function AccountCard(props: {
   serving: boolean;
   busy: boolean;
   refreshing: boolean;
+  deleting: boolean;
   selected: boolean;
   masked: boolean;
+  cardWidth?: number;
   onToggleSelect: () => void;
   onRefresh: () => void;
   onActivate: () => void;
@@ -80,11 +106,24 @@ export function AccountCard(props: {
   return (
     <View
       testID={`acct-card-${props.account.id}`}
+      accessibilityState={{ busy: props.refreshing || props.deleting }}
+      onContextMenu={(e) =>
+        openAccountContextMenu(e, {
+          account: props.account,
+          serving: props.serving,
+          busy: props.busy,
+          refreshing: props.refreshing,
+          onActivate: props.onActivate,
+          onRefresh: props.onRefresh,
+          onReauth: props.onReauth,
+          onDelete: props.onDelete,
+        })
+      }
       style={{
         display: "flex",
         flexDirection: "column",
         gap: 10,
-        width: SKILL_CARD_W,
+        width: props.cardWidth ?? SKILL_CARD_W,
         minHeight: 228,
         paddingVertical: 12,
         paddingHorizontal: 14,
@@ -93,6 +132,7 @@ export function AccountCard(props: {
         backgroundColor: props.selected ? paletteToken("card_active") : paletteToken("card"),
         borderColor:
           props.selected || props.serving ? paletteToken("accent") : paletteToken("border"),
+        overflow: "hidden",
       }}
       hoverStyle={{
         backgroundColor: props.selected
@@ -110,11 +150,10 @@ export function AccountCard(props: {
         onToggleSelect={props.onToggleSelect}
       />
 
-      {props.account.requiresReauth ? (
+      <LoginSubline account={props.account} masked={props.masked} />
+      <If when={props.account.requiresReauth}>
         <ReauthRow id={props.account.id} busy={props.busy} onReauth={props.onReauth} />
-      ) : (
-        <LoginSubline account={props.account} masked={props.masked} />
-      )}
+      </If>
 
       <QuotaArea usage={props.account.usage} />
 
@@ -137,6 +176,7 @@ export function AccountCard(props: {
           serving={props.serving}
           busy={props.busy}
           refreshing={props.refreshing}
+          deleting={props.deleting}
           onRefresh={props.onRefresh}
           onActivate={props.onActivate}
           onDelete={props.onDelete}
@@ -160,12 +200,13 @@ function CardTop(props: {
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
+        minWidth: 0,
       }}
     >
       <SelectCheckbox
         testID={`acct-select-${props.account.id}`}
         checked={props.selected}
-        label={props.account.displayName}
+        label={accountName(props.account) || t("accountsPage.noUsername")}
         onPress={props.onToggleSelect}
       />
 
@@ -181,14 +222,18 @@ function CardTop(props: {
           color: paletteToken("fg"),
         }}
       >
-        {maskAccountText(props.account.displayName, props.masked)}
+        {accountName(props.account)
+          ? maskAccountText(accountName(props.account), props.masked)
+          : t("accountsPage.noUsername")}
       </Text>
 
-      {props.serving ? <ServingBadge id={props.account.id} /> : null}
+      <If when={props.serving}>
+        <ServingBadge id={props.account.id} />
+      </If>
 
-      {props.account.usage?.error ? (
-        <QuotaErrorBadge id={props.account.id} error={props.account.usage.error} />
-      ) : null}
+      <If when={Boolean(props.account.usage?.error)}>
+        <QuotaErrorBadge id={props.account.id} error={props.account.usage?.error ?? ""} />
+      </If>
 
       <View style={{ marginLeft: "auto", flexShrink: 0 }}>
         <PlanBadge id={props.account.id} account={props.account} />
@@ -262,43 +307,45 @@ export function ServingBadge(props: { id: string; compact?: boolean }): JSX.Elem
   );
 }
 
-/** 套餐徽章（ULTRA / PRO / PLUS / TEAM / ENTERPRISE / FREE）。 */
+/** 套餐徽章：顶档（Max / Ultra / Heavy）、次顶（Ultra 5X / Pro+）、pro、plus、lite、team、enterprise、free 各上一色。 */
 export function PlanBadge(props: {
   id: string;
   account: AccountView;
   compact?: boolean;
 }): JSX.Element {
+  const plan = computed(() => planOf(props.account));
+  const kind = computed(() => planKind(plan()));
+  const colors = () => planColors(kind());
+
   return (
-    <View style={{ display: planOf(props.account) ? "flex" : "none", flexShrink: 0 }}>
-      {planOf(props.account) ? (
-        <View
-          testID={`acct-plan-${props.id}`}
+    <If when={plan() !== ""}>
+      <View
+        testID={`acct-plan-${props.id}`}
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: props.compact ? 6 : 7,
+          height: props.compact ? 18 : 20,
+          borderRadius: 999,
+          borderWidth: colors().border ? 1 : 0,
+          borderColor: colors().border,
+          backgroundColor: colors().bg,
+          flexShrink: 0,
+        }}
+      >
+        <Text
           style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            paddingHorizontal: props.compact ? 6 : 7,
-            height: props.compact ? 18 : 20,
-            borderRadius: 999,
-            borderWidth: planColors(planKind(planOf(props.account))).border ? 1 : 0,
-            borderColor: planColors(planKind(planOf(props.account))).border,
-            backgroundColor: planColors(planKind(planOf(props.account))).bg,
-            flexShrink: 0,
+            fontSize: 11,
+            fontWeight: "600",
+            textTransform: "uppercase",
+            color: colors().fg,
           }}
         >
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: "600",
-              textTransform: "uppercase",
-              color: planColors(planKind(planOf(props.account))).fg,
-            }}
-          >
-            {planOf(props.account) ?? ""}
-          </Text>
-        </View>
-      ) : null}
-    </View>
+          {planLabel(props.account)}
+        </Text>
+      </View>
+    </If>
   );
 }
 
@@ -327,18 +374,21 @@ export function QuotaErrorBadge(props: { id: string; error: string }): JSX.Eleme
   );
 }
 
-function LoginSubline(props: { account: AccountView; masked: boolean }): JSX.Element {
+export function LoginSubline(props: { account: AccountView; masked: boolean; compact?: boolean }): JSX.Element {
   return (
     <Text
+      testID={`acct-email-${props.account.id}`}
       style={{
         numberOfLines: 1,
         textOverflow: "ellipsis",
-        fontSize: 12,
+        fontSize: props.compact ? 11 : 12,
         fontWeight: "400",
         color: paletteToken("fg_muted"),
       }}
     >
-      {maskAccountText(loginLine(props.account), props.masked)}
+      {props.account.email?.trim()
+        ? maskAccountText(props.account.email.trim(), props.masked)
+        : t("accountsPage.noEmail")}
     </Text>
   );
 }
@@ -378,6 +428,8 @@ export function ReauthRow(props: {
         <Icon name="alertTriangle" size={12} color={paletteToken("danger")} />
         <Text
           style={{
+            flexShrink: 1,
+            minWidth: 0,
             numberOfLines: 1,
             textOverflow: "ellipsis",
             fontSize: 11,
@@ -436,6 +488,8 @@ export function LastUsedMeta(props: { account: AccountView }): JSX.Element {
       <Icon name="clock" size={12} color={paletteToken("fg_faint")} />
       <Text
         style={{
+          flexShrink: 1,
+          minWidth: 0,
           numberOfLines: 1,
           textOverflow: "ellipsis",
           fontSize: 11,
@@ -456,6 +510,7 @@ export function AccountActionButtons(props: {
   serving: boolean;
   busy: boolean;
   refreshing: boolean;
+  deleting: boolean;
   onRefresh: () => void;
   onActivate: () => void;
   onDelete: () => void;
@@ -474,7 +529,7 @@ export function AccountActionButtons(props: {
         testID={`acct-switch-${props.account.id}`}
         icon={props.serving ? "checkCircle" : "play"}
         tip={props.serving ? t("accountsPage.current") : t("accountsPage.switch")}
-        color={props.serving ? paletteToken("ok") : paletteToken("ok")}
+        color={paletteToken("ok")}
         disabled={props.serving || props.busy}
         activeHighlight={!props.serving && !props.busy}
         onPress={props.onActivate}
@@ -494,9 +549,10 @@ export function AccountActionButtons(props: {
         testID={`acct-delete-${props.account.id}`}
         icon="trash"
         tip={t("common.delete")}
-        color={paletteToken("fg_muted")}
+        color={props.deleting ? paletteToken("danger") : paletteToken("fg_muted")}
         dangerHover
-        disabled={props.busy}
+        disabled={props.busy || props.refreshing}
+        spin={props.deleting}
         onPress={props.onDelete}
       />
     </View>
@@ -520,6 +576,7 @@ function ActionIconButton(props: {
         testID={props.testID}
         role="button"
         accessibilityLabel={props.tip}
+        accessibilityState={{ disabled: props.disabled, busy: props.spin === true }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -555,11 +612,12 @@ function ActionIconButton(props: {
         }
         onPress={props.disabled ? undefined : props.onPress}
       >
-        {props.spin !== undefined ? (
-          <IconSpin name={props.icon} size={13} color={props.color} spin={props.spin} />
-        ) : (
-          <Icon name={props.icon} size={13} color={props.color} />
-        )}
+        <If
+          when={props.spin !== undefined}
+          else={<Icon name={props.icon} size={13} color={props.color} />}
+        >
+          <IconSpin name={props.icon} size={13} color={props.color} spin={props.spin === true} />
+        </If>
       </View>
     </View>
   );

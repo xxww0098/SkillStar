@@ -9,10 +9,21 @@ import { WINDOW_H, WINDOW_W } from "../../layout";
 import { railPage } from "../../shell/nav";
 import { Marketplace } from "skillstar-gui/native";
 import { requestImportSource, selectPage, type ImportSourceRequest } from "../../shell/events";
-import { createReadSide, type MarketNotice, type ReadSideDeps } from "./readSide";
-import { spotlightNames } from "./spotlight";
+import {
+  createReadSide,
+  MAX_AUTO_REFRESH_RETRIES,
+  type MarketNotice,
+  type ReadSideDeps,
+} from "./readSide";
 import { snapshotLabel } from "./marketStrings";
-import { parseSkill, skillBlurb, formatInstalls, type MarketSkill } from "./types";
+import {
+  formatInstalls,
+  parseSkill,
+  parseSkillsPayload,
+  parseStatus,
+  skillBlurb,
+  type MarketSkill,
+} from "./types";
 
 // ---- 测试桩 ---------------------------------------------------------------
 
@@ -211,6 +222,62 @@ test("快速输入的竞态反过来（旧查询后回）同样不污染新结�
   h.loader.calls[1].resolve(skillsPayload(["a-stale-skill"]));
   await settle();
   expect(h.machine.skills().map((skill) => skill.name)).toEqual(["ab-skill"]);
+});
+
+test("页面缓存：命中先回填且仍然请求；两边皆空才骨架；切走仍 bump 挡住回填", async () => {
+  const h = harness();
+  h.machine.start();
+  expect(h.machine.loading()).toBe(true);
+  h.loader.calls[0].resolve(skillsPayload(["cached-all"], "stale"));
+  await settle();
+  expect(h.machine.loading()).toBe(false);
+  expect(h.machine.snapshotStatus()).toBe("stale");
+
+  // 已有行的搜索不进骨架。
+  h.machine.onSearchInput("zz");
+  h.clock.runAll();
+  expect(h.machine.loading()).toBe(false);
+  expect(h.loader.calls.map((call) => call.query)).toEqual(["", "zz"]);
+
+  h.machine.selectTab("hot");
+  // 技能行还在，切到另一个技能 tab 不进骨架，旧行先留着。
+  expect(h.machine.loading()).toBe(false);
+  expect(h.machine.skills().map((skill) => skill.name)).toEqual(["cached-all"]);
+  h.loader.calls[2].resolve(skillsPayload(["hot-one"]));
+  await settle();
+
+  const callsBeforeBack = h.loader.calls.length;
+  h.machine.selectTab("all");
+  // 命中 all| ：先显示缓存和快照，loading 关，并且仍然请求。
+  expect(h.machine.skills().map((skill) => skill.name)).toEqual(["cached-all"]);
+  expect(h.machine.loading()).toBe(false);
+  expect(h.machine.snapshotStatus()).toBe("stale");
+  expect(h.loader.calls.length).toBe(callsBeforeBack + 1);
+  expect(h.loader.calls[callsBeforeBack]?.tab).toBe("all");
+  expect(h.loader.calls[callsBeforeBack]?.query).toBe("");
+
+  h.loader.calls[callsBeforeBack]?.resolve(skillsPayload(["cached-all-v2"]));
+  await settle();
+  expect(h.machine.skills().map((skill) => skill.name)).toEqual(["cached-all-v2"]);
+
+  // official 无缓存，技能行被清掉：两边空，骨架档。
+  h.machine.selectTab("official");
+  expect(h.machine.loading()).toBe(true);
+  expect(h.machine.skills()).toEqual([]);
+  expect(h.loader.calls.length).toBe(callsBeforeBack + 2);
+
+  h.loader.calls[callsBeforeBack + 1]?.resolve(publishersPayload(["acme"]));
+  await settle();
+  h.machine.syncSnapshot();
+  h.syncs[h.syncs.length - 1]?.resolve(undefined);
+  await settle();
+  const afterSync = h.loader.calls.length;
+  // 8 秒内切回已缓存 tab 仍 bump（多一次读取），回填计时器到点不再读。
+  h.machine.selectTab("all");
+  const afterTab = h.loader.calls.length;
+  expect(afterTab).toBe(afterSync + 1);
+  h.clock.runAll();
+  expect(h.loader.calls.length).toBe(afterTab);
 });
 
 // ---- 8s 回填重读 ------------------------------------------------------------
@@ -428,15 +495,6 @@ test("再点同一张卡收起详情；official 清选择", async () => {
 
 // ---- 纯工具 -----------------------------------------------------------------
 
-test("spotlight 建议行按词过滤取前 8", () => {
-  const skills = [
-    "rust-helper", "rust-lint", "python-tool", "regex", "router", "r", "x", "y", "z",
-  ].map((name) => skillFixture(name));
-  expect(spotlightNames(skills, "")).toHaveLength(8);
-  expect(spotlightNames(skills, "RUST")).toEqual(["rust-helper", "rust-lint"]);
-  expect(spotlightNames(skills, "nope")).toEqual([]);
-});
-
 test("skillBlurb 本地化描述优先，空描述为 null", () => {
   expect(skillBlurb(skillFixture("a", { description: "d", localizedDescription: "L" }))).toBe("L");
   expect(skillBlurb(skillFixture("a", { description: "d", localizedDescription: "  " }))).toBe("d");
@@ -465,7 +523,7 @@ test("发布者详情是市场下钻：railPage 映射回市场行", () => {
 
 // ---- UI（app realm；桥侧同库数据驱动，双分支容错）---------------------------
 
-test("市场页顶栏四 tab、排序、视图切换、刷新与 spotlight 触发器齐备", async () => {
+test("市场页顶栏四 tab、排序、视图切换、刷新与内联搜索框齐备", async () => {
   const app = await openApp();
   await app.press("id:nav-market");
   await app.waitUntil(() => app.shows("id:mk-tabs"));
@@ -475,7 +533,9 @@ test("市场页顶栏四 tab、排序、视图切换、刷新与 spotlight 触�
   expect(app.shows("id:mk-tab-official")).toBe(true);
   expect(app.shows("id:mk-sort")).toBe(true);
   expect(app.shows("id:mk-view-switcher")).toBe(true);
-  expect(app.shows("id:mk-spotlight-trigger")).toBe(true);
+  // 搜索框与技能页同一个 BarSearchInput 原语：放大镜 + 占位词 + 清除 X。
+  expect(app.shows("id:mk-search")).toBe(true);
+  expect(app.shows("id:mk-search-input")).toBe(true);
 });
 
 test("连点切 tab 后只呈现最后 tab 的板面（official 不出技能卡）", async () => {
@@ -505,48 +565,42 @@ test("连点切 tab 后只呈现最后 tab 的板面（official 不出技能卡�
   await app.waitUntil(() => !app.shows("id:mk-publishers-count"), { timeout: 15000 });
 });
 
-test("⌘F 打开 spotlight 浮层，透明幕收起", async () => {
+test("搜索框是技能页同款内联输入：⌘F 聚焦、键入落 query、清除 X 回空", async () => {
   const app = await openApp();
   await app.press("id:nav-market");
-  await app.waitUntil(() => app.shows("id:mk-spotlight-trigger"));
+  await app.waitUntil(() => app.shows("id:mk-search-input"));
+  // ⌘F 只把焦点交给这条常驻输入框，不再另开浮层。
   await app.keyboard.press("mod+f");
-  await app.waitUntil(() => app.shows("id:mk-spotlight-panel"));
-  expect(app.shows("id:mk-spotlight-input")).toBe(true);
-  await app.press("id:mk-spotlight-veil");
-  await app.waitUntil(() => !app.shows("id:mk-spotlight-panel"), { timeout: 5000 });
+  await app.type("id:mk-search-input", "rust");
+  await app.waitUntil(() => app.value("id:mk-search-input") === "rust");
+  // 有词时出现清除 X，点它回空（readSide.clearSearch）。
+  await app.waitUntil(() => app.shows("id:mk-search-clear"), { timeout: 5000 });
+  await app.press("id:mk-search-clear");
+  await app.waitUntil(() => app.value("id:mk-search-input") === "", { timeout: 5000 });
+  expect(app.shows("id:mk-search-clear")).toBe(false);
 });
 
 // 这条用例吃的是本机磁盘上的真实市场快照：数据在就有断言价值，数据没就绪就没得断言。
 // 整套 460 条并发跑时磁盘与事件循环都被抢，5s/12s/15s 都实测偶发超时，而 nsh test 的
 // 单用例预算 30s 又不允许把等待放大到能容纳抖动——所以「快照或交互没能在预算内就绪」
 // 按本机快照不可用跳过（与下面的空库分支同一出口），不把机器负载当成断言失败。
-test("spotlight 选中建议行：query 落定并立即重读（桥侧真实数据）", async () => {
+test("搜索框键入真实技能名后清除：query 落定并回全量（桥侧真实数据）", async () => {
   const app = await openApp();
   await app.press("id:nav-market");
   const snapshot = await safeLeaderboard();
   if (snapshot === null || snapshot.length === 0) return; // 空库分支：跳过
   try {
     await app.waitUntil(() => app.shows("id:mk-card-" + snapshot[0].name), { timeout: 12000 });
+    await app.type("id:mk-search-input", snapshot[0].name);
+    await app.waitUntil(() => app.value("id:mk-search-input") === snapshot[0].name, {
+      timeout: 12000,
+    });
+    await app.waitUntil(() => app.shows("id:mk-search-clear"), { timeout: 12000 });
+    await app.press("id:mk-search-clear");
+    await app.waitUntil(() => app.value("id:mk-search-input") === "", { timeout: 12000 });
   } catch {
-    return; // 快照未就绪
+    return; // 快照或交互没能在预算内就绪（负载相关）
   }
-  await app.keyboard.press("mod+f");
-  await app.waitUntil(() => app.shows("id:mk-spotlight-panel"));
-  // 输入过滤建议行。
-  await app.type("id:mk-spotlight-input", snapshot[0].name);
-  await app.waitUntil(() => app.shows("id:mk-spot-0"));
-  await app.press("id:mk-spot-0");
-  try {
-    // 浮层收起，触发器显示选中名。
-    await app.waitUntil(() => !app.shows("id:mk-spotlight-panel"), { timeout: 12000 });
-  } catch {
-    return; // 交互未在预算内落定（负载相关）
-  }
-  expect(app.texts()).toContain(snapshot[0].name);
-  // 触发器激活态的清除 X：query 清空回全量（spotlight.rs mk-spotlight-clear）。
-  await app.waitUntil(() => app.shows("id:mk-spotlight-clear"), { timeout: 12000 });
-  await app.press("id:mk-spotlight-clear");
-  await app.waitUntil(() => !app.shows("id:mk-spotlight-clear"), { timeout: 12000 });
 });
 
 test("发布者行点击跳发布者页（选中框留市场的契约由 railPage 测试锁定）", async () => {
@@ -578,15 +632,10 @@ test("已装技能的卸载按钮先弹确认，取消不落域（不写 $HOME�
   if (!installed) return; // 没有已装技能：确认弹窗由 Rust 侧与状态机测试覆盖
   await app.waitUntil(() => app.shows(`id:mk-card-${snapshot[0].name}`), { timeout: 15000 });
   if (!app.shows(`id:mk-card-${installed.name}`)) {
-    await app.press("id:mk-spotlight-trigger");
-    await app.waitUntil(() => app.shows("id:mk-spotlight-input"), { timeout: 5000 });
-    await app.type("id:mk-spotlight-input", installed.name);
-    await app.waitUntil(() => app.shows("id:mk-spot-0"), { timeout: 5000 });
-    if (app.shows(`text:${installed.name}`)) {
-      await app.press(`text:${installed.name}`);
-    } else {
-      await app.press("id:mk-spot-0");
-    }
+    await app.type("id:mk-search-input", installed.name);
+    await app.waitUntil(() => app.value("id:mk-search-input") === installed.name, {
+      timeout: 5000,
+    });
   }
   await app.waitUntil(() => app.shows(`id:mk-card-${installed.name}`), { timeout: 12000 });
   await app.press(`id:mk-act-${installed.name}`);
@@ -726,4 +775,155 @@ test("directSource tracks command/repo matches and clears on clearSearch or sele
   expect(machine.directSource()?.wasCommand).toBe(false);
   machine.selectTab("trending");
   expect(machine.directSource()).toBeNull();
+});
+
+test("Local-First 状态机：初始 unknown、parseStatus 保留 unknown、结构化 error 容错", () => {
+  const h = harness();
+  expect(h.machine.snapshotStatus()).toBe("unknown");
+  expect(parseStatus("unexpected_value")).toBe("unknown");
+  expect(parseStatus("fresh")).toBe("fresh");
+
+  const parsed = parseSkillsPayload({
+    data: [],
+    snapshotStatus: "error_fallback",
+    snapshotUpdatedAt: null,
+    error: {
+      kind: "error_fallback",
+      scope: "leaderboard_all",
+      detail: "sqlite cache locked",
+    },
+  });
+  expect(parsed.snapshotStatus).toBe("error_fallback");
+  expect(parsed.error).toEqual({
+    kind: "error_fallback",
+    scope: "leaderboard_all",
+    detail: "sqlite cache locked",
+  });
+});
+
+test("stale 状态静默自动刷新，且每个 scope 最多自动重试 3 次", async () => {
+  const h = harness();
+  h.machine.start();
+  h.loader.calls[0].resolve(skillsPayload(["cached-a"], "stale"));
+  await settle();
+
+  // 第 1 次自动刷新由 stale 触发，不开启骨架也不把 refreshing 翻为 true。
+  expect(h.machine.loading()).toBe(false);
+  expect(h.machine.refreshing()).toBe(false);
+  expect(h.syncs.length).toBe(1);
+  expect(h.syncs[0].scope).toBe("leaderboard_all");
+
+  // 失败后按调度重试，直到累计 3 次上限为止。
+  h.syncs[0].reject(new Error("transient-1"));
+  await settle();
+  h.clock.runAll(); // attempt 2
+  expect(h.syncs.length).toBe(2);
+
+  h.syncs[1].reject(new Error("transient-2"));
+  await settle();
+  h.clock.runAll(); // attempt 3
+  expect(h.syncs.length).toBe(3);
+
+  h.syncs[2].reject(new Error("transient-3"));
+  await settle();
+  h.clock.runAll(); // 达到上限不再第 4 次自动触发
+  expect(h.syncs.length).toBe(MAX_AUTO_REFRESH_RETRIES);
+
+  // 切换到另一个 scope 拥有独立额度；手动刷新重置当前 scope 额度。
+  h.machine.selectTab("hot");
+  h.loader.calls[1].resolve(skillsPayload(["hot-a"], "stale"));
+  await settle();
+  expect(h.syncs.length).toBe(4);
+  expect(h.syncs[3].scope).toBe("leaderboard_hot");
+});
+
+test("queueMarketDescription 在开启翻译且中文界面时批量补齐描述并刷新 blurb", async () => {
+  const { queueMarketDescription, resetMarketTranslateForTest } = await import("./translateQueue");
+  resetMarketTranslateForTest();
+  const filledBatches: string[][] = [];
+  const fakeBridge = {
+    descriptionsEnabled: () => true,
+    needsTranslation: () => true,
+    lookup: () => null,
+    blocked: () => false,
+    fillDescriptions: async (sources: string[]) => {
+      filledBatches.push(sources);
+      return {
+        done: sources.map((source) => ({ source, text: `译：${source}` })),
+        rejection: null,
+      };
+    },
+  };
+  const item = parseSkill({ name: "demo", description: "Build tools fast" });
+  expect(skillBlurb(item)).toBe("Build tools fast");
+
+  queueMarketDescription(item, fakeBridge);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(filledBatches).toEqual([["Build tools fast"]]);
+  expect(skillBlurb(item)).toBe("译：Build tools fast");
+  resetMarketTranslateForTest();
+});
+
+test("translationPrefsChanged clears sessionRejected, rejectedSources and marketTranslationCache", async () => {
+  const {
+    queueMarketDescription,
+    marketTranslatedText,
+    resetMarketTranslateForTest,
+  } = await import("./translateQueue");
+  const { translationPrefsChanged } = await import("../../shell/events");
+  resetMarketTranslateForTest();
+
+  try {
+    let shouldReject = false;
+    let prefix = "旧译";
+    const calls: string[][] = [];
+    const fakeBridge = {
+      descriptionsEnabled: () => true,
+      needsTranslation: () => true,
+      lookup: () => null,
+      blocked: () => false,
+      fillDescriptions: async (sources: string[]) => {
+        calls.push(sources);
+        if (shouldReject) {
+          return { done: [], rejection: { model: "bad-model", detail: "bad key" } };
+        }
+        return {
+          done: sources.map((source) => ({ source, text: `${prefix}：${source}` })),
+          rejection: null,
+        };
+      },
+    };
+
+    const cachedItem = parseSkill({ name: "cached", description: "Cached market copy" });
+    const rejectedItem = parseSkill({ name: "rejected", description: "Rejected market copy" });
+    const freshItem = parseSkill({ name: "fresh", description: "Fresh market copy" });
+
+    queueMarketDescription(cachedItem, fakeBridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(skillBlurb(cachedItem)).toBe("旧译：Cached market copy");
+
+    shouldReject = true;
+    queueMarketDescription(rejectedItem, fakeBridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls.length).toBe(2);
+
+    // 会话级拒绝期间不再入队。
+    queueMarketDescription(rejectedItem, fakeBridge);
+    queueMarketDescription(freshItem, fakeBridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls.length).toBe(2);
+
+    // 发布 translationPrefsChanged 后清空旧缓存与拒绝态，恢复队列翻译。
+    shouldReject = false;
+    prefix = "新译";
+    translationPrefsChanged.publish();
+    expect(marketTranslatedText("Cached market copy")).toBe(null);
+
+    queueMarketDescription(rejectedItem, fakeBridge);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls.length).toBe(3);
+    expect(skillBlurb(rejectedItem)).toBe("新译：Rejected market copy");
+  } finally {
+    resetMarketTranslateForTest();
+  }
 });

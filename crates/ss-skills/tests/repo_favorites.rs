@@ -8,19 +8,16 @@ use ss_skills::repo_favorites::{FavoriteWrite, LoadedFavorites, load, save};
 
 struct DataDir {
     previous: Option<OsString>,
-    root: PathBuf,
     _dir: tempfile::TempDir,
 }
 
 impl DataDir {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
-        let root = dir.path().to_path_buf();
         let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
-        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", &root) };
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", dir.path()) };
         Self {
             previous,
-            root,
             _dir: dir,
         }
     }

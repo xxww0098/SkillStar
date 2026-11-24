@@ -353,60 +353,6 @@ pub fn set_baseline_hashes(updates: &[(String, Option<String>)]) -> Result<()> {
     })
 }
 
-/// Desired global agents recorded for `name`.
-pub fn desired_agents_for(name: &str) -> Vec<String> {
-    load()
-        .skills
-        .get(name)
-        .map(|e| e.desired_agents.clone())
-        .unwrap_or_default()
-}
-
-/// Add or remove an `agent_id` in `desired_agents` for `name`.
-pub fn set_desired_agent(name: &str, agent_id: &str, enabled: bool) -> Result<()> {
-    mutate(|lib| {
-        let now = chrono::Utc::now().to_rfc3339();
-        if enabled {
-            let entry = lib.skills.entry(name.to_string()).or_default();
-            if entry.installed_at.is_empty() {
-                entry.installed_at = now.clone();
-            }
-            if !entry.desired_agents.iter().any(|id| id == agent_id) {
-                entry.desired_agents.push(agent_id.to_string());
-                entry.desired_agents.sort();
-            }
-            entry.updated_at = now;
-        } else if let Some(entry) = lib.skills.get_mut(name) {
-            entry.desired_agents.retain(|id| id != agent_id);
-            entry.updated_at = now;
-        }
-    })
-}
-
-/// Record an applied deployment record for `(name, target_id)`.
-pub fn record_applied_target(
-    name: &str,
-    target_id: &str,
-    record: AppliedTargetRecord,
-) -> Result<()> {
-    mutate(|lib| {
-        let entry = lib.skills.entry(name.to_string()).or_default();
-        if entry.installed_at.is_empty() {
-            entry.installed_at = record.updated_at.clone();
-        }
-        entry.applied.insert(target_id.to_string(), record);
-    })
-}
-
-/// Remove an applied deployment record for `(name, target_id)`.
-pub fn remove_applied_target(name: &str, target_id: &str) -> Result<()> {
-    mutate(|lib| {
-        if let Some(entry) = lib.skills.get_mut(name) {
-            entry.applied.remove(target_id);
-        }
-    })
-}
-
 /// Reconcile `library.json` against canonical skills on disk and `.skill-lock.json`.
 pub fn reconcile_library_from_disk() -> Result<()> {
     let lock = SkillLock::load(&paths::skill_lock_path());
@@ -506,18 +452,20 @@ mod tests {
         assert_eq!(entry.baseline_hash.as_deref(), Some("sha256:legacy"));
         assert_eq!(entry.called.as_deref(), Some("orig-alpha"));
 
-        set_desired_agent("alpha", "claude-code", true).unwrap();
-        record_applied_target(
-            "alpha",
-            "claude-code",
-            AppliedTargetRecord {
-                mode: "copy".to_string(),
-                content_hash: Some("h1".to_string()),
-                tree_max_mtime_ms: Some(12345),
-                file_count: Some(1),
-                updated_at: "2026-01-02T00:00:00Z".to_string(),
-            },
-        )
+        mutate(|lib| {
+            let entry = lib.skills.entry("alpha".to_string()).or_default();
+            entry.desired_agents.push("claude-code".to_string());
+            entry.applied.insert(
+                "claude-code".to_string(),
+                AppliedTargetRecord {
+                    mode: "copy".to_string(),
+                    content_hash: Some("h1".to_string()),
+                    tree_max_mtime_ms: Some(12345),
+                    file_count: Some(1),
+                    updated_at: "2026-01-02T00:00:00Z".to_string(),
+                },
+            );
+        })
         .unwrap();
 
         let persisted = load();

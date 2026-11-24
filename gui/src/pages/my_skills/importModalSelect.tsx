@@ -1,4 +1,4 @@
-import { Scroll, Text, View, type JSX } from "nsh";
+import { List, Text, View, computed, type Accessor, type JSX } from "nsh";
 import { Checkbox, Input } from "nsh/base";
 import { Icon } from "../../chrome/icons";
 import { Tip } from "../../chrome/tooltip";
@@ -44,8 +44,8 @@ function auditNeedsAttention(result: string): boolean {
 /** 审计井（audit_well：信息井里最多 4 行 + 余数 pill；pending 态只有
  * checkingAudits 一行，空结果整体隐藏——缺数据不是通过）。 */
 function AuditWell(): JSX.Element | null {
-  const pending = () => auditPending() && audits().length === 0;
-  const rows = () => {
+  const pending = computed(() => auditPending() && audits().length === 0);
+  const rows = computed(() => {
     const picked = selected();
     return audits()
       .filter((audit) => picked.has(audit.skill))
@@ -54,7 +54,15 @@ function AuditWell(): JSX.Element | null {
         const attention = audit.audits.some((row) => auditNeedsAttention(row.result));
         return { attention, text: `${audit.skill}  ${joined}` };
       });
-  };
+  });
+  const topRows = computed(() =>
+    [...rows()]
+      .sort(
+        (left, right) =>
+          Number(right.attention) - Number(left.attention) || left.text.localeCompare(right.text),
+      )
+      .slice(0, 4),
+  );
   return (
     <View style={{ paddingHorizontal: 24, paddingBottom: 8, flexShrink: 0 }}>
       <View
@@ -78,31 +86,28 @@ function AuditWell(): JSX.Element | null {
             </Text>
           </If>
           <If when={!pending() && rows().length > 0}>
-            {() => (
-              <View style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg_muted") }}>
-                    {t("marketplace.detailAudits")}
-                  </Text>
-                  <If when={rows().length > 4}>
-                    <CountPill label={String(rows().length)} />
-                  </If>
-                </View>
-                {[...rows()]
-                  .sort((left, right) => Number(right.attention) - Number(left.attention) || left.text.localeCompare(right.text))
-                  .slice(0, 4)
-                  .map((row) => (
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: row.attention ? paletteToken("danger") : paletteToken("fg_muted"),
-                      }}
-                    >
-                      {row.text}
-                    </Text>
-                  ))}
+            <View style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+              <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg_muted") }}>
+                  {t("marketplace.detailAudits")}
+                </Text>
+                <If when={rows().length > 4}>
+                  <CountPill label={String(rows().length)} />
+                </If>
               </View>
-            )}
+              <Each of={topRows()} key={(row) => row.text}>
+                {(row: () => { attention: boolean; text: string }) => (
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: row().attention ? paletteToken("danger") : paletteToken("fg_muted"),
+                    }}
+                  >
+                    {row().text}
+                  </Text>
+                )}
+              </Each>
+            </View>
           </If>
         </View>
       </View>
@@ -111,43 +116,47 @@ function AuditWell(): JSX.Element | null {
 }
 
 export function SelectBody(): JSX.Element {
-  const current = () => scan();
-  const query = () => filterQuery().toLowerCase();
-  const filtered = () => {
+  const current = computed(() => scan());
+  const query = computed(() => filterQuery().toLowerCase());
+  const filtered = computed(() => {
     const value = current();
     if (value === null) return [];
+    const q = query();
+    if (q.length === 0) return value.skills;
     return value.skills.filter(
       (skill) =>
-        query().length === 0 ||
-        skill.id.toLowerCase().includes(query()) ||
-        skill.description.toLowerCase().includes(query()),
+        skill.id.toLowerCase().includes(q) || skill.description.toLowerCase().includes(q),
     );
-  };
+  });
   // fresh 优先；全装完时回退可批量集（selectableFiltered 的回退）。
-  const selectableAll = () => {
+  const selectableAll = computed(() => {
     const rows = filtered();
-    const fresh = rows.filter((skill) => skill.installable && !skill.internal && !skill.alreadyInstalled);
+    const fresh = rows.filter(
+      (skill) => skill.installable && !skill.internal && !skill.alreadyInstalled,
+    );
     if (fresh.length > 0) return fresh;
     return rows.filter((skill) => skill.installable && !skill.internal);
-  };
-  const allSelected = () => {
+  });
+  const allSelected = computed(() => {
     const rows = selectableAll();
     const picked = selected();
     return rows.length > 0 && rows.every((skill) => picked.has(skill.id));
-  };
-  const allInstalled = () => {
+  });
+  const allInstalled = computed(() => {
     const value = current();
     if (value === null) return false;
     return value.skills.length > 0 && value.skills.every((skill) => skill.alreadyInstalled);
-  };
-  const emptyFiltered = () => filtered().length === 0;
-  const emptyScan = () => (current()?.skills.length ?? 0) === 0;
-  const scrollable = () => filtered().length > SELECT_VISIBLE;
-  const cachedAt = () => current()?.cachedAt ?? null;
-  const cacheHit = () => current()?.cacheHit ?? false;
-  const isPlugin = () => current()?.plugin === true;
-  const selectedCount = () => selected().size;
-  const showAudits = () => auditPending() || audits().some((audit) => selected().has(audit.skill));
+  });
+  const emptyFiltered = computed(() => filtered().length === 0);
+  const emptyScan = computed(() => (current()?.skills.length ?? 0) === 0);
+  const scrollable = computed(() => filtered().length > SELECT_VISIBLE);
+  const cachedAt = computed(() => current()?.cachedAt ?? null);
+  const cacheHit = computed(() => current()?.cacheHit ?? false);
+  const isPlugin = computed(() => current()?.plugin === true);
+  const selectedCount = computed(() => selected().size);
+  const showAudits = computed(
+    () => auditPending() || audits().some((audit) => selected().has(audit.skill)),
+  );
 
   return (
     <View testID="import-select" style={{ display: "flex", flexDirection: "column" }}>
@@ -228,54 +237,50 @@ export function SelectBody(): JSX.Element {
 
       {/* 缓存源与上游刷新 */}
       <If when={cachedAt() !== null}>
-        {() => (
-          <View
-            style={{
-              paddingHorizontal: 24,
-              paddingBottom: 8,
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-              {tf(cacheHit() ? "githubImportModal.cachedSource" : "githubImportModal.fetchedSource", {
-                time: cachedAt() ?? "",
-              })}
+        <View
+          style={{
+            paddingHorizontal: 24,
+            paddingBottom: 8,
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+            {tf(cacheHit() ? "githubImportModal.cachedSource" : "githubImportModal.fetchedSource", {
+              time: cachedAt() ?? "",
+            })}
+          </Text>
+          <View testID="import-refresh-upstream" style={{ cursor: "pointer" }} onPress={() => refreshUpstream()}>
+            <Text style={{ fontSize: 12, color: paletteToken("accent") }}>
+              {t("githubImportModal.refreshUpstream")}
             </Text>
-            <View testID="import-refresh-upstream" style={{ cursor: "pointer" }} onPress={() => refreshUpstream()}>
-              <Text style={{ fontSize: 12, color: paletteToken("accent") }}>
-                {t("githubImportModal.refreshUpstream")}
-              </Text>
-            </View>
           </View>
-        )}
+        </View>
       </If>
 
       {/* Claude Code 插件提示 */}
       <If when={isPlugin()}>
-        {() => (
-          <View style={{ paddingHorizontal: 24, paddingBottom: 8, flexShrink: 0 }}>
-            <View
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                borderRadius: 8,
-                backgroundColor: paletteToken("well") + "99",
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-              }}
-            >
-              <Icon name="info" size={14} color={paletteToken("fg_muted")} />
-              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                {t("githubImportModal.claudePluginHint")}
-              </Text>
-            </View>
+        <View style={{ paddingHorizontal: 24, paddingBottom: 8, flexShrink: 0 }}>
+          <View
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              borderRadius: 8,
+              backgroundColor: paletteToken("well") + "99",
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            }}
+          >
+            <Icon name="info" size={14} color={paletteToken("fg_muted")} />
+            <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+              {t("githubImportModal.claudePluginHint")}
+            </Text>
           </View>
-        )}
+        </View>
       </If>
 
       <If when={showAudits()}>
@@ -283,33 +288,36 @@ export function SelectBody(): JSX.Element {
       </If>
 
       {/* 技能行 */}
-      {(() => {
-        const rows = (
-          <View style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <If when={emptyFiltered()}>
-              <Text
-                testID="import-select-empty"
-                style={{ paddingVertical: 32, textAlign: "center", fontSize: 12, color: paletteToken("fg_muted") }}
-              >
-                {t(emptyScan() ? "githubImportModal.noSkillsFound" : "common.noResults")}
-              </Text>
-            </If>
-            {filtered().map((skill) => (
-              <SkillRowView skill={skill} />
-            ))}
-          </View>
-        );
-        if (!scrollable()) {
-          return <View style={{ paddingHorizontal: 24, paddingBottom: 8 }}>{rows}</View>;
-        }
-        return (
-          <View style={{ paddingHorizontal: 24, paddingBottom: 8, height: SELECT_VIEW_H, width: "100%", flexShrink: 0 }}>
-            <Scroll testID="import-select-list" style={{ width: "100%", height: "100%" }}>
-              {rows}
-            </Scroll>
-          </View>
-        );
-      })()}
+      <If when={emptyFiltered()}>
+        <View style={{ paddingHorizontal: 24, paddingBottom: 8 }}>
+          <Text
+            testID="import-select-empty"
+            style={{ paddingVertical: 32, textAlign: "center", fontSize: 12, color: paletteToken("fg_muted") }}
+          >
+            {t(emptyScan() ? "githubImportModal.noSkillsFound" : "common.noResults")}
+          </Text>
+        </View>
+      </If>
+      <If when={!emptyFiltered() && !scrollable()}>
+        <View style={{ paddingHorizontal: 24, paddingBottom: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+          <Each of={filtered()} key={(skill) => skill.id}>
+            {(skill: () => SkillRow) => <SkillRowView skill={skill} />}
+          </Each>
+        </View>
+      </If>
+      <If when={!emptyFiltered() && scrollable()}>
+        <View style={{ paddingHorizontal: 24, paddingBottom: 8, height: SELECT_VIEW_H, width: "100%", flexShrink: 0 }}>
+          <List
+            testID="import-select-list"
+            each={filtered()}
+            keyExtractor={(skill) => skill.id}
+            estimatedItemSize={54}
+            style={{ width: "100%", height: "100%" }}
+          >
+            {(skill) => <SkillRowView skill={skill} />}
+          </List>
+        </View>
+      </If>
 
       {/* 安装条 */}
       <View
@@ -410,15 +418,18 @@ export function SelectBody(): JSX.Element {
 
 /** 一行技能（select.rs skill_row）：checkbox + 名称徽章 + 描述 + 悬停重装
  * 图标；整行可点（可安装时）。 */
-function SkillRowView(props: { skill: SkillRow }): JSX.Element {
-  const skill = props.skill;
-  const picked = () => selected().has(skill.id) && skill.installable;
-  const issues = () =>
-    skill.frontmatterIssues.map((issue) => t(`githubImportModal.frontmatterIssues.${issue}`));
-  const blocking = () => issues().length > 0 && !skill.installable;
+function SkillRowView(props: { skill: Accessor<SkillRow> }): JSX.Element {
+  const picked = computed(() => {
+    const skill = props.skill();
+    return selected().has(skill.id) && skill.installable;
+  });
+  const issues = computed(() =>
+    props.skill().frontmatterIssues.map((issue) => t(`githubImportModal.frontmatterIssues.${issue}`)),
+  );
+  const blocking = computed(() => issues().length > 0 && !props.skill().installable);
   return (
     <View
-      testID={`import-skill-${skill.folderPath}`}
+      testID={`import-skill-${props.skill().folderPath}`}
       style={{
         display: "flex",
         flexDirection: "row",
@@ -427,18 +438,19 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
         paddingHorizontal: 12,
         paddingVertical: 8,
         borderRadius: 12,
-        cursor: skill.installable ? "pointer" : "default",
-        opacity: skill.installable ? 1 : 0.7,
+        cursor: props.skill().installable ? "pointer" : "default",
+        opacity: props.skill().installable ? 1 : 0.7,
         backgroundColor: picked() ? paletteToken("accent") + "0d" : "transparent",
       }}
       hoverStyle={{
-        backgroundColor: skill.installable
+        backgroundColor: props.skill().installable
           ? picked()
             ? paletteToken("accent") + "0d"
             : paletteToken("panel_hover")
           : "transparent",
       }}
       onPress={() => {
+        const skill = props.skill();
         if (!skill.installable) return;
         toggleSkill(skill.id);
       }}
@@ -446,11 +458,11 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
       <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
         <Checkbox
           checked={picked()}
-          disabled={!skill.installable}
-          accessibilityLabel={skill.id}
+          disabled={!props.skill().installable}
+          accessibilityLabel={props.skill().id}
           onChange={() => {
             // checkbox 的点击不冒泡到整行 toggle（nsh 的 press 命中模型）。
-            toggleSkill(skill.id);
+            toggleSkill(props.skill().id);
           }}
           style={{
             width: 16,
@@ -475,9 +487,9 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
                 textOverflow: "ellipsis",
               }}
             >
-              {skill.id}
+              {props.skill().id}
             </Text>
-            {skill.internal ? (
+            <If when={props.skill().internal}>
               <View
                 style={{
                   paddingHorizontal: 6,
@@ -490,8 +502,8 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
                   {t("githubImportModal.internal")}
                 </Text>
               </View>
-            ) : null}
-            {skill.alreadyInstalled && !picked() ? (
+            </If>
+            <If when={props.skill().alreadyInstalled && !picked()}>
               <View
                 style={{
                   paddingHorizontal: 6,
@@ -504,8 +516,8 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
                   {t("githubImportModal.installed")}
                 </Text>
               </View>
-            ) : null}
-            {skill.alreadyInstalled && picked() ? (
+            </If>
+            <If when={props.skill().alreadyInstalled && picked()}>
               <View
                 style={{
                   paddingHorizontal: 6,
@@ -518,10 +530,10 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
                   {t("detailPanel.reinstall")}
                 </Text>
               </View>
-            ) : null}
-            {issues().length > 0 ? (
+            </If>
+            <If when={issues().length > 0}>
               <View
-                testID={`import-issue-${skill.folderPath}`}
+                testID={`import-issue-${props.skill().folderPath}`}
                 tooltip={<Tip text={issues().join("; ")} />}
                 style={{
                   display: "flex",
@@ -550,9 +562,9 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
                   {t(blocking() ? "githubImportModal.metadataIssue" : "githubImportModal.compatibilityWarning")}
                 </Text>
               </View>
-            ) : null}
+            </If>
           </View>
-          {skill.description.length > 0 ? (
+          <If when={props.skill().description.length > 0}>
             <Text
               style={{
                 fontSize: 12,
@@ -562,16 +574,16 @@ function SkillRowView(props: { skill: SkillRow }): JSX.Element {
                 textOverflow: "ellipsis",
               }}
             >
-              {skill.description}
+              {props.skill().description}
             </Text>
-          ) : null}
+          </If>
         </View>
       </View>
-      {skill.alreadyInstalled ? (
+      <If when={props.skill().alreadyInstalled}>
         <View style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
           <Icon name="rotateCcw" size={12} color={paletteToken("fg_muted")} />
         </View>
-      ) : null}
+      </If>
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import { Text, View, mount, signal, type JSX } from "nsh";
+import { Text, View, batch, mount, signal, type JSX } from "nsh";
 import { Button } from "nsh/base";
 import { NoticeBand } from "../../../shell/notify";
 import { DialogHost } from "../../../chrome/dialog";
@@ -256,9 +256,11 @@ function App(): JSX.Element {
         <Button
           testID="host-switch-on"
           onPress={() => {
-            // 真实设置保存 = 写配置 + 发频道；装置同款两步。
-            switchOn.set(true);
-            translationPrefsChanged.publish();
+            // 真实设置保存 = 写配置 + 发频道；用 batch 合并使效果在 prefsEpoch 更新后单次触发。
+            batch(() => {
+              switchOn.set(true);
+              translationPrefsChanged.publish();
+            });
           }}
         >
           <Text>switch-on</Text>

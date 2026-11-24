@@ -350,6 +350,8 @@ test("the one-toast summary tone follows the report (report_notification)", () =
   expect(mixed?.tone).toBe("warning");
   const pinned = reportNotification(reportOf({ projectFailures: ["p: x"] }), i18n);
   expect(pinned?.pinned).toBe(true);
+  expect(pinned?.actionLabelKey).toBe("mySkills.handleProjectCopies");
+  expect(clean?.actionLabelKey).toBeUndefined();
 });
 
 test("the card ellipsis follows the click-time batch snapshot (updates.rs)", () => {
@@ -583,16 +585,41 @@ test("the two-state scope switch moves the page between local and shared channel
   expect(app.shows("id:my-skills-import")).toBe(true);
   expect(app.shows("id:my-skills-sort-trigger")).toBe(true);
   await app.press("id:my-skills-scope-channels");
-  // 频道 scope：频道空状态（emptyState.channelsTitle），本地专属动作退场
-  // （render_channels_toolbar 对位：只留标题 + 滑块 + 搜索）。
+  // 频道 scope：共享频道工作区可见；本地专属工具栏控件（导入/排序/搜索/视图切换）全部隐藏。
   await app.waitUntil(() => app.texts().some((text) => text === "共享频道" || text === "Shared channels"));
   await app.waitUntil(() => !app.shows("id:my-skills-import"));
   expect(app.shows("id:my-skills-sort-trigger")).toBe(false);
-  // 搜索是两态共用（收敛后本地与频道同一套工具栏头部）。
-  expect(app.shows("id:my-skills-search-input")).toBe(true);
-  // 回到本地 scope，工具栏恢复。
+  expect(app.shows("id:my-skills-search-input")).toBe(false);
+  expect(app.shows("id:my-skills-view-grid")).toBe(false);
+  expect(app.shows("id:my-skills-view-list")).toBe(false);
+  // 回到本地 scope，工具栏与视图切换恢复。
   await app.press("id:my-skills-scope-local");
   await app.waitUntil(() => app.shows("id:my-skills-sort-trigger"));
+  expect(app.shows("id:my-skills-search-input")).toBe(true);
+  expect(app.shows("id:my-skills-view-grid")).toBe(true);
+});
+
+test("switching scope keeps the card board mounted instead of rebuilding it", async () => {
+  // 卡板在两种 scope 下都常驻（canvas.tsx 的 ScopePane，与 Shell 的页面
+  // 保活同一条纪律）：切走只换可见性、命中与层级，不重挂。断开时切回本地
+  // 要重建卡板：实测一次提交 59.7ms（3603 个新 view）外加三次约 9ms 的行
+  // 批，合计约 88ms，正好压在滑块 200ms 的滑行上——用户看到的就是掉帧。
+  // 这条断言锁住「频道 scope 下卡板仍在树上」，也就是没有走重建那条路。
+  const snapshot = (await MySkills.snapshot()) as { skills: { name: string }[] };
+  // 空库没有卡板可保活（空状态是另一态）。
+  if (snapshot.skills.length === 0) return;
+  const app = await open("../../../App.tsx", { width: WINDOW_W, height: WINDOW_H });
+  const first = snapshot.skills[0].name;
+  await app.waitUntil(() => app.shows(`id:skill-card-${first}`));
+  await app.press("id:my-skills-scope-channels");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text === "共享频道" || text === "Shared channels")
+  );
+  expect(app.shows("id:skills-scroll")).toBe(true);
+  // 回到本地仍是同一个卡板，首卡立刻在（不重建、不回到顶部）。
+  await app.press("id:my-skills-scope-local");
+  await app.waitUntil(() => app.shows("id:my-skills-sort-trigger"));
+  expect(app.shows(`id:skill-card-${first}`)).toBe(true);
 });
 
 test("the scope switch still lands at once under reduced motion", async () => {
@@ -666,4 +693,89 @@ test("the origin menu filters by source and dismisses on pick", async () => {
   await pressUntil(app, "id:my-skills-origin-trigger", "id:source-filter");
   await pressUntil(app, "id:source-filter-all", "id:source-filter", "gone");
   await app.waitUntil(() => app.shows(`id:skill-card-${snapshot.skills[0].name}`));
+});
+
+test("channel mutations mark local dirty and switching back to local scope refreshes once", async () => {
+  const {
+    busy,
+    isRefreshDirtyForTest,
+    profiles,
+    scheduleRefresh,
+    scope,
+    setScope,
+    setSnapshotLoaderForTest,
+    skills,
+  } = await import("./state");
+  const { currentPage } = await import("../../shell/nav");
+  const prevPage = currentPage();
+  const prevScope = scope();
+  const prevSkills = skills();
+  const prevProfiles = profiles();
+  const prevBusy = busy();
+  let calls = 0;
+
+  try {
+    currentPage.set("my_skills");
+    // 挡住装载尾的后台更新检查（busy 非空即不查，detailDrawer.test.host.tsx
+    // 同款）：注入的是 hub 技能，而全新安装（空库）的真实装载没有上游、节流
+    // 窗口从未开过，第一次注入 refresh 之后 maybeCheckUpdates 会放行，其
+    // finally 再拉一次快照（calls 变 2）。开发机上真实装载自带上游、窗口已
+    // 开，只是碰巧挡住了。
+    busy.set("channel-test-hold");
+    setSnapshotLoaderForTest(async () => {
+      calls += 1;
+      return {
+        skills: [
+          {
+            name: `channel-skill-${calls}`,
+            description: "From channel",
+            skillType: "hub",
+            stars: 0,
+            installed: true,
+            updateAvailable: false,
+            upstreamChange: null,
+            lastUpdated: "",
+            gitUrl: "",
+            agentLinks: ["Codex"],
+          },
+        ],
+        agents: [],
+        favorites: [],
+        favoritesLocked: false,
+        descriptionChoices: {},
+      };
+    });
+
+    // 在 channels scope 下触发刷新请求：只挂脏标记，切回 local 才立即拉快照。
+    setScope("channels");
+    expect(calls).toBe(0);
+    scheduleRefresh();
+    expect(calls).toBe(0);
+    expect(isRefreshDirtyForTest()).toBe(true);
+
+    setScope("local");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toBe(1);
+    expect(isRefreshDirtyForTest()).toBe(false);
+    expect(skills().map((s) => s.name)).toEqual(["channel-skill-1"]);
+
+    // 无脏标记时切走再切回 local 不重复拉快照。
+    setScope("channels");
+    setScope("local");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toBe(1);
+
+    // 若本身在 local scope，scheduleRefresh 立即触发刷新。
+    scheduleRefresh();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toBe(2);
+    expect(skills().map((s) => s.name)).toEqual(["channel-skill-2"]);
+  } finally {
+    setSnapshotLoaderForTest();
+    skills.set(prevSkills);
+    profiles.set(prevProfiles);
+    busy.set(prevBusy);
+    setScope(prevScope);
+    currentPage.set(prevPage);
+  }
 });

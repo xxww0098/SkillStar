@@ -1,17 +1,20 @@
 name: CI
 
-# Cross-platform quality gate: Rust tests and the remaining structural
-# ratchets (file size, stringly-typed errors, orphan modules, dependency
-# graph, clippy) on every PR and every push to main. Complements
-# windows-ci.yml, which catches Windows-specific path and shell regressions.
-# The React/Bun gates left with the Tauri shell (D-091).
+# Cross-platform quality gate: nsh frontend checks/tests/bundle build, Rust
+# tests, and the remaining structural ratchets (file size, stringly-typed
+# errors, orphan modules, dependency graph, clippy) on every PR and every push
+# to main. Complements windows-ci.yml, which catches Windows-specific path and
+# shell regressions. The React/Bun gates left with the Tauri shell (D-091).
 #
 # ## Failure lessons (from Actions history — do not re-learn the hard way)
 #
-# 1. Do not re-add a frontend production build. Release v0.0.3 burned on
-#    TypeScript that only `tauri-action` compiled. That stack is retired
-#    (D-091). The gate that replaces it is `cargo test --workspace --locked`
-#    on this commit, which release.yml verifies rather than repeats.
+# 1. Do not skip the frontend check/test/bundle build in CI. Release v0.0.3
+#    burned on TypeScript that only `tauri-action` compiled. Tauri/React/Bun are
+#    retired (D-091), and the current UI in `gui/` (`nsh`) is embedded into
+#    `ss-gui-host` via `gui/host/gen/bundle.js`. CI must install the pinned
+#    `nsh` CLI and run `nsh check gui`, `nsh test gui`, and
+#    `nsh build -o gui/host/gen gui` before `cargo test --workspace --locked`
+#    (which `release.yml` verifies rather than repeats for tests).
 #
 # 2. Tests must not depend on the runner's real $HOME / host machine state.
 #    Observed failures:
@@ -28,9 +31,9 @@ name: CI
 #    Fixed via the SKILLSTAR_SSH_CONFIG override (ssh::system_config): ssh
 #    tests point it at a fixture file and never mutate HOME/USERPROFILE.
 #
-# 3. `cargo test --workspace` compiles the GPUI shell, so Linux needs
-#    pkg-config, libxkbcommon-dev, libwayland-dev, libvulkan-dev, and the
-#    font stack (libfontconfig1-dev, libfreetype6-dev) for
+# 3. `cargo test --workspace` compiles `ss-bin`, `ss-gui-bridge`, and `nsh-core`,
+#    so Linux needs pkg-config, libxkbcommon-dev, libwayland-dev, libvulkan-dev,
+#    and the font stack (libfontconfig1-dev, libfreetype6-dev) for
 #    yeslogic-fontconfig-sys. Do not put webkit2gtk or GTK back; that linker
 #    set belonged to Tauri.
 #
@@ -97,9 +100,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # GPUI links Wayland, xkbcommon, and Vulkan. These are needed because
-      # cargo test --workspace compiles the skillstar binary. This job does
-      # not produce an installer.
+      # System libraries needed to compile ss-bin and nsh workspace crates on
+      # Linux. This job does not produce an installer.
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -150,6 +152,27 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install nsh CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh_ver="$(sed -nE 's/^[[:space:]]*nsh-core[[:space:]]*=.*"?=?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' Cargo.toml | head -1)"
+          [ -n "$nsh_ver" ] || { echo "::error::Cargo.toml: cannot read nsh-core version"; exit 1; }
+          export NSH_VERSION="v${nsh_ver}"
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.nsh/bin" >> "$GITHUB_PATH"
+
+      - name: Check, test, and build nsh GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh --version
+          nsh check gui
+          nsh test gui
+          nsh build -o gui/host/gen gui
+          test -s gui/host/gen/bundle.js || { echo "::error::gui/host/gen/bundle.js is missing or empty"; exit 1; }
 
       - name: Workspace dependency and lockfile guard
         run: scripts/internal/check_workspace_deps.sh
@@ -253,6 +276,27 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install nsh CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh_ver="$(sed -nE 's/^[[:space:]]*nsh-core[[:space:]]*=.*"?=?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' Cargo.toml | head -1)"
+          [ -n "$nsh_ver" ] || { echo "::error::Cargo.toml: cannot read nsh-core version"; exit 1; }
+          export NSH_VERSION="v${nsh_ver}"
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.nsh/bin" >> "$GITHUB_PATH"
+
+      - name: Check, test, and build nsh GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh --version
+          nsh check gui
+          nsh test gui
+          nsh build -o gui/host/gen gui
+          test -s gui/host/gen/bundle.js || { echo "::error::gui/host/gen/bundle.js is missing or empty"; exit 1; }
 
       # No separate `cargo check --workspace` step here either — same reasoning
       # and same measurements as test-linux above. Note the difference: this

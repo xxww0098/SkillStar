@@ -51,7 +51,7 @@ fn hub_entry_names(hub_dir: &Path) -> Vec<String> {
 pub struct StorageOverview {
     /// Resolved data root path (`SKILLSTAR_DATA_DIR` or default `~/.skillstar`)
     pub data_root_path: String,
-    /// Resolved hub root path (`SKILLSTAR_HUB_DIR` or default `~/.skillstar/.agents`)
+    /// Resolved hub root path (`SKILLSTAR_HUB_DIR` or default `~/.skillstar/hub`)
     pub hub_root_path: String,
     /// Whether hub root is nested under data root.
     pub is_hub_under_data: bool,
@@ -59,6 +59,8 @@ pub struct StorageOverview {
     pub config_bytes: u64,
     /// Resolved app config directory path.
     pub config_path: String,
+    /// Resolved skills data directory path (`~/.skillstar/data/skills/`, holds `repo_history.json`).
+    pub skills_data_path: String,
     /// Skills hub directory total bytes (~/.skillstar/data/skills/installed/)
     pub hub_bytes: u64,
     /// Resolved installed skills directory path.
@@ -67,13 +69,13 @@ pub struct StorageOverview {
     pub hub_count: usize,
     /// Number of broken skills (broken symlinks, orphaned lockfile entries)
     pub broken_count: usize,
-    /// Number of local skills in skills-local/
+    /// Number of local-authored skills in `data/skills/installed/` (plus any legacy `local/` entries)
     pub local_count: usize,
-    /// Total bytes of skills-local/ directory
+    /// Total bytes of local-authored skills
     pub local_bytes: u64,
     /// Resolved local skills directory path.
     pub local_path: String,
-    /// Repo cache total bytes (~/.skillstar/.agents/.repos/)
+    /// Repo import cache total bytes (`~/.skillstar/cache/skill-imports/`)
     pub cache_bytes: u64,
     /// Resolved repo cache directory path.
     pub cache_path: String,
@@ -100,29 +102,151 @@ pub struct StorageOverview {
     pub backups_bytes: u64,
 }
 
-fn count_local_skills_in_hub(hub_dir: &Path) -> (usize, u64) {
-    let mut count = 0usize;
-    let mut bytes = 0u64;
-    if let Ok(entries) = std::fs::read_dir(hub_dir) {
+struct HubOverviewStats {
+    hub_bytes: u64,
+    hub_count: usize,
+    broken_count: usize,
+    local_count: usize,
+    local_bytes: u64,
+}
+
+fn hub_overview_stats(hub_dir: &Path) -> HubOverviewStats {
+    let mut stats = HubOverviewStats {
+        hub_bytes: 0,
+        hub_count: 0,
+        broken_count: 0,
+        local_count: 0,
+        local_bytes: 0,
+    };
+
+    if hub_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(hub_dir)
+    {
         for entry in entries.flatten() {
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            let path = entry.path();
+            let Ok(meta) = path.symlink_metadata() else {
                 continue;
             };
-            if name.starts_with('.') {
-                continue;
-            }
-            if ss_skills::local_skill::is_local_skill(&name) {
-                count += 1;
-                bytes = bytes.saturating_add(dir_size_recursive(&entry.path()));
+            let is_local = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| !name.starts_with('.') && ss_skills::local_skill::is_local_skill(name));
+
+            if fs_ops::is_link(&path) {
+                if path.exists() {
+                    stats.hub_count += 1;
+                } else {
+                    stats.broken_count += 1;
+                }
+            } else if meta.is_dir() {
+                stats.hub_count += 1;
+                let dir_bytes = dir_size_recursive(&path);
+                stats.hub_bytes = stats.hub_bytes.saturating_add(dir_bytes);
+                if is_local {
+                    stats.local_count += 1;
+                    stats.local_bytes = stats.local_bytes.saturating_add(dir_bytes);
+                }
+            } else if meta.is_file() {
+                stats.hub_bytes = stats.hub_bytes.saturating_add(meta.len());
+                if is_local {
+                    stats.local_count += 1;
+                }
             }
         }
     }
+
+    let lock = skill_lock::load();
+    let mut seen_folders = HashSet::new();
+    for name in lock.skills.keys() {
+        let Some(folder) = skill_lock::folder_for_key(name) else {
+            continue;
+        };
+        if !seen_folders.insert(folder.clone()) {
+            continue;
+        }
+        let skill_path = hub_dir.join(&folder);
+        if matches!(
+            skill_path.symlink_metadata(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        ) {
+            stats.broken_count += 1;
+        }
+    }
+
     let legacy = paths::legacy_local_skills_dir();
     if legacy != hub_dir && legacy.is_dir() {
-        count += count_directories(&legacy);
-        bytes = bytes.saturating_add(dir_size_recursive(&legacy));
+        stats.local_count += count_directories(&legacy);
+        stats.local_bytes = stats.local_bytes.saturating_add(dir_size_recursive(&legacy));
     }
-    (count, bytes)
+
+    stats
+}
+
+struct CacheOverviewStats {
+    cache_bytes: u64,
+    cache_count: usize,
+    unused_count: usize,
+    unused_bytes: u64,
+}
+
+fn cache_overview_stats(cache_dir: &Path) -> CacheOverviewStats {
+    let mut stats = CacheOverviewStats {
+        cache_bytes: 0,
+        cache_count: 0,
+        unused_count: 0,
+        unused_bytes: 0,
+    };
+    if !cache_dir.exists() {
+        return stats;
+    }
+
+    let referenced = match skill_lock::SkillLock::read_state(&skill_lock::lock_path()) {
+        skill_lock::LockFileState::Ready(lock) => Some(
+            lock.skills
+                .values()
+                .filter(|entry| entry.source_type.is_updatable() && !entry.source_url.is_empty())
+                .map(|entry| {
+                    ss_skills::fetch::import_cache_key(&entry.source_url, entry.git_ref.as_deref())
+                })
+                .collect::<HashSet<_>>(),
+        ),
+        skill_lock::LockFileState::Missing => Some(HashSet::new()),
+        skill_lock::LockFileState::Outdated(_)
+        | skill_lock::LockFileState::TooNew(_)
+        | skill_lock::LockFileState::Corrupt(_) => None,
+    };
+
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return stats;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if fs_ops::is_link(&path) {
+            continue;
+        }
+        let Ok(meta) = path.symlink_metadata() else {
+            continue;
+        };
+        if meta.is_file() {
+            stats.cache_bytes = stats.cache_bytes.saturating_add(meta.len());
+            continue;
+        }
+        if !meta.is_dir() {
+            continue;
+        }
+        stats.cache_count += 1;
+        let dir_bytes = dir_size_recursive(&path);
+        stats.cache_bytes = stats.cache_bytes.saturating_add(dir_bytes);
+        if let Some(ref referenced) = referenced
+            && let Some(name) = entry.file_name().to_str()
+            && !name.starts_with('.')
+            && !referenced.contains(name)
+        {
+            stats.unused_count += 1;
+            stats.unused_bytes = stats.unused_bytes.saturating_add(dir_bytes);
+        }
+    }
+    stats
 }
 
 pub async fn get_storage_overview() -> Result<StorageOverview, AppError> {
@@ -132,23 +256,37 @@ pub async fn get_storage_overview() -> Result<StorageOverview, AppError> {
         let is_hub_under_data = hub_root.starts_with(&data_root) && hub_root != data_root;
 
         let config_dir = paths::config_dir();
-        let config_bytes = dir_size_recursive(&config_dir);
-
+        let skills_data_dir = paths::skills_data_dir();
         let hub_dir = paths::hub_skills_dir();
-        let hub_bytes = dir_size_recursive(&hub_dir);
-        let (hub_count, broken_count) = count_hub_skills(&hub_dir);
-
         let local_dir = paths::agents_skills_root();
-        let (local_count, local_bytes) = count_local_skills_in_hub(&hub_dir);
-
-        let history_count = repo_history::entry_count();
         let cache_dir = paths::skill_import_cache_dir();
-        let cache_bytes = dir_size_recursive(&cache_dir);
-        let cache_count = count_directories(&cache_dir);
-        let (cache_unused_count, cache_unused_bytes) = unused_import_cache(&cache_dir);
-        let (backups_count, backups_bytes) = ss_skills::backup::backups_summary();
-        let health = ss_skills::health::scan();
-        let health_repairable = ss_skills::health::plan(&health).steps.len();
+
+        let (config_bytes, history_count, backups, hub, cache, (health_issue_count, health_repairable), intake) =
+            std::thread::scope(|scope| {
+                let config_h = scope.spawn(|| {
+                    (
+                        dir_size_recursive(&config_dir),
+                        repo_history::entry_count(),
+                        ss_skills::backup::backups_summary(),
+                    )
+                });
+                let hub_h = scope.spawn(|| hub_overview_stats(&hub_dir));
+                let cache_h = scope.spawn(|| cache_overview_stats(&cache_dir));
+                let health_h = scope.spawn(|| {
+                    let health = ss_skills::health::scan();
+                    let repairable = ss_skills::health::plan(&health).steps.len();
+                    (health.issues.len(), repairable)
+                });
+                let intake_h = scope.spawn(agent_intake::intake_rows);
+
+                let (config_bytes, history_count, backups) = config_h.join().unwrap();
+                let hub = hub_h.join().unwrap();
+                let cache = cache_h.join().unwrap();
+                let health = health_h.join().unwrap();
+                let intake = intake_h.join().unwrap();
+                (config_bytes, history_count, backups, hub, cache, health, intake)
+            });
+        let (backups_count, backups_bytes) = backups;
 
         StorageOverview {
             data_root_path: data_root.to_string_lossy().to_string(),
@@ -156,21 +294,22 @@ pub async fn get_storage_overview() -> Result<StorageOverview, AppError> {
             is_hub_under_data,
             config_bytes,
             config_path: config_dir.to_string_lossy().to_string(),
-            hub_bytes,
+            skills_data_path: skills_data_dir.to_string_lossy().to_string(),
+            hub_bytes: hub.hub_bytes,
             hub_path: hub_dir.to_string_lossy().to_string(),
-            hub_count,
-            broken_count,
-            local_count,
-            local_bytes,
+            hub_count: hub.hub_count,
+            broken_count: hub.broken_count,
+            local_count: hub.local_count,
+            local_bytes: hub.local_bytes,
             local_path: local_dir.to_string_lossy().to_string(),
-            cache_bytes,
+            cache_bytes: cache.cache_bytes,
             cache_path: cache_dir.to_string_lossy().to_string(),
-            cache_count,
-            cache_unused_count,
-            cache_unused_bytes,
-            health_issue_count: health.issues.len(),
+            cache_count: cache.cache_count,
+            cache_unused_count: cache.unused_count,
+            cache_unused_bytes: cache.unused_bytes,
+            health_issue_count,
             health_repairable,
-            intake: agent_intake::intake_rows(),
+            intake,
             history_count,
             backups_count,
             backups_bytes,
@@ -303,8 +442,9 @@ pub async fn force_delete_installed_skills() -> Result<ForceDeleteSkillsReport, 
 pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
         let _transaction_guard = ss_skills::skill_update::acquire_update_transaction_lock()?;
-        let cache_dir = repos_cache_dir();
-        let repos_removed = count_directories(&cache_dir);
+        let legacy_repos_dir = repos_cache_dir();
+        let import_cache_dir = paths::skill_import_cache_dir();
+        let legacy_repos_removed = count_directories(&legacy_repos_dir);
         let hub_dir = ss_core::infra::paths::hub_skills_dir();
         let mut removed_skill_names: HashSet<String> = HashSet::new();
 
@@ -320,7 +460,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
                 let Some(target) = fs_ops::read_link_resolved(&skill_path).ok() else {
                     continue;
                 };
-                if target.starts_with(&cache_dir)
+                if (target.starts_with(&legacy_repos_dir) || target.starts_with(&import_cache_dir))
                     && let Some(name) = entry.file_name().to_str()
                 {
                     removed_skill_names.insert(name.to_string());
@@ -349,10 +489,11 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
             ss_skills::installed_skill::invalidate_cache();
         }
 
-        if cache_dir.exists() {
-            fs_ops::remove_dir_all_retry(&cache_dir)?;
+        let imports_removed = ss_skills::fetch::clear_import_cache()?;
+
+        if legacy_repos_dir.exists() {
+            fs_ops::remove_dir_all_retry(&legacy_repos_dir)?;
         }
-        std::fs::create_dir_all(&cache_dir)?;
 
         let github_trees = paths::github_trees_cache_dir();
         if github_trees.exists() {
@@ -363,7 +504,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
             let _ = fs_ops::remove_dir_all_retry(&publish_cache);
         }
 
-        Ok(repos_removed + ss_skills::fetch::clear_import_cache()?)
+        Ok(legacy_repos_removed + imports_removed)
     })
     .await?
 }
@@ -373,7 +514,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
 ///
 /// An allowlist, not a sweep of `config/` and `state/`: those directories
 /// also hold records nothing can rebuild — Agent profiles, Skill groups,
-/// registered projects, team intelligence, SSH host keys, OAuth clients and
+/// registered projects, team intelligence, OAuth clients and
 /// shared-channel provenance — and new files must stay safe by default.
 fn resettable_config_files() -> Vec<PathBuf> {
     vec![
@@ -500,11 +641,7 @@ fn step_line(step: &ss_skills::health::RepairStep) -> String {
 ///
 /// Returns the number of issues fixed.
 pub async fn clean_broken_skills() -> Result<usize, AppError> {
-    clean_broken_skills_except(HashSet::new()).await
-}
-
-async fn clean_broken_skills_except(excluded: HashSet<String>) -> Result<usize, AppError> {
-    tokio::task::spawn_blocking(move || -> Result<usize, AppError> {
+    tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
         let _transaction_guard = ss_skills::skill_update::acquire_update_transaction_lock()?;
         let hub_dir = ss_core::infra::paths::hub_skills_dir();
         let mut fixed: usize = 0;
@@ -521,7 +658,7 @@ async fn clean_broken_skills_except(excluded: HashSet<String>) -> Result<usize, 
                     let Some(name) = entry.file_name().to_str().map(str::to_string) else {
                         continue;
                     };
-                    if excluded.contains(&name) || is_channel_managed(&name) {
+                    if is_channel_managed(&name) {
                         continue;
                     }
                     ss_skills::skill_install::clear_owned_deployments(&name)
@@ -537,7 +674,7 @@ async fn clean_broken_skills_except(excluded: HashSet<String>) -> Result<usize, 
         // names — vercel records the raw frontmatter name (`My Skill` lives in
         // `my-skill`). A key that does not map, or a folder we cannot stat, stays.
         let orphans_removed =
-            skill_lock::mutate(|lock| prune_missing_lock_entries(lock, &hub_dir, &excluded))
+            skill_lock::mutate(|lock| prune_missing_lock_entries(lock, &hub_dir))
                 .map_err(|error| AppError::Lockfile(format!("{error:#}")))?;
         if orphans_removed > 0 {
             ss_skills::installed_skill::invalidate_cache();
@@ -549,26 +686,7 @@ async fn clean_broken_skills_except(excluded: HashSet<String>) -> Result<usize, 
     .await?
 }
 
-/// Import-cache directories whose name is not the cache key of an updatable
-/// lock entry. An unreadable lock yields zero: "unused" must not mean "all".
-fn unused_import_cache(root: &Path) -> (usize, u64) {
-    let referenced = match skill_lock::SkillLock::read_state(&skill_lock::lock_path()) {
-        skill_lock::LockFileState::Ready(lock) => lock
-            .skills
-            .values()
-            .filter(|entry| entry.source_type.is_updatable() && !entry.source_url.is_empty())
-            .map(|entry| {
-                ss_skills::fetch::import_cache_key(&entry.source_url, entry.git_ref.as_deref())
-            })
-            .collect::<HashSet<_>>(),
-        skill_lock::LockFileState::Missing => HashSet::new(),
-        skill_lock::LockFileState::Outdated(_)
-        | skill_lock::LockFileState::TooNew(_)
-        | skill_lock::LockFileState::Corrupt(_) => return (0, 0),
-    };
-    unused_cache_in(root, &referenced)
-}
-
+#[cfg(test)]
 fn unused_cache_in(root: &Path, referenced: &HashSet<String>) -> (usize, u64) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return (0, 0);
@@ -658,12 +776,8 @@ fn hub_folder_state(path: &Path) -> HubFolder {
 ///
 /// `lock.remove(folder)` deletes every key for that directory, including a
 /// vercel raw-name key next to the folder name. A key `folder_for_key` cannot
-/// map, a folder we cannot stat, and anything excluded or channel-owned stays.
-fn prune_missing_lock_entries(
-    lock: &mut skill_lock::SkillLock,
-    hub_dir: &Path,
-    excluded: &HashSet<String>,
-) -> usize {
+/// map, a folder we cannot stat, and anything channel-owned stays.
+fn prune_missing_lock_entries(lock: &mut skill_lock::SkillLock, hub_dir: &Path) -> usize {
     let before = lock.skills.len();
     let keys: Vec<String> = lock.skills.keys().cloned().collect();
     let mut drop_folders = HashSet::new();
@@ -672,10 +786,8 @@ fn prune_missing_lock_entries(
         let Some(folder) = skill_lock::folder_for_key(&key) else {
             continue;
         };
-        let protected = excluded.contains(&key)
-            || excluded.contains(&folder)
-            || is_channel_managed(&folder)
-            || (key != folder && is_channel_managed(&key));
+        let protected =
+            is_channel_managed(&folder) || (key != folder && is_channel_managed(&key));
         if protected {
             keep_folders.insert(folder);
             continue;
@@ -697,10 +809,7 @@ fn prune_missing_lock_entries(
     before.saturating_sub(lock.skills.len())
 }
 
-/// Count hub skills, returning (valid_count, broken_count).
-///
-/// A skill entry is "broken" if it is a symlink whose target no longer exists.
-/// Uses `symlink_metadata()` to detect symlink entries that `is_dir()` would skip.
+#[cfg(test)]
 fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
     if !hub_dir.exists() {
         return (0, 0);
@@ -777,195 +886,5 @@ fn repos_cache_dir() -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-
-    use super::*;
-
-    /// `dir_size_recursive` must NOT follow symlink/junction targets.
-    /// AGENTS.md: "treat links as metadata-only entries to avoid recursive
-    /// loops and Windows UI hangs". A symlink to a large dir must contribute 0 bytes.
-    #[test]
-    fn dir_size_does_not_follow_symlinks() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-
-        // Real file with known size inside the scanned root.
-        std::fs::write(root.join("real.txt"), b"hello").unwrap();
-
-        // A directory with a 1MB file, placed OUTSIDE root, then symlinked in.
-        // (If it were under root it would be counted as a normal subdir.)
-        let outside = std::env::temp_dir().join(format!("sst-storage-test-{}", std::process::id()));
-        std::fs::create_dir_all(&outside).unwrap();
-        let payload = vec![0u8; 1_000_000];
-        std::fs::write(outside.join("blob.bin"), &payload).unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, root.join("link_to_big")).unwrap();
-
-        let bytes = dir_size_recursive(root);
-        // Only real.txt (5 bytes) counts; the 1MB via symlink must be excluded.
-        assert_eq!(bytes, 5, "symlink target content must not be counted");
-
-        // Cleanup the outside dir.
-        let _ = std::fs::remove_dir_all(&outside);
-    }
-
-    /// `count_hub_skills` distinguishes valid symlinks from broken ones and
-    /// skips regular files. This is the storage-overview health signal.
-    /// Unix-only: the symlink fixtures are cfg(unix), so on Windows the test
-    /// would see just one valid entry and fail (windows-ci lesson 4 family).
-    #[cfg(unix)]
-    #[test]
-    fn count_hub_skills_separates_valid_and_broken_links() {
-        let tmp = tempfile::tempdir().unwrap();
-        let hub = tmp.path().join("skills");
-        std::fs::create_dir_all(&hub).unwrap();
-
-        // Real dir skill → valid.
-        std::fs::create_dir_all(hub.join("real-skill")).unwrap();
-
-        // Valid symlink → target exists.
-        let target = tmp.path().join("target-skill");
-        std::fs::create_dir_all(&target).unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, hub.join("linked-skill")).unwrap();
-
-        // Broken symlink → target missing.
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(tmp.path().join("does-not-exist"), hub.join("broken-skill"))
-            .unwrap();
-
-        // Stray regular file → ignored entirely.
-        std::fs::write(hub.join(".DS_Store"), b"x").unwrap();
-
-        let (valid, _broken) = count_hub_skills(&hub);
-        // real-skill + linked-skill = 2 valid. broken-skill is counted but the
-        // lockfile lookup may also add orphans, so only assert the floor.
-        assert!(
-            valid >= 2,
-            "real dir + valid symlink should both count as valid, got {valid}"
-        );
-    }
-
-    #[test]
-    fn unused_cache_counts_only_directories_the_lock_does_not_reference() {
-        let tmp = tempfile::tempdir().unwrap();
-        let keep = ss_skills::fetch::import_cache_key("https://example.com/keep.git", None);
-        std::fs::create_dir_all(tmp.path().join(&keep)).unwrap();
-        std::fs::write(tmp.path().join(&keep).join("a"), b"abcd").unwrap();
-        std::fs::create_dir_all(tmp.path().join("orphan")).unwrap();
-        std::fs::write(tmp.path().join("orphan").join("b"), b"ef").unwrap();
-        std::fs::create_dir_all(tmp.path().join(".fetch-temp")).unwrap();
-        let mut referenced = HashSet::new();
-        referenced.insert(keep);
-        let (count, bytes) = unused_cache_in(tmp.path(), &referenced);
-        assert_eq!(count, 1);
-        assert_eq!(bytes, 2);
-    }
-
-    /// vercel keys the lock by the raw frontmatter name. `My Skill` is the
-    /// folder `my-skill` and must survive cleanup while that folder exists.
-    /// A key that does not map to a folder is uncertain and is kept. Every key
-    /// for a folder that is confirmed missing is removed together.
-    #[test]
-    fn clean_broken_keeps_vercel_raw_name_keys_for_an_existing_folder() {
-        let _env_lock = futures::executor::block_on(crate::test_support::ENV_LOCK.lock());
-        let temp = tempfile::tempdir().unwrap();
-        let _env = MaintenanceEnv::new(temp.path());
-
-        let hub = ss_core::infra::paths::hub_skills_dir();
-        std::fs::create_dir_all(hub.join("my-skill")).unwrap();
-        let lock_path = ss_skills::skill_lock::lock_path();
-        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &lock_path,
-            r#"{
-  "version": 3,
-  "skills": {
-    "My Skill": {"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r.git","ref":"main","skillPath":"skills/my-skill","installedAt":"2020-01-01T00:00:00Z","updatedAt":"2020-01-01T00:00:00Z","pluginName":"plug"},
-    "Ghost": {"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r.git","ref":"main","installedAt":"t","updatedAt":"t"},
-    "ghost": {"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r.git","ref":"main","installedAt":"t","updatedAt":"t"},
-    "...": {"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r.git","ref":"main","installedAt":"t","updatedAt":"t"}
-  }
-}"#,
-        )
-        .unwrap();
-
-        let (_valid, broken) = count_hub_skills(&hub);
-        assert_eq!(
-            broken, 1,
-            "My Skill maps to my-skill, which exists; only the missing ghost folder is broken"
-        );
-
-        let fixed = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(clean_broken_skills())
-            .unwrap();
-        assert_eq!(fixed, 2, "Ghost and ghost are one folder, two keys");
-
-        let written: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
-        assert_eq!(written["skills"]["My Skill"]["pluginName"], "plug");
-        assert!(written["skills"].get("Ghost").is_none());
-        assert!(written["skills"].get("ghost").is_none());
-        assert!(
-            written["skills"].get("...").is_some(),
-            "a key with no folder mapping is never pruned"
-        );
-        assert!(hub.join("my-skill").is_dir());
-    }
-
-    struct MaintenanceEnv {
-        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
-    }
-
-    impl MaintenanceEnv {
-        fn new(root: &std::path::Path) -> Self {
-            let home = root.join("home");
-            std::fs::create_dir_all(&home).unwrap();
-            let assignments = [
-                ("HOME", Some(home.clone())),
-                ("USERPROFILE", Some(home.clone())),
-                ("SKILLSTAR_DATA_DIR", Some(root.join("data"))),
-                ("SKILLSTAR_HUB_DIR", Some(root.join("hub"))),
-                ("SKILLSTAR_TOOL_SYNC_HOME", Some(root.join("tool-home"))),
-                ("XDG_CONFIG_HOME", Some(home.join(".config"))),
-                ("XDG_STATE_HOME", None),
-                ("CLAUDE_CONFIG_DIR", None),
-                ("AUTOHAND_HOME", None),
-                ("DSH_HOME", None),
-                ("GROK_HOME", None),
-                ("HERMES_HOME", None),
-                ("VIBE_HOME", None),
-            ];
-            let previous = assignments
-                .iter()
-                .map(|(key, _)| (*key, std::env::var_os(key)))
-                .collect();
-            unsafe {
-                for (key, value) in assignments {
-                    match value {
-                        Some(path) => std::env::set_var(key, path),
-                        None => std::env::remove_var(key),
-                    }
-                }
-            }
-            Self { previous }
-        }
-    }
-
-    impl Drop for MaintenanceEnv {
-        fn drop(&mut self) {
-            unsafe {
-                for (key, previous) in self.previous.drain(..).rev() {
-                    match previous {
-                        Some(value) => std::env::set_var(key, value),
-                        None => std::env::remove_var(key),
-                    }
-                }
-            }
-        }
-    }
-}
+#[path = "storage_maintenance_tests.rs"]
+mod tests;

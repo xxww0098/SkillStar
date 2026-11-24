@@ -18,7 +18,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-gix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ss-core = { path = "../ss-core" }

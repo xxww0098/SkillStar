@@ -59,13 +59,14 @@ pub fn inspect_project_copy_status(name: &str) -> Result<ProjectCopySnapshot> {
         .find(|entry| entry.name == name)
         .with_context(|| format!("Project '{name}' is not registered"))?;
     let list = load_skills_list_strict(name)?.unwrap_or_default();
-    super::store::validate_skills_list(&list)?;
+    let profiles = crate::agents::list_profile_specs();
+    super::store::validate_skills_list_with_profiles(&list, &profiles)?;
     let rules = if Path::new(&entry.path).is_dir() {
         inspect_project_rules(&entry.path)
     } else {
         Vec::new()
     };
-    let copies = inspect_copies_locked(&entry, &list)?;
+    let copies = inspect_copies_locked(&entry, &list, &profiles)?;
     Ok(ProjectCopySnapshot {
         project: entry,
         skills_list: list,
@@ -77,12 +78,12 @@ pub fn inspect_project_copy_status(name: &str) -> Result<ProjectCopySnapshot> {
 fn inspect_copies_locked(
     entry: &super::types::ProjectEntry,
     list: &super::types::SkillsList,
+    profiles: &[crate::agents::AgentProfile],
 ) -> Result<Vec<ProjectCopyRecord>> {
-    let profiles = crate::agents::list_profiles();
     let root = Path::new(&entry.path);
     let live_root = root.is_dir().then_some(root);
     let mut records = Vec::new();
-    for plan in build_physical_path_plans(live_root, list, &profiles)? {
+    for plan in build_physical_path_plans(live_root, list, profiles)? {
         let rel = &plan.profile.project_skills_rel;
         for skill in plan.skill_names {
             crate::content::validate_skill_name(&skill)?;
@@ -176,7 +177,7 @@ pub fn forget_project_copy(name: &str, relative_path: &str, skill: &str) -> Resu
         .with_context(|| format!("Project '{name}' is not registered"))?;
     let mut list =
         load_skills_list_strict(name)?.context("Project skill configuration is missing")?;
-    let profiles = crate::agents::list_profiles();
+    let profiles = crate::agents::list_profile_specs();
     let root = Path::new(&entry.path);
     let live_root = root.is_dir().then_some(root);
     let target = project_path_key(live_root, relative_path)?;

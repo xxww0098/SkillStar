@@ -1,12 +1,13 @@
 // 「网络诊断」模块 — 作为 NetworkSection 的右上角动作 + 独立诊断报告卡，
 // 同时保留 DoctorWorkbench 供 networkDoctor.test.tsx 独立测试。
 
-import { Text, View, signal, type JSX, type Signal } from "nsh";
+import { Text, View, computed, signal, type JSX, type Signal } from "nsh";
 import { SettingsNetwork } from "skillstar-gui/native";
 import { paletteToken } from "../../../services/themeMode";
 import { t } from "../../../services/translation";
 import { Icon, type IconName } from "../../../chrome/icons";
 import { IconSpin } from "../../../chrome/feedback";
+import { bindSlow } from "../../../chrome/delayedFlag";
 import {
   MONO_FONT,
   SectionShell,
@@ -144,6 +145,7 @@ export function DoctorWorkbench(props: { state: DoctorState }): JSX.Element {
 /** 独立诊断报告卡：空闲时不渲染，运行中或有结果/错误时渲染独立 card()。 */
 export function DoctorInlinePanel(props: { state: DoctorState }): JSX.Element | null {
   const state = props.state;
+  const slow = bindSlow(() => state.diagnosing());
   return (
     <If when={state.diagnosing() || state.error() !== null || state.diagnosis() !== null}>
       {() => (
@@ -184,7 +186,7 @@ export function DoctorInlinePanel(props: { state: DoctorState }): JSX.Element | 
               >
                 {t("settings.networkDoctor")}
               </Text>
-              <DoctorSummaryPill state={state} />
+              <If when={!state.diagnosing()}>{() => <DoctorSummaryPill state={state} />}</If>
             </View>
             <If when={!state.diagnosing()}>
               {() => (
@@ -212,28 +214,36 @@ export function DoctorInlinePanel(props: { state: DoctorState }): JSX.Element | 
           <If when={state.diagnosing() && state.error() === null && state.diagnosis() === null}>
             {() => (
               <View
+                accessibilityState={{ busy: true }}
                 style={{
                   paddingHorizontal: 18,
                   paddingVertical: 14,
                   display: "flex",
                   flexDirection: "row",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   gap: 10,
                   width: "100%",
                 }}
               >
                 <IconSpin name="loader" size={14} color={paletteToken("accent")} spin />
-                <Text
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12,
-                    color: paletteToken("fg_muted"),
-                    lineHeight: 18,
-                  }}
-                >
-                  {t("settings.networkDoctorHint")}
-                </Text>
+                <View style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: paletteToken("fg_muted"),
+                      lineHeight: 18,
+                    }}
+                  >
+                    {t("settings.networkDoctorHint")}
+                  </Text>
+                  <If when={slow()}>
+                    {() => (
+                      <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
+                        {t("wait.takingLonger")}
+                      </Text>
+                    )}
+                  </If>
+                </View>
               </View>
             )}
           </If>
@@ -255,9 +265,6 @@ function summaryBadge(state: DoctorState): {
   mono: boolean;
   text: string;
 } {
-  if (state.diagnosing()) {
-    return { tone: "accent", icon: "loader", mono: false, text: t("common.loading") };
-  }
   if (state.error() !== null) {
     return { tone: "danger", icon: "xCircle", mono: false, text: t("common.failed") };
   }
@@ -274,26 +281,26 @@ function summaryBadge(state: DoctorState): {
 }
 
 function DoctorSummaryPill(props: { state: DoctorState }): JSX.Element {
-  const state = props.state;
+  const badge = computed(() => summaryBadge(props.state));
   return (
     <StatusPill
-      tone={summaryBadge(state).tone}
-      icon={summaryBadge(state).icon}
-      mono={summaryBadge(state).mono}
-      text={summaryBadge(state).text}
+      tone={badge().tone}
+      icon={badge().icon}
+      mono={badge().mono}
+      text={badge().text}
     />
   );
 }
 
-/** 分区头「开始诊断」按钮：空闲带 activity 图标，运行中转 loader 并吞点击。 */
+/** 分区头「开始诊断」：保持 activity，不转第二圈；诊断中吞掉第二次按下。 */
 export function DoctorRunButton(props: { state: DoctorState }): JSX.Element {
   const state = props.state;
   return (
     <SettingsButton
       testID="doctor-run"
       label={t("settings.networkDoctorRun")}
-      icon={state.diagnosing() ? "loader" : "activity"}
-      spinning={state.diagnosing()}
+      icon="activity"
+      spinning={false}
       busy={state.diagnosing()}
       variant="accent"
       size="sm"
@@ -371,19 +378,21 @@ function DoctorErrorBox(props: { error: string }): JSX.Element {
 
 function DoctorFindings(props: { state: DoctorState }): JSX.Element {
   const state = props.state;
+  const checks = computed(() => state.diagnosis()?.checks ?? []);
+  const recommendations = computed(() => state.diagnosis()?.recommendations ?? []);
   return (
     <View style={{ display: "flex", flexDirection: "column", width: "100%" }}>
       <View style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-        {(state.diagnosis()?.checks ?? []).map((check, index) => (
-          <CheckRow check={check} borderTop={index > 0} />
-        ))}
+        <Each of={checks()} key={(check) => check.id}>
+          {(check, index) => <CheckRow check={check()} borderTop={index() > 0} />}
+        </Each>
       </View>
-      <If when={(state.diagnosis()?.recommendations ?? []).length > 0}>
+      <If when={recommendations().length > 0}>
         {() => (
           <View
             style={{
               paddingHorizontal: 18,
-              paddingTop: (state.diagnosis()?.checks.length ?? 0) > 0 ? 6 : 12,
+              paddingTop: checks().length > 0 ? 6 : 12,
               paddingBottom: 14,
               width: "100%",
             }}
@@ -408,11 +417,13 @@ function DoctorFindings(props: { state: DoctorState }): JSX.Element {
                   {t("settings.networkDoctorRecommendations")}
                 </Text>
               </View>
-              {(state.diagnosis()?.recommendations ?? []).map((key) => (
-                <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
-                  {`• ${t(recommendationKey(key))}`}
-                </Text>
-              ))}
+              <Each of={recommendations()} key={(key) => key}>
+                {(key) => (
+                  <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), lineHeight: 18 }}>
+                    {`• ${t(recommendationKey(key()))}`}
+                  </Text>
+                )}
+              </Each>
             </View>
           </View>
         )}
@@ -443,9 +454,8 @@ function CheckRow(props: { check: HostCheckDto; borderTop: boolean }): JSX.Eleme
         justifyContent: "space-between",
         gap: 12,
         width: "100%",
-        ...(props.borderTop
-          ? { borderTopWidth: 1, borderTopColor: paletteToken("border_soft") }
-          : {}),
+        borderTopWidth: props.borderTop ? 1 : 0,
+        borderTopColor: props.borderTop ? paletteToken("border_soft") : "transparent",
       }}
     >
       <View

@@ -156,6 +156,39 @@ fn summary_buckets_become_percent_windows_with_grouped_labels() {
 }
 
 #[test]
+fn summary_buckets_strip_limit_suffix_and_compact_period_names() {
+    let payload = json!({
+        "groups": [
+            {
+                "displayName": "Gemini Models",
+                "buckets": [
+                    { "bucketId": "gemini-weekly", "displayName": "Weekly Limit", "remainingFraction": 0.63 },
+                    { "bucketId": "gemini-5h", "displayName": "Five Hour Limit", "remainingFraction": 0.84 }
+                ]
+            },
+            {
+                "displayName": "Claude and GPT models",
+                "buckets": [
+                    { "bucketId": "claude-weekly", "displayName": "Weekly Limit", "remainingFraction": 0.99 },
+                    { "bucketId": "claude-5h", "displayName": "Five Hour Limit", "remainingFraction": 1.0 }
+                ]
+            }
+        ]
+    });
+    let windows = parse_ag::usage_windows(&parse_ag::summary_windows(&payload));
+    let labels: Vec<&str> = windows.iter().map(|window| window.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec![
+            "Gemini Models · Weekly",
+            "Gemini Models · 5h",
+            "Claude and GPT models · Weekly",
+            "Claude and GPT models · 5h",
+        ]
+    );
+}
+
+#[test]
 fn model_rows_need_a_displayable_name_and_a_fraction() {
     let windows = parse_ag::usage_windows(&parse_ag::model_windows(&json_of(AVAILABLE_MODELS)));
     // serde_json keeps object keys sorted, so the rows arrive in model-id order.
@@ -320,12 +353,91 @@ fn an_expired_access_token_is_never_traded_for_a_new_one() {
             token_type: "Bearer".to_string(),
             ..TokenSet::default()
         },
+        account_id: None,
         provider_state: None,
+        needs_identity: false,
     };
     let error = fetch(&creds).expect_err("no quota read without a live token");
     // 不是 AuthRequired：凭据还在，只是这里不兑换 refresh token。
     assert!(matches!(error, UsageError::Unreadable(_)), "{error:?}");
     assert!(error.to_string().contains("已过期"), "{error}");
+}
+
+#[test]
+fn quota_read_enriches_missing_identity_without_making_it_required() {
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    let _sandbox = crate::test_support::Sandbox::new();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("local server");
+    unsafe {
+        std::env::set_var(BASE_URL_ENV, format!("http://{}", listener.local_addr().unwrap()))
+    };
+    let server = std::thread::spawn(move || {
+        for _ in 0..6 {
+            let (stream, _) = listener.accept().expect("request");
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let body = if line.contains(LOAD_CODE_ASSIST_PATH) {
+                LOAD_ASSIST
+            } else {
+                assert!(line.contains(QUOTA_SUMMARY_PATH), "{line}");
+                QUOTA_SUMMARY
+            };
+            let mut content_length = 0;
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+            reader.read_exact(&mut vec![0; content_length]).unwrap();
+            write!(
+                reader.get_mut(),
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            )
+            .unwrap();
+        }
+    });
+    let mut creds = Credentials {
+        tokens: TokenSet {
+            access_token: "at-test".to_string(),
+            ..TokenSet::default()
+        },
+        account_id: None,
+        provider_state: None,
+        needs_identity: true,
+    };
+    let result = fetch_with_identity(&creds, |token| {
+        assert_eq!(token, "at-test");
+        crate::oauth::agents::antigravity::identity_from_userinfo(&json!({
+            "name": "Google User", "email": "user@example.com"
+        }))
+        .ok()
+    })
+    .expect("quota and identity");
+    assert_eq!(
+        result.identity.unwrap().display_name.as_deref(),
+        Some("Google User")
+    );
+    assert!(!result.snapshot.windows.is_empty());
+
+    creds.needs_identity = false;
+    let known = fetch_with_identity(&creds, |_| panic!("identity is already known"))
+        .expect("quota without lookup");
+    assert!(known.identity.is_none());
+
+    creds.needs_identity = true;
+    let unavailable = fetch_with_identity(&creds, |_| None).expect("quota survives failed userinfo");
+    assert!(unavailable.identity.is_none());
+    assert!(!unavailable.snapshot.windows.is_empty());
+    server.join().expect("server");
 }
 
 #[test]

@@ -21,20 +21,11 @@ pub struct MarketplaceTranslation;
 
 #[module]
 impl MarketplaceTranslation {
-    /// The language translations are written in (`active_target` — a
-    /// canonical BCP-47 tag, default `zh-CN`). Pure read of the loaded
-    /// config; read-only.
-    pub fn active_target() -> String {
-        ss_core::translation::active_target().to_owned()
-    }
-
     /// Whether the description surface's Settings switch is on
     /// (`TranslationConfig.translate_descriptions`: skill cards, the detail
     /// column, and the market). Read-only.
     pub fn descriptions_enabled() -> bool {
-        ss_core::translation::load_config()
-            .map(|config| config.translate_descriptions)
-            .unwrap_or(false)
+        ss_core::translation::descriptions_enabled()
     }
 
     /// The stored per-skill description choice from the detail column's
@@ -42,9 +33,7 @@ impl MarketplaceTranslation {
     /// skill name): `true` / `false` when the skill chose, `null` when it
     /// follows the surface switch. Read-only.
     pub fn description_choice(skill: String) -> Option<bool> {
-        ss_core::translation::load_config()
-            .ok()
-            .and_then(|config| config.description_choices.get(&skill).copied())
+        ss_core::translation::description_choice(&skill)
     }
 
     /// Remember one button press — the drawer's translate button writes the
@@ -80,14 +69,7 @@ impl MarketplaceTranslation {
     /// `ss-accounts` for LLM keys): the key check reads the translation key
     /// file only, so an account-only setup reports blocked.
     pub fn descriptions_blocked() -> bool {
-        let Ok(config) = ss_core::translation::load_config() else {
-            return false;
-        };
-        if config.engine != ss_core::translation::Engine::Llm {
-            return false;
-        }
-        config.llm_model.trim().is_empty()
-            || ss_core::translation::load_api_key().trim().is_empty()
+        ss_core::translation::descriptions_blocked()
     }
 
     /// The live engine call for the drawer's translate button

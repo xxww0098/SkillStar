@@ -1,9 +1,22 @@
-import { Overlay, Scroll, Text, View, signal, type JSX, type ViewRef } from "nsh";
+import {
+  Overlay,
+  Scroll,
+  Text,
+  View,
+  computed,
+  signal,
+  type Accessor,
+  type JSX,
+  type ViewRef,
+} from "nsh";
 import { paletteToken } from "../../services/themeMode";
-import { t, tf } from "../../services/translation";
+import { t } from "../../services/translation";
 import { Icon } from "../../chrome/icons";
 import { Tip } from "../../chrome/tooltip";
 import { IconSpin } from "../../chrome/feedback";
+import { BAR_MENU_GLYPH, BarMenuTrigger } from "../../chrome/barMenu";
+import { BAR_GAP, BAR_RADIUS, BAR_SLOT_RADIUS } from "../../chrome/toolbar";
+import { SaveStatus } from "../../chrome/saveStatus";
 import {
   SOURCE_FILTERS,
   needsAttention,
@@ -11,6 +24,7 @@ import {
   type SourceFilter,
 } from "./filters";
 import {
+  busy,
   currentRepos,
   currentScoped,
   favoriteRepos,
@@ -48,7 +62,7 @@ const ORIGIN_REPOS_VIEW_H = 280;
 const menuOpen = signal(false);
 const triggerRef = signal<ViewRef | null>(null);
 
-/** 触发器 + 弹层宿主（spotlight 同款 Overlay 模式）：面板以触发器 ref
+/** 触发器 + 弹层宿主（下拉弹层同款 Overlay 模式）：面板以触发器 ref
  * 为锚（bottom/start，间距 6）挂在 root 层——PageBar 的命令区
  * overflow:hidden 会裁掉普通 absolute 子树；透明幕是不带锚的 fixed
  * Overlay 垫在面板下面，点外收起。计数口径 = toolbar.rs
@@ -65,14 +79,14 @@ export function OriginMenuButton(): JSX.Element {
         <OriginTrigger />
       </View>
       <If when={menuOpen()}>
-        <Overlay style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-          <View
-            testID="selection-menu-dismiss"
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-            onPress={() => menuOpen.set(false)}
-          />
-        </Overlay>
-        <Overlay anchor={triggerRef()} placement="bottom" align="start" offset={6}>
+        <Overlay
+          anchor={triggerRef()}
+          placement="bottom"
+          align="start"
+          offset={6}
+          onPressOutside={() => menuOpen.set(false)}
+          onCancel={() => menuOpen.set(false)}
+        >
           <OriginPanel onClose={() => menuOpen.set(false)} />
         </Overlay>
       </If>
@@ -82,64 +96,14 @@ export function OriginMenuButton(): JSX.Element {
 
 function OriginTrigger(): JSX.Element {
   return (
-    <View>
-      <View
-        testID="my-skills-origin-trigger"
-        tooltip={<Tip text={`${t("toolbar.source")}: ${repoLabel()}`} />}
-        style={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 6,
-          height: 32,
-          paddingHorizontal: 12,
-          borderRadius: 10,
-          borderWidth: 1,
-          cursor: "pointer",
-          flexShrink: 0,
-          borderColor:
-            sourceFilter() !== "all" || repoFilter() !== null
-              ? paletteToken("accent_soft_edge")
-              : paletteToken("border"),
-          backgroundColor:
-            sourceFilter() !== "all" || repoFilter() !== null
-              ? paletteToken("accent_soft")
-              : paletteToken("bg"),
-        }}
-        hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-        onPress={() => menuOpen.set(!menuOpen())}
-      >
-        <Icon
-          name="layers"
-          size={14}
-          color={
-            sourceFilter() !== "all" || repoFilter() !== null
-              ? paletteToken("accent")
-              : paletteToken("fg_muted")
-          }
-        />
-        <Text
-          style={{
-            fontSize: 12,
-            color:
-              sourceFilter() !== "all" || repoFilter() !== null
-                ? paletteToken("accent")
-                : paletteToken("fg"),
-          }}
-        >
-          {originCount()}
-        </Text>
-        <Icon
-          name="chevronDown"
-          size={11}
-          color={
-            sourceFilter() !== "all" || repoFilter() !== null
-              ? paletteToken("accent")
-              : paletteToken("fg_muted")
-          }
-        />
-      </View>
-    </View>
+    <BarMenuTrigger
+      testID="my-skills-origin-trigger"
+      glyph="layers"
+      label={() => String(originCount())}
+      tip={() => `${t("toolbar.source")}: ${repoLabel()}`}
+      active={() => sourceFilter() !== "all" || repoFilter() !== null}
+      onPress={() => menuOpen.update((open) => !open)}
+    />
   );
 }
 
@@ -158,16 +122,18 @@ function repoLabel(): string {
 }
 
 function OriginPanel(props: { onClose: () => void }): JSX.Element {
-  const repos = currentRepos();
-  const showRepos =
-    sourceFilter() !== "local" && !(repos.length === 0 && repoFilter() === null);
-  const width = showRepos ? 340 : 220;
-  const ordered = orderRepos(repos, favoriteRepos());
+  const showRepos = computed(
+    () =>
+      sourceFilter() !== "local" &&
+      !(currentRepos().length === 0 && repoFilter() === null),
+  );
+  const ordered = computed(() => orderRepos(currentRepos(), favoriteRepos()));
+  const scrollable = computed(() => ordered().length + 1 > ORIGIN_REPOS_VISIBLE);
   return (
     <View
       testID="my-skills-origin-panel"
       style={{
-        width,
+        width: showRepos() ? 340 : 220,
         borderRadius: 12,
         borderWidth: 1,
         borderColor: paletteToken("border"),
@@ -178,100 +144,99 @@ function OriginPanel(props: { onClose: () => void }): JSX.Element {
         flexDirection: "column",
       }}
     >
-        <View style={{ padding: 8, display: "flex", flexDirection: "row", gap: 2 }}>
-          <SourceSegment onClose={props.onClose} />
-        </View>
-        {(() => {
-          if (!showRepos) return null;
-          const rows = ordered.length + 1;
-          return (
-            <View
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                paddingHorizontal: 6,
-                paddingTop: 6,
-                paddingBottom: 6,
-              }}
-            >
-              <View
+      <View style={{ padding: 8, display: "flex", flexDirection: "row", gap: 2 }}>
+        <SourceSegment onClose={props.onClose} />
+      </View>
+      <If when={showRepos()}>
+        <View
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            paddingHorizontal: 6,
+            paddingTop: 6,
+            paddingBottom: 6,
+          }}
+        >
+          <View
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingHorizontal: 8,
+              paddingTop: 2,
+              paddingBottom: 4,
+            }}
+          >
+            <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Icon name="gitBranch" size={12} color={paletteToken("fg_muted")} />
+              <Text
                 style={{
-                  display: "flex",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingHorizontal: 8,
-                  paddingTop: 2,
-                  paddingBottom: 4,
+                  fontSize: 12,
+                  fontWeight: "600",
+                  color: paletteToken("fg_muted"),
                 }}
               >
-                <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 5 }}>
-                  <Icon name="gitBranch" size={12} color={paletteToken("fg_muted")} />
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      fontWeight: "600",
-                      color: paletteToken("fg_muted"),
-                    }}
-                  >
-                    {t("toolbar.repo")}
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    paddingHorizontal: 6,
-                    paddingVertical: 1,
-                    borderRadius: 999,
-                    backgroundColor: paletteToken("well"),
-                  }}
-                >
-                  <Text
-                    style={{ fontSize: 10, fontWeight: "500", color: paletteToken("fg_faint") }}
-                  >
-                    {ordered.length}
-                  </Text>
-                </View>
-              </View>
-              {(() => {
-                const list = (
-                  <View style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <PlainRepoRow
-                      testID="origin-repo-all"
-                      label={t("toolbar.allRepos")}
-                      active={repoFilter() === null}
-                      onPress={() => {
-                        repoFilter.set(null);
-                        props.onClose();
-                      }}
-                    />
-                    {ordered.map((repo) => (
-                      <RepoSourceRow repo={repo} onClose={props.onClose} />
-                    ))}
-                  </View>
-                );
-                if (rows <= ORIGIN_REPOS_VISIBLE) return list;
-                // 高度写在视口框上，<Scroll> 撑满：滚轮留在名单里（import 列表
-                // 同款滚动盒契约）。只写高度不挂 <Scroll> 时内容溢出视口被面板
-                // 的 overflow:hidden 裁掉，滚轮无处可滚。
-                return (
-                  <View
-                    testID="origin-repo-scroll"
-                    style={{
-                      height: ORIGIN_REPOS_VIEW_H,
-                      width: "100%",
-                      minWidth: 0,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Scroll testID="origin-repo-scroll-list" style={{ width: "100%", height: "100%" }}>
-                      {list}
-                    </Scroll>
-                  </View>
-                );
-              })()}
+                {t("toolbar.repo")}
+              </Text>
             </View>
-          );
-        })()}
+            <View
+              style={{
+                paddingHorizontal: 6,
+                paddingVertical: 1,
+                borderRadius: 999,
+                backgroundColor: paletteToken("well"),
+              }}
+            >
+              <Text
+                style={{ fontSize: 10, fontWeight: "500", color: paletteToken("fg_faint") }}
+              >
+                {ordered().length}
+              </Text>
+            </View>
+          </View>
+          <If
+            when={scrollable()}
+            else={<RepoList ordered={ordered} onClose={props.onClose} />}
+          >
+            {/* 高度写在视口框上，<Scroll> 撑满：滚轮留在名单里（import 列表
+                同款滚动盒契约）。只写高度不挂 <Scroll> 时内容溢出视口被面板
+                的 overflow:hidden 裁掉，滚轮无处可滚。 */}
+            <View
+              testID="origin-repo-scroll"
+              style={{
+                height: ORIGIN_REPOS_VIEW_H,
+                width: "100%",
+                minWidth: 0,
+                flexShrink: 0,
+              }}
+            >
+              <Scroll testID="origin-repo-scroll-list" style={{ width: "100%", height: "100%" }}>
+                <RepoList ordered={ordered} onClose={props.onClose} />
+              </Scroll>
+            </View>
+          </If>
+        </View>
+      </If>
+    </View>
+  );
+}
+
+function RepoList(props: { ordered: Accessor<string[]>; onClose: () => void }): JSX.Element {
+  return (
+    <View style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <PlainRepoRow
+        testID="origin-repo-all"
+        label={t("toolbar.allRepos")}
+        active={repoFilter() === null}
+        onPress={() => {
+          repoFilter.set(null);
+          props.onClose();
+        }}
+      />
+      <Each of={props.ordered()} key={(repo) => repo}>
+        {(repo: () => string) => <RepoSourceRow repo={repo()} onClose={props.onClose} />}
+      </Each>
     </View>
   );
 }
@@ -288,7 +253,7 @@ function SourceSegment(props: { onClose: () => void }): JSX.Element {
         alignItems: "center",
         width: "100%",
         height: 32,
-        borderRadius: 8,
+        borderRadius: BAR_RADIUS,
         borderWidth: 1,
         borderColor: paletteToken("border"),
         backgroundColor: paletteToken("bg"),
@@ -296,13 +261,15 @@ function SourceSegment(props: { onClose: () => void }): JSX.Element {
         gap: 2,
       }}
     >
-      {SOURCE_FILTERS.map((kind) => (
-        <SourceSegTab
-          kind={kind}
-          selected={sourceFilter() === kind}
-          onClose={props.onClose}
-        />
-      ))}
+      <Each of={SOURCE_FILTERS} key={(kind) => kind}>
+        {(kind: () => SourceFilter) => (
+          <SourceSegTab
+            kind={kind()}
+            selected={sourceFilter() === kind()}
+            onClose={props.onClose}
+          />
+        )}
+      </Each>
     </View>
   );
 }
@@ -327,7 +294,7 @@ function SourceSegTab(props: {
         justifyContent: "center",
         flex: 1,
         height: 26,
-        borderRadius: 6,
+        borderRadius: BAR_SLOT_RADIUS,
         cursor: "pointer",
         backgroundColor: props.selected ? paletteToken("card") : "transparent",
         borderWidth: 1,
@@ -392,8 +359,8 @@ function MenuRow(props: {
         alignItems: "center",
         height: 32,
         paddingHorizontal: 8,
-        gap: 4,
-        borderRadius: 6,
+        gap: BAR_GAP,
+        borderRadius: BAR_SLOT_RADIUS,
         cursor: "pointer",
         backgroundColor: props.active ? paletteToken("accent_soft") : "transparent",
       }}
@@ -406,10 +373,14 @@ function MenuRow(props: {
 }
 
 function LeadingGlyph(props: { active: boolean; repo?: string }): JSX.Element {
-  if (props.active) {
-    return <Icon name="check" size={13} color={paletteToken("accent")} />;
-  }
-  return <Icon name="gitBranch" size={13} color={paletteToken("fg_muted")} />;
+  return (
+    <If
+      when={props.active}
+      else={<Icon name="gitBranch" size={BAR_MENU_GLYPH} color={paletteToken("fg_muted")} />}
+    >
+      <Icon name="check" size={BAR_MENU_GLYPH} color={paletteToken("accent")} />
+    </If>
+  );
 }
 
 /** 逐仓库行（repo_source_row）：点击切换 repo 筛选（再点同仓清除）并收
@@ -417,68 +388,81 @@ function LeadingGlyph(props: { active: boolean; repo?: string }): JSX.Element {
  * 重装/移除弱化恒显、悬停着色——与原版「悬停显形」的差异记入台账。 */
 function RepoSourceRow(props: { repo: string; onClose: () => void }): JSX.Element {
   const repo = props.repo;
-  const active = repoFilter() === repo;
-  const spinning = reinstallingRepo() === repo;
-  const locked = reinstallingRepo() !== null;
-  const favorited = favoriteRepos().has(repo);
-  const starTip = favoritesLocked()
-    ? t("toolbar.favoriteSourceLocked")
-    : favorited
-      ? t("toolbar.unfavoriteSource")
-      : t("toolbar.favoriteSource");
+  const active = computed(() => repoFilter() === repo);
+  const favorited = computed(() => favoriteRepos().has(repo));
+  const spinning = computed(() => reinstallingRepo() === repo);
+  const locked = computed(() => reinstallingRepo() !== null);
+  const removing = computed(() => busy() === `repo-remove:${repo}`);
+  const starTip = computed(() =>
+    favoritesLocked()
+      ? t("toolbar.favoriteSourceLocked")
+      : favorited()
+        ? t("toolbar.unfavoriteSource")
+        : t("toolbar.favoriteSource"),
+  );
   return (
-    <MenuRow
-      testID={`origin-repo-row-${repo}`}
-      active={active}
-      onPress={() => {
-        repoFilter.set(repoFilter() === repo ? null : repo);
-        props.onClose();
-      }}
-    >
-      <LeadingGlyph active={active} repo={repo} />
-      <RepoName repo={repo} active={active} />
-      <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 2, flexShrink: 0 }}>
-        <RepoActionButton
-          testID={`origin-repo-favorite-${repo}`}
-          glyph="star"
-          tip={starTip}
-          ink={favorited ? paletteToken("amber_fg") : paletteToken("fg_faint")}
-          hoverColor={paletteToken("amber_fg")}
-          hoverBg={paletteToken("amber_bg")}
-          onPress={() => void toggleFavoriteRepo(repo)}
-        />
-        <RepoActionButton
-          testID={`origin-repo-reinstall-${repo}`}
-          glyph="refresh"
-          tip={t("toolbar.reinstallSource")}
-          ink={locked && !spinning ? paletteToken("fg_faint") : paletteToken("fg_muted")}
-          hoverColor={paletteToken("fg")}
-          hoverBg={paletteToken("panel_hover")}
-          dimmed={locked && !spinning}
-          spin={spinning}
-          onPress={() => void reinstallRepoSource(repo)}
-        />
-        <RepoActionButton
-          testID={`origin-repo-remove-${repo}`}
-          glyph="trash"
-          tip={t("toolbar.removeSource")}
-          ink={paletteToken("fg_muted")}
-          hoverColor={paletteToken("danger")}
-          hoverBg={paletteToken("danger_bg")}
-          onPress={() => {
-            props.onClose();
-            uninstallRepoSource(repo);
+    <View style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <MenuRow
+        testID={`origin-repo-row-${repo}`}
+        active={active()}
+        onPress={() => {
+          repoFilter.set(active() ? null : repo);
+          props.onClose();
+        }}
+      >
+        <LeadingGlyph active={active()} repo={repo} />
+        <RepoName repo={repo} active={active()} />
+        <View
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 2,
+            flexShrink: 0,
           }}
-        />
-      </View>
-    </MenuRow>
+        >
+          <RepoActionButton
+            testID={`origin-repo-favorite-${repo}`}
+            glyph="star"
+            tip={starTip()}
+            ink={favorited() ? paletteToken("amber_fg") : paletteToken("fg_faint")}
+            hoverColor={paletteToken("amber_fg")}
+            hoverBg={paletteToken("amber_bg")}
+            onPress={() => void toggleFavoriteRepo(repo)}
+          />
+          <RepoActionButton
+            testID={`origin-repo-reinstall-${repo}`}
+            glyph="refresh"
+            tip={t("toolbar.reinstallSource")}
+            ink={locked() && !spinning() ? paletteToken("fg_faint") : paletteToken("fg_muted")}
+            hoverColor={paletteToken("fg")}
+            hoverBg={paletteToken("panel_hover")}
+            dimmed={locked() && !spinning()}
+            spin={spinning()}
+            onPress={() => void reinstallRepoSource(repo)}
+          />
+          <RepoActionButton
+            testID={`origin-repo-remove-${repo}`}
+            glyph="trash"
+            tip={t("toolbar.removeSource")}
+            ink={paletteToken("fg_muted")}
+            hoverColor={paletteToken("danger")}
+            hoverBg={paletteToken("danger_bg")}
+            spin={removing()}
+            spinInk={paletteToken("danger")}
+            onPress={() => uninstallRepoSource(repo)}
+          />
+        </View>
+      </MenuRow>
+      <SaveStatus id={`fav:${repo}`} />
+      <SaveStatus id={`reinstall:${repo}`} />
+    </View>
   );
 }
 
 /** `owner/name` 一行：owner 弱化、name 占余宽截断；无斜杠整段一个 run
  * （origin_menu.rs repo_name）。> 28 字符挂 tooltip。 */
 function RepoName(props: { repo: string; active: boolean }): JSX.Element {
-  const ink = props.active ? paletteToken("accent") : paletteToken("fg");
   const slash = props.repo.indexOf("/");
   const body =
     slash === -1 ? (
@@ -488,7 +472,7 @@ function RepoName(props: { repo: string; active: boolean }): JSX.Element {
           minWidth: 0,
           fontSize: 12,
           fontWeight: "500",
-          color: ink,
+          color: props.active ? paletteToken("accent") : paletteToken("fg"),
           numberOfLines: 1,
         }}
       >
@@ -514,7 +498,14 @@ function RepoName(props: { repo: string; active: boolean }): JSX.Element {
         </View>
         <Text style={{ flexShrink: 0, fontSize: 12, color: paletteToken("fg_faint") }}>/</Text>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ fontSize: 12, fontWeight: "500", color: ink, numberOfLines: 1 }}>
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: "500",
+              color: props.active ? paletteToken("accent") : paletteToken("fg"),
+              numberOfLines: 1,
+            }}
+          >
             {props.repo.slice(slash + 1)}
           </Text>
         </View>
@@ -541,9 +532,9 @@ function RepoActionButton(props: {
   hoverBg: string;
   dimmed?: boolean;
   spin?: boolean;
+  spinInk?: string;
   onPress: () => void;
 }): JSX.Element {
-  const dimmed = props.dimmed === true;
   return (
     <View
       testID={props.testID}
@@ -556,17 +547,27 @@ function RepoActionButton(props: {
         justifyContent: "center",
         borderRadius: 6,
         flexShrink: 0,
-        opacity: dimmed ? 0.4 : 1,
-        cursor: dimmed ? "default" : "pointer",
+        opacity: props.dimmed === true ? 0.4 : 1,
+        cursor: props.dimmed === true ? "default" : "pointer",
       }}
-      hoverStyle={dimmed ? undefined : { backgroundColor: props.hoverBg }}
-      onPress={dimmed ? undefined : props.onPress}
+      hoverStyle={props.dimmed === true ? undefined : { backgroundColor: props.hoverBg }}
+      onPress={props.dimmed === true ? undefined : props.onPress}
     >
-      {props.spin === true ? (
-        <IconSpin name={props.glyph} size={13} color={paletteToken("accent")} spin />
-      ) : (
-        <Icon name={props.glyph} size={13} color={props.ink} />
-      )}
+      <If
+        when={props.glyph === "star"}
+        else={
+          <IconSpin
+            name={props.glyph}
+            size={13}
+            color={
+              props.spin === true ? (props.spinInk ?? paletteToken("accent")) : props.ink
+            }
+            spin={props.spin === true}
+          />
+        }
+      >
+        <Icon name="star" size={13} color={props.ink} />
+      </If>
     </View>
   );
 }

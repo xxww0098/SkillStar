@@ -54,7 +54,7 @@ pub fn inspect_project_skills(binding: &ObservedProject) -> ProjectSkillFacts {
         .as_deref()
         .and_then(load_skills_list)
         .unwrap_or_default();
-    let profiles = agents::list_profiles();
+    let profiles = agents::list_profile_specs();
     let mut seen = BTreeSet::new();
     let mut rows = Vec::new();
     for profile in &profiles {

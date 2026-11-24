@@ -1,7 +1,7 @@
 // 「GitHub 加速」分区 — 可作为独立卡片（MirrorEmbedded）嵌入 NetworkSection，
 // 同时保留 GhMirrorWorkbench 供 ghMirror.test.tsx 独立运行。
 
-import { Text, View, effect, type JSX } from "nsh";
+import { Text, View, computed, effect, type JSX } from "nsh";
 import { Input } from "nsh/base";
 import { paletteToken } from "../../../services/themeMode";
 import { t } from "../../../services/translation";
@@ -41,7 +41,7 @@ export {
 };
 
 /** 页面模块级单例（keep-alive 只挂载一次）；测试装置自建 state 注入。 */
-const mirrorState = createGhMirrorState(realGhMirrorBridge);
+const mirrorState = createGhMirrorState(realGhMirrorBridge, { deferLoad: true });
 
 /** 嵌入 NetworkSection 的独立 GitHub 加速卡片 + 可展开镜像源列表。 */
 export function MirrorEmbedded(): JSX.Element {
@@ -153,9 +153,9 @@ export function GhMirrorWorkbench(props: { state: GhMirrorState }): JSX.Element 
     <SectionShell
       section={GH_MIRROR_SECTION}
       meta={
-        state.config().enabled && state.effectiveUrl() !== "" ? (
+        <If when={state.config().enabled && state.effectiveUrl() !== ""}>
           <MetaChip text={state.effectiveUrl()} mono tone="amber" />
-        ) : null
+        </If>
       }
       action={
         <SettingsSwitch
@@ -251,14 +251,21 @@ function MirrorForm(props: { state: GhMirrorState }): JSX.Element {
           {t("settings.githubMirrorNotice")}
         </Text>
       </View>
-      {state.entries().map((entry, index) => (
-        <MirrorEntryRow
-          state={state}
-          entry={entry}
-          index={index}
-          count={state.entries().length}
-        />
-      ))}
+      {(() => {
+        const entries = computed(() => state.entries());
+        return (
+          <Each of={entries()} key={(entry) => entry.id}>
+            {(entry, index) => (
+              <MirrorEntryRow
+                state={state}
+                entry={entry()}
+                index={index()}
+                count={entries().length}
+              />
+            )}
+          </Each>
+        );
+      })()}
       <If when={state.status() !== null}>
         {() => <MirrorStatusRow state={state} />}
       </If>
@@ -274,12 +281,11 @@ function MirrorEntryRow(props: {
   count: number;
 }): JSX.Element {
   const state = props.state;
-  const entry = props.entry;
-  const isSelected = () => state.selectedId() === entry.id;
-  const isPrimary = () => props.index === 0;
+  const isSelected = computed(() => state.selectedId() === props.entry.id);
+  const isPrimary = computed(() => props.index === 0);
   return (
     <View
-      testID={`gh-entry-${entry.id}`}
+      testID={`gh-entry-${props.entry.id}`}
       role="radio"
       accessibilityState={{ selected: isSelected() }}
       style={{
@@ -299,7 +305,7 @@ function MirrorEntryRow(props: {
       hoverStyle={
         isSelected() ? undefined : { backgroundColor: paletteToken("panel_hover") }
       }
-      onPress={() => state.selectEntry(entry.id)}
+      onPress={() => state.selectEntry(props.entry.id)}
     >
       <RadioDot selected={isSelected()} />
       <View
@@ -331,19 +337,19 @@ function MirrorEntryRow(props: {
       </View>
       <EntryLabel
         state={state}
-        entry={entry}
+        entry={props.entry}
         selected={isSelected()}
         primary={isPrimary()}
       />
       <ReorderButtons
-        entryId={entry.id}
+        entryId={props.entry.id}
         index={props.index}
         count={props.count}
-        onMove={(delta) => state.moveEntry(entry.id, delta)}
+        onMove={(delta) => state.moveEntry(props.entry.id, delta)}
       />
       {/* custom 槽未选中时没有可探活的 URL，不显示测试按钮（GPUI 同款）。 */}
-      <If when={!entry.custom || isSelected()}>
-        {() => <MirrorTestButton state={state} entryId={entry.id} url={entry.url} />}
+      <If when={!props.entry.custom || isSelected()}>
+        {() => <MirrorTestButton state={state} entryId={props.entry.id} url={props.entry.url} />}
       </If>
     </View>
   );
@@ -607,64 +613,71 @@ function MirrorTestButton(props: {
   url: string;
 }): JSX.Element {
   const state = props.state;
+  const tone = computed(() => probeTone(state, props.entryId));
+  const canTest = computed(() => probeAvailable(state, props.entryId, props.url));
   return (
     <View
       testID={`gh-test-${props.entryId}`}
       role="button"
-      accessibilityState={{ disabled: !probeAvailable(state, props.entryId, props.url) }}
+      accessibilityState={{
+        disabled: !canTest(),
+        busy: tone().testing,
+      }}
       style={{
         height: 26,
         flexShrink: 0,
         paddingHorizontal: 10,
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: probeTone(state, props.entryId).border,
-        backgroundColor: probeTone(state, props.entryId).bg,
+        borderColor: tone().border,
+        backgroundColor: tone().bg,
         display: "flex",
         flexDirection: "row",
         alignItems: "center",
         gap: 5,
-        opacity: probeAvailable(state, props.entryId, props.url) ? 1 : 0.6,
-        ...(probeAvailable(state, props.entryId, props.url) ? { cursor: "pointer" } : {}),
+        opacity: canTest() ? 1 : 0.6,
+        ...(canTest() ? { cursor: "pointer" } : {}),
       }}
-      hoverStyle={
-        probeAvailable(state, props.entryId, props.url)
-          ? { backgroundColor: paletteToken("panel_hover") }
-          : undefined
-      }
+      hoverStyle={canTest() ? { backgroundColor: paletteToken("panel_hover") } : undefined}
       onPress={() => {
-        if (probeAvailable(state, props.entryId, props.url)) {
+        if (canTest()) {
           state.runTest(props.entryId, props.url);
         }
       }}
     >
-      <If when={typeof probeTone(state, props.entryId).result === "number"}>
-        {() => <Icon name="wifi" size={12} color={probeTone(state, props.entryId).iconColor} />}
+      <If when={typeof tone().result === "number"}>
+        {() => <Icon name="wifi" size={12} color={tone().iconColor} />}
       </If>
-      <If
-        when={
-          probeTone(state, props.entryId).result === "fail" &&
-          !probeTone(state, props.entryId).testing
-        }
+      <If when={tone().result === "fail" && !tone().testing}>
+        {() => <Icon name="wifiOff" size={12} color={tone().iconColor} />}
+      </If>
+      <View
+        style={{
+          width: tone().testing ? 12 : 0,
+          height: tone().testing ? 12 : 0,
+          overflow: "hidden",
+          flexShrink: 0,
+          ...(tone().testing ? {} : { position: "absolute" }),
+        }}
       >
-        {() => <Icon name="wifiOff" size={12} color={probeTone(state, props.entryId).iconColor} />}
-      </If>
-      <If when={probeTone(state, props.entryId).testing}>
-        {() => (
-          <IconSpin name="loader" size={12} color={probeTone(state, props.entryId).iconColor} spin />
-        )}
-      </If>
+        <IconSpin
+          name="loader"
+          size={12}
+          color={tone().iconColor}
+          spin={tone().testing}
+        />
+      </View>
       <Text
         style={{
           fontSize: 11,
           fontWeight: "600",
-          ...(probeTone(state, props.entryId).mono
+          ...(tone().mono
             ? { fontFamily: MONO_FONT, fontVariant: ["tabular-nums"] }
             : {}),
-          color: probeTone(state, props.entryId).color,
+          color: tone().color,
         }}
       >
-        {probeTone(state, props.entryId).label}
+        {tone().label}
       </Text>
     </View>
   );

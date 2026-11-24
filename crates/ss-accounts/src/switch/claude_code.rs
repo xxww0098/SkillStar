@@ -134,6 +134,10 @@ pub fn read(roots: &PathRoots) -> AccountResult<Option<LocalCredential>> {
         return Ok(None);
     };
     let email = text(EMAIL_FIELD).or_else(|| crate::identity::jwt_email(&access_token));
+    let plan = text("subscriptionType").or_else(|| text("rateLimitTier"));
+    let provider_state = plan
+        .as_ref()
+        .map(|tier| serde_json::json!({ "plan": tier }));
     Ok(Some(LocalCredential {
         tokens: crate::oauth::TokenSet {
             expires_at: milliseconds_to_seconds(segment.get(EXPIRES_AT_FIELD))
@@ -146,10 +150,10 @@ pub fn read(roots: &PathRoots) -> AccountResult<Option<LocalCredential>> {
         identity: crate::oauth::Identity {
             display_name: email.clone(),
             email,
-            plan: None,
+            plan,
             account_id: None,
         },
-        provider_state: None,
+        provider_state,
         source: path.display().to_string(),
     }))
 }

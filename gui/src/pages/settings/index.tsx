@@ -1,8 +1,9 @@
-import { Scroll, Text, View, effect, signal, type JSX, type ScrollRef } from "nsh";
+import { Scroll, Text, View, computed, effect, signal, type JSX, type ScrollRef } from "nsh";
 import { paletteToken } from "../../services/themeMode";
 import { t } from "../../services/translation";
 import { Icon } from "../../chrome/icons";
 import { requestThemeMode } from "../../shell/events";
+import { currentPage, createPaneWidth } from "../../shell/nav";
 import { realSettingsBridge } from "./bridge";
 import { activeSectionFromScroll, createSettingsState, type SettingsState } from "./state";
 import {
@@ -20,21 +21,30 @@ import { AgentConnectionsSection } from "./sections/agentConnections";
 import { StorageSection } from "./sections/storage";
 import { AboutSection } from "./sections/about";
 
-// 设置页：无顶栏（仅保留 20px 透明窗口拖拽条），左侧次级导航顶部对齐并与主侧栏及右侧内容区
-// 保持明确对称留白（左 28px + 壳层 8px / 右 28px）。宽窗口下右侧按 activeSection 切换六大分区
+// 设置页：无顶栏（仅保留 20px 透明窗口拖拽条），左侧次级导航在内容区整高内上下居中，左右留白
+// 与主侧栏及右侧内容区保持对称（左 28px + 壳层 8px / 右 28px）。宽窗口下右侧按 activeSection 切换六大分区
 // （display 保活），窄窗口（< SETTINGS_NAV_MIN_PANE）自动收起次级导航并退化为单列纵向堆叠。
 
-const paneWidth = signal(0);
 let scroller: ScrollRef | null = null;
-const pageState = createSettingsState(realSettingsBridge);
+const pageState = createSettingsState(realSettingsBridge, undefined, { deferLoad: true });
 
 export function SettingsPage(): JSX.Element {
-  return <SettingsWorkbench state={pageState} />;
+  return <SettingsWorkbench state={pageState} lazy />;
 }
 
-export function SettingsWorkbench(props: { state: SettingsState }): JSX.Element {
+export function SettingsWorkbench(props: { state: SettingsState; lazy?: boolean }): JSX.Element {
   const state = props.state;
-  effect(() => state.start());
+  const pageActive = computed(() => !props.lazy || currentPage() === "settings");
+  const pane = createPaneWidth({
+    active: pageActive,
+    fromShell: (panelW) => panelW,
+  });
+  let started = false;
+  effect(() => {
+    if (!pageActive() || started) return;
+    started = true;
+    state.start();
+  });
   effect(() =>
     requestThemeMode.subscribe((style) => {
       state.setBackgroundStyle(style);
@@ -43,7 +53,7 @@ export function SettingsWorkbench(props: { state: SettingsState }): JSX.Element 
   return (
     <View
       style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, width: "100%" }}
-      onLayout={(event) => paneWidth.set(event.bounds.size.width)}
+      onLayout={pane.onLayout}
     >
       {/* 顶部无边框窗口拖拽区（移除原 PageBar 后保留顶部拖拽句柄与上边距）。 */}
       <View
@@ -51,12 +61,17 @@ export function SettingsWorkbench(props: { state: SettingsState }): JSX.Element 
         style={{ width: "100%", height: 20, flexShrink: 0 }}
         desktop={{ windowDrag: true }}
       />
-      <SettingsRow state={state} />
+      <SettingsRow state={state} paneWidth={pane.width} pageActive={pageActive} lazy={props.lazy} />
     </View>
   );
 }
 
-function SettingsRow(props: { state: SettingsState }): JSX.Element {
+function SettingsRow(props: {
+  state: SettingsState;
+  paneWidth: () => number;
+  pageActive: () => boolean;
+  lazy?: boolean;
+}): JSX.Element {
   const state = props.state;
   return (
     <View
@@ -67,30 +82,34 @@ function SettingsRow(props: { state: SettingsState }): JSX.Element {
         flex: 1,
         minHeight: 0,
         width: "100%",
-        paddingLeft: paneWidth() >= SETTINGS_NAV_MIN_PANE ? 28 : 20,
+        paddingLeft: props.paneWidth() >= SETTINGS_NAV_MIN_PANE ? 28 : 20,
         paddingRight: 20,
         paddingTop: 4,
-        gap: paneWidth() >= SETTINGS_NAV_MIN_PANE ? 28 : 0,
+        gap: props.paneWidth() >= SETTINGS_NAV_MIN_PANE ? 28 : 0,
       }}
     >
-      {paneWidth() >= SETTINGS_NAV_MIN_PANE ? (
-        <SettingsNav state={state} labels={paneWidth() >= SETTINGS_NAV_LABELS_MIN_PANE} />
-      ) : null}
+      <If when={props.paneWidth() >= SETTINGS_NAV_MIN_PANE}>
+        <SettingsNav state={state} labels={props.paneWidth() >= SETTINGS_NAV_LABELS_MIN_PANE} />
+      </If>
       <View style={{ position: "relative", flex: 1, minWidth: 0, height: "100%", minHeight: 0 }}>
-        <SettingsColumn state={state} />
+        <SettingsColumn
+          state={state}
+          paneWidth={props.paneWidth}
+          pageActive={props.pageActive}
+          lazy={props.lazy}
+        />
       </View>
     </View>
   );
 }
 
-/** 次级导航卡片（顶部与分区头齐平，左侧活跃胶囊条 + 图标底座，hover 零帧换色）。 */
+/** 次级导航卡片（在内容区整高内上下居中，左侧活跃胶囊条 + 图标底座，hover 零帧换色）。 */
 function SettingsNav(props: { state: SettingsState; labels: boolean }): JSX.Element {
   const state = props.state;
   return (
     <View
       style={{
-        alignSelf: "flex-start",
-        marginTop: 4,
+        alignSelf: "center",
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
@@ -158,7 +177,7 @@ function SettingsNavItem(props: {
       }}
       onPress={props.onPress}
     >
-      {props.labels ? (
+      <If when={props.labels}>
         <View
           style={{
             width: 3,
@@ -168,7 +187,7 @@ function SettingsNavItem(props: {
             backgroundColor: props.active ? paletteToken("accent") : "transparent",
           }}
         />
-      ) : null}
+      </If>
       <View
         style={{
           width: props.labels ? 24 : 28,
@@ -187,7 +206,7 @@ function SettingsNavItem(props: {
           color={props.active ? paletteToken("accent_fg") : paletteToken("fg_muted")}
         />
       </View>
-      {props.labels ? (
+      <If when={props.labels}>
         <Text
           style={{
             minWidth: 0,
@@ -200,7 +219,7 @@ function SettingsNavItem(props: {
         >
           {t(props.labelKey)}
         </Text>
-      ) : null}
+      </If>
     </View>
   );
 }
@@ -210,8 +229,14 @@ function focusSection(state: SettingsState, id: string): void {
   scroller?.scrollTo({ y: 0, animated: false });
 }
 
-function SettingsColumn(props: { state: SettingsState }): JSX.Element {
+function SettingsColumn(props: {
+  state: SettingsState;
+  paneWidth: () => number;
+  pageActive: () => boolean;
+  lazy?: boolean;
+}): JSX.Element {
   const state = props.state;
+  const narrowMode = computed(() => props.paneWidth() > 0 && props.paneWidth() < SETTINGS_NAV_MIN_PANE);
   return (
     <Scroll
       style={{ width: "100%", height: "100%" }}
@@ -226,7 +251,7 @@ function SettingsColumn(props: { state: SettingsState }): JSX.Element {
         scroller = node;
       }}
       onScroll={(event) => {
-        if (paneWidth() < SETTINGS_NAV_MIN_PANE) {
+        if (narrowMode()) {
           const index = activeSectionFromScroll(
             state.sectionTops(),
             event.offset.y,
@@ -237,24 +262,35 @@ function SettingsColumn(props: { state: SettingsState }): JSX.Element {
         }
       }}
     >
-      {SETTINGS_SECTIONS.map((section, index) => (
-        <View
-          style={{
-            width: "100%",
-            maxWidth: SETTINGS_BODY_W,
-            flexShrink: 0,
-            paddingBottom: paneWidth() < SETTINGS_NAV_MIN_PANE ? SETTINGS_SECTION_PB : 0,
-            display:
-              paneWidth() < SETTINGS_NAV_MIN_PANE || state.activeSection() === section.id
-                ? "flex"
-                : "none",
-            flexDirection: "column",
-          }}
-          onLayout={(event) => state.reportSectionTop(index, event.bounds.origin.y)}
-        >
-          <SectionBody state={state} id={section.id} />
-        </View>
-      ))}
+      {SETTINGS_SECTIONS.map((section, index) => {
+        const mounted = signal(!props.lazy);
+        effect(() => {
+          if (mounted() || !props.pageActive()) return;
+          if (narrowMode() || state.activeSection() === section.id) {
+            mounted.set(true);
+          }
+        });
+        return (
+          <View
+            style={{
+              width: "100%",
+              maxWidth: SETTINGS_BODY_W,
+              flexShrink: 0,
+              paddingBottom: narrowMode() ? SETTINGS_SECTION_PB : 0,
+              display:
+                narrowMode() || state.activeSection() === section.id
+                  ? "flex"
+                  : "none",
+              flexDirection: "column",
+            }}
+            onLayout={(event) => state.reportSectionTop(index, event.bounds.origin.y)}
+          >
+            <If when={mounted()}>
+              <SectionBody state={state} id={section.id} />
+            </If>
+          </View>
+        );
+      })}
     </Scroll>
   );
 }

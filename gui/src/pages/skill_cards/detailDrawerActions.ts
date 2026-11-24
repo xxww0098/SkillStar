@@ -14,6 +14,8 @@ import { tf } from "../../services/translation";
 /** One deck as the drawer reads it — the `SkillCards.snapshot` deck record
  * (the fields detail_drawer.rs uses; `agentLinks` null and [] both read
  * unlinked, the facade normalizes to []). */
+import type { AgentLinkState } from "./deckQuery";
+
 export interface DrawerDeck {
   id: string;
   name: string;
@@ -21,6 +23,8 @@ export interface DrawerDeck {
   icon: string;
   skills: string[];
   agentLinks: string[] | null;
+  memberAgentLinks?: Record<string, string[]>;
+  agentLinkStates?: Record<string, AgentLinkState>;
 }
 
 /** One targetable agent — `SkillCards.snapshot`'s `{id, displayName}`

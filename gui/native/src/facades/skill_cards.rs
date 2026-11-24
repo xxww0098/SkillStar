@@ -15,10 +15,13 @@
 //! runs them inline — no separate blocking pool, mirroring how cheap the
 //! GPUI page treats these jobs.
 
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use nsh_core::JsonValue;
 use nsh_core::prelude::*;
+use ss_skills::agents::AgentProfile;
+use ss_skills::installed_skill;
 use ss_skills::installer;
 use ss_skills::skill_group;
 use ss_skills::workflows::agent_links::AgentLinkReport;
@@ -59,35 +62,9 @@ impl SkillCards {
     /// set (`targetable_agent_profiles`: a global skills directory AND
     /// enabled in Settings). Read-only.
     pub async fn snapshot() -> Result<JsonValue, String> {
-        let decks = skill_group::list_groups();
-        let installed = installer::installed_names();
-        let agents = ss_skills::agents::list_profiles()
-            .into_iter()
-            .filter(|profile| profile.has_global_skills() && profile.enabled)
-            .map(|profile| {
-                obj(vec![
-                    ("id", str(&profile.id)),
-                    ("displayName", str(&profile.display_name)),
-                    ("icon", str(&profile.icon)),
-                ])
-            })
-            .collect::<Vec<_>>();
-        Ok(obj(vec![
-            (
-                "decks",
-                JsonValue::Array(
-                    decks
-                        .iter()
-                        .map(|group| deck_json(group))
-                        .collect::<Vec<_>>(),
-                ),
-            ),
-            (
-                "installedSkills",
-                JsonValue::Array(installed.iter().map(|name| str(name)).collect()),
-            ),
-            ("agents", JsonValue::Array(agents)),
-        ]))
+        blocking(snapshot_body)
+            .await
+            .map_err(|join| format!("snapshot task failed: {join}"))?
     }
 
     /// Duplicate a deck (`skill_group::duplicate_group`, the deck card's
@@ -122,22 +99,144 @@ impl SkillCards {
     }
 }
 
+fn snapshot_body() -> Result<JsonValue, String> {
+    let decks = skill_group::list_groups();
+    let installed = installer::installed_names();
+    let profiles = ss_skills::agents::list_profiles();
+    let targetable: Vec<&AgentProfile> = profiles
+        .iter()
+        .filter(|profile| profile.has_global_skills() && profile.enabled)
+        .collect();
+    let installed_links: HashMap<String, Vec<String>> = installed
+        .iter()
+        .map(|name| {
+            let links = installed_skill::agent_links_for(name)
+                .into_iter()
+                .map(|raw| canonical_agent_id(&raw, &profiles))
+                .collect::<Vec<_>>();
+            (name.trim().to_ascii_lowercase(), links)
+        })
+        .collect();
+    let agents = targetable
+        .iter()
+        .map(|profile| {
+            obj(vec![
+                ("id", str(&profile.id)),
+                ("displayName", str(&profile.display_name)),
+                ("icon", str(&profile.icon)),
+            ])
+        })
+        .collect::<Vec<_>>();
+    Ok(obj(vec![
+        (
+            "decks",
+            JsonValue::Array(
+                decks
+                    .iter()
+                    .map(|group| deck_json_with_members(group, &installed_links, &targetable))
+                    .collect::<Vec<_>>(),
+            ),
+        ),
+        (
+            "installedSkills",
+            JsonValue::Array(installed.iter().map(|name| str(name)).collect()),
+        ),
+        ("agents", JsonValue::Array(agents)),
+    ]))
+}
+
+fn canonical_agent_id(raw: &str, profiles: &[AgentProfile]) -> String {
+    let trimmed = raw.trim();
+    profiles
+        .iter()
+        .find(|profile| {
+            profile.id.eq_ignore_ascii_case(trimmed)
+                || profile.display_name.eq_ignore_ascii_case(trimmed)
+        })
+        .map(|profile| profile.id.clone())
+        .unwrap_or_else(|| trimmed.to_owned())
+}
+
+fn matches_agent_ref(links: &[String], profile: &AgentProfile) -> bool {
+    links.iter().any(|link| {
+        let trimmed = link.trim();
+        trimmed.eq_ignore_ascii_case(&profile.id)
+            || trimmed.eq_ignore_ascii_case(&profile.display_name)
+    })
+}
+
+fn compute_deck_agent_states(
+    group: &skill_group::SkillGroup,
+    installed_links: &HashMap<String, Vec<String>>,
+    targetable: &[&AgentProfile],
+) -> (JsonMap<String, JsonValue>, JsonMap<String, JsonValue>) {
+    let mut member_links_map = JsonMap::new();
+    let mut seen_members = HashSet::new();
+    let mut installed_member_links: Vec<&[String]> = Vec::new();
+    for skill_name in &group.skills {
+        let lower = skill_name.trim().to_ascii_lowercase();
+        if !seen_members.insert(lower.clone()) {
+            continue;
+        }
+        if let Some(links) = installed_links.get(&lower) {
+            member_links_map.insert(
+                skill_name.clone(),
+                JsonValue::Array(links.iter().map(|id| str(id)).collect()),
+            );
+            installed_member_links.push(links.as_slice());
+        }
+    }
+
+    let mut state_map = JsonMap::new();
+    let declared_links = group.agent_links.as_deref().unwrap_or(&[]);
+    for profile in targetable {
+        let declared = matches_agent_ref(declared_links, profile);
+        let state = if !declared {
+            "none"
+        } else if installed_member_links.is_empty() {
+            "linked"
+        } else {
+            let linked_count = installed_member_links
+                .iter()
+                .filter(|links| matches_agent_ref(links, profile))
+                .count();
+            if linked_count == installed_member_links.len() {
+                "linked"
+            } else {
+                "mixed"
+            }
+        };
+        state_map.insert(profile.id.clone(), str(state));
+    }
+    (member_links_map, state_map)
+}
+
 /// The group-command tail every deck job shares (skill_cards/mod.rs
-/// `run_group_job`): run on this task, surface the domain error chain as
+/// `run_group_job`): run on the blocking pool, surface the domain error chain as
 /// the UI notice string. The error stays generic (`{err:#}` keeps
 /// anyhow's alternate-chain formatting when the domain hands one over).
-async fn run_group_job<T, E: std::fmt::Display>(
+async fn run_group_job<T: Send + 'static, E: std::fmt::Display + Send + 'static>(
     job: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, String> {
-    job().map_err(|err| format!("{err:#}"))
+    blocking(move || job().map_err(|err| format!("{err:#}")))
+        .await
+        .map_err(|join| format!("group task failed: {join}"))?
 }
 
 /// The link-command tail (skill_cards/mod.rs `run_link_job`): acquire the
-/// update transaction lock with a zero wait (deck-rail clicks already left
-/// the UI thread; do not wait on a Skill transaction), then run the link
+/// update transaction lock with a zero wait on the blocking pool (do not wait
+/// on a Skill transaction or block the JS/async thread), then run the link
 /// job and shape the report as JSON.
-async fn run_link_job<E: std::fmt::Display>(
+async fn run_link_job<E: std::fmt::Display + Send + 'static>(
     job: impl FnOnce() -> Result<AgentLinkReport, E> + Send + 'static,
+) -> Result<JsonValue, String> {
+    blocking(move || link_job_body(job))
+        .await
+        .map_err(|join| format!("link task failed: {join}"))?
+}
+
+fn link_job_body<E: std::fmt::Display>(
+    job: impl FnOnce() -> Result<AgentLinkReport, E>,
 ) -> Result<JsonValue, String> {
     let _guard = ss_skills::skill_update::try_acquire_update_transaction_lock(Duration::ZERO)
         .map_err(|err| format!("{err:#}"))?;
@@ -179,7 +278,13 @@ fn link_issue_json(issue: &ss_skills::workflows::agent_links::AgentLinkIssue) ->
 /// One deck as the page's TS deck record: the SkillGroup fields the card
 /// and the query predicate read (skill_cards/query.rs + group_card.rs).
 /// The struct is Serialize, so this mirrors serde's field names exactly.
-fn deck_json(group: &skill_group::SkillGroup) -> JsonValue {
+fn deck_json_with_members(
+    group: &skill_group::SkillGroup,
+    installed_links: &HashMap<String, Vec<String>>,
+    targetable: &[&AgentProfile],
+) -> JsonValue {
+    let (member_agent_links, agent_link_states) =
+        compute_deck_agent_states(group, installed_links, targetable);
     obj(vec![
         ("id", str(&group.id)),
         ("name", str(&group.name)),
@@ -209,6 +314,8 @@ fn deck_json(group: &skill_group::SkillGroup) -> JsonValue {
                 None => JsonValue::Array(vec![]),
             },
         ),
+        ("memberAgentLinks", JsonValue::Object(member_agent_links)),
+        ("agentLinkStates", JsonValue::Object(agent_link_states)),
         ("createdAt", str(&group.created_at)),
         ("updatedAt", str(&group.updated_at)),
         ("memberCount", num(group.skills.len())),
@@ -217,7 +324,6 @@ fn deck_json(group: &skill_group::SkillGroup) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-    use super::SkillCards;
     use ss_skills::skill_group;
 
     /// The GPUI suites' IsolatedDataDir pattern (ss-gpui test_support.rs):
@@ -228,7 +334,7 @@ mod tests {
     /// and the racing threads abort the test binary.
     struct IsolatedDataDir {
         _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Option<std::ffi::OsString>,
+        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
         root: std::path::PathBuf,
     }
 
@@ -245,9 +351,22 @@ mod tests {
                     .unwrap_or_default()
                     .as_nanos()
             ));
-            std::fs::create_dir_all(&root).unwrap();
-            let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
-            unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", &root) };
+            let previous = [
+                ("HOME", "home"),
+                ("USERPROFILE", "home"),
+                ("SKILLSTAR_TOOL_SYNC_HOME", "home"),
+                ("SKILLSTAR_DATA_DIR", "data"),
+            ]
+            .into_iter()
+            .map(|(key, sub)| {
+                let saved = std::env::var_os(key);
+                let dir = root.join(sub);
+                std::fs::create_dir_all(&dir).unwrap();
+                unsafe { std::env::set_var(key, dir) };
+                (key, saved)
+            })
+            .collect();
+            ss_skills::deployment::invalidate_profile_cache();
             Self { _lock: lock, previous, root }
         }
     }
@@ -255,11 +374,14 @@ mod tests {
     impl Drop for IsolatedDataDir {
         fn drop(&mut self) {
             unsafe {
-                match self.previous.take() {
-                    Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
-                    None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+                for (key, saved) in self.previous.drain(..) {
+                    match saved {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
                 }
             }
+            ss_skills::deployment::invalidate_profile_cache();
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
@@ -276,8 +398,7 @@ mod tests {
         )
         .unwrap();
 
-        let snapshot = spin(SkillCards::snapshot());
-        let snapshot = snapshot.expect("snapshot over an isolated data dir");
+        let snapshot = super::snapshot_body().expect("snapshot over an isolated data dir");
         let decks = snapshot["decks"].as_array().expect("decks is an array");
         assert_eq!(decks.len(), 1);
         assert_eq!(decks[0]["name"].as_str(), Some("Rust Starter"));
@@ -307,7 +428,9 @@ mod tests {
         )
         .unwrap();
 
-        let copy_id = spin(SkillCards::duplicate_deck(group.id.clone()))
+        let copy_id = skill_group::duplicate_group(&group.id)
+            .map(|g| super::str(&g.id))
+            .map_err(|err| format!("{err:#}"))
             .expect("duplicate in the isolated store");
         let copy_id = copy_id.as_str().expect("duplicate returns the new id").to_owned();
         assert_ne!(copy_id, group.id);
@@ -319,18 +442,20 @@ mod tests {
         assert_eq!(names.len(), 2);
         assert!(names.iter().any(|n| n.starts_with("Frontend (Copy")));
 
-        spin(SkillCards::delete_deck(copy_id)).expect("delete the copy");
+        skill_group::delete_group(&copy_id).expect("delete the copy");
         assert_eq!(skill_group::list_groups().len(), 1);
     }
 
     #[test]
     fn missing_deck_jobs_surface_the_domain_error() {
         let _iso = IsolatedDataDir::new();
-        let err = spin(SkillCards::duplicate_deck("no-such-deck".into()))
+        let err = skill_group::duplicate_group("no-such-deck")
+            .map_err(|err| format!("{err:#}"))
             .expect_err("duplicating a missing deck fails");
         assert!(err.contains("no-such-deck"), "error names the deck: {err}");
 
-        let err = spin(SkillCards::delete_deck("no-such-deck".into()))
+        let err = skill_group::delete_group("no-such-deck")
+            .map_err(|err| format!("{err:#}"))
             .expect_err("deleting a missing deck fails");
         assert!(err.contains("no-such-deck"), "error names the deck: {err}");
     }
@@ -348,33 +473,71 @@ mod tests {
         .unwrap();
         // No member skills and no agent profile: the domain toggles nothing,
         // the report stays empty, and the JSON shape is what the page reads.
-        let report =
-            spin(SkillCards::toggle_deck_agent(group.id.clone(), "claude".into(), true))
-                .expect("toggle on an empty deck is not an error");
+        let report = super::link_job_body(|| {
+            ss_skills::workflows::skill_group_links::set_deck_agent(&group.id, "claude", true)
+        })
+        .expect("toggle on an empty deck is not an error");
         assert_eq!(report["applied"].as_array().map(Vec::len), Some(0));
         assert_eq!(report["skipped"].as_array().map(Vec::len), Some(0));
         assert_eq!(report["failed"].as_array().map(Vec::len), Some(0));
 
         // A missing deck is a domain error, surfaced as the notice string.
-        let err = spin(SkillCards::toggle_deck_agent(
-            "no-such-deck".into(),
-            "claude".into(),
-            true,
-        ))
+        let err = super::link_job_body(|| {
+            ss_skills::workflows::skill_group_links::set_deck_agent("no-such-deck", "claude", true)
+        })
         .expect_err("toggling a missing deck fails");
         assert!(err.contains("no-such-deck"), "error names the deck: {err}");
     }
 
-    /// The #[module] macro turns `async fn` into a task-start call in JS;
-    /// from Rust tests the same bodies run as plain futures. Drive them on
-    /// a minimal poll loop (the domain calls complete on first poll).
-    fn spin<T>(future: impl std::future::Future<Output = T>) -> T {
-        let mut future = std::pin::pin!(future);
-        let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(waker);
-        match future.as_mut().poll(&mut cx) {
-            std::task::Poll::Ready(value) => value,
-            std::task::Poll::Pending => unreachable!("domain calls finish on first poll"),
-        }
+    #[test]
+    fn deck_agent_states_detect_mixed_linked_and_display_name_matches() {
+        let profiles = ss_skills::agents::list_profiles();
+        let claude = profiles
+            .iter()
+            .find(|p| p.id == "claude")
+            .expect("claude profile");
+        let codex = profiles
+            .iter()
+            .find(|p| p.id == "codex")
+            .expect("codex profile");
+        let cursor = profiles
+            .iter()
+            .find(|p| p.id == "cursor")
+            .expect("cursor profile");
+        let targetable = vec![claude, codex, cursor];
+
+        let group = skill_group::SkillGroup {
+            id: "d1".into(),
+            name: "Deck".into(),
+            description: String::new(),
+            icon: "📦".into(),
+            skills: vec!["Alpha".into(), "Beta".into()],
+            skill_sources: Default::default(),
+            default_agent: String::new(),
+            agent_links: Some(vec!["Claude Code".into(), "codex".into()]),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let mut installed_links = std::collections::HashMap::new();
+        // cursor is linked on both members, but NOT declared in deck.agent_links -> stays "none".
+        installed_links.insert(
+            "alpha".to_owned(),
+            vec!["Claude Code".to_owned(), "codex".to_owned(), "cursor".to_owned()],
+        );
+        installed_links.insert(
+            "beta".to_owned(),
+            vec!["codex".to_owned(), "cursor".to_owned()],
+        );
+
+        let (members, states) =
+            super::compute_deck_agent_states(&group, &installed_links, &targetable);
+        assert_eq!(
+            members["Alpha"].as_array().map(Vec::len),
+            Some(3),
+            "installed member links recorded"
+        );
+        assert_eq!(states["claude"].as_str(), Some("mixed"));
+        assert_eq!(states["codex"].as_str(), Some("linked"));
+        assert_eq!(states["cursor"].as_str(), Some("none"));
     }
 }

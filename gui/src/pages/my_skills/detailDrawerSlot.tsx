@@ -1,4 +1,4 @@
-import { Scroll, Text, View, openUrl, type JSX } from "nsh";
+import { Scroll, Text, View, computed, effect, openUrl, untracked, type Accessor, type JSX } from "nsh";
 import { Switch } from "nsh/base";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
@@ -7,11 +7,14 @@ import { Icon } from "../../chrome/icons";
 import { Sheet } from "../../chrome/sheet";
 import { Tip } from "../../chrome/tooltip";
 import { openUninstallConfirm, uninstallTitleNamed } from "../../chrome/dialog";
-import { IconSweep } from "../../chrome/feedback";
-import { mixHex, motionEnabled, motionTransition } from "../../chrome/motion";
+import { IconSpin, IconSweep } from "../../chrome/feedback";
+import { SaveStatus } from "../../chrome/saveStatus";
+import { mixHex, pressTransition, settleTransition } from "../../chrome/motion";
+import { translationPrefsChanged } from "../../shell/events";
 import {
   busy,
   descriptionChoices,
+  pageActive,
   profiles,
   selectedSkill,
   skills,
@@ -24,10 +27,11 @@ import { etf } from "./extrasStrings";
 import { DetailDrawerExtras } from "./detailDrawerExtras";
 import { skillUpdateInFlight } from "./updates";
 import { openSkillReader } from "./skillReaderSlot";
+import { openPublishSkill } from "./publishModal";
+import { pt } from "./publishStrings";
 import {
   descriptionSource,
   formatUpdated,
-  profileIsLinked,
   shownAuthor,
   sourceValues,
   upstreamNoteOf,
@@ -68,7 +72,7 @@ import {
 // 动作脚（drawer_actions）：查看 SKILL.md…（唯一入口 openSkillReader）；
 // 有更新时的 warn 强调更新钮（label 三态：更新中/覆盖本地/更新）；打开目
 // 录；卸载（确认弹窗 → 关抽屉 → busy=名字 → MySkills.uninstallSkill）。
-// 卸载钮是全页唯一允许颜色缓动的控件（~80ms），其余 hover 零帧。
+// 卸载钮是全页唯一允许颜色缓动的控件（pressTransition，120ms），其余 hover 零帧。
 //
 // nsh 组件体只执行一次：一切动态读取落在 JSX 子表达式的 IIFE 里，信号消
 // 费在 JSX（NoticeBand/DetailDrawerTrack 的教训）。
@@ -98,51 +102,48 @@ export interface DetailDrawerSlotProps {
 export function DetailDrawerSlot(props: DetailDrawerSlotProps): JSX.Element {
   const ops = props.ops ?? drawerOps;
   const session = props.session ?? drawerTranslateSession;
+  const activeSkill = computed(() => props.skill);
 
   return (
     <Sheet style={{ width: "100%", height: "100%" }}>
-      {(() => {
-        const skill = props.skill;
-        if (skill === null) {
-          // 按名查不到卡（GPUI：render_detail_drawer 的 else 空分支）。
-          return (
-            <View testID="my-skills-detail-empty" style={{ flex: 1, minHeight: 0 }} />
-          );
-        }
-        return (
-          <View
-            style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+      <If
+        when={activeSkill() !== null}
+        else={<View testID="my-skills-detail-empty" style={{ flex: 1, minHeight: 0 }} />}
+      >
+        <View style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <DrawerHeader skill={() => activeSkill()!} onClose={props.onClose} />
+          {/* 列内滚轮不外泄：正文是唯一 Scroll（chrome/sheet 约定）。 */}
+          <Scroll
+            testID="skill-detail-scroll"
+            style={{ flex: 1, minHeight: 0 }}
+            contentStyle={{
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
           >
-            {drawerHeader(skill, props)}
-            {/* 列内滚轮不外泄：正文是唯一 Scroll（chrome/sheet 约定）。 */}
-            <Scroll
-              testID="skill-detail-scroll"
-              style={{ flex: 1, minHeight: 0 }}
-              contentStyle={{
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-                display: "flex",
-                flexDirection: "column",
-                gap: 16,
-              }}
-            >
-              {descriptionSection(props, session)}
-              {factsSection(skill)}
-              {upstreamSection(skill)}
-              <DetailDrawerExtras skillName={skill.name} ops={ops} />
-              {agentSection(props, ops)}
-            </Scroll>
-            {drawerActions(props, ops)}
-          </View>
-        );
-      })()}
+            <DescriptionSection props={props} session={session} />
+            <FactsSection skill={() => activeSkill()!} />
+            <UpstreamSection skill={() => activeSkill()!} />
+            <DetailDrawerExtras skillName={activeSkill()?.name ?? ""} ops={ops} />
+            <AgentSection props={props} ops={ops} />
+          </Scroll>
+          <DrawerActions props={props} ops={ops} />
+        </View>
+      </If>
     </Sheet>
   );
 }
 
 // ---- 头部（drawer_header） ----------------------------------------------------
 
-function drawerHeader(skill: SkillRecord, props: DetailDrawerSlotProps): JSX.Element {
+function DrawerHeader(props: {
+  skill: Accessor<SkillRecord>;
+  onClose(): void;
+}): JSX.Element {
+  const skill = props.skill;
   return (
     <View
       style={{
@@ -160,33 +161,44 @@ function drawerHeader(skill: SkillRecord, props: DetailDrawerSlotProps): JSX.Ele
       }}
     >
       <View style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minWidth: 0 }}>
-        <View style={{ minWidth: 0 }} tooltip={<Tip text={skill.name} />}>
+        <View style={{ minWidth: 0 }} tooltip={<Tip text={skill().name} />}>
           <Text style={{ fontSize: 14, color: paletteToken("fg") }}>
-            {wrapLongToken(skill.name)}
+            {wrapLongToken(skill().name)}
           </Text>
         </View>
         <View style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
-          {skill.skillType === "local" ? (
-            <Badge bg={paletteToken("ok_bg")} fg={paletteToken("ok")} label={t("detailPanel.localCreation")} />
-          ) : (
-            <Badge bg={paletteToken("well")} fg={paletteToken("fg_muted")} label={t("detailPanel.hubSkill")} />
-          )}
-          {skill.updateAvailable ? (
+          <If
+            when={skill().skillType === "local"}
+            else={
+              <Badge
+                bg={paletteToken("well")}
+                fg={paletteToken("fg_muted")}
+                label={t("detailPanel.hubSkill")}
+              />
+            }
+          >
+            <Badge
+              bg={paletteToken("ok_bg")}
+              fg={paletteToken("ok")}
+              label={t("detailPanel.localCreation")}
+            />
+          </If>
+          <If when={skill().updateAvailable}>
             <Badge
               bg={paletteToken("warn")}
               fg={paletteToken("on_accent")}
               label={t("detailPanel.updateAvailable")}
-              testID={`drawer-update-badge-${skill.name}`}
+              testID={`drawer-update-badge-${skill().name}`}
             />
-          ) : null}
-          {skill.called && skill.called !== skill.name ? (
+          </If>
+          <If when={Boolean(skill().called && skill().called !== skill().name)}>
             <Badge
               bg={paletteToken("info_bg")}
               fg={paletteToken("info")}
-              label={etf("mySkills.fromCalled", { called: skill.called })}
-              testID={`drawer-called-badge-${skill.name}`}
+              label={etf("mySkills.fromCalled", { called: skill().called ?? "" })}
+              testID={`drawer-called-badge-${skill().name}`}
             />
-          ) : null}
+          </If>
         </View>
       </View>
       <View
@@ -231,20 +243,63 @@ function Badge(props: { bg: string; fg: string; label: string; testID?: string }
 
 // ---- 描述段（drawer_body 的 description section + translate_button） ---------
 
-function descriptionSection(
-  props: DetailDrawerSlotProps,
-  session: DrawerTranslateSession
-): JSX.Element {
+function DescriptionSection(p: {
+  props: DetailDrawerSlotProps;
+  session: DrawerTranslateSession;
+}): JSX.Element {
+  const session = p.session;
+  effect(() => translationPrefsChanged.subscribe(() => session.onPrefsChanged()));
+  const source = computed(() => {
+    const skill = p.props.skill;
+    return skill === null ? null : descriptionSource(skill);
+  });
+  const showing = computed(() => {
+    void session.generation();
+    const skill = p.props.skill;
+    if (skill === null) return false;
+    return session.resolveTranslate(skill.name, p.props.descriptionChoices);
+  });
+  effect(() => {
+    const src = source();
+    const want = showing();
+    void session.generation();
+    if (src === null) return;
+    untracked(() => session.ensureTranslation(src, want));
+  });
+  const shown = computed(() => {
+    void session.generation();
+    const src = source();
+    if (src === null) return "";
+    return session.descriptionLine(src, showing());
+  });
+  const translated = computed(() => {
+    const src = source();
+    return src !== null && shown() !== src;
+  });
+  const gate = computed(() => {
+    void session.generation();
+    const src = source();
+    if (src === null) return { visible: false, pending: false };
+    return session.buttonGate(src, showing());
+  });
+  const failure = computed(() => {
+    void session.generation();
+    const src = source();
+    return showing() && src !== null ? session.failureLine(src) : null;
+  });
+  const showRetry = computed(() => {
+    void session.generation();
+    const src = source();
+    const failedSrc = session.transportFailed();
+    return showing() && src !== null && failedSrc !== null && failedSrc === src.trim() && !translated();
+  });
+
   return (
-    <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {(() => {
-        // 派生读取落在本表达式：generation/props 变化都重算。
-        void session.generation();
-        const skill = props.skill;
-        if (skill === null) return null;
-        const source = descriptionSource(skill);
-        if (source === null) {
-          return (
+    <If when={p.props.skill !== null}>
+      <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <If
+          when={source() !== null}
+          else={
             <>
               <FieldLabel label={t("detailPanel.description")} />
               <View>
@@ -253,48 +308,73 @@ function descriptionSection(
                 </Text>
               </View>
             </>
-          );
-        }
-        const showing = session.resolveTranslate(skill.name, props.descriptionChoices);
-        // schedule_when：开着译文而磁盘未命中时补一次引擎调用。
-        session.ensureTranslation(source, showing);
-        const shown = session.descriptionLine(source, showing);
-        const translated = shown !== source;
-        const gate = session.buttonGate(source, showing);
-        const failure = showing ? session.failureLine() : null;
-        return (
-          <>
+          }
+        >
+          <View
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <FieldLabel label={t("detailPanel.description")} />
+            <If when={gate().visible}>
+              <TranslateButton
+                pending={gate().pending}
+                tip={showing() ? t("detailPanel.showOriginal") : t("detailPanel.translate")}
+                onPress={() => {
+                  const skill = p.props.skill;
+                  if (skill !== null) session.applyChoice(skill.name, showing());
+                }}
+              />
+            </If>
+          </View>
+          <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <View
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-              }}
+              testID={
+                translated()
+                  ? "drawer-translation"
+                  : `drawer-original-${p.props.skill?.name ?? ""}`
+              }
             >
-              <FieldLabel label={t("detailPanel.description")} />
-              {gate.visible ? (
-                <TranslateButton
-                  pending={gate.pending}
-                  tip={showing ? t("detailPanel.showOriginal") : t("detailPanel.translate")}
-                  onPress={() => session.applyChoice(skill.name, showing)}
-                />
-              ) : null}
+              <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{shown()}</Text>
             </View>
-            <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <View testID={translated ? "drawer-translation" : `drawer-original-${skill.name}`}>
-                <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{shown}</Text>
+            <If when={failure() !== null}>
+              <View testID="drawer-translate-notice">
+                <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+                  {failure() ?? ""}
+                </Text>
               </View>
-              {failure !== null ? (
-                <View>
-                  <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>{failure}</Text>
-                </View>
-              ) : null}
-            </View>
-          </>
-        );
-      })()}
-    </View>
+            </If>
+            <If when={showRetry()}>
+              <View
+                testID="drawer-translate-retry"
+                style={{
+                  alignSelf: "flex-start",
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 6,
+                  borderWidth: 1,
+                  borderColor: paletteToken("border"),
+                  backgroundColor: paletteToken("card"),
+                  cursor: "pointer",
+                }}
+                hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+                onPress={() => {
+                  const src = source();
+                  if (src !== null) session.retryTransport(src);
+                }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
+                  {t("common.retry")}
+                </Text>
+              </View>
+            </If>
+          </View>
+        </If>
+      </View>
+    </If>
   );
 }
 
@@ -334,34 +414,33 @@ function FieldLabel(props: { label: string }): JSX.Element {
   return <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>{props.label}</Text>;
 }
 
-function factsSection(skill: SkillRecord): JSX.Element {
+function FactsSection(props: { skill: Accessor<SkillRecord> }): JSX.Element {
+  const lines = computed(() => {
+    const s = props.skill();
+    return sourceValues(s.gitUrl, s.source, s.name);
+  });
+  const author = computed(() => shownAuthor(props.skill().author, lines()));
+  const updated = computed(() => formatUpdated(props.skill().lastUpdated));
+  const hasFacts = computed(() => lines().length > 0 || author() !== null || updated() !== null);
   return (
-    <View style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
-      {(() => {
-        const lines = sourceValues(skill.gitUrl, skill.source, skill.name);
-        const author = shownAuthor(skill.author, lines);
-        const updated = formatUpdated(skill.lastUpdated);
-        if (lines.length === 0 && author === null && updated === null) return null;
-        return (
-          <>
-            {lines.length > 0 ? (
-              <View style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-                <FieldLabel label={t("detailPanel.source")} />
-                {lines.map((line, index) => (
-                  <SourceLine index={index} line={line} />
-                ))}
-              </View>
-            ) : null}
-            {author !== null ? (
-              <FactRow label={t("detailPanel.author")} value={atHandle(author)} />
-            ) : null}
-            {updated !== null ? (
-              <FactRow label={t("detailPanel.lastUpdated")} value={updated} />
-            ) : null}
-          </>
-        );
-      })()}
-    </View>
+    <If when={hasFacts()}>
+      <View style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+        <If when={lines().length > 0}>
+          <View style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+            <FieldLabel label={t("detailPanel.source")} />
+            <Each of={lines()} key="index">
+              {(line, index) => <SourceLine index={index()} line={line()} />}
+            </Each>
+          </View>
+        </If>
+        <If when={author() !== null}>
+          <FactRow label={t("detailPanel.author")} value={atHandle(author() ?? "")} />
+        </If>
+        <If when={updated() !== null}>
+          <FactRow label={t("detailPanel.lastUpdated")} value={updated() ?? ""} />
+        </If>
+      </View>
+    </If>
   );
 }
 
@@ -431,23 +510,27 @@ function FactRow(props: { label: string; value: string }): JSX.Element {
 
 // ---- 上游异常块（upstream_note + upstream_block） -----------------------------
 
-function upstreamSection(skill: SkillRecord): JSX.Element {
+function UpstreamSection(props: { skill: Accessor<SkillRecord> }): JSX.Element {
+  const note = computed(() => {
+    const s = props.skill();
+    const fromSnap =
+      s.upstreamChange?.kind === "local_changes" ? s.upstreamChange.baselineMissing : undefined;
+    const missing = baselineMissing()[s.name] ?? fromSnap ?? false;
+    return upstreamNoteOf(s, missing);
+  });
+  const copy = computed(() => {
+    const current = note();
+    return current === null ? null : upstreamBlockCopy(current);
+  });
   return (
-    <View style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-      {(() => {
-        // baselineMissing 信号变化（异步补读落地）时重算。
-        const missing = baselineMissing()[skill.name] ?? false;
-        const note = upstreamNoteOf(skill, missing);
-        if (note === null) return null;
-        const { title, body, tone } = upstreamBlockCopy(note);
-        return (
-          <>
-            <Text style={{ fontSize: 12, fontWeight: "600", color: tone }}>{title}</Text>
-            <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{body}</Text>
-          </>
-        );
-      })()}
-    </View>
+    <If when={copy() !== null}>
+      <View style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+        <Text style={{ fontSize: 12, fontWeight: "600", color: copy()?.tone ?? paletteToken("warn") }}>
+          {copy()?.title ?? ""}
+        </Text>
+        <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{copy()?.body ?? ""}</Text>
+      </View>
+    </If>
   );
 }
 
@@ -485,7 +568,27 @@ function upstreamBlockCopy(note: UpstreamNote): { title: string; body: string; t
 
 // ---- agent 开关（agent_switches + master_agent_switch） -----------------------
 
-function agentSection(props: DetailDrawerSlotProps, ops: DrawerOps): JSX.Element {
+function AgentSection(p: { props: DetailDrawerSlotProps; ops: DrawerOps }): JSX.Element {
+  const targetable = computed(() => p.props.agents.filter((agent) => agent.targetable));
+  const linksSet = computed<ReadonlySet<string>>(
+    () => new Set(p.props.skill?.agentLinks ?? []),
+  );
+  const busyMaster = computed(() => {
+    const skill = p.props.skill;
+    if (skill === null) return false;
+    const prefix = `${skill.name}::`;
+    for (const key of pendingAgents()) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
+  });
+  const allOn = computed(() => {
+    const list = targetable();
+    if (list.length === 0) return false;
+    const set = linksSet();
+    return list.every((agent) => set.has(agent.id) || set.has(agent.displayName));
+  });
+
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <FieldLabel label={t("detailPanel.agentDeployments")} />
@@ -501,112 +604,123 @@ function agentSection(props: DetailDrawerSlotProps, ops: DrawerOps): JSX.Element
           borderColor: paletteToken("border"),
         }}
       >
-        {(() => {
-          const skill = props.skill;
-          // pendingAgents 信号在 JSX 里消费：链接在途时 master 禁用。
-          const pending = pendingAgents();
-          if (skill === null) return null;
-          const targetable = props.agents.filter((agent) => agent.targetable);
-          if (targetable.length === 0) {
-            return (
-              <View style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
-                <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-                  {t("selectionBar.noAgents")}
-                </Text>
-              </View>
-            );
+        <If
+          when={targetable().length > 0}
+          else={
+            <View style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
+              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+                {t("selectionBar.noAgents")}
+              </Text>
+            </View>
           }
-          const links = skill.agentLinks;
-          const prefix = `${skill.name}::`;
-          const busyMaster = [...pending].some((key) => key.startsWith(prefix));
-          const pairs: [string, boolean][] = targetable.map((agent) => [
-            agent.id,
-            profileIsLinked(agent, links),
-          ]);
-          const allOn = pairs.every(([, on]) => on);
-          return (
-            <>
-              <View
-                testID={`drawer-agent-all-${skill.name}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingHorizontal: 8,
-                  paddingVertical: 6,
-                  borderRadius: 6,
-                  borderBottomWidth: 1,
-                  borderBottomColor: paletteToken("border"),
-                }}
-              >
-                <View style={{ minWidth: 0 }}>
-                  <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
-                    {t("detailPanel.allAgents")}
-                  </Text>
-                </View>
-                <SlideSwitch
-                  testID={`drawer-toggle-all-${skill.name}`}
-                  checked={allOn}
-                  disabled={busyMaster}
-                  label={t(allOn ? "detailPanel.unlinkAll" : "detailPanel.linkAll")}
-                  onChange={() => runMasterToggle(ops, skill.name, targetable)}
-                />
-              </View>
-              {targetable.map((agent) => {
-                const linked = profileIsLinked(agent, links);
-                return (
-                  <View
-                    testID={`drawer-agent-row-${skill.name}-${agent.id}`}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      paddingHorizontal: 8,
-                      paddingVertical: 6,
-                      borderRadius: 6,
-                    }}
-                    hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-                  >
-                    <View style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                      <AgentBadge
-                        id={agent.id}
-                        name={agent.displayName}
-                        icon={agent.icon}
-                        active={linked}
-                        size={18}
-                      />
-                      <View style={{ minWidth: 0, overflow: "hidden" }}>
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            fontWeight: "500",
-                            color: paletteToken("fg"),
-                          }}
-                        >
-                          {agent.displayName}
-                        </Text>
-                      </View>
-                    </View>
-                    <SlideSwitch
-                      testID={`drawer-toggle-${skill.name}-${agent.id}`}
-                      checked={linked}
-                      disabled={false}
-                      label={`${skill.name} · ${agent.displayName}`}
-                      onChange={() => runToggle(ops, skill.name, agent.id, !linked)}
-                    />
-                  </View>
-                );
-              })}
-            </>
-          );
-        })()}
+        >
+          <View
+            testID={`drawer-agent-all-${p.props.skill?.name ?? ""}`}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingHorizontal: 8,
+              paddingVertical: 6,
+              borderRadius: 6,
+              borderBottomWidth: 1,
+              borderBottomColor: paletteToken("border"),
+            }}
+          >
+            <View style={{ minWidth: 0 }}>
+              <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg") }}>
+                {t("detailPanel.allAgents")}
+              </Text>
+            </View>
+            <SlideSwitch
+              testID={`drawer-toggle-all-${p.props.skill?.name ?? ""}`}
+              checked={allOn()}
+              disabled={busyMaster()}
+              label={t(allOn() ? "detailPanel.unlinkAll" : "detailPanel.linkAll")}
+              onChange={() => {
+                const skill = p.props.skill;
+                if (skill !== null) runMasterToggle(p.ops, skill.name, targetable());
+              }}
+            />
+          </View>
+          <Each of={targetable()} key={(agent) => agent.id}>
+            {(agent) => (
+              <DrawerAgentRow
+                skillName={() => p.props.skill?.name ?? ""}
+                agent={agent}
+                linksSet={linksSet}
+                ops={p.ops}
+              />
+            )}
+          </Each>
+        </If>
       </View>
     </View>
   );
 }
 
+function DrawerAgentRow(props: {
+  skillName: Accessor<string>;
+  agent: Accessor<AgentProfileRecord>;
+  linksSet: Accessor<ReadonlySet<string>>;
+  ops: DrawerOps;
+}): JSX.Element {
+  const linked = computed(() => {
+    const a = props.agent();
+    const set = props.linksSet();
+    return set.has(a.id) || set.has(a.displayName);
+  });
+  return (
+    <View
+      testID={`drawer-agent-row-${props.skillName()}-${props.agent().id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderRadius: 6,
+      }}
+      hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
+    >
+      <View style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+        <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <AgentBadge
+            id={props.agent().id}
+            name={props.agent().displayName}
+            icon={props.agent().icon}
+            active={linked()}
+            size={18}
+          />
+          <View style={{ minWidth: 0, overflow: "hidden" }}>
+            <Text
+              style={{
+                fontSize: 12,
+                fontWeight: "500",
+                color: paletteToken("fg"),
+              }}
+            >
+              {props.agent().displayName}
+            </Text>
+          </View>
+        </View>
+        <SaveStatus id={`link:${props.skillName()}:${props.agent().id}`} />
+      </View>
+      <SlideSwitch
+        testID={`drawer-toggle-${props.skillName()}-${props.agent().id}`}
+        checked={linked()}
+        disabled={false}
+        label={`${props.skillName()} · ${props.agent().displayName}`}
+        onChange={() =>
+          runToggle(props.ops, props.skillName(), props.agent().id, !linked())
+        }
+      />
+    </View>
+  );
+}
+
 /** chrome::slide_switch 的 nsh 手绘（设置开关同款 28×16 轨道，开启态 ok
- * 绿显式）。滑块只用 transform 的 80ms 过渡（motion.ts 通道二）走到另一端：
+ * 绿显式）。滑块只用 transform 回弹到另一端（motion.ts settleTransition）：
  * 轨道颜色零帧换色，系统降低动态效果时直接落位。 */
 function SlideSwitch(props: {
   testID: string;
@@ -635,7 +749,7 @@ function SlideSwitch(props: {
         borderRadius: 6,
         backgroundColor: paletteToken("on_accent"),
         transform: props.checked ? "translateX(12px)" : "translateX(0px)",
-        ...motionTransition(),
+        ...settleTransition(),
       }}
       onChange={props.onChange}
     />
@@ -644,79 +758,94 @@ function SlideSwitch(props: {
 
 // ---- 动作脚（drawer_actions + detail_uninstall） ------------------------------
 
-function drawerActions(props: DetailDrawerSlotProps, ops: DrawerOps): JSX.Element {
+function DrawerActions(p: { props: DetailDrawerSlotProps; ops: DrawerOps }): JSX.Element {
+  const updating = computed(() => {
+    const skill = p.props.skill;
+    return skill !== null && skillUpdateInFlight(skill, p.props.busyToken, p.props.updatingBatch);
+  });
+  const removing = computed(() => {
+    const skill = p.props.skill;
+    return skill !== null && p.props.busyToken === `uninstall:${skill.name}`;
+  });
+  const overwritesLocal = computed(
+    () => p.props.skill?.upstreamChange?.kind === "local_changes",
+  );
+  const name = computed(() => p.props.skill?.name ?? "");
+
   return (
-    <View
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        flexShrink: 0,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderTopWidth: 1,
-        borderTopColor: paletteToken("border"),
-      }}
-    >
-      {(() => {
-        const skill = props.skill;
-        if (skill === null) return null;
-        const updating = skillUpdateInFlight(skill, props.busyToken, props.updatingBatch);
-        const isBusy = props.busyToken === skill.name;
-        const overwritesLocal = skill.upstreamChange?.kind === "local_changes";
-        const name = skill.name;
-        return (
-          <>
-            <ActionButton
-              testID="drawer-view-skill-md"
-              glyph="fileText"
-              label={t("detailPanel.viewSkillMd")}
-              onPress={() => (props.onOpenReader ?? openSkillReader)(name)}
-            />
-            {skill.updateAvailable ? (
-              <ActionButton
-                testID="drawer-update-btn"
-                glyph="circleArrowUp"
-                label={
-                  updating
-                    ? t("common.updating")
-                    : overwritesLocal
-                      ? t("skillCard.updateOverwritesLocal")
-                      : t("common.update")
-                }
-                bg={paletteToken("warn")}
-                fg={paletteToken("on_accent")}
-                border={paletteToken("warn")}
-                emphasized
-                disabled={updating}
-                onPress={() => {
-                  if (updating) return;
-                  (props.onUpdate ?? updateSkill)(name);
-                }}
-              />
-            ) : null}
-            <ActionButton
-              testID="drawer-open-folder-btn"
-              glyph="folder"
-              label={t("detailPanel.openFolder")}
-              onPress={() => (props.onOpenFolder ?? openSkillFolder)(name)}
-            />
-            <UninstallButton
-              name={name}
-              label={isBusy ? t("common.uninstalling") : t("common.uninstall")}
-              onPress={() => {
-                openUninstallConfirm(uninstallTitleNamed(name), () => {
-                  // on_ok：先收抽屉再执行（GPUI select_detail(None) 顺序）。
-                  props.onClose();
-                  runUninstall(ops, name);
-                  return true;
-                });
-              }}
-            />
-          </>
-        );
-      })()}
-    </View>
+    <If when={p.props.skill !== null}>
+      <View
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          flexShrink: 0,
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          borderTopWidth: 1,
+          borderTopColor: paletteToken("border"),
+        }}
+      >
+        <ActionButton
+          testID="drawer-view-skill-md"
+          glyph="fileText"
+          label={t("detailPanel.viewSkillMd")}
+          onPress={() => (p.props.onOpenReader ?? openSkillReader)(name())}
+        />
+        <If when={p.props.skill?.updateAvailable === true}>
+          <ActionButton
+            testID="drawer-update-btn"
+            glyph="circleArrowUp"
+            label={
+              updating()
+                ? t("common.updating")
+                : overwritesLocal()
+                  ? t("skillCard.updateOverwritesLocal")
+                  : t("common.update")
+            }
+            bg={paletteToken("warn")}
+            fg={paletteToken("on_accent")}
+            border={paletteToken("warn")}
+            emphasized
+            disabled={updating()}
+            spin={updating()}
+            onPress={() => {
+              if (updating()) return;
+              (p.props.onUpdate ?? updateSkill)(name());
+            }}
+          />
+        </If>
+        <SaveStatus id={`update:${name()}`} />
+        <If when={p.props.skill?.skillType === "local"}>
+          <ActionButton
+            testID="drawer-publish-btn"
+            glyph="gitBranch"
+            label={pt("publish.action")}
+            onPress={() => openPublishSkill(name())}
+          />
+        </If>
+        <ActionButton
+          testID="drawer-open-folder-btn"
+          glyph="folder"
+          label={t("detailPanel.openFolder")}
+          onPress={() => (p.props.onOpenFolder ?? openSkillFolder)(name())}
+        />
+        <UninstallButton
+          name={name()}
+          spinning={removing()}
+          label={removing() ? t("common.uninstalling") : t("common.uninstall")}
+          onPress={() => {
+            const target = name();
+            openUninstallConfirm(uninstallTitleNamed(target), () => {
+              // on_ok：先收抽屉再执行（GPUI select_detail(None) 顺序）。
+              p.props.onClose();
+              runUninstall(p.ops, target);
+              return true;
+            });
+          }}
+        />
+      </View>
+    </If>
   );
 }
 
@@ -724,23 +853,23 @@ function drawerActions(props: DetailDrawerSlotProps, ops: DrawerOps): JSX.Elemen
  * 的 warn 填充分支）。 */
 function ActionButton(props: {
   testID: string;
-  glyph: "fileText" | "circleArrowUp" | "folder";
+  glyph: "fileText" | "circleArrowUp" | "folder" | "gitBranch";
   label: string;
   bg?: string;
   fg?: string;
   border?: string;
   emphasized?: boolean;
   disabled?: boolean;
+  spin?: boolean;
   onPress(): void;
 }): JSX.Element {
   const bg = props.bg ?? paletteToken("card");
   const fg = props.fg ?? paletteToken("fg");
   const border = props.border ?? paletteToken("border");
-  const disabled = props.disabled ?? false;
   return (
     <View
       testID={props.testID}
-      disabled={disabled}
+      disabled={props.disabled === true}
       style={{
         display: "flex",
         flexDirection: "row",
@@ -754,11 +883,11 @@ function ActionButton(props: {
         borderWidth: 1,
         borderColor: border,
         backgroundColor: bg,
-        opacity: disabled ? 0.7 : 1,
-        cursor: "pointer",
+        opacity: props.disabled === true ? 0.7 : 1,
+        cursor: props.disabled === true ? "default" : "pointer",
       }}
       hoverStyle={
-        disabled
+        props.disabled === true
           ? undefined
           : props.emphasized
             ? { opacity: 0.92 }
@@ -767,11 +896,9 @@ function ActionButton(props: {
       onPress={props.onPress}
     >
       {props.glyph === "circleArrowUp" ? (
-        <Icon name="circleArrowUp" size={14} color={fg} />
-      ) : props.glyph === "folder" ? (
-        <Icon name="folder" size={14} color={fg} />
+        <IconSpin name="circleArrowUp" size={14} color={fg} spin={props.spin === true} />
       ) : (
-        <Icon name="fileText" size={14} color={fg} />
+        <Icon name={props.glyph} size={14} color={fg} />
       )}
       <Text style={{ fontSize: 12, fontWeight: props.emphasized ? "600" : "500", color: fg }}>
         {props.label}
@@ -780,11 +907,16 @@ function ActionButton(props: {
   );
 }
 
-/** detail_uninstall.rs 的按钮：全页唯一允许颜色缓动的控件（~80ms 临界
- * 阻尼弹簧的对位；Reduce Motion 直接落位）。悬停面在 danger 色阶内插值
+/** detail_uninstall.rs 的按钮：全页唯一允许颜色缓动的控件（悬停 120ms
+ * --ease-out；Reduce Motion 直接落位）。悬停面在 danger 色阶内插值
  * （hover_face 的 bg/border mix_rgb；字色通道 nsh 的 hoverStyle 够不到
  * 子 Text，保持 danger 常量）。 */
-function UninstallButton(props: { name: string; label: string; onPress(): void }): JSX.Element {
+function UninstallButton(props: {
+  name: string;
+  label: string;
+  spinning: boolean;
+  onPress(): void;
+}): JSX.Element {
   const rest = {
     bg: paletteToken("danger_bg"),
     border: paletteToken("danger_border"),
@@ -812,18 +944,13 @@ function UninstallButton(props: { name: string; label: string; onPress(): void }
         borderColor: rest.border,
         backgroundColor: rest.bg,
         cursor: "pointer",
-        ...(motionEnabled()
-          ? {
-              transitionProperty: "background-color, border-color",
-              transitionDuration: 80,
-            }
-          : {}),
+        ...pressTransition(),
       }}
       hoverStyle={hover}
       activeStyle={{ opacity: 0.88 }}
       onPress={props.onPress}
     >
-      <Icon name="trash" size={14} color={rest.fg} />
+      <IconSpin name="trash" size={14} color={rest.fg} spin={props.spinning} />
       <Text
         style={{
           fontSize: 12,
@@ -839,30 +966,29 @@ function UninstallButton(props: { name: string; label: string; onPress(): void }
 }
 
 /** index.tsx 的轨道渲染助手：selectedSkill 非空时按名查卡并挂抽屉。读取
- * 全部落在 JSX 子表达式里（组件体只执行一次，体级读取会冻死抽屉）。 */
+ * 全部落在 computed / JSX 子表达式里，避免单行变更整块重建抽屉。 */
 export function DetailDrawerTrack(): JSX.Element {
+  const currentSkill = computed<SkillRecord | null>((prev) => {
+    if (!pageActive() && prev !== undefined) return prev;
+    const name = selectedSkill();
+    if (name === null) return null;
+    return skills().find((record) => record.name === name) ?? null;
+  });
   return (
-    <>
-      {(() => {
-        const name = selectedSkill();
-        if (name === null) return null;
-        const skill = skills().find((record) => record.name === name) ?? null;
-        return (
-          <View
-            testID="my-skills-detail-track"
-            style={{ width: "100%", height: "100%", display: "flex" }}
-          >
-            <DetailDrawerSlot
-              skill={skill}
-              agents={profiles()}
-              busyToken={busy()}
-              updatingBatch={updatingBatch()}
-              descriptionChoices={descriptionChoices()}
-              onClose={() => selectedSkill.set(null)}
-            />
-          </View>
-        );
-      })()}
-    </>
+    <If when={pageActive() && selectedSkill() !== null}>
+      <View
+        testID="my-skills-detail-track"
+        style={{ width: "100%", height: "100%", display: "flex" }}
+      >
+        <DetailDrawerSlot
+          skill={currentSkill()}
+          agents={profiles()}
+          busyToken={busy()}
+          updatingBatch={updatingBatch()}
+          descriptionChoices={descriptionChoices()}
+          onClose={() => selectedSkill.set(null)}
+        />
+      </View>
+    </If>
   );
 }

@@ -22,7 +22,7 @@ pub fn list_tree_paths(repo_path: &Path) -> Result<Vec<String>> {
     list_tree_paths_at(repo_path, "HEAD")
 }
 
-pub fn list_tree_paths_at(repo_path: &Path, revision: &str) -> Result<Vec<String>> {
+fn list_tree_paths_at(repo_path: &Path, revision: &str) -> Result<Vec<String>> {
     Ok(list_tree_entries_at(repo_path, revision)?
         .into_iter()
         .map(|entry| entry.path)
@@ -31,16 +31,6 @@ pub fn list_tree_paths_at(repo_path: &Path, revision: &str) -> Result<Vec<String
 
 pub fn list_tree_entries_at(repo_path: &Path, revision: &str) -> Result<Vec<GitTreeEntry>> {
     list_tree_entries_with_args(repo_path, revision, &["-r"], &[])
-}
-
-/// Recursive tree entries including intermediate directory (`tree`) entries.
-///
-/// `-t` makes `ls-tree -r` also emit every subtree it walks, so callers can
-/// read each directory's tree hash without extra `rev-parse` round-trips.
-/// The extra entries are `kind == "tree"` and must be filtered out by callers
-/// that only want file paths.
-pub fn list_tree_entries_with_trees(repo_path: &Path, revision: &str) -> Result<Vec<GitTreeEntry>> {
-    list_tree_entries_with_args(repo_path, revision, &["-r", "-t"], &[])
 }
 
 fn list_tree_entries_with_args(
@@ -103,38 +93,6 @@ fn list_tree_entries_with_args(
         ));
     }
     Ok(entries)
-}
-
-/// Does `revision` still track this repository-relative path?
-///
-/// A managed Skill link can dangle for two very different reasons: a sparse
-/// checkout simply has not materialized the path, or upstream deleted the
-/// Skill outright. Only the tree can tell them apart, so this answers for one
-/// exact revision. `None` means the revision itself does not resolve — an
-/// unfetched clone must never be read as "upstream removed it".
-pub fn revision_contains_path(repo_path: &Path, revision: &str, pathspec: &str) -> Option<bool> {
-    if pathspec.is_empty() {
-        return None;
-    }
-    run_tree_git(repo_path, &["rev-parse", "--verify", "--quiet", revision])?;
-    let listed = run_tree_git(
-        repo_path,
-        &["ls-tree", "--name-only", revision, "--", pathspec],
-    )?;
-    Some(!listed.trim().is_empty())
-}
-
-/// Run a read-only git command, returning `None` for any non-zero exit.
-fn run_tree_git(repo_path: &Path, args: &[&str]) -> Option<String> {
-    let output = command_with_path("git")
-        .current_dir(repo_path)
-        .args(args)
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn parse_tree_entry(record: &str) -> Result<GitTreeEntry> {

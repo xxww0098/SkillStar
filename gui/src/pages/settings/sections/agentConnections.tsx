@@ -1,7 +1,8 @@
 // 「智能体」分区 UI — 双分组卡布局：顶部搜索与分段过滤栏 + 下方智能体列表卡；
 // 行渲染与受管技能面板在 managedSkills.tsx；状态机与纯计算在 agentConnectionsState.ts。
 
-import { Text, View, effect, type JSX } from "nsh";
+import { Text, View, computed, effect, type JSX } from "nsh";
+import os from "os";
 import { Input } from "nsh/base";
 import { paletteToken } from "../../../services/themeMode";
 import { t, tf } from "../../../services/translation";
@@ -24,6 +25,7 @@ import {
   matchedAgents,
   realAgentConnectionsBridge,
   sharedNames,
+  sharedNamesByDir,
   statusCounts,
   VISIBLE_AGENTS,
   type AgentConnectionsBridge,
@@ -50,6 +52,7 @@ export {
   matchedAgents,
   realAgentConnectionsBridge,
   sharedNames,
+  sharedNamesByDir,
   statusCounts,
   VISIBLE_AGENTS,
   type AgentConnectionsBridge,
@@ -81,7 +84,12 @@ export function AgentConnectionsSection(): JSX.Element {
 
 export function AgentConnectionsWorkbench(props: { state: AgentConnectionsState }): JSX.Element {
   const state = props.state;
-  effect(() => state.start());
+  effect(() => {
+    void state.start();
+  });
+  const matched = computed(() =>
+    matchedAgents(state.profiles(), state.agentQuery(), state.agentFilter()),
+  );
   return (
     <SectionShell
       section={SETTINGS_SECTIONS.find((section) => section.id === "agents")!}
@@ -98,24 +106,26 @@ export function AgentConnectionsWorkbench(props: { state: AgentConnectionsState 
         />
       }
     >
-      {state.profiles().length === 0 ? (
+      <If
+        when={state.profiles().length === 0}
+        else={
+          <>
+            <If when={state.deployModeAvailable()}>
+              <DeployModeBar state={state} />
+            </If>
+            <AgentFilterBar state={state} />
+            <View style={card()}>
+              <If when={matched().length === 0} else={<AgentRows state={state} matched={matched} />}>
+                <AgentEmptyFilters state={state} />
+              </If>
+            </View>
+          </>
+        }
+      >
         <View style={card()}>
           <AgentEmptyState icon="bot" message={t("settings.noAgentsRegistered")} />
         </View>
-      ) : (
-        <>
-          {state.deployModeAvailable() ? <DeployModeBar state={state} /> : null}
-          <AgentFilterBar state={state} />
-          <View style={card()}>
-            {matchedAgents(state.profiles(), state.agentQuery(), state.agentFilter()).length ===
-            0 ? (
-              <AgentEmptyFilters state={state} />
-            ) : (
-              <AgentRows state={state} />
-            )}
-          </View>
-        </>
-      )}
+      </If>
     </SectionShell>
   );
 }
@@ -173,7 +183,7 @@ function AgentFilterBar(props: { state: AgentConnectionsState }): JSX.Element {
             onChange={(event: { value: string }) => state.editAgentQuery(event.value)}
           />
         </View>
-        {state.agentQuery() !== "" ? (
+        <If when={state.agentQuery() !== ""}>
           <View
             testID="agent-search-clear"
             role="button"
@@ -195,7 +205,7 @@ function AgentFilterBar(props: { state: AgentConnectionsState }): JSX.Element {
           >
             <Icon name="x" size={11} color={paletteToken("fg_muted")} />
           </View>
-        ) : null}
+        </If>
       </View>
       <View
         style={{
@@ -212,15 +222,18 @@ function AgentFilterBar(props: { state: AgentConnectionsState }): JSX.Element {
           flexShrink: 0,
         }}
       >
-        {AGENT_FILTERS.map((filter) => (
-          <AgentFilterPill
-            testID={`agent-filter-${filter.id}`}
-            label={t(filter.labelKey)}
-            count={statusCounts(state.profiles(), state.agentQuery())[filter.countIndex]}
-            active={state.agentFilter() === filter.id}
-            onPress={() => state.setAgentFilter(filter.id)}
-          />
-        ))}
+        {(() => {
+          const counts = computed(() => statusCounts(state.profiles(), state.agentQuery()));
+          return AGENT_FILTERS.map((filter) => (
+            <AgentFilterPill
+              testID={`agent-filter-${filter.id}`}
+              label={t(filter.labelKey)}
+              count={counts()[filter.countIndex]}
+              active={state.agentFilter() === filter.id}
+              onPress={() => state.setAgentFilter(filter.id)}
+            />
+          ));
+        })()}
       </View>
     </View>
   );
@@ -351,11 +364,13 @@ function AgentEmptyState(props: {
   );
 }
 
-function visibleAgentRows(state: AgentConnectionsState): {
+function visibleAgentRows(
+  state: AgentConnectionsState,
+  matched: AgentProfileDto[],
+): {
   rows: AgentProfileDto[];
   hidden: number;
 } {
-  const matched = matchedAgents(state.profiles(), state.agentQuery(), state.agentFilter());
   const filterActive = state.agentQuery().trim() !== "" || state.agentFilter() !== "all";
   const hidden = filterActive ? 0 : Math.max(0, matched.length - VISIBLE_AGENTS);
   const shown =
@@ -365,15 +380,33 @@ function visibleAgentRows(state: AgentConnectionsState): {
   return { rows: matched.slice(0, shown), hidden };
 }
 
-function AgentRows(props: { state: AgentConnectionsState }): JSX.Element {
+function AgentRows(props: {
+  state: AgentConnectionsState;
+  matched: () => AgentProfileDto[];
+}): JSX.Element {
   const state = props.state;
-  const view = (): { rows: AgentProfileDto[]; hidden: number } => visibleAgentRows(state);
+  const view = computed(() => visibleAgentRows(state, props.matched()));
+  const rows = computed(() => view().rows);
+  const hidden = computed(() => view().hidden);
+  const sharedByDir = computed(() => sharedNamesByDir(state.profiles()));
+  const homedir = os.homedir();
   return (
     <View style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-      {view().rows.map((profile, index, arr) => (
-        <AgentRow state={state} agentId={profile.id} last={index + 1 === arr.length} />
-      ))}
-      {view().hidden > 0 ? <AgentShowMore state={state} hidden={view().hidden} /> : null}
+      <Each of={rows()} key={(profile) => profile.id}>
+        {(profile, index) => (
+          <AgentRow
+            state={state}
+            agentId={profile().id}
+            profile={profile}
+            sharedByDir={sharedByDir}
+            homedir={homedir}
+            last={index() + 1 === rows().length}
+          />
+        )}
+      </Each>
+      <If when={hidden() > 0}>
+        <AgentShowMore state={state} hidden={hidden()} />
+      </If>
     </View>
   );
 }

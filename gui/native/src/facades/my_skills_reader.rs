@@ -35,18 +35,15 @@ pub struct MySkillsReader;
 
 #[module]
 impl MySkillsReader {
-    /// Read one installed skill's SKILL.md (skill_reader.rs
+    /// Read one installed skill's SKILL.md (`skill_reader.rs`
     /// `Origin::Installed` → `ss_skills::content::read`, returning
-    /// `content.content`). A cheap local read — one SKILL.md plus the
-    /// lockfile lookups `resolve_content_dir` does — so it runs inline
-    /// (the my-skills facade's "cheap local reads run inline" precedent;
-    /// the GPUI `spawn_blocking` is about its single UI thread, not the
-    /// work's size). Err carries the domain chain for the reader's failure
-    /// card + retry.
-    pub fn read(name: String) -> Result<String, String> {
-        ss_skills::content::read(&name)
-            .map(|content| content.content)
-            .map_err(|err| format!("{err:#}"))
+    /// `content.content`). Runs on the blocking pool so disk I/O never
+    /// stalls the JS UI thread. Err carries the domain chain for the
+    /// reader's failure card + retry.
+    pub async fn read(name: String) -> Result<String, String> {
+        blocking(move || read_body(&name))
+            .await
+            .map_err(|join| format!("read task failed: {join}"))?
     }
 
     /// The SKILL.md surface switch the reader opens with
@@ -170,15 +167,27 @@ impl MySkillsReader {
     }
 
     /// Pick a style (reader_style.rs `apply_theme` :143): write
-    /// `reader_theme`; the open reader repaints through the page's
-    /// generation signal. An unknown id is stored verbatim and reads back
-    /// as the default through the config's canonicalization — same as the
-    /// GPUI write.
-    pub fn set_reader_theme(id: String) -> Result<(), String> {
-        let mut config = ss_core::translation::load_config().unwrap_or_default();
-        config.reader_theme = id;
-        ss_core::translation::save_config(&config).map_err(|err| format!("{err:#}"))
+    /// `reader_theme` on the blocking pool; the open reader repaints
+    /// through the page's generation signal. An unknown id is stored
+    /// verbatim and reads back as the default through the config's
+    /// canonicalization — same as the GPUI write.
+    pub async fn set_reader_theme(id: String) -> Result<(), String> {
+        blocking(move || set_reader_theme_body(id))
+            .await
+            .map_err(|join| format!("set reader theme task failed: {join}"))?
     }
+}
+
+fn read_body(name: &str) -> Result<String, String> {
+    ss_skills::content::read(name)
+        .map(|content| content.content)
+        .map_err(|err| format!("{err:#}"))
+}
+
+fn set_reader_theme_body(id: String) -> Result<(), String> {
+    let mut config = ss_core::translation::load_config().unwrap_or_default();
+    config.reader_theme = id;
+    ss_core::translation::save_config(&config).map_err(|err| format!("{err:#}"))
 }
 
 #[cfg(test)]
@@ -254,30 +263,33 @@ mod tests {
         )
         .unwrap();
 
-        let content = MySkillsReader::read("demo-skill".to_owned()).expect("hub skill reads");
+        let content = super::read_body("demo-skill").expect("hub skill reads");
         assert!(content.starts_with("---\nname: demo-skill"));
         assert!(content.contains("# Demo"));
 
-        let err = MySkillsReader::read("missing-skill".to_owned())
+        let err = super::read_body("missing-skill")
             .expect_err("a missing skill is a failure card, not a panic");
         assert!(!err.is_empty());
     }
 
-    /// The SKILL.md surface switch starts off and reads back after a save —
+    /// The SKILL.md surface switch starts on and reads back after a save —
     /// the reader only reads it (translation_chosen never writes).
     #[test]
     fn the_skill_md_switch_reads_the_config() {
         let _iso = IsolatedDataDir::new();
-        assert!(!MySkillsReader::skill_md_enabled());
+        assert!(
+            MySkillsReader::skill_md_enabled(),
+            "a fresh install opens the reader in translation mode"
+        );
         let mut config = ss_core::translation::TranslationConfig {
-            translate_skill_md: true,
+            translate_skill_md: false,
             ..Default::default()
         };
         ss_core::translation::save_config(&config).unwrap();
-        assert!(MySkillsReader::skill_md_enabled());
-        config.translate_skill_md = false;
-        ss_core::translation::save_config(&config).unwrap();
         assert!(!MySkillsReader::skill_md_enabled());
+        config.translate_skill_md = true;
+        ss_core::translation::save_config(&config).unwrap();
+        assert!(MySkillsReader::skill_md_enabled());
     }
 
     /// The translate-button gate: prose the target needs is offered, copy
@@ -315,12 +327,12 @@ mod tests {
             .all(|theme| theme["labelKey"].as_str().is_some()));
 
         assert_eq!(MySkillsReader::reader_theme(), "quote");
-        MySkillsReader::set_reader_theme("line".to_owned()).expect("style write");
+        super::set_reader_theme_body("line".to_owned()).expect("style write");
         assert_eq!(MySkillsReader::reader_theme(), "line");
 
         // An unknown id is stored verbatim (the GPUI write) but reads back
         // through the load-time canonicalization to the default.
-        MySkillsReader::set_reader_theme("not-a-theme".to_owned()).expect("verbatim write");
+        super::set_reader_theme_body("not-a-theme".to_owned()).expect("verbatim write");
         assert_eq!(MySkillsReader::reader_theme(), "quote");
     }
 

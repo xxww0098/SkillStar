@@ -1,10 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// schemastore 上该格式的官方 schema 地址。
-/// 生成的最小集不写 `$schema`；常量留给要写该字段的调用方。
-#[allow(dead_code)]
-pub const PLUGIN_SCHEMA_URL: &str = "https://json.schemastore.org/claude-code-plugin.json";
-
 /// 插件目录内 `.claude-plugin/plugin.json`。生成只写 `name` / `description` /
 /// `version` 最小集；解析保留常见可选字段，未知字段忽略。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

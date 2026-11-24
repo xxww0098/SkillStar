@@ -104,13 +104,12 @@ export type NoticeTone = "success" | "warning" | "error";
 export function reportNotification(
   report: UpdateReport,
   i18n: Translator
-): { tone: NoticeTone; message: string; pinned: boolean } | null {
+): { tone: NoticeTone; message: string; pinned: boolean; actionLabelKey?: string } | null {
   const lines = reportLines(report, i18n);
   if (lines.length === 0) return null;
   const updated = report.updated.length;
   const failed = report.failed.length;
-  // project_failures 非空时 GPUI 置顶并带「处理项目副本」按钮；按钮与
-  // 置顶由页面在发布 toast 时附加（pinned 标记交给调用方）。
+  const hasProjectFailures = report.projectFailures.length > 0;
   return {
     tone:
       failed > 0 && updated === 0
@@ -119,7 +118,8 @@ export function reportNotification(
           ? "success"
           : "warning",
     message: lines.join("\n"),
-    pinned: report.projectFailures.length > 0,
+    pinned: hasProjectFailures,
+    actionLabelKey: hasProjectFailures ? "mySkills.handleProjectCopies" : undefined,
   };
 }
 

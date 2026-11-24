@@ -1,5 +1,6 @@
 //! Built-in Agent definitions for the skills CLI ecosystem.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -11,6 +12,7 @@ enum GlobalRoot {
     Config,
     EnvOrHome(&'static str, &'static [&'static str]),
     OpenClaw,
+    Reasonix,
     Unsupported,
 }
 
@@ -50,6 +52,13 @@ const fn env_or_home(
 const fn openclaw() -> GlobalDirDef {
     GlobalDirDef {
         root: GlobalRoot::OpenClaw,
+        subdirs: &[],
+    }
+}
+
+const fn reasonix() -> GlobalDirDef {
+    GlobalDirDef {
+        root: GlobalRoot::Reasonix,
         subdirs: &[],
     }
 }
@@ -225,7 +234,13 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         home(&[".forge", "skills"]),
         ".forge/skills",
     ),
-    ("fx", "fx", home(&[".fx", "skills"]), ".fx/skills"),
+    (
+        "fx",
+        "fx",
+        // fx natively discovers these shared roots alongside its own `.fx/skills` roots.
+        home(&[".agents", "skills"]),
+        ".agents/skills",
+    ),
     // Google's Gemini CLI — `~/.gemini`. Deliberately *not* the `antigravity`
     // row above: that one is Google Antigravity, a different product that
     // merely shares the `~/.gemini` prefix, so it cannot stand in for this
@@ -400,7 +415,7 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "reasonix",
         "Reasonix",
-        home(&[".reasonix", "skills"]),
+        reasonix(),
         ".reasonix/skills",
     ),
     ("roo", "Roo Code", home(&[".roo", "skills"]), ".roo/skills"),
@@ -592,15 +607,24 @@ fn config_home(home: &Path) -> PathBuf {
         .unwrap_or_else(|| home.join(".config"))
 }
 
+fn non_blank_path(value: Option<&OsStr>) -> Option<PathBuf> {
+    let value = value?;
+    match value.to_str() {
+        Some(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+        }
+        None => (!value.is_empty()).then(|| PathBuf::from(value)),
+    }
+}
+
 fn env_or_home_path(variable: &str, home: &Path, fallback: &[&str]) -> PathBuf {
-    std::env::var_os(variable)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            fallback
-                .iter()
-                .fold(home.to_path_buf(), |p, part| p.join(part))
-        })
+    let env_val = std::env::var_os(variable);
+    non_blank_path(env_val.as_deref()).unwrap_or_else(|| {
+        fallback
+            .iter()
+            .fold(home.to_path_buf(), |p, part| p.join(part))
+    })
 }
 
 fn openclaw_skills_dir(home: &Path) -> PathBuf {
@@ -611,6 +635,34 @@ fn openclaw_skills_dir(home: &Path) -> PathBuf {
         }
     }
     home.join(".openclaw").join("skills")
+}
+
+pub(crate) fn resolve_reasonix_skills_dir(
+    home: &Path,
+    reasonix_home: Option<&OsStr>,
+    appdata: Option<&OsStr>,
+    is_windows: bool,
+) -> PathBuf {
+    if let Some(custom) = non_blank_path(reasonix_home) {
+        return custom.join("skills");
+    }
+    if is_windows {
+        let roaming =
+            non_blank_path(appdata).unwrap_or_else(|| home.join("AppData").join("Roaming"));
+        return roaming.join("reasonix").join("skills");
+    }
+    home.join(".reasonix").join("skills")
+}
+
+fn reasonix_skills_dir(home: &Path) -> PathBuf {
+    let reasonix_home = std::env::var_os("REASONIX_HOME");
+    let appdata = std::env::var_os("APPDATA");
+    resolve_reasonix_skills_dir(
+        home,
+        reasonix_home.as_deref(),
+        appdata.as_deref(),
+        cfg!(windows),
+    )
 }
 
 pub(crate) struct BuiltinSpec(pub &'static BuiltinAgentData);
@@ -632,6 +684,7 @@ impl AgentSpec for BuiltinSpec {
             GlobalRoot::Config => config_home(home),
             GlobalRoot::EnvOrHome(variable, fallback) => env_or_home_path(variable, home, fallback),
             GlobalRoot::OpenClaw => return openclaw_skills_dir(home),
+            GlobalRoot::Reasonix => return reasonix_skills_dir(home),
             GlobalRoot::Unsupported => return PathBuf::new(),
         };
         base.extend(self.0.global.subdirs);
@@ -649,168 +702,5 @@ impl AgentSpec for BuiltinSpec {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    const UPSTREAM_AGENT_IDS: &[&str] = &[
-        "aider-desk",
-        "amp",
-        "antigravity",
-        "antigravity-cli",
-        "astrbot",
-        "autohand-code",
-        "augment",
-        "bob",
-        "claude-code",
-        "openclaw",
-        "cline",
-        "codearts-agent",
-        "codebuddy",
-        "codemaker",
-        "codestudio",
-        "codex",
-        "command-code",
-        "continue",
-        "cortex",
-        "crush",
-        "cursor",
-        "deepagents",
-        "devin",
-        "dexto",
-        "droid",
-        "eve",
-        "firebender",
-        "forgecode",
-        "fx",
-        "gemini-cli",
-        "github-copilot",
-        "goose",
-        "grok",
-        "hermes-agent",
-        "inference-sh",
-        "jazz",
-        "junie",
-        "iflow-cli",
-        "kilo",
-        "kimchi",
-        "kimi-code-cli",
-        "kiro-cli",
-        "kode",
-        "lingma",
-        "loaf",
-        "mcpjam",
-        "minimax-code",
-        "mistral-vibe",
-        "moxby",
-        "mux",
-        "neovate",
-        "opencode",
-        "openhands",
-        "ona",
-        "pi",
-        "posit-assistant",
-        "qoder",
-        "qoder-cn",
-        "qwen-code",
-        "replit",
-        "reasonix",
-        "roo",
-        "rovodev",
-        "sarvam-code",
-        "tabnine-cli",
-        "terramind",
-        "tinycloud",
-        "trae",
-        "trae-cn",
-        "warp",
-        "windsurf",
-        "zed",
-        "zcode",
-        "zencoder",
-        "zenflow",
-        "pochi",
-        "promptscript",
-        "adal",
-        "universal",
-    ];
-
-    /// Standard ids the Agent CLIs publish fold onto persisted SkillStar ids
-    /// through the same alias table the CLI and IPC use, so this test cannot
-    /// drift from it.
-    fn skillstar_id(upstream: &str) -> &str {
-        crate::agents::compatible_profile_id(upstream)
-    }
-
-    #[test]
-    fn covers_every_upstream_agent_id() {
-        let ids = BUILTIN_AGENT_DEFS
-            .iter()
-            .map(|row| row.0)
-            .collect::<HashSet<_>>();
-        let missing = UPSTREAM_AGENT_IDS
-            .iter()
-            .filter(|id| !ids.contains(skillstar_id(id)))
-            .collect::<Vec<_>>();
-        assert!(
-            missing.is_empty(),
-            "missing upstream Agent ids: {missing:?}"
-        );
-    }
-
-    #[test]
-    fn builtin_agent_ids_are_unique() {
-        let mut seen = HashSet::new();
-        for (id, ..) in BUILTIN_AGENT_DEFS {
-            assert!(seen.insert(*id), "duplicate builtin Agent id: {id}");
-        }
-    }
-
-    #[test]
-    fn builtin_agent_fields_are_well_formed() {
-        for (id, name, _global, rel) in BUILTIN_AGENT_DEFS {
-            assert!(!id.is_empty(), "blank Agent id");
-            assert!(!name.is_empty(), "blank display_name for {id}");
-            assert!(!rel.is_empty(), "blank project skills path for {id}");
-        }
-    }
-
-    #[test]
-    fn antigravity_mirrors_every_installed_state() {
-        let home = Path::new("/tmp/skillstar-test-home");
-        let dirs = mirror_dirs("antigravity", home);
-        assert_eq!(
-            dirs,
-            [
-                home.join(".gemini/antigravity-cli/skills"),
-                home.join(".gemini/skills"),
-                home.join(".gemini/config/skills"),
-                home.join(".gemini/antigravity-ide/skills"),
-            ]
-        );
-        assert!(mirror_dirs("claude", home).is_empty());
-        // The dropped `antigravity-cli` profile id still resolves, so persisted
-        // prefs and `--agent antigravity-cli` keep reaching the single row.
-        assert!(
-            !mirror_dirs(
-                crate::agents::compatible_profile_id("antigravity-cli"),
-                home
-            )
-            .is_empty()
-        );
-    }
-
-    #[test]
-    fn project_only_agents_have_no_global_path() {
-        let home = Path::new("/tmp/skillstar-test-home");
-        for id in ["eve", "promptscript"] {
-            let data = builtin_agent_data()
-                .iter()
-                .find(|agent| agent.id == id)
-                .unwrap();
-            let spec = BuiltinSpec(data);
-            assert!(!spec.supports_global());
-            assert!(spec.resolve_global_dir(home).as_os_str().is_empty());
-        }
-    }
-}
+#[path = "builtin_tests.rs"]
+mod tests;

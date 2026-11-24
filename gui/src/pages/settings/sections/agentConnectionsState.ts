@@ -1,4 +1,4 @@
-import { signal, type Signal } from "nsh";
+import { batch, signal, type Signal } from "nsh";
 import { SettingsAgentConnections, SettingsStorage } from "skillstar-gui/native";
 import { t, tf } from "../../../services/translation";
 import { agentsChanged, publishToast, type ToastTone } from "../../../shell/events";
@@ -67,14 +67,14 @@ export interface ReconcileModeReportDto {
 }
 
 export interface AgentConnectionsBridge {
-  listProfiles(): AgentProfileDto[];
-  toggleProfile(id: string): boolean;
-  listLinkedSkills(id: string): string[];
+  listProfiles(): Promise<AgentProfileDto[]>;
+  toggleProfile(id: string): Promise<boolean>;
+  listLinkedSkills(id: string): Promise<string[]>;
   unlinkSkill(skill: string, agentId: string): Promise<void>;
   unlinkAll(agentId: string): Promise<number>;
   getManagedState(agentId: string): Promise<ManagedStateDto>;
   toggleManaged(agentId: string): Promise<ManagedReportDto>;
-  getDeployModes?(): DeployModesDto;
+  getDeployModes?(): Promise<DeployModesDto>;
   setDefaultDeployMode?(mode: DeployMode): Promise<{
     defaultMode: DeployMode;
     reconciled: ReconcileModeReportDto;
@@ -173,16 +173,16 @@ function asReconcileReport(value: unknown): ReconcileModeReportDto {
 }
 
 export const realAgentConnectionsBridge: AgentConnectionsBridge = {
-  listProfiles() {
-    return asProfiles(SettingsAgentConnections.listProfiles());
+  async listProfiles() {
+    return asProfiles(await SettingsAgentConnections.listProfiles());
   },
-  toggleProfile(id) {
-    const enabled = SettingsAgentConnections.toggleProfile(id);
+  async toggleProfile(id) {
+    const enabled = await SettingsAgentConnections.toggleProfile(id);
     if (typeof enabled !== "boolean") throw new Error("unexpected toggle wire");
     return enabled;
   },
-  listLinkedSkills(id) {
-    const names = SettingsAgentConnections.listLinkedSkills(id);
+  async listLinkedSkills(id) {
+    const names = await SettingsAgentConnections.listLinkedSkills(id);
     return Array.isArray(names)
       ? names.filter((name): name is string => typeof name === "string")
       : [];
@@ -200,8 +200,8 @@ export const realAgentConnectionsBridge: AgentConnectionsBridge = {
   async toggleManaged(agentId) {
     return asManagedReport(await SettingsAgentConnections.toggleManagedSkills(agentId));
   },
-  getDeployModes() {
-    return asDeployModes(SettingsAgentConnections.getDeployModes());
+  async getDeployModes() {
+    return asDeployModes(await SettingsAgentConnections.getDeployModes());
   },
   async setDefaultDeployMode(mode) {
     const raw = (await SettingsAgentConnections.setDefaultDeployMode(mode)) as Record<
@@ -227,6 +227,7 @@ export const realAgentConnectionsBridge: AgentConnectionsBridge = {
 
 export const VISIBLE_AGENTS = 10;
 export const SKIP_UNMANAGED_REAL_DIRECTORY = "unmanaged_real_directory";
+export const SKIP_FOREIGN_LINK = "foreign_link";
 
 export function managedTargetKeyOf(path: string): string {
   return path.trim().replaceAll("\\", "/").replace(/\/+$/, "");
@@ -312,9 +313,11 @@ export function noticeFromReport(name: string, report: ManagedReportDto): AgentN
     .map((skip) =>
       skip.code === SKIP_UNMANAGED_REAL_DIRECTORY
         ? tf("skillToggle.skipUnmanagedDirItem", { name: skip.skill_name, path: skip.path })
-        : skip.reason === ""
-          ? skip.skill_name
-          : `${skip.skill_name}: ${skip.reason}`,
+        : skip.code === SKIP_FOREIGN_LINK
+          ? tf("skillToggle.skipForeignLinkItem", { name: skip.skill_name, path: skip.path })
+          : skip.reason === ""
+            ? skip.skill_name
+            : `${skip.skill_name}: ${skip.reason}`,
     );
   const hiddenSkips = skipped - Math.min(skipped, 3);
   details.push(...visibleSkips);
@@ -353,6 +356,21 @@ export function noticeFromReport(name: string, report: ManagedReportDto): AgentN
   return openPath === undefined ? { tone, text } : { tone, text, openPath };
 }
 
+export function sharedNamesByDir(list: AgentProfileDto[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const item of list) {
+    if (!hasGlobalSkills(item)) continue;
+    const key = managedTargetKeyOf(item.global_skills_dir);
+    let group = map.get(key);
+    if (group === undefined) {
+      group = [];
+      map.set(key, group);
+    }
+    group.push(item.display_name);
+  }
+  return map;
+}
+
 export interface AgentConnectionsState {
   profiles: Signal<AgentProfileDto[]>;
   agentQuery: Signal<string>;
@@ -367,13 +385,13 @@ export interface AgentConnectionsState {
   disallowJunctionAgents: Signal<string[]>;
   deployModePending: Signal<boolean>;
   deployModeAvailable: Signal<boolean>;
-  start(): void;
+  start(): Promise<void>;
   setAgentFilter(filter: AgentFilter): void;
   editAgentQuery(value: string): void;
   clearAgentFilters(): void;
   toggleShowAllAgents(): void;
-  toggleAgentExpand(agentId: string): void;
-  toggleAgentEnabled(agentId: string): void;
+  toggleAgentExpand(agentId: string): Promise<void>;
+  toggleAgentEnabled(agentId: string): Promise<void>;
   unlinkLinkedSkill(agentId: string, skill: string): void;
   unlinkAllLinkedSkills(agentId: string): void;
   toggleManagedSkills(agentId: string): void;
@@ -453,18 +471,31 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
     );
   };
 
-  const applyManagedState = (key: string, state: ManagedStateDto): void => {
-    managedStates.set({ ...managedStates(), [key]: state });
-    const names = state.active_skill_names;
+  const applyManagedStatesBatch = (updates: { key: string; state: ManagedStateDto }[]): void => {
+    if (updates.length === 0) return;
+    const states = { ...managedStates() };
     const linked = { ...linkedSkills() };
+    const byKey = new Map<string, string[]>();
+    for (const item of updates) {
+      states[item.key] = item.state;
+      byKey.set(item.key, item.state.active_skill_names);
+    }
     const next = profiles().map((profile) => {
       if (!hasGlobalSkills(profile)) return profile;
-      if (managedTargetKeyOf(profile.global_skills_dir) !== key) return profile;
+      const names = byKey.get(managedTargetKeyOf(profile.global_skills_dir));
+      if (names === undefined) return profile;
       linked[profile.id] = [...names];
       return { ...profile, synced_count: names.length };
     });
-    linkedSkills.set(linked);
-    profiles.set(next);
+    batch(() => {
+      managedStates.set(states);
+      linkedSkills.set(linked);
+      profiles.set(next);
+    });
+  };
+
+  const applyManagedState = (key: string, state: ManagedStateDto): void => {
+    applyManagedStatesBatch([{ key, state }]);
   };
 
   const spawnManagedReads = (
@@ -480,14 +511,16 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
           .catch((err: unknown) => ({ job, state: null, error: String(err) })),
       ),
     ).then((rows) => {
+      const accepted: { key: string; state: ManagedStateDto }[] = [];
       for (const row of rows) {
         if (!accepts(row.job.key, row.job.guard[0], row.job.guard[1])) continue;
         if (row.error !== null) {
           noteReadError(row.job.purpose, row.job.key, row.error);
         } else if (row.state !== null) {
-          applyManagedState(row.job.key, row.state);
+          accepted.push({ key: row.job.key, state: row.state });
         }
       }
+      applyManagedStatesBatch(accepted);
     });
   };
 
@@ -597,14 +630,24 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
     });
   };
 
-  const refreshAfterDeployModeChange = (): void => {
-    const reloaded = bridge.listProfiles();
-    profiles.set(reloaded);
+  let startSeq = 0;
+
+  const refreshAfterDeployModeChange = async (): Promise<void> => {
+    const linkedIds = Object.keys(linkedSkills());
+    const [reloaded, linkedPairs] = await Promise.all([
+      bridge.listProfiles(),
+      Promise.all(
+        linkedIds.map(async (id) => [id, await bridge.listLinkedSkills(id)] as const),
+      ),
+    ]);
     const nextLinked = { ...linkedSkills() };
-    for (const id of Object.keys(nextLinked)) {
-      nextLinked[id] = bridge.listLinkedSkills(id);
+    for (const [id, names] of linkedPairs) {
+      nextLinked[id] = names;
     }
-    linkedSkills.set(nextLinked);
+    batch(() => {
+      profiles.set(reloaded);
+      linkedSkills.set(nextLinked);
+    });
     preloadManagedSkills(reloaded);
     agentsChanged.publish();
   };
@@ -623,19 +666,25 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
     disallowJunctionAgents,
     deployModePending,
     deployModeAvailable,
-    start() {
-      const loaded = bridge.listProfiles();
-      profiles.set(loaded);
+    async start() {
+      const seq = ++startSeq;
+      const [loaded, modes] = await Promise.all([
+        bridge.listProfiles(),
+        bridge.getDeployModes ? bridge.getDeployModes() : Promise.resolve(null),
+      ]);
+      if (seq !== startSeq) return;
+      batch(() => {
+        profiles.set(loaded);
+        if (modes !== null) {
+          defaultDeployMode.set(modes.defaultMode);
+          agentDeployOverrides.set(modes.overrides);
+          disallowJunctionAgents.set(modes.disallowJunction);
+          deployModeAvailable.set(true);
+        } else {
+          deployModeAvailable.set(false);
+        }
+      });
       preloadManagedSkills(loaded);
-      if (bridge.getDeployModes !== undefined) {
-        const modes = bridge.getDeployModes();
-        defaultDeployMode.set(modes.defaultMode);
-        agentDeployOverrides.set(modes.overrides);
-        disallowJunctionAgents.set(modes.disallowJunction);
-        deployModeAvailable.set(true);
-      } else {
-        deployModeAvailable.set(false);
-      }
     },
     setAgentFilter(filter) {
       agentFilter.set(filter);
@@ -644,13 +693,15 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
       agentQuery.set(value);
     },
     clearAgentFilters() {
-      agentQuery.set("");
-      agentFilter.set("all");
+      batch(() => {
+        agentQuery.set("");
+        agentFilter.set("all");
+      });
     },
     toggleShowAllAgents() {
       showAllAgents.set(!showAllAgents());
     },
-    toggleAgentExpand(agentId) {
+    async toggleAgentExpand(agentId) {
       if (expandedAgent() === agentId) {
         expandedAgent.set(null);
         return;
@@ -662,17 +713,17 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
         refreshManaged(agentId, profile.global_skills_dir);
       } else if (linkedSkills()[agentId] === undefined) {
         try {
-          const names = bridge.listLinkedSkills(agentId);
+          const names = await bridge.listLinkedSkills(agentId);
           linkedSkills.set({ ...linkedSkills(), [agentId]: names });
         } catch {
           errorNotice(agentId, t("settings.listLinkedFailed"));
         }
       }
     },
-    toggleAgentEnabled(agentId) {
+    async toggleAgentEnabled(agentId) {
       let enabled: boolean;
       try {
-        enabled = bridge.toggleProfile(agentId);
+        enabled = await bridge.toggleProfile(agentId);
       } catch {
         errorNotice(agentId, t("settings.toggleFailed"));
         return;
@@ -698,6 +749,7 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
         .unlinkSkill(skill, agentId)
         .then(() => {
           forgetLinkedSkill(agentId, skill);
+          agentsChanged.publish();
           if (key !== null) refreshManagedKey(key);
         })
         .catch(() => {
@@ -719,6 +771,7 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
           setPending(key, false);
           forgetAllLinkedSkills(key);
           showNotice(clearedLinksNotice(removed, name), "result", key);
+          agentsChanged.publish();
           refreshManagedKey(key);
         })
         .catch(() => {
@@ -742,6 +795,7 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
           setPending(key, false);
           applyManagedState(key, report.state);
           showNotice(noticeFromReport(name, report), "result", key);
+          agentsChanged.publish();
           refreshManagedKey(key);
         })
         .catch(() => {
@@ -755,11 +809,13 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
       deployModePending.set(true);
       void bridge
         .setDefaultDeployMode(mode)
-        .then((res) => {
-          deployModePending.set(false);
-          defaultDeployMode.set(res.defaultMode);
+        .then(async (res) => {
+          batch(() => {
+            deployModePending.set(false);
+            defaultDeployMode.set(res.defaultMode);
+          });
           announceReconcile(res.reconciled);
-          refreshAfterDeployModeChange();
+          await refreshAfterDeployModeChange();
         })
         .catch(() => {
           deployModePending.set(false);
@@ -771,11 +827,13 @@ export function createAgentConnectionsState(bridge: AgentConnectionsBridge): Age
       deployModePending.set(true);
       void bridge
         .setAgentDeployMode(agentId, choice)
-        .then((res) => {
-          deployModePending.set(false);
-          agentDeployOverrides.set(res.overrides);
+        .then(async (res) => {
+          batch(() => {
+            deployModePending.set(false);
+            agentDeployOverrides.set(res.overrides);
+          });
           announceReconcile(res.reconciled);
-          refreshAfterDeployModeChange();
+          await refreshAfterDeployModeChange();
         })
         .catch(() => {
           deployModePending.set(false);

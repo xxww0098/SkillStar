@@ -29,21 +29,6 @@ use nsh_core::element::__private::JsonMap;
 #[module]
 pub struct Marketplace;
 
-/// The scope string `sync_scope` expects for a tab + query pair — the exact
-/// strings `parse_scope` understands (sync_state.rs:46-88) and the ones the
-/// GPUI toolbar builds (mod.rs:324-330). Exposed so the page (and its tests)
-/// never hand-assemble them wrong.
-fn scope_for(tab: &str, query: &str) -> String {
-    let query = query.trim();
-    if !query.is_empty() {
-        format!("search_seed:{}", query.to_ascii_lowercase())
-    } else if tab == "official" {
-        "official_publishers".to_owned()
-    } else {
-        format!("leaderboard_{tab}")
-    }
-}
-
 /// `SnapshotStatus` as the page's string tag (Fresh/Stale/Seizing/Miss/
 /// ErrorFallback/RemoteError become the banner vocabulary).
 fn status_tag(status: SnapshotStatus) -> &'static str {
@@ -57,18 +42,47 @@ fn status_tag(status: SnapshotStatus) -> &'static str {
     }
 }
 
+fn lookup_localized_description(
+    skill: &Skill,
+    config: Option<&ss_core::translation::TranslationConfig>,
+) -> Option<String> {
+    if let Some(text) = &skill.localized_description {
+        return Some(text.clone());
+    }
+    let cfg = config?;
+    let enabled = cfg
+        .description_choices
+        .get(&skill.name)
+        .copied()
+        .unwrap_or(cfg.translate_descriptions);
+    if !enabled {
+        return None;
+    }
+    let target = ss_core::translation::canonical_target(&cfg.target_lang);
+    if !ss_core::translation::needs_translation(&skill.description, target) {
+        return None;
+    }
+    ss_core::translation::lookup(&skill.description, target)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 fn skill_json(skill: &Skill) -> JsonValue {
+    let config = ss_core::translation::load_config().ok();
+    skill_json_with_config(skill, config.as_ref())
+}
+
+fn skill_json_with_config(
+    skill: &Skill,
+    config: Option<&ss_core::translation::TranslationConfig>,
+) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert("name".to_owned(), JsonValue::String(skill.name.clone()));
     map.insert(
         "description".to_owned(),
         JsonValue::String(skill.description.clone()),
     );
-    if let Some(text) = &skill.localized_description {
-        map.insert(
-            "localizedDescription".to_owned(),
-            JsonValue::String(text.clone()),
-        );
+    if let Some(text) = lookup_localized_description(skill, config) {
+        map.insert("localizedDescription".to_owned(), JsonValue::String(text));
     }
     map.insert(
         "skillType".to_owned(),
@@ -122,11 +136,34 @@ fn skill_json(skill: &Skill) -> JsonValue {
     JsonValue::Object(map)
 }
 
-fn skills_result(result: LocalFirstResult<Vec<Skill>>) -> JsonValue {
+fn error_json(status: SnapshotStatus, scope: &str, error: Option<String>) -> JsonValue {
+    match error {
+        Some(detail) => {
+            let mut err = JsonMap::new();
+            err.insert(
+                "kind".to_owned(),
+                JsonValue::String(status_tag(status).to_owned()),
+            );
+            err.insert("scope".to_owned(), JsonValue::String(scope.to_owned()));
+            err.insert("detail".to_owned(), JsonValue::String(detail));
+            JsonValue::Object(err)
+        }
+        None => JsonValue::Null,
+    }
+}
+
+fn skills_result(scope: &str, result: LocalFirstResult<Vec<Skill>>) -> JsonValue {
+    let config = ss_core::translation::load_config().ok();
     let mut map = JsonMap::new();
     map.insert(
         "data".to_owned(),
-        JsonValue::Array(result.data.iter().map(skill_json).collect()),
+        JsonValue::Array(
+            result
+                .data
+                .iter()
+                .map(|skill| skill_json_with_config(skill, config.as_ref()))
+                .collect(),
+        ),
     );
     map.insert(
         "snapshotStatus".to_owned(),
@@ -141,15 +178,12 @@ fn skills_result(result: LocalFirstResult<Vec<Skill>>) -> JsonValue {
     );
     map.insert(
         "error".to_owned(),
-        match result.error {
-            Some(text) => JsonValue::String(text),
-            None => JsonValue::Null,
-        },
+        error_json(result.snapshot_status, scope, result.error),
     );
     JsonValue::Object(map)
 }
 
-fn publishers_result(result: LocalFirstResult<Vec<OfficialPublisher>>) -> JsonValue {
+fn publishers_result(scope: &str, result: LocalFirstResult<Vec<OfficialPublisher>>) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert(
         "data".to_owned(),
@@ -188,59 +222,77 @@ fn publishers_result(result: LocalFirstResult<Vec<OfficialPublisher>>) -> JsonVa
     );
     map.insert(
         "error".to_owned(),
-        match result.error {
-            Some(text) => JsonValue::String(text),
-            None => JsonValue::Null,
-        },
+        error_json(result.snapshot_status, scope, result.error),
     );
     JsonValue::Object(map)
 }
 
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+static RUNTIME_READY_PATHS: OnceLock<Mutex<Option<(PathBuf, PathBuf)>>> = OnceLock::new();
+
 /// The snapshot runtime wiring bootstrap.rs owns on the GPUI side, repeated
 /// because the bridge cannot depend on ss-app: the real data dir, the
-/// installed-skill markers, and the installed-skill loader. Called before
-/// every read (configure_runtime is a cheap RwLock write that also clears
-/// the pool when the db path changed); migrations run once per path inside
-/// `initialize`.
-fn ensure_runtime() -> Result<(), String> {
-    let config = SnapshotRuntimeConfig::new(
-        ss_core::infra::paths::marketplace_db_path(),
-        ss_core::infra::paths::data_root(),
-        ss_skills::installed_skill::installed_snapshot_markers,
-        || -> InstalledSkillsFuture {
-            Box::pin(ss_skills::installed_skill::list_installed_skills())
-        },
-    );
-    market_snapshot::configure_runtime(config);
-    market_snapshot::initialize().map_err(|err| format!("{err:#}"))
+/// installed-skill markers, and the installed-skill loader. Cached per
+/// `(db_path, data_root)` and initialized on the blocking pool so reads do not
+/// re-run schema setup or touch SQLite on Tokio async worker threads.
+async fn ensure_runtime() -> Result<(), String> {
+    let db_path = ss_core::infra::paths::marketplace_db_path();
+    let data_root = ss_core::infra::paths::data_root();
+    {
+        let guard = RUNTIME_READY_PATHS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if guard.as_ref() == Some(&(db_path.clone(), data_root.clone())) {
+            return Ok(());
+        }
+    }
+    let db_for_init = db_path.clone();
+    let root_for_init = data_root.clone();
+    blocking(move || {
+        let config = SnapshotRuntimeConfig::new(
+            db_for_init,
+            root_for_init,
+            ss_skills::installed_skill::installed_snapshot_markers,
+            || -> InstalledSkillsFuture {
+                Box::pin(ss_skills::installed_skill::list_installed_skills())
+            },
+        );
+        market_snapshot::configure_runtime(config);
+        market_snapshot::initialize().map_err(|err| format!("{err:#}"))
+    })
+    .await
+    .map_err(|join| format!("runtime init task failed: {join}"))??;
+
+    let mut guard = RUNTIME_READY_PATHS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    *guard = Some((db_path, data_root));
+    Ok(())
 }
 
 #[module]
 impl Marketplace {
-    /// True when `repoUrl` is an exact `https://github.com/owner/repo`
-    /// clone URL — the only source SkillStar may query install-time
-    /// security audits for. Pure URL-shape check: read-only, no IO, no side
-    /// effects. The same gate the GPUI import dialog uses.
-    pub fn may_query_install_audits(repo_url: String) -> bool {
-        ss_marketplace::may_query_install_audits(&repo_url)
-    }
-
-    /// The scope a refresh button press should sync for this tab + query
-    /// (`search_seed:<q>` / `official_publishers` / `leaderboard_<tab>`).
-    /// Pure; the page hands the result back to `sync_scope`.
-    pub fn scope_for(tab: String, query: String) -> String {
-        scope_for(&tab, &query)
-    }
-
     /// One leaderboard read — the all/trending/hot tabs
     /// (`get_leaderboard_local`, mod.rs `refresh` query-empty branch).
     /// Read-only local-first: falls back to remote inside the domain.
     /// Resolves `{data, snapshotStatus, snapshotUpdatedAt, error}`.
     pub async fn leaderboard(category: String) -> Result<JsonValue, String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
+        let scope = format!(
+            "leaderboard_{}",
+            if category.trim().is_empty() {
+                "all".to_owned()
+            } else {
+                category.trim().to_ascii_lowercase()
+            }
+        );
         get_leaderboard_local(&category)
             .await
-            .map(skills_result)
+            .map(|result| skills_result(&scope, result))
             .map_err(|err| format!("{err:#}"))
     }
 
@@ -248,10 +300,11 @@ impl Marketplace {
     /// local-first; the search seed write happens on `sync_scope`, not here.
     /// Same result shape as `leaderboard`.
     pub async fn search(query: String) -> Result<JsonValue, String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
+        let scope = format!("search_seed:{}", query.trim().to_ascii_lowercase());
         search_local(&query, Some(50))
             .await
-            .map(skills_result)
+            .map(|result| skills_result(&scope, result))
             .map_err(|err| format!("{err:#}"))
     }
 
@@ -259,10 +312,10 @@ impl Marketplace {
     /// tab's dataset). Read-only local-first. Same result shape with
     /// publisher rows: `{name, repo, repoCount, skillCount, url}`.
     pub async fn publishers() -> Result<JsonValue, String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
         get_publishers_local()
             .await
-            .map(publishers_result)
+            .map(|result| publishers_result("official_publishers", result))
             .map_err(|err| format!("{err:#}"))
     }
 
@@ -272,7 +325,7 @@ impl Marketplace {
     /// backfill — the page re-reads once more ~8s later to pick it up
     /// (mod.rs `SYNC_BACKFILL_RELOAD`).
     pub async fn sync_scope(scope: String) -> Result<(), String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
         sync_marketplace_scope(&scope)
             .await
             .map(|_| ())
@@ -293,13 +346,23 @@ impl Marketplace {
         .map_err(|join| format!("install task failed: {join}"))?
     }
 
-    /// Uninstall a skill by name (`skill_install::uninstall_skill`, the
-    /// market card's uninstall action after the confirm). Runs on the
-    /// blocking pool. Resolves with the name.
-    pub async fn uninstall_skill(name: String) -> Result<String, String> {
+    /// Uninstall the Skill a market row refers to (`skill_install::uninstall_skill`,
+    /// the market card's uninstall action after the confirm). The row carries the
+    /// upstream `name` and `source`; the installed folder is not always `name`,
+    /// because a taken name makes the installer put the Skill in `<name>-<owner>`,
+    /// so the folder is resolved the way the row is marked installed. Runs on the
+    /// blocking pool. Resolves with the folder that was removed.
+    pub async fn uninstall_skill(source: String, name: String) -> Result<String, String> {
+        // When the snapshot runtime cannot be set up, or nothing installed
+        // answers for the row, fall back to the row's name: nothing is
+        // installed under it, so removing only prunes stale entries.
+        let _ = ensure_runtime().await;
+        let folder = market_snapshot::installed_folder_for(&source, &name)
+            .await
+            .unwrap_or(name);
         blocking(move || {
-            ss_skills::skill_install::uninstall_skill(&name)
-                .map(|_| name.clone())
+            ss_skills::skill_install::uninstall_skill(&folder)
+                .map(|_| folder.clone())
                 .map_err(|err| format!("{err:#}"))
         })
         .await
@@ -334,7 +397,7 @@ impl Marketplace {
     /// Seed sparse local search results (<5 hits, subject to 10-minute cooldown)
     /// into the local marketplace SQLite snapshot.
     pub async fn maybe_seed_search(query: String) -> Result<bool, String> {
-        ensure_runtime()?;
+        ensure_runtime().await?;
         market_snapshot::maybe_seed_sparse_search(&query)
             .await
             .map_err(|err| format!("{err:#}"))
@@ -345,42 +408,19 @@ impl Marketplace {
 mod tests {
     use super::Marketplace;
     use ss_core::types::skill::Skill;
+    use ss_marketplace::SnapshotStatus;
 
     #[test]
-    fn gates_exact_github_clone_urls_only() {
-        assert!(Marketplace::may_query_install_audits(
-            "https://github.com/anthropics/skills".to_owned()
-        ));
-        assert!(!Marketplace::may_query_install_audits(
-            "https://gitlab.com/owner/repo".to_owned()
-        ));
-        assert!(!Marketplace::may_query_install_audits(
-            "https://github.com/anthropics/skills/tree/main".to_owned()
-        ));
-        assert!(!Marketplace::may_query_install_audits(String::new()));
-    }
-
-    /// mod.rs:324-330 — the refresh scope a tab + query maps onto. Pure, so
-    /// the vocabulary is locked without touching the network or the db.
-    #[test]
-    fn scope_for_matches_the_sync_grammar() {
-        assert_eq!(
-            Marketplace::scope_for("all".into(), "".into()),
-            "leaderboard_all"
+    fn structured_error_carries_kind_scope_and_detail() {
+        let json = super::error_json(
+            SnapshotStatus::ErrorFallback,
+            "leaderboard_all",
+            Some("timeout reaching skills.sh".to_owned()),
         );
-        assert_eq!(
-            Marketplace::scope_for("trending".into(), "  ".into()),
-            "leaderboard_trending"
-        );
-        assert_eq!(
-            Marketplace::scope_for("official".into(), "".into()),
-            "official_publishers"
-        );
-        // Search wins over the tab and case-folds (search_seed_scope parity).
-        assert_eq!(
-            Marketplace::scope_for("hot".into(), "  Rust  ".into()),
-            "search_seed:rust"
-        );
+        assert_eq!(json["kind"].as_str(), Some("error_fallback"));
+        assert_eq!(json["scope"].as_str(), Some("leaderboard_all"));
+        assert_eq!(json["detail"].as_str(), Some("timeout reaching skills.sh"));
+        assert!(super::error_json(SnapshotStatus::Fresh, "leaderboard_all", None).is_null());
     }
 
     /// The wire shape every reader resolves with: the four keys and the six

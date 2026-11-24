@@ -40,9 +40,9 @@ fn v12_migration_is_repeatable_and_adds_the_degraded_column() {
 /// version 0 and gets `degraded_reason` from the base `CREATE TABLE` chain, so
 /// no amount of local testing on a new database sees it. An existing v11
 /// database instead ends up stamped 12 without the column, and then
-/// `scope_sync_state`, `get_marketplace_sync_states` and the MCP sync-state
-/// read all die on `no such column` — the marketplace falls back to
-/// online-only and the degraded marker silently reads as `false` forever.
+/// `scope_sync_state` reads all die on `no such column` — the marketplace
+/// falls back to online-only and the degraded marker silently reads as `false`
+/// forever.
 ///
 /// So: hand-seed a real v11 database and go through the startup path, exactly
 /// like the v11 test below does for v10.
@@ -97,13 +97,6 @@ fn the_v12_column_is_added_when_an_existing_v11_database_starts_up() {
             .expect("the pre-existing row survives");
         assert!(state.degraded_reason.is_none());
         assert!(state.last_success_at.is_some(), "v11 data is preserved");
-        drop(conn);
-        assert_eq!(
-            get_marketplace_sync_states()
-                .expect("diagnostics read must work after the upgrade")
-                .len(),
-            1
-        );
     });
 }
 

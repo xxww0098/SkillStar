@@ -117,8 +117,8 @@ impl MySkillsDrawer {
         }
     }
 
-    /// Inspect `called`, discovered `besideSkills` siblings, and any
-    /// `modifiedCopies` requiring conflict recovery. Blocking pool.
+    /// Inspect `called`, discovered `besideSkills` siblings, `modifiedCopies`,
+    /// and `unmanagedEntries` requiring conflict recovery. Blocking pool.
     pub async fn inspect_drawer_extras(skill: String) -> Result<JsonValue, String> {
         blocking(move || inspect_drawer_extras_job(&skill))
             .await
@@ -142,6 +142,30 @@ impl MySkillsDrawer {
         blocking(move || overwrite_agent_copy_with_backup_job(&skill, &agent_id))
             .await
             .map_err(|join| format!("overwrite-agent-copy task failed: {join}"))?
+    }
+
+    /// Backup-archive an unmanaged agent directory (when real dir) and switch
+    /// it to SkillStar's managed symlink/copy deployment. Blocking pool under
+    /// the zero-wait update transaction lock.
+    pub async fn take_over_unmanaged_agent_entry(
+        skill: String,
+        agent_id: String,
+    ) -> Result<JsonValue, String> {
+        blocking(move || take_over_unmanaged_agent_entry_job(&skill, &agent_id))
+            .await
+            .map_err(|join| format!("take-over-unmanaged-entry task failed: {join}"))?
+    }
+
+    /// Absorb an unmanaged real skill directory from `agent_id` into
+    /// `data/skills/installed/<skill>` (archiving the previous canonical copy)
+    /// and switch `agent_id` to a managed deployment. Blocking pool.
+    pub async fn adopt_unmanaged_agent_entry(
+        skill: String,
+        agent_id: String,
+    ) -> Result<(), String> {
+        blocking(move || adopt_unmanaged_agent_entry_job(&skill, &agent_id))
+            .await
+            .map_err(|join| format!("adopt-unmanaged-entry task failed: {join}"))?
     }
 }
 
@@ -171,10 +195,25 @@ fn inspect_drawer_extras_job(skill: &str) -> Result<JsonValue, String> {
             ])
         })
         .collect();
+    let unmanaged_entries: Vec<JsonValue> =
+        deployment::inspect_unmanaged_agent_entries(Some(skill))
+            .into_iter()
+            .map(|info| {
+                obj(vec![
+                    ("skillName", str(&info.skill_name)),
+                    ("agentId", str(&info.agent_id)),
+                    ("agentDisplayName", str(&info.agent_name)),
+                    ("targetDir", str(&info.path)),
+                    ("isSymlink", JsonValue::Bool(info.is_symlink)),
+                    ("canAdoptToHub", JsonValue::Bool(info.can_adopt_to_hub)),
+                ])
+            })
+            .collect();
     Ok(obj(vec![
         ("called", called),
         ("besideSkills", JsonValue::Array(beside_skills)),
         ("modifiedCopies", JsonValue::Array(modified_copies)),
+        ("unmanagedEntries", JsonValue::Array(unmanaged_entries)),
     ]))
 }
 
@@ -193,6 +232,29 @@ fn overwrite_agent_copy_with_backup_job(skill: &str, agent_id: &str) -> Result<J
         ("backupId", str(&entry.id)),
         ("path", str(&entry.path.display().to_string())),
     ]))
+}
+
+fn take_over_unmanaged_agent_entry_job(skill: &str, agent_id: &str) -> Result<JsonValue, String> {
+    let _guard = try_acquire_update_transaction_lock(Duration::ZERO)
+        .map_err(|err| format!("{err:#}"))?;
+    let entry = deployment::take_over_unmanaged_agent_entry(skill, agent_id)
+        .map_err(|err| format!("{err:#}"))?;
+    Ok(match entry {
+        Some(backup) => obj(vec![
+            ("backupId", str(&backup.id)),
+            ("path", str(&backup.path.display().to_string())),
+        ]),
+        None => obj(vec![
+            ("backupId", JsonValue::Null),
+            ("path", JsonValue::Null),
+        ]),
+    })
+}
+
+fn adopt_unmanaged_agent_entry_job(skill: &str, agent_id: &str) -> Result<(), String> {
+    let _guard = try_acquire_update_transaction_lock(Duration::ZERO)
+        .map_err(|err| format!("{err:#}"))?;
+    deployment::adopt_unmanaged_agent_entry(skill, agent_id).map_err(|err| format!("{err:#}"))
 }
 
 /// `toggle_agent`'s synchronous core (run on the blocking pool by the module
@@ -268,16 +330,21 @@ mod tests {
                     .unwrap_or_default()
                     .as_nanos()
             ));
-            let previous = [("HOME", "home"), ("USERPROFILE", "home"), ("SKILLSTAR_DATA_DIR", "data")]
-                .into_iter()
-                .map(|(key, sub)| {
-                    let saved = std::env::var_os(key);
-                    let dir = root.join(sub);
-                    std::fs::create_dir_all(&dir).unwrap();
-                    unsafe { std::env::set_var(key, dir) };
-                    (key, saved)
-                })
-                .collect();
+            let previous = [
+                ("HOME", "home"),
+                ("USERPROFILE", "home"),
+                ("SKILLSTAR_TOOL_SYNC_HOME", "home"),
+                ("SKILLSTAR_DATA_DIR", "data"),
+            ]
+            .into_iter()
+            .map(|(key, sub)| {
+                let saved = std::env::var_os(key);
+                let dir = root.join(sub);
+                std::fs::create_dir_all(&dir).unwrap();
+                unsafe { std::env::set_var(key, dir) };
+                (key, saved)
+            })
+            .collect();
             ss_skills::deployment::invalidate_profile_cache();
             Self { _lock: lock, previous, root }
         }
@@ -298,23 +365,16 @@ mod tests {
         }
     }
 
-    /// The module methods ride the blocking pool (`tokio::spawn_blocking`),
-    /// which a headless test has no runtime for; the synchronous cores carry
-    /// the whole domain contract, so the tests drive them directly.
     #[test]
     fn an_empty_master_batch_reports_zeros() {
         let _iso = IsolatedDataDir::new();
-        let report =
-            super::toggle_listed("demo", &[], true).expect("empty batch");
+        let report = super::toggle_listed("demo", &[], true).expect("empty batch");
         assert_eq!(report["total"].as_u64(), Some(0));
         assert_eq!(report["failed"].as_u64(), Some(0));
         assert_eq!(report["skipped"].as_u64(), Some(0));
         assert_eq!(report["canonical"].as_u64(), Some(0));
     }
 
-    /// A skill that is not installed cannot be toggled: the domain rejects
-    /// and the facade carries the chain (the drawer restores its optimistic
-    /// flip on this Err).
     #[test]
     fn toggling_an_uninstalled_skill_rejects_with_the_domain_reason() {
         let _iso = IsolatedDataDir::new();
@@ -323,10 +383,6 @@ mod tests {
         assert!(!err.is_empty());
     }
 
-    /// An unknown agent id is rejected before any filesystem write — the
-    /// master batch counts it as `failed` rather than erroring the whole
-    /// transaction (commands.rs `toggle_listed_agents` collects per-agent
-    /// failures; only the lock is fatal).
     #[test]
     fn the_master_batch_counts_an_unknown_agent_as_failed() {
         let _iso = IsolatedDataDir::new();
@@ -341,8 +397,6 @@ mod tests {
         assert_eq!(report["skipped"].as_u64(), Some(0));
     }
 
-    /// A syntactically invalid skill name fails validation inside the
-    /// transaction without touching anything (content::validate_skill_name).
     #[test]
     fn an_invalid_skill_name_is_rejected_by_validation() {
         let _iso = IsolatedDataDir::new();
@@ -351,10 +405,6 @@ mod tests {
         assert!(!err.is_empty());
     }
 
-    /// The upstream-note read: an isolated store knows no skills, so the
-    /// descriptor is null (the drawer keeps the snapshot's kind and shows the
-    /// recorded-baseline hint). The listing settles on first poll (the same
-    /// `spin` discipline the my-skills facade's snapshot test uses).
     #[test]
     fn an_unknown_skill_has_no_upstream_note() {
         let _iso = IsolatedDataDir::new();
@@ -461,9 +511,74 @@ mod tests {
             "---\nname: demo\ndescription: discard-me\n---\n",
         )
         .unwrap();
-        let backup = super::overwrite_agent_copy_with_backup_job("demo", "custom_copy_drawer").unwrap();
+        let backup =
+            super::overwrite_agent_copy_with_backup_job("demo", "custom_copy_drawer").unwrap();
         assert!(backup["backupId"].as_str().is_some());
         let restored = std::fs::read_to_string(agent_dir.join("demo/SKILL.md")).unwrap();
         assert!(restored.contains("edited-in-agent"));
+    }
+
+    #[test]
+    fn unmanaged_antigravity_directory_takeover_and_adopt_roundtrip() {
+        let iso = IsolatedDataDir::new();
+        let hub_dir = ss_core::infra::paths::hub_skills_dir().join("ego-browser");
+        std::fs::create_dir_all(&hub_dir).unwrap();
+        std::fs::write(
+            hub_dir.join("SKILL.md"),
+            "---\nname: ego-browser\ndescription: hub version\n---\n\n# hub\n",
+        )
+        .unwrap();
+
+        ss_skills::agents::toggle_profile("antigravity").unwrap();
+        let antigravity_dir = iso
+            .root
+            .join("home/.gemini/antigravity/skills/ego-browser");
+        std::fs::create_dir_all(&antigravity_dir).unwrap();
+        std::fs::write(
+            antigravity_dir.join("SKILL.md"),
+            "---\nname: ego-browser\ndescription: external app copy\n---\n\n# external\n",
+        )
+        .unwrap();
+
+        let extras = super::inspect_drawer_extras_job("ego-browser").unwrap();
+        assert_eq!(
+            extras["unmanagedEntries"][0]["agentId"].as_str(),
+            Some("antigravity")
+        );
+        assert_eq!(
+            extras["unmanagedEntries"][0]["canAdoptToHub"].as_bool(),
+            Some(true)
+        );
+
+        // Adopt unmanaged directory into Hub first.
+        super::adopt_unmanaged_agent_entry_job("ego-browser", "antigravity").unwrap();
+        assert!(
+            std::fs::read_to_string(hub_dir.join("SKILL.md"))
+                .unwrap()
+                .contains("external app copy")
+        );
+        assert!(
+            super::inspect_drawer_extras_job("ego-browser").unwrap()["unmanagedEntries"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+
+        // Simulate external installer overwriting Antigravity's folder again, then take over.
+        ss_skills::deployment::unlink_skill_from_agent("ego-browser", "antigravity").unwrap();
+        std::fs::create_dir_all(&antigravity_dir).unwrap();
+        std::fs::write(
+            antigravity_dir.join("SKILL.md"),
+            "---\nname: ego-browser\ndescription: stale external\n---\n",
+        )
+        .unwrap();
+        let takeover =
+            super::take_over_unmanaged_agent_entry_job("ego-browser", "antigravity").unwrap();
+        assert!(takeover["backupId"].as_str().is_some());
+        assert!(
+            ss_skills::installed_skill::agent_links_for("ego-browser")
+                .iter()
+                .any(|name| name == "Antigravity")
+        );
     }
 }

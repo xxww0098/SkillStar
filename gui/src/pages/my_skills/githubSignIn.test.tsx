@@ -14,7 +14,7 @@ test("opening paints the starting phase while the device flow starts", async () 
   const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
   await app.host.send("harness", { action: "open" });
   await app.waitFor("id:github-sign-in-card");
-  expect(app.texts()).toContain("加载中...");
+  await app.waitUntil(() => app.texts().includes("加载中..."));
   // 标题（render_header 的 sharedChannels.signInTitle）。
   expect(app.texts()).toContain("登录 GitHub 以管理共享频道");
 });
@@ -62,7 +62,7 @@ test("denied paints the localized message and retry restarts the flow", async ()
   await app.press("github-sign-in-retry");
   await app.waitFor("id:github-sign-in-card");
   await app.waitUntil(() => app.texts().some((t) => t.includes("calls:2")));
-  expect(app.texts()).toContain("加载中...");
+  await app.waitUntil(() => app.texts().includes("加载中..."));
 });
 
 test("a domain error shows verbatim, not as a key", async () => {
@@ -86,34 +86,54 @@ test("connected writes the page session and closes the dialog", async () => {
   await app.waitUntil(() => app.texts().some((t) => t.includes("session:connected@octocat")));
 });
 
-test("closing on the veil cancels the in-flight job", async () => {
+test("closing on the veil hides the dialog while keeping polling alive", async () => {
   const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
   await app.host.send("harness", { action: "open" });
   await app.host.send("harness", { action: "deliver-waiting" });
   await app.waitFor("id:github-sign-in-code");
   await app.press("github-sign-in-veil");
   await app.waitUntil(() => !app.shows("id:github-sign-in-card"));
-  // 关闭即取消：run.stop() → job.cancel()（Drop→cancel 对位）。
+  // 关闭只隐藏弹层，后台设备授权继续轮询。
   await app.host.send("harness", { action: "cancelled" });
-  await app.waitUntil(() => app.texts().some((t) => t.includes("cancelled:true")));
+  await app.waitUntil(() => app.texts().some((t) => t.includes("cancelled:false")));
+  await app.waitUntil(() => app.texts().some((t) => t.includes("polling:true")));
+
+  // 重开后直接续显既有设备码，不新开第二轮请求。
+  await app.host.send("harness", { action: "open" });
+  await app.waitFor("id:github-sign-in-code");
+  expect(app.texts()).toContain("ABCD-1234");
+  expect(app.texts().some((t) => t.includes("calls:1"))).toBe(true);
+
+  // 后台完成授权依然写回会话。
+  await app.press("github-sign-in-veil");
+  await app.waitUntil(() => !app.shows("id:github-sign-in-card"));
+  await app.host.send("harness", { action: "resolve-connected" });
+  await app.waitUntil(() => app.texts().some((t) => t.includes("session:connected@octocat")));
 });
 
-test("escape closes and cancels too", async () => {
+test("escape closes without cancelling", async () => {
   const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
   await app.host.send("harness", { action: "open" });
   await app.waitFor("id:github-sign-in-card");
   await app.keyboard.press("escape");
   await app.waitUntil(() => !app.shows("id:github-sign-in-card"));
   await app.host.send("harness", { action: "cancelled" });
-  await app.waitUntil(() => app.texts().some((t) => t.includes("cancelled:true")));
+  await app.waitUntil(() => app.texts().some((t) => t.includes("cancelled:false")));
+  await app.waitUntil(() => app.texts().some((t) => t.includes("polling:true")));
 });
 
-test("a late waiting event after close never lands; reopening starts clean", async () => {
+test("explicit cancel button stops the job and blocks late events; reopening starts fresh", async () => {
   const app = await open(HOST, { width: 1200, height: 800, reducedMotion: true });
   await app.host.send("harness", { action: "open" });
-  // Starting 相关闭（start 在途的竞态：epoch 门兜底）。
-  await app.press("github-sign-in-veil");
+  await app.host.send("harness", { action: "deliver-waiting" });
+  await app.waitFor("id:github-sign-in-code");
+  // 显式点击「取消授权」按钮才中止设备流。
+  await app.press("github-sign-in-cancel");
   await app.waitUntil(() => !app.shows("id:github-sign-in-card"));
+  await app.host.send("harness", { action: "cancelled" });
+  await app.waitUntil(() => app.texts().some((t) => t.includes("cancelled:true")));
+  await app.waitUntil(() => app.texts().some((t) => t.includes("polling:false")));
+
   // 迟到的 waiting 事件 post 进已停的 run。
   await app.host.send("harness", { action: "late-waiting" });
   await app.waitUntil(() => app.texts().some((t) => t.includes("late:1")));
@@ -122,7 +142,7 @@ test("a late waiting event after close never lands; reopening starts clean", asy
   // 重开：新任务从 Starting 开始，旧 code 不落屏。
   await app.host.send("harness", { action: "open" });
   await app.waitFor("id:github-sign-in-card");
-  expect(app.texts()).toContain("加载中...");
+  await app.waitUntil(() => app.texts().includes("加载中..."));
   expect(app.texts()).not.toContain("ABCD-1234");
   // 新任务自己的 waiting 事件正常落屏。
   await app.host.send("harness", { action: "deliver-waiting" });
@@ -139,6 +159,6 @@ test("a cancelled settle after retry does not paint over the fresh flow", async 
   await app.waitUntil(() => app.texts().some((t) => t.includes("calls:2")));
   // 第一笔（已过期）结算若迟到也不得改相位——新任务停在 Starting 等待
   // 自己的 waiting 事件。
-  expect(app.texts()).toContain("加载中...");
+  await app.waitUntil(() => app.texts().includes("加载中..."));
   expect(app.shows("id:github-sign-in-retry")).toBe(false);
 });

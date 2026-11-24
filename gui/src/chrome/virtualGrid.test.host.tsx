@@ -3,6 +3,7 @@ import { CARD_ROW_W } from "../layout";
 import { MarketBoard } from "../pages/marketplace/board";
 import { PublisherBoardPane } from "../pages/marketplace/publisher/board";
 import type { PublisherRepoRow, PublisherSide } from "../pages/marketplace/publisher/readSide";
+import { NO_BUSY } from "../pages/marketplace/readSide";
 import type { MarketSkill, SnapshotStatusTag } from "../pages/marketplace/types";
 import { SkillCard } from "../pages/my_skills/skillCard";
 import type { SkillRecord } from "../pages/my_skills/filters";
@@ -80,7 +81,7 @@ const fakePublisherSide: PublisherSide = {
   loadingRepos: signal(false),
   loadingSkills: signal(false),
   refreshing: signal(false),
-  busy: signal<string | null>(null),
+  busy: signal<ReadonlySet<string>>(NO_BUSY),
   snapshotStatus: signal<SnapshotStatusTag>("fresh"),
   snapshotError: signal<string | null>(null),
   refreshedFlash: signal(false),
@@ -165,7 +166,7 @@ function App(): JSX.Element {
             publishers={[]}
             query=""
             viewList={false}
-            busy={null}
+            busy={NO_BUSY}
             selectedName={null}
             onOpenSkill={noop}
             onToggleInstall={noop}

@@ -1,15 +1,14 @@
 //! Antigravity 的 Google OAuth 客户端凭据解析。
 //!
-//! 换票要用一个安装型桌面 client 的 id + secret。id 是公开的（Antigravity 与
-//! Cockpit Tools 共用同一个），secret 不随仓库发布，只能由使用者注入：
+//! 换票要用一个安装型桌面 client 的 id + secret；默认配置与公开的
+//! Cockpit Tools 客户端一致，不是用户凭据：
 //!
 //! 1. env `SKILLSTAR_ANTIGRAVITY_CLIENT_ID` / `_SECRET`
 //! 2. 编译期 `option_env!`（发布 CI 或本地构建时注入）
 //! 3. `~/.skillstar/config/antigravity_oauth.json`（`{client_id, client_secret}`）
-//! 4. 内置公开桌面 client 的 id + `GOCSPX-` 占位 secret
+//! 4. 内置公开桌面 client 的 id + secret
 //!
-//! 占位串永远不会被当成 secret 发出去：缺失时登录在打开浏览器之前就报错，
-//! 而不是让用户走完授权才发现换不到票。
+//! 自定义 client id 不使用内置 secret；缺少对应 secret 时登录在打开浏览器前报错。
 
 use std::path::PathBuf;
 
@@ -23,7 +22,10 @@ const BUILTIN_CLIENT_ID: &str = concat!(
     ".apps.googleusercontent.com",
 );
 
-/// 内置 client 的 secret 占位：真实值只经 env / 编译期 / 配置文件注入。
+/// Cockpit Tools 公开的安装型客户端配置，并非用户凭据。
+const BUILTIN_CLIENT_SECRET: &str = "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";
+
+/// 占位串从不作为实际 client secret 使用。
 const BUILTIN_CLIENT_SECRET_PLACEHOLDER: &str = "GOCSPX-";
 
 const CLIENT_ID_ENV: &str = "SKILLSTAR_ANTIGRAVITY_CLIENT_ID";
@@ -109,7 +111,7 @@ fn read_config_file(path: &std::path::Path) -> Option<ConfigFile> {
     serde_json::from_str(&body).ok()
 }
 
-/// 优先级：env → 编译期 → 文件 → 内置。id 总有值，secret 可能没有。
+/// 优先级：env → 编译期 → 文件 → 内置；仅默认 client id 使用内置 secret。
 fn resolve(
     env_id: Option<String>,
     env_secret: Option<String>,
@@ -126,7 +128,8 @@ fn resolve(
     let client_secret = clean(env_secret)
         .or_else(|| clean(built_secret))
         .or(from_file_secret)
-        .filter(|secret| !is_placeholder(secret));
+        .filter(|secret| !is_placeholder(secret))
+        .or_else(|| (client_id == BUILTIN_CLIENT_ID).then(|| BUILTIN_CLIENT_SECRET.to_string()));
     ClientConfig {
         client_id,
         client_secret,
@@ -209,10 +212,16 @@ mod tests {
     }
 
     #[test]
-    fn the_builtin_client_has_an_id_but_never_a_secret() {
+    fn the_builtin_client_has_the_published_installed_app_configuration() {
         let config = resolve(None, None, None, None, None);
         assert_eq!(config.client_id, BUILTIN_CLIENT_ID);
-        let error = config.require_secret().expect_err("no secret");
+        assert_eq!(
+            config.require_secret().expect("public client secret"),
+            BUILTIN_CLIENT_SECRET
+        );
+
+        let custom = resolve(Some("custom-id".to_string()), None, None, None, None);
+        let error = custom.require_secret().expect_err("custom clients need their own secret");
         let message = error.to_string();
         assert!(message.contains("SKILLSTAR_ANTIGRAVITY_CLIENT_SECRET"), "{message}");
         assert!(message.contains("antigravity_oauth.json"), "{message}");
@@ -221,7 +230,13 @@ mod tests {
     #[test]
     fn the_secret_placeholder_is_never_sent() {
         for placeholder in ["GOCSPX-", " gocspx- "] {
-            let config = resolve(None, Some(placeholder.to_string()), None, None, None);
+            let config = resolve(
+                Some("custom-id".to_string()),
+                Some(placeholder.to_string()),
+                None,
+                None,
+                None,
+            );
             assert_eq!(config.client_secret, None, "{placeholder:?} is not a secret");
             assert!(config.require_secret().is_err());
         }

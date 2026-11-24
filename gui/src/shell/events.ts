@@ -42,8 +42,11 @@ export interface PublisherRef {
 export const selectPage = channel<PageId>();
 /** Marketplace → publisher detail. */
 export const selectPublisher = channel<PublisherRef>();
-/** A MySkills flow wrote a deck (Quick Pack, `agd-` share codes): the
- * keep-alive deck page reloads its list. */
+/** The deck store changed: a MySkills flow wrote a deck (Quick Pack,
+ * `agd-` share codes), or a deck page job rewrote one. A deck's rail toggle
+ * also links its member Skills into Agent directories, so this channel is
+ * what makes the keep-alive skills page reload its per-Skill agent links —
+ * both pages subscribe and reload their own snapshot. */
 export const groupsChanged = channel<void>();
 /** An agent was enabled/disabled in Settings: keep-alive pages reload their
  * profile snapshots. */
@@ -59,6 +62,8 @@ export interface ImportSourceRequest {
 }
 
 export const requestImportSource = channel<ImportSourceRequest>();
+/** Sidebar GitHub entry -> switch MySkills page directly into shared channels workspace. */
+export const requestChannelsScope = channel<void>();
 
 // ---- Notify band (notify.rs parity) ------------------------------------
 
@@ -69,15 +74,29 @@ export interface ToastAction {
   run: () => void;
 }
 
+export type ToastKind = "status" | "action" | "progress";
+
 export interface ToastRequest {
   tone: ToastTone;
   message: string;
-  /** Notices sharing a replace key displace each other. */
+  /** Notices sharing a replace key update the one on screen in place. */
   replaceKey?: string;
-  /** Ignore the TTL; only the close button removes it. */
+  /** No TTL while it is the current toast. A newer toast still replaces it. */
   pinned?: boolean;
-  /** An inline button beside the alert; carrying one auto-pins. */
+  /** An inline button. It does not pin; pass `pinned` to keep the toast up. */
   action?: ToastAction;
+  /** Unpinned lifetime. Success and info use 3s; warning leaves this unset (5s). */
+  ttlMs?: number;
+  /**
+   * status sheens on arrival. action waits for the button and does not sheen.
+   * progress stays while `pending` is not false, then sheens the result.
+   * Omitted: an action makes it an action toast, otherwise status.
+   */
+  kind?: ToastKind;
+  /** Progress stays up until this is false. */
+  pending?: boolean;
+  /** Undo action: countdown ring, then the restored line for 1.5s. */
+  undo?: boolean;
 }
 
 const notifyChannel = channel<ToastRequest>();
@@ -86,9 +105,20 @@ export function subscribeNotify(handler: Handler<ToastRequest>): () => void {
   return notifyChannel.subscribe(handler);
 }
 
+/** Success and info leave on their own. Warning keeps the 5s band. */
+export const TOAST_SHORT_TTL_MS = 3000;
+
 /** Shorthand publishers (Notice::info / success / warning / error). */
 export function toast(message: string, tone: ToastTone = "info"): void {
-  notifyChannel.publish({ tone, message });
+  if (tone === "error") {
+    notifyChannel.publish({ tone, message, pinned: true });
+    return;
+  }
+  notifyChannel.publish({
+    tone,
+    message,
+    ttlMs: tone === "warning" ? undefined : TOAST_SHORT_TTL_MS,
+  });
 }
 
 export function publishToast(request: ToastRequest): void {

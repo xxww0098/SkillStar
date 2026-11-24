@@ -31,7 +31,7 @@ export interface SkillRecord {
   upstreamChange:
     | { kind: "removed" }
     | { kind: "identity_changed"; upstreamName: string }
-    | { kind: "local_changes" }
+    | { kind: "local_changes"; baselineMissing?: boolean }
     | null;
   lastUpdated: string;
   gitUrl: string;

@@ -6,10 +6,12 @@
 //! state, quota, the reauth flag - so a rename the user made while the network
 //! was busy survives. A switch verifies against the client's own disk before it
 //! moves anything, so a client that refuses or ignores the write stays on the
-//! account it was already serving.
+//! account it was already serving. A switch never touches the client process:
+//! only the stored credential is rewritten, and restarting the client to pick it
+//! up is the user's call (D-121).
 
 use crate::oauth::{RefreshOutcome, TokenSet};
-use crate::usage::{Credentials, UsageOutcome};
+use crate::usage::{Credentials, UsageError, UsageOutcome};
 
 use crate::error::{AccountError, AccountResult};
 use crate::record::Account;
@@ -38,12 +40,18 @@ pub(crate) fn now_secs() -> i64 {
         .unwrap_or_default()
 }
 
-/// Every stored account, oldest first, with the client's truth already applied.
+/// Supported stored accounts, oldest first, with the client's truth already applied.
+///
+/// Reading the list is also the moment a retired client's rows go away: this
+/// build cannot log in, read quota for, or switch those agents any more, so
+/// their records are deleted instead of lingering as unreadable leftovers
+/// (D-119).
 pub fn list() -> AccountResult<Vec<AccountView>> {
-    let entries = store::index()?;
-    let lives = reconcile::live_all()?;
+    let entries = store::index_supported()?;
+    let lives = reconcile::live_all_with(&entries);
     Ok(entries
         .iter()
+        .filter(|entry| Agent::from_id(&entry.agent).is_ok())
         .map(|entry| view_from_entry(entry, &lives))
         .collect())
 }
@@ -59,46 +67,106 @@ pub(crate) fn refresh_with(
     refresh_tokens: OAuthRefresh,
     read_usage: UsageRead,
 ) -> AccountResult<AccountView> {
-    // One refresh per agent at a time: two rotations of the same refresh token
-    // would leave one of them storing a token the provider already replaced.
-    // The record is read again under that lock, so the credential refreshed is
-    // the one on disk now and not one another window already rotated.
-    let agent = store::get(id)?.agent;
-    let _refresh_guard = store::AgentRefreshLock::acquire(&agent)?;
-    let stored = store::get(id)?;
-    let mut tokens = stored.tokens()?;
-    let mut state = stored.provider_state()?;
+    let updated = refresh_record_with(id, refresh_tokens, read_usage)?;
+    Ok(view_for(&updated))
+}
 
-    if tokens.needs_refresh(now_secs(), crate::oauth::refresh_skew_seconds(&agent)) {
-        match refresh_tokens(&agent, &tokens, state.as_ref()) {
-            Ok(outcome) => {
-                tokens = outcome.tokens;
-                if outcome.provider_state.is_some() {
-                    state = outcome.provider_state;
+fn refresh_record_with(
+    id: &str,
+    refresh_tokens: OAuthRefresh,
+    read_usage: UsageRead,
+) -> AccountResult<Account> {
+    let mut stored = store::get(id)?;
+    let agent = stored.agent.clone();
+    Agent::from_id(&agent)?;
+    let disk_tokens = stored.tokens()?;
+    let mut tokens = disk_tokens.clone();
+    let disk_state = stored.provider_state()?;
+    let mut state = disk_state.clone();
+    heal_cursor_tokens_from_local(&stored, &mut tokens);
+    let mut tokens_changed = tokens != disk_tokens;
+    let mut state_changed = false;
+
+    // Align pre-refresh skew with usage::fetch::tokens_for_read (300s) for
+    // OAuth-refreshable agents so rotation stays serialized under AgentRefreshLock
+    // and never leaks into the unlocked quota-HTTP phase.
+    let refresh_skew = if agent == Agent::DevinDesktop.id() {
+        crate::oauth::refresh_skew_seconds(&agent)
+    } else {
+        crate::oauth::refresh_skew_seconds(&agent).max(300)
+    };
+
+    if tokens.needs_refresh(now_secs(), refresh_skew) {
+        // Hold per-agent lock ONLY around token rotation + persistence so slow
+        // quota HTTP calls never block activate() or other accounts' refreshes.
+        let _refresh_guard = store::AgentRefreshLock::acquire(&agent)?;
+        stored = store::get(id)?;
+        let locked_disk_tokens = stored.tokens()?;
+        tokens = locked_disk_tokens.clone();
+        let locked_disk_state = stored.provider_state()?;
+        state = locked_disk_state.clone();
+        heal_cursor_tokens_from_local(&stored, &mut tokens);
+        tokens_changed = tokens != locked_disk_tokens;
+        state_changed = false;
+        if tokens.needs_refresh(now_secs(), refresh_skew) {
+            match refresh_tokens(&agent, &tokens, state.as_ref()) {
+                Ok(outcome) => {
+                    tokens = outcome.tokens;
+                    if outcome.provider_state.is_some() {
+                        state = outcome.provider_state;
+                    }
+                    stored = store::update(id, |account| {
+                        account.set_tokens(&tokens)?;
+                        account.set_provider_state(state.as_ref())?;
+                        Ok(())
+                    })?;
+                    tokens_changed = false;
+                    state_changed = false;
                 }
-            }
-            Err(error) => {
-                let classified = AccountError::from(error);
-                if matches!(classified, AccountError::AuthRequired(_)) {
-                    mark_requires_reauth(id)?;
+                Err(error) => {
+                    let classified = AccountError::from(error);
+                    if matches!(classified, AccountError::AuthRequired(_)) {
+                        mark_requires_reauth(id)?;
+                    }
+                    return Err(classified);
                 }
-                return Err(classified);
             }
         }
     }
 
+    let local_identity = if agent == Agent::Grok.id() {
+        switch::live(&agent)
+            .ok()
+            .filter(|live| serves(live, &tokens, &stored))
+            .and_then(|live| live.display_name)
+            .map(|name| crate::oauth::Identity {
+                display_name: Some(name),
+                ..crate::oauth::Identity::default()
+            })
+    } else {
+        None
+    };
+
     let credentials = Credentials {
         tokens: tokens.clone(),
+        account_id: stored.account_id.clone(),
         provider_state: state.clone(),
+        needs_identity: needs_profile_identity(&stored),
     };
-    let mut usage = stored.usage.clone();
+    let mut usage = clean_usage(&agent, stored.usage.clone());
     let mut requires_reauth = stored.requires_reauth;
+    let mut discovered_identity = None;
     match read_usage(&agent, &credentials) {
         Ok(outcome) => {
-            tokens = outcome.tokens;
-            if outcome.provider_state.is_some() {
-                state = outcome.provider_state;
+            if outcome.tokens != credentials.tokens {
+                tokens = outcome.tokens;
+                tokens_changed = true;
             }
+            if outcome.provider_state.is_some() && outcome.provider_state != credentials.provider_state {
+                state = outcome.provider_state;
+                state_changed = true;
+            }
+            discovered_identity = outcome.identity;
             usage = Some(outcome.snapshot);
             requires_reauth = false;
         }
@@ -112,24 +180,42 @@ pub(crate) fn refresh_with(
             // snapshot and say why it is stale.
             tracing::warn!(
                 target: "accounts",
+                agent = %agent,
                 account = %id,
                 error = %classified,
                 "quota read failed; keeping the last snapshot"
             );
             if let Some(previous) = usage.as_mut() {
                 previous.error = Some(classified.to_string());
+            } else {
+                usage = Some(crate::usage::UsageSnapshot {
+                    fetched_at: now_secs(),
+                    error: Some(classified.to_string()),
+                    ..Default::default()
+                });
             }
         }
     }
 
-    let updated = store::update(id, |account| {
-        account.set_tokens(&tokens)?;
-        account.set_provider_state(state.as_ref())?;
+    let token_identity = identity_from_tokens(&tokens);
+    store::update(id, |account| {
+        if tokens_changed {
+            account.set_tokens(&tokens)?;
+        }
+        if state_changed {
+            account.set_provider_state(state.as_ref())?;
+        }
+        if let Some(identity) = discovered_identity.as_ref() {
+            apply_discovered_identity(account, identity);
+        }
+        apply_discovered_identity(account, &token_identity);
+        if let Some(identity) = local_identity.as_ref() {
+            apply_discovered_identity(account, identity);
+        }
         account.usage = usage;
         account.requires_reauth = requires_reauth;
         Ok(())
-    })?;
-    Ok(view_for(&updated))
+    })
 }
 
 /// Make the account's client serve it.
@@ -144,9 +230,10 @@ pub(crate) fn activate_with(
     read_usage: UsageRead,
 ) -> AccountResult<ActivateOutcome> {
     // 1. The credential has to work before the client is touched at all.
-    refresh_with(id, refresh_tokens, read_usage)?;
+    let refreshed = refresh_record_with(id, refresh_tokens, read_usage)?;
+    let agent = refreshed.agent.clone();
+    let _switch_guard = store::AgentRefreshLock::acquire(&agent)?;
     let account = store::get(id)?;
-    let agent = account.agent.clone();
     let previous = live_account_id(&agent);
     let tokens = account.tokens()?;
     let state = account.provider_state()?;
@@ -167,8 +254,8 @@ pub(crate) fn activate_with(
     };
 
     // 3. Read the client back: the disk decides, not the writer.
-    match switch::live(&agent) {
-        Ok(live) if serves(&live, &tokens, &account) => {}
+    let live_display_name = match switch::live(&agent) {
+        Ok(live) if serves(&live, &tokens, &account) => live.display_name,
         Ok(live) => {
             let error = AccountError::Client(format!(
                 "{} did not start serving this account (the client shows {:?})",
@@ -177,15 +264,17 @@ pub(crate) fn activate_with(
             return Err(roll_back(&snapshot, error));
         }
         Err(error) => return Err(roll_back(&snapshot, error)),
-    }
+    };
 
     // 4. Only a verified switch moves the row.
     let updated = store::update(id, |account| {
         account.last_used_at = Some(now_secs());
         Ok(())
     })?;
+    // 5. 客户端进程不动：切号只写凭据。客户端要重启才读到新会话时，由用户自己
+    //    决定什么时候重启（D-121）。
     Ok(ActivateOutcome {
-        account: view_for_with(&updated, Some(updated.id.as_str())),
+        account: view_for_with(&updated, Some(updated.id.as_str()), live_display_name.as_deref()),
         previous,
         target: outcome.target,
     })
@@ -240,13 +329,14 @@ pub(crate) fn add_from_local_with(
 pub fn finish_login(login_id: &str) -> AccountResult<AccountView> {
     let outcome = crate::oauth::complete(login_id)?;
     let agent = Agent::from_id(&outcome.agent)?;
-    let account = Account::from_login(
+    let mut account = Account::from_login(
         agent.id(),
         &outcome.identity,
         &outcome.tokens,
         outcome.provider_state.as_ref(),
         now_secs(),
     )?;
+    let _ = verify_usage(&mut account, crate::usage::read);
     let stored = store::upsert_replacing_identity(account)?;
     Ok(view_for(&stored))
 }
@@ -278,26 +368,46 @@ fn store_new(
 fn verify_usage(account: &mut Account, read_usage: UsageRead) -> AccountResult<()> {
     let credentials = Credentials {
         tokens: account.tokens()?,
+        account_id: account.account_id.clone(),
         provider_state: account.provider_state()?,
+        needs_identity: needs_profile_identity(account),
     };
-    match read_usage(&account.agent, &credentials).map_err(AccountError::from) {
+    let token_identity = identity_from_tokens(&credentials.tokens);
+    match read_usage(&account.agent, &credentials) {
         Ok(outcome) => {
             account.set_tokens(&outcome.tokens)?;
             if outcome.provider_state.is_some() {
                 account.set_provider_state(outcome.provider_state.as_ref())?;
             }
+            if let Some(identity) = outcome.identity.as_ref() {
+                apply_discovered_identity(account, identity);
+            }
+            apply_discovered_identity(account, &identity_from_tokens(&outcome.tokens));
             account.usage = Some(outcome.snapshot);
             account.requires_reauth = false;
             Ok(())
         }
-        Err(classified @ AccountError::AuthRequired(_)) => Err(classified),
+        Err(UsageError::AuthRequired(message)) => Err(AccountError::AuthRequired(message)),
         Err(tolerated) => {
+            // An unreadable answer is durable, so the reason is kept on the row
+            // and the card can say why the quota is missing. Transient and
+            // unwired agents stay quiet: the next refresh retries them.
+            let diagnostic = matches!(tolerated, UsageError::Unreadable(_));
+            let tolerated = AccountError::from(tolerated);
+            apply_discovered_identity(account, &token_identity);
             tracing::warn!(
                 target: "accounts",
                 agent = %account.agent,
                 error = %tolerated,
                 "quota read failed; storing the credential without a snapshot"
             );
+            if diagnostic {
+                account.usage = Some(crate::usage::UsageSnapshot {
+                    fetched_at: now_secs(),
+                    error: Some(tolerated.to_string()),
+                    ..Default::default()
+                });
+            }
             account.requires_reauth = false;
             Ok(())
         }
@@ -342,25 +452,185 @@ fn roll_back(snapshot: &ClientSnapshot, cause: AccountError) -> AccountError {
 }
 
 /// The account the agent's client is serving, read from the client itself.
+fn live_for(agent: &str) -> Option<AgentLive> {
+    reconcile::live_for_agent(agent)
+}
+
 fn live_account_id(agent: &str) -> Option<String> {
-    reconcile::live_all()
-        .ok()?
-        .into_iter()
-        .find(|live| live.agent == agent)?
-        .account_id
+    live_for(agent).and_then(|live| live.account_id)
+}
+
+fn heal_cursor_tokens_from_local(stored: &Account, tokens: &mut TokenSet) {
+    if stored.agent != Agent::Cursor.id() {
+        return;
+    }
+    if tokens
+        .refresh_token
+        .as_deref()
+        .is_some_and(switch::cursor::is_safe_storage_ciphertext)
+    {
+        tokens.refresh_token = None;
+    }
+    let needs_heal = switch::cursor::is_safe_storage_ciphertext(&tokens.access_token)
+        || (tokens.refresh_token.is_none()
+            && tokens.needs_refresh(now_secs(), crate::oauth::refresh_skew_seconds(&stored.agent)));
+    if !needs_heal {
+        return;
+    }
+    let Ok(local) = switch::read(Agent::Cursor.id()) else {
+        return;
+    };
+    let same_email = crate::identity::same_identity(
+        local.identity.email.as_deref(),
+        stored.email.as_deref(),
+    );
+    let same_account = crate::identity::same_identity(
+        local.identity.account_id.as_deref(),
+        stored.account_id.as_deref(),
+    );
+    if same_email || same_account {
+        *tokens = local.tokens;
+    }
+}
+
+fn needs_profile_identity(account: &Account) -> bool {
+    let name = account.display_name.trim();
+    let email = account.email.as_deref().unwrap_or("").trim();
+    (account.agent == Agent::Antigravity.id() || account.agent == Agent::Cursor.id())
+        && (email.is_empty()
+            || name.is_empty()
+            || name.eq_ignore_ascii_case(&account.agent)
+            || name.eq_ignore_ascii_case(email))
+}
+
+fn identity_from_tokens(tokens: &TokenSet) -> crate::oauth::Identity {
+    let claim = |key| {
+        tokens
+            .id_token
+            .as_deref()
+            .and_then(|token| crate::identity::jwt_claim(token, key))
+            .or_else(|| crate::identity::jwt_claim(&tokens.access_token, key))
+    };
+    crate::oauth::Identity {
+        display_name: claim("name").or_else(|| claim("preferred_username")),
+        email: claim("email"),
+        ..crate::oauth::Identity::default()
+    }
+}
+
+fn apply_discovered_identity(account: &mut Account, identity: &crate::oauth::Identity) {
+    let current = account.display_name.trim();
+    let is_placeholder = current.is_empty()
+        || current.eq_ignore_ascii_case(&account.agent)
+        || account
+            .email
+            .as_deref()
+            .is_some_and(|email| current.eq_ignore_ascii_case(email.trim()))
+        || identity
+            .email
+            .as_deref()
+            .is_some_and(|email| current.eq_ignore_ascii_case(email.trim()));
+    if is_placeholder {
+        let candidate = identity
+            .display_name
+            .as_deref()
+            .or(identity.email.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(&account.agent));
+        if let Some(name) = candidate {
+            account.display_name = name.to_string();
+        }
+    }
+    if account
+        .email
+        .as_deref()
+        .is_none_or(|email| email.trim().is_empty())
+        && let Some(email) = identity
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
+    {
+        account.email = Some(email.to_string());
+    }
+    if account.account_id.is_none()
+        && let Some(account_id) = identity
+            .account_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+    {
+        account.account_id = Some(account_id.to_string());
+    }
+}
+
+fn public_account_id(account_id: Option<&str>) -> Option<String> {
+    let raw = account_id?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.to_string())
+}
+
+fn effective_display_name(
+    agent: &str,
+    stored_name: &str,
+    email: Option<&str>,
+    is_active: bool,
+    live_name: Option<&str>,
+) -> String {
+    let trimmed = stored_name.trim();
+    if (trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case(agent)
+        || email.is_some_and(|email| trimmed.eq_ignore_ascii_case(email.trim())))
+        && is_active
+        && let Some(name) = live_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(agent))
+    {
+        return name.to_string();
+    }
+    stored_name.to_string()
+}
+
+fn clean_usage(
+    agent: &str,
+    usage: Option<crate::usage::UsageSnapshot>,
+) -> Option<crate::usage::UsageSnapshot> {
+    let mut usage = usage?;
+    if agent == Agent::Grok.id() {
+        usage.windows.retain(|window| window.key != "month");
+    }
+    Some(usage)
 }
 
 fn view_for(account: &Account) -> AccountView {
-    let active = live_account_id(&account.agent);
-    view_for_with(account, active.as_deref())
+    let live = live_for(&account.agent);
+    view_for_with(
+        account,
+        live.as_ref().and_then(|item| item.account_id.as_deref()),
+        live.as_ref().and_then(|item| item.display_name.as_deref()),
+    )
 }
 
-fn view_for_with(account: &Account, active: Option<&str>) -> AccountView {
+fn view_for_with(
+    account: &Account,
+    active: Option<&str>,
+    live_display_name: Option<&str>,
+) -> AccountView {
+    let is_active = active == Some(account.id.as_str());
     AccountView {
         id: account.id.clone(),
         agent: account.agent.clone(),
-        display_name: account.display_name.clone(),
+        display_name: effective_display_name(
+            &account.agent,
+            &account.display_name,
+            account.email.as_deref(),
+            is_active,
+            live_display_name,
+        ),
         email: account.email.clone(),
+        account_id: public_account_id(account.account_id.as_deref()),
         plan: account
             .plan
             .clone()
@@ -368,8 +638,8 @@ fn view_for_with(account: &Account, active: Option<&str>) -> AccountView {
         created_at: account.created_at,
         last_used_at: account.last_used_at,
         requires_reauth: account.requires_reauth,
-        is_active: active == Some(account.id.as_str()),
-        usage: account.usage.clone(),
+        is_active,
+        usage: clean_usage(&account.agent, account.usage.clone()),
     }
 }
 
@@ -378,15 +648,21 @@ fn view_for_with(account: &Account, active: Option<&str>) -> AccountView {
 mod service_tests;
 
 fn view_from_entry(entry: &IndexEntry, lives: &[AgentLive]) -> AccountView {
-    let active = lives
-        .iter()
-        .find(|live| live.agent == entry.agent)
-        .and_then(|live| live.account_id.as_deref());
+    let live = lives.iter().find(|live| live.agent == entry.agent);
+    let active = live.and_then(|live| live.account_id.as_deref());
+    let is_active = active == Some(entry.id.as_str());
     AccountView {
         id: entry.id.clone(),
         agent: entry.agent.clone(),
-        display_name: entry.display_name.clone(),
+        display_name: effective_display_name(
+            &entry.agent,
+            &entry.display_name,
+            entry.email.as_deref(),
+            is_active,
+            live.and_then(|live| live.display_name.as_deref()),
+        ),
         email: entry.email.clone(),
+        account_id: public_account_id(entry.account_id.as_deref()),
         plan: entry
             .plan
             .clone()
@@ -394,7 +670,7 @@ fn view_from_entry(entry: &IndexEntry, lives: &[AgentLive]) -> AccountView {
         created_at: entry.created_at,
         last_used_at: entry.last_used_at,
         requires_reauth: entry.requires_reauth,
-        is_active: active == Some(entry.id.as_str()),
-        usage: entry.usage.clone(),
+        is_active,
+        usage: clean_usage(&entry.agent, entry.usage.clone()),
     }
 }

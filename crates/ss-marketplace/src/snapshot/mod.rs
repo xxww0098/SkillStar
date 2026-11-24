@@ -11,7 +11,7 @@ use tracing::{debug, error, warn};
 
 use crate::db;
 use crate::remote::{
-    self, FetchMeta, MarketplaceResult, MarketplaceSkillDetails, PublisherRepo, SecurityAudit,
+    self, FetchMeta, MarketplaceSkillDetails, PublisherRepo, SecurityAudit,
 };
 use crate::{OfficialPublisher, Skill, SkillType, extract_github_source_from_url};
 
@@ -31,7 +31,6 @@ const STALE_SKILL_RETENTION_DAYS: i64 = 30;
 /// more, so after the very first sync the row count sits at 600–800 forever
 /// and the whole remote-seed branch was dead code.
 const SEARCH_SEED_TTL_HOURS: i64 = 24;
-const RESOLVE_SOURCE_REMOTE_LIMIT: u32 = 20;
 
 /// Envelope every local-first read returns: the payload plus the provenance
 /// the UI needs to decide whether to show a staleness banner.
@@ -94,25 +93,15 @@ pub struct SyncStateEntry {
 
 #[derive(Debug, Clone)]
 pub(crate) struct InstalledSkillState {
+    /// The installed folder. Not always the name a marketplace row shows: a
+    /// coexist rename puts the Skill in `<name>-<owner>`.
+    folder: String,
     installed: bool,
     update_available: bool,
     skill_type: SkillType,
     tree_hash: Option<String>,
     agent_links: Option<Vec<String>>,
     called: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolveSkillRequest {
-    original_name: String,
-    normalized_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolveSourceCandidate {
-    source: String,
-    git_url: String,
-    installs: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -399,7 +388,6 @@ mod helpers;
 mod loaders;
 mod local_first;
 pub(crate) mod migrations;
-mod resolve;
 mod skills;
 mod sync;
 mod sync_state;
@@ -418,7 +406,6 @@ pub(crate) use migrations::*;
 // items externally and also brings every `pub(crate)` item into this module's
 // namespace for sibling access via `super::*`.
 pub use local_first::*;
-pub use resolve::*;
 pub(crate) use skills::*;
 pub use sync::*;
 pub use sync_state::*;

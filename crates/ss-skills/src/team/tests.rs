@@ -303,3 +303,47 @@ fn usage_for_missing_skill_is_not_found() {
         assert!(error.to_string().contains("missing-skill"));
     });
 }
+
+#[test]
+fn share_learning_trims_and_ignores_blank_skill_names() {
+    with_team_env(|_| {
+        let blank = share_learning(
+            LearningDraft {
+                title: "Blank skill name".into(),
+                body: "Empty string must become None before name validation.".into(),
+                tags: Vec::new(),
+                skill_name: Some("   ".into()),
+                confidence: 0.7,
+            },
+            now(),
+        )
+        .unwrap();
+        assert_eq!(blank.skill_name, None);
+
+        let empty = share_learning(
+            LearningDraft {
+                title: "Empty skill name".into(),
+                body: "Zero-length string must become None before name validation.".into(),
+                tags: Vec::new(),
+                skill_name: Some(String::new()),
+                confidence: 0.7,
+            },
+            now(),
+        )
+        .unwrap();
+        assert_eq!(empty.skill_name, None);
+
+        let trimmed = share_learning(
+            LearningDraft {
+                title: "Padded skill name".into(),
+                body: "Outer whitespace must be stripped before name validation.".into(),
+                tags: Vec::new(),
+                skill_name: Some("  pr-review  ".into()),
+                confidence: 0.8,
+            },
+            now(),
+        )
+        .unwrap();
+        assert_eq!(trimmed.skill_name.as_deref(), Some("pr-review"));
+    });
+}

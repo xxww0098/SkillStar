@@ -82,55 +82,6 @@ pub(crate) fn load_leaderboard_snapshot(conn: &Connection, scope: &str) -> Resul
     Ok(skills)
 }
 
-pub(crate) fn load_all_skills_snapshot(conn: &Connection) -> Result<(Vec<Skill>, Option<String>)> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                source,
-                name,
-                git_url,
-                author,
-                description,
-                installs,
-                last_list_sync_at
-             FROM marketplace_skill
-             ORDER BY installs DESC, name ASC",
-        )
-        .context("Failed to prepare full marketplace skill snapshot query")?;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(skill_from_snapshot_row(SnapshotSkillRow {
-                source: row.get(0)?,
-                name: row.get(1)?,
-                git_url: row.get(2)?,
-                author: row.get(3)?,
-                description: row.get(4)?,
-                installs: row.get::<_, i64>(5)?.max(0) as u32,
-                last_updated: row.get(6)?,
-                rank: None,
-            }))
-        })
-        .context("Failed to read full marketplace skill snapshot rows")?;
-
-    let mut skills = Vec::new();
-    for row in rows {
-        skills.push(row.context("Failed to decode full marketplace skill row")?);
-    }
-
-    let updated_at: Option<String> = conn
-        .query_row(
-            "SELECT MAX(last_list_sync_at) FROM marketplace_skill",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .context("Failed to read full marketplace skill snapshot timestamp")?
-        .flatten();
-
-    Ok((skills, updated_at))
-}
-
 pub(crate) fn any_skill_rows(conn: &Connection) -> Result<bool> {
     let count: i64 = conn
         .query_row("SELECT COUNT(1) FROM marketplace_skill", [], |row| {

@@ -136,6 +136,7 @@ fn keeps_valid_entries_when_others_are_malformed() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn reads_installed_npm_skills_and_skips_escaped_links() {
     let root = std::env::temp_dir().join(format!("skillstar-pkg-npm-{}", uuid_like()));

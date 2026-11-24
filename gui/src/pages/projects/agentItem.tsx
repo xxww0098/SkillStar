@@ -7,23 +7,28 @@
 // 【nsh 纪律】本组件只收 stable 的 state/profile；一切动态量在 JSX 表达
 // 式里经 state 信号读取（组件体只执行一次）。
 
-import { Text, View, type JSX } from "nsh";
+import { Text, View, computed, type Accessor, type JSX } from "nsh";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import { AgentBadge } from "../../chrome/agentRail";
 import { Icon } from "../../chrome/icons";
-import { motionTransition } from "../../chrome/motion";
+import { settleTransition } from "../../chrome/motion";
 import type { AgentProfileRecord } from "./bridge";
 import type { ProjectsState } from "./state";
 
-/** agent_item.rs available_skills：Hub 里还没分配给该 agent 的技能。 */
-export function availableSkills(state: ProjectsState, agentId: string): string[] {
-  const assigned = state.agentSkills()[agentId] ?? [];
-  return state.hubSkills().filter((name) => !assigned.includes(name));
+const EMPTY_SKILLS: string[] = [];
+
+function sameElements(prev: readonly string[], next: readonly string[]): boolean {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
 }
 
-/** agent_item.rs render_switch：开启态显式 ok 绿；滑块只用 transform 的
- * 80ms 过渡滑到另一端（motion.ts 通道二），降低动态效果时直接落位。 */
+/** agent_item.rs render_switch：开启态显式 ok 绿；滑块只用 transform 回弹
+ * 到另一端（motion.ts settleTransition），降低动态效果时直接落位。 */
 function AgentSwitch(props: { state: ProjectsState; agentId: string; enabled: boolean }): JSX.Element {
   return (
     <View
@@ -53,7 +58,7 @@ function AgentSwitch(props: { state: ProjectsState; agentId: string; enabled: bo
           borderRadius: 6,
           backgroundColor: props.enabled ? paletteToken("panel") : paletteToken("fg_muted"),
           transform: props.enabled ? "translateX(14px)" : "translateX(0px)",
-          ...motionTransition(),
+          ...settleTransition(),
         }}
       />
     </View>
@@ -75,7 +80,8 @@ function BrandGlyph(props: { profile: AgentProfileRecord; enabled: boolean }): J
   );
 }
 
-/** agent_item.rs render_agent_item：一行 agent 的全部交互。 */
+/** agent_item.rs render_agent_item：一行 agent 的全部交互。
+ * 行级状态经 computed 收窄：单行开关、技能增删或模式切换不再扇出到其余行。 */
 export function AgentItem(props: {
   state: ProjectsState;
   profile: AgentProfileRecord;
@@ -84,8 +90,22 @@ export function AgentItem(props: {
   const profile = props.profile;
   const agentId = profile.id;
   const relPath = profile.projectSkillsRel;
-  // 派生读取放在 JSX 里（函数体只执行一次）：下面的 (() => {...})() 即时
-  // 求值块只在首渲染算一次，响应式读取必须写成 JSX 内的表达式。
+  const expanded = computed(() => state.expandedAgent() === agentId);
+  const enabled = computed(() => agentId in state.agentSkills());
+  const assignedSkills = computed(
+    () => state.agentSkills()[agentId] ?? EMPTY_SKILLS,
+    { equals: sameElements },
+  );
+  const assignedCount = computed(() => assignedSkills().length);
+  const isCopy = computed(() => state.deployModes()[relPath] === "copy");
+  const available = computed(
+    () => {
+      const assigned = new Set(assignedSkills());
+      return state.hubSkills().filter((name) => !assigned.has(name));
+    },
+    { equals: sameElements },
+  );
+
   return (
     <View
       style={{
@@ -94,8 +114,7 @@ export function AgentItem(props: {
         width: "100%",
         borderRadius: 10,
         borderWidth: 1,
-        borderColor:
-          state.expandedAgent() === agentId ? paletteToken("accent") : paletteToken("edge"),
+        borderColor: expanded() ? paletteToken("accent") : paletteToken("edge"),
         backgroundColor: paletteToken("card"),
         flexShrink: 0,
       }}
@@ -114,7 +133,7 @@ export function AgentItem(props: {
         }}
         hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
         onPress={() =>
-          state.expandedAgent.set(state.expandedAgent() === agentId ? null : agentId)
+          state.expandedAgent.set(expanded() ? null : agentId)
         }
       >
         <View
@@ -127,24 +146,23 @@ export function AgentItem(props: {
           }}
         >
           <Icon
-            name={state.expandedAgent() === agentId ? "chevronDown" : "chevronRight"}
+            name={expanded() ? "chevronDown" : "chevronRight"}
             size={14}
             color={paletteToken("fg_muted")}
           />
-          <BrandGlyph profile={profile} enabled={agentId in state.agentSkills()} />
+          <BrandGlyph profile={profile} enabled={enabled()} />
           <Text
             style={{
               fontSize: 14,
               fontWeight: "600",
-              color:
-                agentId in state.agentSkills() ? paletteToken("fg") : paletteToken("fg_muted"),
+              color: enabled() ? paletteToken("fg") : paletteToken("fg_muted"),
               minWidth: 0,
               numberOfLines: 1,
             }}
           >
             {profile.displayName}
           </Text>
-          <If when={agentId in state.agentSkills()}>
+          <If when={enabled()}>
             <View
               style={{
                 display: "flex",
@@ -159,7 +177,7 @@ export function AgentItem(props: {
                 style={{ fontSize: 12, fontWeight: "700", color: paletteToken("accent_fg") }}
               >
                 {tf("projects.skillsCount", {
-                  count: (state.agentSkills()[agentId] ?? []).length,
+                  count: assignedCount(),
                 })}
               </Text>
             </View>
@@ -185,7 +203,7 @@ export function AgentItem(props: {
           >
             {relPath}
           </Text>
-          <If when={agentId in state.agentSkills()}>
+          <If when={enabled()}>
             <View
               testID={`mode-toggle-${agentId}`}
               style={{
@@ -196,14 +214,12 @@ export function AgentItem(props: {
                 paddingVertical: 2,
                 borderRadius: 6,
                 borderWidth: 1,
-                borderColor:
-                  state.deployModes()[relPath] === "copy"
-                    ? paletteToken("warn_border")
-                    : paletteToken("info_border"),
-                backgroundColor:
-                  state.deployModes()[relPath] === "copy"
-                    ? paletteToken("warn_bg")
-                    : paletteToken("info_bg"),
+                borderColor: isCopy()
+                  ? paletteToken("warn_border")
+                  : paletteToken("info_border"),
+                backgroundColor: isCopy()
+                  ? paletteToken("warn_bg")
+                  : paletteToken("info_bg"),
                 cursor: "pointer",
                 flexShrink: 0,
               }}
@@ -211,34 +227,27 @@ export function AgentItem(props: {
               onPress={() => state.toggleDeployMode(relPath)}
             >
               <Icon
-                name={state.deployModes()[relPath] === "copy" ? "copy" : "link"}
+                name={isCopy() ? "copy" : "link"}
                 size={11}
-                color={
-                  state.deployModes()[relPath] === "copy"
-                    ? paletteToken("warn")
-                    : paletteToken("accent_fg")
-                }
+                color={isCopy() ? paletteToken("warn") : paletteToken("accent_fg")}
               />
               <Text
                 style={{
                   fontSize: 12,
-                  color:
-                    state.deployModes()[relPath] === "copy"
-                      ? paletteToken("warn")
-                      : paletteToken("accent_fg"),
+                  color: isCopy() ? paletteToken("warn") : paletteToken("accent_fg"),
                 }}
               >
-                {state.deployModes()[relPath] === "copy"
+                {isCopy()
                   ? t("projects.deployCopy")
                   : t("projects.deploySymlink")}
               </Text>
             </View>
           </If>
-          <AgentSwitch state={state} agentId={agentId} enabled={agentId in state.agentSkills()} />
+          <AgentSwitch state={state} agentId={agentId} enabled={enabled()} />
         </View>
       </View>
       {/* 展开体：已分配 chips + Hub 添加区（仅展开且启用）。 */}
-      <If when={state.expandedAgent() === agentId && agentId in state.agentSkills()}>
+      <If when={expanded() && enabled()}>
         <View
           testID={`agent-detail-${agentId}`}
           style={{
@@ -252,7 +261,7 @@ export function AgentItem(props: {
           }}
         >
           <If
-            when={(state.agentSkills()[agentId] ?? []).length > 0}
+            when={assignedCount() > 0}
             else={
               <Text
                 style={{ fontSize: 12, fontStyle: "italic", color: paletteToken("fg_muted") }}
@@ -263,7 +272,7 @@ export function AgentItem(props: {
           >
             <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
               <Each
-                of={state.agentSkills()[agentId] ?? []}
+                of={assignedSkills()}
                 key={(skill: string) => skill}
               >
                 {(skill: () => string) => (
@@ -298,8 +307,8 @@ export function AgentItem(props: {
               </Each>
             </View>
           </If>
-          <If when={availableSkills(state, agentId).length > 0}>
-            <AddFromHub state={state} agentId={agentId} />
+          <If when={available().length > 0}>
+            <AddFromHub state={state} agentId={agentId} available={available} />
           </If>
         </View>
       </If>
@@ -308,7 +317,11 @@ export function AgentItem(props: {
 }
 
 /** agent_item.rs 添加区：「+ 添加全部可用」与可用 chips。 */
-function AddFromHub(props: { state: ProjectsState; agentId: string }): JSX.Element {
+function AddFromHub(props: {
+  state: ProjectsState;
+  agentId: string;
+  available: Accessor<string[]>;
+}): JSX.Element {
   const state = props.state;
   const agentId = props.agentId;
   return (
@@ -341,11 +354,7 @@ function AddFromHub(props: { state: ProjectsState; agentId: string }): JSX.Eleme
             cursor: "pointer",
           }}
           hoverStyle={{ opacity: 0.8 }}
-          onPress={() => {
-            for (const name of availableSkills(state, agentId)) {
-              state.addSkillToAgent(agentId, name);
-            }
-          }}
+          onPress={() => state.addAllSkillsToAgent(agentId, props.available())}
         >
           <Text style={{ fontSize: 12, color: paletteToken("accent_fg") }}>
             {t("projects.addAllAvailable")}
@@ -353,7 +362,7 @@ function AddFromHub(props: { state: ProjectsState; agentId: string }): JSX.Eleme
         </View>
       </View>
       <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
-        <Each of={availableSkills(state, agentId)} key={(skill: string) => skill}>
+        <Each of={props.available()} key={(skill: string) => skill}>
           {(skill: () => string) => (
             <View
               testID={`add-chip-${agentId}-${skill()}`}

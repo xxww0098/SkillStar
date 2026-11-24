@@ -1,19 +1,19 @@
-import { Text, View, effect, signal, type JSX } from "nsh";
+import { Overlay, Text, View, effect, signal, untracked, type JSX } from "nsh";
 import { isLight, paletteToken } from "../services/themeMode";
 import { t } from "../services/translation";
 import { fadeTransition } from "./motion";
 
 // Confirm dialogs — chrome::open_confirm / open_form_dialog parity
-// (chrome/dialog.rs). One shared surface: the card parks at a tenth of the
-// viewport from the top (the kit AlertDialog's documented offset), enters
-// with a FadeSlide (opacity + a short settle from just above rest), and sits
-// on the shared prompt veil — a translucent wash that keeps the page
-// visible (theme.rs prompt_veil: black @ 0.28 dark / 0.18 light). Kit
-// dialogs read the same color from ThemeColor.overlay.
+// (chrome/dialog.rs). One shared surface: the card sits in the middle of the
+// window on both axes (open_centered parity, the same recipe as the import
+// modal), enters with a FadeSlide (opacity + a short settle from just above
+// rest), and sits on the shared prompt veil — a translucent wash that keeps
+// the page visible (theme.rs prompt_veil: black @ 0.28 dark / 0.18 light).
+// Kit dialogs read the same color from ThemeColor.overlay.
 //
 // Custom self-buttoned surfaces (import modal, share sheet, reader) measure
-// themselves and center instead — `openCentered` lands with the page waves
-// that need it.
+// themselves and center the same way — `openCentered` lands with the page
+// waves that need it.
 
 export interface ConfirmRequest {
   title: string;
@@ -42,16 +42,20 @@ let nextSeq = 1;
 
 /** Open the shared confirm card (chrome::open_confirm). */
 export function openConfirm(request: ConfirmRequest): void {
-  entries.set([...entries(), { ...request, seq: nextSeq++ }]);
+  entries.set([...untracked(entries), { ...request, seq: nextSeq++ }]);
 }
 
 function close(seq: number): void {
-  entries.set(entries().filter((e) => e.seq !== seq));
+  const list = untracked(entries);
+  const next = list.filter((e) => e.seq !== seq);
+  if (next.length !== list.length) entries.set(next);
 }
 
 /** Close the card opened with this token, if it is still open. */
 export function closeConfirm(token: string): void {
-  entries.set(entries().filter((e) => e.token !== token));
+  const list = untracked(entries);
+  const next = list.filter((e) => e.token !== token);
+  if (next.length !== list.length) entries.set(next);
 }
 
 /** Uninstall confirm shared by My Skills and Marketplace (dialog.rs:208). */
@@ -109,29 +113,27 @@ export function DialogHost(): JSX.Element {
 }
 
 function ConfirmCard(props: { entry: ConfirmEntry }): JSX.Element {
-  const entry = props.entry;
   const runOk = () => {
+    const entry = props.entry;
     // A false return keeps the dialog open (dialog.rs on_ok contract).
     if (entry.onOk() === false) return;
     close(entry.seq);
   };
-  const commitFill = entry.danger ? paletteToken("danger") : paletteToken("accent");
-  const commitHover = entry.danger ? paletteToken("danger_hover") : paletteToken("accent_hover");
+  const commitFill = () => (props.entry.danger ? paletteToken("danger") : paletteToken("accent"));
+  const commitHover = () =>
+    props.entry.danger ? paletteToken("danger_hover") : paletteToken("accent_hover");
   return (
-    <View
+    <Overlay
       style={{
-        position: "absolute",
+        position: "fixed",
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "flex-start",
-        flexDirection: "column",
         zIndex: 60,
       }}
-      onPress={() => close(entry.seq)}
+      onCancel={() => close(props.entry.seq)}
+      onPress={() => close(props.entry.seq)}
     >
       {/* Veil: page stays visible through it. */}
       <View
@@ -147,12 +149,18 @@ function ConfirmCard(props: { entry: ConfirmEntry }): JSX.Element {
       <View
         style={{
           position: "absolute",
-          // A tenth of the viewport from the top — the kit offset parity.
-          top: "10%",
+          top: 0,
           left: 0,
           right: 0,
+          bottom: 0,
           display: "flex",
+          // Column default: alignItems centers the card across the window and
+          // justifyContent centers it between the top and bottom edges, so the
+          // card lands on the exact center of the screen (open_centered
+          // parity). A row here would center only horizontally.
+          justifyContent: "center",
           alignItems: "center",
+          paddingHorizontal: 20,
         }}
       >
         {/* FadeSlide entrance: opacity + settle from just above rest. */}
@@ -178,13 +186,13 @@ function ConfirmCard(props: { entry: ConfirmEntry }): JSX.Element {
             // press reaches the nearest view that hears presses.
           }}
         >
-          <Text style={{ fontSize: 16, color: paletteToken("fg") }}>{entry.title}</Text>
-          {entry.body ? (
+          <Text style={{ fontSize: 16, color: paletteToken("fg") }}>{props.entry.title}</Text>
+          {props.entry.body ? (
             <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg_muted") }}>
-              {entry.body}
+              {props.entry.body}
             </Text>
           ) : null}
-          {entry.fields ? entry.fields() : null}
+          {props.entry.fields ? props.entry.fields() : null}
           <View
             style={{
               display: "flex",
@@ -197,19 +205,19 @@ function ConfirmCard(props: { entry: ConfirmEntry }): JSX.Element {
             <DialogButton
               testID="dialog-confirm-cancel"
               label={t("common.cancel")}
-              onPress={() => close(entry.seq)}
+              onPress={() => close(props.entry.seq)}
             />
             <DialogButton
               testID="dialog-confirm-ok"
-              label={entry.okText}
-              fill={commitFill}
-              hoverFill={commitHover}
+              label={props.entry.okText}
+              fill={commitFill()}
+              hoverFill={commitHover()}
               onPress={runOk}
             />
           </View>
         </View>
       </View>
-    </View>
+    </Overlay>
   );
 }
 
@@ -220,7 +228,7 @@ function DialogButton(props: {
   hoverFill?: string;
   onPress: () => void;
 }): JSX.Element {
-  const filled = props.fill !== undefined;
+  const filled = () => props.fill !== undefined;
   return (
     <View
       testID={props.testID}
@@ -234,7 +242,7 @@ function DialogButton(props: {
         borderRadius: 6,
         cursor: "pointer",
         borderWidth: 1,
-        borderColor: filled ? "transparent" : paletteToken("border"),
+        borderColor: filled() ? "transparent" : paletteToken("border"),
         backgroundColor: props.fill ?? "transparent",
       }}
       hoverStyle={{ backgroundColor: props.hoverFill ?? paletteToken("panel_hover") }}
@@ -243,7 +251,7 @@ function DialogButton(props: {
       <Text
         style={{
           fontSize: 12,
-          color: filled ? paletteToken("on_accent") : paletteToken("fg"),
+          color: filled() ? paletteToken("on_accent") : paletteToken("fg"),
           fontWeight: "500",
         }}
       >

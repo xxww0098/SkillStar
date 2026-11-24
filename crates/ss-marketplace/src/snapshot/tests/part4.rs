@@ -38,17 +38,6 @@ fn read_state(scope: &str) -> SyncStateEntry {
         .expect("state row exists")
 }
 
-/// Put one row into `marketplace_skill` so the "all" tab has something to show.
-fn seed_one_skill() {
-    let synced_at = now_rfc3339();
-    let conn = create_connection().expect("open marketplace db");
-    let tx = conn.unchecked_transaction().expect("open tx");
-    upsert_skill_identity_in_tx(&tx, "acme/repo", "demo", 5, &synced_at)
-        .expect("upsert skill")
-        .expect("skill key");
-    tx.commit().expect("commit skill");
-}
-
 /// Put several named skills into `marketplace_skill` — what search reads.
 fn seed_named_skills(names: &[&str]) {
     let synced_at = now_rfc3339();
@@ -597,82 +586,6 @@ fn a_no_change_refresh_adopts_a_rotated_etag_but_keeps_the_fingerprint() {
 // The env lock is a plain mutex; this test runs on a current-thread runtime and
 // holds it across awaits to keep `SKILLSTAR_DATA_DIR` stable.
 #[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn the_all_tab_reports_stale_exactly_when_the_leaderboard_scope_is() {
-    let _guard = test_env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let temp = tempfile::tempdir().expect("create temp dir");
-    let temp_root = temp.path().to_path_buf();
-    configure_runtime(SnapshotRuntimeConfig::new(
-        temp_root.join("marketplace.db"),
-        temp_root.clone(),
-        HashSet::new,
-        || -> InstalledSkillsFuture { Box::pin(async { Ok(Vec::new()) }) },
-    ));
-
-    let scope = leaderboard_scope("all");
-    seed_one_skill();
-
-    // Rows exist but the leaderboard scope was never synced (a search seed put
-    // them there). Not fresh → stale, and the startup refresh will pick it up.
-    let result = list_skills_local().await.expect("read all skills");
-    assert_eq!(result.data.len(), 1);
-    assert_eq!(
-        result.snapshot_status,
-        SnapshotStatus::Stale,
-        "rows alone never mean fresh"
-    );
-
-    // A degraded leaderboard write is the exact scenario the UI contract is
-    // about: 200 fallback rows must not claim to be the leaderboard.
-    commit_success(&scope, &degraded_meta(&"a".repeat(64)), false);
-    let result = list_skills_local().await.expect("read all skills");
-    assert_eq!(
-        result.snapshot_status,
-        SnapshotStatus::Stale,
-        "degraded data must be marked stale, not fresh"
-    );
-    assert!(
-        is_scope_stale(&scope).expect("staleness"),
-        "and `schedule_startup_refreshes` must retry it"
-    );
-
-    // A complete sync is the only thing that reports fresh.
-    commit_success(&scope, &sample_meta(&"b".repeat(64)), false);
-    let result = list_skills_local().await.expect("read all skills");
-    assert_eq!(result.snapshot_status, SnapshotStatus::Fresh);
-    assert!(result.snapshot_updated_at.is_some());
-    assert!(result.error.is_none());
-}
-
-/// An empty table with a successfully synced scope is a real (empty) answer,
-/// not a reason to hit the network.
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn the_all_tab_reports_miss_for_an_empty_but_synced_scope() {
-    let _guard = test_env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let temp = tempfile::tempdir().expect("create temp dir");
-    let temp_root = temp.path().to_path_buf();
-    configure_runtime(SnapshotRuntimeConfig::new(
-        temp_root.join("marketplace.db"),
-        temp_root.clone(),
-        HashSet::new,
-        || -> InstalledSkillsFuture { Box::pin(async { Ok(Vec::new()) }) },
-    ));
-
-    commit_success(
-        &leaderboard_scope("all"),
-        &sample_meta(&"a".repeat(64)),
-        false,
-    );
-    let result = list_skills_local().await.expect("read all skills");
-    assert!(result.data.is_empty());
-    assert_eq!(result.snapshot_status, SnapshotStatus::Miss);
-}
-
 #[test]
 fn scope_row_count_covers_every_content_addressed_scope() {
     with_temp_data_root(|_| {

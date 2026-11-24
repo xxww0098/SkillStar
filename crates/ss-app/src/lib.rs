@@ -1,8 +1,10 @@
 pub mod bootstrap;
-pub mod install_audit;
+mod install_audit;
 mod channel_facade;
+pub mod channel_ops;
 mod channel_wake;
 pub mod cli;
+pub mod project_skill_approval;
 mod release_check_wake;
 mod skill_wake;
 pub mod storage_maintenance;

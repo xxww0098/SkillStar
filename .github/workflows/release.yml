@@ -8,7 +8,8 @@ name: Release
 # ## Failure lessons (from Actions history — do not re-learn the hard way)
 #
 # 1. Tag only after CI is green. The old failure was a TypeScript build that
-#    only tauri-action ran. That stack is gone. Pre-tag checklist:
+#    only tauri-action ran. Pre-tag checklist:
+#      nsh check gui && nsh test gui && nsh build -o gui/host/gen gui
 #      cargo test --workspace --locked
 #      # wait for CI + Windows CI green on the commit you will tag
 #    The last line is no longer a request — the require-green-ci job below
@@ -33,7 +34,7 @@ name: Release
 #
 # 5. GitHub App device login needs the public repository variable
 #    `SKILLSTAR_GITHUB_APP_CLIENT_ID`. It is not a secret, but it must be in the
-#    Tauri build environment so Rust can embed it with `option_env!`. Fail before
+#    build environment so Rust can embed it with `option_env!`. Fail before
 #    the platform matrix spends time compiling if the variable is absent.
 #
 # 6. Until 2026-08-14 this workflow needed no CI at all: it is tag-triggered,
@@ -216,7 +217,9 @@ jobs:
             libssl-dev \
             libxkbcommon-dev \
             libwayland-dev \
-            libvulkan-dev
+            libvulkan-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev
 
       - name: Resolve pinned Rust toolchain
         id: rust
@@ -253,6 +256,42 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install nsh CLI (Unix)
+        if: matrix.platform != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh_ver="$(sed -nE 's/^[[:space:]]*nsh-core[[:space:]]*=.*"?=?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' Cargo.toml | head -1)"
+          [ -n "$nsh_ver" ] || { echo "::error::Cargo.toml: cannot read nsh-core version"; exit 1; }
+          export NSH_VERSION="v${nsh_ver}"
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.nsh/bin" >> "$GITHUB_PATH"
+
+      - name: Install nsh CLI (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $match = Select-String -Path Cargo.toml -Pattern '^\s*nsh-core\s*=.*?"?=?([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+          if (-not $match) {
+            throw "Cargo.toml: cannot read nsh-core version"
+          }
+          $nshVer = $match.Matches[0].Groups[1].Value
+          $env:NSH_VERSION = "v$nshVer"
+          irm https://nsh.dev/install.ps1 | iex
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:LOCALAPPDATA\nsh"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:LOCALAPPDATA\nsh\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nsh\bin"
+
+      - name: Build nsh GUI bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          nsh --version
+          nsh build -o gui/host/gen gui
+          test -s gui/host/gen/bundle.js || { echo "::error::gui/host/gen/bundle.js is missing or empty"; exit 1; }
 
       - name: Build skillstar
         shell: bash

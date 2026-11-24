@@ -5,24 +5,29 @@ import {
   Scroll,
   Text,
   View,
+  batch,
+  computed,
   effect,
   signal,
   untracked,
   windowSize,
+  type Accessor,
   type JSX,
   type ViewRef,
 } from "nsh";
 import { TextView } from "nsh/base";
 import { paletteToken } from "../../services/themeMode";
 import { Tip } from "../../chrome/tooltip";
-import { IconSweep } from "../../chrome/feedback";
+import { IconSweep, Pulse } from "../../chrome/feedback";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
 import { promptVeil, SHEET_SHADOW } from "../../chrome/dialog";
 import { fadeTransition, motionEnabled } from "../../chrome/motion";
 import { dismissReplaceKey } from "../../shell/notify";
-import { publishToast } from "../../shell/events";
+import { publishToast, translationPrefsChanged } from "../../shell/events";
 import { MySkillsReader } from "skillstar-gui/native";
 import { splitMarkdown, type MdBlock } from "./readerBlocks";
 import { readerLineTheme, readerTypography, translationBase } from "./readerStyle";
+import { t } from "../../services/translation";
 import { readerRejectionMessage, rt } from "./readerStrings";
 
 // SKILL.md 阅读器 — my_skills/skill_reader.rs（+ reader_style.rs）对位。
@@ -100,14 +105,13 @@ export interface ReaderBridge {
   /** 保存的译文行样式（canonicalized，默认 quote）。 */
   readerTheme(): string;
   /** 写译文行样式（apply_theme :143），不写其他设置。 */
-  setReaderTheme(id: string): void;
+  setReaderTheme(id: string): void | Promise<void>;
 }
 
-/** 真桥：MySkillsReader facade。`read` 在 Rust 侧是同步 Result（Err 抛
- * 出），async 包装成 Promise；密钥检查只读手填密钥文件（不读取订阅账号
- * 密钥的已知分歧，见 facade 注释）。 */
+/** 真桥：MySkillsReader facade。`read` / `setReaderTheme` 在 Rust 侧走 blocking 池
+ * （async Promise）；密钥与模型读取自「设置 → 翻译」保存的配置与密钥文件。 */
 export const facadeBridge: ReaderBridge = {
-  read: async (name) => MySkillsReader.read(name),
+  read: (name) => MySkillsReader.read(name),
   skillMdEnabled: () => MySkillsReader.skillMdEnabled(),
   lookup: (source) => MySkillsReader.lookup(source),
   needsTranslation: (text) => MySkillsReader.needsTranslation(text),
@@ -119,9 +123,7 @@ export const facadeBridge: ReaderBridge = {
     }>,
   readerThemes: () => MySkillsReader.readerThemes() as { id: string; labelKey: string }[],
   readerTheme: () => MySkillsReader.readerTheme(),
-  setReaderTheme: (id) => {
-    MySkillsReader.setReaderTheme(id);
-  },
+  setReaderTheme: (id) => MySkillsReader.setReaderTheme(id),
 };
 
 /** 当前生效的桥（Host 挂载时安装一次；测试注入假桥）。 */
@@ -154,7 +156,18 @@ const failed = new Set<string>();
 /** translation_chosen 的记录（每次打开重选一次；关闭即复位）。 */
 let translationChosenFor: string | null = null;
 let readEpoch = 0;
+let prefsEpoch = 0;
 let revealTimer: ReturnType<typeof setTimeout> | null = null;
+
+translationPrefsChanged.subscribe(() => {
+  prefsEpoch += 1;
+  inflight.clear();
+  failed.clear();
+  batch(() => {
+    rejectionLine.set(null);
+    generation.update((n) => n + 1);
+  });
+});
 
 // ---- 打开 / 关闭 / 重试（open_reader / Phase 流转） ---------------------------
 
@@ -266,12 +279,16 @@ function scheduleProse(sources: string[]): void {
     if (batch.length === FILL_BATCH_CAP) break;
   }
   if (batch.length === 0) return;
+  const runPrefsEpoch = prefsEpoch;
   bridge
     .fill(batch)
     .then((report) => {
+      if (runPrefsEpoch !== prefsEpoch) return;
       for (const source of batch) inflight.delete(source);
       if (report.rejection !== null) {
         // 每会话只播报一次；同 replaceKey 的旧通知被顶替。
+        // 失败同时留在各段下面，通知关掉之后仍能重试。
+        for (const source of batch) failed.add(source);
         const message = readerRejectionMessage(report.rejection.model, report.rejection.detail);
         rejectionLine.set(message);
         publishToast({
@@ -281,7 +298,11 @@ function scheduleProse(sources: string[]): void {
           replaceKey: "translation-model-rejected",
         });
       } else {
-        for (const item of report.done) failed.delete(item.source);
+        const done = new Set(report.done.map((item) => item.source));
+        for (const source of batch) {
+          if (done.has(source) || bridge.lookup(source) !== null) failed.delete(source);
+          else failed.add(source);
+        }
         if (report.done.length > 0 && rejectionLine() === null) {
           dismissReplaceKey("translation-model-rejected");
         }
@@ -289,6 +310,7 @@ function scheduleProse(sources: string[]): void {
       bump();
     })
     .catch(() => {
+      if (runPrefsEpoch !== prefsEpoch) return;
       // 传输失败：本会话静默这批（GPUI 按帧重问，effect 重跑会热循环）。
       for (const source of batch) {
         inflight.delete(source);
@@ -422,6 +444,36 @@ function ReaderCard(props: { name: string }): JSX.Element {
  * reader_style 测试同款）。行首那枚「SKILL.md」文件标签按用户裁定去掉
  * （2026-11-16）：卡片标题就是技能名，再挂一行文件名是重复信息。整行跟着
  * 按钮一起藏：没有可翻的内容时不占高度。 */
+const parsedBlocks = computed<MdBlock[]>(() => {
+  const current = phase();
+  if (current.kind !== "ready" || current.markdown.trim().length === 0) {
+    return [];
+  }
+  return splitMarkdown(current.markdown);
+});
+
+const proseSources = computed<string[]>(() =>
+  parsedBlocks()
+    .filter((block) => block.kind === "prose")
+    .map((block) => block.markdown),
+);
+
+/** offers_translation ：506 / translation_pending ：513。 */
+const translateGate = computed<{ visible: boolean; pending: boolean }>(() => {
+  void generation();
+  const prose = proseSources();
+  if (prose.length === 0) {
+    return { visible: false, pending: false };
+  }
+  const visible = prose.some((source) => bridge.needsTranslation(source));
+  const pending =
+    visible &&
+    showTranslation() &&
+    !bridge.blocked() &&
+    prose.some((source) => !proseResolved(source));
+  return { visible, pending };
+});
+
 function ActionRow(): JSX.Element {
   return (
     <If when={translateGate().visible}>
@@ -442,25 +494,6 @@ function ActionRow(): JSX.Element {
       </View>
     </If>
   );
-}
-
-/** offers_translation ：506 / translation_pending ：513。 */
-function translateGate(): { visible: boolean; pending: boolean } {
-  void generation();
-  const current = phase();
-  if (current.kind !== "ready" || current.markdown.trim().length === 0) {
-    return { visible: false, pending: false };
-  }
-  const prose = splitMarkdown(current.markdown)
-    .filter((block) => block.kind === "prose")
-    .map((block) => block.markdown);
-  const visible = prose.some((source) => bridge.needsTranslation(source));
-  const pending =
-    visible &&
-    showTranslation() &&
-    !bridge.blocked() &&
-    prose.some((source) => !proseResolved(source));
-  return { visible, pending };
 }
 
 /** 翻译按钮（translate_button :281-332）：图标 14、图标式、pending 时激光
@@ -568,19 +601,20 @@ function StyleButton(): JSX.Element {
             cursor: "pointer",
           }}
           hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
-          onPress={() => styleMenuOpen.set(!styleMenuOpen())}
+          onPress={() => styleMenuOpen.update((open) => !open)}
         >
           <Glyph name="highlighter" size={14} color={paletteToken("fg_muted")} />
         </View>
       </View>
       <If when={styleMenuOpen()}>
-        <Overlay style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }} onCancel={() => styleMenuOpen.set(false)}>
-          <View
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-            onPress={() => styleMenuOpen.set(false)}
-          />
-        </Overlay>
-        <Overlay anchor={styleTriggerRef()} placement="top" align="end" offset={6}>
+        <Overlay
+          anchor={styleTriggerRef()}
+          placement="top"
+          align="end"
+          offset={6}
+          onPressOutside={() => styleMenuOpen.set(false)}
+          onCancel={() => styleMenuOpen.set(false)}
+        >
           <StyleMenu />
         </Overlay>
       </If>
@@ -588,11 +622,12 @@ function StyleButton(): JSX.Element {
   );
 }
 
-/** 当前保存样式（generation 里重读：换样式/译文落地后重算）。 */
-function currentReaderTheme(): string {
+/** 当前保存样式（generation 里重读：换样式/译文落地后只读一次桥）。 */
+const currentReaderTheme = computed(() => {
   void generation();
   return bridge.readerTheme();
-}
+});
+const activeLineTheme = computed(() => readerLineTheme(currentReaderTheme()));
 
 function StyleMenu(): JSX.Element {
   const themes = bridge.readerThemes();
@@ -686,16 +721,41 @@ function StyleRow(props: { id: string; labelKey: string; selected: boolean }): J
 }
 
 function applyReaderTheme(id: string): void {
+  styleMenuOpen.set(false);
   try {
-    bridge.setReaderTheme(id);
+    const result = bridge.setReaderTheme(id);
+    if (result && typeof (result as Promise<void>).then === "function") {
+      void (result as Promise<void>)
+        .catch((err) => {
+          console.warn("failed to save the reader style:", String(err));
+        })
+        .finally(() => {
+          bump();
+        });
+      return;
+    }
   } catch (err) {
     console.warn("failed to save the reader style:", String(err));
   }
-  styleMenuOpen.set(false);
   bump();
 }
 
 // ---- 正文（body :334-350 + scroll_port :410-437 + file_column :439-504） ----
+
+const readyMarkdown = computed(() => {
+  const current = phase();
+  return current.kind === "ready" ? current.markdown : "";
+});
+const failedError = computed(() => {
+  const current = phase();
+  return current.kind === "failed" ? current.error : "";
+});
+const isReadyEmpty = computed(
+  () => phase().kind === "ready" && readyMarkdown().trim().length === 0,
+);
+const isReadyContent = computed(
+  () => phase().kind === "ready" && readyMarkdown().trim().length > 0,
+);
 
 function ReaderBody(): JSX.Element {
   return (
@@ -715,7 +775,9 @@ function ReaderBody(): JSX.Element {
         }}
       >
         <Scroll testID="skill-md-reader" style={{ width: "100%", height: "100%" }}>
-          {revealed() ? phaseBody() : null}
+          <If when={revealed()}>
+            <ReaderPhaseBody />
+          </If>
         </Scroll>
       </View>
     </View>
@@ -728,22 +790,40 @@ function bodyReady(): boolean {
   return phase().kind === "ready";
 }
 
-/** Phase 分支（Loading/失败/空/正文）。必须以 JSX 子表达式调用
- * （`{revealed() ? phaseBody() : null}`）——组件体只执行一次，体级
- * const 读 phase、或 If 回调体内读 phase，都会把正文冻死在 Loading
- * （波 1 教训，本轮实测复现）。 */
-function phaseBody(): JSX.Element {
-  const current = phase();
-  if (current.kind === "loading") {
-    return <MutedLine text={rt("detailPanel.reading")} />;
-  }
-  if (current.kind === "failed") {
-    return <FailureCard error={current.error} />;
-  }
-  if (current.markdown.trim().length === 0) {
-    return <MutedLine text={rt("detailPanel.emptySkillMd")} />;
-  }
-  return <FileColumn markdown={current.markdown} />;
+function ReaderPhaseBody(): JSX.Element {
+  return (
+    <View style={{ display: "flex", flexDirection: "column", width: "100%", minWidth: 0 }}>
+      <If when={phase().kind === "loading"}>
+        <ReaderLoading />
+      </If>
+      <If when={phase().kind === "failed"}>
+        <FailureCard error={failedError()} />
+      </If>
+      <If when={isReadyEmpty()}>
+        <MutedLine text={rt("detailPanel.emptySkillMd")} />
+      </If>
+      <If when={isReadyContent()}>
+        <FileColumn />
+      </If>
+    </View>
+  );
+}
+
+/** 仍在读时晚 300ms 出一条脉冲。快于这个时间保持空白，没有「正在阅读」。 */
+function ReaderLoading(): JSX.Element {
+  const show = bindDelayedFlag(() => phase().kind === "loading");
+  return (
+    <If when={show()}>
+      <View
+        accessibilityState={{ busy: true }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}
+      >
+        <Pulse id="skill-md-loading-1" style={{ height: 14, width: "92%", borderRadius: 4 }} />
+        <Pulse id="skill-md-loading-2" style={{ height: 14, width: "80%", borderRadius: 4 }} />
+        <Pulse id="skill-md-loading-3" style={{ height: 14, width: "64%", borderRadius: 4 }} />
+      </View>
+    </If>
+  );
 }
 
 function MutedLine(props: { text: string }): JSX.Element {
@@ -784,13 +864,13 @@ function FailureCard(props: { error: string }): JSX.Element {
 }
 
 /** 文件列（file_column :439-504）。 */
-function FileColumn(props: { markdown: string }): JSX.Element {
+function FileColumn(): JSX.Element {
   return (
     <If
       when={showTranslation()}
-      else={<SingleDocument markdown={props.markdown} />}
+      else={<SingleDocument markdown={readyMarkdown()} />}
     >
-      {() => <TranslatedColumn markdown={props.markdown} />}
+      <TranslatedColumn />
     </If>
   );
 }
@@ -815,19 +895,23 @@ function SingleDocument(props: { markdown: string }): JSX.Element {
   );
 }
 
+function isBlocked(): boolean {
+  void generation();
+  return bridge.blocked();
+}
+
 /** 翻译模式：逐块 TextView + 译文行（file_column :460-494）。 */
-function TranslatedColumn(props: { markdown: string }): JSX.Element {
-  const blocks = splitMarkdown(props.markdown);
+function TranslatedColumn(): JSX.Element {
   return (
     <View
       testID="skill-md-column"
       style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", minWidth: 0 }}
     >
       {/* blocked 提示优先，其次会话级拒绝行（:447-459）。 */}
-      <If when={bridge.blocked()} else={<RejectionHint />}>
-        <MutedLine text={rt("detailPanel.translationNeedsAccount")} />
+      <If when={isBlocked()} else={<RejectionHint />}>
+        <MutedLine text={rt("detailPanel.translationNeedsConfig")} />
       </If>
-      <Each of={blocks} key="index">
+      <Each of={parsedBlocks()} key="index">
         {(block: () => MdBlock) => (
           <If
             when={block().kind === "prose"}
@@ -843,7 +927,7 @@ function TranslatedColumn(props: { markdown: string }): JSX.Element {
               }}
             >
               <TextView markdown={block().markdown} styles={readerTypography()} />
-              {translationFor(block().markdown)}
+              <TranslationLine source={() => block().markdown} />
             </View>
           </If>
         )}
@@ -852,25 +936,58 @@ function TranslatedColumn(props: { markdown: string }): JSX.Element {
   );
 }
 
-function RejectionHint(): JSX.Element | null {
-  const line = rejectionLine();
-  if (line === null) return null;
-  return <MutedLine text={line} />;
+function RejectionHint(): JSX.Element {
+  return (
+    <If when={rejectionLine() !== null}>
+      <MutedLine text={rejectionLine() ?? ""} />
+    </If>
+  );
 }
 
 /** display_when ：161-167 + paint_reader：开着且缓存命中（译文≠原文）才画
  * 译文行，样式取保存的 reader 主题。generation 里重读（译文落地/换样式）。 */
-function translationFor(source: string): JSX.Element | null {
-  void generation();
-  const translated = bridge.lookup(source) ?? source;
-  if (translated === source) return null;
-  const line = readerLineTheme(bridge.readerTheme());
+function TranslationLine(props: { source: Accessor<string> }): JSX.Element {
+  const lookupState = computed(() => {
+    void generation();
+    const source = props.source();
+    const trimmed = source.trim();
+    const translated = bridge.lookup(source) ?? source;
+    const hasTranslation = translated !== source;
+    const broken = trimmed.length > 0 && failed.has(trimmed) && !hasTranslation;
+    return { trimmed, translated, hasTranslation, broken };
+  });
   return (
-    <View
-      testID="skill-md-translation"
-      style={{ width: "100%", minWidth: 0, ...line.view }}
-    >
-      <Text style={{ ...translationBase(), ...line.text }}>{translated}</Text>
-    </View>
+    <If when={lookupState().hasTranslation || lookupState().broken}>
+      <View style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", minWidth: 0 }}>
+        <If when={lookupState().hasTranslation}>
+          <View
+            testID="skill-md-translation"
+            style={{ width: "100%", minWidth: 0, ...activeLineTheme().view }}
+          >
+            <Text style={{ ...translationBase(), ...activeLineTheme().text }}>
+              {lookupState().translated}
+            </Text>
+          </View>
+        </If>
+        <If when={lookupState().broken}>
+          <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={{ fontSize: 12, color: paletteToken("danger") }}>
+              {rejectionLine() ?? t("wait.couldntSave")}
+            </Text>
+            <View testID="skill-md-paragraph-retry" onPress={() => retryProse(lookupState().trimmed)} style={{ cursor: "pointer" }}>
+              <Text style={{ fontSize: 12, color: paletteToken("accent_fg") }}>{t("common.retry")}</Text>
+            </View>
+          </View>
+        </If>
+      </View>
+    </If>
   );
+}
+
+function retryProse(source: string): void {
+  failed.delete(source);
+  // 会话级拒绝会挡住排程。这一段的重试清掉它，其余已失败的段仍留在 failed 里。
+  rejectionLine.set(null);
+  bump();
+  scheduleProse([source]);
 }

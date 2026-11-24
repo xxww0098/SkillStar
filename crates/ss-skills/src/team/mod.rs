@@ -10,7 +10,7 @@
 //! | [`health`] | usage × freshness × recall coverage for each installed skill |
 //! | [`record_friction`] / [`share_learning`] / [`digest`] | friction capture, notes, weekly-style digest |
 //!
-//! Callers: CLI (`skillstar team …`). No Tauri command in this slice.
+//! Callers: CLI (`skillstar team …`). No GUI facade command in this slice.
 
 mod improve;
 mod recall;

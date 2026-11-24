@@ -65,8 +65,12 @@ pub struct LoginStart {
 pub struct StartOptions {
     /// A preferred loopback port (the provider fixed a redirect URI).
     pub prefer_port: Option<u16>,
+    /// An explicit provider login leg selector (e.g. `"portal"` / `"idc"` for Kiro).
+    pub leg: Option<String>,
     /// A provider region/workspace selector.
     pub region: Option<String>,
+    /// An explicit IAM Identity Center start URL (Kiro IdC).
+    pub start_url: Option<String>,
 }
 
 /// How the finishing thread learns that the user cancelled.

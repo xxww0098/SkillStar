@@ -3,7 +3,7 @@
 //! Probes the SkillStar proxy, direct GitHub, each configured accelerator,
 //! and skills.sh. Recommendations are machine
 //! keys; the UI maps them through i18n. HTTP stays in this module so the
-//! Tauri command remains a thin adapter (command-boundary ratchet).
+//! GUI facade (`ss-gui-bridge`) remains a thin adapter (command-boundary ratchet).
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -156,7 +156,7 @@ async fn probe_http(id: &str, label: &str, url: &str) -> NetworkHostCheck {
             url: url.into(),
             status: "fail".into(),
             latency_ms: None,
-            detail: Some(format!("{err:#}")),
+            detail: Some(crate::infra::http_client::format_error_chain(&err)),
         },
     }
 }
@@ -233,9 +233,6 @@ fn recommendations(
     if (!github_ok || !api_ok) && !mirrors_enabled {
         recs.push("enable_github_mirrors".into());
     }
-    if proxy_config.enabled && matches!(proxy_config.proxy_type, proxy::ProxyType::Socks5) {
-        recs.push("use_socks5h".into());
-    }
     if !skills_ok && (wrap_ok || any_mirror_ok) {
         recs.push("use_marketplace_wrap".into());
     }
@@ -285,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn recommends_socks5h_for_local_dns_socks() {
+    fn does_not_warn_use_socks5h_for_socks5_because_transport_uses_socks5h() {
         let proxy = ProxyConfig {
             enabled: true,
             proxy_type: ProxyType::Socks5,
@@ -296,6 +293,6 @@ mod tests {
             bypass: None,
         };
         let recs = recommendations(&proxy, &[ok("github")], true);
-        assert!(recs.contains(&"use_socks5h".to_string()));
+        assert!(!recs.contains(&"use_socks5h".to_string()));
     }
 }

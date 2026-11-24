@@ -22,15 +22,8 @@ use crate::github_auth::{
 use serde::Deserialize;
 
 const API_ROOT: &str = "https://api.github.com";
-const PER_PAGE: u32 = 100;
-const MAX_PAGES: u32 = 20;
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Repositories the publish picker may offer. `gh repo list <login>` only ever
-/// returned personally owned repositories, which is why an organization
-/// repository could never be picked as a publish target.
-pub(super) const REPO_AFFILIATION: &str = "owner,collaborator,organization_member";
 
 // ── Errors ──────────────────────────────────────────────────────────
 
@@ -50,20 +43,6 @@ pub enum GhRestErrorCode {
     Network,
     /// GitHub answered with something we cannot interpret.
     Protocol,
-}
-
-impl GhRestErrorCode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NotAuthenticated => "not_authenticated",
-            Self::Unauthorized => "unauthorized",
-            Self::CredentialUnavailable => "credential_unavailable",
-            Self::RateLimited => "rate_limited",
-            Self::Rejected => "rejected",
-            Self::Network => "network",
-            Self::Protocol => "protocol",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,14 +225,6 @@ pub(super) fn block_on_blocking_context<F: Future>(future: F) -> Result<F::Outpu
 // ── Client ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GhRepository {
-    pub full_name: String,
-    pub html_url: String,
-    pub description: String,
-    pub private: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GhCreatedRepository {
     pub full_name: String,
     pub html_url: String,
@@ -321,58 +292,6 @@ impl<T: GhRestTransport> GhRestClient<T> {
         Ok(user.login)
     }
 
-    /// Repositories that can serve as publish targets, newest activity first.
-    ///
-    /// `affiliation` is what makes organization repositories reachable; the
-    /// previous `gh repo list <login>` call could only see personal ones.
-    pub fn list_repositories(&self, limit: u32) -> Result<Vec<GhRepository>, GhRestError> {
-        let limit = limit.clamp(1, PER_PAGE.saturating_mul(MAX_PAGES)) as usize;
-        let mut repositories: Vec<GhRepository> = Vec::new();
-
-        for page in 1..=MAX_PAGES {
-            let url = format!(
-                "{API_ROOT}/user/repos?affiliation={REPO_AFFILIATION}&per_page={PER_PAGE}&page={page}&sort=updated"
-            );
-            let response = self.transport.get(&url, &self.token)?;
-            ensure_status(&response, &[200])?;
-            let items: Vec<RepositoryResponse> = parse_json(&response.body)?;
-            let received = items.len();
-            repositories.extend(items.into_iter().map(map_repository));
-            if repositories.len() >= limit || received < PER_PAGE as usize {
-                break;
-            }
-        }
-
-        repositories.truncate(limit);
-        Ok(repositories)
-    }
-
-    /// Existing skill folders under the repository's top-level `skills/`.
-    ///
-    /// A repository without that directory — including a brand new empty one —
-    /// is an ordinary publish target, so it answers with an empty list rather
-    /// than an error.
-    pub fn list_skill_folders(&self, repo_full_name: &str) -> Result<Vec<String>, GhRestError> {
-        let url = format!(
-            "{API_ROOT}/repos/{}/contents/skills",
-            repository_path(repo_full_name)?
-        );
-        let response = self.transport.get(&url, &self.token)?;
-        if matches!(response.status, 404 | 409) {
-            return Ok(Vec::new());
-        }
-        ensure_status(&response, &[200])?;
-        let entries: Vec<ContentEntry> = parse_json(&response.body)?;
-        let mut folders: Vec<String> = entries
-            .into_iter()
-            .filter(|entry| entry.kind == "dir")
-            .map(|entry| entry.name)
-            .filter(|name| !name.is_empty() && !name.starts_with('.'))
-            .collect();
-        folders.sort();
-        Ok(folders)
-    }
-
     /// Create a repository owned by the signed-in user.
     pub fn create_repository(
         &self,
@@ -421,26 +340,6 @@ struct RepositoryResponse {
     html_url: String,
     #[serde(default)]
     clone_url: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    private: bool,
-}
-
-#[derive(Deserialize)]
-struct ContentEntry {
-    name: String,
-    #[serde(rename = "type")]
-    kind: String,
-}
-
-fn map_repository(response: RepositoryResponse) -> GhRepository {
-    GhRepository {
-        full_name: response.full_name,
-        html_url: response.html_url,
-        description: response.description.unwrap_or_default(),
-        private: response.private,
-    }
 }
 
 // ── Response handling ───────────────────────────────────────────────
@@ -524,30 +423,4 @@ fn rejection_message(body: &str) -> String {
         })
         .unwrap_or_else(|| "GitHub rejected the request".to_string());
     format!("GitHub rejected the publish request: {detail}")
-}
-
-/// Validate `owner/name` before it becomes part of a URL path.
-fn repository_path(repo_full_name: &str) -> Result<String, GhRestError> {
-    let invalid = || {
-        GhRestError::new(
-            GhRestErrorCode::Protocol,
-            "Repository names must look like 'owner/name'",
-        )
-    };
-    let (owner, name) = repo_full_name.split_once('/').ok_or_else(invalid)?;
-    let owner_ok = !owner.is_empty()
-        && owner
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-');
-    let name_ok = !name.is_empty()
-        && name.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
-        })
-        && name != "."
-        && name != "..";
-    if owner_ok && name_ok {
-        Ok(format!("{owner}/{name}"))
-    } else {
-        Err(invalid())
-    }
 }

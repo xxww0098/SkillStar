@@ -54,6 +54,15 @@ const MODELS_LABEL: &str = "antigravity fetchAvailableModels";
 
 /// Read the Antigravity quota for one account.
 pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
+    fetch_with_identity(creds, |token| {
+        crate::oauth::agents::antigravity::read_identity_blocking(token).ok()
+    })
+}
+
+fn fetch_with_identity(
+    creds: &Credentials,
+    read_identity: impl FnOnce(&str) -> Option<crate::oauth::Identity>,
+) -> UsageResult<UsageOutcome> {
     let now = super::unix_now();
     let access_token = creds.tokens.access_token.trim();
     if access_token.is_empty() {
@@ -117,9 +126,15 @@ pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
             credits: load.credits,
             error: None,
             gcp_tos,
+            reset_credits: None,
         },
         tokens: creds.tokens.clone(),
         provider_state: Some(provider_state(project.as_deref(), gcp_tos)),
+        identity: if creds.needs_identity {
+            read_identity(access_token)
+        } else {
+            None
+        },
     })
 }
 

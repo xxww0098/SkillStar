@@ -18,8 +18,6 @@ mod antigravity_parse;
 pub mod claude_code;
 pub mod codex;
 pub mod cursor;
-pub mod gemini_cli;
-mod gemini_cli_parse;
 pub mod grok;
 mod grok_parse;
 pub mod kiro;
@@ -79,7 +77,7 @@ pub(crate) fn unix_now() -> i64 {
 }
 
 /// Classify a failed refresh into the same three states a quota read uses.
-fn refresh_error(error: OAuthError) -> UsageError {
+pub(crate) fn refresh_error(error: OAuthError) -> UsageError {
     match error {
         OAuthError::AuthRequired(message) => UsageError::AuthRequired(message),
         OAuthError::Transient(message) => UsageError::Transient(message),
@@ -95,10 +93,11 @@ pub(crate) struct Answer {
 }
 
 /// GET a quota endpoint through the shared probe client, so the user's proxy
-/// settings apply and no second HTTP stack is introduced.
+/// settings apply (while loopback targets bypass proxy) and no second HTTP
+/// stack is introduced.
 pub(crate) fn http_get(label: &str, url: &str, headers: &[(&str, String)]) -> UsageResult<Answer> {
-    let client =
-        ss_core::infra::http_client::probe_http_client(REQUEST_TIMEOUT).map_err(|error| {
+    let client = ss_core::infra::http_client::probe_http_client_for_url(url, REQUEST_TIMEOUT)
+        .map_err(|error| {
             UsageError::Transient(format!("{label}: cannot build the HTTP client: {error}"))
         })?;
     let request = client.get(url).headers(header_map(label, headers)?);
@@ -113,8 +112,8 @@ pub(crate) fn http_post_json(
     headers: &[(&str, String)],
     body: &serde_json::Value,
 ) -> UsageResult<Answer> {
-    let client =
-        ss_core::infra::http_client::probe_http_client(REQUEST_TIMEOUT).map_err(|error| {
+    let client = ss_core::infra::http_client::probe_http_client_for_url(url, REQUEST_TIMEOUT)
+        .map_err(|error| {
             UsageError::Transient(format!("{label}: cannot build the HTTP client: {error}"))
         })?;
     let request = client
@@ -126,13 +125,20 @@ pub(crate) fn http_post_json(
 
 /// One request, whether it carried a body or not.
 async fn send(request: reqwest::RequestBuilder, label: &str) -> UsageResult<Answer> {
-    let response = request
-        .send()
-        .await
-        .map_err(|error| UsageError::Transient(format!("{label}: request failed: {error}")))?;
+    let response = request.send().await.map_err(|error| {
+        ss_core::infra::http_client::invalidate_probe_http_client();
+        UsageError::Transient(format!(
+            "{label}: request failed: {}",
+            ss_core::infra::http_client::format_error_chain(&error)
+        ))
+    })?;
     let status = response.status().as_u16();
     let body = response.text().await.map_err(|error| {
-        UsageError::Transient(format!("{label}: cannot read the reply body: {error}"))
+        ss_core::infra::http_client::invalidate_probe_http_client();
+        UsageError::Transient(format!(
+            "{label}: cannot read the reply body: {}",
+            ss_core::infra::http_client::format_error_chain(&error)
+        ))
     })?;
     Ok(Answer { status, body })
 }
@@ -179,11 +185,8 @@ pub(crate) fn classify_status(label: &str, status: u16, body: &str) -> UsageErro
 /// short-lived runtime bridges the two. Only call this from a blocking
 /// context: starting a runtime from inside an async task panics.
 fn block_on_request<F: Future>(future: F) -> UsageResult<F::Output> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| {
-            UsageError::Transient(format!("cannot start the quota request runtime: {error}"))
-        })?;
+    let runtime = crate::oauth::rt::shared_runtime().map_err(|error| {
+        UsageError::Transient(format!("cannot start the quota request runtime: {error}"))
+    })?;
     Ok(runtime.block_on(future))
 }

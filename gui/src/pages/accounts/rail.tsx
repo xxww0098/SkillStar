@@ -21,106 +21,88 @@ export const railCounts = signal<Record<string, number>>({});
 
 /**
  * 壳侧栏的 accounts 模式槽位（Sidebar.tsx 已接线）：collapsed 时只留图标。
+ * 使用按 id 键控的 <Each> + <If> 保活每行及其 <AgentIcon>，折叠切换不再销毁重建 SVG 纹理。
  */
 export function AccountsProviderMenu(props: { collapsed: boolean }): JSX.Element {
   return (
-    <View style={{ width: "100%" }}>
-      {props.collapsed ? (
-        <View style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
-          {railAgents().map((agent) => (
-            <View
-              testID={`rail-${agent.id}`}
-              role="button"
-              accessibilityLabel={agent.displayName}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "100%",
-                height: 32,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor:
-                  railSelected() === agent.id ? paletteToken("accent") : "transparent",
-                backgroundColor:
-                  railSelected() === agent.id ? paletteToken("panel_active") : "transparent",
-                cursor: "pointer",
-              }}
-              hoverStyle={
-                railSelected() === agent.id
-                  ? undefined
-                  : { backgroundColor: paletteToken("panel_hover") }
-              }
-              onPress={() => railSelected.set(agent.id)}
-            >
-              <AgentIcon testID={`rail-icon-${agent.id}`} id={agent.id} size={18} />
-            </View>
-          ))}
-        </View>
-      ) : (
-        <View style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
-          {railAgents().map((agent) => (
-            <View
-              testID={`rail-${agent.id}`}
-              role="button"
-              accessibilityLabel={agent.displayName}
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 10,
-                width: "100%",
-                minHeight: 32,
-                paddingHorizontal: 10,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor:
-                  railSelected() === agent.id ? paletteToken("accent") : "transparent",
-                backgroundColor:
-                  railSelected() === agent.id ? paletteToken("panel_active") : "transparent",
-                cursor: "pointer",
-              }}
-              hoverStyle={
-                railSelected() === agent.id
-                  ? undefined
-                  : { backgroundColor: paletteToken("panel_hover") }
-              }
-              onPress={() => railSelected.set(agent.id)}
-            >
-              <AgentIcon testID={`rail-icon-${agent.id}`} id={agent.id} size={16} />
-              <Text
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  numberOfLines: 1,
-                  textOverflow: "ellipsis",
-                  fontSize: 13,
-                  fontWeight: railSelected() === agent.id ? "600" : "400",
-                  color:
-                    railSelected() === agent.id
-                      ? paletteToken("accent_fg")
-                      : paletteToken("fg"),
-                }}
-              >
-                {agent.displayName}
-              </Text>
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: railSelected() === agent.id ? "600" : "400",
-                  fontVariant: "tabular-nums",
-                  color:
-                    railSelected() === agent.id
-                      ? paletteToken("accent_fg")
-                      : paletteToken("fg_faint"),
-                }}
-              >
-                {String(railCounts()[agent.id] ?? 0)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
+    <View style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+      <Each of={railAgents()} key={(agent) => agent.id}>
+        {(agent) => <RailAgentRow agent={agent} collapsed={() => props.collapsed} />}
+      </Each>
+    </View>
+  );
+}
+
+function RailAgentRow(props: {
+  agent: () => AgentRow;
+  collapsed: () => boolean;
+}): JSX.Element {
+  const active = () => railSelected() === props.agent().id;
+  return (
+    <View
+      testID={`rail-${props.agent().id}`}
+      role="button"
+      accessibilityLabel={props.agent().displayName}
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: props.collapsed() ? "center" : "flex-start",
+        gap: props.collapsed() ? 0 : 10,
+        width: "100%",
+        height: props.collapsed() ? 32 : undefined,
+        minHeight: 32,
+        paddingHorizontal: props.collapsed() ? 0 : 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: active() ? paletteToken("accent") : "transparent",
+        backgroundColor: active() ? paletteToken("panel_active") : "transparent",
+        cursor: "pointer",
+      }}
+      hoverStyle={
+        active() ? undefined : { backgroundColor: paletteToken("panel_hover") }
+      }
+      onPress={() => railSelected.set(props.agent().id)}
+    >
+      <AgentIcon
+        testID={`rail-icon-${props.agent().id}`}
+        id={props.agent().id}
+        size={props.collapsed() ? 18 : 16}
+      />
+      <View
+        style={{
+          display: props.collapsed() ? "none" : "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        <Text
+          style={{
+            flex: 1,
+            minWidth: 0,
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+            fontSize: 13,
+            fontWeight: active() ? "600" : "400",
+            color: active() ? paletteToken("accent_fg") : paletteToken("fg"),
+          }}
+        >
+          {props.agent().displayName}
+        </Text>
+        <Text
+          style={{
+            fontSize: 11,
+            fontWeight: active() ? "600" : "400",
+            fontVariant: "tabular-nums",
+            color: active() ? paletteToken("accent_fg") : paletteToken("fg_faint"),
+          }}
+        >
+          {String(railCounts()[props.agent().id] ?? 0)}
+        </Text>
+      </View>
     </View>
   );
 }

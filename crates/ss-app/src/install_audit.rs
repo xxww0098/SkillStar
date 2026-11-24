@@ -1,7 +1,7 @@
 //! Install-time security audits. The marketplace owns the query; this is the
 //! cross-domain seam CLI and the import dialog call.
 
-pub use ss_marketplace::SkillSecurityAudit;
+use ss_marketplace::SkillSecurityAudit;
 
 pub fn may_query_install_audits(repo_url: &str) -> bool {
     ss_marketplace::may_query_install_audits(repo_url)

@@ -12,6 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -20,9 +21,7 @@ use ss_core::infra::{fs_ops, paths};
 use crate::deployment::ownership::{self, Ownership};
 use crate::skill_lock::{self, LockFileState, SkillLock};
 
-/// Names a confined copy skips. If any of these sit in the Agent directory,
-/// replacing that directory with a link would delete them, so the directory
-/// is reported and not moved.
+/// Names a confined copy skips when copying into canonical storage.
 pub(super) const INTAKE_EXCLUDES: &[&str] = &[
     ".git",
     ".skillstar",
@@ -34,6 +33,23 @@ pub(super) const INTAKE_EXCLUDES: &[&str] = &[
     "__pypackages__",
     "metadata.json",
 ];
+
+/// Entries whose presence means replacing the Agent directory with a link
+/// would discard meaningful working-tree or metadata state. OS Finder/Explorer
+/// junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are stripped during
+/// copy and never block adoption or relinking.
+const INTAKE_BLOCKING_EXCLUDES: &[&str] = &[
+    ".git",
+    ".skillstar",
+    ".skillstar-deploy.json",
+    "__pycache__",
+    "__pypackages__",
+    "metadata.json",
+];
+
+fn is_os_junk(name: &std::ffi::OsStr) -> bool {
+    matches!(name.to_str(), Some(".DS_Store" | "Thumbs.db" | "desktop.ini"))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -158,64 +174,112 @@ enum Class {
     },
 }
 
+fn scan_root(agent_id: &str, root: &Path) -> Vec<IntakeFinding> {
+    let mut findings = Vec::new();
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return findings,
+        Err(error) => {
+            findings.push(finding(
+                IntakeKind::Excluded,
+                String::new(),
+                agent_id.to_owned(),
+                root.to_path_buf(),
+                error.to_string(),
+            ));
+            return findings;
+        }
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let Some(name) = entry.file_name().into_string().ok() else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        match classify_entry(agent_id, &name, &path) {
+            Ok(Class::Skip) => {}
+            Ok(Class::Step { action, reason }) => {
+                let kind = match action {
+                    IntakeAction::Adopt => IntakeKind::Adopt,
+                    IntakeAction::Relink => IntakeKind::Relink,
+                };
+                findings.push(finding(kind, name, agent_id.to_owned(), path, reason));
+            }
+            Ok(Class::Hold { kind, reason }) => {
+                findings.push(finding(kind, name, agent_id.to_owned(), path, reason));
+            }
+            Err(error) => findings.push(finding(
+                IntakeKind::Excluded,
+                name,
+                agent_id.to_owned(),
+                path,
+                format!("{error:#}"),
+            )),
+        }
+    }
+    findings
+}
+
 /// Read every Agent global skills directory except those that *are* the
 /// canonical root (Pi, Cline). Enabled and disabled profiles are both
 /// visited: the Agent installed the skill whether or not Settings has
 /// turned the profile on. Nothing here writes.
 pub fn scan() -> IntakeReport {
-    let mut report = IntakeReport::default();
-    for (agent_id, root) in agent_roots() {
-        let entries = match std::fs::read_dir(&root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                report.findings.push(finding(
-                    IntakeKind::Excluded,
-                    String::new(),
-                    agent_id,
-                    root,
-                    error.to_string(),
-                ));
-                continue;
+    let roots = agent_roots();
+    if roots.len() <= 1 {
+        let mut report = IntakeReport::default();
+        for (agent_id, root) in &roots {
+            report.findings.extend(scan_root(agent_id, root));
+        }
+        return report;
+    }
+
+    let existing: Vec<(usize, &(String, PathBuf))> = roots
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, root))| root.exists())
+        .collect();
+    let mut per_root: Vec<Vec<IntakeFinding>> = vec![Vec::new(); roots.len()];
+    if existing.len() <= 1 {
+        for (idx, (agent_id, root)) in existing {
+            per_root[idx] = scan_root(agent_id, root);
+        }
+    } else {
+        let workers = std::thread::available_parallelism()
+            .map_or(4, |n| n.get().min(8))
+            .min(existing.len());
+        let next_idx = AtomicUsize::new(0);
+        let batches: Vec<(usize, Vec<IntakeFinding>)> = std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(workers);
+            for _ in 0..workers {
+                handles.push(scope.spawn(|| {
+                    let mut local = Vec::new();
+                    loop {
+                        let i = next_idx.fetch_add(1, Ordering::Relaxed);
+                        let Some(&(root_idx, (agent_id, root))) = existing.get(i) else {
+                            break;
+                        };
+                        local.push((root_idx, scan_root(agent_id, root)));
+                    }
+                    local
+                }));
             }
-        };
-        let mut entries: Vec<_> = entries.flatten().collect();
-        entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            let Some(name) = entry.file_name().into_string().ok() else {
-                continue;
-            };
-            if name.starts_with('.') {
-                continue;
-            }
-            let path = entry.path();
-            match classify_entry(&agent_id, &name, &path) {
-                Ok(Class::Skip) => {}
-                Ok(Class::Step { action, reason }) => {
-                    let kind = match action {
-                        IntakeAction::Adopt => IntakeKind::Adopt,
-                        IntakeAction::Relink => IntakeKind::Relink,
-                    };
-                    report
-                        .findings
-                        .push(finding(kind, name, agent_id.clone(), path, reason));
-                }
-                Ok(Class::Hold { kind, reason }) => {
-                    report
-                        .findings
-                        .push(finding(kind, name, agent_id.clone(), path, reason));
-                }
-                Err(error) => report.findings.push(finding(
-                    IntakeKind::Excluded,
-                    name,
-                    agent_id.clone(),
-                    path,
-                    format!("{error:#}"),
-                )),
-            }
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap_or_default())
+                .collect()
+        });
+        for (root_idx, findings) in batches {
+            per_root[root_idx] = findings;
         }
     }
-    report
+    IntakeReport {
+        findings: per_root.into_iter().flatten().collect(),
+    }
 }
 
 pub fn plan(report: &IntakeReport) -> IntakePlan {
@@ -326,7 +390,7 @@ fn step(action: IntakeAction, finding: &IntakeFinding) -> IntakeStep {
 fn agent_roots() -> Vec<(String, PathBuf)> {
     let mut seen = BTreeSet::new();
     let mut roots = Vec::new();
-    for profile in crate::agents::list_profiles() {
+    for profile in crate::agents::list_profile_specs() {
         if !profile.has_global_skills() {
             continue;
         }
@@ -534,7 +598,13 @@ pub(super) fn blocking(root: &Path) -> Result<Option<String>> {
         {
             let entry = entry?;
             let name = entry.file_name();
-            if INTAKE_EXCLUDES.iter().any(|excluded| name == *excluded) {
+            if is_os_junk(&name) {
+                continue;
+            }
+            if INTAKE_BLOCKING_EXCLUDES
+                .iter()
+                .any(|excluded| name == *excluded)
+            {
                 let display = name.to_string_lossy();
                 let reason = if display == ".git" {
                     "Git working tree left unchanged".to_string()
@@ -556,7 +626,7 @@ pub(super) fn blocking(root: &Path) -> Result<Option<String>> {
                 }
                 let inside = target.strip_prefix(&root_real).unwrap_or(&target);
                 if inside.components().any(|part| {
-                    INTAKE_EXCLUDES
+                    INTAKE_BLOCKING_EXCLUDES
                         .iter()
                         .any(|excluded| part.as_os_str() == *excluded)
                 }) {
@@ -579,7 +649,11 @@ pub(super) fn entry_set(root: &Path) -> Result<BTreeSet<PathBuf>> {
     let mut out = BTreeSet::new();
     fn walk(root: &Path, dir: &Path, out: &mut BTreeSet<PathBuf>) -> Result<()> {
         for entry in std::fs::read_dir(dir)? {
-            let path = entry?.path();
+            let entry = entry?;
+            if is_os_junk(&entry.file_name()) {
+                continue;
+            }
+            let path = entry.path();
             out.insert(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
             if path.is_dir() && !fs_ops::is_link(&path) {
                 walk(root, &path, out)?;
@@ -595,7 +669,11 @@ fn file_rels(root: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         for entry in std::fs::read_dir(dir)? {
-            let path = entry?.path();
+            let entry = entry?;
+            if is_os_junk(&entry.file_name()) {
+                continue;
+            }
+            let path = entry.path();
             if fs_ops::is_link(&path) {
                 if path.is_file() {
                     out.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());

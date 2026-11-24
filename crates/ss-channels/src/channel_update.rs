@@ -24,13 +24,7 @@ where
         &self,
         repository_id: u64,
     ) -> Result<Option<ChannelUpdateSnapshot>, SharedChannelError> {
-        Ok(self
-            .subscriptions
-            .load_mutable()?
-            .subscriptions
-            .into_iter()
-            .find(|subscription| subscription.repository_id == repository_id)
-            .and_then(|subscription| subscription.last_update))
+        channel_update_state(&self.subscriptions, repository_id)
     }
 
     pub async fn check_update(
@@ -839,4 +833,18 @@ fn validate_resolutions(
         }
     }
     Ok(())
+}
+
+/// Reads the persisted update check snapshot for a subscribed channel without
+/// requiring a remote gateway or GitHub sign-in.
+pub fn channel_update_state<S: ChannelSubscriptionRegistry>(
+    subscriptions: &S,
+    repository_id: u64,
+) -> Result<Option<ChannelUpdateSnapshot>, SharedChannelError> {
+    Ok(subscriptions
+        .load_mutable()?
+        .subscriptions
+        .into_iter()
+        .find(|subscription| subscription.repository_id == repository_id)
+        .and_then(|subscription| subscription.last_update))
 }

@@ -67,13 +67,14 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 | 账号记录与登录令牌（令牌字段加密，整体按秘密保护） | `~/.skillstar/secrets/accounts/accounts.json`（索引）+ `secrets/accounts/records/<id>.json`（单条记录）；写锁在 `runtime/locks/accounts/storage.lock` | `ss-accounts`：记录、加密存储、切号写回、对账 |
 | 额度快照 | 不单独落盘：随账号记录存在 `records/<id>.json` 的 `usage` 字段 | `ss-accounts` 内部私有 `usage` 模块负责读取与建模，持久化同归 `ss-accounts` |
 | OAuth pending 登录会话 | 进程内存，重启即失效 | `ss-accounts` 内部私有 `oauth` 模块；每路登录一个 id |
-| 客户端凭据写回（切号） | 直接写各客户端自己的凭据位置（`auth.json` / `.credentials.json` / `state.vscdb` 等；Antigravity 同步写回 macOS 系统钥匙串） | `ss-accounts::switch`（可回滚写-回读校验，各家落点见 [Accounts](./features/accounts/README.md)） |
+| 客户端凭据写回（切号） | 直接写各客户端自己的凭据位置（`auth.json` / `.credentials.json` / `state.vscdb` 等；Antigravity 在 macOS 写系统钥匙串、在 Windows 写 Credential Manager） | `ss-accounts::switch`（可回滚写-回读校验，各家落点见 [Accounts](./features/accounts/README.md)） |
 | GitHub 用户登录凭据 | `~/.skillstar/secrets/github/auth.json`（Unix `0600`） | `ss-skills::github_auth`；普通配置只保存非敏感共享频道状态 |
 | 共享频道注册、订阅与锁 | `~/.skillstar/data/channels/{shared_channels,subscriptions}.json` 与 `runtime/locks/channels/`（由旧 `config/` 无损迁入） | `ss-skills::channel_registry` 拥有持久化 store 与所有权查询接缝（由 `ss-channels` 重导出并执行订阅/升级/发布/回滚编排）；只保存 repository ID、release target、所选 Skill、安装 baseline/provenance、逐 Skill 历史 pin、按频道自动升级偏好与最近逐项结果，不保存 GitHub 凭据 |
+| 外部 MCP 服务库与账本、备份及互斥锁 | `~/.skillstar/data/mcp/library.json`、`~/.skillstar/data/mcp/backups/` 与 `~/.skillstar/runtime/locks/mcp/library.lock` | `ss-mcp-hub` 拥有（[D-118](./decisions.md#d-118外部-mcp-管理域拆分到-ss-mcp-hub实施三层无损入侵并与-magpie-对齐-35-个-mcp-agent)、[D-122](./decisions.md#d-122移除-gemini-cli-mcp-支持)）：持久化规范服务定义、`disabledTools`、逐 Agent 覆盖、已纳管/应用台账（`applied` / `tools_off`）、滚动备份与 35 个内置 MCP Agent 外部配置文件的跨进程同步 |
 | 项目技能计划、批准和回执 | `~/.skillstar/state/project-skill-plans/`、`project-skill-approvals/`、`project-skill-receipts/` | `ss-mcp`（`ss-mcp::plan` / `approval` / `apply`）。项目写入的跨进程锁是 `state/project-write.lock`，所有者是 `ss-skills::projects::write_lock` |
-| 技能描述与 SKILL.md 译文 | `cache/translations/entries.json`；偏好 `config/translation.json` | `ss-core::translation`。大模型只读账户里的 OpenCode Go、Ollama、Command Code API Key，不另存一份密钥。没手动改过模型时，用该服务的推荐模型（OpenCode Go 为 `deepseek-v4.1-flash`）。用户点拉取时才请求 `{base}/models`。描述和 SKILL.md 各有一个开关，默认关。壳只在对应开关打开、且界面语言为中文时读缓存并排队缺失项；关掉开关仍留着缓存，再打开直接用。机翻、大模型翻译和模型列表都走 `probe_http_client`。密钥不进缓存键 |
+| 技能描述与 SKILL.md 译文 | `cache/translations/entries.json`；偏好 `config/translation.json`；大模型密钥 `secrets/translation/api_key`（Unix `0600`） | `ss-core::translation`。大模型翻译不再从 Accounts 读取账户密钥，而在「设置 → 翻译」手动配置端点（`llm_base_url`，默认 `https://api.openai.com/v1`）、手填 API Key（落盘至 `secrets/translation/api_key`，读取时只回显脱敏摘要）与模型 ID（支持手填或点拉取请求 `{base}/models`）；旧配置中的 `llm_account_id` / `llm_account_catalog` 在规范化时清空。描述和 `SKILL.md` 各有一个开关，默认开（新装不改设置即翻译）；My Skills（含选择栏批量翻译描述）与 Marketplace 在对应开关打开时读缓存并排队翻译缺失项，关掉开关仍留着缓存，再打开直接用。机翻、大模型翻译和模型列表都走 `probe_http_client`。密钥不进缓存键 |
 
-敏感凭证不得明文写入普通配置；账号密钥由 `ss-accounts` 使用本地 AES-256-GCM 加密存储（仅 Antigravity 按客户端要求写回系统钥匙串，见 [D-114](./decisions.md#d-114antigravity-的切号按-cockpit-复刻macos-需要写系统钥匙串)），具体行为见 [Accounts](./features/accounts/README.md)。
+敏感凭证不得明文写入普通配置；账号密钥由 `ss-accounts` 使用本地 AES-256-GCM 加密存储（仅 Antigravity 按客户端要求写回 macOS 系统钥匙串或 Windows Credential Manager，见 [D-114](./decisions.md#d-114antigravity-的切号按-cockpit-复刻macos-需要写系统钥匙串)），翻译大模型密钥独立写入 `secrets/translation/api_key`、不从 Accounts 读取，具体行为见 [Accounts](./features/accounts/README.md)。
 
 ## 核心不变量
 
@@ -82,7 +83,7 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 - MCP serve（`ss_mcp::serve()`）在 askpass 和市场快照初始化之前返回。它不调用 `ss_app::bootstrap::prepare_process`。
 - Windows release 保持 `windows` subsystem，不调用 `AllocConsole`。MCP 继承父进程已经重定向的管道。
 - 未知参数落入 nsh GUI（`ss_gui_host::run`），这样系统启动器仍能打开应用（macOS 与 Windows 有 AppView 宿主；其它平台打印原因并提示使用 CLI）。深链注册本身没有移植。
-- 长任务的取消和进度属于域 session（经 `ss-gui-bridge` 的 `DomainJob` 与 `src/services/domainJob.ts` 衔接）。nsh 宿主没有深链或签名更新器；托盘只有 Windows 一份（通知区，常驻与退出，D-115）。
+- 长任务的取消和进度属于域 session（经 `ss-gui-bridge` 的 `DomainJob` 与 `src/services/domainJob.ts` 衔接）。nsh 宿主没有深链或签名更新器；macOS 菜单栏状态图标（`assets/tray-icon.svg`）与 Windows 通知区托盘均已通过 `Tray.set` 接入独立额度弹出窗 `<Window id="quota-popover">`（`gui/src/shell/trayQuotaWindow.tsx`，macOS 经 `gui/native/src/popover_dismiss.rs` 监听窗外点击收起）。主窗口关闭行为受「设置 → 常规」的「后台运行」开关（`gui_prefs.json` 的 `background_run`，默认关闭）控制：关闭时点击关窗走退出流程（经未完成任务确认后退出）；开启后点击关窗仅隐藏主窗口，进程、状态栏入口及后台唤醒继续运行（D-115）。
 
 ### 文件和部署
 
@@ -109,7 +110,7 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 - 频道升级 facade 默认检查、显式应用，并以订阅 Skill 为隔离事务单元。它从最新已验证 Release 与每项已安装 release hash/provenance 推导频道状态；只把完整内容仍等于 baseline 的 updated Skill 切到目标 commit 的隔离 ref cache。分歧或失败项保留替换前的规范副本（升级前留下的隐藏副本，不重新拉取），成功项独立前进；新增项只通知、removed 项不隐式删除。每项事务复用统一分歧解决、update state、Agent/Project reconciliation 与回滚接缝，最近一次检查结果持久化以支持重启和离线展示。
 - 单 Skill 历史回滚也由频道升级 facade 编排：它在同一仓库的已验证 manifest 集合中将当前 provenance/hash 解析为唯一安装 Release，只允许更早且仍包含该 Skill 的精确 target，再复用 staged update transaction 替换文件与部署。回执的复核、订阅写入和失败补偿与批量升级共用一段流程，见 [Skills 生命周期](./features/skills/README.md#频道升级)。成功只更新该 Skill 的安装事实并写入 pin，不倒退频道整体 target；手动与自动批量应用均排除 pin。恢复跟随以一次 subscription store 事务清 pin 并按最新 Release 重建计划，不在该动作中直接替换 Skill。
 - 频道 marketplace 导出是纯本地只读管线：从 subscription registry 读取当前选择与安装 baseline，逐 Skill 重新对 canonical 副本做内容 hash 校验（相等才导出，fail-closed），再由 `ss-channels` 私有模块 `plugin_market_format`（[D-104](./decisions.md#d-104claude-code-插件市场格式收回-ss-skills-私有模块)）写出自包含的市场目录（根 `marketplace.json` + 每技能 `plugin.json` + 内容副本）。不经网络、不需要 GitHub 登录；输出目录必须不存在或为空。导出不修改订阅、锁或任何远端状态。
-- Release 移除是 manifest 与本地 tracked 集合的差异状态，不是删除指令。频道 facade 保留 Hub 内容、lockfile 与部署，直到用户显式卸载或转为本地副本；前者复用统一卸载清理，后者先以完整内容快照建立 `skills-local` 所有权，再解除频道跟踪。Hub/lockfile 先进入可恢复 staging，subscription store 在同一共享 mutation/update transaction 内提交；metadata 失败会恢复 Hub/lockfile 并删除未提交的本地安全副本，metadata 成功后的部署清理失败则保留已解除跟踪事实并报告剩余清理。未处理的 removal tombstone 会跨后续 Release 保留；移除 tracked/known/pin 后，未来同名重加只能进入带最终内容/provenance 校验的显式 staged install 路径。
+- Release 移除是 manifest 与本地 tracked 集合的差异状态，不是删除指令。频道 facade 保留 Hub 内容、lockfile 与部署，直到用户显式卸载或转为本地副本；前者复用统一卸载清理，后者先以完整内容快照在 `installed/<name>/` 与 `library.json` 建立 local origin 所有权，再解除频道跟踪。Hub/lockfile 先进入可恢复 staging，subscription store 在同一共享 mutation/update transaction 内提交；metadata 失败会恢复 Hub/lockfile 并删除未提交的本地安全副本，metadata 成功后的部署清理失败则保留已解除跟踪事实并报告剩余清理。未处理的 removal tombstone 会跨后续 Release 保留；移除 tracked/known/pin 后，未来同名重加只能进入带最终内容/provenance 校验的显式 staged install 路径。
 - GitHub 成员撤销与订阅访问冻结是两端独立、以远端为准的状态机。owner 端只删除 direct collaborator，随后复查 effective permission 并区分完全撤权、继承访问和未确认错误；subscriber 端把远端探测投影为 `active`、`revoked`、`offline`、`recoverable_failure`、`integrity_error`。非 active 状态一律冻结需要远端内容的 mutation 并保留 Hub、lockfile、部署和最近已验证快照；只有 revoked 额外开放逐项转本地/卸载。频道所有权 guard 位于域层通用 mutation 接缝，覆盖扫描/安装、更新、内容、本地收养、bundle/pack、项目导入及卸载，而不是只靠界面隐藏动作。检查在冻结时仍可只读重试，必须在隔离验证 cache 中重新通过 stable repository/organization ID、权限、manifest/tag/commit/path/hash 全链验证才恢复 active。网络/代理状态不得推断为撤权，完整性错误不得被普通重试结果或旧缓存绕过。该 guard 通过域内窄查询接缝实现：`ss-skills::skill_mutation::SkillMutationPolicy`（默认使用域内频道策略）由 `ss-skills::channel_registry::policy::ChannelAwarePolicy` 实现，策略由技能域直接提供默认值，不依赖 GUI/CLI 启动注册。
 - 后台检查与受保护自动升级复用上述 facade，不是第二套更新器。`ss-channels` 以注入时间为所有订阅判定一小时检查窗口并持久化结果；只有按频道显式开启的偏好才允许选择并应用安全项。`ss-app::channel_wake` 只负责 GUI 进程存活期间的分钟级唤醒。它不发桌面通知。自动与手动扫描/应用共享 subscription mutation lease，实际文件替换继续共享全局 Skill update transaction lock，因此普通更新器并发移动 checkout 时，自动路径必须在写入前重新检查并暂停该项。
 - 通用技能的后台自动更新遵循同一原则，不是第二套更新器（自动模式额外按安装基线跳过本地已修改的技能，[D-095](./decisions.md#d-095更新检测按-tree-逐层解析安装基线保护自动更新频道升级由类型化授权与本地备份承担)）：偏好是 `config/skill_updates.json` 的 `auto_update`（默认手动）和 `interval_minutes`（默认 1 小时，限于固定档位），`ss-app::skill_wake` 只负责 GUI 进程存活期间的分钟级唤醒与上次运行时间，检查与应用分别复用 `ss-skills::update::auto_update_locked_skills` 包装的既有读侧与 `GitSkillFacade::update_skills`；更新投影仍只有 `ss-skills::update_state` 一处。
@@ -127,6 +128,13 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 - Windows release 不改 `windows_subsystem`，不调用 `AllocConsole`。父进程接上的管道就是传输。
 - 项目技能 MCP 只接受协议 `2026-07-28`。推荐保持 BM25 原序。
 
+### 外部 MCP 无损管理
+
+- `ss-mcp-hub` 独立于 `ss-mcp`，支持 35 个内置 MCP Agent（在对齐 magpie `t.MCP != nil` 的基础上已按 [D-122](./decisions.md#d-122移除-gemini-cli-mcp-支持) 移除 `gemini`；含 `agy` 并入规范 `antigravity`，不含 magpie 内部 `claude-magpie-3p`）。
+- 外部配置写入遵循三层无损入侵保证：UTF-8 BOM / CRLF / 缩进 / symlink 目标穿透 / 字节级 JSONC 注释尾逗号与 TOML/YAML/DSH 无关区块保留；条目级仅覆写 `owned` 字段并保留用户扩展字段（Zed 扩展条目的 `context_servers.<name>` 无 `command` 与 `url` 时拒绝覆盖）；账本只删除曾经由 `ss-mcp-hub` 记录写入的条目，从不接触无需求且无账本记录的 Agent 文件。每次修改前写入滚动备份（`data/mcp/backups/`）。
+- 内置 MCP 商店优先离线提供精选与嵌入式 `market_servers.json` 快照（不含 magpie 专有网关条目），在线 Registry 搜索、GitHub `pyproject.toml` 与 PyPI 探测经 `probe_http_client` 执行。
+- 测试隔离同时设置 `SKILLSTAR_DATA_DIR` 与 `SKILLSTAR_TOOL_SYNC_HOME`，绝不触碰真实 `$HOME`。
+
 ### 跨进程与凭证事务
 
 - 额度刷新、账号切换与凭据写入按 agent 串行化，并使用 OS 文件锁（`runtime/locks/accounts/`）。
@@ -141,10 +149,10 @@ SKILL.md frontmatter 解析、诊断与安装门禁统一归技能域；发现�
 
 ## 壳运行模型
 
-- `ss-gui-host`（`gui/host`）内嵌 `nsh build` 产物 `bundle.js` 与 `ss-gui-bridge`（`gui/native`）；`gui/App.tsx` 挂载 `Shell`（`src/shell/Shell.tsx`）负责侧栏与页面路由。
-- `Shell` 对页面（`src/pages/*`）单次挂载并按 `display` 切换保活；页面间禁止互相 import，跨页跳转与数据失效事件走 `src/shell/events.ts`。
+- `ss-gui-host`（`gui/host`）内嵌 `nsh build` 产物 `bundle.js` 与 `ss-gui-bridge`（`gui/native`），`nsh-*` 宿主与桥接 crate 版本统一由根 `Cargo.toml` 的 `[workspace.dependencies]` 锁定；`gui/App.tsx` 挂载 `Shell`（`src/shell/Shell.tsx`）负责侧栏与页面路由。
+- `Shell` 对页面（`src/pages/*`）单次挂载并按 `display` 切换保活；页面间禁止互相 import，跨页跳转与数据失效事件走 `src/shell/events.ts`。桌面宿主能力集中在 `src/shell/residentWindow.ts`、`src/shell/trayQuotaWindow.tsx` 与 `src/shell/desktopShell.ts`（`nsh` 原生应用菜单与快捷键 `Menu.setApplicationMenu`、按 `background_run` 路由 `closePress` 隐藏或 `requestAppQuit()` 退出、macOS/Windows 状态栏/托盘与独立额度窗 `<Window id="quota-popover">`、全局额度窗快捷键 `GlobalShortcut`、前后台 `lifecycle()` 恢复对账与过期配额补刷，以及由 `jobBoard` 镜像的 Dock / 任务栏 `WindowProgress`）。
 - TSX 视图经 `#[native_module("skillstar-gui/native")]` 调用 `ss-gui-bridge`（除纯同步判定外一律走 tokio blocking 池）；长任务取消句柄 `DomainJob` 与 120ms 节流进度流由 `native/src/facades/bridge_task.rs` 与 `src/services/domainJob.ts` 配对实现，不另建全局状态库。
-- 应用文案在 `gui/src/services/translation.ts`，`en` 与 `zh-CN` 两套字典同步维护；主题配色经 `paletteToken()` 读取 `themeMode`（`current` / `paper`）与 `gui/theme.json`。
+- 应用文案在 `gui/src/services/translation.ts`，`en` 与 `zh-CN` 两套字典同步维护；主题配色经 `paletteToken()` 读取 `themeMode`（`current` / `paper`）与 `gui/theme.json`，并通过 `Scrollbar.setTheme` 同步全局滚动条外观。
 
 ## 发布与验证
 

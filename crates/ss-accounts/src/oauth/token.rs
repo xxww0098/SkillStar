@@ -182,7 +182,7 @@ pub fn classify_status(status: u16, body: &str) -> OAuthError {
 }
 
 async fn post_form(url: &str, pairs: &[(String, String)]) -> OAuthResult<Value> {
-    let client = client()?;
+    let client = client(url)?;
     let response = client
         .post(url)
         .header("Accept", "application/json")
@@ -194,7 +194,7 @@ async fn post_form(url: &str, pairs: &[(String, String)]) -> OAuthResult<Value> 
 }
 
 async fn post_json(url: &str, body: &Value) -> OAuthResult<Value> {
-    let client = client()?;
+    let client = client(url)?;
     let response = client
         .post(url)
         .header("Accept", "application/json")
@@ -215,13 +215,21 @@ async fn read_token_response(response: reqwest::Response, kind: &str) -> OAuthRe
         .map_err(|error| OAuthError::Rejected(format!("{kind} 令牌响应不是合法 JSON: {error}")))
 }
 
-fn client() -> OAuthResult<reqwest::Client> {
-    ss_core::infra::http_client::probe_http_client(TOKEN_TIMEOUT)
+fn client(url: &str) -> OAuthResult<reqwest::Client> {
+    ss_core::infra::http_client::probe_http_client_for_url(url, TOKEN_TIMEOUT)
         .map_err(|error| OAuthError::Other(format!("无法构建 HTTP 客户端: {error}")))
 }
 
+pub(crate) fn transport_error(prefix: &str, error: reqwest::Error) -> OAuthError {
+    ss_core::infra::http_client::invalidate_probe_http_client();
+    OAuthError::Transient(format!(
+        "{prefix}: {}",
+        ss_core::infra::http_client::format_error_chain(&error)
+    ))
+}
+
 fn transport(error: reqwest::Error) -> OAuthError {
-    OAuthError::Transient(format!("令牌端点请求失败: {error}"))
+    transport_error("令牌端点请求失败", error)
 }
 
 fn error_code(body: &str) -> Option<String> {

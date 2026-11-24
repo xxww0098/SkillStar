@@ -100,24 +100,16 @@ export const NETWORK_DOCTOR_SECTION: StandaloneSectionEntry = {
   icon: "activity",
 };
 
-export function sectionIndex(id: SettingsSectionId): number {
-  return SETTINGS_SECTIONS.findIndex((section) => section.id === id);
-}
-
 // ---- 布局常量 ---------------------------------------------------------------
 
 /** 滚动内容最大宽。 */
 export const SETTINGS_BODY_W = 760;
-/** 滚动列标准宽（保留导出供历史兼容与测试引用）。 */
-export const SETTINGS_COL_W = 768;
 /** 次级导航展开标签态宽。 */
 export const SETTINGS_NAV_W = 188;
 /** 次级导航收起图标态宽。 */
 export const SETTINGS_NAV_COLLAPSED_W = 48;
 /** 窄窗口退化为单列堆叠时分区槽底距。 */
 export const SETTINGS_SECTION_PB = 28;
-/** 滚动列标准内边距。 */
-export const SETTINGS_SCROLL_PAD = 24;
 
 /** 面板宽度响应式断点：>=720 展示次级导航，>=900 展示导航文字标签。 */
 export const SETTINGS_NAV_MIN_PANE = 720;

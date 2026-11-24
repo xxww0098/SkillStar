@@ -93,6 +93,14 @@ impl SkillCardsImport {
         share_install::looks_like_share_code(&text)
     }
 
+    /// Cheap input sniff for GitHub/Git repository URLs, `owner/repo`
+    /// shorthands, and pasted install commands (excluding share codes and
+    /// local `.ags`/`.agd` bundle paths). Drives the live banner and handoff
+    /// to the repository import modal. Pure, no IO.
+    pub fn looks_like_repo_source(text: String) -> bool {
+        ss_skills::source_resolver::looks_like_remote_source(&text)
+    }
+
     /// Decode an `ags-`/`agd-` share code (7-day TTL, 1 MB cap) into its
     /// flavour and payload. Pure; an invalid, corrupted or expired code
     /// rejects with the domain's reason.
@@ -263,6 +271,27 @@ mod tests {
         )));
         assert!(!SkillCardsImport::looks_like_share_code("ags-short".into()));
         assert!(!SkillCardsImport::looks_like_share_code("".into()));
+    }
+
+    #[test]
+    fn sniffs_repo_sources_without_catching_bundles_or_share_codes() {
+        assert!(SkillCardsImport::looks_like_repo_source(
+            "https://github.com/vuejs-ai/skills".into()
+        ));
+        assert!(SkillCardsImport::looks_like_repo_source(
+            "vuejs-ai/skills".into()
+        ));
+        assert!(SkillCardsImport::looks_like_repo_source(
+            "npx skills add vuejs-ai/skills".into()
+        ));
+        assert!(!SkillCardsImport::looks_like_repo_source(
+            "/tmp/pack.agd".into()
+        ));
+        assert!(!SkillCardsImport::looks_like_repo_source(format!(
+            "agd-{}/{}",
+            "A".repeat(20),
+            "B".repeat(20)
+        )));
     }
 
     #[test]

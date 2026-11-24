@@ -1,14 +1,12 @@
-import { isLight } from "../../services/themeMode";
-
 // 市场页共享类型与纯工具 — marketplace/types.rs 对位。Tab 枚举、快照行
 // 的宽容解析（parseX 把未知形状降级成默认值，页面永不因桥数据缺字段
-// 抛错）、装机量格式化、头像配色、卡面 blurb 选择，全部纯函数。
+// 抛错）、装机量格式化、卡面 blurb 选择，全部纯函数。
+
+import { marketTranslatedText } from "./translateQueue";
 
 /** 四个 tab（types.rs MarketplaceTab）："all"/"trending"/"hot" 走
  * leaderboard 读取，"official" 换成发布者列表。 */
 export type MarketTabId = "all" | "trending" | "hot" | "official";
-
-export const MARKET_TABS: MarketTabId[] = ["all", "trending", "hot", "official"];
 
 /** Tab 的 leaderboard 类目（types.rs leaderboard_category；official 恒
  * "all"，只有非 official tab 会用到）。 */
@@ -16,8 +14,9 @@ export function leaderboardCategory(tab: MarketTabId): string {
   return tab === "trending" ? "trending" : tab === "hot" ? "hot" : "all";
 }
 
-/** 快照状态 tag（LocalFirstResult.snapshotStatus 的桥侧字符串）。 */
+/** 快照状态 tag（LocalFirstResult.snapshotStatus 的桥侧字符串，含未初始化 unknown）。 */
 export type SnapshotStatusTag =
+  | "unknown"
   | "fresh"
   | "stale"
   | "seeding"
@@ -25,12 +24,19 @@ export type SnapshotStatusTag =
   | "error_fallback"
   | "remote_error";
 
+/** 结构化快照错误（{ kind, scope, detail }）。 */
+export interface SnapshotErrorInfo {
+  kind: SnapshotStatusTag;
+  scope: string;
+  detail: string;
+}
+
 /** 本地优先读结果（LocalFirstResult<T> 的桥形状）。 */
 export interface LocalFirst<T> {
   data: T;
   snapshotStatus: SnapshotStatusTag;
   snapshotUpdatedAt: string | null;
-  error: string | null;
+  error: SnapshotErrorInfo | null;
 }
 
 /** 市场技能行（Skill 的桥形状 + 宽容解析后的视图记录）。 */
@@ -110,31 +116,57 @@ export function parsePublisher(row: unknown): PublisherRecord {
   };
 }
 
+export function parseSnapshotError(
+  value: unknown,
+  fallbackKind: SnapshotStatusTag = "remote_error",
+  fallbackScope = ""
+): SnapshotErrorInfo | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0
+      ? { kind: fallbackKind, scope: fallbackScope, detail: trimmed }
+      : null;
+  }
+  if (value !== null && typeof value === "object") {
+    const rec = value as Record<string, unknown>;
+    const detail = str(rec.detail).trim();
+    const scope = str(rec.scope).trim() || fallbackScope;
+    const kind = parseStatus(rec.kind) === "unknown" ? fallbackKind : parseStatus(rec.kind);
+    if (detail.length > 0) {
+      return { kind, scope, detail };
+    }
+  }
+  return null;
+}
+
 /** 整个 LocalFirst 载荷解析；data 行逐个降级。 */
 export function parseSkillsPayload(payload: unknown): LocalFirst<MarketSkill[]> {
   const record = (payload ?? {}) as Record<string, unknown>;
   const rows = Array.isArray(record.data) ? record.data : [];
+  const status = parseStatus(record.snapshotStatus);
   return {
     data: rows.map(parseSkill),
-    snapshotStatus: parseStatus(record.snapshotStatus),
+    snapshotStatus: status,
     snapshotUpdatedAt: optStr(record.snapshotUpdatedAt),
-    error: optStr(record.error),
+    error: parseSnapshotError(record.error, status),
   };
 }
 
 export function parsePublishersPayload(payload: unknown): LocalFirst<PublisherRecord[]> {
   const record = (payload ?? {}) as Record<string, unknown>;
   const rows = Array.isArray(record.data) ? record.data : [];
+  const status = parseStatus(record.snapshotStatus);
   return {
     data: rows.map(parsePublisher),
-    snapshotStatus: parseStatus(record.snapshotStatus),
+    snapshotStatus: status,
     snapshotUpdatedAt: optStr(record.snapshotUpdatedAt),
-    error: optStr(record.error),
+    error: parseSnapshotError(record.error, status),
   };
 }
 
-function parseStatus(value: unknown): SnapshotStatusTag {
+export function parseStatus(value: unknown): SnapshotStatusTag {
   switch (value) {
+    case "fresh":
     case "stale":
     case "seeding":
     case "miss":
@@ -142,7 +174,7 @@ function parseStatus(value: unknown): SnapshotStatusTag {
     case "remote_error":
       return value;
     default:
-      return "fresh";
+      return "unknown";
   }
 }
 
@@ -153,34 +185,12 @@ export function formatInstalls(count: number): string {
   return String(count);
 }
 
-/** 卡面 blurb：本地化描述优先，空描述返回 null（types.rs skill_blurb —
- * 卡片不得发明占位段落）。 */
+/** 卡面 blurb：本地化描述或翻译队列缓存优先，空描述返回 null。 */
 export function skillBlurb(skill: MarketSkill): string | null {
   const localized = skill.localizedDescription?.trim();
   if (localized) return localized;
+  const cached = marketTranslatedText(skill.description);
+  if (cached) return cached;
   const plain = skill.description.trim();
   return plain.length > 0 ? plain : null;
-}
-
-/** 头像配色（types.rs avatar_palette）：种子哈希选盘，按明暗模式取
- * (bg, fg)。九盘值照抄。 */
-export function avatarPalette(seed: string): [string, string] {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) {
-    h = (Math.imul(h, 31) + seed.charCodeAt(i)) | 0;
-  }
-  const palettes: ReadonlyArray<[string, string, string, string]> = [
-    // (dark bg, dark fg, light bg, light fg)
-    ["#162c52", "#79c0ff", "#e8f1fe", "#0969da"],
-    ["#19214d", "#a5b4fc", "#e0e7ff", "#4338ca"],
-    ["#27173e", "#d2a8ff", "#f3e8ff", "#7c3aed"],
-    ["#32153c", "#f0abfc", "#fae8ff", "#a21caf"],
-    ["#0d3529", "#2dd4bf", "#dcf5e4", "#047857"],
-    ["#0e3636", "#2dd4bf", "#ccfbf1", "#0f766e"],
-    ["#0c313a", "#67e8f9", "#e0f7fa", "#0e7490"],
-    ["#382307", "#fcd34d", "#fef3c7", "#a16207"],
-    ["#3d1419", "#ff7b72", "#ffe4e6", "#be123c"],
-  ];
-  const [darkBg, darkFg, lightBg, lightFg] = palettes[Math.abs(h) % palettes.length];
-  return isLight() ? [lightBg, lightFg] : [darkBg, darkFg];
 }

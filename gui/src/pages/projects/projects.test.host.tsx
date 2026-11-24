@@ -18,6 +18,7 @@ import type {
   CopyRecord,
   CopyStatusSnapshot,
   DeployMode,
+  PendingProjectSkillPlan,
   ProjectEntry,
   ProjectsBridge,
   RegistrySnapshot,
@@ -62,7 +63,6 @@ const PROFILES: RegistrySnapshot["profiles"] = [
 ];
 
 let hubContent = "v1";
-let nextSeq = 1;
 
 function makeProject(name: string, path: string): FakeProject {
   return {
@@ -101,7 +101,8 @@ function recordsOf(project: FakeProject): CopyRecord[] {
 
 // ---- 假桥 -----------------------------------------------------------------------
 
-const calls = { save: 0, retry: 0, forget: 0, register: 0 };
+const calls = { save: 0, retry: 0, forget: 0, register: 0, approve: 0 };
+let activePendingPlan: PendingProjectSkillPlan | null = null;
 
 const pulse = signal(0);
 const readoutText = signal("");
@@ -249,6 +250,37 @@ const fakeBridge: ProjectsBridge = {
     bump();
     return null;
   },
+  async pendingProjectSkillPlan(projectRoot) {
+    if (activePendingPlan !== null && activePendingPlan.canonicalRoot === projectRoot) {
+      return {
+        ...activePendingPlan,
+        affectedAgents: [...activePendingPlan.affectedAgents],
+        operations: activePendingPlan.operations.map((op) => ({ ...op })),
+      };
+    }
+    return null;
+  },
+  async approveProjectSkillPlan(planId, planHash) {
+    calls.approve += 1;
+    if (activePendingPlan === null || activePendingPlan.planId !== planId) {
+      throw new Error(`unknown plan: ${planId}`);
+    }
+    if (activePendingPlan.planHash !== planHash) {
+      throw new Error(`plan hash mismatch`);
+    }
+    activePendingPlan = {
+      ...activePendingPlan,
+      approved: true,
+      approvalSource: "skillstar",
+    };
+    bump();
+    return {
+      planId,
+      planHash,
+      source: "skillstar",
+      recordedAt: "2026-11-20T08:00:00Z",
+    };
+  },
 };
 
 // ---- 装置 -----------------------------------------------------------------------
@@ -263,6 +295,7 @@ effect(() => {
   );
   readoutText.set(
     `save:${calls.save} retry:${calls.retry} forget:${calls.forget} reg:${calls.register} ` +
+      `approve:${calls.approve} ` +
       `hub:${hubContent} target:${target === undefined ? "none" : target === null ? "gone" : target} ` +
       `missingKeys:${missingKeys.length} ` +
       `last:${lastSave === null ? "none" : `${lastSave.agents}|${lastSave.modes}`}`
@@ -325,6 +358,41 @@ function App(): JSX.Element {
           }}
         >
           <Text>refresh</Text>
+        </Button>
+        <Button
+          testID="host-seed-plan"
+          onPress={() => {
+            activePendingPlan = {
+              planId: "plan-1",
+              planHash: "sha256:plan1",
+              canonicalRoot: projects[0]?.entry.path ?? "/tmp/proj/alpha",
+              isRegistered: true,
+              owner: "codex",
+              affectedAgents: ["codex", "cursor"],
+              operations: [
+                {
+                  name: "demo",
+                  action: "create",
+                  skillPath: ".agents/skills/demo",
+                },
+              ],
+              expiresAt: "2026-11-20T09:00:00Z",
+              approved: false,
+              approvalSource: null,
+            };
+            state.refreshPendingPlan();
+          }}
+        >
+          <Text>seed-plan</Text>
+        </Button>
+        <Button
+          testID="host-clear-plan"
+          onPress={() => {
+            activePendingPlan = null;
+            state.refreshPendingPlan();
+          }}
+        >
+          <Text>clear-plan</Text>
         </Button>
       </View>
       <Readout />

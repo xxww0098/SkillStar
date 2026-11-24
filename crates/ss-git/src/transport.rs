@@ -229,18 +229,6 @@ impl GitOperationSession {
             progress: self.progress.clone(),
         }
     }
-
-    /// Recovery runs after an operation has already failed or been cancelled.
-    /// It retains the operation credential but must not inherit the sticky
-    /// cancellation bit, otherwise rollback cannot restore a partial checkout.
-    pub fn recovery_view(&self) -> Self {
-        Self {
-            id: self.id.clone(),
-            auth: self.auth.clone(),
-            cancelled: Arc::new(AtomicBool::new(false)),
-            progress: Arc::new(NoopGitProgressSink),
-        }
-    }
 }
 
 impl fmt::Debug for GitOperationSession {

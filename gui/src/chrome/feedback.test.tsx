@@ -17,10 +17,21 @@ test("the sweep mounts with its flag after the first paint, and leaves with it",
   await app.waitUntil(() => !app.shows("id:sweep-beam"));
 });
 
-test("the spinner starts turning after the first paint, and stops with it", async () => {
+test("the spinner starts turning after the first paint, and coasts one turn", async () => {
   const app = await open(HOST);
   await app.waitUntil(() => app.shows("id:host-toggle-spin"));
   expect(app.shows("id:spin-frame")).toBe(false);
+  await app.press("id:host-toggle-spin");
+  await app.waitFor("id:spin-frame");
+  await app.press("id:host-toggle-spin");
+  // The frame stays up until the 800ms revolution it already started finishes.
+  expect(app.shows("id:spin-frame")).toBe(true);
+  await app.waitUntil(() => !app.shows("id:spin-frame"), { timeout: 2000 });
+});
+
+test("reduced motion drops the spinner as soon as spin is off", async () => {
+  const app = await open(HOST, { reducedMotion: true });
+  await app.waitUntil(() => app.shows("id:host-toggle-spin"));
   await app.press("id:host-toggle-spin");
   await app.waitFor("id:spin-frame");
   await app.press("id:host-toggle-spin");

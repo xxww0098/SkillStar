@@ -81,9 +81,18 @@ impl SkillCardsDrawer {
 }
 
 /// The link-command tail (skill_cards/mod.rs `run_link_job`): acquire the
-/// update transaction lock with a zero wait, then run the link job and shape
-/// the report as JSON. Errors keep anyhow's alternate-chain formatting.
-async fn run_link_job<E: std::fmt::Display>(
+/// update transaction lock with a zero wait on the blocking pool, then run
+/// the link job and shape the report as JSON. Errors keep anyhow's
+/// alternate-chain formatting.
+async fn run_link_job<E: std::fmt::Display + Send + 'static>(
+    job: impl FnOnce() -> Result<AgentLinkReport, E> + Send + 'static,
+) -> Result<JsonValue, String> {
+    blocking(move || link_job_body(job))
+        .await
+        .map_err(|join| format!("link task failed: {join}"))?
+}
+
+fn link_job_body<E: std::fmt::Display>(
     job: impl FnOnce() -> Result<AgentLinkReport, E>,
 ) -> Result<JsonValue, String> {
     let _guard = ss_skills::skill_update::try_acquire_update_transaction_lock(Duration::ZERO)
@@ -92,11 +101,13 @@ async fn run_link_job<E: std::fmt::Display>(
     Ok(report_to_json(&report))
 }
 
-/// The group-command tail (skill_cards/mod.rs `run_group_job`).
-async fn run_group_job<T, E: std::fmt::Display>(
-    job: impl FnOnce() -> Result<T, E>,
+/// The group-command tail (skill_cards/mod.rs `run_group_job`) on the blocking pool.
+async fn run_group_job<T: Send + 'static, E: std::fmt::Display + Send + 'static>(
+    job: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, String> {
-    job().map_err(|err| format!("{err:#}"))
+    blocking(move || job().map_err(|err| format!("{err:#}")))
+        .await
+        .map_err(|join| format!("group task failed: {join}"))?
 }
 
 fn report_to_json(report: &AgentLinkReport) -> JsonValue {
@@ -136,8 +147,8 @@ fn link_issue_json(issue: &ss_skills::workflows::agent_links::AgentLinkIssue) ->
 
 #[cfg(test)]
 mod tests {
-    use super::SkillCardsDrawer;
     use ss_skills::skill_group;
+    use ss_skills::workflows::skill_group_links;
 
     /// The GPUI suites' IsolatedDataDir pattern (ss-gpui test_support.rs):
     /// keep test writes off the real `~/.skillstar` by re-rooting
@@ -198,32 +209,15 @@ mod tests {
         .expect("seed deck")
     }
 
-    /// The #[module] macro turns `async fn` into a task-start call in JS;
-    /// from Rust tests the same bodies run as plain futures (the deck-page
-    /// facade's `spin` pattern).
-    fn spin<T>(future: impl std::future::Future<Output = T>) -> T {
-        let mut future = std::pin::pin!(future);
-        let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(waker);
-        match future.as_mut().poll(&mut cx) {
-            std::task::Poll::Ready(value) => value,
-            std::task::Poll::Pending => unreachable!("domain calls finish on first poll"),
-        }
-    }
-
-    /// One store-writing test on purpose: the sibling deck facades each
-    /// sandbox `SKILLSTAR_DATA_DIR` behind their own module lock, and cargo
-    /// runs the suites in parallel — every extra env-flipping test widens
-    /// the cross-module race window (an abort under cargo's threaded
-    /// runner). All write-path domains run here back to back under one
-    /// sandbox lease; read-only and in-memory checks live below without one.
     #[test]
     fn drawer_jobs_write_the_store() {
         let _iso = IsolatedDataDir::new();
         let group = seed_deck(&["alpha"]);
 
         // Duplicate: the copy lands beside its source with the same members.
-        let copy_id = spin(SkillCardsDrawer::duplicate_deck(group.id.clone()))
+        let copy_id = skill_group::duplicate_group(&group.id)
+            .map(|g| super::str(&g.id))
+            .map_err(|err| format!("{err:#}"))
             .expect("duplicate in the isolated store");
         let copy_id = copy_id.as_str().expect("duplicate returns the new id").to_owned();
         assert_ne!(copy_id, group.id);
@@ -232,11 +226,9 @@ mod tests {
         // The rail toggle on a deck with no installed members still records
         // the rail (nothing was attempted for the agent — `rail_may_change`),
         // the domain rule the drawer's switch relies on.
-        let report = spin(SkillCardsDrawer::set_deck_agent(
-            group.id.clone(),
-            "claude".into(),
-            true,
-        ))
+        let report = super::link_job_body(|| {
+            skill_group_links::set_deck_agent(&group.id, "claude", true)
+        })
         .expect("toggle is not an error on an empty install");
         assert_eq!(report["applied"].as_array().map(Vec::len), Some(0));
         assert_eq!(report["skipped"].as_array().map(Vec::len), Some(0));
@@ -248,12 +240,8 @@ mod tests {
         assert!(links.iter().any(|id| id == "claude"), "rail recorded");
 
         // Toggling back off clears the rail entry the same way.
-        spin(SkillCardsDrawer::set_deck_agent(
-            group.id.clone(),
-            "claude".into(),
-            false,
-        ))
-        .expect("untoggle");
+        super::link_job_body(|| skill_group_links::set_deck_agent(&group.id, "claude", false))
+            .expect("untoggle");
         let links = skill_group::list_groups()[0]
             .agent_links
             .clone()
@@ -261,16 +249,17 @@ mod tests {
         assert!(!links.iter().any(|id| id == "claude"), "rail cleared");
 
         // Deploy-all with no enabled agents is a no-op, never an error.
-        let report = spin(SkillCardsDrawer::link_deck_to_enabled_agents(group.id.clone()))
-            .expect("deploy-all without agents is not an error");
+        let report =
+            super::link_job_body(|| skill_group_links::link_deck_to_enabled_agents(&group.id))
+                .expect("deploy-all without agents is not an error");
         assert_eq!(report["applied"].as_array().map(Vec::len), Some(0));
         assert_eq!(report["skipped"].as_array().map(Vec::len), Some(0));
         assert_eq!(report["failed"].as_array().map(Vec::len), Some(0));
 
         // Delete: the round trip empties the store (Hub skills untouched —
         // the domain only drops group records).
-        spin(SkillCardsDrawer::delete_deck(copy_id)).expect("delete the copy");
-        spin(SkillCardsDrawer::delete_deck(group.id)).expect("delete the original");
+        skill_group::delete_group(&copy_id).expect("delete the copy");
+        skill_group::delete_group(&group.id).expect("delete the original");
         assert!(skill_group::list_groups().is_empty());
     }
 
@@ -278,11 +267,13 @@ mod tests {
     /// store is only read, so no sandbox is needed).
     #[test]
     fn missing_deck_jobs_surface_the_domain_error() {
-        let err = spin(SkillCardsDrawer::duplicate_deck("no-such-deck".into()))
+        let err = skill_group::duplicate_group("no-such-deck")
+            .map_err(|err| format!("{err:#}"))
             .expect_err("duplicating a missing deck fails");
         assert!(err.contains("no-such-deck"), "error names the deck: {err}");
 
-        let err = spin(SkillCardsDrawer::delete_deck("no-such-deck".into()))
+        let err = skill_group::delete_group("no-such-deck")
+            .map_err(|err| format!("{err:#}"))
             .expect_err("deleting a missing deck fails");
         assert!(err.contains("no-such-deck"), "error names the deck: {err}");
     }

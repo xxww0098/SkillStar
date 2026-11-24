@@ -21,7 +21,3 @@ export const locale = signal<Locale>("zh-CN");
 export function setLocale(next: Locale) {
   locale.set(next);
 }
-
-export function toggleLocale() {
-  locale.set(locale() === "zh-CN" ? "en" : "zh-CN");
-}

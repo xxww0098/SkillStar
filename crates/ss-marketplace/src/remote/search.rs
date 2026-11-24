@@ -62,15 +62,6 @@ impl From<SkillsShSkill> for Skill {
     }
 }
 
-/// Search skills.sh registry via official API
-/// API endpoint: GET /api/search?q={query}&limit={limit}
-/// Note: empty query returns 400 — a query is always required
-pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResult> {
-    Ok(search_skills_sh_with_meta(query, limit, None, None)
-        .await?
-        .0)
-}
-
 /// Search fetch with content-addressing metadata.
 pub async fn search_skills_sh_with_meta(
     query: &str,

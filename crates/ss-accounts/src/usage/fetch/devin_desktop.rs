@@ -61,18 +61,37 @@ pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
     if !(200..300).contains(&answer.status) {
         return Err(super::classify_status(LABEL, answer.status, &answer.body));
     }
-    let payload: Value = serde_json::from_str(&answer.body).map_err(|error| {
+    outcome_from_body(&answer.body, now, creds)
+}
+
+fn outcome_from_body(body: &str, now: i64, creds: &Credentials) -> UsageResult<UsageOutcome> {
+    let payload: Value = serde_json::from_str(body).map_err(|error| {
         UsageError::Unreadable(format!(
             "{LABEL}: cannot parse the answer (planStatus protobuf is not read here): {error}: {}",
-            parse::snippet(&answer.body)
+            parse::snippet(body)
         ))
     })?;
     let snapshot = devin_desktop_parse::snapshot_from(&payload, Some(&payload), now);
+    if snapshot.windows.is_empty() && snapshot.plan.is_none() {
+        return Err(UsageError::Unreadable(format!(
+            "{LABEL}: the reply carries no quota field: {}",
+            parse::snippet(body)
+        )));
+    }
     Ok(UsageOutcome {
         snapshot,
         tokens: creds.tokens.clone(),
         provider_state: creds.provider_state.clone(),
+        identity: Some(identity_from_status(&payload)),
     })
+}
+
+fn identity_from_status(payload: &Value) -> crate::oauth::Identity {
+    crate::oauth::Identity {
+        display_name: parse::text_in(payload, &["name", "displayName", "username"]),
+        email: devin_desktop_parse::email_of(payload),
+        ..crate::oauth::Identity::default()
+    }
 }
 
 /// 这次读该打哪个 apiServer：provider_state 里记的优先。
@@ -109,13 +128,38 @@ mod tests {
     }
 
     #[test]
+    fn status_identity_carries_name_and_email_when_available() {
+        let identity = identity_from_status(&json!({
+            "name": "Example User", "email": "user@example.com"
+        }));
+        assert_eq!(identity.display_name.as_deref(), Some("Example User"));
+        assert_eq!(identity.email.as_deref(), Some("user@example.com"));
+        assert_eq!(identity_from_status(&json!({})).email, None);
+    }
+
+    #[test]
     fn a_read_without_an_api_key_asks_for_a_new_import() {
         let creds = Credentials {
             tokens: TokenSet::default(),
+            account_id: None,
             provider_state: None,
+            needs_identity: false,
         };
         let error = fetch(&creds).expect_err("no api key");
         assert!(matches!(error, UsageError::AuthRequired(_)), "got {error:?}");
         assert!(error.to_string().contains("重新导入"), "{error}");
+    }
+
+    #[test]
+    fn empty_200_response_is_rejected_as_unreadable() {
+        let creds = Credentials {
+            tokens: TokenSet {
+                access_token: "sk-devin".to_string(),
+                ..TokenSet::default()
+            },
+            ..Credentials::default()
+        };
+        let err = outcome_from_body("{}", 1_800_000_000, &creds).expect_err("empty 200 rejected");
+        assert!(matches!(err, UsageError::Unreadable(_)), "got {err:?}");
     }
 }

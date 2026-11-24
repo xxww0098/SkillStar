@@ -35,7 +35,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-// 切号写回也要读 agent 自己的常量（Grok 的 scope key、Gemini CLI 的 scope 清单），
+// 切号写回也要读 agent 自己的常量（Grok 的 scope key 与清单），
 // 所以这一层对 crate 内可见，对外仍然私有。
 pub(crate) mod agents;
 pub mod error;

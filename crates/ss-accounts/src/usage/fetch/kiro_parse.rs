@@ -196,6 +196,27 @@ pub(crate) fn profile_arn(body: &Value) -> Option<String> {
     parse::text_in(root, &["profileArn", "profile_arn", "arn"])
 }
 
+/// 响应里带回的身份（userInfo.email / userInfo.userId 或根级回退）。
+pub(crate) fn identity_of(body: &Value) -> Option<crate::oauth::Identity> {
+    let root = usage_root(body);
+    let user_info = root.get("userInfo").or_else(|| root.get("user"));
+    let email = user_info
+        .and_then(|node| parse::text_in(node, &["email", "userEmail"]))
+        .or_else(|| parse::text_in(root, &["email", "userEmail"]));
+    let account_id = user_info
+        .and_then(|node| parse::text_in(node, &["userId", "user_id", "sub", "id"]))
+        .or_else(|| parse::text_in(root, &["userId", "user_id", "sub"]));
+    if email.is_none() && account_id.is_none() {
+        return None;
+    }
+    Some(crate::oauth::Identity {
+        display_name: email.clone(),
+        email,
+        plan: None,
+        account_id,
+    })
+}
+
 /// 完整快照。
 pub(crate) fn snapshot_from(body: &Value, now: i64) -> UsageSnapshot {
     UsageSnapshot {
@@ -205,6 +226,7 @@ pub(crate) fn snapshot_from(body: &Value, now: i64) -> UsageSnapshot {
         credits: None,
         error: None,
         gcp_tos: None,
+        reset_credits: None,
     }
 }
 
@@ -312,5 +334,31 @@ mod tests {
         assert_eq!(snapshot.windows.len(), 2);
         assert_eq!(snapshot.credits, None);
         assert_eq!(snapshot.gcp_tos, None);
+    }
+
+    #[test]
+    fn identity_is_extracted_from_user_info_with_root_fallback() {
+        let nested = json!({
+            "userInfo": {
+                "email": "kiro@example.com",
+                "userId": "kiro-user-1"
+            }
+        });
+        let parsed = identity_of(&nested).expect("nested identity");
+        assert_eq!(parsed.email.as_deref(), Some("kiro@example.com"));
+        assert_eq!(parsed.display_name.as_deref(), Some("kiro@example.com"));
+        assert_eq!(parsed.account_id.as_deref(), Some("kiro-user-1"));
+
+        let root_only = json!({
+            "kiro.resourceNotifications.usageState": {
+                "email": "wrapped@example.com",
+                "userId": "wrapped-user"
+            }
+        });
+        let wrapped = identity_of(&root_only).expect("wrapped identity");
+        assert_eq!(wrapped.email.as_deref(), Some("wrapped@example.com"));
+        assert_eq!(wrapped.account_id.as_deref(), Some("wrapped-user"));
+
+        assert_eq!(identity_of(&json!({})), None);
     }
 }

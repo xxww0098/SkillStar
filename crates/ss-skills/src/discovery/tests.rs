@@ -370,3 +370,55 @@ fn skill_discovery_candidate_keeps_root_path_and_frontmatter() {
     assert_eq!(candidates[0].frontmatter.name.as_deref(), Some("root-name"));
     assert_eq!(candidates[0].frontmatter.description, "root-desc");
 }
+
+#[test]
+fn priority_skill_dirs_cover_every_builtin_agent_and_legacy_dir() {
+    let mut seen = std::collections::HashSet::new();
+    for dir in PRIORITY_SKILL_DIRS {
+        assert!(seen.insert(*dir), "duplicate PRIORITY_SKILL_DIRS entry: {dir}");
+    }
+
+    for profile in crate::agents::list_profiles() {
+        if profile.project_skills_rel.is_empty() || profile.project_skills_rel == "skills" {
+            continue;
+        }
+        assert!(
+            seen.contains(profile.project_skills_rel.as_str()),
+            "PRIORITY_SKILL_DIRS missing project_skills_rel '{}' for builtin agent '{}'",
+            profile.project_skills_rel,
+            profile.id
+        );
+    }
+
+    for legacy in [
+        ".agent/skills",
+        ".cline/skills",
+        ".codex/skills",
+        ".factory/skills",
+        ".fx/skills",
+        ".github/skills",
+        ".kilo/skills",
+        ".kilocode/skills",
+        ".opencode/skills",
+        ".pi/skills",
+    ] {
+        assert!(
+            seen.contains(legacy),
+            "PRIORITY_SKILL_DIRS missing legacy dir '{legacy}'"
+        );
+    }
+}
+
+#[test]
+fn registered_agent_dirs_are_discovered_alongside_skills_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+
+    write_skill_md(&repo.join("skills/foo/SKILL.md"), "foo", "standard").unwrap();
+    write_skill_md(&repo.join("agent/skills/bar/SKILL.md"), "bar", "eve").unwrap();
+    write_skill_md(&repo.join("data/skills/baz/SKILL.md"), "baz", "astrbot").unwrap();
+
+    let skills = discover_skills(repo, false);
+    let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["bar", "baz", "foo"]);
+}

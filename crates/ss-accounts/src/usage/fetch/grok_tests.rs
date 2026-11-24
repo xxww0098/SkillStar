@@ -22,7 +22,9 @@ fn every_request_names_the_cli_authenticator() {
 fn a_read_without_a_token_asks_for_a_new_login() {
     let creds = Credentials {
         tokens: TokenSet::default(),
+        account_id: None,
         provider_state: None,
+        needs_identity: false,
     };
     let error = fetch(&creds).expect_err("no token");
     assert!(matches!(error, UsageError::AuthRequired(_)), "got {error:?}");
@@ -31,11 +33,11 @@ fn a_read_without_a_token_asks_for_a_new_login() {
 #[test]
 fn a_401_on_billing_is_auth_required_and_a_500_is_transient() {
     assert!(matches!(
-        super::super::classify_status(BILLING_LABEL, 401, "{}"),
+        super::super::classify_status(CREDITS_LABEL, 401, "{}"),
         UsageError::AuthRequired(_)
     ));
     assert!(matches!(
-        super::super::classify_status(BILLING_LABEL, 503, "{}"),
+        super::super::classify_status(CREDITS_LABEL, 503, "{}"),
         UsageError::Transient(_)
     ));
 }
@@ -64,7 +66,9 @@ fn a_read_with_a_stale_token_is_refreshed_before_the_proxy_call() {
             expires_at: Some(super::super::unix_now() - 10),
             ..TokenSet::default()
         },
+        account_id: None,
         provider_state: None,
+        needs_identity: false,
     };
     let error = fetch(&creds).expect_err("nothing to refresh with");
     assert!(matches!(error, UsageError::AuthRequired(_)), "got {error:?}");

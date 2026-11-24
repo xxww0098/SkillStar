@@ -1,24 +1,43 @@
 // 账号页悬浮圆角工具栏（搜索 / 三态视图 / 筛选 / 排序 / + / 全部刷新 / 隐私）。
-// 批量选择条见 selectionBar.tsx；颜色全走 paletteToken()，下拉弹层复用 Overlay 锚定模式。
+// 每个控件都来自 chrome/toolbar.tsx 的统一工具栏尺度（BAR_H 32 / BAR_RADIUS
+// 10 / BAR_FONT 12 / BAR_ICON 14）：账号页不再自绘按钮，尺寸与「我的技能」
+// 等其余五页逐像素一致。批量选择条见 selectionBar.tsx；下拉弹层复用
+// Overlay 锚定模式与共享的 BarMenuPanel / BarMenuRow。
 
-import { Overlay, Text, View, signal, type JSX, type ViewRef } from "nsh";
-import { Input } from "nsh/base";
-import { Icon, type IconName } from "../../chrome/icons";
-import { IconSpin } from "../../chrome/feedback";
-import { PAGE_BAR_CARD_H, PAGE_BAR_PAD_X, PAGE_BAR_RADIUS } from "../../chrome/toolbar";
-import { Tip } from "../../chrome/tooltip";
+import { Overlay, Text, View, computed, signal, type JSX, type ViewRef } from "nsh";
+import { BarMenuPanel, BarMenuRow, BarMenuTrigger } from "../../chrome/barMenu";
+import {
+  BAR_H,
+  BarIconButton,
+  BarSearchInput,
+  BarSegmentSlot,
+  BarSegmented,
+  PAGE_BAR_CARD_H,
+  PAGE_BAR_PAD_X,
+  PAGE_BAR_RADIUS,
+} from "../../chrome/toolbar";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import {
-  matchesAccountFilter,
+  planKind,
+  planOf,
   type AccountFilter,
   type AccountSortBy,
   type AccountViewMode,
 } from "./logic";
+import { AUTO_REFRESH_OPTIONS } from "./autoRefresh";
 import type { AccountsState } from "./state";
 import type { AccountView } from "./types";
 
-const PLAN_FILTERS: AccountFilter[] = ["ultra", "pro", "plus", "team", "enterprise", "free"];
+const PLAN_FILTERS: AccountFilter[] = [
+  "ultra",
+  "pro",
+  "plus",
+  "lite",
+  "team",
+  "enterprise",
+  "free",
+];
 const SORT_OPTIONS: AccountSortBy[] = ["default", "quota", "last_used", "created_at"];
 
 function filterLabel(filter: AccountFilter, totalCount: number): string {
@@ -47,7 +66,7 @@ function sortLabel(sortBy: AccountSortBy): string {
   }
 }
 
-/** 悬浮圆角工具栏：对齐 cockpit-tools 的顶部操作胶囊。 */
+/** 悬浮圆角工具栏：与 PageBar 共用卡片几何，控件全部走 BAR_* 尺度。 */
 export function AccountsToolbar(props: {
   state: AccountsState;
   agentId: string;
@@ -101,7 +120,7 @@ export function AccountsToolbar(props: {
 
       <View
         testID="accounts-toolbar-drag"
-        style={{ flex: 1, minWidth: 16, height: 32 }}
+        style={{ flex: 1, minWidth: 16, height: BAR_H }}
       />
 
       <View
@@ -113,132 +132,47 @@ export function AccountsToolbar(props: {
           flexShrink: 0,
         }}
       >
-        <View tooltip={<Tip text={t("accountsPage.addAccount")} />}>
-          <View
-            testID="acct-toolbar-add"
-            role="button"
-            accessibilityLabel={t("accountsPage.addAccount")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 32,
-              height: 32,
-              borderRadius: 10,
-              cursor: "pointer",
-              backgroundColor: paletteToken("accent"),
-            }}
-            hoverStyle={{ backgroundColor: paletteToken("accent_hover") }}
-            onPress={() => state.openAdd(props.agentId)}
-          >
-            <Icon name="plus" size={16} color={paletteToken("on_accent")} />
-          </View>
-        </View>
+        <BarIconButton
+          testID="acct-toolbar-add"
+          glyph="plus"
+          tone="primary"
+          tip={t("accountsPage.addAccount")}
+          onPress={() => state.openAdd(props.agentId)}
+        />
 
-        <View
-          tooltip={
-            <Tip
-              text={
-                state.batchBusy() === "refresh"
-                  ? t("accountsPage.refreshingAll")
-                  : t("accountsPage.refreshAll")
-              }
-            />
-          }
-        >
-          <View
-            testID="acct-toolbar-refresh-all"
-            role="button"
-            accessibilityLabel={t("accountsPage.refreshAll")}
-            desktop={{ windowDrag: false }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 32,
-              height: 32,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: paletteToken("border"),
-              backgroundColor: paletteToken("bg"),
-              opacity:
-                props.totalCount === 0 || state.busyId() !== null || state.batchBusy() === "delete"
-                  ? 0.45
-                  : 1,
-              cursor:
-                props.totalCount === 0 || state.busyId() !== null || state.batchBusy() !== null
-                  ? "default"
-                  : "pointer",
-            }}
-            hoverStyle={
-              props.totalCount === 0 || state.busyId() !== null || state.batchBusy() !== null
-                ? undefined
-                : { backgroundColor: paletteToken("panel_hover"), borderColor: paletteToken("edge") }
-            }
-            onPress={
-              props.totalCount === 0 || state.busyId() !== null || state.batchBusy() !== null
-                ? undefined
-                : () => state.refreshAll()
-            }
-          >
-            <IconSpin
-              name="refresh"
-              size={14}
-              color={
-                state.batchBusy() === "refresh" ? paletteToken("accent") : paletteToken("fg_muted")
-              }
-              spin={state.batchBusy() === "refresh"}
-            />
-          </View>
-        </View>
+        <AutoRefreshMenuButton state={state} />
 
-        <View
-          tooltip={
-            <Tip
-              text={
-                state.privacyMode()
-                  ? t("accountsPage.privacyShow")
-                  : t("accountsPage.privacyHide")
-              }
-            />
+        <BarIconButton
+          testID="acct-toolbar-refresh-all"
+          glyph="refresh"
+          label={t("accountsPage.refreshAll")}
+          tip={() =>
+            state.batchRefreshing()
+              ? t("accountsPage.refreshingAll")
+              : t("accountsPage.refreshAll")
           }
-        >
-          <View
-            testID="acct-toolbar-privacy"
-            role="button"
-            accessibilityLabel={
-              state.privacyMode() ? t("accountsPage.privacyShow") : t("accountsPage.privacyHide")
-            }
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 32,
-              height: 32,
-              borderRadius: 10,
-              borderWidth: 1,
-              cursor: "pointer",
-              borderColor: state.privacyMode()
-                ? paletteToken("accent_soft_edge")
-                : paletteToken("border"),
-              backgroundColor: state.privacyMode()
-                ? paletteToken("accent_soft")
-                : paletteToken("bg"),
-            }}
-            hoverStyle={{
-              backgroundColor: state.privacyMode()
-                ? paletteToken("accent_soft")
-                : paletteToken("panel_hover"),
-            }}
-            onPress={() => state.togglePrivacy()}
-          >
-            <Icon
-              name={state.privacyMode() ? "eyeOff" : "eye"}
-              size={14}
-              color={state.privacyMode() ? paletteToken("accent") : paletteToken("fg_muted")}
-            />
-          </View>
-        </View>
+          loading={state.batchRefreshing()}
+          disabled={
+            props.totalCount === 0 ||
+            state.busyId() !== null ||
+            state.batchBusy() !== null ||
+            state.batchRefreshing()
+          }
+          onPress={() => state.refreshAll()}
+        />
+
+        <BarIconButton
+          testID="acct-toolbar-privacy"
+          glyph={state.privacyMode() ? "eyeOff" : "eye"}
+          label={state.privacyMode() ? t("accountsPage.privacyShow") : t("accountsPage.privacyHide")}
+          tip={() =>
+            state.privacyMode()
+              ? t("accountsPage.privacyShow")
+              : t("accountsPage.privacyHide")
+          }
+          active={state.privacyMode()}
+          onPress={() => state.togglePrivacy()}
+        />
       </View>
     </View>
   );
@@ -247,124 +181,35 @@ export function AccountsToolbar(props: {
 function SearchBox(props: { state: AccountsState }): JSX.Element {
   const state = props.state;
   return (
-    <View
-      testID="acct-search"
-      desktop={{ windowDrag: false }}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        width: 190,
-        height: 32,
-        paddingHorizontal: 10,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: paletteToken("border"),
-        backgroundColor: paletteToken("input"),
-      }}
-    >
-      <Icon name="search" size={14} color={paletteToken("fg_muted")} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Input
-          testID="acct-search-input"
-          value={state.searchQuery()}
-          placeholder={t("accountsPage.searchPlaceholder")}
-          onChange={(e: { value: string }) => state.searchQuery.set(e.value)}
-          style={{
-            fontSize: 12,
-            color: paletteToken("fg"),
-            padding: 0,
-            backgroundColor: "transparent",
-            borderWidth: 0,
-          }}
-        />
-      </View>
-      {state.searchQuery().length > 0 ? (
-        <View
-          testID="acct-search-clear"
-          role="button"
-          accessibilityLabel={t("common.clear")}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 18,
-            height: 18,
-            borderRadius: 999,
-            cursor: "pointer",
-          }}
-          hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
-          onPress={() => state.searchQuery.set("")}
-        >
-          <Icon name="x" size={11} color={paletteToken("fg_muted")} />
-        </View>
-      ) : null}
-    </View>
+    <BarSearchInput
+      boxTestID="acct-search"
+      inputTestID="acct-search-input"
+      clearTestID="acct-search-clear"
+      value={state.searchQuery()}
+      placeholder={t("accountsPage.searchPlaceholder")}
+      onChange={(next) => state.searchQuery.set(next)}
+    />
   );
 }
 
 function ViewModeSwitch(props: { state: AccountsState }): JSX.Element {
-  const modes: { mode: AccountViewMode; icon: IconName; label: string }[] = [
+  const modes: { mode: AccountViewMode; icon: "rows3" | "list" | "layoutGrid"; label: string }[] = [
     { mode: "compact", icon: "rows3", label: t("accountsPage.viewCompact") },
     { mode: "list", icon: "list", label: t("accountsPage.viewList") },
     { mode: "grid", icon: "layoutGrid", label: t("accountsPage.viewGrid") },
   ];
   return (
-    <View
-      desktop={{ windowDrag: false }}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 2,
-        height: 32,
-        padding: 2,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: paletteToken("border"),
-        backgroundColor: paletteToken("well"),
-        flexShrink: 0,
-      }}
-    >
-      {modes.map((entry) => (
-        <View tooltip={<Tip text={entry.label} />}>
-          <View
-            testID={`acct-view-${entry.mode}`}
-            role="button"
-            accessibilityLabel={entry.label}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 28,
-              height: 26,
-              borderRadius: 7,
-              cursor: "pointer",
-              backgroundColor:
-                props.state.viewMode() === entry.mode ? paletteToken("accent") : "transparent",
-            }}
-            hoverStyle={{
-              backgroundColor:
-                props.state.viewMode() === entry.mode
-                  ? paletteToken("accent_hover")
-                  : paletteToken("panel_hover"),
-            }}
-            onPress={() => props.state.viewMode.set(entry.mode)}
-          >
-            <Icon
-              name={entry.icon}
-              size={14}
-              color={
-                props.state.viewMode() === entry.mode
-                  ? paletteToken("on_accent")
-                  : paletteToken("fg_muted")
-              }
-            />
-          </View>
-        </View>
+    <BarSegmented
+      slots={modes.map((entry) => (
+        <BarSegmentSlot
+          testID={`acct-view-${entry.mode}`}
+          glyph={entry.icon}
+          accessibilityLabel={entry.label}
+          selected={props.state.viewMode() === entry.mode}
+          onPress={() => props.state.viewMode.set(entry.mode)}
+        />
       ))}
-    </View>
+    />
   );
 }
 
@@ -375,6 +220,51 @@ function FilterMenuButton(props: {
 }): JSX.Element {
   const menuOpen = signal(false);
   const triggerRef = signal<ViewRef | null>(null);
+  const filterOptions = computed(() => {
+    if (!menuOpen()) return [];
+    const rows = props.allAgentRows;
+    const tierCounts = new Map<AccountFilter, number>();
+    let reauthCount = 0;
+    let errorCount = 0;
+    for (const row of rows) {
+      if (row.requiresReauth) reauthCount += 1;
+      if ((row.usage?.error ?? "").trim().length > 0) errorCount += 1;
+      const kind = planKind(planOf(row));
+      const bucket: AccountFilter | null =
+        kind === "ultra" || kind === "ultra_lite"
+          ? "ultra"
+          : kind === "pro_lite" || kind === "none"
+            ? null
+            : kind;
+      if (bucket !== null) {
+        tierCounts.set(bucket, (tierCounts.get(bucket) ?? 0) + 1);
+      }
+    }
+    const options: { key: AccountFilter; label: string; count?: number }[] = [
+      {
+        key: "all",
+        label: tf("accountsPage.allCount", { count: props.totalCount }),
+      },
+    ];
+    for (const tier of PLAN_FILTERS) {
+      const count = tierCounts.get(tier) ?? 0;
+      if (count > 0) {
+        options.push({ key: tier, label: tier.toUpperCase(), count });
+      }
+    }
+    options.push({
+      key: "reauth",
+      label: t("accountsPage.filterReauth"),
+      count: reauthCount,
+    });
+    options.push({
+      key: "error",
+      label: t("accountsPage.filterQuotaError"),
+      count: errorCount,
+    });
+    return options;
+  });
+
   return (
     <View style={{ position: "relative", flexShrink: 0, display: "flex" }}>
       <View
@@ -382,120 +272,40 @@ function FilterMenuButton(props: {
           triggerRef.set(node);
         }}
       >
-        <View
+        <BarMenuTrigger
           testID="acct-filter-trigger"
-          role="button"
-          accessibilityLabel={t("accountsPage.filterPlan")}
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            height: 32,
-            paddingHorizontal: 10,
-            borderRadius: 999,
-            borderWidth: 1,
-            cursor: "pointer",
-            flexShrink: 0,
-            borderColor:
-              props.state.filter() !== "all"
-                ? paletteToken("accent_soft_edge")
-                : paletteToken("border"),
-            backgroundColor:
-              props.state.filter() !== "all" ? paletteToken("accent_soft") : paletteToken("bg"),
-          }}
-          hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-          onPress={() => menuOpen.set(!menuOpen())}
-        >
-          <Icon
-            name="listFilter"
-            size={13}
-            color={
-              props.state.filter() !== "all" ? paletteToken("accent") : paletteToken("fg_muted")
-            }
-          />
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: "500",
-              color: props.state.filter() !== "all" ? paletteToken("accent") : paletteToken("fg"),
-            }}
-          >
-            {filterLabel(props.state.filter(), props.totalCount)}
-          </Text>
-          <Icon
-            name="chevronDown"
-            size={11}
-            color={
-              props.state.filter() !== "all" ? paletteToken("accent") : paletteToken("fg_muted")
-            }
-          />
-        </View>
+          glyph="listFilter"
+          label={() => filterLabel(props.state.filter(), props.totalCount)}
+          active={() => props.state.filter() !== "all"}
+          onPress={() => menuOpen.update((open) => !open)}
+        />
       </View>
 
       <If when={menuOpen()}>
-        <Overlay style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-          <View
-            testID="acct-filter-dismiss"
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-            onPress={() => menuOpen.set(false)}
-          />
-        </Overlay>
-        <Overlay anchor={triggerRef()} placement="bottom" align="start" offset={6}>
-          <View
-            testID="acct-filter-panel"
-            style={{
-              width: 196,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: paletteToken("border"),
-              backgroundColor: paletteToken("card"),
-              boxShadow: "0 8px 30px rgba(0,0,0,0.28)",
-              display: "flex",
-              flexDirection: "column",
-              padding: 6,
-              gap: 2,
-            }}
-          >
-            {(() => {
-              const rows = props.allAgentRows;
-              const options: { key: AccountFilter; label: string; count: number }[] = [
-                {
-                  key: "all",
-                  label: tf("accountsPage.allCount", { count: props.totalCount }),
-                  count: props.totalCount,
-                },
-              ];
-              for (const tier of PLAN_FILTERS) {
-                const count = rows.filter((row) => matchesAccountFilter(row, tier)).length;
-                if (count > 0) {
-                  options.push({ key: tier, label: tier.toUpperCase(), count });
-                }
-              }
-              options.push({
-                key: "reauth",
-                label: t("accountsPage.filterReauth"),
-                count: rows.filter((row) => matchesAccountFilter(row, "reauth")).length,
-              });
-              options.push({
-                key: "error",
-                label: t("accountsPage.filterQuotaError"),
-                count: rows.filter((row) => matchesAccountFilter(row, "error")).length,
-              });
-              return options.map((opt) => (
-                <DropdownRow
-                  testID={`acct-filter-opt-${opt.key}`}
-                  label={opt.label}
-                  count={opt.key === "all" ? undefined : opt.count}
-                  active={props.state.filter() === opt.key}
+        <Overlay
+          anchor={triggerRef()}
+          placement="bottom"
+          align="start"
+          offset={6}
+          onPressOutside={() => menuOpen.set(false)}
+          onCancel={() => menuOpen.set(false)}
+        >
+          <BarMenuPanel testID="acct-filter-panel">
+            <Each of={filterOptions()} key={(opt) => opt.key}>
+              {(opt) => (
+                <BarMenuRow
+                  testID={`acct-filter-opt-${opt().key}`}
+                  label={opt().label}
+                  count={opt().count}
+                  active={props.state.filter() === opt().key}
                   onPress={() => {
-                    props.state.filter.set(opt.key);
+                    props.state.filter.set(opt().key);
                     menuOpen.set(false);
                   }}
                 />
-              ));
-            })()}
-          </View>
+              )}
+            </Each>
+          </BarMenuPanel>
         </Overlay>
       </If>
     </View>
@@ -512,84 +322,27 @@ function SortMenuButton(props: { state: AccountsState }): JSX.Element {
           triggerRef.set(node);
         }}
       >
-        <View
+        <BarMenuTrigger
           testID="acct-sort-trigger"
-          role="button"
-          accessibilityLabel={sortLabel(props.state.sortBy())}
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            height: 32,
-            paddingHorizontal: 10,
-            borderRadius: 999,
-            borderWidth: 1,
-            cursor: "pointer",
-            flexShrink: 0,
-            borderColor:
-              props.state.sortBy() !== "default"
-                ? paletteToken("accent_soft_edge")
-                : paletteToken("border"),
-            backgroundColor:
-              props.state.sortBy() !== "default" ? paletteToken("accent_soft") : paletteToken("bg"),
-          }}
-          hoverStyle={{ backgroundColor: paletteToken("card_hover") }}
-          onPress={() => menuOpen.set(!menuOpen())}
-        >
-          <Icon
-            name="arrowUpDown"
-            size={13}
-            color={
-              props.state.sortBy() !== "default" ? paletteToken("accent") : paletteToken("fg_muted")
-            }
-          />
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: "500",
-              color:
-                props.state.sortBy() !== "default" ? paletteToken("accent") : paletteToken("fg"),
-            }}
-          >
-            {sortLabel(props.state.sortBy())}
-          </Text>
-          <Icon
-            name="chevronDown"
-            size={11}
-            color={
-              props.state.sortBy() !== "default" ? paletteToken("accent") : paletteToken("fg_muted")
-            }
-          />
-        </View>
+          glyph="arrowUpDown"
+          label={() => sortLabel(props.state.sortBy())}
+          active={() => props.state.sortBy() !== "default"}
+          onPress={() => menuOpen.update((open) => !open)}
+        />
       </View>
 
       <If when={menuOpen()}>
-        <Overlay style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-          <View
-            testID="acct-sort-dismiss"
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-            onPress={() => menuOpen.set(false)}
-          />
-        </Overlay>
-        <Overlay anchor={triggerRef()} placement="bottom" align="start" offset={6}>
-          <View
-            testID="acct-sort-panel"
-            style={{
-              width: 196,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: paletteToken("border"),
-              backgroundColor: paletteToken("card"),
-              boxShadow: "0 8px 30px rgba(0,0,0,0.28)",
-              display: "flex",
-              flexDirection: "column",
-              padding: 6,
-              gap: 2,
-            }}
-          >
+        <Overlay
+          anchor={triggerRef()}
+          placement="bottom"
+          align="start"
+          offset={6}
+          onPressOutside={() => menuOpen.set(false)}
+          onCancel={() => menuOpen.set(false)}
+        >
+          <BarMenuPanel testID="acct-sort-panel">
             {SORT_OPTIONS.map((option) => (
-              <DropdownRow
+              <BarMenuRow
                 testID={`acct-sort-opt-${option}`}
                 label={sortLabel(option)}
                 active={props.state.sortBy() === option}
@@ -599,7 +352,7 @@ function SortMenuButton(props: { state: AccountsState }): JSX.Element {
                 }}
               />
             ))}
-          </View>
+          </BarMenuPanel>
         </Overlay>
       </If>
     </View>
@@ -608,101 +361,98 @@ function SortMenuButton(props: { state: AccountsState }): JSX.Element {
 
 function SortDirButton(props: { state: AccountsState }): JSX.Element {
   return (
-    <View
-      tooltip={
-        <Tip
-          text={
-            props.state.sortDir() === "desc" ? t("accountsPage.sortDesc") : t("accountsPage.sortAsc")
-          }
-        />
+    <BarIconButton
+      testID="acct-sort-dir"
+      glyph={props.state.sortDir() === "desc" ? "arrowDown" : "arrowUp"}
+      label={props.state.sortDir() === "desc" ? t("accountsPage.sortDesc") : t("accountsPage.sortAsc")}
+      tip={() =>
+        props.state.sortDir() === "desc" ? t("accountsPage.sortDesc") : t("accountsPage.sortAsc")
       }
-    >
-      <View
-        testID="acct-sort-dir"
-        role="button"
-        accessibilityLabel={
-          props.state.sortDir() === "desc" ? t("accountsPage.sortDesc") : t("accountsPage.sortAsc")
-        }
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 32,
-          height: 32,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: paletteToken("border"),
-          backgroundColor: paletteToken("bg"),
-          cursor: "pointer",
-        }}
-        hoverStyle={{ backgroundColor: paletteToken("panel_hover"), borderColor: paletteToken("edge") }}
-        onPress={() => props.state.toggleSortDir()}
-      >
-        <Icon
-          name={props.state.sortDir() === "desc" ? "arrowDown" : "arrowUp"}
-          size={14}
-          color={paletteToken("fg_muted")}
-        />
-      </View>
-    </View>
+      onPress={() => props.state.toggleSortDir()}
+    />
   );
 }
 
-function DropdownRow(props: {
-  testID: string;
-  label: string;
-  count?: number;
-  active: boolean;
-  onPress: () => void;
-}): JSX.Element {
+function formatAutoRefreshOption(ms: number | null): string {
+  if (ms === null) return t("accountsPage.autoRefreshMenuOff");
+  if (ms < 60_000) return tf("accountsPage.autoRefreshSec", { n: Math.round(ms / 1000) });
+  return tf("accountsPage.autoRefreshMin", { n: Math.round(ms / 60_000) });
+}
+
+function autoRefreshTriggerLabel(ms: number | null): string {
+  if (ms === null) return t("accountsPage.autoRefreshOff");
+  return tf("accountsPage.autoRefreshLabel", { label: formatAutoRefreshOption(ms) });
+}
+
+function AutoRefreshMenuButton(props: { state: AccountsState }): JSX.Element {
+  const menuOpen = signal(false);
+  const triggerRef = signal<ViewRef | null>(null);
   return (
-    <View
-      testID={props.testID}
-      role="button"
-      accessibilityLabel={props.label}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        height: 30,
-        paddingHorizontal: 8,
-        gap: 6,
-        borderRadius: 6,
-        cursor: "pointer",
-        backgroundColor: props.active ? paletteToken("accent_soft") : "transparent",
-      }}
-      hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
-      onPress={props.onPress}
-    >
-      <View style={{ width: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {props.active ? <Icon name="check" size={12} color={paletteToken("accent")} /> : null}
-      </View>
-      <Text
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 12,
-          fontWeight: props.active ? "600" : "400",
-          color: props.active ? paletteToken("accent") : paletteToken("fg"),
-          numberOfLines: 1,
+    <View style={{ position: "relative", flexShrink: 0, display: "flex" }}>
+      <View
+        ref={(node) => {
+          triggerRef.set(node);
         }}
       >
-        {props.label}
-      </Text>
-      {props.count !== undefined ? (
-        <Text
-          style={{
-            fontSize: 11,
-            fontVariant: "tabular-nums",
-            color: paletteToken("fg_faint"),
-          }}
+        <BarMenuTrigger
+          testID="acct-auto-refresh-trigger"
+          glyph="clock"
+          label={() => autoRefreshTriggerLabel(props.state.autoRefreshInterval())}
+          active={() => props.state.autoRefreshInterval() !== null}
+          onPress={() => menuOpen.update((open) => !open)}
+        />
+      </View>
+
+      <If when={menuOpen()}>
+        <Overlay
+          anchor={triggerRef()}
+          placement="bottom"
+          align="end"
+          offset={6}
+          onPressOutside={() => menuOpen.set(false)}
+          onCancel={() => menuOpen.set(false)}
         >
-          {String(props.count)}
-        </Text>
-      ) : null}
+          <BarMenuPanel testID="acct-auto-refresh-panel">
+            <Each of={AUTO_REFRESH_OPTIONS} key={(opt) => String(opt ?? "off")}>
+              {(opt) => (
+                <BarMenuRow
+                  testID={`acct-auto-refresh-opt-${opt() ?? "off"}`}
+                  label={formatAutoRefreshOption(opt())}
+                  active={props.state.autoRefreshInterval() === opt()}
+                  onPress={() => {
+                    props.state.setAutoRefreshInterval(opt());
+                    menuOpen.set(false);
+                  }}
+                />
+              )}
+            </Each>
+            <If when={props.state.autoRefreshInterval() !== null}>
+              <View
+                testID="acct-auto-refresh-preview"
+                style={{
+                  paddingHorizontal: 10,
+                  paddingTop: 6,
+                  paddingBottom: 4,
+                  borderTopWidth: 1,
+                  borderTopColor: paletteToken("border_soft"),
+                }}
+              >
+                <Text style={{ fontSize: 11, color: paletteToken("fg_muted") }}>
+                  {(() => {
+                    const step = props.state.autoRefreshStepSeconds();
+                    const count = props.state.autoRefreshEligibleCount();
+                    return step !== null
+                      ? tf("accountsPage.autoRefreshPreview", { count, step })
+                      : t("accountsPage.autoRefreshNoneEligible");
+                  })()}
+                </Text>
+              </View>
+            </If>
+          </BarMenuPanel>
+        </Overlay>
+      </If>
     </View>
   );
 }
 
 export { AccountSelectionBar } from "./selectionBar";
-

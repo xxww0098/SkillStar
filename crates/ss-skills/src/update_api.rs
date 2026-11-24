@@ -44,16 +44,6 @@ pub struct ApiRemoteTree {
     pub folders: HashMap<String, String>,
 }
 
-impl ApiRemoteTree {
-    /// Subtree hash for `source_folder` (`None` = repo root skill).
-    pub fn subtree_hash(&self, source_folder: Option<&str>) -> Option<&str> {
-        match source_folder {
-            Some(folder) if !folder.is_empty() => self.folders.get(folder).map(String::as_str),
-            _ => self.folders.get("").map(String::as_str),
-        }
-    }
-}
-
 /// Why one Trees API call could not replace `git fetch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FastPathFailure {
@@ -512,13 +502,13 @@ mod tests {
         // Production queries use a branch/commit, and GitHub then puts that
         // commit SHA in `sha`. The parser still stores whatever the API
         // returned at the root; the checker accepts either object type.
-        assert_eq!(tree.subtree_hash(None), Some("root-tree-sha"));
-        assert_eq!(tree.subtree_hash(Some("skills")), Some("skills-tree"));
-        assert_eq!(tree.subtree_hash(Some("skills/demo")), Some("demo-tree"));
+        assert_eq!(tree.folders.get("").map(String::as_str), Some("root-tree-sha"));
+        assert_eq!(tree.folders.get("skills").map(String::as_str), Some("skills-tree"));
+        assert_eq!(tree.folders.get("skills/demo").map(String::as_str), Some("demo-tree"));
         // Blobs are not subtrees.
-        assert_eq!(tree.subtree_hash(Some("skills/demo/SKILL.md")), None);
+        assert_eq!(tree.folders.get("skills/demo/SKILL.md").map(String::as_str), None);
         // Missing folder → unknown (caller preserves the badge).
-        assert_eq!(tree.subtree_hash(Some("gone")), None);
+        assert_eq!(tree.folders.get("gone").map(String::as_str), None);
     }
 
     /// Shape of `GET /repos/{o}/{r}/git/commits/{sha}`: the root tree a lock

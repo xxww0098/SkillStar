@@ -3,14 +3,18 @@
 //! A plan is written only for an explicit selection. Scores, expiry, and the
 //! plan id are stored beside the hash and are not inputs to it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ss_skills::content::{self, SNAPSHOT_HASH_VERSION};
+use ss_skills::projects::observe_project;
 use uuid::Uuid;
+
+use super::apply::{DeploymentStatus, Receipt};
+use super::approval::{ApprovalRecord, ApprovalSource, load_approval, record_from_skillstar};
 
 const HASH_DOMAIN: &[u8] = b"skillstar.project-skill-plan.v1\0";
 const TTL: Duration = Duration::minutes(15);
@@ -116,11 +120,157 @@ pub fn create_plan(draft: PlanDraft, now: DateTime<Utc>) -> Result<Option<Deploy
     Ok(Some(plan))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingPlanOperation {
+    pub name: String,
+    pub action: PlanAction,
+    pub skill_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingProjectSkillPlan {
+    pub plan_id: String,
+    pub plan_hash: String,
+    pub canonical_root: String,
+    pub is_registered: bool,
+    pub owner: String,
+    pub affected_agents: Vec<String>,
+    pub operations: Vec<PendingPlanOperation>,
+    pub expires_at: DateTime<Utc>,
+    pub approved: bool,
+    pub approval_source: Option<ApprovalSource>,
+}
+
 pub fn load_plan(plan_id: &str, now: DateTime<Utc>) -> Result<DeploymentPlan> {
     let path = plan_path(plan_id)?;
     let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
     let plan: DeploymentPlan = serde_json::from_slice(&bytes).context("parse deployment plan")?;
-    if plan.plan_id != plan_id {
+    verify_plan(&plan, plan_id, now)?;
+    Ok(plan)
+}
+
+/// Read the latest unexpired, unapplied project-skill plan summary for `project_root`.
+pub fn pending_project_skill_plan(project_root: &Path) -> Result<Option<PendingProjectSkillPlan>> {
+    pending_project_skill_plan_at(project_root, Utc::now())
+}
+
+pub(crate) fn pending_project_skill_plan_at(
+    project_root: &Path,
+    now: DateTime<Utc>,
+) -> Result<Option<PendingProjectSkillPlan>> {
+    if !project_root.exists() {
+        return Ok(None);
+    }
+    let root_str = project_root
+        .to_str()
+        .context("project root is not utf-8")?;
+    let observed = observe_project(root_str)?;
+    let canonical_root = observed
+        .root
+        .to_str()
+        .context("canonical project root is not utf-8")?
+        .to_string();
+    let is_registered = observed.name.is_some();
+
+    let plans_dir = ss_core::infra::paths::state_dir().join("project-skill-plans");
+    let entries = match std::fs::read_dir(&plans_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).with_context(|| format!("read {}", plans_dir.display())),
+    };
+
+    let mut matching: Vec<DeploymentPlan> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(plan) = serde_json::from_slice::<DeploymentPlan>(&bytes) else {
+            continue;
+        };
+        if verify_plan(&plan, stem, now).is_err() {
+            continue;
+        }
+        let plan_canonical = std::fs::canonicalize(&plan.root)
+            .unwrap_or_else(|_| PathBuf::from(&plan.root));
+        if plan_canonical == observed.root {
+            matching.push(plan);
+        }
+    }
+
+    matching.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.plan_id.cmp(&left.plan_id))
+    });
+    let Some(latest) = matching.into_iter().next() else {
+        return Ok(None);
+    };
+    if is_plan_applied(&latest.plan_id, &latest.plan_hash) {
+        return Ok(None);
+    }
+
+    let approval = load_approval(&latest.plan_id)
+        .ok()
+        .flatten()
+        .filter(|record| record.plan_hash == latest.plan_hash);
+    let operations = latest
+        .skills
+        .iter()
+        .map(|skill| PendingPlanOperation {
+            name: skill.name.clone(),
+            action: skill.action,
+            skill_path: format!("{}/{}/SKILL.md", latest.physical_rel, skill.name)
+                .replace('\\', "/"),
+        })
+        .collect();
+
+    Ok(Some(PendingProjectSkillPlan {
+        plan_id: latest.plan_id,
+        plan_hash: latest.plan_hash,
+        canonical_root,
+        is_registered,
+        owner: latest.owner_id,
+        affected_agents: latest.affected_agents,
+        operations,
+        expires_at: latest.expires_at,
+        approved: approval.is_some(),
+        approval_source: approval.map(|record| record.source),
+    }))
+}
+
+/// Verify an existing unexpired plan matches `plan_hash` and record a SkillStar approval
+/// without deploying skills or registering the project.
+pub fn approve_project_skill_plan(plan_id: &str, plan_hash: &str) -> Result<ApprovalRecord> {
+    approve_project_skill_plan_at(plan_id, plan_hash, Utc::now())
+}
+
+pub(crate) fn approve_project_skill_plan_at(
+    plan_id: &str,
+    plan_hash: &str,
+    now: DateTime<Utc>,
+) -> Result<ApprovalRecord> {
+    let plan = load_plan(plan_id, now)?;
+    if plan.plan_hash != plan_hash {
+        anyhow::bail!(
+            "deployment plan hash mismatch: expected {}, got {plan_hash}",
+            plan.plan_hash
+        );
+    }
+    record_from_skillstar(&plan.plan_id, &plan.plan_hash)
+}
+
+fn verify_plan(plan: &DeploymentPlan, expected_id: &str, now: DateTime<Utc>) -> Result<()> {
+    if plan.plan_id != expected_id {
         anyhow::bail!("plan id does not match its file");
     }
     if now >= plan.expires_at {
@@ -137,7 +287,33 @@ pub fn load_plan(plan_id: &str, now: DateTime<Utc>) -> Result<DeploymentPlan> {
     if expected != plan.plan_hash {
         anyhow::bail!("deployment plan hash does not match its contents");
     }
-    Ok(plan)
+    Ok(())
+}
+
+fn is_plan_applied(plan_id: &str, plan_hash: &str) -> bool {
+    let receipts_dir = ss_core::infra::paths::state_dir().join("project-skill-receipts");
+    let Ok(entries) = std::fs::read_dir(&receipts_dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(receipt) = serde_json::from_slice::<Receipt>(&bytes) else {
+            continue;
+        };
+        if receipt.plan_id == plan_id
+            && receipt.plan_hash == plan_hash
+            && receipt.deployment_status == DeploymentStatus::Applied
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn plan_hash(
@@ -375,5 +551,102 @@ mod deployment_plan_tests {
             .collect();
         let too_many = create_plan(draft(nine, vec!["codex"]), now());
         assert!(too_many.is_err());
+    }
+
+    #[test]
+    fn pending_plan_returns_latest_unapplied_and_skips_applied_or_expired() {
+        let env = EnvGuard::new();
+        let project = env.root.join("project");
+        fs::create_dir_all(&project).unwrap();
+        let canonical = fs::canonicalize(&project).unwrap();
+
+        assert!(
+            super::pending_project_skill_plan_at(&project, now())
+                .unwrap()
+                .is_none()
+        );
+
+        let mut d1 = draft(vec![skill("alpha", PlanAction::Create)], vec!["codex"]);
+        d1.root = canonical.clone();
+        let p1 = create_plan(d1, now()).unwrap().unwrap();
+
+        let mut d2 = draft(vec![skill("beta", PlanAction::Already)], vec!["codex"]);
+        d2.root = canonical.clone();
+        let p2 = create_plan(d2, now() + Duration::minutes(2)).unwrap().unwrap();
+
+        let pending = super::pending_project_skill_plan_at(&project, now() + Duration::minutes(3))
+            .unwrap()
+            .expect("latest pending plan");
+        assert_eq!(pending.plan_id, p2.plan_id);
+        assert_eq!(pending.plan_hash, p2.plan_hash);
+        assert_eq!(pending.canonical_root, canonical.to_string_lossy());
+        assert!(!pending.is_registered);
+        assert_eq!(pending.owner, "codex");
+        assert!(!pending.approved);
+        assert_eq!(pending.operations.len(), 1);
+        assert_eq!(pending.operations[0].name, "beta");
+        assert_eq!(pending.operations[0].skill_path, ".agents/skills/beta/SKILL.md");
+
+        // Approving writes SkillStar approval without deploying, and updates approved status.
+        let rec = super::approve_project_skill_plan_at(
+            &p2.plan_id,
+            &p2.plan_hash,
+            now() + Duration::minutes(3),
+        )
+        .unwrap();
+        assert_eq!(rec.plan_id, p2.plan_id);
+        assert!(!project.join(".agents").exists());
+        let pending_after_approve =
+            super::pending_project_skill_plan_at(&project, now() + Duration::minutes(4))
+                .unwrap()
+                .unwrap();
+        assert!(pending_after_approve.approved);
+
+        // Once a receipt exists for the latest plan, neither it nor older p1 is surfaced.
+        let receipts_dir = ss_core::infra::paths::state_dir().join("project-skill-receipts");
+        fs::create_dir_all(&receipts_dir).unwrap();
+        let receipt = crate::apply::Receipt {
+            idempotency_key: "r-1".into(),
+            plan_id: p2.plan_id.clone(),
+            plan_hash: p2.plan_hash.clone(),
+            deployment_status: crate::apply::DeploymentStatus::Applied,
+            items: Vec::new(),
+            project_scope: pending.canonical_root.clone(),
+            runtime_visibility: crate::inspect::RuntimeVisibility::Unverified,
+            next_action: crate::apply::NextAction::LoadSkill,
+        };
+        fs::write(
+            receipts_dir.join("r-1.json"),
+            serde_json::to_vec_pretty(&receipt).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            super::pending_project_skill_plan_at(&project, now() + Duration::minutes(5))
+                .unwrap()
+                .is_none()
+        );
+        assert_ne!(p1.plan_id, p2.plan_id);
+    }
+
+    #[test]
+    fn approve_project_skill_plan_validates_hash_and_expiry() {
+        let env = EnvGuard::new();
+        let project = env.root.join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut d = draft(vec![skill("demo", PlanAction::Create)], vec!["codex"]);
+        d.root = fs::canonicalize(&project).unwrap();
+        let plan = create_plan(d, now()).unwrap().unwrap();
+
+        let bad_hash = super::approve_project_skill_plan_at(&plan.plan_id, "wrong-hash", now())
+            .unwrap_err();
+        assert!(bad_hash.to_string().contains("hash mismatch"), "{bad_hash}");
+
+        let expired = super::approve_project_skill_plan_at(
+            &plan.plan_id,
+            &plan.plan_hash,
+            now() + Duration::minutes(16),
+        )
+        .unwrap_err();
+        assert!(expired.to_string().contains("expired"), "{expired}");
     }
 }

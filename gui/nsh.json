@@ -1,5 +1,6 @@
 {
   "name": "skillstar-gui",
+  "nsh": ">=0.6.1",
   "id": "dev.skillstar.gui",
   "version": "0.0.1",
   "build": 1,
@@ -11,6 +12,8 @@
   "window": {
     "title": "SkillStar",
     "titleBar": { "style": "hidden", "height": 44 },
+    "minSize": { "width": 960, "height": 600 },
+    "restoreBounds": true,
     "closeOnPress": false
   }
 }

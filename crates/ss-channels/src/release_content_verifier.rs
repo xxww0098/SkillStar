@@ -3,7 +3,6 @@ use super::{
     CHANNEL_CONTENT_HASH_VERSION, ChannelReleaseManifest, ChannelSkillReleaseStatus,
     RemoteRepository, SharedChannelError, SharedChannelErrorCode,
 };
-use anyhow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 

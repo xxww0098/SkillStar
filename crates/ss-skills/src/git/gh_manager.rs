@@ -375,9 +375,8 @@ pub fn publish_skill(
             anyhow::bail!("Skill directory '{}' not found", skill_name);
         }
 
-        // Hub entries are symlinks: locally authored Skills point into skills-local/,
-        // installed ones into a repository checkout. Publish the directory the
-        // link resolves to.
+        // Canonical installed skills live under `installed/<name>/`
+        // (resolve if a symlink is present so publishing reads the target dir).
         let skill_source_resolved = if ss_core::infra::fs_ops::is_link(&skill_source) {
             ss_core::infra::fs_ops::read_link_resolved(&skill_source)
                 .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?

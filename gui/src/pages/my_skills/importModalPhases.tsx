@@ -1,13 +1,15 @@
-import { Scroll, Text, View, type JSX } from "nsh";
+import { Scroll, Text, View, computed, type Accessor, type JSX } from "nsh";
 import { Input } from "nsh/base";
 import { Icon } from "../../chrome/icons";
 import { IconSpin } from "../../chrome/feedback";
+import { bindSlow } from "../../chrome/delayedFlag";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
 import {
   adoptFolder,
   cancelActive,
   closeImportModal,
+  parkImport,
   history,
   onUrlChange,
   onUrlSubmit,
@@ -135,18 +137,20 @@ function ChipGroup(props: { title: string; names: string[]; fg: string; bg: stri
         {props.title}
       </Text>
       <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {props.names.map((name) => (
-          <View
-            style={{
-              paddingHorizontal: 6,
-              paddingVertical: 2,
-              borderRadius: 6,
-              backgroundColor: props.bg,
-            }}
-          >
-            <Text style={{ fontSize: 12, color: props.fg }}>{name}</Text>
-          </View>
-        ))}
+        <Each of={props.names} key={(name) => name}>
+          {(name: () => string) => (
+            <View
+              style={{
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 6,
+                backgroundColor: props.bg,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: props.fg }}>{name()}</Text>
+            </View>
+          )}
+        </Each>
       </View>
     </View>
   );
@@ -331,61 +335,66 @@ function SourceButton(props: {
 }
 
 function RecentList(): JSX.Element {
-  const entries = () => history();
-  const scrollable = () => entries().length > RECENT_VISIBLE;
+  const entries = computed(() => history());
+  const scrollable = computed(() => entries().length > RECENT_VISIBLE);
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg_muted") }}>
         {t("githubImportModal.recentRepos")}
       </Text>
-      {(() => {
-        // 滚动盒外层是明确像素高度视口框（禁 max_h——波 4 硬契约）。
-        if (!scrollable()) return <Rows entries={entries} />;
-        return (
-          <View testID="import-recent-repos" style={{ height: RECENT_VIEW_H, width: "100%", flexShrink: 0 }}>
-            <Scroll testID="import-recent-scroll" style={{ width: "100%", height: "100%" }}>
-              <Rows entries={entries} />
-            </Scroll>
-          </View>
-        );
-      })()}
+      {/* 滚动盒外层是明确像素高度视口框（禁 max_h——波 4 硬契约）。 */}
+      <If
+        when={scrollable()}
+        else={<Rows entries={entries} />}
+      >
+        <View testID="import-recent-repos" style={{ height: RECENT_VIEW_H, width: "100%", flexShrink: 0 }}>
+          <Scroll testID="import-recent-scroll" style={{ width: "100%", height: "100%" }}>
+            <Rows entries={entries} />
+          </Scroll>
+        </View>
+      </If>
     </View>
   );
 }
 
-function Rows(props: { entries: () => string[] }): JSX.Element {
+function Rows(props: { entries: Accessor<string[]> }): JSX.Element {
+  const indexed = computed(() =>
+    props.entries().map((source, index) => ({ source, index })),
+  );
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%" }}>
-      {props.entries().map((source, index) => (
-        <View
-          testID={`import-history-${index}`}
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            borderRadius: 8,
-            cursor: "pointer",
-          }}
-          hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
-          onPress={() => pickHistory(source)}
-        >
-          <Icon name="rotateCcw" size={14} color={paletteToken("fg_muted")} />
-          <Text
+      <Each of={indexed()} key={(row) => `${row.index}:${row.source}`}>
+        {(row: () => { source: string; index: number }) => (
+          <View
+            testID={`import-history-${row().index}`}
             style={{
-              fontSize: 14,
-              color: paletteToken("fg"),
-              minWidth: 0,
-              textOverflow: "ellipsis",
-              numberOfLines: 1,
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 8,
+              cursor: "pointer",
             }}
+            hoverStyle={{ backgroundColor: paletteToken("panel_hover") }}
+            onPress={() => pickHistory(row().source)}
           >
-            {source}
-          </Text>
-        </View>
-      ))}
+            <Icon name="rotateCcw" size={14} color={paletteToken("fg_muted")} />
+            <Text
+              style={{
+                fontSize: 14,
+                color: paletteToken("fg"),
+                minWidth: 0,
+                textOverflow: "ellipsis",
+                numberOfLines: 1,
+              }}
+            >
+              {row().source}
+            </Text>
+          </View>
+        )}
+      </Each>
     </View>
   );
 }
@@ -393,6 +402,7 @@ function Rows(props: { entries: () => string[] }): JSX.Element {
 // ---- Loading 相（phases.rs render_loading） -----------------------------------
 
 export function LoadingBody(): JSX.Element {
+  const slow = bindSlow(() => true);
   const cancellable = () => phase() === "scanning" || phase() === "installing";
   return (
     <View
@@ -425,19 +435,77 @@ export function LoadingBody(): JSX.Element {
       <If when={cancellable()}>
         <GhostButton testID="import-cancel" label={t("common.cancel")} onPress={() => cancelActive()} />
       </If>
+      <If when={slow()}>
+        <GhostButton
+          testID="import-park"
+          label={t("wait.continueInBackground")}
+          onPress={() => parkImport()}
+        />
+      </If>
     </View>
   );
 }
 
 // ---- 完成相（phases.rs render_completed） --------------------------------------
 
+const KNOWN_SKIP_REASONS = new Set([
+  "repo_missing",
+  "no_source",
+  "install_failed",
+  "unsupported_source",
+  "embedded_failed",
+  "cancelled",
+]);
+
+function CompletedSummaryGroups(): JSX.Element {
+  const doneSummary = computed(() => summary());
+  const existing = computed(() => doneSummary()?.existing ?? []);
+  const installed = computed(() => doneSummary()?.installed ?? []);
+  const skipped = computed(() => doneSummary()?.skipped ?? []);
+  return (
+    <View style={{ width: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
+      <If when={existing().length > 0}>
+        <ChipGroup
+          title={tf("shareCodeImport.alreadyHadTitle", { count: existing().length })}
+          names={existing()}
+          fg={paletteToken("fg")}
+          bg={paletteToken("well")}
+        />
+      </If>
+      <If when={installed().length > 0}>
+        <ChipGroup
+          title={tf("shareCodeImport.installedNowTitle", { count: installed().length })}
+          names={installed()}
+          fg={paletteToken("ok")}
+          bg={paletteToken("ok_bg")}
+        />
+      </If>
+      <If when={skipped().length > 0}>
+        <SkippedRows skipped={skipped()} />
+      </If>
+    </View>
+  );
+}
+
 export function CompletedBody(): JSX.Element {
-  const doneSummary = () => summary();
-  const entries = () => {
+  const doneSummary = computed(() => summary());
+  const entries = computed(() => {
     const value = doneSummary();
     if (value === null) return 0;
     return value.existing.length + value.installed.length + value.skipped.length;
-  };
+  });
+  const summaryText = computed(() => {
+    const value = doneSummary();
+    if (value === null) {
+      return tf("githubImportModal.descComplete", { count: installedCount() });
+    }
+    return tf("shareCodeImport.resultSummary", {
+      total: value.requested,
+      existing: value.existing.length,
+      installed: value.installed.length,
+      skipped: value.skipped.length,
+    });
+  });
   return (
     <View
       testID="import-completed"
@@ -467,56 +535,21 @@ export function CompletedBody(): JSX.Element {
       <View style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, width: "100%" }}>
         <Text style={{ fontSize: 16, fontWeight: "600" }}>{t("githubImportModal.titleComplete")}</Text>
         <Text style={{ fontSize: 14, color: paletteToken("fg_muted"), textAlign: "center" }}>
-          {(() => {
-            const value = doneSummary();
-            if (value === null) {
-              return tf("githubImportModal.descComplete", { count: installedCount() });
-            }
-            return tf("shareCodeImport.resultSummary", {
-              total: value.requested,
-              existing: value.existing.length,
-              installed: value.installed.length,
-              skipped: value.skipped.length,
-            });
-          })()}
+          {summaryText()}
         </Text>
       </View>
-      {(() => {
-        const value = doneSummary();
-        if (value === null) return null;
-        const installedNames = [...value.installed];
-        const block = (
-          <View style={{ width: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
-            {value.existing.length > 0 ? (
-              <ChipGroup
-                title={tf("shareCodeImport.alreadyHadTitle", { count: value.existing.length })}
-                names={value.existing}
-                fg={paletteToken("fg")}
-                bg={paletteToken("well")}
-              />
-            ) : null}
-            {installedNames.length > 0 ? (
-              <ChipGroup
-                title={tf("shareCodeImport.installedNowTitle", { count: installedNames.length })}
-                names={installedNames}
-                fg={paletteToken("ok")}
-                bg={paletteToken("ok_bg")}
-              />
-            ) : null}
-            {value.skipped.length > 0 ? <SkippedRows skipped={value.skipped} /> : null}
+      <If when={doneSummary() !== null}>
+        <If
+          when={entries() > SUMMARY_VISIBLE}
+          else={<CompletedSummaryGroups />}
+        >
+          <View testID="import-summary" style={{ height: SUMMARY_VIEW_H, width: "100%", flexShrink: 0 }}>
+            <Scroll testID="import-summary-scroll" style={{ width: "100%", height: "100%" }}>
+              <CompletedSummaryGroups />
+            </Scroll>
           </View>
-        );
-        if (entries() > SUMMARY_VISIBLE) {
-          return (
-            <View testID="import-summary" style={{ height: SUMMARY_VIEW_H, width: "100%", flexShrink: 0 }}>
-              <Scroll testID="import-summary-scroll" style={{ width: "100%", height: "100%" }}>
-                {block}
-              </Scroll>
-            </View>
-          );
-        }
-        return block;
-      })()}
+        </If>
+      </If>
       <If when={error() !== null}>
         <Text style={{ width: "100%", fontSize: 12, color: paletteToken("warn") }}>{error() ?? ""}</Text>
       </If>
@@ -534,50 +567,46 @@ export function CompletedBody(): JSX.Element {
 /** 未装行（skipped：reason 归一到已知集合，未知落 install_failed——React
  * knownReasons 回退对位）。 */
 function SkippedRows(props: { skipped: { name: string; reason: string }[] }): JSX.Element {
-  const known = [
-    "repo_missing",
-    "no_source",
-    "install_failed",
-    "unsupported_source",
-    "embedded_failed",
-    "cancelled",
-  ];
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("fg_muted") }}>
         {tf("shareCodeImport.skippedTitle", { count: props.skipped.length })}
       </Text>
-      {props.skipped.map((entry) => (
-        <View
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-            paddingHorizontal: 8,
-            paddingVertical: 6,
-            borderRadius: 6,
-            borderWidth: 1,
-            borderColor: paletteToken("warn") + "33",
-            backgroundColor: paletteToken("warn") + "0d",
-          }}
-        >
-          <Text
+      <Each of={props.skipped} key={(entry) => entry.name}>
+        {(entry: () => { name: string; reason: string }) => (
+          <View
             style={{
-              fontSize: 12,
-              minWidth: 0,
-              textOverflow: "ellipsis",
-              numberOfLines: 1,
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              paddingHorizontal: 8,
+              paddingVertical: 6,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: paletteToken("warn") + "33",
+              backgroundColor: paletteToken("warn") + "0d",
             }}
           >
-            {entry.name}
-          </Text>
-          <Text style={{ fontSize: 12, flexShrink: 0, color: paletteToken("warn") }}>
-            {t(`shareCodeImport.skipReason.${known.includes(entry.reason) ? entry.reason : "install_failed"}`)}
-          </Text>
-        </View>
-      ))}
+            <Text
+              style={{
+                fontSize: 12,
+                minWidth: 0,
+                textOverflow: "ellipsis",
+                numberOfLines: 1,
+              }}
+            >
+              {entry().name}
+            </Text>
+            <Text style={{ fontSize: 12, flexShrink: 0, color: paletteToken("warn") }}>
+              {t(
+                `shareCodeImport.skipReason.${KNOWN_SKIP_REASONS.has(entry().reason) ? entry().reason : "install_failed"}`,
+              )}
+            </Text>
+          </View>
+        )}
+      </Each>
     </View>
   );
 }

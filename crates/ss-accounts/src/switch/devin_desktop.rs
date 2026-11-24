@@ -112,7 +112,7 @@ fn write_rows(path: &Path, document: &str, api_server_url: Option<&str>) -> Acco
         &rows,
     )?;
     // 回读：写不进去（或写进去的是别的账号）必须让切换失败。
-    let connection = open(path)?;
+    let connection = open_read_only(path)?;
     let stored = vscdb::read_value(&connection, AUTH_STATUS_KEY, "Devin Desktop")?;
     let Some(stored) = stored else {
         return Err(AccountError::Client(format!(
@@ -246,13 +246,13 @@ fn missing_database(path: &Path) -> AccountError {
     ))
 }
 
-/// 打开客户端的数据库；表不存在时补一张（库文件本身绝不新建）。
-fn open(path: &Path) -> AccountResult<Connection> {
-    vscdb::open_existing(path, vscdb::DEFAULT_BUSY_TIMEOUT, true, missing_database)
+/// 以严格只读方式打开客户端数据库，避免探活触发写锁或 DDL。
+fn open_read_only(path: &Path) -> AccountResult<Connection> {
+    vscdb::open_read_only(path, vscdb::READ_BUSY_TIMEOUT, missing_database)
 }
 
 fn read_rows(path: &Path) -> AccountResult<Vec<(String, Option<String>)>> {
-    let connection = open(path)?;
+    let connection = open_read_only(path)?;
     vscdb::read_values(&connection, &keys(), "Devin Desktop")
 }
 

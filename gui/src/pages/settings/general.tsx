@@ -1,4 +1,9 @@
-import { Text, View, type JSX } from "nsh";
+import { Text, View, effect, type JSX } from "nsh";
+import {
+  seedTrayQuotaPrefs,
+  setTrayQuotaEnabled,
+  trayQuotaEnabled,
+} from "../../shell/trayQuotaPrefs";
 import { Input } from "nsh/base";
 import { isLight, paletteToken } from "../../services/themeMode";
 import { t } from "../../services/translation";
@@ -41,6 +46,7 @@ function normalizeSelected(language: string): number {
 /** 常规分区：外观与语言分组卡 + 运行与自动更新分组卡。 */
 export function GeneralSection(props: { state: SettingsState }): JSX.Element {
   const state = props.state;
+  effect(() => seedTrayQuotaPrefs());
   return (
     <SectionShell section={sectionOf("general")} grouped>
       <SettingsGroup title={st("settings.group.appearance")}>
@@ -94,6 +100,20 @@ export function GeneralSection(props: { state: SettingsState }): JSX.Element {
                 id="bg-run-toggle"
                 checked={state.prefs().background_run}
                 onToggle={() => state.setBackgroundRun(!state.prefs().background_run)}
+              />
+            }
+          />
+          <SettingRow
+            icon="gauge"
+            iconTone="amber"
+            borderTop
+            title={st("settings.trayQuota")}
+            hint={st("settings.trayQuotaHint")}
+            control={
+              <SettingsSwitch
+                id="tray-quota-toggle"
+                checked={trayQuotaEnabled()}
+                onToggle={() => setTrayQuotaEnabled(!trayQuotaEnabled())}
               />
             }
           />

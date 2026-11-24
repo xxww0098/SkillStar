@@ -1,7 +1,7 @@
 // 「智能体」行与展开「受管技能」面板：主行呈现品牌图标底座、名称、暂停状态胶囊、
 // 等宽路径与共享提示、可折叠链接胶囊及主开关；展开面板内提供受管技能开关与解绑操作。
 
-import { Text, View, type JSX } from "nsh";
+import { Text, View, computed, type JSX } from "nsh";
 import os from "os";
 import { paletteToken } from "../../../services/themeMode";
 import { t, tf } from "../../../services/translation";
@@ -14,7 +14,7 @@ import {
   hasGlobalSkills,
   managedTargetKeyOf,
   noticeFromReport,
-  sharedNames,
+  sharedNamesByDir,
   SKIP_UNMANAGED_REAL_DIRECTORY,
   type AgentConnectionsState,
   type AgentDeployModeChoice,
@@ -114,17 +114,25 @@ export function AgentRow(props: {
   state: AgentConnectionsState;
   agentId: string;
   last: boolean;
+  profile?: () => AgentProfileDto | undefined;
+  sharedByDir?: () => Map<string, string[]>;
+  homedir?: string;
 }): JSX.Element {
   const state = props.state;
+  const profile =
+    props.profile ?? computed(() => state.profiles().find((item) => item.id === props.agentId));
+  const sharedByDir = props.sharedByDir ?? computed(() => sharedNamesByDir(state.profiles()));
+  const homedir = props.homedir ?? os.homedir();
+  const enabled = computed(() => profile()?.enabled === true);
+  const expanded = computed(() => state.expandedAgent() === props.agentId);
   return (
     <View
       style={{
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        ...(props.last
-          ? {}
-          : { borderBottomWidth: 1, borderBottomColor: paletteToken("border_soft") }),
+        borderBottomWidth: props.last ? 0 : 1,
+        borderBottomColor: props.last ? "transparent" : paletteToken("border_soft"),
       }}
     >
       <View
@@ -138,32 +146,41 @@ export function AgentRow(props: {
           width: "100%",
         }}
       >
-        <AgentGlyph state={state} agentId={props.agentId} />
-        <AgentIdentity state={state} agentId={props.agentId} />
-        <AgentLinkedChip state={state} agentId={props.agentId} />
+        <AgentGlyph agentId={props.agentId} profile={profile} enabled={enabled} />
+        <AgentIdentity
+          state={state}
+          agentId={props.agentId}
+          profile={profile}
+          sharedByDir={sharedByDir}
+          homedir={homedir}
+        />
+        <AgentLinkedChip
+          state={state}
+          agentId={props.agentId}
+          profile={profile}
+          expanded={expanded}
+        />
         <SettingsSwitch
           id={`agent-toggle-${slug(props.agentId)}`}
-          checked={
-            state
-              .profiles()
-              .find((profile) => profile.id === props.agentId)
-              ?.enabled === true
-          }
-          onToggle={() => state.toggleAgentEnabled(props.agentId)}
+          checked={enabled()}
+          onToggle={() => {
+            void state.toggleAgentEnabled(props.agentId);
+          }}
         />
       </View>
-      {state.expandedAgent() === props.agentId ? (
-        <LinkedPanel state={state} agentId={props.agentId} />
-      ) : null}
+      <If when={expanded()}>
+        <LinkedPanel state={state} agentId={props.agentId} profile={profile} />
+      </If>
     </View>
   );
 }
 
-function AgentGlyph(props: { state: AgentConnectionsState; agentId: string }): JSX.Element {
-  const state = props.state;
-  const profile = (): AgentProfileDto | undefined =>
-    state.profiles().find((item) => item.id === props.agentId);
-  const enabled = (): boolean => profile()?.enabled === true;
+function AgentGlyph(props: {
+  agentId: string;
+  profile: () => AgentProfileDto | undefined;
+  enabled: () => boolean;
+}): JSX.Element {
+  const enabled = props.enabled;
   return (
     <View
       style={{
@@ -181,7 +198,7 @@ function AgentGlyph(props: { state: AgentConnectionsState; agentId: string }): J
     >
       <AgentIcon
         id={props.agentId}
-        icon={profile()?.icon}
+        icon={props.profile()?.icon}
         size={18}
         grayscale={!enabled()}
         opacity={enabled() ? 1 : 0.6}
@@ -190,11 +207,26 @@ function AgentGlyph(props: { state: AgentConnectionsState; agentId: string }): J
   );
 }
 
-function AgentIdentity(props: { state: AgentConnectionsState; agentId: string }): JSX.Element {
+function AgentIdentity(props: {
+  state: AgentConnectionsState;
+  agentId: string;
+  profile: () => AgentProfileDto | undefined;
+  sharedByDir: () => Map<string, string[]>;
+  homedir: string;
+}): JSX.Element {
   const state = props.state;
-  const profile = (): AgentProfileDto | undefined =>
-    state.profiles().find((item) => item.id === props.agentId);
-  const snapshot = (): PauseSnapshot => snapshotForAgent(state, props.agentId);
+  const profile = props.profile;
+  const snapshot = computed(() => snapshotForAgent(state, props.agentId));
+  const paths = computed(() => {
+    const p = profile();
+    return p ? displayPaths(p, props.homedir) : [];
+  });
+  const shared = computed(() => {
+    const p = profile();
+    if (!p || !hasGlobalSkills(p)) return [];
+    const group = props.sharedByDir().get(managedTargetKeyOf(p.global_skills_dir)) ?? [];
+    return group.filter((name) => name !== p.display_name);
+  });
   return (
     <View
       style={{
@@ -226,17 +258,21 @@ function AgentIdentity(props: { state: AgentConnectionsState; agentId: string })
         >
           {profile()?.display_name ?? props.agentId}
         </Text>
-        {profile()?.enabled === true &&
-        (snapshot().status === "paused" || snapshot().status === "partial") ? (
+        <If
+          when={
+            profile()?.enabled === true &&
+            (snapshot().status === "paused" || snapshot().status === "partial")
+          }
+        >
           <StatusPill
             tone="warn"
             text={tf("settings.managedSkillsPausedCount", {
               count: String(snapshot().suspended.length),
             })}
           />
-        ) : null}
+        </If>
       </View>
-      {(profile() ? displayPaths(profile()!, os.homedir()) : []).length > 0 ? (
+      <If when={paths().length > 0}>
         <Text
           style={{
             fontSize: 12,
@@ -245,16 +281,16 @@ function AgentIdentity(props: { state: AgentConnectionsState; agentId: string })
             numberOfLines: 1,
           }}
         >
-          {displayPaths(profile()!, os.homedir()).join(" · ")}
+          {paths().join(" · ")}
         </Text>
-      ) : null}
-      {profile() && sharedNames(state.profiles(), profile()!).length > 0 ? (
+      </If>
+      <If when={shared().length > 0}>
         <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), numberOfLines: 1 }}>
           {tf("settings.sharedSkillsTarget", {
-            names: sharedNames(state.profiles(), profile()!).join(", "),
+            names: shared().join(", "),
           })}
         </Text>
-      ) : null}
+      </If>
     </View>
   );
 }
@@ -262,71 +298,86 @@ function AgentIdentity(props: { state: AgentConnectionsState; agentId: string })
 function AgentLinkedChip(props: {
   state: AgentConnectionsState;
   agentId: string;
-}): JSX.Element | null {
+  profile: () => AgentProfileDto | undefined;
+  expanded: () => boolean;
+}): JSX.Element {
   const state = props.state;
-  const info = (): { linked: number; visible: boolean; expanded: boolean } => {
-    const profile = state.profiles().find((item) => item.id === props.agentId);
+  const info = computed(() => {
+    const profile = props.profile();
     const linked = state.linkedSkills()[props.agentId]?.length ?? profile?.synced_count ?? 0;
     const suspended = snapshotForAgent(state, props.agentId).suspended.length;
-    const expanded = state.expandedAgent() === props.agentId;
+    const expanded = props.expanded();
     return { linked, visible: linked > 0 || suspended > 0 || expanded, expanded };
-  };
-  return info().visible ? (
-    <View
-      testID={`agent-links-${slug(props.agentId)}`}
-      role="button"
-      style={{
-        flexShrink: 0,
-        height: 28,
-        paddingHorizontal: 10,
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: info().expanded ? paletteToken("accent_soft_edge") : paletteToken("border"),
-        backgroundColor: info().expanded ? paletteToken("accent_soft") : paletteToken("well"),
-        cursor: "pointer",
-      }}
-      hoverStyle={
-        info().expanded
-          ? undefined
-          : { backgroundColor: paletteToken("panel_hover"), borderColor: paletteToken("edge") }
-      }
-      activeStyle={{ backgroundColor: paletteToken("card_active") }}
-      onPress={() => state.toggleAgentExpand(props.agentId)}
-    >
-      <Text
+  });
+  return (
+    <If when={info().visible}>
+      <View
+        testID={`agent-links-${slug(props.agentId)}`}
+        role="button"
         style={{
-          fontSize: 12,
-          fontWeight: "500",
-          fontVariant: ["tabular-nums"],
-          color: info().expanded ? paletteToken("accent_fg") : paletteToken("tag"),
-          numberOfLines: 1,
+          flexShrink: 0,
+          height: 28,
+          paddingHorizontal: 10,
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          borderRadius: 999,
+          borderWidth: 1,
+          borderColor: info().expanded ? paletteToken("accent_soft_edge") : paletteToken("border"),
+          backgroundColor: info().expanded ? paletteToken("accent_soft") : paletteToken("well"),
+          cursor: "pointer",
+        }}
+        hoverStyle={
+          info().expanded
+            ? undefined
+            : { backgroundColor: paletteToken("panel_hover"), borderColor: paletteToken("edge") }
+        }
+        activeStyle={{ backgroundColor: paletteToken("card_active") }}
+        onPress={() => {
+          void state.toggleAgentExpand(props.agentId);
         }}
       >
-        {`${info().linked} ${t("settings.linked")}`}
-      </Text>
-      <CollapseChevron
-        open={info().expanded}
-        color={info().expanded ? paletteToken("accent_fg") : paletteToken("fg_muted")}
-      />
-    </View>
-  ) : null;
+        <Text
+          style={{
+            fontSize: 12,
+            fontWeight: "500",
+            fontVariant: ["tabular-nums"],
+            color: info().expanded ? paletteToken("accent_fg") : paletteToken("tag"),
+            numberOfLines: 1,
+          }}
+        >
+          {`${info().linked} ${t("settings.linked")}`}
+        </Text>
+        <CollapseChevron
+          open={info().expanded}
+          color={info().expanded ? paletteToken("accent_fg") : paletteToken("fg_muted")}
+        />
+      </View>
+    </If>
+  );
 }
 
 /** 展开面板：受管技能暂停/恢复开关 + 一键取消全部链接 + 已链接技能列表。 */
-export function LinkedPanel(props: { state: AgentConnectionsState; agentId: string }): JSX.Element {
+export function LinkedPanel(props: {
+  state: AgentConnectionsState;
+  agentId: string;
+  profile?: () => AgentProfileDto | undefined;
+}): JSX.Element {
   const state = props.state;
-  const skills = (): string[] => state.linkedSkills()[props.agentId] ?? [];
-  const profile = (): AgentProfileDto | undefined =>
-    state.profiles().find((item) => item.id === props.agentId);
-  const clearable = (): boolean => profile() !== undefined && hasGlobalSkills(profile()!);
-  const pending = (): boolean =>
-    clearable()
-      ? state.managedPending()[managedTargetKeyOf(profile()!.global_skills_dir)] === true
+  const skills = computed(() => state.linkedSkills()[props.agentId] ?? []);
+  const profile =
+    props.profile ?? computed(() => state.profiles().find((item) => item.id === props.agentId));
+  const clearable = computed(() => {
+    const p = profile();
+    return p !== undefined && hasGlobalSkills(p);
+  });
+  const pending = computed(() => {
+    const p = profile();
+    return p !== undefined && hasGlobalSkills(p)
+      ? state.managedPending()[managedTargetKeyOf(p.global_skills_dir)] === true
       : false;
+  });
   return (
     <View
       style={{
@@ -340,7 +391,7 @@ export function LinkedPanel(props: { state: AgentConnectionsState; agentId: stri
         gap: 12,
       }}
     >
-      {clearable() ? (
+      <If when={clearable()}>
         <View
           style={{
             display: "flex",
@@ -351,8 +402,8 @@ export function LinkedPanel(props: { state: AgentConnectionsState; agentId: stri
             flexWrap: "wrap",
           }}
         >
-          <ManagedSkillsRow state={state} agentId={props.agentId} />
-          {skills().length > 0 ? (
+          <ManagedSkillsRow state={state} agentId={props.agentId} profile={profile} />
+          <If when={skills().length > 0}>
             <View
               testID={`unlink-all-${slug(props.agentId)}`}
               role="button"
@@ -393,81 +444,86 @@ export function LinkedPanel(props: { state: AgentConnectionsState; agentId: stri
                 {t("settings.unlinkAllFromAgent")}
               </Text>
             </View>
-          ) : null}
+          </If>
         </View>
-      ) : null}
-      {state.deployModeAvailable() ? (
+      </If>
+      <If when={state.deployModeAvailable()}>
         <AgentDeployModeRow state={state} agentId={props.agentId} />
-      ) : null}
-      {skills().length === 0 ? (
+      </If>
+      <If
+        when={skills().length === 0}
+        else={
+          <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            <Each of={skills()} key={(skill) => skill}>
+              {(skill) => (
+                <View
+                  style={{
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingLeft: 9,
+                    paddingRight: 5,
+                    paddingVertical: 4,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: paletteToken("border"),
+                    backgroundColor: paletteToken("card"),
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontFamily: MONO_FONT,
+                      color: paletteToken("fg"),
+                      numberOfLines: 1,
+                    }}
+                  >
+                    {skill()}
+                  </Text>
+                  <View
+                    testID={`unlink-${slug(props.agentId)}-${slug(skill())}`}
+                    role="button"
+                    accessibilityLabel={t("common.clear")}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: 5,
+                      borderWidth: 1,
+                      borderColor: "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: pending() ? "default" : "pointer",
+                      ...(pending() ? { opacity: 0.5 } : {}),
+                    }}
+                    hoverStyle={
+                      pending()
+                        ? undefined
+                        : {
+                            backgroundColor: paletteToken("danger_bg"),
+                            borderColor: paletteToken("danger_border"),
+                          }
+                    }
+                    activeStyle={
+                      pending() ? undefined : { backgroundColor: paletteToken("danger_hover") }
+                    }
+                    onPress={() => {
+                      if (!pending()) state.unlinkLinkedSkill(props.agentId, skill());
+                    }}
+                  >
+                    <Icon name="x" size={10} color={paletteToken("fg_muted")} />
+                  </View>
+                </View>
+              )}
+            </Each>
+          </View>
+        }
+      >
         <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
           {t("settings.noSkillsLinked")}
         </Text>
-      ) : (
-        <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {skills().map((skill) => (
-            <View
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                paddingLeft: 9,
-                paddingRight: 5,
-                paddingVertical: 4,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: paletteToken("border"),
-                backgroundColor: paletteToken("card"),
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 12,
-                  fontFamily: MONO_FONT,
-                  color: paletteToken("fg"),
-                  numberOfLines: 1,
-                }}
-              >
-                {skill}
-              </Text>
-              <View
-                testID={`unlink-${slug(props.agentId)}-${slug(skill)}`}
-                role="button"
-                accessibilityLabel={t("common.clear")}
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 5,
-                  borderWidth: 1,
-                  borderColor: "transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: pending() ? "default" : "pointer",
-                  ...(pending() ? { opacity: 0.5 } : {}),
-                }}
-                hoverStyle={
-                  pending()
-                    ? undefined
-                    : {
-                        backgroundColor: paletteToken("danger_bg"),
-                        borderColor: paletteToken("danger_border"),
-                      }
-                }
-                activeStyle={
-                  pending() ? undefined : { backgroundColor: paletteToken("danger_hover") }
-                }
-                onPress={() => {
-                  if (!pending()) state.unlinkLinkedSkill(props.agentId, skill);
-                }}
-              >
-                <Icon name="x" size={10} color={paletteToken("fg_muted")} />
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
+      </If>
     </View>
   );
 }
@@ -476,18 +532,21 @@ export function LinkedPanel(props: { state: AgentConnectionsState; agentId: stri
 export function ManagedSkillsRow(props: {
   state: AgentConnectionsState;
   agentId: string;
+  profile?: () => AgentProfileDto | undefined;
 }): JSX.Element {
   const state = props.state;
-  const snapshotOf = (): PauseSnapshot => snapshotForAgent(state, props.agentId);
-  const pendingOf = (): boolean => {
-    const profile = state.profiles().find((item) => item.id === props.agentId);
-    if (profile === undefined || !hasGlobalSkills(profile)) return false;
-    return state.managedPending()[managedTargetKeyOf(profile.global_skills_dir)] === true;
-  };
-  const disabled = (): boolean => {
+  const profile =
+    props.profile ?? computed(() => state.profiles().find((item) => item.id === props.agentId));
+  const snapshotOf = computed(() => snapshotForAgent(state, props.agentId));
+  const pendingOf = computed(() => {
+    const p = profile();
+    if (p === undefined || !hasGlobalSkills(p)) return false;
+    return state.managedPending()[managedTargetKeyOf(p.global_skills_dir)] === true;
+  });
+  const disabled = computed(() => {
     const snapshot = snapshotOf();
     return pendingOf() || snapshot.status === "loading" || snapshot.status === "empty";
-  };
+  });
   return (
     <View
       style={{
@@ -528,11 +587,13 @@ function AgentDeployModeRow(props: {
   agentId: string;
 }): JSX.Element {
   const state = props.state;
-  const slugId = (): string => props.agentId.toLowerCase().replace(/[^a-z0-9]/g, "-");
-  const currentChoice = (): AgentDeployModeChoice =>
-    state.agentDeployOverrides()[props.agentId] ?? "inherit";
-  const disallowJunction = (): boolean =>
-    state.disallowJunctionAgents().includes(props.agentId);
+  const slugId = props.agentId.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  const currentChoice = computed(
+    (): AgentDeployModeChoice => state.agentDeployOverrides()[props.agentId] ?? "inherit",
+  );
+  const disallowJunction = computed(() =>
+    state.disallowJunctionAgents().includes(props.agentId),
+  );
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <View
@@ -550,7 +611,7 @@ function AgentDeployModeRow(props: {
           {st("settings.agentDeployMode")}
         </Text>
         <ChoicePills
-          idPrefix={`agent-deploy-${slugId()}`}
+          idPrefix={`agent-deploy-${slugId}`}
           options={[
             { id: "inherit", label: st("settings.deployModeInherit") },
             { id: "symlink", label: st("settings.deployModeSymlink") },
@@ -564,14 +625,14 @@ function AgentDeployModeRow(props: {
           }}
         />
       </View>
-      {disallowJunction() ? (
+      <If when={disallowJunction()}>
         <Text
-          testID={`disallow-junction-${slugId()}`}
+          testID={`disallow-junction-${slugId}`}
           style={{ fontSize: 11, color: paletteToken("fg_muted") }}
         >
           {st("settings.disallowJunctionHint")}
         </Text>
-      ) : null}
+      </If>
     </View>
   );
 }

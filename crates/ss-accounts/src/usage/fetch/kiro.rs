@@ -67,12 +67,14 @@ pub fn fetch(creds: &Credentials) -> UsageResult<UsageOutcome> {
             parse::snippet(&answer.body)
         )));
     }
-    // 这一轮学到的 profileArn 与区域进 provider_state（加密落盘）。
+    // 这一轮学到的 profileArn 与区域与身份一起回写，供对账与下次读取使用。
     let learned = learned_state(&state, &body, &region);
+    let identity = kiro_parse::identity_of(&body);
     Ok(UsageOutcome {
         snapshot,
         tokens: reading.tokens,
         provider_state: learned.to_value(),
+        identity,
     })
 }
 

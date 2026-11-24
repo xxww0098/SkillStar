@@ -8,6 +8,7 @@ import {
   SKILL_CARD_H,
   SKILL_SCROLL_PB,
 } from "../../../layout";
+import { bindDelayedFlag } from "../../../chrome/delayedFlag";
 import { Icon } from "../../../chrome/icons";
 import { Pulse } from "../../../chrome/feedback";
 import { cardTrackWidth, gridColumnsForPane, packCardRows } from "../../../chrome/cardShell";
@@ -25,19 +26,59 @@ import type { PublisherRepoRow, PublisherSide } from "./readSide";
 
 const REPO_ROW_H = 76;
 
-export function PublisherBoardPane(props: { side: PublisherSide }): JSX.Element {
+function sameElements<T>(prev: readonly T[], next: readonly T[]): boolean {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
+}
+
+export function PublisherBoardPane(props: {
+  side: PublisherSide;
+  active?: () => boolean;
+}): JSX.Element {
   const side = props.side;
+  const isActive = (): boolean => (props.active ? props.active() : true);
   const paneWidth = signal(0);
   const scrolledPast = signal(false);
-  const listRef = signal<ListRef | null>(null);
+  const repoListRef = signal<ListRef | null>(null);
+  const skillListRef = signal<ListRef | null>(null);
+  const visitedSkillGrid = signal(side.activeRepo() !== null);
+
+  effect(() => {
+    if (side.activeRepo() !== null && !visitedSkillGrid()) {
+      visitedSkillGrid.set(true);
+    }
+  });
+
+  const activeListRef = (): ListRef | null =>
+    side.activeRepo() !== null ? skillListRef() : repoListRef();
+
+  // 还没有内容时才晚出骨架；已有行的刷新留在原处。
+  const skeletonReady = bindDelayedFlag(() => {
+    if (!isActive()) return false;
+    if (side.activeRepo() !== null) return side.loadingSkills() && side.skills().length === 0;
+    return side.loadingRepos() && side.repos().length === 0;
+  });
 
   // 切仓库/换发布者开新数据集：立即回顶（board.rs 换 scroll handle 的 reset 语义）。
   effect(() => {
     void side.activeRepo();
     void side.publisherName();
     scrolledPast.set(false);
-    queueMicrotask(() => listRef()?.scrollToOffset({ offset: 0, animated: false }));
+    queueMicrotask(() => activeListRef()?.scrollToOffset({ offset: 0, animated: false }));
   });
+
+  const filteredRepos = computed<PublisherRepoRow[]>(
+    (prev) => (!isActive() && prev !== undefined ? prev : filterRepos(side.repos(), side.query())),
+    { equals: sameElements },
+  );
+  const filteredSkills = computed<MarketSkill[]>(
+    (prev) => (!isActive() && prev !== undefined ? prev : filterSkills(side.skills(), side.query())),
+    { equals: sameElements },
+  );
 
   const fallbackW = (): number =>
     side.selected() !== null ? CARD_ROW_W - DETAIL_COLUMN_W : CARD_ROW_W;
@@ -49,6 +90,20 @@ export function PublisherBoardPane(props: { side: PublisherSide }): JSX.Element 
     const past = offsetY > SHOW_AFTER_PX;
     if (past !== scrolledPast()) scrolledPast.set(past);
   };
+
+  const showSkeleton = (): boolean =>
+    (side.snapshotStatus() === "seeding" &&
+      (side.activeRepo() !== null ? side.skills().length === 0 : side.repos().length === 0)) ||
+    (skeletonReady() &&
+      (side.activeRepo() !== null
+        ? side.loadingSkills() && side.skills().length === 0
+        : side.loadingRepos() && side.repos().length === 0));
+  const showRepos = (): boolean =>
+    side.activeRepo() === null &&
+    (side.repos().length > 0 || (!side.loadingRepos() && side.snapshotStatus() !== "seeding"));
+  const showSkills = (): boolean =>
+    side.activeRepo() !== null &&
+    (side.skills().length > 0 || (!side.loadingSkills() && side.snapshotStatus() !== "seeding"));
 
   return (
     <View
@@ -65,39 +120,59 @@ export function PublisherBoardPane(props: { side: PublisherSide }): JSX.Element 
         if (w > 0 && w !== paneWidth()) paneWidth.set(w);
       }}
     >
-      <If when={side.loadingRepos() || (side.activeRepo() !== null && side.loadingSkills())}>
+      <If when={showSkeleton()}>
         <View testID="pd-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
           <PublisherSkeletons cardWidth={trackW()} />
         </View>
       </If>
-      <If when={!side.loadingRepos() && side.activeRepo() === null}>
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: showRepos() ? "flex" : "none",
+        }}
+      >
         <RepoList
-          repos={filterRepos(side.repos(), side.query())}
+          repos={filteredRepos()}
           columns={columnsNow()}
           cardWidth={trackW()}
           onOpen={side.openRepo}
-          onRef={(node) => listRef.set(node)}
+          onRef={(node) => repoListRef.set(node)}
           onScroll={handleScroll}
         />
+      </View>
+      <If when={visitedSkillGrid()}>
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: showSkills() ? "flex" : "none",
+          }}
+        >
+          <RepoSkillGrid
+            skills={filteredSkills()}
+            columns={columnsNow()}
+            cardWidth={trackW()}
+            searching={side.query().trim().length > 0}
+            busy={side.busy()}
+            selectedName={side.selected()?.name ?? null}
+            onOpenSkill={side.openSkill}
+            onToggleInstall={side.toggleInstalled}
+            onRef={(node) => skillListRef.set(node)}
+            onScroll={handleScroll}
+          />
+        </View>
       </If>
-      <If when={!side.loadingRepos() && !side.loadingSkills() && side.activeRepo() !== null}>
-        <RepoSkillGrid
-          skills={filterSkills(side.skills(), side.query())}
-          columns={columnsNow()}
-          cardWidth={trackW()}
-          searching={side.query().trim().length > 0}
-          busy={side.busy()}
-          selectedName={side.selected()?.name ?? null}
-          onOpenSkill={side.openSkill}
-          onToggleInstall={side.toggleInstalled}
-          onRef={(node) => listRef.set(node)}
-          onScroll={handleScroll}
-        />
-      </If>
-      <If when={scrolledPast() && listRef() !== null}>
+      <If when={scrolledPast() && activeListRef() !== null}>
         <BackToTopButton
           label={mt("publisherDetail.backToTop")}
-          listRef={listRef()}
+          listRef={activeListRef()}
           onClick={() => scrolledPast.set(false)}
         />
       </If>
@@ -131,6 +206,7 @@ function PublisherSkeletons(props: { cardWidth: number }): JSX.Element {
   return (
     <View
       testID="pd-skeletons"
+      accessibilityState={{ busy: true }}
       style={{
         display: "flex",
         flexDirection: "row",
@@ -202,14 +278,13 @@ function RepoList(props: {
   const rowStride = REPO_ROW_H + CARD_GAP;
 
   return (
-    <If
-      when={props.repos.length === 0}
-      else={
+    <View style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
+      <View style={{ width: "100%", height: "100%", display: props.repos.length === 0 ? "none" : "flex" }}>
         <List
           ref={(node) => props.onRef(node)}
           testID="pd-scroll"
           each={packedRows()}
-          keyExtractor={(_row, idx) => `pd-repo-row-${idx}`}
+          keyExtractor={(row) => row.map((r) => `${r.source}\u001f${r.repo}`).join("\u001e")}
           estimatedItemSize={rowStride}
           style={{ width: "100%", height: "100%" }}
           contentStyle={{
@@ -239,12 +314,13 @@ function RepoList(props: {
             </View>
           )}
         </List>
-      }
-    >
-      <View testID="pd-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
-        <EmptyBlock testID="pd-empty" glyph="folder" label={mt("publisherDetail.noReposMatch")} />
       </View>
-    </If>
+      <If when={props.repos.length === 0}>
+        <View testID="pd-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
+          <EmptyBlock testID="pd-empty" glyph="folder" label={mt("publisherDetail.noReposMatch")} />
+        </View>
+      </If>
+    </View>
   );
 }
 
@@ -339,7 +415,8 @@ function RepoSkillGrid(props: {
   columns: number;
   cardWidth: number;
   searching: boolean;
-  busy: string | null;
+  /** 在飞的安装/卸载（技能名）；每张卡只认自己的名字。 */
+  busy: ReadonlySet<string>;
   selectedName: string | null;
   onOpenSkill: (skill: MarketSkill) => void;
   onToggleInstall: (skill: MarketSkill) => void;
@@ -350,14 +427,13 @@ function RepoSkillGrid(props: {
   const rowStride = SKILL_CARD_H + CARD_GAP;
 
   return (
-    <If
-      when={props.skills.length === 0}
-      else={
+    <View style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
+      <View style={{ width: "100%", height: "100%", display: props.skills.length === 0 ? "none" : "flex" }}>
         <List
           ref={(node) => props.onRef(node)}
           testID="pd-scroll"
           each={packedRows()}
-          keyExtractor={(_row, idx) => `pd-skill-row-${idx}`}
+          keyExtractor={(row) => row.map((s) => `${s.source ?? s.gitUrl}\u001f${s.name}`).join("\u001e")}
           estimatedItemSize={rowStride}
           style={{ width: "100%", height: "100%" }}
           contentStyle={{
@@ -383,41 +459,64 @@ function RepoSkillGrid(props: {
             >
               <Each of={row()} key="index">
                 {(skill) => (
-                  <View
-                    style={{
-                      width: props.cardWidth,
-                      minWidth: props.cardWidth,
-                      maxWidth: props.cardWidth,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <MarketCard
-                      skill={skill()}
-                      selected={props.selectedName === skill().name}
-                      busy={props.busy === skill().name}
-                      cardWidth={props.cardWidth}
-                      onPress={() => props.onOpenSkill(skill())}
-                      onToggleInstall={() => props.onToggleInstall(skill())}
-                    />
-                  </View>
+                  <RepoSkillSlot
+                    skill={skill}
+                    cardWidth={() => props.cardWidth}
+                    selectedName={() => props.selectedName}
+                    busyNames={() => props.busy}
+                    onOpenSkill={props.onOpenSkill}
+                    onToggleInstall={props.onToggleInstall}
+                  />
                 )}
               </Each>
             </View>
           )}
         </List>
-      }
-    >
-      <View testID="pd-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
-        <EmptyBlock
-          testID="pd-empty"
-          glyph="package"
-          label={
-            props.searching
-              ? mt("publisherDetail.noMatch")
-              : mt("publisherDetail.noSkills")
-          }
-        />
       </View>
-    </If>
+      <If when={props.skills.length === 0}>
+        <View testID="pd-scroll" style={{ flex: 1, minHeight: 0, width: "100%" }}>
+          <EmptyBlock
+            testID="pd-empty"
+            glyph="package"
+            label={
+              props.searching
+                ? mt("publisherDetail.noMatch")
+                : mt("publisherDetail.noSkills")
+            }
+          />
+        </View>
+      </If>
+    </View>
+  );
+}
+
+function RepoSkillSlot(props: {
+  skill: () => MarketSkill;
+  cardWidth: () => number;
+  selectedName: () => string | null;
+  busyNames: () => ReadonlySet<string>;
+  onOpenSkill: (skill: MarketSkill) => void;
+  onToggleInstall: (skill: MarketSkill) => void;
+}): JSX.Element {
+  const selected = computed(() => props.selectedName() === props.skill().name);
+  const busy = computed(() => props.busyNames().has(props.skill().name));
+  return (
+    <View
+      style={{
+        width: props.cardWidth(),
+        minWidth: props.cardWidth(),
+        maxWidth: props.cardWidth(),
+        flexShrink: 0,
+      }}
+    >
+      <MarketCard
+        skill={props.skill()}
+        selected={selected()}
+        busy={busy()}
+        cardWidth={props.cardWidth()}
+        onPress={() => props.onOpenSkill(props.skill())}
+        onToggleInstall={() => props.onToggleInstall(props.skill())}
+      />
+    </View>
   );
 }

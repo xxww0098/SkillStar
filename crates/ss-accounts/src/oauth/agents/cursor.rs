@@ -140,9 +140,8 @@ fn poll_for_tokens(
     verifier: &str,
     cancel: &CancelSignal,
 ) -> OAuthResult<LoginOutcome> {
-    let runtime = rt::runtime()?;
     let url = poll_url(login_uuid, verifier);
-    runtime.block_on(async move {
+    rt::block_on(async move {
         let client = ss_core::infra::http_client::probe_http_client(REQUEST_TIMEOUT)
             .map_err(|error| OAuthError::Other(format!("无法构建 HTTP 客户端: {error}")))?;
         for attempt in 0..MAX_POLLS {
@@ -166,7 +165,7 @@ fn poll_for_tokens(
         Err(OAuthError::Rejected(
             "Cursor 登录轮询超时，请重新发起登录".to_string(),
         ))
-    })
+    })?
 }
 
 /// One poll. A refusal, an empty answer or a transport hiccup all mean the same
@@ -202,18 +201,33 @@ async fn read_identity(
         .header("Cookie", cookie)
         .send()
         .await;
-    let email = match profile {
-        Ok(response) if response.status().is_success() => response
-            .json::<Value>()
-            .await
-            .ok()
-            .and_then(|value| jwt::claim(&value, &["email"])),
+    let profile = match profile {
+        Ok(response) if response.status().is_success() => response.json::<Value>().await.ok(),
         _ => None,
     };
+    identity_from_profile(profile.as_ref(), fallback_email)
+}
+
+fn identity_from_profile(profile: Option<&Value>, fallback_email: Option<String>) -> Identity {
     Identity {
-        email: email.or(fallback_email),
+        email: profile
+            .and_then(|value| string_field(value, &["email"]))
+            .or(fallback_email),
+        display_name: profile.and_then(|value| {
+            string_field(value, &["name", "displayName", "display_name", "username"])
+        }),
         ..Identity::default()
     }
+}
+
+pub(crate) fn read_identity_blocking(tokens: &TokenSet) -> Option<Identity> {
+    let tokens = tokens.clone();
+    rt::block_on(async move {
+        let client = ss_core::infra::http_client::probe_http_client(REQUEST_TIMEOUT).ok()?;
+        Some(read_identity(&client, &tokens, None).await)
+    })
+    .ok()
+    .flatten()
 }
 
 fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
@@ -324,6 +338,17 @@ mod tests {
         assert!(parse_poll_body(&json!({ "refreshToken": "r" }).to_string()).is_none());
         assert!(parse_poll_body("").is_none());
         assert!(parse_poll_body("not json").is_none());
+    }
+
+    #[test]
+    fn profile_identity_includes_name_and_email_with_fallback() {
+        let profile = json!({ "name": "Cursor User", "email": "user@example.com" });
+        let identity = identity_from_profile(Some(&profile), Some("fallback@example.com".into()));
+        assert_eq!(identity.display_name.as_deref(), Some("Cursor User"));
+        assert_eq!(identity.email.as_deref(), Some("user@example.com"));
+        let fallback = identity_from_profile(None, Some("fallback@example.com".into()));
+        assert_eq!(fallback.display_name, None);
+        assert_eq!(fallback.email.as_deref(), Some("fallback@example.com"));
     }
 
     #[test]

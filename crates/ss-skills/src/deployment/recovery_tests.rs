@@ -307,3 +307,136 @@ fn disallow_junction_agents_accept_symlinks_on_unix_and_switch_cleanly_to_copy()
     );
     Ok(())
 }
+
+#[test]
+fn unmanaged_foreign_directory_takeover_and_adopt_with_mirror_cleanup() -> Result<()> {
+    let sandbox = Sandbox::new();
+    ensure_enabled("antigravity", true);
+    let canon = create_canonical_skill("ego-browser", "hub v2");
+
+    let ag_target = sandbox
+        .home()
+        .join(".gemini/antigravity/skills/ego-browser");
+    let ide_mirror_target = sandbox
+        .home()
+        .join(".gemini/antigravity-ide/skills/ego-browser");
+    let gemini_cli_reserved = sandbox.home().join(".gemini/skills/ego-browser");
+
+    for dir in [&ag_target, &ide_mirror_target, &gemini_cli_reserved] {
+        fs::create_dir_all(dir)?;
+        fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: ego-browser\ndescription: external installer\n---\nexternal v1\n",
+        )?;
+    }
+
+    // Normal toggle stays fail-closed (D-094/D-096).
+    let skipped = toggle_skill_for_agent("ego-browser", "antigravity", true)?;
+    match skipped {
+        ToggleSkillOutcome::Skipped { code, .. } => {
+            assert_eq!(code, SKIP_UNMANAGED_REAL_DIRECTORY);
+        }
+        other => panic!("expected SKIP_UNMANAGED_REAL_DIRECTORY, got {other:?}"),
+    }
+
+    let inspected = inspect_unmanaged_agent_entries(Some("ego-browser"));
+    assert_eq!(inspected.len(), 1);
+    assert_eq!(inspected[0].agent_id, "antigravity");
+    assert!(!inspected[0].is_symlink);
+    assert!(inspected[0].can_adopt_to_hub);
+
+    // Explicit takeover archives the unmanaged dir, deploys Antigravity + IDE mirror,
+    // and leaves gemini-cli's reserved ~/.gemini/skills untouched.
+    let backup = take_over_unmanaged_agent_entry("ego-browser", "antigravity")?
+        .expect("real directory takeover creates a backup");
+    assert_eq!(backup.reason, BackupReason::CopyConflict);
+    assert!(ownership::owned_deployment(&ag_target, "ego-browser").is_owned());
+    assert!(ownership::owned_deployment(&ide_mirror_target, "ego-browser").is_owned());
+    assert_eq!(
+        ownership::owned_deployment(&gemini_cli_reserved, "ego-browser"),
+        Ownership::Foreign,
+        "reserved gemini-cli directory must not be touched by antigravity takeover"
+    );
+    assert!(inspect_unmanaged_agent_entries(Some("ego-browser")).is_empty());
+
+    // Simulate external tool re-creating an updated real directory, then absorb into Hub.
+    unlink_skill_from_agent("ego-browser", "antigravity")?;
+    fs::create_dir_all(&ag_target)?;
+    fs::write(
+        ag_target.join("SKILL.md"),
+        "---\nname: ego-browser\ndescription: external v3\n---\nabsorbed from agent\n",
+    )?;
+    adopt_unmanaged_agent_entry("ego-browser", "antigravity")?;
+    assert!(fs::read_to_string(canon.join("SKILL.md"))?.contains("absorbed from agent"));
+    assert!(ownership::owned_deployment(&ag_target, "ego-browser").is_owned());
+    Ok(())
+}
+
+#[test]
+fn foreign_antigravity_symlink_skips_with_foreign_link_and_takes_over_with_mirrors() -> Result<()> {
+    let sandbox = Sandbox::new();
+    ensure_enabled("antigravity", true);
+    let canon = create_canonical_skill("ego-browser", "hub v2");
+
+    let external_root = sandbox.root().join("panego/ego-browser");
+    fs::create_dir_all(&external_root)?;
+    fs::write(
+        external_root.join("SKILL.md"),
+        "---\nname: ego-browser\ndescription: external link\n---\nexternal link\n",
+    )?;
+
+    let ag_skills = sandbox.home().join(".gemini/antigravity/skills");
+    let ide_skills = sandbox.home().join(".gemini/antigravity-ide/skills");
+    let cli_parent = sandbox.home().join(".gemini/antigravity-cli");
+    let gemini_reserved = sandbox.home().join(".gemini/skills/ego-browser");
+    fs::create_dir_all(&ag_skills)?;
+    fs::create_dir_all(&ide_skills)?;
+    fs::create_dir_all(&cli_parent)?;
+    fs::create_dir_all(gemini_reserved.parent().unwrap())?;
+
+    let ag_target = ag_skills.join("ego-browser");
+    let ide_target = ide_skills.join("ego-browser");
+    fs_ops::create_symlink(&external_root, &ag_target)?;
+    fs_ops::create_symlink(&external_root, &ide_target)?;
+    fs_ops::create_symlink(&external_root, &gemini_reserved)?;
+
+    for enable in [true, false] {
+        match toggle_skill_for_agent("ego-browser", "antigravity", enable)? {
+            ToggleSkillOutcome::Skipped { code, .. } => assert_eq!(code, SKIP_FOREIGN_LINK),
+            other => panic!("expected SKIP_FOREIGN_LINK, got {other:?}"),
+        }
+    }
+
+    let batch = batch_link_skills_to_agent_with_report(&["ego-browser".to_string()], "antigravity")?;
+    assert_eq!(batch.linked, 0);
+    assert_eq!(batch.skipped.len(), 1);
+    assert_eq!(batch.skipped[0].code, SKIP_FOREIGN_LINK);
+
+    let inspected = inspect_unmanaged_agent_entries(Some("ego-browser"));
+    assert_eq!(inspected.len(), 1);
+    assert_eq!(inspected[0].agent_id, "antigravity");
+    assert!(inspected[0].is_symlink);
+    assert!(!inspected[0].can_adopt_to_hub);
+
+    assert!(
+        take_over_unmanaged_agent_entry("ego-browser", "antigravity")?.is_none(),
+        "taking over a foreign symlink must not archive a directory backup"
+    );
+    assert!(ownership::owned_deployment(&ag_target, "ego-browser").is_owned());
+    assert!(ownership::owned_deployment(&ide_target, "ego-browser").is_owned());
+    assert!(
+        ownership::owned_deployment(&cli_parent.join("skills/ego-browser"), "ego-browser")
+            .is_owned()
+    );
+    assert_eq!(
+        std::fs::canonicalize(&ag_target)?,
+        std::fs::canonicalize(&canon)?
+    );
+    assert_eq!(
+        ownership::owned_deployment(&gemini_reserved, "ego-browser"),
+        Ownership::Foreign,
+        "reserved gemini-cli symlink must not be touched by antigravity takeover"
+    );
+    assert!(inspect_unmanaged_agent_entries(Some("ego-browser")).is_empty());
+    Ok(())
+}

@@ -4,17 +4,19 @@
 // 智能体管理技能）最上、部署方式卡只做静态图例、检测规则卡垫底；看护
 // 区在最上（GPUI body 的第一个 child）。
 
-import { Scroll, Text, View, type JSX } from "nsh";
+import { Scroll, Text, View, computed, type JSX } from "nsh";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
+import { bindDelayedFlag } from "../../chrome/delayedFlag";
 import { Icon, type IconName } from "../../chrome/icons";
 import { IconSpin } from "../../chrome/feedback";
 import { Tip } from "../../chrome/tooltip";
 import { errorAlert } from "../../chrome/alerts";
 import { openChangePathDialog, openForgetCopyConfirm, openRemoveDialog } from "./dialogs";
 import { AgentItem } from "./agentItem";
+import { PendingSkillPlanSection } from "./pendingPlanCard";
 import { copyStateKey, type ProjectsState } from "./state";
-import type { CopyRecord, ProjectEntry } from "./bridge";
+import type { CopyRecord } from "./bridge";
 
 /** detail.rs render_project_detail 的整列。 */
 export function ProjectDetail(props: { state: ProjectsState }): JSX.Element {
@@ -44,6 +46,7 @@ export function ProjectDetail(props: { state: ProjectsState }): JSX.Element {
           width: "100%",
         }}
       >
+        <PendingSkillPlanSection state={state} />
         <CopyStatusSection state={state} />
         <AgentsCard state={state} />
         <DeployModeCard />
@@ -182,9 +185,9 @@ function SmallButton(props: {
       }
       onPress={props.onPress}
     >
-      {props.glyph ? (
+      <If when={Boolean(props.glyph)}>
         <Icon
-          name={props.glyph}
+          name={props.glyph!}
           size={13}
           color={
             (props.disabled ?? false)
@@ -194,7 +197,7 @@ function SmallButton(props: {
                 : paletteToken("fg")
           }
         />
-      ) : null}
+      </If>
       <Text
         style={{
           fontSize: 12,
@@ -264,30 +267,7 @@ function CopyStatusSection(props: { state: ProjectsState }): JSX.Element {
       <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
         {t("projects.copyStatusHint")}
       </Text>
-      <If when={state.copyLoading()}>
-        <View style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <IconSpin
-            name="refresh"
-            size={14}
-            color={paletteToken("fg_muted")}
-            spin={state.copyLoading()}
-          />
-          <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-            {t("projects.checkingCopies")}
-          </Text>
-        </View>
-      </If>
-      <If when={state.copyError() !== null}>
-        {errorAlert(state.copyError() ?? "")}
-      </If>
-      <If when={state.copyError() === null && !state.copyLoading()}>
-        <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
-          {tf("projects.copyStatusCount", {
-            count: state.copyRecords().length,
-            pending: state.pendingCopyCount(),
-          })}
-        </Text>
-      </If>
+      <CopyProbeMark state={state} />
       <If when={state.dirty()}>
         <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
           {t("projects.copySaveFirst")}
@@ -306,6 +286,43 @@ function CopyStatusSection(props: { state: ProjectsState }): JSX.Element {
       <Each of={state.copyRecords()} key={(record: CopyRecord) => `${record.relativePath}/${record.skillName}`}>
         {(record: () => CopyRecord) => <CopyRecordRow state={state} record={record()} />}
       </Each>
+    </View>
+  );
+}
+
+/** 检查 / 重试的转圈晚 300ms 才出现。IconSpin 与 bindDelayedFlag 都在这个
+ * 子组件体里（effect 不能写在父组件的 JSX 回调中）。失败留在本区域。 */
+function CopyProbeMark(props: { state: ProjectsState }): JSX.Element {
+  const state = props.state;
+  const show = bindDelayedFlag(() => state.copyLoading());
+  return (
+    <View style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+      <If when={state.copyError() !== null}>{errorAlert(state.copyError() ?? "")}</If>
+      <View style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <IconSpin
+          name="loader"
+          size={14}
+          color={paletteToken("fg_muted")}
+          spin={state.copyLoading()}
+        />
+        <If
+          when={show() && state.copyError() === null}
+          else={
+            <If when={state.copyError() === null}>
+              <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+                {tf("projects.copyStatusCount", {
+                  count: state.copyRecords().length,
+                  pending: state.pendingCopyCount(),
+                })}
+              </Text>
+            </If>
+          }
+        >
+          <Text style={{ fontSize: 12, color: paletteToken("fg_muted") }}>
+            {t("projects.checkingCopies")}
+          </Text>
+        </If>
+      </View>
     </View>
   );
 }
@@ -541,11 +558,10 @@ function RulesCard(props: { state: ProjectsState }): JSX.Element {
 /** detail.rs Section 4：页脚（配置摘要 + 保存并同步）。 */
 function DetailFooter(props: { state: ProjectsState }): JSX.Element {
   const state = props.state;
-  const totalSkills = Object.values(state.agentSkills()).reduce(
-    (sum, list) => sum + list.length,
-    0
+  const totalSkills = computed(() =>
+    Object.values(state.agentSkills()).reduce((sum, list) => sum + list.length, 0)
   );
-  const enabledAgents = Object.keys(state.agentSkills()).length;
+  const enabledAgents = computed(() => Object.keys(state.agentSkills()).length);
   return (
     <View
       style={{
@@ -563,7 +579,7 @@ function DetailFooter(props: { state: ProjectsState }): JSX.Element {
       <View style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <View style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Text style={{ fontSize: 12, color: paletteToken("fg") }}>
-            {tf("projects.footerSummary", { skills: totalSkills, agents: enabledAgents })}
+            {tf("projects.footerSummary", { skills: totalSkills(), agents: enabledAgents() })}
           </Text>
           <If when={state.dirty()}>
             <View
@@ -594,8 +610,7 @@ function DetailFooter(props: { state: ProjectsState }): JSX.Element {
           </Text>
         </If>
       </View>
-      {/* can_apply=false 时静默描边不可点（detail.rs Button::primary 仅在
-          can_apply 时上；busy 时 loading 吞点击）。 */}
+      {/* canApply 时保持实色，不换成 loader；busy 只吞连点。结论留在状态行。 */}
       <View
         testID="proj-save-sync"
         style={{
@@ -607,13 +622,9 @@ function DetailFooter(props: { state: ProjectsState }): JSX.Element {
           borderRadius: 10,
           cursor: state.busy() || !state.canApply() ? "default" : "pointer",
           borderWidth: 1,
-          borderColor:
-            state.canApply() && !state.busy()
-              ? "transparent"
-              : paletteToken("border"),
-          backgroundColor:
-            state.canApply() && !state.busy() ? paletteToken("accent") : "transparent",
-          opacity: state.busy() || !state.canApply() ? 0.6 : 1,
+          borderColor: state.canApply() ? "transparent" : paletteToken("border"),
+          backgroundColor: state.canApply() ? paletteToken("accent") : "transparent",
+          opacity: state.canApply() ? 1 : 0.6,
         }}
         hoverStyle={
           state.canApply() && !state.busy()
@@ -621,26 +632,22 @@ function DetailFooter(props: { state: ProjectsState }): JSX.Element {
             : undefined
         }
         disabled={state.busy() || !state.canApply()}
-        onPress={() => state.saveAndSync()}
+        onPress={() => {
+          if (state.busy()) return;
+          state.saveAndSync();
+        }}
       >
         <IconSpin
-          name={state.busy() ? "loader" : "check"}
+          name="check"
           size={14}
-          color={
-            state.busy() || !state.canApply()
-              ? paletteToken("fg_muted")
-              : paletteToken("on_accent")
-          }
+          color={state.canApply() ? paletteToken("on_accent") : paletteToken("fg_muted")}
           spin={state.busy()}
         />
         <Text
           style={{
             fontSize: 12,
             fontWeight: "500",
-            color:
-              state.canApply() && !state.busy()
-                ? paletteToken("on_accent")
-                : paletteToken("fg_muted"),
+            color: state.canApply() ? paletteToken("on_accent") : paletteToken("fg_muted"),
           }}
         >
           {t("projects.saveAndSync")}

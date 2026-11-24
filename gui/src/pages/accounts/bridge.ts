@@ -15,9 +15,28 @@ import type {
   AgentLive,
   AgentRow,
   LoginStart,
+  OAuthModeOption,
+  StartLoginOptions,
 } from "./types";
 
 // ---- 收窄（JSON → DTO；字段名两侧都是 camelCase，只验类型） ----------------
+
+function asOAuthModes(raw: unknown): OAuthModeOption[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const modes = raw.flatMap((item): OAuthModeOption[] => {
+    const mode = (item ?? {}) as Partial<OAuthModeOption>;
+    if (typeof mode.id !== "string" || typeof mode.label !== "string") return [];
+    const entry: OAuthModeOption = { id: mode.id, label: mode.label };
+    if (mode.optionKey === "leg" || mode.optionKey === "provider") {
+      entry.optionKey = mode.optionKey;
+    }
+    if (Array.isArray(mode.fields)) {
+      entry.fields = mode.fields.filter((f): f is string => typeof f === "string");
+    }
+    return [entry];
+  });
+  return modes.length > 0 ? modes : undefined;
+}
 
 function asAgentRows(value: unknown): AgentRow[] {
   if (!Array.isArray(value)) return [];
@@ -27,6 +46,8 @@ function asAgentRows(value: unknown): AgentRow[] {
     const entry: AgentRow = { id: raw.id, displayName: raw.displayName };
     if (typeof raw.supportsOauth === "boolean") entry.supportsOauth = raw.supportsOauth;
     if (typeof raw.localSource === "string") entry.localSource = raw.localSource;
+    const oauthModes = asOAuthModes(raw.oauthModes);
+    if (oauthModes !== undefined) entry.oauthModes = oauthModes;
     return [entry];
   });
 }
@@ -61,7 +82,7 @@ function asLoginStart(value: unknown): LoginStart {
 
 /** 页面与装置面对的全部账号能力。 */
 export interface AccountsBridge {
-  /** ss_accounts::list：全部账号（最旧在前）。 */
+  /** ss_accounts::list：受支持客户端的账号（最旧在前）。 */
   list(): Promise<AccountView[]>;
   /** ss_accounts::reconcile：每个 agent 此刻在服务谁。 */
   reconcile(): Promise<AgentLive[]>;
@@ -74,7 +95,7 @@ export interface AccountsBridge {
   /** 桥的三个 agent 行（id + 展示名）。纯、同步。 */
   agents(): AgentRow[];
   /** ss_accounts::start_login：开一次 OAuth 登录，返回待办会话。 */
-  startLogin(agent: string): Promise<LoginStart>;
+  startLogin(agent: string, options?: StartLoginOptions): Promise<LoginStart>;
   /** ss_accounts::submit_login_callback：喂入粘贴的回调链接/授权码。 */
   submitOAuthCallback(loginId: string, text: string): Promise<null>;
   /** ss_accounts::finish_login：等到登录完成并落库，返回新账号。 */
@@ -108,8 +129,8 @@ export const realAccountsBridge: AccountsBridge = {
   agents() {
     return asAgentRows(Accounts.agents());
   },
-  async startLogin(agent) {
-    return asLoginStart(await Accounts.startLogin(agent));
+  async startLogin(agent, options) {
+    return asLoginStart(await Accounts.startLogin(agent, options ?? null));
   },
   async submitOAuthCallback(loginId, text) {
     await Accounts.submitOauthCallback(loginId, text);

@@ -46,7 +46,7 @@
 //! `short` id the TSX hands back, so the wire never round-trips the whole
 //! scan.
 
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::time::Duration;
 
 use nsh_core::JsonValue;
@@ -216,14 +216,16 @@ pub struct AuditInfo {
 
 // ---- Progress plumbing (progress.rs parity) --------------------------------
 
-/// The dialog's sink (progress.rs:38-46): the mpsc sender side, `Send+Sync`.
+/// The dialog's sink sends progress while the worker owns the channel.
 struct DialogProgressSink {
-    tx: mpsc::Sender<GitOperationProgress>,
+    tx: Weak<mpsc::Sender<GitOperationProgress>>,
 }
 
 impl GitProgressSink for DialogProgressSink {
     fn emit(&self, progress: GitOperationProgress) {
-        let _ = self.tx.send(progress);
+        if let Some(tx) = self.tx.upgrade() {
+            let _ = tx.send(progress);
+        }
     }
 }
 
@@ -529,13 +531,17 @@ impl MySkillsImport {
     ) -> Result<ScanInfo, String> {
         let flag = job_flag(&job);
         let (tx, rx) = mpsc::channel::<GitOperationProgress>();
+        let tx = Arc::new(tx);
         let facade = GitSkillFacade::from_file_store_with_progress(Arc::new(DialogProgressSink {
-            tx,
+            tx: Arc::downgrade(&tx),
         }));
         let worker_facade = facade.clone();
         let worker_input = input.clone();
-        let handle =
-            blocking(move || scan_with_command(&worker_facade, &worker_input, full_depth, refresh));
+        let handle = blocking(move || {
+            // Only the worker keeps the channel open; the pump retains the facade for cancellation.
+            let _progress_sender = tx;
+            scan_with_command(&worker_facade, &worker_input, full_depth, refresh)
+        });
         let cancelled = pump_with_cancel(rx, on_event.clone(), flag.clone(), facade.clone()).await;
         let (scan, preselected) = handle
             .await
@@ -565,8 +571,9 @@ impl MySkillsImport {
         };
         let flag = job_flag(&job);
         let (tx, rx) = mpsc::channel::<GitOperationProgress>();
+        let tx = Arc::new(tx);
         let facade = GitSkillFacade::from_file_store_with_progress(Arc::new(DialogProgressSink {
-            tx,
+            tx: Arc::downgrade(&tx),
         }));
         let worker_facade = facade.clone();
         let install_targets: Vec<SkillInstallTarget> = targets
@@ -577,7 +584,10 @@ impl MySkillsImport {
                 pinned: false,
             })
             .collect();
-        let handle = blocking(move || install_body(&worker_facade, &scan, &install_targets));
+        let handle = blocking(move || {
+            let _progress_sender = tx;
+            install_body(&worker_facade, &scan, &install_targets)
+        });
         let cancelled = pump_with_cancel(rx, on_event.clone(), flag.clone(), facade.clone()).await;
         let installed = handle
             .await

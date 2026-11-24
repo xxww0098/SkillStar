@@ -1,19 +1,20 @@
-import { View, type JSX } from "nsh";
+import { View, computed, type JSX } from "nsh";
 import { t } from "../../services/translation";
 import { PageBar, BarCount } from "../../chrome/toolbar";
 import { DETAIL_COLUMN_W } from "../../layout";
 import {
   allAttentionCount,
+  currentRepos,
   currentScoped,
+  enabledProfiles,
   localSkillCount,
   onlyUpdates,
+  pageActive,
   pendingUpdateCount,
-  profiles,
   repoFilter,
   scope,
   selectedSkill,
   sourceFilter,
-  currentRepos,
 } from "./state";
 import { needsAttention } from "./filters";
 import {
@@ -30,8 +31,8 @@ import { SortMenuButton } from "./sortMenu";
 import { SkillsCanvas } from "./canvas";
 import { DetailDrawerTrack } from "./detailDrawerSlot";
 import { SkillReaderHost } from "./skillReaderSlot";
-import { GitHubSignInHost } from "./githubSignInSlot";
 import { ImportModalHost } from "./importModalSlot";
+import { PublishModalHost } from "./publishModal";
 
 // 我的技能页 — my_skills/mod.rs Render 对位：一条工具栏 + 页体行。
 //
@@ -53,6 +54,16 @@ import { ImportModalHost } from "./importModalSlot";
 // 动态 prop 是 getter，子组件必须在 JSX 里读（props 解构会冻死）。
 
 export function MySkillsPage(): JSX.Element {
+  const showOriginMenu = computed(
+    () =>
+      localSkillCount() > 0 ||
+      currentRepos().length > 0 ||
+      sourceFilter() !== "all" ||
+      repoFilter() !== null,
+  );
+  const gatedSelected = computed<string | null>((prev) =>
+    !pageActive() && prev !== undefined ? prev : selectedSkill(),
+  );
   return (
     <View
       style={{
@@ -67,13 +78,26 @@ export function MySkillsPage(): JSX.Element {
         title={t("sidebar.skills")}
         dragId="my-skills-toolbar-drag"
         titleExtras={[<ScopeSwitch />]}
-        search={<SearchField />}
+        search={
+          <If when={scope() === "local"}>
+            <SearchField />
+          </If>
+        }
         filters={[
-          <If when={scope() === "local" && profiles().some((profile) => profile.enabled)}>
+          <If when={scope() === "local" && enabledProfiles().length > 0}>
             <AgentFilterStrip />
           </If>,
           <If when={scope() === "local"}>
-            <View style={{ display: "flex" }}>{originSlotNode()}</View>
+            <If
+              when={showOriginMenu()}
+              else={
+                <View testID="my-skills-count-chip">
+                  <BarCount glyph="layers" label={String(originCount())} />
+                </View>
+              }
+            >
+              <OriginMenuButton />
+            </If>
           </If>,
           <If when={scope() === "local"}>
             <SortMenuButton />
@@ -92,7 +116,9 @@ export function MySkillsPage(): JSX.Element {
           <If when={scope() === "local"}>
             <RefreshButton />
           </If>,
-          <ViewToggle />,
+          <If when={scope() === "local"}>
+            <ViewToggle />
+          </If>,
         ]}
       />
       <View
@@ -119,7 +145,7 @@ export function MySkillsPage(): JSX.Element {
         </View>
         <View
           style={{
-            width: selectedSkill() !== null ? DETAIL_COLUMN_W : 0,
+            width: scope() === "local" && gatedSelected() !== null ? DETAIL_COLUMN_W : 0,
             flexShrink: 0,
             height: "100%",
             overflow: "hidden",
@@ -132,26 +158,10 @@ export function MySkillsPage(): JSX.Element {
       </View>
       {/* SKILL.md 阅读器浮层（skillReaderSlot 切片；readerOpen 驱动）。 */}
       <SkillReaderHost />
-      {/* GitHub 设备授权登录对话框（githubSignInSlot 切片；signInOpen 驱动）。 */}
-      <GitHubSignInHost />
       {/* 导入对话框浮层（importModalSlot 切片；importModalOpen 驱动）。 */}
       <ImportModalHost />
-    </View>
-  );
-}
-
-/** 来源/仓库菜单或计数 chip（toolbar.rs show_origin 分支）。在 JSX 子表
- * 达式里调用，其中读取的信号变化时重算。 */
-function originSlotNode(): JSX.Element {
-  const repos = currentRepos();
-  const filtering = sourceFilter() !== "all" || repoFilter() !== null;
-  const showOrigin = localSkillCount() > 0 || repos.length > 0 || filtering;
-  if (showOrigin) {
-    return <OriginMenuButton />;
-  }
-  return (
-    <View testID="my-skills-count-chip">
-      <BarCount glyph="layers" label={String(originCount())} />
+      {/* 发布本地技能到 GitHub 对话框。 */}
+      <PublishModalHost />
     </View>
   );
 }

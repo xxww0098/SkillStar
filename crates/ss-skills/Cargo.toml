@@ -42,7 +42,6 @@ reqwest = { workspace = true, features = ["form"] }
 tempfile.workspace = true
 url.workspace = true
 serde_yaml.workspace = true
-thiserror.workspace = true
 
 [target."cfg(windows)".dependencies]
 junction = { workspace = true }

@@ -130,7 +130,7 @@ pub fn run(product_version: &'static str) -> anyhow::Result<()> {
     let main_window = main_window_options()?;
     let title = window_title(&main_window);
     let bundle = embedded_bundle(main_window)?;
-    install_dock_icon();
+    let _dock_icon = install_dock_icon_on_launch();
     let code = run_app(AppSource::Bundle(bundle), app_options(title));
     if code == std::process::ExitCode::SUCCESS {
         Ok(())
@@ -190,6 +190,9 @@ fn app_options(title: String) -> AppOptions {
         // release runner (`nsh-macos-app`): no embedding VM limits.
         limits: Limits::standalone(),
         keep_alive_on_close: true,
+        // Expose `Application.launchAtLogin()` / `setLaunchAtLogin()` without
+        // mutating SMAppService state at launch.
+        login_item: true,
         ..AppOptions::default()
     }
 }
@@ -215,6 +218,9 @@ fn windows_app_options(title: String) -> AppOptions {
         single_instance: single_instance(),
         // As on macOS: the product binary runs the app on its own.
         limits: Limits::standalone(),
+        // Expose `Application.launchAtLogin()` / `setLaunchAtLogin()` without
+        // writing the HKCU Run registry value at launch.
+        login_item: true,
         ..AppOptions::default()
     }
 }
@@ -236,27 +242,87 @@ fn app_icon_path() -> Option<std::path::PathBuf> {
 }
 
 /// Dock & About-panel icon for the bare single-file binary (crates/ss-gpui/src/lib.rs:122 parity).
-/// Without a `.app` bundle macOS falls back to the generic `exec` tile; setting
-/// `applicationIconImage` after `Regular` activation policy overrides it at runtime.
+///
+/// Without a `.app` bundle macOS falls back to the generic `exec` tile. We keep
+/// this in-memory observer instead of `AppOptions::icon` because `AppOptions::icon`
+/// requires a file path on disk and applies `setApplicationIconImage` before
+/// `app.run()`, which can be overwritten when AppKit completes launch registration
+/// with the Dock; applying `APP_ICON_PNG` and flushing `dockTile` once
+/// `NSApplicationDidFinishLaunchingNotification` fires avoids temp files and sticks.
 #[cfg(target_os = "macos")]
-fn install_dock_icon() {
+fn install_dock_icon_on_launch() -> Option<macos_dock::ObserverGuard> {
+    macos_dock::install_on_launch()
+}
+
+#[cfg(target_os = "macos")]
+mod macos_dock {
     use nsh_platform_macos::{
-        objc2::{AnyThread, MainThreadMarker},
-        objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSImage},
-        objc2_foundation::NSData,
+        objc2::{
+            AnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+            rc::Retained, runtime::NSObject, sel,
+        },
+        objc2_app_kit::{NSApplication, NSApplicationDidFinishLaunchingNotification, NSImage},
+        objc2_foundation::{NSData, NSNotification, NSNotificationCenter, NSObjectProtocol},
     };
 
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    let data = NSData::with_bytes(ss_gui_bridge::APP_ICON_PNG);
-    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else {
-        return;
-    };
-    // SAFETY: `image` is a valid decoded `NSImage` and `mtm` proves we are on the AppKit main thread.
-    unsafe { app.setApplicationIconImage(Some(&image)) };
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "SkillStarDockIconObserver"]
+        struct Observer;
+
+        unsafe impl NSObjectProtocol for Observer {}
+
+        impl Observer {
+            #[unsafe(method(didFinishLaunching:))]
+            fn did_finish_launching(&self, _notification: &NSNotification) {
+                apply_dock_icon(self.mtm());
+            }
+        }
+    );
+
+    pub(super) struct ObserverGuard(Retained<Observer>);
+
+    impl Drop for ObserverGuard {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` was registered with `NSNotificationCenter::defaultCenter()`.
+            unsafe { NSNotificationCenter::defaultCenter().removeObserver(&self.0) };
+        }
+    }
+
+    pub(super) fn install_on_launch() -> Option<ObserverGuard> {
+        let mtm = MainThreadMarker::new()?;
+        let app = NSApplication::sharedApplication(mtm);
+        // SAFETY: `NSObject`'s zero-arg `init` on a `MainThreadOnly` subclass initialized on `mtm`.
+        let observer: Retained<Observer> = unsafe { msg_send![Observer::alloc(mtm), init] };
+        // SAFETY: `observer` implements `didFinishLaunching:`, `NSApplicationDidFinishLaunchingNotification`
+        // is AppKit's launch notification, `app` is the `NSApplication` singleton, and `ObserverGuard::drop`
+        // unregisters `observer` before it is released.
+        unsafe {
+            NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
+                &observer,
+                sel!(didFinishLaunching:),
+                Some(NSApplicationDidFinishLaunchingNotification),
+                Some(&app),
+            );
+        }
+        Some(ObserverGuard(observer))
+    }
+
+    pub(super) fn app_icon_image() -> Option<Retained<NSImage>> {
+        let data = NSData::with_bytes(ss_gui_bridge::APP_ICON_PNG);
+        NSImage::initWithData(NSImage::alloc(), &data)
+    }
+
+    pub(super) fn apply_dock_icon(mtm: MainThreadMarker) {
+        let Some(image) = app_icon_image() else {
+            return;
+        };
+        let app = NSApplication::sharedApplication(mtm);
+        // SAFETY: `image` is a valid decoded `NSImage` and `mtm` proves we are on the AppKit main thread.
+        unsafe { app.setApplicationIconImage(Some(&image)) };
+        app.dockTile().display();
+    }
 }
 
 /// Not yet ported hosts: report instead of pretending. The nsh platform
@@ -354,7 +420,8 @@ mod tests {
     }
 
     /// The embedded host parses nsh.json's window options so the hidden 44pt
-    /// titleBar reaches nsh-platform-macos and no extra system title bar renders.
+    /// titleBar, 960×600 minSize, and `restoreBounds` placement persistence
+    /// reach the desktop hosts identically to `nsh run`.
     #[test]
     fn the_main_window_hides_the_system_title_bar_per_nsh_json() {
         let opts = main_window_options().expect("valid nsh.json window options");
@@ -365,6 +432,16 @@ mod tests {
             .expect("nsh.json window.titleBar configured");
         assert_eq!(bar.style, nsh_core::desktop::TitleBarStyle::Hidden);
         assert_eq!(bar.height, Some(nsh_core::geometry::Points(44.0)));
+        let manifest: nsh_core::JsonValue = NSH_JSON.parse().expect("nsh.json parses");
+        let window_json = manifest.get("window").expect("nsh.json window block");
+        assert_eq!(
+            window_json.get("restoreBounds").and_then(|on| on.as_bool()),
+            Some(true),
+            "main window should persist and restore placement across launches"
+        );
+        let min_size = window_json.get("minSize").expect("nsh.json window.minSize");
+        assert_eq!(min_size.get("width").and_then(|n| n.as_f64()), Some(960.0));
+        assert_eq!(min_size.get("height").and_then(|n| n.as_f64()), Some(600.0));
     }
 
     /// The resident behavior both desktop hosts share: closing the main
@@ -403,6 +480,7 @@ mod tests {
             options.keep_alive_on_close,
             "a closed window must hide and keep the process running"
         );
+        assert!(options.login_item);
         assert_eq!(options.activation_policy, ActivationPolicy::Regular);
         assert!(!options.background);
         assert_eq!(options.size, (WINDOW_W, WINDOW_H));
@@ -418,6 +496,7 @@ mod tests {
     fn the_windows_host_keeps_one_instance_and_an_icon() {
         let options = super::windows_app_options("SkillStar".to_owned());
         assert!(options.single_instance);
+        assert!(options.login_item);
         assert!(options.icon.is_some(), "the app icon must be a readable file");
         assert_eq!(options.size, (WINDOW_W, WINDOW_H));
         assert_eq!(options.app_id, APP_ID);
@@ -438,11 +517,7 @@ mod tests {
 
         #[cfg(target_os = "macos")]
         {
-            use nsh_platform_macos::{
-                objc2::AnyThread, objc2_app_kit::NSImage, objc2_foundation::NSData,
-            };
-            let data = NSData::with_bytes(ss_gui_bridge::APP_ICON_PNG);
-            assert!(NSImage::initWithData(NSImage::alloc(), &data).is_some());
+            assert!(super::macos_dock::app_icon_image().is_some());
         }
     }
 }

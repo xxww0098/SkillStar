@@ -334,13 +334,13 @@ fn sync_writers_do_not_default_over_a_damaged_manifest() {
     let path = fs_paths::project_detail_dir(&entry.name).join("skills-list.json");
     fs::write(&path, "{broken").unwrap();
     let agents = HashMap::from([("claude".into(), vec!["demo".into()])]);
-    assert!(save_and_sync(project.to_str().unwrap(), agents.clone(), HashMap::new()).is_err());
-    assert!(save_skills_list_only(project.to_str().unwrap(), agents).is_err());
+    assert!(save_and_sync(project.to_str().unwrap(), agents, HashMap::new()).is_err());
     assert!(
-        add_skills_to_project(
+        add_skills_to_project_with_mode(
             project.to_str().unwrap(),
             &["demo".into()],
-            &["claude".into()]
+            &["claude".into()],
+            ProjectDeployMode::Symlink,
         )
         .is_err()
     );

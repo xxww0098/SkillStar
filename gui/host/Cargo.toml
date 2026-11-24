@@ -8,12 +8,12 @@ license.workspace = true
 # Product AppView host for `gui/` (workspace member of the
 # repository root; `ss-bin` calls `ss_gui_host::run`).
 [dependencies]
-# nsh platform crates, pinned to the CLI's version (=0.5.1; bump together
-# with the nsh CLI — same rule as ../native). nsh-base ships the base UI
-# set (the components the TSX uses); `highlight` is the feature set the
+# nsh platform crates, unified via `[workspace.dependencies]` (=0.6.1; bump
+# together with the nsh CLI — same rule as ../native). nsh-base ships the base
+# UI set (the components the TSX uses); `highlight` is the feature set the
 # generated development host enables.
-nsh-core = "=0.5.1"
-nsh-base = { version = "=0.5.1", features = ["highlight"] }
+nsh-core = { workspace = true }
+nsh-base = { workspace = true }
 
 # The app's own native bridge (nsh.json "rust"): the facade registry the
 # TSX bundle imports as `skillstar-gui/native`.
@@ -34,9 +34,9 @@ anyhow = "1"
 [target.'cfg(target_os = "macos")'.dependencies]
 # The macOS AppView backend: AppView/run_app/AppOptions. Off macOS the
 # crate is empty, and run() reports the platform gap instead.
-nsh-platform-macos = "=0.5.1"
+nsh-platform-macos = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # The Win32 AppView backend: the same AppView/run_app/AppOptions over D2D and
 # DirectWrite. Windows CI (`windows-ci.yml`) is what compiles this path.
-nsh-platform-windows = "=0.5.1"
+nsh-platform-windows = { workspace = true }

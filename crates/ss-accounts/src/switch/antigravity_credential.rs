@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AccountError, AccountResult};
 
-/// 系统凭据的服务名与账号名（gemini CLI 与 Antigravity 桌面端共用）。
+/// 系统凭据的服务名与账号名（Antigravity 桌面端）。
 pub(crate) const KEYCHAIN_SERVICE: &str = "gemini";
 pub(crate) const KEYCHAIN_ACCOUNT: &str = "antigravity";
 /// go-keyring 在 macOS 上给载荷加的包装前缀。
@@ -56,6 +56,7 @@ pub(crate) struct SystemCredential {
     pub(crate) access_token: Option<String>,
     pub(crate) refresh_token: String,
     pub(crate) expires_at: Option<i64>,
+    pub(crate) email: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -84,6 +85,7 @@ struct StoredToken {
 #[derive(Deserialize)]
 struct StoredPayload {
     token: StoredToken,
+    id_token_email: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,50 @@ pub(crate) fn payload_json(
     serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// 把新载荷合进客户端原来那份：我们拥有的字段覆盖，客户端自己的其它字段留着。
+///
+/// 客户端自己写的载荷除了 `token` 和 `auth_method` 还有 `writer_id`、
+/// `token.expires_in`、`id_token_email` 这类我们读不懂但客户端认得的字段。
+/// 整条换成我们这份"最小载荷"等于替客户端忘掉它们，所以按原载荷合并：`token`
+/// 里我们拥有的子字段覆盖，多出来的兄弟字段与顶层未知键原样保留；知道邮箱时
+/// 顺手把 `id_token_email` 指到这次写入的账号（它是客户端的登录提示）。
+pub(crate) fn merge_payload(existing: Option<&str>, fresh: &str, email: Option<&str>) -> String {
+    // 没有可合并的原载荷（客户端还没写过）时原样用新的，不做一次无意义的键重排。
+    let Some(serde_json::Value::Object(mut target)) =
+        existing.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+    else {
+        return fresh.to_string();
+    };
+    let Ok(serde_json::Value::Object(source)) = serde_json::from_str::<serde_json::Value>(fresh)
+    else {
+        return fresh.to_string();
+    };
+    for (key, value) in &source {
+        let into_token = key == "token"
+            && matches!(target.get(key), Some(serde_json::Value::Object(_)))
+            && matches!(value, serde_json::Value::Object(_));
+        if !into_token {
+            target.insert(key.clone(), value.clone());
+            continue;
+        }
+        if let (Some(serde_json::Value::Object(token)), serde_json::Value::Object(fresh_token)) =
+            (target.get_mut(key), value)
+        {
+            for (token_key, token_value) in fresh_token {
+                token.insert(token_key.clone(), token_value.clone());
+            }
+        }
+    }
+    if let Some(email) = email.map(str::trim).filter(|email| !email.is_empty()) {
+        target.insert(
+            "id_token_email".to_string(),
+            serde_json::Value::String(email.to_string()),
+        );
+    }
+    serde_json::to_string(&serde_json::Value::Object(target))
+        .unwrap_or_else(|_| fresh.to_string())
+}
+
 /// 载荷 JSON 到凭据。没有 refresh_token 的载荷对切号没有意义，按读不到处理。
 pub(crate) fn parse_payload(payload: &str) -> AccountResult<SystemCredential> {
     let parsed: StoredPayload = serde_json::from_str(payload).map_err(|error| {
@@ -133,6 +179,7 @@ pub(crate) fn parse_payload(payload: &str) -> AccountResult<SystemCredential> {
             .as_deref()
             .and_then(|expiry| chrono::DateTime::parse_from_rfc3339(expiry.trim()).ok())
             .map(|at| at.timestamp()),
+        email: clean(parsed.id_token_email),
     })
 }
 
@@ -163,6 +210,18 @@ pub(crate) fn parse_keychain_value(raw: &str) -> AccountResult<String> {
     String::from_utf8(decoded).map_err(|_| {
         AccountError::Client("Antigravity Keychain 凭据不是有效 UTF-8".to_string())
     })
+}
+
+/// 同时兼容裸 JSON 载荷与 `go-keyring-base64:` 包装文本。
+pub(crate) fn decode_payload_text(raw: &str) -> AccountResult<Option<String>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.starts_with(KEYCHAIN_PREFIX) {
+        return parse_keychain_value(trimmed).map(Some);
+    }
+    Ok(Some(trimmed.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +382,41 @@ mod tests {
     fn an_id_token_is_carried_when_there_is_one() {
         let payload = payload_json("at-1", "rt-1", 1_700_000_000, Some("id-1"));
         assert!(payload.contains("\"id_token\":\"id-1\""), "{payload}");
+    }
+
+    #[test]
+    fn merging_keeps_the_fields_the_client_wrote_itself() {
+        // 客户端自己写的载荷：token 里多一个 expires_in，顶层有 writer_id 与
+        // 未知键，id_token_email 还是上一个账号。
+        let existing = r#"{"token":{"access_token":"old-at","token_type":"Bearer","refresh_token":"old-rt","expiry":"2026-11-17T16:06:50.000000Z","expires_in":3599},"auth_method":"consumer","writer_id":"w-1","id_token_email":"old@example.com","unknown":{"keep":true}}"#;
+        let fresh = payload_json("new-at", "new-rt", 1_700_000_000, None);
+        let merged = merge_payload(Some(existing), &fresh, Some("new@example.com"));
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("json");
+
+        assert_eq!(value["token"]["access_token"], "new-at");
+        assert_eq!(value["token"]["refresh_token"], "new-rt");
+        assert_eq!(
+            value["token"]["expiry"], "2023-11-14T22:13:20.000000Z",
+            "我们拥有 expiry：{merged}"
+        );
+        assert_eq!(value["token"]["expires_in"], 3599, "{merged}");
+        assert_eq!(value["writer_id"], "w-1", "{merged}");
+        assert_eq!(value["unknown"]["keep"], true, "{merged}");
+        assert_eq!(value["id_token_email"], "new@example.com", "{merged}");
+        // 合并后的载荷必须还是客户端认得的凭据。
+        assert_eq!(parse_payload(&merged).expect("credential").refresh_token, "new-rt");
+    }
+
+    #[test]
+    fn merging_without_a_previous_payload_is_the_fresh_one() {
+        let fresh = payload_json("at-1", "rt-1", 1_700_000_000, None);
+        assert_eq!(merge_payload(None, &fresh, None), fresh);
+        assert_eq!(merge_payload(Some("not json"), &fresh, None), fresh);
+        // 不知道邮箱时不动客户端原来那个提示值。
+        let existing = r#"{"token":{"refresh_token":"old-rt"},"auth_method":"consumer","id_token_email":"old@example.com"}"#;
+        let merged = merge_payload(Some(existing), &fresh, None);
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("json");
+        assert_eq!(value["id_token_email"], "old@example.com", "{merged}");
     }
 
     #[test]

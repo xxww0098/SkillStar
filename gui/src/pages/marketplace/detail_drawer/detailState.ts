@@ -1,6 +1,5 @@
 import { signal, type Signal } from "nsh";
 import type { MarketSkill } from "../types";
-import { skillBlurb } from "../types";
 
 // 市场详情列读侧状态机 — detail_drawer/mod.rs 的 MarketDetailController
 // 对位（本切片核心数据流）。
@@ -235,14 +234,14 @@ export function extractGithubSource(url: string): string | null {
   return clean.includes("/") ? clean : null;
 }
 
-/** shown_description（column.rs:737-744）：列显示的一行——快照摘要优先，
- * 否则卡面 blurb。 */
+/** shown_description：快照摘要优先，其次卡面原文描述，最后才回退本地化描述
+ * （避免已缓存的译文反压原文导致翻译按钮消失）。 */
 export function shownDescription(skill: MarketSkill, phase: DetailPhase): string | null {
   if (phase.kind === "ready") {
     const summary = nonEmpty(phase.details.summary);
     if (summary !== null) return summary;
   }
-  return skillBlurb(skill);
+  return nonEmpty(skill.description) ?? nonEmpty(skill.localizedDescription);
 }
 
 /** shown_readme（column.rs:746-755）：正文与描述不同才给按钮。 */

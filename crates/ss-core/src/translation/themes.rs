@@ -11,7 +11,7 @@ pub struct Theme {
 }
 
 /// Full catalog. Order is the reader's style menu.
-pub const THEMES: &[Theme] = &[
+pub(super) const THEMES: &[Theme] = &[
     Theme {
         id: "none",
         label_key: "settings.tranThemeNone",
@@ -88,7 +88,7 @@ pub const THEMES: &[Theme] = &[
 
 pub const DEFAULT_READER: &str = "quote";
 
-pub fn canonical_reader(id: &str) -> &'static str {
+pub(super) fn canonical_reader(id: &str) -> &'static str {
     THEMES
         .iter()
         .find(|theme| theme.id == id)

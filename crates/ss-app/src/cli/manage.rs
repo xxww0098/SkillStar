@@ -154,7 +154,7 @@ pub fn cmd_publish() {
             // Publishing uses the SkillStar GitHub App identity, not a global
             // `gh` login; the device flow lives in the desktop app.
             eprintln!(
-                "✗ SkillStar is not signed in to GitHub. Sign in from the SkillStar app (Settings → GitHub), then retry."
+                "✗ SkillStar is not signed in to GitHub. Sign in from the SkillStar desktop app (My Skills → Channels), then retry."
             );
             std::process::exit(1);
         }

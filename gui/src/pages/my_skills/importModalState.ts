@@ -3,6 +3,7 @@ import type { DomainJob } from "skillstar-gui/native";
 import { MySkillsImport, SkillCardsCreateGroup } from "skillstar-gui/native";
 import { startJob, type JobRun } from "../../services/domainJob";
 import { groupsChanged, requestImportSource } from "../../shell/events";
+import { dropJob, endJob, putJob } from "../../shell/jobBoard";
 import { refresh } from "./state";
 import { t, tf } from "../../services/translation";
 
@@ -309,6 +310,17 @@ effect(() => {
 /** 打开信号由 importModalSlot 持有；本模块提供开/关两侧的域动作。 */
 export const importModalOpen = signal<string | null>(null);
 
+/** 对话框收进后台。为真时关闭不 cancel、不重置阶段。 */
+export const importParked = signal(false);
+
+const IMPORT_JOB = "my-skills-import";
+
+/**
+ * 重新打开的这一拍：先把对话框打开，effect 看到它就不要 reset。
+ * 信号效果若被推迟到两次 set 之后，这个闩仍然挡住 reset。
+ */
+let importReopenKeep = false;
+
 let pendingImportLaunch: { input: string; autoScan: boolean } | null = null;
 
 function applyPendingImportLaunch(): void {
@@ -325,7 +337,20 @@ function applyPendingImportLaunch(): void {
 /** 对外打开入口（toolbar open_import 对位；接线在 toolbar.tsx）。 */
 export function openImportModal(): void {
   pendingImportLaunch = null;
+  if (importParked()) {
+    importReopenKeep = true;
+    dropJob(IMPORT_JOB);
+  }
   importModalOpen.set("import");
+  if (importParked()) importParked.set(false);
+}
+
+/** 收进后台：先标记，再关。关的 effect 看到 parked 就不会停任务。 */
+export function parkImport(): void {
+  const at = untracked(phase);
+  if (at !== "scanning" && at !== "installing" && at !== "shareInstalling") return;
+  importParked.set(true);
+  closeImportModal();
 }
 
 /** 预填来源（如 `npx skills add ...` 或同源推荐技能）打开导入弹窗并可选自动扫描。 */
@@ -351,18 +376,31 @@ export function closeImportModal(): void {
 
 // ---- 生命周期（new/reset/Drop 对位） -----------------------------------------
 
-/** 打开信号驱动：开 = 复位 + 装历史；关 = stop 在途任务（Drop→cancel 兜底，
- * epoch 门保证迟到事件不落屏）。 */
+/** 打开信号驱动。未 parked 的关（X / Escape / 遮罩）仍 stop。
+ * parked 或「先打开再清 parked」的重开保留阶段，不 reset。 */
 effect(() => {
   const open = importModalOpen();
   if (open === null) {
     untracked(() => {
+      if (importParked() || importReopenKeep) return;
       activeRun()?.stop();
       activeRun.set(null);
     });
     return;
   }
   untracked(() => {
+    const keep = (importParked() || importReopenKeep) && pendingImportLaunch === null;
+    if (keep) {
+      importReopenKeep = false;
+      return;
+    }
+    if (importParked()) {
+      activeRun()?.stop();
+      activeRun.set(null);
+      dropJob(IMPORT_JOB);
+      importParked.set(false);
+    }
+    importReopenKeep = false;
     reset();
     applyPendingImportLaunch();
     void loadHistory();
@@ -760,6 +798,48 @@ export function cancelActive(): void {
     activeRun()?.stop();
   });
 }
+
+function revealParkedImport(): void {
+  importReopenKeep = true;
+  if (untracked(importModalOpen) === null) importModalOpen.set("import");
+  importParked.set(false);
+}
+
+/** parked 时把阶段映到角标。没有百分比。只有扫描/安装/分享安装可取消。 */
+effect(() => {
+  if (!importParked()) return;
+  const at = phase();
+  if (at === "scanning" || at === "installing" || at === "shareInstalling") {
+    const detail = progressLabel();
+    putJob({
+      id: IMPORT_JOB,
+      title: t("wait.importing"),
+      detail: detail.length > 0 ? detail : undefined,
+      cancellable: true,
+      onCancel: () => cancelActive(),
+    });
+    return;
+  }
+  if (at === "completed") {
+    endJob(IMPORT_JOB);
+    importParked.set(false);
+    return;
+  }
+  if (at === "failed") {
+    endJob(IMPORT_JOB);
+    revealParkedImport();
+    return;
+  }
+  if (at === "select" || at === "sharePreview" || at === "pack") {
+    dropJob(IMPORT_JOB);
+    revealParkedImport();
+    return;
+  }
+  if (at === "input") {
+    dropJob(IMPORT_JOB);
+    importParked.set(false);
+  }
+});
 
 /** 失败相的重试（render_failed on_click → reset）。 */
 export function resetToInput(): void {

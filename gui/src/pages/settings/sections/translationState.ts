@@ -38,7 +38,7 @@ export type ModelPullReport =
     };
 
 export interface TranslationBridge {
-  /** translation::load_config：缺文件 → 默认（machine / 双开关关 / zh-CN）。 */
+  /** translation::load_config：缺文件 → 默认（machine / 双开关开 / zh-CN）。 */
   loadTranslation(): TranslationConfigDto;
   /** save_translation 语义：盘上的 description_choices/reader_theme 回填，
    * 返回重载后的归一配置；error 非空表示写盘失败（配置仍是重载值）。 */
@@ -64,8 +64,9 @@ function asConfig(value: unknown): TranslationConfigDto {
   }
   return {
     engine: raw.engine === "llm" ? "llm" : "machine",
-    translate_descriptions: raw.translate_descriptions === true,
-    translate_skill_md: raw.translate_skill_md === true,
+    // 两个面开关的域默认是开：读不到字段时不能收成 false。
+    translate_descriptions: raw.translate_descriptions !== false,
+    translate_skill_md: raw.translate_skill_md !== false,
     description_choices: choices,
     reader_theme: typeof raw.reader_theme === "string" ? raw.reader_theme : "quote",
     target_lang: typeof raw.target_lang === "string" ? raw.target_lang : "zh-CN",
@@ -165,16 +166,22 @@ export interface TranslationState {
   fetchSeq: Signal<number>;
   modelMenuOpen: Signal<boolean>;
   modelQuery: Signal<string>;
+  /** 模型输入草稿（允许未拉取或有列表时直接填自定义模型 id）。 */
+  modelDraft: Signal<string>;
   start(): void;
   toggleDescriptions(): void;
   toggleSkillMd(): void;
   setTargetLang(code: string): void;
   setEngine(engine: "machine" | "llm"): void;
   setLlmBaseUrl(url: string): void;
-  /** 提交密钥（回车/失焦/点保存）：空串即清除盘上的密钥。 */
+  /** 提交密钥（回车/失焦）：空草稿不覆盖已存密钥，清除需调 clearLlmKey()。 */
   commitLlmKey(): void;
+  /** 显式清除已保存的密钥。 */
+  clearLlmKey(): void;
   setLlmKeyDraft(text: string): void;
   selectModel(model: string): void;
+  setModelDraft(text: string): void;
+  commitModelDraft(): void;
   pullModels(): void;
   setModelMenuOpen(open: boolean): void;
   setModelQuery(query: string): void;
@@ -192,12 +199,13 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
   const fetchSeq = signal(0);
   const modelMenuOpen = signal(false);
   const modelQuery = signal("");
+  const modelDraft = signal("");
 
   function defaultConfig(): TranslationConfigDto {
     return {
       engine: "machine",
-      translate_descriptions: false,
-      translate_skill_md: false,
+      translate_descriptions: true,
+      translate_skill_md: true,
       description_choices: {},
       reader_theme: "quote",
       target_lang: "zh-CN",
@@ -213,6 +221,7 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
   function saveFrom(next: TranslationConfigDto, publish: boolean): void {
     const result = bridge.saveTranslation(next);
     config.set(result.config);
+    modelDraft.set(result.config.llm_model);
     if (result.error !== null) {
       console.warn(`failed to save translation settings: ${result.error}`);
     }
@@ -221,7 +230,7 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
     }
   }
 
-  return {
+  const state: TranslationState = {
     config,
     languages,
     llmKeyDraft,
@@ -233,6 +242,7 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
     fetchSeq,
     modelMenuOpen,
     modelQuery,
+    modelDraft,
     start() {
       // 读盘值先进局部变量再落 signal（effect 追踪面纪律同基座 start）。
       const languagesLoaded = bridge.translationLanguages();
@@ -242,6 +252,7 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
       llmKeySaved.set(hasKey);
       llmKeyDraft.set("");
       config.set(loaded);
+      modelDraft.set(loaded.llm_model);
     },
     toggleDescriptions() {
       saveFrom({ ...config(), translate_descriptions: !config().translate_descriptions }, true);
@@ -271,32 +282,62 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
     },
     commitLlmKey() {
       const key = llmKeyDraft().trim();
+      if (key.length === 0) {
+        // 已保存密钥时，空草稿失焦或回车禁止覆盖清空；清除需显式调用 clearLlmKey()。
+        if (llmKeyDraft().length > 0) {
+          llmKeyDraft.set("");
+        }
+        return;
+      }
       try {
-        // 空串即清除：save_api_key 写成空文件，load_api_key 读回空。
         bridge.saveLlmKey(key);
-        llmKeySaved.set(key.length > 0);
+        llmKeySaved.set(true);
         llmKeyDraft.set("");
+        translationPrefsChanged.publish();
       } catch (error) {
         console.warn(`failed to save the translation key: ${error}`);
+      }
+    },
+    clearLlmKey() {
+      try {
+        bridge.saveLlmKey("");
+        llmKeySaved.set(false);
+        llmKeyDraft.set("");
+        translationPrefsChanged.publish();
+      } catch (error) {
+        console.warn(`failed to clear the translation key: ${error}`);
       }
     },
     selectModel(model) {
       const current = config();
       const trimmed = model.trim();
-      if (
-        trimmed.length === 0 ||
-        (current.llm_model_pinned && current.llm_model === trimmed)
-      ) {
+      if (trimmed.length === 0) {
+        return;
+      }
+      if (current.llm_model_pinned && current.llm_model === trimmed) {
+        modelDraft.set(current.llm_model);
         return;
       }
       saveFrom({ ...current, llm_model: trimmed, llm_model_pinned: true }, true);
+    },
+    setModelDraft(text) {
+      modelDraft.set(text);
+    },
+    commitModelDraft() {
+      const trimmed = modelDraft().trim();
+      if (trimmed.length === 0) {
+        modelDraft.set(config().llm_model);
+        return;
+      }
+      state.selectModel(trimmed);
+      modelDraft.set(config().llm_model);
     },
     pullModels() {
       if (modelsLoading()) return;
       const current = config();
       const base = current.llm_base_url.trim();
       if (base.length === 0) {
-        // 没填地址：按钮静默（提示文案就摆在地址行下面）。
+        modelsError.set(pullErrorMessage({ ok: false, error: "missing_base" }));
         return;
       }
       modelsLoading.set(true);
@@ -335,4 +376,5 @@ export function createTranslationState(bridge: TranslationBridge): TranslationSt
       modelQuery.set(query);
     },
   };
+  return state;
 }

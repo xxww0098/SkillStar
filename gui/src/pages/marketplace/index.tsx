@@ -1,22 +1,38 @@
-import { Text, View, effect, type JSX } from "nsh";
+import { Text, View, computed, effect, type JSX } from "nsh";
 import { Marketplace } from "skillstar-gui/native";
 import { paletteToken } from "../../services/themeMode";
+import { SLOW_MS } from "../../chrome/delayedFlag";
 import { Icon } from "../../chrome/icons";
-import { PageBar, BarIconButton, BarTextChip, BarViewToggle } from "../../chrome/toolbar";
+import {
+  BarIconButton,
+  BarSegmentSlot,
+  BarSegmented,
+  BarTextChip,
+  BarViewToggle,
+  PageBar,
+} from "../../chrome/toolbar";
 import { openUninstallConfirm, uninstallTitleNamed } from "../../chrome/dialog";
-import { publishToast, requestImportSource, selectPage, selectPublisher } from "../../shell/events";
+import { endJob, putJob } from "../../shell/jobBoard";
+import { publishToast, requestImportSource, selectPage, selectPublisher, toast } from "../../shell/events";
+import { currentPage } from "../../shell/nav";
 import { DETAIL_COLUMN_W, PAGE_PAD, SKILL_SCROLL_PT } from "../../layout";
 import { leaderboardCategory, type MarketSkill, type MarketTabId, type PublisherRecord } from "./types";
-import { createReadSide, type DirectSourceMatch, type MarketNotice, type ReadSide } from "./readSide";
+import {
+  createReadSide,
+  NO_BUSY,
+  type DirectSourceMatch,
+  type MarketNotice,
+  type ReadSide,
+} from "./readSide";
 import { mt, mtf, snapshotLabel } from "./marketStrings";
 import { MarketBoard, SnapshotBanner } from "./board";
-import { Spotlight, useSpotlightKeys } from "./spotlight";
+import { MarketSearch, useMarketSearchKeys } from "./search";
 import { MarketDetailColumn } from "./detail_drawer";
 
 // 市场页 — marketplace/mod.rs（+ view.rs + board.rs + card.rs + types.rs）
-// 对位，波 2 基座。顶栏：spotlight 触发器（⌘F）、四 tab 分段、技能计数
-// chip、同步状态文案、快照状态弱化标签、刷新（loading 转圈吞点击）、
-// 排序分段、网格/列表切换。页面体：快照错误横幅（重试）+ 板面（骨架/
+// 对位，波 2 基座。顶栏：与技能页同款的内联搜索框（⌘F 聚焦）、四 tab 分段、
+// 技能计数 chip、快照状态弱化标签、刷新（只转图标）、排序分段、网格/列表切换。
+// 同步成功走短通知。页面体：快照错误横幅（重试）+ 板面（延迟骨架/
 // 空态/技能网格/官方发布者列表）+ 详情列固定轨道（selected 非空时）。
 //
 // 读侧状态机在 readSide.ts（本地优先 + epoch 丢弃过期响应），页面只持
@@ -81,7 +97,7 @@ const readSide: ReadSide = createReadSide({
   loader: bridgeLoader,
   syncer: (scope) => Marketplace.syncScope(scope),
   installer: (url, name) => Marketplace.installSkill(url, name),
-  uninstaller: (name) => Marketplace.uninstallSkill(name),
+  uninstaller: (name, source) => Marketplace.uninstallSkill(source ?? "", name),
   schedule: (fn, ms) => {
     const timer = setTimeout(fn, ms);
     return () => clearTimeout(timer);
@@ -95,63 +111,130 @@ const readSide: ReadSide = createReadSide({
   },
   parseDirectSource: parseDirectSourceBridge,
   maybeSeedSearch: (query) => Marketplace.maybeSeedSearch(query),
+  isActive: () => currentPage() === "marketplace",
 });
 
-// keep-alive：挂载即首载一次（MarketplacePage::new 的 refresh）。
-effect(() => readSide.start());
+function sameElements<T>(prev: readonly T[], next: readonly T[]): boolean {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
+}
+
+// 同步成功的短通知。flash 在开始时落下、结束时升起，避免第二次不触发。
+let seenSyncFlash = false;
+effect(() => {
+  const flash = readSide.syncedFlash();
+  const refreshing = readSide.refreshing();
+  if (flash && !refreshing) {
+    if (!seenSyncFlash) {
+      seenSyncFlash = true;
+      toast(mt("marketplace.snapshotSynced"), "success");
+    }
+  } else {
+    seenSyncFlash = false;
+  }
+});
+
+// 快照超过约 10 秒才挂任务。不能取消。刷新结束清计时器并收起任务。
+effect(() => {
+  if (!readSide.refreshing()) return;
+  const timer = setTimeout(() => {
+    putJob({
+      id: "market-snapshot",
+      title: mt("marketplace.refreshingSnapshot"),
+    });
+  }, SLOW_MS);
+  return () => {
+    clearTimeout(timer);
+    endJob("market-snapshot");
+  };
+});
 
 export function MarketplacePage(): JSX.Element {
-  // ⌘F/Esc 绑定在组件体内注册（keymap 的组件生命周期语义）。
-  useSpotlightKeys();
+  // ⌘F 绑定在组件体内注册（keymap 的组件生命周期语义）。
+  useMarketSearchKeys();
+  // 惰性首载：首次进入市场页才触发快照读取，不拖慢应用启动首帧。
+  effect(() => {
+    if (currentPage() !== "marketplace") return;
+    readSide.start();
+    readSide.flushBackfill();
+  });
   return <MarketplaceBody />;
 }
 
 function MarketplaceBody(): JSX.Element {
+  const pageActive = (): boolean => currentPage() === "marketplace";
+  const gated = <T,>(
+    read: () => T,
+    fallback: T,
+    equals?: (prev: T, next: T) => boolean,
+  ) =>
+    computed<T>(
+      (prev) => (!pageActive() ? (prev !== undefined ? prev : fallback) : read()),
+      equals ? { equals } : undefined,
+    );
+
+  const gTab = gated(() => readSide.tab(), "all");
+  const gQuery = gated(() => readSide.query(), "");
+  const gSkills = gated(() => readSide.skills(), [], sameElements);
+  const gPublishers = gated(() => readSide.publishers(), [], sameElements);
+  const gSort = gated(() => readSide.sort(), "stars");
+  const gViewList = gated(() => readSide.viewList(), false);
+  const gLoading = gated(() => readSide.loading(), true);
+  const gRefreshing = gated(() => readSide.refreshing(), false);
+  const gBusy = gated(() => readSide.busy(), NO_BUSY);
+  const gSnapshotStatus = gated(() => readSide.snapshotStatus(), "unknown");
+  const gSnapshotError = gated(() => readSide.snapshotError(), null);
+  const gSelected = gated(() => readSide.selected(), null);
+  const gDirectSource = gated(() => readSide.directSource(), null);
+  const gSelectedSkill = gated(() => findSkill(readSide.skills(), readSide.selected()), null);
+  // 详情列只跟自己这一个技能的安装走：别的技能在飞不钉住这一列。
+  const selectedBusy = (): boolean => {
+    const identity = gSelected();
+    return identity !== null && gBusy().has(identity.name);
+  };
+
   return (
     <View style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, width: "100%" }}>
       <PageBar
         title={mt("sidebar.market")}
         dragId="market-toolbar-drag"
         search={
-          <Spotlight
-            query={readSide.query()}
-            skills={readSide.skills()}
-            onPanelInput={(text) => readSide.onSearchInput(text)}
-            onPick={(name) => readSide.spotlightPick(name)}
+          <MarketSearch
+            query={gQuery()}
+            onChange={(text) => readSide.onSearchInput(text)}
             onClear={() => readSide.clearSearch()}
           />
         }
         filters={[
-          <MarketTabs tab={readSide.tab()} onSelect={(tab) => readSide.selectTab(tab)} />,
-          <If when={readSide.tab() !== "official"}>
+          <MarketTabs tab={gTab()} onSelect={(tab) => readSide.selectTab(tab)} />,
+          <If when={gTab() !== "official"}>
             <View testID="mk-count-chip">
-              <BarTextChip label={mtf("marketplace.skillsCount", { count: readSide.skills().length })} />
+              <BarTextChip label={mtf("marketplace.skillsCount", { count: gSkills().length })} />
             </View>
           </If>,
         ]}
         actions={[
-          <If when={readSide.syncedFlash() && !readSide.refreshing()}>
-            <Text style={{ fontSize: 12, color: paletteToken("ok") }}>
-              {mt("marketplace.snapshotSynced")}
-            </Text>
-          </If>,
-          <If when={snapshotLabel(readSide.snapshotStatus(), readSide.refreshing()) !== null}>
+          <If when={snapshotLabel(gSnapshotStatus(), false) !== null}>
             <Text style={{ fontSize: 12, color: paletteToken("fg_muted"), flexShrink: 0 }}>
-              {snapshotLabel(readSide.snapshotStatus(), readSide.refreshing()) ?? ""}
+              {snapshotLabel(gSnapshotStatus(), false) ?? ""}
             </Text>
           </If>,
           <BarIconButton
             glyph="refresh"
-            loading={readSide.refreshing()}
+            loading={gRefreshing()}
             tip={mt("common.refresh")}
             onPress={() => readSide.syncSnapshot()}
           />,
-          <SortSegmented sort={readSide.sort()} onSelect={(sort) => readSide.setSort(sort)} />,
+          <SortSegmented sort={gSort()} onSelect={(sort) => readSide.setSort(sort)} />,
           <BarViewToggle
             testID="mk-view-switcher"
             gridTestID="mk-view-grid"
             listTestID="mk-view-list"
-            listMode={readSide.viewList()}
+            listMode={gViewList()}
             onSelect={(list) => readSide.setViewList(list)}
           />,
         ]}
@@ -175,51 +258,53 @@ function MarketplaceBody(): JSX.Element {
             minWidth: 0,
           }}
         >
-          <If when={readSide.snapshotError() !== null}>
+          <If when={gSnapshotError() !== null}>
             <View style={{ paddingHorizontal: PAGE_PAD, paddingTop: SKILL_SCROLL_PT }}>
               <SnapshotBanner
-                error={readSide.snapshotError() ?? ""}
-                refreshing={readSide.refreshing()}
+                error={gSnapshotError() ?? { kind: "remote_error", scope: "", detail: "" }}
+                refreshing={gRefreshing()}
                 onRetry={() => readSide.syncSnapshot()}
               />
             </View>
           </If>
-          {(() => {
-            const direct = readSide.directSource();
-            if (direct === null) return null;
-            return (
-              <DirectSourceBanner
-                direct={direct}
-                onImport={() => {
-                  selectPage.publish("my_skills");
-                  requestImportSource.publish({ input: direct.raw, autoScan: true });
-                }}
-              />
-            );
-          })()}
+          <If when={gDirectSource() !== null}>
+            <DirectSourceBanner
+              direct={gDirectSource() ?? { source: "", raw: "", skills: [], wasCommand: false }}
+              onImport={() => {
+                const direct = gDirectSource();
+                if (!direct) return;
+                selectPage.publish("my_skills");
+                requestImportSource.publish({ input: direct.raw, autoScan: true });
+              }}
+            />
+          </If>
           <View style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
             <MarketBoard
-              loading={readSide.loading()}
-              tab={readSide.tab()}
-              skills={readSide.skills()}
-              publishers={readSide.publishers()}
-              query={readSide.query()}
-              viewList={readSide.viewList()}
-              busy={readSide.busy()}
-              selectedName={readSide.selected()?.name ?? null}
+              active={pageActive}
+              loading={gLoading()}
+              snapshotStatus={gSnapshotStatus()}
+              refreshing={gRefreshing()}
+              tab={gTab()}
+              skills={gSkills()}
+              publishers={gPublishers()}
+              query={gQuery()}
+              viewList={gViewList()}
+              busy={gBusy()}
+              selectedName={gSelected()?.name ?? null}
               onOpenSkill={(skill) => readSide.openSkill(skill)}
               onToggleInstall={(skill) => readSide.toggleInstalled(skill)}
               onOpenPublisher={openPublisher}
               onClearSearch={() => readSide.clearSearch()}
+              onSyncSnapshot={() => readSide.syncSnapshot()}
             />
           </View>
         </View>
-        <If when={readSide.selected() !== null}>
+        <If when={gSelected() !== null}>
           <View style={{ width: DETAIL_COLUMN_W, flexShrink: 0, height: "100%" }}>
             <MarketDetailColumn
-              skill={findSkill(readSide.skills(), readSide.selected())}
-              identity={readSide.selected() ?? { source: null, name: "" }}
-              busy={readSide.busy() !== null}
+              skill={gSelectedSkill()}
+              identity={gSelected() ?? { source: null, name: "" }}
+              busy={selectedBusy()}
               onClose={() => readSide.clearSelection()}
               onToggleInstall={(skill) => readSide.toggleInstalled(skill)}
             />
@@ -331,100 +416,39 @@ function tabLabelKey(tab: MarketTabId): string {
 
 function MarketTabs(props: { tab: MarketTabId; onSelect: (tab: MarketTabId) => void }): JSX.Element {
   return (
-    <View
+    <BarSegmented
       testID="mk-tabs"
-      role="tablist"
-      desktop={{ windowDrag: false }}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        height: 32,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: paletteToken("border"),
-        backgroundColor: paletteToken("bg"),
-        padding: 2,
-        gap: 2,
-      }}
-    >
-      {MARKET_TAB_IDS.map((id) => (
-        <TabSlot
+      slots={MARKET_TAB_IDS.map((id) => (
+        <BarSegmentSlot
           testID={`mk-tab-${id}`}
           label={mt(tabLabelKey(id))}
           selected={props.tab === id}
           onPress={() => props.onSelect(id)}
         />
       ))}
-    </View>
-  );
-}
-
-function TabSlot(props: { testID: string; label: string; selected: boolean; onPress: () => void }): JSX.Element {
-  return (
-    <View
-      testID={props.testID}
-      role="tab"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: 26,
-        paddingHorizontal: 12,
-        borderRadius: 7,
-        cursor: "pointer",
-        backgroundColor: props.selected ? paletteToken("card") : "transparent",
-        borderWidth: 1,
-        borderColor: props.selected ? paletteToken("border") : "transparent",
-      }}
-      hoverStyle={props.selected ? undefined : { backgroundColor: paletteToken("panel_hover") }}
-      onPress={props.onPress}
-    >
-      <Text
-        style={{
-          fontSize: 12,
-          color: props.selected ? paletteToken("accent") : paletteToken("fg_muted"),
-          fontWeight: props.selected ? "600" : "500",
-        }}
-      >
-        {props.label}
-      </Text>
-    </View>
+    />
   );
 }
 
 /** 排序分段（view.rs render_sort）：下载量 ↓ / 最近更新。 */
 function SortSegmented(props: { sort: "stars" | "updated"; onSelect: (sort: "stars" | "updated") => void }): JSX.Element {
   return (
-    <View
+    <BarSegmented
       testID="mk-sort"
-      role="tablist"
-      desktop={{ windowDrag: false }}
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        height: 32,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: paletteToken("border"),
-        backgroundColor: paletteToken("bg"),
-        padding: 2,
-        gap: 2,
-      }}
-    >
-      <TabSlot
-        testID="mk-sort-stars"
-        label={mt("toolbar.stars")}
-        selected={props.sort === "stars"}
-        onPress={() => props.onSelect("stars")}
-      />
-      <TabSlot
-        testID="mk-sort-updated"
-        label={mt("toolbar.updated")}
-        selected={props.sort === "updated"}
-        onPress={() => props.onSelect("updated")}
-      />
-    </View>
+      slots={[
+        <BarSegmentSlot
+          testID="mk-sort-stars"
+          label={mt("toolbar.stars")}
+          selected={props.sort === "stars"}
+          onPress={() => props.onSelect("stars")}
+        />,
+        <BarSegmentSlot
+          testID="mk-sort-updated"
+          label={mt("toolbar.updated")}
+          selected={props.sort === "updated"}
+          onPress={() => props.onSelect("updated")}
+        />,
+      ]}
+    />
   );
 }

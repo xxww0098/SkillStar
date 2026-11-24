@@ -3,6 +3,7 @@ import { Clipboard } from "nsh";
 import { dirname } from "path";
 import { SkillCardsShare } from "skillstar-gui/native";
 import { Icon } from "../../chrome/icons";
+import { IconSpin } from "../../chrome/feedback";
 import { SHEET_SHADOW } from "../../chrome/dialog";
 import { fadeTransition, mixHex, motionEnabled } from "../../chrome/motion";
 import { isLight, paletteToken } from "../../services/themeMode";
@@ -78,13 +79,14 @@ let epoch = 0;
 /** Open the deck share sheet (crate::open_share_sheet parity). */
 export function openShareSheet(deck: ShareDeck, options?: { exportOutDir?: string }): void {
   epoch += 1;
+  // From-state before the sheet mounts, so the entrance has a frame to leave.
+  entered.set(false);
   open.set({ deck, exportOutDir: options?.exportOutDir });
   code.set(null);
   codeRemote.set(0);
   codeLocal.set(0);
   exporting.set(false);
   exportPath.set(null);
-  entered.set(false);
   generateCode(deck, epoch);
 }
 
@@ -127,7 +129,6 @@ async function runExport(): Promise<void> {
   const sheet = open();
   if (!sheet) return;
   exporting.set(true);
-  exportPath.set(null);
   try {
     const path = await SkillCardsShare.exportDeckBundle(
       sheet.deck.skills,
@@ -167,12 +168,13 @@ export function ShareSheetHost(): JSX.Element {
 }
 
 function DeckShareSheet(): JSX.Element {
-  if (!entered() && motionEnabled()) {
+  if (!entered()) {
     // One displaced frame, then the FadeSlide rest (the notice rows enter
     // the same way): the transition needs a "from" to animate from.
+    // Reduce Motion still fades opacity, so it takes the same frame.
     requestAnimationFrame(() => entered.set(true));
   }
-  const settled = () => entered() || !motionEnabled();
+  const settled = () => entered();
   return (
     // The veil layer: centered card on the shared prompt wash; a press on
     // the wash dismisses (the kit dialog's outside-press).
@@ -216,7 +218,8 @@ function DeckShareSheet(): JSX.Element {
           // would clip the bundle section away on short viewports.
           backgroundColor: paletteToken(isLight() ? "card" : "panel"),
           boxShadow: SHEET_SHADOW,
-          transform: settled() ? "translateY(0)" : "translateY(-8px)",
+          transform:
+            motionEnabled() && !settled() ? "translateY(-8px)" : "translateY(0)",
           opacity: settled() ? 1 : 0,
           ...fadeTransition(true),
         }}
@@ -366,15 +369,21 @@ function BundleSection(): JSX.Element {
       <Text style={{ fontSize: 12, lineHeight: 18, color: paletteToken("fg_muted") }}>
         {t("skillCards.shareBundleHint")}
       </Text>
-      <View style={{ opacity: exporting() ? 0.6 : 1 }}>
-        <PrimaryButton
-          testID="share-export"
-          label={exporting()
-            ? t("skillCards.shareBundleExporting")
-            : t("skillCards.shareBundleExport")}
-          onPress={() => void runExport()}
-        />
-      </View>
+      <PrimaryButton
+        testID="share-export"
+        label={t("skillCards.shareBundleExport")}
+        onPress={() => void runExport()}
+        leading={
+          <View style={{ width: 16, height: 16, flexShrink: 0 }}>
+            <IconSpin
+              name="loader"
+              size={16}
+              color={paletteToken("on_accent")}
+              spin={exporting()}
+            />
+          </View>
+        }
+      />
       <If when={exportPath()}>
         {(path) => (
           <View
@@ -398,19 +407,12 @@ function BundleSection(): JSX.Element {
             >
               {path()}
             </Text>
-            <If
-              when={(() => {
-                const folder = dirname(path());
-                return folder && folder !== path() ? folder : false;
-              })()}
-            >
-              {(folder) => (
-                <GhostButton
-                  testID="share-open-folder"
-                  label={t("skillCards.shareBundleOpenFolder")}
-                  onPress={() => void revealFolder(path())}
-                />
-              )}
+            <If when={dirname(path()).length > 0 && dirname(path()) !== path()}>
+              <GhostButton
+                testID="share-open-folder"
+                label={t("skillCards.shareBundleOpenFolder")}
+                onPress={() => void revealFolder(path())}
+              />
             </If>
           </View>
         )}
@@ -421,13 +423,19 @@ function BundleSection(): JSX.Element {
 
 /** `chrome::primary_button` parity: h-28, px-20, accent fill, hover swaps to
  *  accent_hover in zero frames (no color transition — channel 1). */
-function PrimaryButton(props: { testID: string; label: string; onPress: () => void }): JSX.Element {
+function PrimaryButton(props: {
+  testID: string;
+  label: string;
+  onPress: () => void;
+  leading?: JSX.Element;
+}): JSX.Element {
   const accent = paletteToken("accent");
   return (
     <View
       testID={props.testID}
       style={{
         display: "flex",
+        flexDirection: "row",
         height: 28,
         paddingHorizontal: 20,
         alignItems: "center",
@@ -441,6 +449,7 @@ function PrimaryButton(props: { testID: string; label: string; onPress: () => vo
       activeStyle={{ backgroundColor: mixHex(accent, paletteToken("on_accent"), 0.12) }}
       onPress={props.onPress}
     >
+      {props.leading}
       <Text style={{ fontSize: 12, fontWeight: "500", color: paletteToken("on_accent") }}>
         {props.label}
       </Text>

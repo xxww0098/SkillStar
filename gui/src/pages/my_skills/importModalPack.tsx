@@ -46,18 +46,20 @@ export function PackBody(): JSX.Element {
           {t("githubImportModal.quickPack")}
         </Text>
         <View style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {(seed()?.members ?? []).map((member) => (
-            <View
-              style={{
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 999,
-                backgroundColor: paletteToken("well"),
-              }}
-            >
-              <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{member}</Text>
-            </View>
-          ))}
+          <Each of={seed()?.members ?? []} key={(member) => member}>
+            {(member: () => string) => (
+              <View
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 999,
+                  backgroundColor: paletteToken("well"),
+                }}
+              >
+                <Text style={{ fontSize: 12, color: paletteToken("fg") }}>{member()}</Text>
+              </View>
+            )}
+          </Each>
         </View>
       </View>
       <If when={packError() !== null}>

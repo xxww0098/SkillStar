@@ -90,7 +90,7 @@ export function Alert(props: {
   maxWidth?: number;
   onClose?: () => void;
 }): JSX.Element {
-  const surface = toneSurface(props.tone);
+  const surface = () => toneSurface(props.tone);
   return (
     <View
       style={{
@@ -102,36 +102,27 @@ export function Alert(props: {
         paddingVertical: 8,
         borderRadius: 8,
         borderWidth: 1,
-        backgroundColor: surface.bg,
-        borderColor: surface.border,
+        backgroundColor: surface().bg,
+        borderColor: surface().border,
         maxWidth: props.maxWidth,
       }}
     >
-      <Icon name={surface.icon} size={14} color={surface.ink} />
-      <Text style={{ fontSize: 12, lineHeight: 18, color: surface.ink }}>{props.message}</Text>
+      <Icon name={surface().icon} size={14} color={surface().ink} />
+      <Text style={{ fontSize: 12, lineHeight: 18, color: surface().ink }}>{props.message}</Text>
       {props.onClose ? (
         <View
           style={{ display: "flex", padding: 2, cursor: "pointer" }}
           hoverStyle={{ opacity: 0.7 }}
           onPress={props.onClose}
         >
-          <Icon name="x" size={12} color={surface.ink} />
+          <Icon name="x" size={12} color={surface().ink} />
         </View>
       ) : null}
     </View>
   );
 }
 
-// In-page callout shortcuts (the pages' error banners use these shapes).
-export function infoAlert(message: string): JSX.Element {
-  return <Alert tone="info" message={message} />;
-}
-export function successAlert(message: string): JSX.Element {
-  return <Alert tone="success" message={message} />;
-}
-export function warningAlert(message: string): JSX.Element {
-  return <Alert tone="warning" message={message} />;
-}
+// In-page callout shortcut (the pages' error banners use this shape).
 export function errorAlert(message: string): JSX.Element {
   return <Alert tone="error" message={message} />;
 }

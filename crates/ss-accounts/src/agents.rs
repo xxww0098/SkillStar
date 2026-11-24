@@ -22,12 +22,11 @@ use crate::{Agent, identity};
 
 /// 与 `Agent::supported()` 同序的受管 agent registry id 列表。
 #[cfg(test)]
-pub(crate) const SUPPORTED_IDS: [&str; 9] = [
+pub(crate) const SUPPORTED_IDS: [&str; 8] = [
     "codex",
     "claude-code",
     "cursor",
     "antigravity",
-    "gemini-cli",
     "grok",
     "kiro",
     "zcode",
@@ -145,26 +144,6 @@ pub(crate) fn spec(agent: Agent) -> AgentSpec {
             },
             provider_account_id: no_account_id,
         },
-        Agent::GeminiCli => AgentSpec {
-            id: "gemini-cli",
-            display_name: "Gemini CLI",
-            local_source: "~/.gemini/oauth_creds.json",
-            oauth: OAuthDispatch {
-                supported: true,
-                refresh_skew_seconds: oauth::agents::gemini_cli::REFRESH_SKEW_SECONDS,
-                start: oauth::agents::gemini_cli::start,
-                refresh: |tokens, _| oauth::agents::gemini_cli::refresh(tokens),
-            },
-            usage: fetch::gemini_cli::fetch,
-            switch: SwitchDispatch {
-                credential_path: switch::gemini_cli::credential_path,
-                write: switch::gemini_cli::write,
-                read: switch::gemini_cli::read,
-                snapshot: switch::gemini_cli::snapshot,
-                live_identity: switch::gemini_cli::live_identity,
-            },
-            provider_account_id: no_account_id,
-        },
         Agent::Grok => AgentSpec {
             id: "grok",
             display_name: "Grok",
@@ -183,7 +162,7 @@ pub(crate) fn spec(agent: Agent) -> AgentSpec {
                 snapshot: switch::grok::snapshot,
                 live_identity: switch::grok::live_identity,
             },
-            provider_account_id: no_account_id,
+            provider_account_id: grok_account_id,
         },
         Agent::Kiro => AgentSpec {
             id: "kiro",
@@ -203,7 +182,7 @@ pub(crate) fn spec(agent: Agent) -> AgentSpec {
                 snapshot: switch::kiro::snapshot,
                 live_identity: switch::kiro::live_identity,
             },
-            provider_account_id: no_account_id,
+            provider_account_id: kiro_account_id,
         },
         Agent::Zcode => AgentSpec {
             id: "zcode",
@@ -250,6 +229,24 @@ pub(crate) fn spec(agent: Agent) -> AgentSpec {
 
 fn no_account_id(_access_token: &str, _id_token: Option<&str>) -> Option<String> {
     None
+}
+
+fn grok_account_id(access_token: &str, id_token: Option<&str>) -> Option<String> {
+    jwt_account_id(access_token, id_token, &["user_id", "sub", "principal_id"])
+}
+
+fn kiro_account_id(access_token: &str, id_token: Option<&str>) -> Option<String> {
+    jwt_account_id(access_token, id_token, &["sub", "userId", "user_id"])
+}
+
+fn jwt_account_id(access_token: &str, id_token: Option<&str>, keys: &[&str]) -> Option<String> {
+    id_token
+        .into_iter()
+        .chain(std::iter::once(access_token))
+        .find_map(|token| {
+            keys.iter()
+                .find_map(|key| identity::jwt_claim(token, key))
+        })
 }
 
 fn codex_account_id(access_token: &str, id_token: Option<&str>) -> Option<String> {

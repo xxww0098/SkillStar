@@ -1,0 +1,35 @@
+[package]
+name = "ss-mcp-hub"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Internal path dep, never goes to crates.io.
+publish = false
+
+[lib]
+# No doc tests in this workspace; the crates are internal path deps, not a
+# published API whose examples need to keep compiling.
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["rustls", "json", "socks", "query"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+ss-core = { path = "../ss-core" }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+toml = { workspace = true }
+url = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

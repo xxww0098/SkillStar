@@ -1,6 +1,6 @@
 // 「GitHub 加速」桥接 DTO 与状态机（由 ghMirror.tsx re-export，供视图与测试共用）。
 
-import { signal, type Signal } from "nsh";
+import { batch, signal, type Signal } from "nsh";
 import { SettingsNetwork } from "skillstar-gui/native";
 import { t, tf } from "../../../services/translation";
 
@@ -137,22 +137,35 @@ export interface GhMirrorState {
   runTest(id: string, url: string): void;
 }
 
-export function createGhMirrorState(bridge: GhMirrorBridge): GhMirrorState {
-  // builtin presets 是静态清单：工厂期读一次，之后不再过桥。
-  const presets = bridge.loadPresets();
-  const config = signal<MirrorConfigDto>(bridge.loadConfig());
+const DEFAULT_MIRROR_CONFIG: MirrorConfigDto = {
+  enabled: false,
+  preset_id: null,
+  custom_url: null,
+  order: null,
+};
+
+export function createGhMirrorState(
+  bridge: GhMirrorBridge,
+  opts?: { deferLoad?: boolean },
+): GhMirrorState {
+  // builtin presets 是静态清单：默认工厂期读一次；deferLoad 时延后到 start()。
+  let presets = opts?.deferLoad ? [] : bridge.loadPresets();
+  const config = signal<MirrorConfigDto>(
+    opts?.deferLoad ? { ...DEFAULT_MIRROR_CONFIG } : bridge.loadConfig(),
+  );
   const customUrlForm = signal(config().custom_url ?? "");
   const expanded = signal(false);
   const status = signal<string | null>(null);
   const testingId = signal<string | null>(null);
   const testResults = signal<Record<string, number | "fail">>({});
 
-  /** gh_mirror_order 对位：order 为 null（缺文件原始默认）回落 preset id
-   * 序——与 GPUI 一致不含 custom；任何一次保存后域会补齐。 */
+  /** gh_mirror_order 对位：order 为 null（缺文件原始默认）回落 preset id 序并附带 custom 槽。 */
   function order(): string[] {
     const stored = config().order;
-    if (stored !== null && stored.length > 0) return stored;
-    return presets.map((preset) => preset.id);
+    if (stored !== null && stored.length > 0) {
+      return stored.includes(CUSTOM_ENTRY_ID) ? stored : [...stored, CUSTOM_ENTRY_ID];
+    }
+    return [...presets.map((preset) => preset.id), CUSTOM_ENTRY_ID];
   }
 
   const state: GhMirrorState = {
@@ -195,9 +208,12 @@ export function createGhMirrorState(bridge: GhMirrorBridge): GhMirrorState {
     },
     start() {
       // 读盘值先进局部变量再落 signal：effect 的追踪面必须为空。
+      presets = bridge.loadPresets();
       const loaded = bridge.loadConfig();
-      config.set(loaded);
-      customUrlForm.set(loaded.custom_url ?? "");
+      batch(() => {
+        config.set(loaded);
+        customUrlForm.set(loaded.custom_url ?? "");
+      });
     },
     save() {
       const orderNow = order();

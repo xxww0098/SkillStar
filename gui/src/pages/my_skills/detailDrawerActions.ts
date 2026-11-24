@@ -6,12 +6,15 @@
 // pending 键 `skill:::agent`（commands.rs pending_agents）：挡住重复点击；
 // 不进 state.ts——选择状态模型归基座，pending 是抽屉的域簿记。
 
-import { effect, signal } from "nsh";
-import { MySkills, MySkillsDrawer } from "skillstar-gui/native";
+import { effect, signal, untracked } from "nsh";
+import { MySkills, MySkillsDrawer, SettingsStorage } from "skillstar-gui/native";
+import { beginSave, failSave, finishSave } from "../../chrome/saveStatus";
 import { t, tf } from "../../services/translation";
 import { publishToast } from "../../shell/events";
+import { et, etf } from "./extrasStrings";
 import {
   busy,
+  openDetail,
   profiles,
   refresh,
   selectedBatch,
@@ -51,10 +54,20 @@ export interface ModifiedAgentCopyDto {
   targetDir: string;
 }
 
+export interface UnmanagedAgentEntryDto {
+  skillName: string;
+  agentId: string;
+  agentDisplayName: string;
+  targetDir: string;
+  isSymlink: boolean;
+  canAdoptToHub: boolean;
+}
+
 export interface DrawerExtrasDto {
   called: string | null;
   besideSkills: DrawerSiblingSkill[];
   modifiedCopies: ModifiedAgentCopyDto[];
+  unmanagedEntries?: UnmanagedAgentEntryDto[];
 }
 
 export interface DrawerOps {
@@ -73,6 +86,12 @@ export interface DrawerOps {
     skill: string,
     agentId: string,
   ): Promise<{ backupId: string; path: string }>;
+  takeOverUnmanagedAgentEntry?(
+    skill: string,
+    agentId: string,
+  ): Promise<{ backupId: string | null; path: string | null }>;
+  adoptUnmanagedAgentEntry?(skill: string, agentId: string): Promise<void>;
+  revealPath?(path: string): void;
   /** 命令尾部的 refresh（GPUI spawn_domain 回调的 this.refresh(cx)）；
    * 测试注入假件以免真实重载冲掉装置夹具。 */
   refresh(): Promise<void>;
@@ -97,6 +116,16 @@ export const drawerOps: DrawerOps = {
       backupId: string;
       path: string;
     }>,
+  takeOverUnmanagedAgentEntry: (skill, agentId) =>
+    MySkillsDrawer.takeOverUnmanagedAgentEntry(skill, agentId) as Promise<{
+      backupId: string | null;
+      path: string | null;
+    }>,
+  adoptUnmanagedAgentEntry: (skill, agentId) =>
+    MySkillsDrawer.adoptUnmanagedAgentEntry(skill, agentId) as Promise<void>,
+  revealPath: (path) => {
+    SettingsStorage.revealPath(path);
+  },
   refresh: () => refresh(),
 };
 
@@ -108,11 +137,26 @@ export const pendingAgents = signal<ReadonlySet<string>>(new Set());
 /** 本地改动的基线缺失补读（upstreamNote 异步落地的 per-skill 缓存）。 */
 export const baselineMissing = signal<Record<string, boolean>>({});
 
+/** 冲突/扩展面板版本戳：链接切换或恢复动作落地时递增，触发已打开的抽屉重查。 */
+export const extrasVersion = signal(0);
+
+export function bumpExtrasVersion(): void {
+  extrasVersion.set(untracked(() => extrasVersion()) + 1);
+}
+
 // 打开的技能变化时补读上游详情（换卡重读；迟到响应按当前打开丢弃，
-// mod.rs epoch 纪律）。
+// mod.rs epoch 纪律）。快照已带 baselineMissing 时不再全表重扫。
 effect(() => {
   const name = selectedSkill();
   if (name === null) return;
+  const current = untracked(skills).find((record) => record.name === name);
+  if (
+    current !== undefined &&
+    (current.upstreamChange?.kind !== "local_changes" ||
+      current.upstreamChange.baselineMissing !== undefined)
+  ) {
+    return;
+  }
   void drawerOps
     .upstreamNote(name)
     .then((note) => {
@@ -162,7 +206,73 @@ function dropPending(keys: readonly string[]): void {
   pendingAgents.set(next);
 }
 
-// ---- 三条命令 -----------------------------------------------------------------
+// ---- 未受管冲突接管与开关编排 ------------------------------------------------
+
+const TOGGLE_SKIP_REPLACE_KEY = "skill-toggle-skip";
+
+/** 未受管冲突跳过项的接管按钮文案；不属于未受管目录/外来链接时返回 null。 */
+export function unmanagedSkipActionLabel(code: string): string | null {
+  if (code === "unmanaged_real_directory") {
+    return t("skillToggle.backupAndTakeOver");
+  }
+  if (code === "foreign_link") {
+    return t("skillToggle.takeOverLink");
+  }
+  return null;
+}
+
+/** 备份并接管未受管同名目录/链接（可从通知带按钮或抽屉冲突卡片触发）。 */
+export function runTakeOverUnmanaged(
+  ops: DrawerOps,
+  name: string,
+  agentId: string,
+  toastReplaceKey?: string,
+): void {
+  const fn = ops.takeOverUnmanagedAgentEntry;
+  if (fn === undefined) return;
+  const key = `${name}::${agentId}`;
+  if (pendingAgents().has(key)) return;
+  const displayName =
+    profiles().find((profile) => profile.id === agentId)?.displayName ?? agentId;
+  pendingAgents.set(new Set([...pendingAgents(), key]));
+  const wasLinked = flipAgentLink(name, displayName, true);
+  const saveId = `link:${name}:${agentId}`;
+  beginSave(saveId);
+  fn(name, agentId)
+    .then((res) => {
+      finishSave(saveId);
+      const message =
+        typeof res.backupId === "string" && res.backupId.length > 0
+          ? etf("mySkills.takeOverDoneWithBackup", {
+              id: res.backupId,
+              agent: displayName,
+            })
+          : etf("mySkills.takeOverDone", { agent: displayName });
+      publishToast({
+        tone: "success",
+        message,
+        ...(toastReplaceKey !== undefined ? { replaceKey: toastReplaceKey } : {}),
+      });
+    })
+    .catch((err: unknown) => {
+      restoreAgentLink(name, displayName, wasLinked);
+      const message = `${et("mySkills.takeOverFailed")}: ${String(err)}`;
+      publishToast({
+        tone: "error",
+        message,
+        pinned: true,
+        ...(toastReplaceKey !== undefined ? { replaceKey: toastReplaceKey } : {}),
+      });
+      failSave(saveId, message, () =>
+        runTakeOverUnmanaged(ops, name, agentId, toastReplaceKey),
+      );
+    })
+    .finally(() => {
+      dropPending([key]);
+      bumpExtrasVersion();
+      void ops.refresh();
+    });
+}
 
 /** 单行开关（dispatch_card_command ToggleAgent）：pending 挡重复，乐观翻
  * 链，skip/失败回滚 + 通知带，尾部 refresh。 */
@@ -178,26 +288,61 @@ export function runToggle(
   if (displayName === undefined) return;
   pendingAgents.set(new Set([...pendingAgents(), key]));
   const wasLinked = flipAgentLink(name, displayName, enable);
+  const saveId = `link:${name}:${agentId}`;
+  beginSave(saveId);
+  const retry = () => runToggle(ops, name, agentId, enable);
   ops
     .toggleAgent(name, agentId, enable)
     .then((outcome) => {
       if (outcome.kind === "skipped") {
         restoreAgentLink(name, displayName, wasLinked);
-        publishToast({
-          tone: "warning",
-          message: toggleSkipMessage(name, outcome),
-        });
+        const message = toggleSkipMessage(name, outcome);
+        const takeOverLabel = unmanagedSkipActionLabel(outcome.code);
+        if (
+          takeOverLabel !== null &&
+          ops.takeOverUnmanagedAgentEntry !== undefined
+        ) {
+          publishToast({
+            tone: "warning",
+            message,
+            pinned: true,
+            replaceKey: TOGGLE_SKIP_REPLACE_KEY,
+            action: {
+              label: takeOverLabel,
+              run: () =>
+                runTakeOverUnmanaged(ops, name, agentId, TOGGLE_SKIP_REPLACE_KEY),
+            },
+          });
+        } else if (outcome.code === "modified_agent_copy") {
+          publishToast({
+            tone: "warning",
+            message,
+            pinned: true,
+            replaceKey: TOGGLE_SKIP_REPLACE_KEY,
+            action: {
+              label: t("skillToggle.resolveInDrawer"),
+              run: () => {
+                if (selectedSkill() !== name) openDetail(name);
+              },
+            },
+          });
+        } else {
+          publishToast({ tone: "warning", message });
+        }
+        failSave(saveId, message, retry);
+        return;
       }
+      finishSave(saveId);
     })
     .catch((err: unknown) => {
       restoreAgentLink(name, displayName, wasLinked);
-      publishToast({
-        tone: "error",
-        message: `${t("common.failed")}: ${String(err)}`,
-      });
+      const message = `${t("common.failed")}: ${String(err)}`;
+      publishToast({ tone: "error", message });
+      failSave(saveId, message, retry);
     })
     .finally(() => {
       dropPending([key]);
+      bumpExtrasVersion();
       void ops.refresh();
     });
 }
@@ -242,6 +387,7 @@ export function runMasterToggle(
     })
     .finally(() => {
       dropPending(ids.map((id) => `${name}::${id}`));
+      bumpExtrasVersion();
       void ops.refresh();
     });
 }
@@ -250,11 +396,11 @@ function currentLinks(name: string): string[] {
   return skills().find((record) => record.name === name)?.agentLinks ?? [];
 }
 
-/** 卸载确认的提交（uninstall_skill）：busy=名字（按钮转「卸载中」）、清批
- * 量选择里的名字，失败走通知带，尾部 refresh。抽屉关闭由确认回调先做
- * （GPUI select_detail(None) 顺序）。 */
+/** 卸载确认的提交（uninstall_skill）：busy=`uninstall:名字`，和单卡更新
+ * 的名字 token 分开，更新图标不会跟着转。清批量选择里的名字，失败走
+ * 通知带，尾部 refresh。抽屉关闭由确认回调先做。不从列表里提前删掉。 */
 export function runUninstall(ops: DrawerOps, name: string): void {
-  busy.set(name);
+  busy.set(`uninstall:${name}`);
   const batch = selectedBatch();
   if (batch.has(name)) {
     const kept = new Set(batch);

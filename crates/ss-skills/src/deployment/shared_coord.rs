@@ -87,19 +87,6 @@ pub(crate) fn is_satisfied_by_shared_agents_dir_in(
     shared_agents_entry_is_active(skill_name, lib, profiles)
 }
 
-/// Public check (reloads profiles & library once) for status inspection.
-pub(crate) fn is_satisfied_by_shared_agents_dir(
-    profile: &AgentProfile,
-    skill_name: &str,
-) -> bool {
-    if !agent_reads_shared_agents_skills(&profile.id) {
-        return false;
-    }
-    let profiles = super::cached_profiles();
-    let lib = library::load();
-    is_satisfied_by_shared_agents_dir_in(profile, skill_name, &lib, &profiles)
-}
-
 /// Whether `skill_name` is active for `profile` (either on disk or shared).
 pub(crate) fn is_skill_visible_for_profile(
     profile: &AgentProfile,

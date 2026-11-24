@@ -6,17 +6,18 @@
 // close_if_current：用户已关掉的弹窗不被晚到的成功再关，也不误关后来打
 // 开的新弹窗）；失败保留弹窗与输入，输入框下方给出原因。
 //
-// 注：GPUI 的「选择目录…」按钮打开系统目录选择器；nsh 当前没有系统选
-// 目录 API（.nsh/types 只有 fs 读写），路径输入框即提交通道——能力到齐
-// 再补按钮，不造半吊子替身。
+// 注：路径弹窗支持直接输入路径，也可通过右侧目录选择按钮调用系统目录选择器
+// （Projects.pickFolder → nsh_core::file_dialog::OpenDialog::folders()）。
 
 import { signal, type Signal } from "nsh";
 import { Text, View, type JSX } from "nsh";
 import { Input } from "nsh/base";
 import { closeConfirm, openConfirm } from "../../chrome/dialog";
+import { Icon } from "../../chrome/icons";
+import { Tip } from "../../chrome/tooltip";
 import { paletteToken } from "../../services/themeMode";
 import { t, tf } from "../../services/translation";
-import type { CopyRecord, ProjectEntry } from "./bridge";
+import { realProjectsBridge, type CopyRecord, type ProjectEntry } from "./bridge";
 import type { ProjectsState } from "./state";
 
 /** 一次路径弹窗的全部本地状态（DialogState 的 TS 半边）。 */
@@ -60,27 +61,91 @@ function PathDialogBody(props: {
   promptKey: string;
   errorTestId: string;
 }): JSX.Element {
+  const picking = signal(false);
+  const pickFolder = () => {
+    if (props.local.running() || picking()) return;
+    picking.set(true);
+    void Promise.resolve(realProjectsBridge.pickFolder?.(t(props.promptKey)))
+      .then((picked) => {
+        if (typeof picked === "string" && picked.trim().length > 0) {
+          props.local.input.set(picked);
+          props.local.error.set(null);
+        }
+      })
+      .catch(() => {
+        // Ignore dialog cancellation / unavailable platform picker.
+      })
+      .finally(() => {
+        picking.set(false);
+      });
+  };
   return (
     <View style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
       <Text style={{ fontSize: 12, color: paletteToken("fg") }}>
         {t(props.promptKey)}
       </Text>
-      <Input
-        testID={props.errorTestId === "projects-register-error" ? "projects-path-input" : "project-change-path-input"}
-        value={props.local.input()}
-        placeholder={t(props.promptKey)}
-        disabled={props.local.running()}
-        onChange={(e: { value: string }) => props.local.input.set(e.value)}
+      <View
         style={{
-          fontSize: 12,
-          color: paletteToken("fg"),
-          padding: 8,
-          backgroundColor: paletteToken("input"),
-          borderWidth: 1,
-          borderColor: paletteToken("border"),
-          borderRadius: 6,
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
         }}
-      />
+      >
+        <Input
+          testID={props.errorTestId === "projects-register-error" ? "projects-path-input" : "project-change-path-input"}
+          value={props.local.input()}
+          placeholder={t(props.promptKey)}
+          disabled={props.local.running()}
+          onChange={(e: { value: string }) => props.local.input.set(e.value)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12,
+            color: paletteToken("fg"),
+            padding: 8,
+            backgroundColor: paletteToken("input"),
+            borderWidth: 1,
+            borderColor: paletteToken("border"),
+            borderRadius: 6,
+          }}
+        />
+        <View
+          testID="projects-pick-folder"
+          role="button"
+          accessibilityLabel={t(props.promptKey)}
+          tooltip={<Tip text={t(props.promptKey)} />}
+          disabled={props.local.running() || picking()}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 34,
+            height: 34,
+            flexShrink: 0,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: paletteToken("border"),
+            backgroundColor: paletteToken("card"),
+            opacity: props.local.running() || picking() ? 0.5 : 1,
+            cursor: props.local.running() || picking() ? "default" : "pointer",
+          }}
+          hoverStyle={
+            props.local.running() || picking()
+              ? undefined
+              : { backgroundColor: paletteToken("panel_hover"), borderColor: paletteToken("edge") }
+          }
+          focusVisibleStyle={{
+            outlineWidth: 2,
+            outlineColor: paletteToken("accent"),
+            outlineOffset: 1,
+          }}
+          onPress={pickFolder}
+        >
+          <Icon name="folderOpen" size={14} color={paletteToken("fg")} />
+        </View>
+      </View>
       <DialogFeedback local={props.local} errorTestId={props.errorTestId} />
     </View>
   );

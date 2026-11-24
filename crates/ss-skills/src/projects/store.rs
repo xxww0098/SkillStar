@@ -37,13 +37,20 @@ pub(super) fn validate_project_relative_path(relative: &str) -> Result<()> {
 }
 
 pub(super) fn validate_skills_list(list: &SkillsList) -> Result<()> {
+    let profiles = crate::agents::list_profile_specs();
+    validate_skills_list_with_profiles(list, &profiles)
+}
+
+pub(super) fn validate_skills_list_with_profiles(
+    list: &SkillsList,
+    profiles: &[crate::agents::AgentProfile],
+) -> Result<()> {
     for name in list.agents.values().flatten() {
         crate::content::validate_skill_name(name)?;
     }
     for relative in list.deploy_modes.keys() {
         validate_project_relative_path(relative)?;
     }
-    let profiles = crate::agents::list_profiles();
     for profile in profiles
         .iter()
         .filter(|profile| profile.has_project_skills() && list.agents.contains_key(&profile.id))

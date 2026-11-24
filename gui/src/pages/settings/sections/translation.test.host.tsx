@@ -95,13 +95,15 @@ const fakeBridge: TranslationBridge = {
 
 const state = createTranslationState(fakeBridge);
 
-// ---- 装置动作（nsh 0.5：press 有命中测试，装置动作走 host 事件通道） ------
+// ---- 装置动作（nsh 0.6：press 有命中测试，装置动作走 host 事件通道） ------
 
 const harnessActions: Record<string, () => void> = {
   /** 填接口地址（地址框是失焦提交，装置直接走 state 的同一步）。 */
   "set-base": () => state.setLlmBaseUrl("https://api.test/v1"),
   /** 提交密钥草稿（输入框的 onChange 已经把草稿放进 state）。 */
   "commit-key": () => state.commitLlmKey(),
+  /** 提交自定义模型草稿（模拟失焦/确认）。 */
+  "commit-model": () => state.commitModelDraft(),
   "pull-ok": () => {
     pendingPull?.({ ok: true, models: ["deepseek-v4.1-flash", "kimi-k2.6"] });
   },
