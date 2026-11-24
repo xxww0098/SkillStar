@@ -4,15 +4,28 @@
 
 记录根因不直观、容易在后续修改或重构时复发的故障模式与自检方式。
 
-## 2026-11-25 - Windows 上导入普通本地文件夹、粘贴带盘符路径的命令都失败
+## 2026-11-25 - 只在 macOS 上跑过的测试在 Windows 上的六种挂法
 
-- Symptom: Windows 上扫描一个不含 `.git` 的本地文件夹，报 `Failed to clone 'file:///C:/…' … does not appear to be a git repository`；粘贴 `npx skills add "C:\Users\me\repo" --skill x` 报「仓库格式无效」。macOS / Linux 上同一操作正常，所以只有 Windows CI 的 `nsh test gui`（`my_skills_import_tests` 两条）和 `ss-skills` 的 `local_file_url_borrows_in_place` 会红。
+- Symptom: Windows CI 第一次跑到 `cargo test --workspace`：38 条失败，集中在 `ss-accounts`、`ss-channels`、`ss-skills`、`ss-mcp-hub` 的测试里；macOS / Linux 上同一棵树全绿。
+- Root cause 与 Fix:
+  1. **路径按字符串断言**：`s.ends_with(".codex/auth.json")`、`join("home/.grok/auth.json").display().to_string()`。Windows 的分隔符是 `\`。改用 `Path::ends_with` 与 `PathBuf` 相等——按分量比较，`/` 在 Windows 上同样是分隔符。
+  2. **手拼 JSON 塞路径**：`format!(r#"{{"dataBaseDir":"{}"}}"#, base.display())`。Windows 路径里的反斜杠是非法的 JSON 转义，配置解析失败后回落到默认值。改用 `serde_json::json!` / `to_string`。
+  3. **`File::open` 之后 `set_times` 倒填时间**：`File::open` 不带 `FILE_FLAG_BACKUP_SEMANTICS`，在 Windows 上打不开目录；只读句柄也没有 `FILE_WRITE_ATTRIBUTES`，对普通文件同样被拒。统一走 `test_sandbox::backdate`（Windows 上用 `OpenOptionsExt` 显式申请这两样）；只对文件时 `File::options().write(true)` 也行。
+  4. **给 macOS 写的捷径没有平台条件**：`projects/binding.rs` 的 `symlink_pair` 借 `/tmp → /private/tmp` 造一对别名。Windows 上 `canonicalize("/tmp")` 读到的是当前盘上的 `\tmp`，捷径返回不带盘符的 `/tmp/…`，按 Rust 的定义不是绝对路径，被产品正确地拒绝。捷径现在只在 `Path::new("/tmp").is_absolute()` 时生效，Windows 走原本就备好的 junction 分支。
+  5. **沙箱靠 `HOME` 重定向，被测代码却问操作系统**：`dirs::download_dir()` / `dirs::home_dir()` 在 Windows 上走「已知文件夹」接口，不看环境变量，用例把导出文件写进了 runner 的真实用户目录（用例自己的护栏拦下了）。把「导出到指定目录」从 `export_deck_bundle` 里拆出来（`export_deck_bundle_to`、`default_export_dir`），测试指定沙箱目录。
+  6. **非 unix 的降级分支抽掉了用例的前提**：符号链接用例在 Windows 上退化成写一个普通文件，后面的断言却仍按链接写。只属于 unix 的性质用 `#[cfg(unix)]` 限定，平台无关的部分（BOM / CRLF 保留）单独一条在所有平台跑。
+- Files: `crates/ss-accounts/src/{reconcile_tests.rs,service_tests.rs,switch/{codex,grok,kiro,zcode}_tests.rs,switch/paths.rs}`、`crates/ss-mcp-hub/tests/lossless_sync.rs`、`crates/ss-skills/src/{test_sandbox.rs,health/tests.rs,materialize_tests.rs,projects/binding.rs,skill_bundle/mod.rs}`。
+- Self-check: 本机复现不了（Docker 虚拟机只有 2 核，跑不动完整测试腿），只有 CI 的 Windows 腿能验证，所以推送前按这六条自查新写的测试；`cargo test --workspace --locked --no-fail-fast` 让一轮 CI 把失败报全。
+
+## 2026-11-25 - Windows 上导入普通本地文件夹、粘贴带盘符路径的命令、以 `file:///C:/…` 为来源都失败
+
+- Symptom: Windows 上扫描一个不含 `.git` 的本地文件夹，报 `Failed to clone 'file:///C:/…' … does not appear to be a git repository`；粘贴 `npx skills add "C:\Users\me\repo" --skill x` 报「仓库格式无效」。此外凡是以 `local_file_url(临时目录)` 当来源的用例（技能更新、频道安装，20 余条）报 `Invalid source: Local path does not exist`。macOS / Linux 上同一操作正常。
 - Root cause: 两处都只对 POSIX 路径成立。
-  1. `ss_git::ops::local_file_url` 把盘符路径写成 `file:///C:/…`（三个斜杠；少一个 git 会把 `C:` 当主机名），而 `ss_skills::fetch::local_source_dir` 还原路径时按 `C:/…` 开头判盘符，得到 `/C:/…`。带前导斜杠的路径在 Windows 上不是绝对路径，`is_dir()` 为假，`fetch_source` 于是跳过「就地借用本地目录」去 `git clone` 一个普通文件夹。
+  1. `ss_git::ops::local_file_url` 把盘符路径写成 `file:///C:/…`（三个斜杠；少一个 git 会把 `C:` 当主机名）。读回这个 URL 的地方却按 `C:/…` 开头判盘符，于是得到 `/C:/…`——带前导斜杠的路径在 Windows 上不是绝对路径。这样的读法有两份：`ss_skills::fetch::local_source_dir` 得到 `is_dir() == false`，`fetch_source` 跳过「就地借用本地目录」去 `git clone` 一个普通文件夹；`source_resolver::parse_local_source` 则直接报路径不存在。第一轮只修了前一处，21 条用例在第二轮才暴露后一处。
   2. `source_resolver::tokenize_shell_words` 在双引号内把任何反斜杠都当转义符吃掉（POSIX 里双引号内只在 `"`、`\`、`` ` ``、`$` 前才是；PowerShell 与 cmd 里根本不是转义符），`"C:\Users\me\repo"` 变成 `C:Usersmerepo`：含 `:` 又不是绝对路径，落到 `parse_github_shorthand` 报格式无效。不加引号的 `C:\Users\me\repo` 同理。
-- Fix: `local_source_dir` 在 Windows 上先去掉盘符前那个属于 URL 的斜杠；分词器在双引号内按 POSIX 规则只在四个字符前当转义，不加引号的词一旦以盘符（`C:`）开头就整词保留反斜杠。
+- Fix: `file://` URL 到路径输入的还原收拢成 `source_resolver::file_url_to_path_input` 一个函数，`local_source_dir` 与 `parse_local_source` 共用，在 Windows 上去掉盘符前那个属于 URL 的斜杠；分词器在双引号内按 POSIX 规则只在四个字符前当转义，不加引号的词一旦以盘符（`C:`）开头就整词保留反斜杠。
 - Files: `crates/ss-skills/src/fetch.rs`、`crates/ss-skills/src/source_resolver.rs`、`crates/ss-skills/src/source_resolver_tests.rs`。
-- Self-check: `cargo test -p ss-skills --locked`——`parse_install_input_keeps_windows_path_backslashes` 三条腿都跑；`drive_letter_file_url_resolves_to_its_directory` 与 `local_file_url_borrows_in_place` 在 Windows 腿守住。`local_file_url` 的产出再被 `local_source_dir` 或别的 `file://` 还原逻辑消费时，两边对盘符形式的约定必须一致。
+- Self-check: `cargo test -p ss-skills --locked`——`parse_install_input_keeps_windows_path_backslashes` 与 `file_url_path_input_keeps_the_caller_prefixing_rule` 三条腿都跑；`drive_letter_file_url_resolves_to_its_directory`、`source_parse_accepts_a_drive_letter_file_url` 与 `local_file_url_borrows_in_place` 在 Windows 腿守住。再写消费 `local_file_url` 产出的代码时走 `file_url_to_path_input`，不要另写一份还原逻辑。
 
 ## 2026-11-24 - 开发机上 `nsh test gui` 全绿，空的 `$HOME`（CI）上挂四条：装载尾的后台更新检查把夹具冲掉
 
