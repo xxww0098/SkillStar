@@ -4,9 +4,9 @@
 
 记录根因不直观、容易在后续修改或重构时复发的故障模式与自检方式。
 
-## 2026-11-25 - 只在 macOS 上跑过的测试在 Windows 上的六种挂法
+## 2026-11-25 - 只在 macOS 上跑过的测试在 Windows 上的八种挂法
 
-- Symptom: Windows CI 第一次跑到 `cargo test --workspace`：38 条失败，集中在 `ss-accounts`、`ss-channels`、`ss-skills`、`ss-mcp-hub` 的测试里；macOS / Linux 上同一棵树全绿。
+- Symptom: Windows CI 第一次跑到 `cargo test --workspace`：38 条失败，集中在 `ss-accounts`、`ss-channels`、`ss-skills`、`ss-mcp-hub` 的测试里；macOS / Linux 上同一棵树全绿。修完第一轮还剩 5 条：第 1 种的漏网之鱼，以及下面第 7、8 种。
 - Root cause 与 Fix:
   1. **路径按字符串断言**：`s.ends_with(".codex/auth.json")`、`join("home/.grok/auth.json").display().to_string()`。Windows 的分隔符是 `\`。改用 `Path::ends_with` 与 `PathBuf` 相等——按分量比较，`/` 在 Windows 上同样是分隔符。
   2. **手拼 JSON 塞路径**：`format!(r#"{{"dataBaseDir":"{}"}}"#, base.display())`。Windows 路径里的反斜杠是非法的 JSON 转义，配置解析失败后回落到默认值。改用 `serde_json::json!` / `to_string`。
@@ -14,7 +14,9 @@
   4. **给 macOS 写的捷径没有平台条件**：`projects/binding.rs` 的 `symlink_pair` 借 `/tmp → /private/tmp` 造一对别名。Windows 上 `canonicalize("/tmp")` 读到的是当前盘上的 `\tmp`，捷径返回不带盘符的 `/tmp/…`，按 Rust 的定义不是绝对路径，被产品正确地拒绝。捷径现在只在 `Path::new("/tmp").is_absolute()` 时生效，Windows 走原本就备好的 junction 分支。
   5. **沙箱靠 `HOME` 重定向，被测代码却问操作系统**：`dirs::download_dir()` / `dirs::home_dir()` 在 Windows 上走「已知文件夹」接口，不看环境变量，用例把导出文件写进了 runner 的真实用户目录（用例自己的护栏拦下了）。把「导出到指定目录」从 `export_deck_bundle` 里拆出来（`export_deck_bundle_to`、`default_export_dir`），测试指定沙箱目录。
   6. **非 unix 的降级分支抽掉了用例的前提**：符号链接用例在 Windows 上退化成写一个普通文件，后面的断言却仍按链接写。只属于 unix 的性质用 `#[cfg(unix)]` 限定，平台无关的部分（BOM / CRLF 保留）单独一条在所有平台跑。
-- Files: `crates/ss-accounts/src/{reconcile_tests.rs,service_tests.rs,switch/{codex,grok,kiro,zcode}_tests.rs,switch/paths.rs}`、`crates/ss-mcp-hub/tests/lossless_sync.rs`、`crates/ss-skills/src/{test_sandbox.rs,health/tests.rs,materialize_tests.rs,projects/binding.rs,skill_bundle/mod.rs}`。
+  7. **对 JSON 文本做路径包含判断**：`stored.contains(alias.to_str())`。清单是 JSON，Windows 路径里的 `\` 被转义成 `\\`。先用 `serde_json::to_string` 得到同样的转义形式再判断。
+  8. **同一个夹具的三份拷贝各缺一半**：`ss-channels/subscription_installer_tests.rs` 里，一份钉了换行却手拼 `file://{规范路径}`（Windows 的规范路径带 `\\?\`，拼出来是废地址），另外两份用了 `local_file_url` 却没钉换行，克隆时 LF 被改写成 CRLF，内容哈希与清单不符。这正是 `windows-ci.yml` 教训 #5、#8 说过的事。三份合成一个 `stage_release_origin`，两件事一起做。
+- Files: `crates/ss-accounts/src/{reconcile_tests.rs,service_tests.rs,switch/{codex,grok,kiro,zcode}_tests.rs,switch/paths.rs}`、`crates/ss-channels/src/subscription_installer{,_tests}.rs`、`crates/ss-mcp-hub/tests/lossless_sync.rs`、`crates/ss-skills/src/{test_sandbox.rs,health/tests.rs,materialize_tests.rs,projects/binding.rs,skill_bundle/mod.rs}`。
 - Self-check: 本机复现不了（Docker 虚拟机只有 2 核，跑不动完整测试腿），只有 CI 的 Windows 腿能验证，所以推送前按这六条自查新写的测试；`cargo test --workspace --locked --no-fail-fast` 让一轮 CI 把失败报全。
 
 ## 2026-11-25 - Windows 上导入普通本地文件夹、粘贴带盘符路径的命令、以 `file:///C:/…` 为来源都失败
