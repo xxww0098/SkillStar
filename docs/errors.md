@@ -4,6 +4,26 @@
 
 记录根因不直观、容易在后续修改或重构时复发的故障模式与自检方式。
 
+## 2026-11-25 - Windows 上导入普通本地文件夹、粘贴带盘符路径的命令都失败
+
+- Symptom: Windows 上扫描一个不含 `.git` 的本地文件夹，报 `Failed to clone 'file:///C:/…' … does not appear to be a git repository`；粘贴 `npx skills add "C:\Users\me\repo" --skill x` 报「仓库格式无效」。macOS / Linux 上同一操作正常，所以只有 Windows CI 的 `nsh test gui`（`my_skills_import_tests` 两条）和 `ss-skills` 的 `local_file_url_borrows_in_place` 会红。
+- Root cause: 两处都只对 POSIX 路径成立。
+  1. `ss_git::ops::local_file_url` 把盘符路径写成 `file:///C:/…`（三个斜杠；少一个 git 会把 `C:` 当主机名），而 `ss_skills::fetch::local_source_dir` 还原路径时按 `C:/…` 开头判盘符，得到 `/C:/…`。带前导斜杠的路径在 Windows 上不是绝对路径，`is_dir()` 为假，`fetch_source` 于是跳过「就地借用本地目录」去 `git clone` 一个普通文件夹。
+  2. `source_resolver::tokenize_shell_words` 在双引号内把任何反斜杠都当转义符吃掉（POSIX 里双引号内只在 `"`、`\`、`` ` ``、`$` 前才是；PowerShell 与 cmd 里根本不是转义符），`"C:\Users\me\repo"` 变成 `C:Usersmerepo`：含 `:` 又不是绝对路径，落到 `parse_github_shorthand` 报格式无效。不加引号的 `C:\Users\me\repo` 同理。
+- Fix: `local_source_dir` 在 Windows 上先去掉盘符前那个属于 URL 的斜杠；分词器在双引号内按 POSIX 规则只在四个字符前当转义，不加引号的词一旦以盘符（`C:`）开头就整词保留反斜杠。
+- Files: `crates/ss-skills/src/fetch.rs`、`crates/ss-skills/src/source_resolver.rs`、`crates/ss-skills/src/source_resolver_tests.rs`。
+- Self-check: `cargo test -p ss-skills --locked`——`parse_install_input_keeps_windows_path_backslashes` 三条腿都跑；`drive_letter_file_url_resolves_to_its_directory` 与 `local_file_url_borrows_in_place` 在 Windows 腿守住。`local_file_url` 的产出再被 `local_source_dir` 或别的 `file://` 还原逻辑消费时，两边对盘符形式的约定必须一致。
+
+## 2026-11-24 - 开发机上 `nsh test gui` 全绿，空的 `$HOME`（CI）上挂四条：装载尾的后台更新检查把夹具冲掉
+
+- Symptom: 真实 `$HOME` 下 652/653，换成空的 `$HOME` 跑同一棵树挂 4 条：`App.test.tsx` 的侧栏折叠用例等 `id:skills-scroll` 超时；`mySkills.test.tsx` 的 `channel mutations …` 断言 `calls` 为 1 实得 2；`originMenu.test.tsx` 两条等 `skills:12` 超时，画面停在 `skills:0`。CI 的 runner 正是空库。
+- Root cause:
+  1. 空库的技能页走 `EmptyInstalled`，没有 `skills-scroll`（它只在 `CardPane` 里）。
+  2. `state.ts` 的 `refresh()` 在 `loading.set(false)` 之后才调 `maybeCheckUpdates()`，读到的已经是刚播种的 hub 夹具。开发机的首装真实装载带 hub 技能，立刻起一次后台检查，`lastUpdateCheckAt` 落定、三十分钟节流窗口打开；空库机从没检查过，于是后台检查放行，`checkUpdates` 的 `finally` 再 `refresh()` 一次——计数用例多数一次，host 夹具被真实快照（空）冲掉。开发机上这次真实检查要走网络，冲掉的时刻晚于用例结束，所以一直没暴露。
+- Fix: 按 `detailDrawer.test.host.tsx` 文件头的既有约定隔离：`originMenu` host 置 `busy` hold 挡住后台检查，并用 `setSnapshotLoaderForTest` 让后续 refresh 回到当前名单；计数用例在用例期间置 `busy`；侧栏折叠用例的等待锚点改为 `id:skills-scroll` 或空态的 `id:my-skills-goto-marketplace`。
+- Files: `gui/App.test.tsx`、`gui/src/pages/my_skills/{mySkills.test.tsx,originMenu.test.host.tsx}`。
+- Self-check: `CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" HOME="$(mktemp -d)" nsh test gui`（真实的 `CARGO_HOME` / `RUSTUP_HOME` 要在覆盖 `HOME` 之前展开）。不要用 `SKILLSTAR_DATA_DIR` / `SKILLSTAR_HUB_DIR` 模拟：原生测试的 `IsolatedDataDir` 不中和 `SKILLSTAR_HUB_DIR`，真实 `~/.agents/skills` 也挡不住，会得出假失败。新写依赖 `skills` / `loading` 的测试 host，先对照 `detailDrawer.test.host.tsx` 的两道隔离。
+
 ## 2026-11-24 - 改了桥的签名，`nsh check gui` 仍按旧声明报 `Expected N arguments`，`nsh test` 的界面用例跑的是旧桥
 
 - Symptom: 改 `gui/native` 的导出签名后，`nsh check gui` 在调用点报参数个数不对，重跑 `nsh check` / `nsh build` / `nsh test` 都不消失；`gui/.nsh/types/skillstar-gui/native.d.ts` 和 `gui/.nsh/rust/description.json` 的修改时间停在旧日期。界面用例对桥的改动没有反应。
@@ -268,6 +288,7 @@
 - Fix: 根 `Cargo.toml` 显式锁定 `rmcp = "=3.4.0"`。
 - Files: `Cargo.toml`、`Cargo.lock`、`crates/ss-mcp/`。
 - Self-check: `cargo test -p ss-mcp --locked -- --test-threads=1`。
+- 2026-11-25 复测（为 cargo-deny 的 RUSTSEC-2026-0457/0461/0462 找修复版本）：`rmcp` 3.11.0 上不再中止，但 `cargo test -p ss-mcp --locked` 连跑 5 次都是 46 过 4 败——elicitation 三条加 `server_capabilities_omit_roots`，elicitation 请求被以 `-32600: server-to-client requests are not allowed on protocol 2026-07-28 or later` 拒绝。钉子因此保留；解钉的前提是审批流不再依赖服务端到客户端请求，而不是只改测试。
 
 ## 2026-10-09 - Antigravity 镜像目录旧链接未随规范根迁移，持续告警漂移
 
