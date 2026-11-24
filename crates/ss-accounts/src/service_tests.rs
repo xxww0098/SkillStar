@@ -867,7 +867,7 @@ fn account_view_exposes_provider_account_id() {
 fn refresh_heals_cursor_ciphertext_tokens_from_local_plaintext_mirror() {
     let _sandbox = Sandbox::new();
     let plain_jwt = jwt_with_claims(json!({
-        "sub": "grok|user_01M05TPY0JVN98TNPJR3C1QXG2",
+        "sub": "grok|user_01A0000000000000000000000",
         "exp": 1_900_000_000_i64
     }));
     // Seed the client database where the heal path reads it on this OS
@@ -881,10 +881,10 @@ fn refresh_heals_cursor_ciphertext_tokens_from_local_plaintext_mirror() {
     for (k, v) in [
         ("cursorAuth/accessToken", "cursor-safe-storage:v1:encryptedAt"),
         ("cursorAuth/refreshToken", "cursor-safe-storage:v1:encryptedRt"),
-        ("cursorAuth/cachedEmail", "shefkie1957@gmail.com"),
-        ("cursorAuth/authId", "grok|user_01M05TPY0JVN98TNPJR3C1QXG2"),
+        ("cursorAuth/cachedEmail", "shefkie@cursor.example"),
+        ("cursorAuth/authId", "grok|user_01A0000000000000000000000"),
         ("cursor.accessToken", plain_jwt.as_str()),
-        ("cursor.email", "shefkie1957@gmail.com"),
+        ("cursor.email", "shefkie@cursor.example"),
     ] {
         conn.execute(
             "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?1, ?2)",
@@ -896,9 +896,9 @@ fn refresh_heals_cursor_ciphertext_tokens_from_local_plaintext_mirror() {
     let stored = store_account(
         "cursor",
         Identity {
-            email: Some("shefkie1957@gmail.com".to_string()),
-            display_name: Some("shefkie1957@gmail.com".to_string()),
-            account_id: Some("grok|user_01M05TPY0JVN98TNPJR3C1QXG2".to_string()),
+            email: Some("shefkie@cursor.example".to_string()),
+            display_name: Some("shefkie@cursor.example".to_string()),
+            account_id: Some("grok|user_01A0000000000000000000000".to_string()),
             plan: None,
         },
         token_set(
