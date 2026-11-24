@@ -187,7 +187,9 @@ jobs:
       # and `#[cfg(test)]` code), and on this job the clippy ratchet below runs
       # `--all-targets`, type-checking every target a second time anyway.
       - name: Rust tests (workspace)
-        run: cargo test --workspace --locked
+        # `--no-fail-fast`: one red run lists every failing test binary instead
+        # of stopping at the first. The exit status is unchanged.
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: File-size guard (structural governance)
         run: scripts/internal/check_file_size.sh
@@ -236,6 +238,12 @@ jobs:
       #               [workspace.package]; tiny-keccak CC0-1.0 and webpki-roots
       #               CDLA-Permissive-2.0 are explicitly allowed as low-risk
       #               permissive licences.
+      #
+      # 2026-11-25: first run since the nsh migration, against a fresh
+      #              advisory-db — 12 errors. What was fixed by upgrading and
+      #              what is allowlisted (with its reason) is recorded at the
+      #              top of deny.toml; that file is the list, so do not
+      #              duplicate it here.
       #
       # If this step ever goes red, fix the dependency — do not re-add
       # continue-on-error and do not widen deny.toml's allow list to make a
@@ -303,7 +311,9 @@ jobs:
       # leg has no clippy run, so `cargo test --workspace` is the ONLY thing
       # that compiles Rust on macOS. It must stay.
       - name: Rust tests (workspace)
-        run: cargo test --workspace --locked
+        # `--no-fail-fast`: one red run lists every failing test binary instead
+        # of stopping at the first. The exit status is unchanged.
+        run: cargo test --workspace --locked --no-fail-fast
       # Ratchet gates + clippy + cargo-deny intentionally do not re-run here —
       # they're platform-agnostic checks already covered by test-linux, and
       # duplicating the clippy compile (the slowest step) would roughly

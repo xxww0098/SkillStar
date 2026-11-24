@@ -128,8 +128,10 @@ jobs:
           nsh build -o gui/host/gen gui
           test -s gui/host/gen/bundle.js || { echo "::error::gui/host/gen/bundle.js is missing or empty"; exit 1; }
 
+      # `--no-fail-fast`: one red run lists every failing test binary instead
+      # of stopping at the first. The exit status is unchanged.
       - name: Rust tests (workspace)
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: File-size guard (structural governance)
         shell: bash
