@@ -63,6 +63,10 @@ mod tests {
 
     #[test]
     fn runtime_config_wires_marketplace_paths() {
+        // Flips the process-wide SKILLSTAR_DATA_DIR: serialize with the other
+        // tests that do, or the two sides of each assertion can land on
+        // different sandboxes (2026-11-24).
+        let _env_lock = futures::executor::block_on(crate::test_support::ENV_LOCK.lock());
         let temp = tempfile::tempdir().unwrap();
         let prev = std::env::var_os("SKILLSTAR_DATA_DIR");
         unsafe {

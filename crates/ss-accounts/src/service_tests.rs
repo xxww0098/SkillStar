@@ -865,19 +865,15 @@ fn account_view_exposes_provider_account_id() {
 
 #[test]
 fn refresh_heals_cursor_ciphertext_tokens_from_local_plaintext_mirror() {
-    let sandbox = Sandbox::new();
+    let _sandbox = Sandbox::new();
     let plain_jwt = jwt_with_claims(json!({
         "sub": "grok|user_01M05TPY0JVN98TNPJR3C1QXG2",
         "exp": 1_900_000_000_i64
     }));
-    let db_path = sandbox.tool_path(&[
-        "Library",
-        "Application Support",
-        "Cursor",
-        "User",
-        "globalStorage",
-        "state.vscdb",
-    ]);
+    // Seed the client database where the heal path reads it on this OS
+    // (Application Support on macOS, .config on Linux, AppData on Windows).
+    let db_path =
+        crate::switch::paths::cursor_state_db_path(&crate::switch::PathRoots::from_env());
     std::fs::create_dir_all(db_path.parent().expect("parent")).expect("dir");
     let conn = rusqlite::Connection::open(&db_path).expect("vscdb");
     conn.execute_batch("CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);")

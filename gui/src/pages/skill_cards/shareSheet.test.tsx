@@ -77,7 +77,10 @@ test("the bundle export lands in the injected dir and offers the folder button",
   const texts = app.texts();
   // 导出完成：路径行显示写出的 .agd（harness 注入的临时目录）。按钮文案
   // 始终是空闲的「导出 .agd」，不换成「正在导出…」。「打开所在文件夹」出现。
-  expect(texts.some((s) => s.startsWith(`${OUT_DIR}/`) && s.endsWith(".agd"))).toBe(true);
+  // 目录与文件名之间是平台分隔符（Windows 上是反斜杠）。
+  const isExportedBundle = (s: string): boolean =>
+    (s.startsWith(`${OUT_DIR}/`) || s.startsWith(`${OUT_DIR}\\`)) && s.endsWith(".agd");
+  expect(texts.some(isExportedBundle)).toBe(true);
   expect(texts).toContain("导出 .agd");
   expect(texts).not.toContain("正在导出…");
   expect(texts).toContain("打开所在文件夹");
