@@ -106,7 +106,7 @@ nsh-core = "=0.6.1"
 nsh-platform-macos = { version = "=0.6.1", default-features = false, features = ["js", "highlight", "svg", "zlib", "crypto"] }
 nsh-platform-windows = { version = "=0.6.1", default-features = false, features = ["js", "highlight", "svg", "net", "zlib", "crypto"] }
 r2d2 = "0.8.10"
-r2d2_sqlite = "0.34.0"
+r2d2_sqlite = "0.36.0"
 rand = "0.10.0"
 regex = "1.12"
 # rmcp: hard-pin. 3.5.1 makes the project-skills MCP serve tests abort with a
@@ -121,7 +121,7 @@ schemars = "1.2.1"
 # 10s timeout per repo on proxied networks while git (which reads its own proxy
 # config) succeeds.
 reqwest = { version = "0.13.3", default-features = false, features = ["system-proxy"] }
-rusqlite = { version = "0.39.0", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
